@@ -36,7 +36,6 @@ impl WindowController {
                         controller.apply_runtime_theme(&opts);
                         let registry = controller.pane_registry.borrow();
                         for terminal in registry.terminals.values() {
-                            terminal.set_font_scale(opts.zoom_factor());
                             terminal
                                 .set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
                         }

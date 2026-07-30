@@ -17,7 +17,9 @@ the built-in defaults.
 `default_shell` selects the command for new tabs; a per-tab IPC `shell` takes
 precedence, then `$SHELL` is used. Invalid commands fall back safely.
 
-`zoom_percent` applies to terminal, browser, and editor surfaces. The resolved
+`zoom_percent` applies to terminal, browser, and editor surfaces. Terminal zoom
+is rounded to a whole-point font size instead of using VTE's fractional font
+scale, avoiding GTK text-damage artifacts during cursor blink. The resolved
 theme plus `font_family` and `font_size` overrides are applied live to both
 terminal and editor text; editor selection and cursor colors follow the same
 theme.

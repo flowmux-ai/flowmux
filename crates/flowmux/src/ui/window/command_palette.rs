@@ -915,7 +915,6 @@ impl WindowController {
 
         let registry = self.pane_registry.borrow();
         for terminal in registry.terminals.values() {
-            terminal.set_font_scale(opts.zoom_factor());
             terminal.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
         }
         for browser in registry.browsers.values() {

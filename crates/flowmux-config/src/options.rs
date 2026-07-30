@@ -322,8 +322,7 @@ impl Options {
         ms.clamp(CURSOR_BLINK_INTERVAL_MIN, CURSOR_BLINK_INTERVAL_MAX)
     }
 
-    /// Scale in 0.1..=2.0 form for terminal `set_font_scale` and WebView
-    /// `set_zoom_level`.
+    /// Scale in 0.1..=2.0 form for terminal font sizing and WebView zoom.
     pub fn zoom_factor(&self) -> f64 {
         Self::clamp_zoom(self.zoom_percent) as f64 / 100.0
     }

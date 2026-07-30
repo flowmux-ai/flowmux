@@ -183,8 +183,25 @@ impl ResolvedTheme {
         desc
     }
 
-    /// Push the theme font + default fg/bg, the 16 ANSI palette colors, the
-    /// cursor color, and selection colors into the VTE terminal pane.
+    /// Build the terminal font with global zoom baked into an integer point
+    /// size. Keeping VTE's own `font-scale` at 1 avoids GTK 4.14's clipped
+    /// glyph damage when a blinking cursor redraws fractionally-scaled text.
+    pub fn terminal_font(
+        &self,
+        options: &flowmux_config::options::Options,
+    ) -> pango::FontDescription {
+        let mut font = self.font_with_overrides(options.font_family.as_deref(), options.font_size);
+        if options.zoom_percent != 100 && font.size() > 0 {
+            let points = font.size() as f64 / pango::SCALE as f64;
+            font.set_size(
+                ((points * options.zoom_factor()).round().max(1.0) * pango::SCALE as f64) as i32,
+            );
+        }
+        font
+    }
+
+    /// Push the default fg/bg, the 16 ANSI palette colors, the cursor color,
+    /// and selection colors into the VTE terminal pane.
     /// Indices 16..256 keep VTE's standard xterm fill (so a 16-color
     /// theme expands the same way a traditional terminal would).
     pub fn apply_to_ghostty(&self, pane: &crate::ui::ghostty_pane::GhosttyPane) {
@@ -196,7 +213,6 @@ impl ResolvedTheme {
                 b: (c.blue() * 255.0).round().clamp(0.0, 255.0) as u8,
             }
         }
-        pane.set_font(&self.font);
         let palette: Vec<Rgb> = self.palette.iter().map(to_rgb).collect();
         pane.apply_colors(
             to_rgb(&self.fg),
@@ -751,6 +767,27 @@ mod tests {
         assert_eq!(appearance.selection_background, "#4080c0ff");
         assert_eq!(appearance.font_family, "다국어 Mono");
         assert_eq!(appearance.font_size, 14.0);
+    }
+
+    #[test]
+    fn terminal_zoom_uses_integral_font_size_instead_of_vte_scale() {
+        let theme = ResolvedTheme::from_ghostty(&flowmux_config::ghostty::parse(
+            "font-family = Test Mono\nfont-size = 12\n",
+        ));
+        let options = flowmux_config::options::Options::default().with_zoom_percent(85);
+
+        let font = theme.terminal_font(&options);
+
+        assert_eq!(font.family().as_deref(), Some("Test Mono"));
+        assert_eq!(font.size(), 10 * pango::SCALE);
+
+        let exact_size = flowmux_config::options::Options::default()
+            .with_font_size(Some(10.5))
+            .with_zoom_percent(100);
+        assert_eq!(
+            theme.terminal_font(&exact_size).size(),
+            (10.5 * pango::SCALE as f32) as i32
+        );
     }
 
     #[test]

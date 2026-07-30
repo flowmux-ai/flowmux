@@ -417,13 +417,10 @@ impl GhosttyPane {
         self.widget.grab_focus();
     }
 
-    pub fn set_font_scale(&self, scale: f64) {
-        self.widget.set_font_scale(scale);
-    }
-
-    /// Replace the base terminal font. The independent font scale set by
-    /// [`Self::set_font_scale`] (global zoom) still multiplies this size.
+    /// Replace the terminal font while keeping VTE's fractional scaling path
+    /// disabled. Global zoom is already baked into `desc`.
     pub fn set_font(&self, desc: &gtk::pango::FontDescription) {
+        self.widget.set_font_scale(1.0);
         self.widget.set_font(Some(desc));
     }
 

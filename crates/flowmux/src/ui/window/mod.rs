@@ -796,7 +796,7 @@ impl WindowController {
             adw::ColorScheme::ForceLight
         });
 
-        let font = resolved.font_with_overrides(opts.font_family.as_deref(), opts.font_size);
+        let font = resolved.terminal_font(opts);
         let registry = self.pane_registry.borrow();
         for terminal in registry.terminals.values() {
             resolved.apply_to_ghostty(terminal);

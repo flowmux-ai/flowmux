@@ -3172,7 +3172,7 @@ fn build_panel(
             );
             // Start the new terminal widget with the current font + zoom
             // options so a freshly spawned tab matches the live ones.
-            let font = theme.font_with_overrides(opts.font_family.as_deref(), opts.font_size);
+            let font = theme.terminal_font(&opts);
             let resume_command = take_restored_agent_shell_command(
                 surface.id,
                 opts.auto_resume_agent_sessions,
@@ -3209,7 +3209,6 @@ fn build_panel(
             );
             theme.apply_to_ghostty(&pane);
             pane.set_font(&font);
-            pane.set_font_scale(opts.zoom_factor());
             pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
             if let Some(scrollback) = scrollback_to_restore(
                 opts.restore_terminal_scrollback,
