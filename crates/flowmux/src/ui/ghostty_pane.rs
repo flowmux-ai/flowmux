@@ -103,36 +103,46 @@ fn escape_pcre_literal(pattern: &str) -> String {
 
 #[derive(Clone)]
 struct TerminalSearchUi {
-    term: vte::Terminal,
-    entry: gtk::SearchEntry,
-    case_toggle: gtk::ToggleButton,
-    regex_toggle: gtk::ToggleButton,
-    error_label: gtk::Label,
-    revealer: gtk::Revealer,
+    term: glib::WeakRef<vte::Terminal>,
+    entry: glib::WeakRef<gtk::SearchEntry>,
+    case_toggle: glib::WeakRef<gtk::ToggleButton>,
+    regex_toggle: glib::WeakRef<gtk::ToggleButton>,
+    error_label: glib::WeakRef<gtk::Label>,
+    revealer: glib::WeakRef<gtk::Revealer>,
 }
 
 impl TerminalSearchUi {
     fn update(&self) -> bool {
-        let pattern = self.entry.text();
+        let (Some(term), Some(entry), Some(case_toggle), Some(regex_toggle)) = (
+            self.term.upgrade(),
+            self.entry.upgrade(),
+            self.case_toggle.upgrade(),
+            self.regex_toggle.upgrade(),
+        ) else {
+            return false;
+        };
+        let pattern = entry.text();
         if pattern.is_empty() {
-            self.term.search_set_regex(None, 0);
+            term.search_set_regex(None, 0);
             self.clear_error();
             return false;
         }
         match set_terminal_search(
-            &self.term,
+            &term,
             &pattern,
-            self.case_toggle.is_active(),
-            self.regex_toggle.is_active(),
+            case_toggle.is_active(),
+            regex_toggle.is_active(),
         ) {
             Ok(()) => {
                 self.clear_error();
                 true
             }
             Err(error) => {
-                self.term.search_set_regex(None, 0);
-                self.error_label.set_visible(true);
-                self.error_label.set_tooltip_text(Some(&error.to_string()));
+                term.search_set_regex(None, 0);
+                if let Some(error_label) = self.error_label.upgrade() {
+                    error_label.set_visible(true);
+                    error_label.set_tooltip_text(Some(&error.to_string()));
+                }
                 false
             }
         }
@@ -140,26 +150,37 @@ impl TerminalSearchUi {
 
     fn next(&self) {
         if self.update() {
-            self.term.search_find_next();
+            if let Some(term) = self.term.upgrade() {
+                term.search_find_next();
+            }
         }
     }
 
     fn previous(&self) {
         if self.update() {
-            self.term.search_find_previous();
+            if let Some(term) = self.term.upgrade() {
+                term.search_find_previous();
+            }
         }
     }
 
     fn close(&self) {
-        self.term.search_set_regex(None, 0);
+        let Some(term) = self.term.upgrade() else {
+            return;
+        };
+        term.search_set_regex(None, 0);
         self.clear_error();
-        self.revealer.set_reveal_child(false);
-        self.term.grab_focus();
+        if let Some(revealer) = self.revealer.upgrade() {
+            revealer.set_reveal_child(false);
+        }
+        term.grab_focus();
     }
 
     fn clear_error(&self) {
-        self.error_label.set_visible(false);
-        self.error_label.set_tooltip_text(None);
+        if let Some(error_label) = self.error_label.upgrade() {
+            error_label.set_visible(false);
+            error_label.set_tooltip_text(None);
+        }
     }
 }
 
@@ -222,12 +243,12 @@ fn build_terminal_search_overlay(term: &vte::Terminal) -> (gtk::Revealer, gtk::S
         .build();
 
     let ui = TerminalSearchUi {
-        term: term.clone(),
-        entry: entry.clone(),
-        case_toggle: case_toggle.clone(),
-        regex_toggle: regex_toggle.clone(),
-        error_label,
-        revealer: revealer.clone(),
+        term: term.downgrade(),
+        entry: entry.downgrade(),
+        case_toggle: case_toggle.downgrade(),
+        regex_toggle: regex_toggle.downgrade(),
+        error_label: error_label.downgrade(),
+        revealer: revealer.downgrade(),
     };
 
     entry.connect_search_changed({
@@ -754,11 +775,14 @@ impl GhosttyPane {
             let on_copy_text = callbacks.on_copy_surface_text.clone();
             let surface_for_menu = surface;
             let pane_id = pane_id.clone();
-            let term_widget = term.clone();
+            let term_widget = term.downgrade();
             let last_selection_for_menu = last_selection.clone();
             let click = gtk::GestureClick::new();
             click.set_button(gtk::gdk::BUTTON_SECONDARY);
             click.connect_pressed(move |gesture, _n_press, x, y| {
+                let Some(term_widget) = term_widget.upgrade() else {
+                    return;
+                };
                 let id = pane_id.get();
                 (on_focus.borrow_mut())(id);
 
@@ -1326,9 +1350,12 @@ fn install_url_link_handling(
     click.set_propagation_phase(gtk::PropagationPhase::Bubble);
     let activation = Rc::new(RefCell::new(TerminalClickActivation::default()));
 
-    let term_widget = term.clone();
+    let term_widget = term.downgrade();
     let activation_for_press = activation.clone();
     click.connect_pressed(move |gesture, _n_press, x, y| {
+        let Some(term_widget) = term_widget.upgrade() else {
+            return;
+        };
         activation_for_press.borrow_mut().clear();
         // A new primary press starts a fresh interaction: drop the stale
         // selection snapshot so Copy never resurrects text from a selection the
@@ -1398,8 +1425,11 @@ fn install_url_link_handling(
 
     let release = gtk::EventControllerLegacy::new();
     release.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let term_widget = term.clone();
+    let term_widget = term.downgrade();
     release.connect_event(move |_, event| {
+        let Some(term_widget) = term_widget.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
         let button = event
             .downcast_ref::<gtk::gdk::ButtonEvent>()
             .map(|event| event.button());
@@ -1660,9 +1690,12 @@ fn install_enter_preedit_commit_ordering(term: &vte::Terminal) {
     controller.set_propagation_phase(gtk::PropagationPhase::Capture);
     controller.set_scope(gtk::ShortcutScope::Local);
 
-    let term_widget = term.clone();
+    let term_widget = term.downgrade();
     let armed_action = armed.clone();
     let action = gtk::CallbackAction::new(move |_, _| {
+        let Some(term_widget) = term_widget.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
         scroll_terminal_to_bottom(&term_widget);
         armed_action.set(true);
         flush_pending_preedit(&term_widget);
@@ -1821,9 +1854,12 @@ fn install_shift_arrow_cursor_move(term: &vte::Terminal) {
     ];
 
     for (keyval, bytes) in bindings {
-        let term_widget = term.clone();
+        let term_widget = term.downgrade();
         let bytes: &'static [u8] = bytes;
         let action = gtk::CallbackAction::new(move |_, _| {
+            let Some(term_widget) = term_widget.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             scroll_terminal_to_bottom(&term_widget);
             term_widget.feed_child(bytes);
             glib::Propagation::Stop
@@ -1874,10 +1910,13 @@ fn install_smart_page_keys(term: &vte::Terminal) {
     ];
 
     for (key, mods, direction, always_scroll) in bindings {
-        let term_widget = term.clone();
+        let term_widget = term.downgrade();
         let direction = *direction;
         let always_scroll = *always_scroll;
         let action = gtk::CallbackAction::new(move |_, _| {
+            let Some(term_widget) = term_widget.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             let Some(adj) = term_widget.vadjustment() else {
                 let bytes: &[u8] = if direction < 0 {
                     b"\x1b[5~"
@@ -2050,8 +2089,11 @@ fn install_ibus_nav_workaround(term: &vte::Terminal, smart_page_enabled: bool) {
     controller.set_scope(gtk::ShortcutScope::Local);
 
     let bind = |keyval: gtk::gdk::Key, bytes: &'static [u8]| {
-        let term_widget = term.clone();
+        let term_widget = term.downgrade();
         let action = gtk::CallbackAction::new(move |_, _| {
+            let Some(term_widget) = term_widget.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             scroll_terminal_to_bottom(&term_widget);
             flush_pending_preedit(&term_widget);
             term_widget.feed_child(bytes);
@@ -3009,5 +3051,36 @@ mod tests {
         ));
         // The disable env wins everywhere (bisection kill switch).
         assert!(!should_install_ibus_nav_workaround(true, true, true, true));
+    }
+
+    #[gtk::test]
+    fn closing_terminal_releases_widget_graph() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/true".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        );
+        let terminal = pane.widget.downgrade();
+        let container = pane.container.downgrade();
+
+        pane.close_pty();
+        drop(pane);
+        let context = glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+
+        assert!(
+            terminal.upgrade().is_none(),
+            "closed terminal retained its VTE widget"
+        );
+        assert!(
+            container.upgrade().is_none(),
+            "closed terminal retained its GTK container"
+        );
     }
 }
