@@ -395,14 +395,14 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             }),
             check_sensitive: true,
         },
-        BannerState::Running(Stage::Fetching, version) => UpdateTabProps {
-            status: format!("Downloading FlowMux v{version}…"),
+        BannerState::Running(Stage::Fetching, percent, version) => UpdateTabProps {
+            status: format!("Downloading FlowMux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
         },
-        BannerState::Running(Stage::Installing, version) => UpdateTabProps {
-            status: format!("Building and installing FlowMux v{version}…"),
+        BannerState::Running(Stage::Installing, percent, version) => UpdateTabProps {
+            status: format!("Building and installing FlowMux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
@@ -464,7 +464,7 @@ fn preinstall_decision(selected: Version, refreshed: &BannerState) -> Preinstall
 }
 
 fn request_update(version: Version, on_update: &dyn Fn(Version) -> bool) -> Option<BannerState> {
-    on_update(version).then_some(BannerState::Running(Stage::Fetching, version))
+    on_update(version).then_some(BannerState::Running(Stage::Fetching, 0, version))
 }
 
 fn start_update_from_tab(
@@ -1355,11 +1355,12 @@ mod tests {
         assert!(current.check_sensitive);
 
         let running = update_tab_props(
-            &BannerState::Running(Stage::Installing, Version(0, 8, 0)),
+            &BannerState::Running(Stage::Installing, 64, Version(0, 8, 0)),
             InstallOrigin::Source,
         );
         assert!(running.update_version.is_none());
         assert!(!running.check_sensitive);
+        assert!(running.status.contains("64%"), "{}", running.status);
     }
 
     #[test]
@@ -1375,7 +1376,7 @@ mod tests {
         assert_eq!(selected.get(), Some(Version(0, 8, 0)));
         assert_eq!(
             next,
-            Some(BannerState::Running(Stage::Fetching, Version(0, 8, 0)))
+            Some(BannerState::Running(Stage::Fetching, 0, Version(0, 8, 0)))
         );
     }
 

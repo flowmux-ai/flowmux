@@ -10,17 +10,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Widget properties for a banner state:
-/// `(title, button_label, revealed, progress_visible, ignore_visible)`.
+/// `(title, button_label, revealed, progress_percent, ignore_visible)`.
 /// `None` for the button label hides the button. Pure so the mapping
 /// stays unit-testable without GTK.
 fn banner_props(
     state: &BannerState,
     origin: InstallOrigin,
-) -> (String, Option<&'static str>, bool, bool, bool) {
+) -> (String, Option<&'static str>, bool, Option<u8>, bool) {
     use crate::update::Stage;
     match state {
         BannerState::Hidden | BannerState::Current | BannerState::Ignored(_) => {
-            (String::new(), None, false, false, false)
+            (String::new(), None, false, None, false)
         }
         BannerState::Available(v) => (
             format!("FlowMux {v} is available"),
@@ -29,28 +29,28 @@ fn banner_props(
                 UpdateGate::ReleasePage => "Open release page (.deb)",
             }),
             true,
-            false,
-            true,
-        ),
-        BannerState::Running(Stage::Fetching, v) => (
-            format!("Updating to {v} — downloading…"),
             None,
             true,
-            true,
-            false,
         ),
-        BannerState::Running(Stage::Installing, v) => (
-            format!("Updating to {v} — building & installing…"),
+        BannerState::Running(Stage::Fetching, percent, v) => (
+            format!("Updating to {v} — downloading {percent}%"),
             None,
             true,
+            Some(*percent),
+            false,
+        ),
+        BannerState::Running(Stage::Installing, percent, v) => (
+            format!("Updating to {v} — building & installing {percent}%"),
+            None,
             true,
+            Some(*percent),
             false,
         ),
         BannerState::Done(v) => (
             format!("FlowMux {v} is installed. Restart FlowMux to use it."),
             Some("Dismiss"),
             true,
-            false,
+            None,
             false,
         ),
         BannerState::Failed(message, v) => (
@@ -60,7 +60,7 @@ fn banner_props(
                 UpdateGate::ReleasePage => "Open release page (.deb)",
             }),
             true,
-            false,
+            None,
             false,
         ),
     }
@@ -101,7 +101,7 @@ impl UpdateBanner {
         progress.set_margin_start(12);
         progress.set_margin_end(12);
         progress.set_margin_bottom(6);
-        progress.set_pulse_step(0.08);
+        progress.set_show_text(true);
         progress.set_visible(false);
 
         let banner_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -243,45 +243,26 @@ impl UpdateBanner {
     }
 
     fn dispatch(&self, event: Event) {
-        let was_running = matches!(*self.state.borrow(), BannerState::Running(..));
         let next = self.state.borrow().clone().apply(event);
-        self.render_with_previous_running(next, was_running);
+        self.render(next);
     }
 
     fn render(&self, next: BannerState) {
-        let was_running = matches!(*self.state.borrow(), BannerState::Running(..));
-        self.render_with_previous_running(next, was_running);
-    }
-
-    fn render_with_previous_running(&self, next: BannerState, was_running: bool) {
-        let (title, button, revealed, progress_visible, ignore_visible) =
+        let (title, button, revealed, progress_percent, ignore_visible) =
             banner_props(&next, self.origin);
         self.banner.set_title(&title);
         self.banner.set_button_label(button);
         self.banner.set_revealed(revealed);
         self.ignore_button.set_visible(ignore_visible);
-        self.progress.set_visible(progress_visible);
-        *self.state.borrow_mut() = next;
-        if progress_visible && !was_running {
-            self.start_progress_pulse();
+        self.progress.set_visible(progress_percent.is_some());
+        if let Some(percent) = progress_percent {
+            self.progress.set_fraction(f64::from(percent) / 100.0);
+            self.progress.set_text(Some(&format!("{percent}%")));
+        } else {
+            self.progress.set_fraction(0.0);
+            self.progress.set_text(None);
         }
-    }
-
-    fn start_progress_pulse(&self) {
-        self.progress.set_fraction(0.0);
-        self.progress.pulse();
-        let progress = self.progress.downgrade();
-        let state = Rc::clone(&self.state);
-        gtk::glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
-            if !matches!(*state.borrow(), BannerState::Running(..)) {
-                return gtk::glib::ControlFlow::Break;
-            }
-            let Some(progress) = progress.upgrade() else {
-                return gtk::glib::ControlFlow::Break;
-            };
-            progress.pulse();
-            gtk::glib::ControlFlow::Continue
-        });
+        *self.state.borrow_mut() = next;
     }
 }
 
@@ -307,7 +288,7 @@ mod tests {
     fn hidden_state_reveals_nothing() {
         assert_eq!(
             banner_props(&BannerState::Hidden, InstallOrigin::Source),
-            (String::new(), None, false, false, false)
+            (String::new(), None, false, None, false)
         );
     }
 
@@ -315,7 +296,7 @@ mod tests {
     fn current_state_reveals_nothing() {
         assert_eq!(
             banner_props(&BannerState::Current, InstallOrigin::Source),
-            (String::new(), None, false, false, false)
+            (String::new(), None, false, None, false)
         );
     }
 
@@ -323,7 +304,7 @@ mod tests {
     fn ignored_state_reveals_nothing() {
         assert_eq!(
             banner_props(&BannerState::Ignored(V), InstallOrigin::Source),
-            (String::new(), None, false, false, false)
+            (String::new(), None, false, None, false)
         );
     }
 
@@ -337,7 +318,7 @@ mod tests {
         );
         assert_eq!(button, Some("Update"));
         assert!(revealed);
-        assert!(!progress);
+        assert_eq!(progress, None);
         assert!(ignore);
     }
 
@@ -347,7 +328,7 @@ mod tests {
             banner_props(&BannerState::Available(V), InstallOrigin::Deb);
         assert_eq!(button, Some("Open release page (.deb)"));
         assert!(revealed);
-        assert!(!progress);
+        assert_eq!(progress, None);
     }
 
     #[test]
@@ -357,13 +338,23 @@ mod tests {
             (Stage::Installing, "installing"),
         ] {
             let (title, button, revealed, progress, ignore) =
-                banner_props(&BannerState::Running(stage, V), InstallOrigin::Source);
+                banner_props(&BannerState::Running(stage, 42, V), InstallOrigin::Source);
             assert!(title.contains(needle), "{title} should mention {needle}");
+            assert!(title.contains("42%"), "{title} should show the percentage");
             assert_eq!(button, None, "no button while running");
             assert!(revealed);
-            assert!(progress, "progress should be visible while running");
+            assert_eq!(progress, Some(42));
             assert!(!ignore);
         }
+    }
+
+    #[gtk::test]
+    fn running_renders_a_determinate_labeled_progress_bar() {
+        let banner = UpdateBanner::new(None);
+        banner.render(BannerState::Running(Stage::Fetching, 42, V));
+        assert!(banner.progress.is_visible());
+        assert!((banner.progress.fraction() - 0.42).abs() < f64::EPSILON);
+        assert_eq!(banner.progress.text().as_deref(), Some("42%"));
     }
 
     #[test]
@@ -373,7 +364,7 @@ mod tests {
         assert!(title.contains("Restart FlowMux"), "{title}");
         assert_eq!(button, Some("Dismiss"));
         assert!(revealed);
-        assert!(!progress);
+        assert_eq!(progress, None);
         assert!(!ignore);
     }
 
@@ -390,7 +381,7 @@ mod tests {
         );
         assert_eq!(button, Some("Retry"));
         assert!(revealed);
-        assert!(!progress);
+        assert_eq!(progress, None);
         assert!(!ignore);
     }
 }

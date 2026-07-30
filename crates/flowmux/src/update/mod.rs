@@ -63,8 +63,8 @@ pub enum Event {
     Current,
     /// A newer release exists.
     Available(Version),
-    /// Install progress.
-    Stage(Stage),
+    /// Download or install progress, clamped to 0..=100.
+    Progress(Stage, u8),
     /// Install finished; takes effect on next launch.
     Done(Version),
     /// Install failed; message is a short summary for the banner.
@@ -87,7 +87,7 @@ pub enum BannerState {
     /// Update to `Version` can be started.
     Available(Version),
     /// Install running; keep the target version for retry/labels.
-    Running(Stage, Version),
+    Running(Stage, u8, Version),
     Done(Version),
     /// Install failed; retry targets `Version`.
     Failed(String, Version),
@@ -118,18 +118,23 @@ impl BannerState {
             (BannerState::Done(installed), Event::Start(v)) if v <= installed => {
                 BannerState::Done(installed)
             }
-            (_, Event::Start(v)) => BannerState::Running(Stage::Fetching, v),
-            (state, Event::Stage(stage)) => match state {
+            (_, Event::Start(v)) => BannerState::Running(Stage::Fetching, 0, v),
+            (state, Event::Progress(stage, percent)) => match state {
+                BannerState::Running(current_stage, current_percent, v)
+                    if current_stage == stage =>
+                {
+                    BannerState::Running(stage, current_percent.max(percent.min(100)), v)
+                }
                 BannerState::Available(v)
-                | BannerState::Running(_, v)
+                | BannerState::Running(_, _, v)
                 | BannerState::Failed(_, v)
-                | BannerState::Done(v) => BannerState::Running(stage, v),
+                | BannerState::Done(v) => BannerState::Running(stage, percent.min(100), v),
                 BannerState::Hidden | BannerState::Current | BannerState::Ignored(_) => state,
             },
             (_, Event::Done(v)) => BannerState::Done(v),
             (state, Event::Failed(message)) => match state {
                 BannerState::Available(v)
-                | BannerState::Running(_, v)
+                | BannerState::Running(_, _, v)
                 | BannerState::Failed(_, v)
                 | BannerState::Done(v) => BannerState::Failed(message, v),
                 BannerState::Hidden | BannerState::Current | BannerState::Ignored(_) => state,
@@ -203,36 +208,47 @@ mod tests {
     #[test]
     fn start_moves_offer_to_running_immediately_and_is_idempotent() {
         let running = BannerState::Available(V1).apply(Event::Start(V1));
-        assert_eq!(running, BannerState::Running(Stage::Fetching, V1));
+        assert_eq!(running, BannerState::Running(Stage::Fetching, 0, V1));
         assert_eq!(running.clone().apply(Event::Start(V1)), running);
     }
 
     #[test]
     fn periodic_check_does_not_disturb_a_running_install() {
-        let running = BannerState::Running(Stage::Installing, V1);
+        let running = BannerState::Running(Stage::Installing, 50, V1);
         assert_eq!(running.clone().apply(Event::Available(V2)), running);
     }
 
     #[test]
-    fn stages_progress_while_running() {
+    fn progress_is_clamped_monotonic_and_resets_for_installing() {
         assert_eq!(
-            BannerState::Available(V1).apply(Event::Stage(Stage::Fetching)),
-            BannerState::Running(Stage::Fetching, V1)
+            BannerState::Available(V1).apply(Event::Progress(Stage::Fetching, 42)),
+            BannerState::Running(Stage::Fetching, 42, V1)
         );
         assert_eq!(
-            BannerState::Running(Stage::Fetching, V1).apply(Event::Stage(Stage::Installing)),
-            BannerState::Running(Stage::Installing, V1)
+            BannerState::Running(Stage::Fetching, 42, V1)
+                .apply(Event::Progress(Stage::Fetching, 20)),
+            BannerState::Running(Stage::Fetching, 42, V1)
+        );
+        assert_eq!(
+            BannerState::Running(Stage::Fetching, 42, V1)
+                .apply(Event::Progress(Stage::Installing, 0)),
+            BannerState::Running(Stage::Installing, 0, V1)
+        );
+        assert_eq!(
+            BannerState::Running(Stage::Installing, 0, V1)
+                .apply(Event::Progress(Stage::Installing, 255)),
+            BannerState::Running(Stage::Installing, 100, V1)
         );
     }
 
     #[test]
     fn done_and_failed_terminate_a_run() {
         assert_eq!(
-            BannerState::Running(Stage::Installing, V1).apply(Event::Done(V1)),
+            BannerState::Running(Stage::Installing, 100, V1).apply(Event::Done(V1)),
             BannerState::Done(V1)
         );
         assert_eq!(
-            BannerState::Running(Stage::Fetching, V1).apply(Event::Failed("boom".into())),
+            BannerState::Running(Stage::Fetching, 50, V1).apply(Event::Failed("boom".into())),
             BannerState::Failed("boom".into(), V1)
         );
     }
@@ -261,7 +277,7 @@ mod tests {
         assert_eq!(BannerState::Current.actionable_version(), None);
         assert_eq!(BannerState::Ignored(V1).actionable_version(), None);
         assert_eq!(
-            BannerState::Running(Stage::Fetching, V1).actionable_version(),
+            BannerState::Running(Stage::Fetching, 50, V1).actionable_version(),
             None
         );
         assert_eq!(BannerState::Done(V1).actionable_version(), None);

@@ -113,6 +113,7 @@ pub fn git_plan(clone_exists: bool, url: &str, dir: &Path, tag: &str) -> Vec<Vec
                 s("-C"),
                 dir.clone(),
                 s("fetch"),
+                s("--progress"),
                 s("--depth"),
                 s("1"),
                 s("origin"),
@@ -125,6 +126,7 @@ pub fn git_plan(clone_exists: bool, url: &str, dir: &Path, tag: &str) -> Vec<Vec
         vec![vec![
             s("git"),
             s("clone"),
+            s("--progress"),
             s("--depth"),
             s("1"),
             s("--branch"),
@@ -223,6 +225,7 @@ ffffeeeeddddccccbbbbaaaa9999888877776666\trefs/heads/main
             vec![vec![
                 "git".to_string(),
                 "clone".to_string(),
+                "--progress".to_string(),
                 "--depth".to_string(),
                 "1".to_string(),
                 "--branch".to_string(),
@@ -304,6 +307,7 @@ ffffeeeeddddccccbbbbaaaa9999888877776666\trefs/heads/main
                     "-C".to_string(),
                     "/home/u/.cache/flowmux/src".to_string(),
                     "fetch".to_string(),
+                    "--progress".to_string(),
                     "--depth".to_string(),
                     "1".to_string(),
                     "origin".to_string(),
