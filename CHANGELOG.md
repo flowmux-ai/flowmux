@@ -3,7 +3,7 @@
 # Changelog
 
 All notable changes are recorded here in release order. The next release line
-is 0.8.8; this document does not change the crate version by itself.
+is 0.8.9; this document does not change the crate version by itself.
 
 ## [Unreleased]
 
