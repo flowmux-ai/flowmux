@@ -376,6 +376,11 @@ paned > separator {{
     min-width: 1px;
     min-height: 1px;
 }}
+.flowmux-agents-split > separator {{
+    background-color: transparent;
+    border: 0;
+    border-top: 1px solid {border};
+}}
 .flowmux-sidebar-shell {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
@@ -952,6 +957,19 @@ mod tests {
                 && divider_rule.contains("border: 0")
                 && divider_rule.contains("box-shadow: none"),
             "window split divider must not paint a line between the native headers"
+        );
+
+        let agents_divider_start = css
+            .find(".flowmux-agents-split > separator {")
+            .expect("Agents split divider rule missing");
+        let agents_divider_tail = &css[agents_divider_start..];
+        let agents_divider_rule = &agents_divider_tail[..agents_divider_tail
+            .find('}')
+            .expect("Agents split divider rule unterminated")];
+        assert!(
+            agents_divider_rule.contains("background-color: transparent")
+                && agents_divider_rule.contains("border-top: 1px solid"),
+            "Agents split divider must paint only a thin line"
         );
     }
 

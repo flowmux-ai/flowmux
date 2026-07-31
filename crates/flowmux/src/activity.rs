@@ -218,13 +218,6 @@ impl ActivityStore {
     pub fn entries(&self) -> Vec<ActivityEntry> {
         self.entries.borrow().iter().cloned().collect()
     }
-
-    pub fn clear(&self) -> bool {
-        let mut entries = self.entries.borrow_mut();
-        let changed = !entries.is_empty();
-        entries.clear();
-        changed
-    }
 }
 
 #[cfg(test)]
@@ -406,19 +399,6 @@ mod tests {
             "Session started"
         )));
         assert_eq!(store.entries().len(), 3);
-    }
-
-    #[test]
-    fn clear_drops_recent_entries_idempotently() {
-        let store = ActivityStore::new();
-        assert!(store.push(entry(
-            SurfaceId::new(),
-            Some(AgentStatus::Working),
-            "Starting turn"
-        )));
-        assert!(store.clear());
-        assert!(store.entries().is_empty());
-        assert!(!store.clear());
     }
 
     #[test]

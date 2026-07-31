@@ -1525,6 +1525,7 @@ impl WindowController {
         if let Some(surface) = active_surface {
             self.refresh_agent_screen_status(surface, None).await;
         }
+        self.refresh_activity_panel().await;
     }
 
     /// Called right before exit. Record window size, maximized state, sidebar
@@ -1839,7 +1840,6 @@ impl WindowController {
             }
             command @ (GtkCommand::AddNotification { .. }
             | GtkCommand::AddActivity { .. }
-            | GtkCommand::ClearActivities
             | GtkCommand::SetAgentBarMode { .. }
             | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }

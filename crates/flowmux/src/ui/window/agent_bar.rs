@@ -53,12 +53,12 @@ impl WindowController {
     pub(super) async fn refresh_activity_panel(&self) {
         let state = self.store.snapshot().await;
         let current = current_activity_entries(&state);
-        let workspaces = state
-            .workspaces
-            .iter()
-            .map(|workspace| workspace.id)
-            .collect();
-        self.sidebar.refresh_activity_panel(&current, &workspaces);
+        let focused_surface = self
+            .focused_pane
+            .get()
+            .and_then(|pane| self.pane_registry.borrow().active_surface(pane));
+        self.sidebar
+            .refresh_activity_panel(&current, focused_surface);
     }
 
     pub(super) async fn open_activity_target(

@@ -11,7 +11,7 @@
 //! | • workspace 2  |  scrollable workspace list
 //! | • workspace 3  |
 //! +----------------+
-//! | Agent Activity |  resizable lower third
+//! | Agents         |  resizable lower third
 //! +----------------+
 //! ```
 //!
@@ -20,7 +20,7 @@
 //! rows expose hover-X close, color bar, right-click menu (rename /
 //! recolor / close).
 
-use crate::activity::{ActivityEntry, ActivityNowEntry, ActivityStore};
+use crate::activity::{ActivityNowEntry, ActivityStore};
 use crate::bridge::{Bridge, GtkCommand};
 use crate::notifications::{NotificationEntry, NotificationStore};
 use crate::ui::update_banner::UpdateBanner;
@@ -29,7 +29,7 @@ use crate::ui::workspace_view::{
     read_tab_dnd_payload_from_drop, tab_dnd_content_formats, tab_dnd_formats_accept_payload,
 };
 use adw::prelude::*;
-use flowmux_core::{AgentStatus, NotificationLevel, PrState, Workspace, WorkspaceId};
+use flowmux_core::{AgentStatus, NotificationLevel, PrState, SurfaceId, Workspace, WorkspaceId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -196,6 +196,8 @@ impl Sidebar {
 
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+        scroll.set_vscrollbar_policy(gtk::PolicyType::Automatic);
+        scroll.set_overlay_scrolling(false);
         scroll.set_vexpand(true);
         scroll.set_child(Some(&list));
 
@@ -382,7 +384,7 @@ impl Sidebar {
         activity_panel.append(&render_activity_list(
             &activities,
             &[],
-            &HashSet::new(),
+            None,
             bridge.clone(),
         ));
         activity_panel.set_visible(false);
@@ -400,6 +402,7 @@ impl Sidebar {
             .shrink_start_child(false)
             .shrink_end_child(true)
             .build();
+        activity_split.add_css_class("flowmux-agents-split");
 
         let activity_panel_for_toggle = activity_panel.clone();
         let activity_split_for_toggle = activity_split.clone();
@@ -761,7 +764,7 @@ impl Sidebar {
     pub fn refresh_activity_panel(
         &self,
         current: &[ActivityNowEntry],
-        existing_workspaces: &HashSet<WorkspaceId>,
+        focused_surface: Option<SurfaceId>,
     ) {
         let has_agents = !current.is_empty();
         self.activity_has_agents.set(has_agents);
@@ -780,7 +783,7 @@ impl Sidebar {
         self.activity_panel.append(&render_activity_list(
             &self.activities,
             current,
-            existing_workspaces,
+            focused_surface,
             self.bridge.clone(),
         ));
     }
@@ -823,7 +826,7 @@ fn set_activity_panel_visible(
 fn render_activity_list(
     store: &ActivityStore,
     current: &[ActivityNowEntry],
-    existing_workspaces: &HashSet<WorkspaceId>,
+    focused_surface: Option<SurfaceId>,
     bridge: Bridge,
 ) -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -832,82 +835,36 @@ fn render_activity_list(
     root.set_margin_start(8);
     root.set_margin_end(8);
 
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let title = gtk::Label::new(Some("Agent Activity"));
+    let title = gtk::Label::new(Some("Agents"));
     title.add_css_class("heading");
     title.set_halign(gtk::Align::Start);
-    title.set_hexpand(true);
-    header.append(&title);
-    let clear = gtk::Button::from_icon_name("user-trash-symbolic");
-    clear.add_css_class("flat");
-    clear.set_tooltip_text(Some("Clear recent Agent activity"));
-    clear.update_property(&[gtk::accessible::Property::Label(
-        "Clear recent Agent activity",
-    )]);
-    let bridge_for_clear = bridge.clone();
-    clear.connect_clicked(move |_| {
-        let bridge = bridge_for_clear.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            let _ = bridge.tx.send(GtkCommand::ClearActivities).await;
-        });
-    });
-    header.append(&clear);
-    root.append(&header);
+    root.append(&title);
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scroll.set_vscrollbar_policy(gtk::PolicyType::Automatic);
+    scroll.set_overlay_scrolling(false);
     scroll.set_min_content_height(180);
     scroll.set_vexpand(true);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
 
-    content.append(&activity_section_label("NOW"));
-    if current.is_empty() {
-        content.append(&activity_empty_label("No active Agents."));
-    } else {
-        for entry in current {
-            content.append(&activity_now_row(entry, store, bridge.clone()));
-        }
-    }
-
-    content.append(&activity_section_label("RECENT"));
-    let entries = store.entries();
-    if entries.is_empty() {
-        content.append(&activity_empty_label("No recent activity."));
-    } else {
-        for entry in entries.iter().rev() {
-            content.append(&activity_recent_row(
-                entry,
-                existing_workspaces.contains(&entry.workspace),
-                bridge.clone(),
-            ));
-        }
+    for entry in current {
+        content.append(&activity_now_row(
+            entry,
+            store,
+            focused_surface == Some(entry.surface),
+            bridge.clone(),
+        ));
     }
     scroll.set_child(Some(&content));
     root.append(&scroll);
     root.upcast()
 }
 
-fn activity_section_label(text: &str) -> gtk::Widget {
-    let label = gtk::Label::new(Some(text));
-    label.set_halign(gtk::Align::Start);
-    label.add_css_class("caption-heading");
-    label.add_css_class("dim-label");
-    label.set_margin_top(4);
-    label.upcast()
-}
-
-fn activity_empty_label(text: &str) -> gtk::Widget {
-    let label = gtk::Label::new(Some(text));
-    label.set_halign(gtk::Align::Start);
-    label.add_css_class("dim-label");
-    label.set_margin_start(8);
-    label.set_margin_bottom(6);
-    label.upcast()
-}
-
 fn activity_now_row(
     entry: &ActivityNowEntry,
     store: &ActivityStore,
+    focused: bool,
     bridge: Bridge,
 ) -> gtk::Widget {
     let when = store
@@ -916,7 +873,7 @@ fn activity_now_row(
         .rev()
         .find(|recent| recent.surface == entry.surface)
         .map(|recent| format_relative_time(&recent.created_at));
-    activity_row(
+    let row = activity_row(
         &entry.agent,
         Some(entry.status),
         entry.seen,
@@ -930,29 +887,12 @@ fn activity_now_row(
         entry.pane,
         entry.surface,
         bridge,
-    )
-}
-
-fn activity_recent_row(
-    entry: &ActivityEntry,
-    workspace_exists: bool,
-    bridge: Bridge,
-) -> gtk::Widget {
-    activity_row(
-        &entry.agent,
-        entry.status,
-        false,
-        &entry.summary,
-        &entry.workspace_label,
-        &entry.surface_label,
-        &entry.color,
-        Some(&format_relative_time(&entry.created_at)),
-        workspace_exists,
-        entry.workspace,
-        entry.pane,
-        entry.surface,
-        bridge,
-    )
+    );
+    row.add_css_class("flowmux-agent-bar-item");
+    if focused {
+        row.add_css_class("focused");
+    }
+    row
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2455,32 +2395,27 @@ mod tests {
             .downcast::<gtk::Paned>()
             .unwrap();
         assert_eq!(activity_split.orientation(), gtk::Orientation::Vertical);
+        assert!(activity_split.has_css_class("flowmux-agents-split"));
+        let panel_scrolls: Vec<gtk::ScrolledWindow> = descendant_widgets(&sidebar.root)
+            .into_iter()
+            .filter_map(|widget| widget.downcast::<gtk::ScrolledWindow>().ok())
+            .collect();
+        assert!(panel_scrolls.len() >= 2);
+        assert!(
+            panel_scrolls
+                .iter()
+                .filter(|scroll| {
+                    !scroll.is_overlay_scrolling()
+                        && scroll.vscrollbar_policy() == gtk::PolicyType::Automatic
+                })
+                .count()
+                >= 2,
+            "workspace and Agents lists must use persistent scrollbars"
+        );
 
         let workspace = WorkspaceId::new();
         let pane = PaneId::new();
         let surface = SurfaceId::new();
-        let mut recent = ActivityEntry {
-            agent: "claude".into(),
-            status: Some(AgentStatus::Done),
-            summary: "Completed: fixed a deliberately long summary without changing the window"
-                .into(),
-            created_at: chrono::Utc::now() - chrono::Duration::minutes(2),
-            workspace,
-            pane,
-            surface,
-            workspace_label: "flowmux-terminal".into(),
-            surface_label: "zsh".into(),
-            color: "#abcdef".into(),
-            session_id: Some("session-1".into()),
-            source: "flowmux:hook".into(),
-        };
-        assert!(store.push(recent.clone()));
-        recent.workspace = WorkspaceId::new();
-        recent.surface = SurfaceId::new();
-        recent.summary = "Session ended".into();
-        recent.status = None;
-        assert!(store.push(recent));
-
         let current = [ActivityNowEntry {
             agent: "codex".into(),
             status: AgentStatus::Working,
@@ -2493,8 +2428,7 @@ mod tests {
             surface_label: "zsh".into(),
             color: "#abcdef".into(),
         }];
-        let workspaces = HashSet::from([workspace]);
-        sidebar.refresh_activity_panel(&current, &workspaces);
+        sidebar.refresh_activity_panel(&current, Some(surface));
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         assert!(sidebar.activity_panel.is_visible());
         assert!(
@@ -2509,17 +2443,16 @@ mod tests {
             .iter()
             .filter_map(|widget| widget.clone().downcast().ok())
             .collect();
-        for expected in ["NOW", "RECENT"] {
-            assert!(labels.iter().any(|label| label.label() == expected));
-        }
-        for expected in ["Running tests", "Session ended"] {
-            assert!(labels
-                .iter()
-                .any(|label| label.label().starts_with(expected)));
-        }
+        assert!(labels.iter().any(|label| label.label() == "Agents"));
+        assert!(labels
+            .iter()
+            .any(|label| label.label().starts_with("Running tests")));
+        assert!(labels
+            .iter()
+            .all(|label| !matches!(label.label().as_str(), "NOW" | "RECENT" | "Session ended")));
         let summary = labels
             .iter()
-            .find(|label| label.label().starts_with("Completed:"))
+            .find(|label| label.label().starts_with("Running tests"))
             .unwrap();
         assert!(summary.wraps());
         assert!(!summary.is_single_line_mode());
@@ -2531,29 +2464,30 @@ mod tests {
             .find_map(|widget| widget.clone().downcast::<gtk::ScrolledWindow>().ok())
             .unwrap();
         assert!(scroll.vexpands());
-        let clear = widgets
-            .iter()
-            .filter_map(|widget| widget.clone().downcast::<gtk::Button>().ok())
-            .find(|button| button.tooltip_text().as_deref() == Some("Clear recent Agent activity"))
-            .unwrap();
-        assert_eq!(clear.icon_name().as_deref(), Some("user-trash-symbolic"));
-        assert!(descendant_labels(&clear).is_empty());
+        assert!(!scroll.is_overlay_scrolling());
+        assert_eq!(scroll.vscrollbar_policy(), gtk::PolicyType::Automatic);
         let rows: Vec<gtk::Button> = widgets
-            .into_iter()
+            .iter()
+            .cloned()
             .filter_map(|widget| widget.downcast().ok())
             .collect();
-        assert!(rows.iter().any(|button| !button.is_sensitive()));
-        let completed = rows
+        assert!(rows.iter().all(|button| {
+            button.tooltip_text().as_deref() != Some("Clear recent Agent activity")
+        }));
+        let selected = rows
             .into_iter()
             .find(|button| {
                 descendant_labels(button)
                     .iter()
-                    .any(|label| label.label().starts_with("Completed:"))
+                    .any(|label| label.label().starts_with("Running tests"))
             })
             .unwrap();
-        assert!(!completed.vexpands());
-        assert_eq!(completed.valign(), gtk::Align::Start);
-        completed.emit_clicked();
+        assert!(selected.is_sensitive());
+        assert!(!selected.vexpands());
+        assert_eq!(selected.valign(), gtk::Align::Start);
+        assert!(selected.has_css_class("flowmux-agent-bar-item"));
+        assert!(selected.has_css_class("focused"));
+        selected.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(matches!(
             rx.try_recv().unwrap(),
@@ -2586,7 +2520,7 @@ mod tests {
             GtkCommand::SetAgentBarMode { enabled: false }
         ));
 
-        sidebar.refresh_activity_panel(&[], &workspaces);
+        sidebar.refresh_activity_panel(&[], None);
         assert!(
             !sidebar.activity_panel.is_visible(),
             "Agent Activity must hide when the last live Agent disappears"
