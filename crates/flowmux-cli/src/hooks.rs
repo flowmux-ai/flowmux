@@ -56,6 +56,10 @@ pub struct ClaudeHookInput {
     /// `last-assistant-message`. We accept both spellings.
     #[serde(default, alias = "last-assistant-message")]
     pub last_assistant_message: Option<String>,
+    /// Claude `PreToolUse` tool identifier. The hook deliberately does not
+    /// deserialize `tool_input`, which may contain prompts, paths, or commands.
+    #[serde(default)]
+    pub tool_name: Option<String>,
 }
 
 /// Read up to 1 MiB of JSON from stdin and parse as a hook payload.
@@ -198,7 +202,7 @@ pub fn build_unknown_activity_update_with_session(
         source: Some("flowmux:hook".into()),
         seq: hook_seq(),
         message: None,
-        custom_status: None,
+        custom_status: Some("Ready".into()),
         session_id: session_id.map(str::to_string),
     }
 }
@@ -243,6 +247,30 @@ pub fn shorten_body(s: &str, max: usize) -> String {
         let truncated: String = one_line.chars().take(max).collect();
         format!("{truncated}…")
     }
+}
+
+pub fn normalized_activity_text(text: Option<&str>) -> Option<String> {
+    text.map(|value| shorten_body(value, 160))
+        .filter(|value| !value.is_empty())
+}
+
+pub fn completed_activity_text(message: Option<&str>) -> String {
+    normalized_activity_text(message)
+        .map(|message| format!("Completed: {message}"))
+        .unwrap_or_else(|| "Completed".into())
+}
+
+pub fn tool_activity_text(tool_name: Option<&str>) -> String {
+    let Some(tool_name) = tool_name.map(str::trim).filter(|name| {
+        !name.is_empty()
+            && name.chars().count() <= 48
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
+    }) else {
+        return "Working".into();
+    };
+    format!("Using {tool_name}")
 }
 
 /// Build a `Request::Notify` for an agent stop event.
@@ -449,6 +477,28 @@ mod tests {
     }
 
     #[test]
+    fn activity_text_is_short_and_single_line() {
+        let input = format!("done\n{}", "x".repeat(200));
+        let text = completed_activity_text(Some(&input));
+        assert!(text.starts_with("Completed: done "));
+        assert!(!text.contains('\n'));
+        assert_eq!(text.chars().count(), "Completed: ".chars().count() + 161);
+    }
+
+    #[test]
+    fn tool_activity_text_accepts_identifiers_only() {
+        assert_eq!(
+            tool_activity_text(Some("mcp__github__search")),
+            "Using mcp__github__search"
+        );
+        assert_eq!(
+            tool_activity_text(Some("Bash /home/user/secret")),
+            "Working"
+        );
+        assert_eq!(tool_activity_text(None), "Working");
+    }
+
+    #[test]
     fn read_hook_input_parses_stdin_payloads_for_claude_style_hooks() {
         let parsed = read_hook_input(r#"{ "message": "approval needed" }"#.as_bytes());
         assert_eq!(parsed.message.as_deref(), Some("approval needed"));
@@ -532,12 +582,14 @@ mod tests {
                 status,
                 activity,
                 pid,
+                custom_status,
                 ..
             } => {
                 assert_eq!(agent, "codex");
                 assert_eq!(status, Some(flowmux_core::AgentStatus::Unknown));
                 assert_eq!(activity, None);
                 assert_eq!(pid, Some(42));
+                assert_eq!(custom_status.as_deref(), Some("Ready"));
             }
             other => panic!("expected AgentActivityUpdate, got {other:?}"),
         }
@@ -679,6 +731,21 @@ mod tests {
         }"#;
         let parsed: ClaudeHookInput = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.session_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn parse_claude_hook_payload_reads_tool_name_without_tool_input() {
+        let raw = r#"{
+            "session_id": "abc",
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat /home/user/secret"}
+        }"#;
+        let parsed: ClaudeHookInput = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed.tool_name.as_deref(), Some("Bash"));
+        assert_eq!(
+            serde_json::to_value(parsed.tool_name).unwrap(),
+            serde_json::json!("Bash")
+        );
     }
 
     #[test]

@@ -264,32 +264,39 @@ pub(crate) async fn run_claude_hook_event(
     let mut reqs: Vec<_> = Vec::new();
     match event {
         ClaudeHookEvent::Stop => {
-            let body = input.last_assistant_message.as_deref();
+            let body = normalized_activity_text(input.last_assistant_message.as_deref());
+            let status_text = completed_activity_text(body.as_deref());
             reqs.push(build_activity_update_with_metadata(
                 "claude",
                 Some(Idle),
                 pid,
                 pane,
                 surface,
-                body,
-                None,
+                body.as_deref(),
+                Some(&status_text),
                 input.session_id.as_deref(),
             ));
-            reqs.push(build_stop_notify("Claude", body, pane, surface));
+            reqs.push(build_stop_notify("Claude", body.as_deref(), pane, surface));
         }
         ClaudeHookEvent::Notification => {
-            let msg = input.message.as_deref();
+            let msg = normalized_activity_text(input.message.as_deref());
+            let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(
                 "claude",
                 Some(NeedsInput),
                 pid,
                 pane,
                 surface,
-                msg,
-                None,
+                msg.as_deref(),
+                Some(status_text),
                 input.session_id.as_deref(),
             ));
-            reqs.push(build_notification_notify("Claude", msg, pane, surface));
+            reqs.push(build_notification_notify(
+                "Claude",
+                msg.as_deref(),
+                pane,
+                surface,
+            ));
         }
         // SessionStart registers the agent's presence (and PID, for the
         // liveness sweep) without claiming it is working yet.
@@ -301,13 +308,13 @@ pub(crate) async fn run_claude_hook_event(
                 pane,
                 surface,
                 None,
-                None,
+                Some("Ready"),
                 input.session_id.as_deref(),
             ));
         }
         // A new prompt or an imminent tool call means the agent is
         // actively working this turn — and clears any "needs input".
-        ClaudeHookEvent::PromptSubmit | ClaudeHookEvent::PreToolUse => {
+        ClaudeHookEvent::PromptSubmit => {
             reqs.push(build_activity_update_with_metadata(
                 "claude",
                 Some(Running),
@@ -315,7 +322,20 @@ pub(crate) async fn run_claude_hook_event(
                 pane,
                 surface,
                 None,
+                Some("Starting turn"),
+                input.session_id.as_deref(),
+            ));
+        }
+        ClaudeHookEvent::PreToolUse => {
+            let status_text = tool_activity_text(input.tool_name.as_deref());
+            reqs.push(build_activity_update_with_metadata(
+                "claude",
+                Some(Running),
+                pid,
+                pane,
+                surface,
                 None,
+                Some(&status_text),
                 input.session_id.as_deref(),
             ));
         }
@@ -330,7 +350,7 @@ pub(crate) async fn run_claude_hook_event(
                 pane,
                 surface,
                 None,
-                None,
+                Some("Session ended"),
                 input.session_id.as_deref(),
             ));
             if let Some(request) =
@@ -386,34 +406,41 @@ pub(crate) async fn run_generic_agent_hook_event(
             {
                 reqs.push(request);
             } else {
-                let body = input.last_assistant_message.as_deref();
+                let body = normalized_activity_text(input.last_assistant_message.as_deref());
+                let status_text = completed_activity_text(body.as_deref());
                 reqs.push(build_activity_update_with_metadata(
                     agent,
                     Some(Idle),
                     pid,
                     pane,
                     surface,
-                    body,
-                    None,
+                    body.as_deref(),
+                    Some(&status_text),
                     input.session_id.as_deref(),
                 ));
-                reqs.push(build_stop_notify(agent, body, pane, surface));
+                reqs.push(build_stop_notify(agent, body.as_deref(), pane, surface));
             }
         }
         AgentHookEvent::Notification { args, .. } => {
             let input = read_codex_hook_input(args);
-            let msg = input.message.as_deref();
+            let msg = normalized_activity_text(input.message.as_deref());
+            let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(
                 agent,
                 Some(NeedsInput),
                 pid,
                 pane,
                 surface,
-                msg,
-                None,
+                msg.as_deref(),
+                Some(status_text),
                 input.session_id.as_deref(),
             ));
-            reqs.push(build_notification_notify(agent, msg, pane, surface));
+            reqs.push(build_notification_notify(
+                agent,
+                msg.as_deref(),
+                pane,
+                surface,
+            ));
         }
         AgentHookEvent::Running { args, .. } => {
             let input = read_codex_hook_input(args);
@@ -424,7 +451,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 pane,
                 surface,
                 None,
-                None,
+                Some("Working"),
                 input.session_id.as_deref(),
             ));
         }
