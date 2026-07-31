@@ -140,6 +140,7 @@ pub struct Sidebar {
     bell_button: gtk::MenuButton,
     bell_popover: gtk::Popover,
     activity_panel: gtk::Box,
+    activity_list: gtk::Box,
     activity_split: gtk::Paned,
     activity_position_initialized: Rc<Cell<bool>>,
     activity_has_agents: Rc<Cell<bool>>,
@@ -381,12 +382,8 @@ impl Sidebar {
         let update_banner = UpdateBanner::new(tokio_handle);
 
         let activity_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        activity_panel.append(&render_activity_list(
-            &activities,
-            &[],
-            None,
-            bridge.clone(),
-        ));
+        let (activity_list_root, activity_list) = activity_list();
+        activity_panel.append(&activity_list_root);
         activity_panel.set_visible(false);
 
         let workspace_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -446,6 +443,7 @@ impl Sidebar {
             bell_button,
             bell_popover,
             activity_panel,
+            activity_list,
             activity_split,
             activity_position_initialized,
             activity_has_agents,
@@ -777,15 +775,13 @@ impl Sidebar {
         if !has_agents {
             return;
         }
-        while let Some(child) = self.activity_panel.first_child() {
-            self.activity_panel.remove(&child);
-        }
-        self.activity_panel.append(&render_activity_list(
+        render_activity_rows(
+            &self.activity_list,
             &self.activities,
             current,
             focused_surface,
             self.bridge.clone(),
-        ));
+        );
     }
 
     pub(crate) fn set_agent_bar_mode(&self, enabled: bool) {
@@ -823,12 +819,7 @@ fn set_activity_panel_visible(
     }
 }
 
-fn render_activity_list(
-    store: &ActivityStore,
-    current: &[ActivityNowEntry],
-    focused_surface: Option<SurfaceId>,
-    bridge: Bridge,
-) -> gtk::Widget {
+fn activity_list() -> (gtk::Widget, gtk::Box) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     root.set_margin_top(8);
     root.set_margin_bottom(8);
@@ -847,6 +838,21 @@ fn render_activity_list(
     scroll.set_min_content_height(180);
     scroll.set_vexpand(true);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    scroll.set_child(Some(&content));
+    root.append(&scroll);
+    (root.upcast(), content)
+}
+
+fn render_activity_rows(
+    content: &gtk::Box,
+    store: &ActivityStore,
+    current: &[ActivityNowEntry],
+    focused_surface: Option<SurfaceId>,
+    bridge: Bridge,
+) {
+    while let Some(child) = content.first_child() {
+        content.remove(&child);
+    }
 
     for entry in current {
         content.append(&activity_now_row(
@@ -856,9 +862,6 @@ fn render_activity_list(
             bridge.clone(),
         ));
     }
-    scroll.set_child(Some(&content));
-    root.append(&scroll);
-    root.upcast()
 }
 
 fn activity_now_row(
@@ -2498,6 +2501,31 @@ mod tests {
             } if target_workspace == workspace && target_pane == pane && target_surface == surface
         ));
 
+        let many: Vec<_> = (0..8)
+            .map(|index| {
+                let mut entry = current[0].clone();
+                entry.surface = SurfaceId::new();
+                entry.status_text = format!("Agent {index}");
+                entry
+            })
+            .collect();
+        let bottom_surface = many.last().unwrap().surface;
+        sidebar.refresh_activity_panel(&many, Some(bottom_surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        let adjustment = scroll.vadjustment();
+        let bottom = adjustment.upper() - adjustment.page_size();
+        assert!(bottom > 0.0, "test setup must overflow the Agents list");
+        adjustment.set_value(bottom);
+        let position = adjustment.value();
+        sidebar.refresh_activity_panel(&many, Some(bottom_surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        let refreshed_scroll = descendant_widgets(&rendered)
+            .into_iter()
+            .find_map(|widget| widget.downcast::<gtk::ScrolledWindow>().ok())
+            .unwrap();
+        assert_eq!(refreshed_scroll, scroll);
+        assert_eq!(refreshed_scroll.vadjustment().value(), position);
+
         sidebar.agent_bar_button.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(!sidebar.activity_panel.is_visible());
@@ -2525,6 +2553,7 @@ mod tests {
             !sidebar.activity_panel.is_visible(),
             "Agent Activity must hide when the last live Agent disappears"
         );
+        window.close();
     }
 
     /// Smoke test that row_widget can build a stable widget tree with a name
