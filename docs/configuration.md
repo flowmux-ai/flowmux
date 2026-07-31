@@ -11,11 +11,13 @@ the built-in defaults.
 `zoom_percent`, `default_browser_engine`, `focus_border_color`,
 `focus_border_opacity`, `persist_browser_session`, `auto_resume_agent_sessions`,
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
-`system_notifications_enabled`, `agent_bar_enabled`, `cursor_blink`,
+`system_notifications_enabled`, `agent_bar_mode`, `cursor_blink`,
 `cursor_blink_interval_ms`, `font_family`, `font_size`,
 `agent_notification_target`, `theme`, `theme_overrides`, and `keybindings`.
 `default_shell` selects the command for new tabs; a per-tab IPC `shell` takes
 precedence, then `$SHELL` is used. Invalid commands fall back safely.
+`agent_bar_mode` switches Agent Activity from the resizable lower side-panel
+area to the compact bottom bar.
 
 `zoom_percent` applies to terminal, browser, and editor surfaces. Terminal zoom
 is rounded to a whole-point font size instead of using VTE's fractional font

@@ -8,16 +8,24 @@ impl WindowController {
         match cmd {
             GtkCommand::AddActivity { entry } => {
                 if self.activities.push(entry) {
-                    self.refresh_activity_popover().await;
+                    self.refresh_activity_panel().await;
                 }
             }
             GtkCommand::ClearActivities => {
                 if self.activities.clear() {
-                    self.refresh_activity_popover().await;
+                    self.refresh_activity_panel().await;
                 }
             }
-            GtkCommand::RefreshActivityPopover => {
-                self.refresh_activity_popover().await;
+            GtkCommand::SetAgentBarMode { enabled } => {
+                self.options.borrow_mut().agent_bar_mode = enabled;
+                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                    tracing::warn!(%error, "agent display mode save failed");
+                }
+                self.sidebar.set_agent_bar_mode(enabled);
+                self.refresh_agent_bar().await;
+                if !enabled {
+                    self.refresh_activity_panel().await;
+                }
             }
             GtkCommand::OpenActivityTarget {
                 workspace,
@@ -310,6 +318,7 @@ impl WindowController {
             }
             GtkCommand::SetAgentStatus { workspace } => {
                 self.sync_workspace_agent_status(workspace).await;
+                self.refresh_activity_panel().await;
             }
             GtkCommand::QueryAgentSurfaceVisible { surface, ack } => {
                 let _ = ack.send(self.is_agent_surface_visible(surface));

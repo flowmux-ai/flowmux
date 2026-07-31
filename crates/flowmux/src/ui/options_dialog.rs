@@ -117,7 +117,7 @@ fn build_dialog(
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
     let default_shell_entry = build_default_shell_entry(current.default_shell.as_deref());
     let system_notify_switch = build_system_notify_switch(current.system_notifications_enabled);
-    let agent_bar_switch = build_agent_bar_switch(current.agent_bar_enabled);
+    let agent_bar_switch = build_agent_bar_switch(current.agent_bar_mode);
     let cursor_blink_switch = build_cursor_blink_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
 
@@ -139,7 +139,7 @@ fn build_dialog(
     general.append(&row("Terminal scrollback lines", &scrollback_lines_spin));
     general.append(&row("Default shell", &default_shell_entry));
     general.append(&row("System notifications", &system_notify_switch));
-    general.append(&row("Agent Bar", &agent_bar_switch));
+    general.append(&row("Agents bar mode", &agent_bar_switch));
     general.append(&row("Cursor blink", &cursor_blink_switch));
     general.append(&row("Cursor blink interval (ms)", &blink_interval_spin));
 
@@ -943,7 +943,7 @@ fn collect_options(
             default_shell_entry.text().to_string(),
         )),
         system_notifications_enabled: system_notify_switch.is_active(),
-        agent_bar_enabled: agent_bar_switch.is_active(),
+        agent_bar_mode: agent_bar_switch.is_active(),
         cursor_blink: cursor_blink_switch.is_active(),
         cursor_blink_interval_ms: Options::clamp_cursor_blink_interval(
             blink_interval_spin.value() as u32
@@ -1497,7 +1497,7 @@ mod tests {
             &kb,
             &crate::ui::theme_tab::ThemeSelection::default(),
         );
-        assert!(opts.agent_bar_enabled);
+        assert!(opts.agent_bar_mode);
         assert!(opts.cursor_blink);
         assert_eq!(opts.cursor_blink_interval_ms, 300);
         assert_eq!(
@@ -1559,7 +1559,7 @@ mod tests {
         assert!(opts.auto_resume_agent_sessions);
         assert!(!opts.restore_terminal_scrollback);
         assert!(!opts.system_notifications_enabled);
-        assert!(!opts.agent_bar_enabled);
+        assert!(!opts.agent_bar_mode);
         assert_eq!(opts.default_shell, None);
         assert_eq!(opts.font_family, Some("Fira Code".to_string()));
         assert_eq!(opts.font_size, Some(15.0));

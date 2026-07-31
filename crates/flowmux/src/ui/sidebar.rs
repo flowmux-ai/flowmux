@@ -11,6 +11,8 @@
 //! | • workspace 2  |  scrollable workspace list
 //! | • workspace 3  |
 //! +----------------+
+//! | Agent Activity |  resizable lower third
+//! +----------------+
 //! ```
 //!
 //! The header's `+` adds a workspace (Ctrl+N equivalent) and
@@ -137,7 +139,12 @@ pub struct Sidebar {
     on_close: Rc<dyn Fn(WorkspaceId)>,
     bell_button: gtk::MenuButton,
     bell_popover: gtk::Popover,
-    activity_popover: gtk::Popover,
+    activity_panel: gtk::Box,
+    activity_split: gtk::Paned,
+    activity_position_initialized: Rc<Cell<bool>>,
+    activity_has_agents: Rc<Cell<bool>>,
+    agent_bar_mode: Rc<Cell<bool>>,
+    agent_bar_button: gtk::ToggleButton,
     usage_button: gtk::MenuButton,
     notifications: NotificationStore,
     activities: ActivityStore,
@@ -171,6 +178,7 @@ impl Sidebar {
         notifications: NotificationStore,
         activities: ActivityStore,
         tokio_handle: Option<tokio::runtime::Handle>,
+        agent_bar_mode: bool,
     ) -> Self
     where
         S: Fn(WorkspaceId) + 'static,
@@ -232,21 +240,6 @@ impl Sidebar {
         bell_popover.set_size_request(320, -1);
         bell_button.set_popover(Some(&bell_popover));
 
-        let activity_button = gtk::MenuButton::new();
-        activity_button.set_icon_name("view-list-symbolic");
-        activity_button.set_tooltip_text(Some("Agent activity"));
-        activity_button.update_property(&[gtk::accessible::Property::Label("Agent activity")]);
-        let activity_popover = gtk::Popover::new();
-        activity_popover.set_size_request(400, -1);
-        activity_button.set_popover(Some(&activity_popover));
-        let bridge_for_activity = bridge.clone();
-        activity_popover.connect_show(move |_| {
-            let bridge = bridge_for_activity.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                let _ = bridge.tx.send(GtkCommand::RefreshActivityPopover).await;
-            });
-        });
-
         let store_for_show = notifications.clone();
         let bridge_for_rows = bridge.clone();
         let bridge_for_close = bridge.clone();
@@ -292,7 +285,6 @@ impl Sidebar {
         header.set_title_widget(Some(&header_title));
         header.pack_start(&new_btn);
         header.pack_end(&bell_button);
-        header.pack_end(&activity_button);
 
         // ---- Bottom footer: small left options button ----
         // Click dispatches ShowOptionsDialog through the bridge so the window
@@ -322,6 +314,17 @@ impl Sidebar {
         let footer_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         footer_spacer.set_hexpand(true);
         footer.append(&footer_spacer);
+
+        let agent_bar_button = gtk::ToggleButton::new();
+        agent_bar_button.set_icon_name("view-list-symbolic");
+        agent_bar_button.add_css_class("flat");
+        agent_bar_button.add_css_class("flowmux-sidebar-options");
+        agent_bar_button.set_tooltip_text(Some("Agents bar"));
+        agent_bar_button.update_property(&[gtk::accessible::Property::Label("Agents bar")]);
+        agent_bar_button.set_focus_on_click(false);
+        agent_bar_button.set_active(agent_bar_mode);
+        agent_bar_button.set_widget_name("flowmux-agent-bar-button");
+        footer.append(&agent_bar_button);
 
         let usage = UsagePopover::new(tokio_handle.clone());
         usage
@@ -375,10 +378,59 @@ impl Sidebar {
         // finds a newer tag; the banner owns its own check/install wiring.
         let update_banner = UpdateBanner::new(tokio_handle);
 
+        let activity_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        activity_panel.append(&render_activity_list(
+            &activities,
+            &[],
+            &HashSet::new(),
+            bridge.clone(),
+        ));
+        activity_panel.set_visible(false);
+
+        let workspace_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        workspace_area.append(&scroll);
+        workspace_area.append(update_banner.widget());
+
+        let activity_split = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .start_child(&workspace_area)
+            .end_child(&activity_panel)
+            .resize_start_child(true)
+            .resize_end_child(false)
+            .shrink_start_child(false)
+            .shrink_end_child(true)
+            .build();
+
+        let activity_panel_for_toggle = activity_panel.clone();
+        let activity_split_for_toggle = activity_split.clone();
+        let activity_position_initialized = Rc::new(Cell::new(false));
+        let activity_position_initialized_for_toggle = activity_position_initialized.clone();
+        let activity_has_agents = Rc::new(Cell::new(false));
+        let activity_has_agents_for_toggle = activity_has_agents.clone();
+        let agent_bar_mode = Rc::new(Cell::new(agent_bar_mode));
+        let agent_bar_mode_for_toggle = agent_bar_mode.clone();
+        let bridge_for_toggle = bridge.clone();
+        agent_bar_button.connect_clicked(move |button| {
+            let enabled = button.is_active();
+            agent_bar_mode_for_toggle.set(enabled);
+            set_activity_panel_visible(
+                &activity_panel_for_toggle,
+                &activity_split_for_toggle,
+                &activity_position_initialized_for_toggle,
+                !enabled && activity_has_agents_for_toggle.get(),
+            );
+            let bridge = bridge_for_toggle.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::SetAgentBarMode { enabled })
+                    .await;
+            });
+        });
+
         // ---- Sidebar body; the header is mounted by the window shell ----
         let root_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root_box.append(&scroll);
-        root_box.append(update_banner.widget());
+        root_box.append(&activity_split);
         root_box.append(&footer);
 
         Self {
@@ -390,7 +442,12 @@ impl Sidebar {
             on_close,
             bell_button,
             bell_popover,
-            activity_popover,
+            activity_panel,
+            activity_split,
+            activity_position_initialized,
+            activity_has_agents,
+            agent_bar_mode,
+            agent_bar_button,
             usage_button,
             notifications,
             activities,
@@ -701,20 +758,60 @@ impl Sidebar {
         }
     }
 
-    pub fn refresh_activity_popover(
+    pub fn refresh_activity_panel(
         &self,
         current: &[ActivityNowEntry],
         existing_workspaces: &HashSet<WorkspaceId>,
     ) {
-        if self.activity_popover.is_visible() {
-            self.activity_popover.set_child(Some(&render_activity_list(
-                &self.activities,
-                current,
-                existing_workspaces,
-                self.bridge.clone(),
-                self.activity_popover.clone(),
-            )));
+        let has_agents = !current.is_empty();
+        self.activity_has_agents.set(has_agents);
+        set_activity_panel_visible(
+            &self.activity_panel,
+            &self.activity_split,
+            &self.activity_position_initialized,
+            has_agents && !self.agent_bar_mode.get(),
+        );
+        if !has_agents {
+            return;
         }
+        while let Some(child) = self.activity_panel.first_child() {
+            self.activity_panel.remove(&child);
+        }
+        self.activity_panel.append(&render_activity_list(
+            &self.activities,
+            current,
+            existing_workspaces,
+            self.bridge.clone(),
+        ));
+    }
+
+    pub(crate) fn set_agent_bar_mode(&self, enabled: bool) {
+        self.agent_bar_mode.set(enabled);
+        self.agent_bar_button.set_active(enabled);
+        set_activity_panel_visible(
+            &self.activity_panel,
+            &self.activity_split,
+            &self.activity_position_initialized,
+            !enabled && self.activity_has_agents.get(),
+        );
+    }
+}
+
+fn set_activity_panel_visible(
+    panel: &gtk::Box,
+    split: &gtk::Paned,
+    position_initialized: &Rc<Cell<bool>>,
+    visible: bool,
+) {
+    panel.set_visible(visible);
+    if visible && !position_initialized.replace(true) {
+        split.add_tick_callback(|split, _| {
+            if split.height() == 0 {
+                return gtk::glib::ControlFlow::Continue;
+            }
+            split.set_position(split.height() * 2 / 3);
+            gtk::glib::ControlFlow::Break
+        });
     }
 }
 
@@ -723,7 +820,6 @@ fn render_activity_list(
     current: &[ActivityNowEntry],
     existing_workspaces: &HashSet<WorkspaceId>,
     bridge: Bridge,
-    popover: gtk::Popover,
 ) -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     root.set_margin_top(8);
@@ -737,7 +833,7 @@ fn render_activity_list(
     title.set_halign(gtk::Align::Start);
     title.set_hexpand(true);
     header.append(&title);
-    let clear = gtk::Button::with_label("Clear");
+    let clear = gtk::Button::from_icon_name("user-trash-symbolic");
     clear.add_css_class("flat");
     clear.set_tooltip_text(Some("Clear recent Agent activity"));
     clear.update_property(&[gtk::accessible::Property::Label(
@@ -756,8 +852,7 @@ fn render_activity_list(
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroll.set_min_content_height(180);
-    scroll.set_max_content_height(480);
-    scroll.set_propagate_natural_height(true);
+    scroll.set_vexpand(true);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
 
     content.append(&activity_section_label("NOW"));
@@ -765,12 +860,7 @@ fn render_activity_list(
         content.append(&activity_empty_label("No active Agents."));
     } else {
         for entry in current {
-            content.append(&activity_now_row(
-                entry,
-                store,
-                bridge.clone(),
-                popover.clone(),
-            ));
+            content.append(&activity_now_row(entry, store, bridge.clone()));
         }
     }
 
@@ -784,7 +874,6 @@ fn render_activity_list(
                 entry,
                 existing_workspaces.contains(&entry.workspace),
                 bridge.clone(),
-                popover.clone(),
             ));
         }
     }
@@ -815,7 +904,6 @@ fn activity_now_row(
     entry: &ActivityNowEntry,
     store: &ActivityStore,
     bridge: Bridge,
-    popover: gtk::Popover,
 ) -> gtk::Widget {
     let when = store
         .entries()
@@ -837,7 +925,6 @@ fn activity_now_row(
         entry.pane,
         entry.surface,
         bridge,
-        popover,
     )
 }
 
@@ -845,7 +932,6 @@ fn activity_recent_row(
     entry: &ActivityEntry,
     workspace_exists: bool,
     bridge: Bridge,
-    popover: gtk::Popover,
 ) -> gtk::Widget {
     activity_row(
         &entry.agent,
@@ -861,7 +947,6 @@ fn activity_recent_row(
         entry.pane,
         entry.surface,
         bridge,
-        popover,
     )
 }
 
@@ -880,7 +965,6 @@ fn activity_row(
     pane: flowmux_core::PaneId,
     surface: flowmux_core::SurfaceId,
     bridge: Bridge,
-    popover: gtk::Popover,
 ) -> gtk::Widget {
     let button = gtk::Button::new();
     button.add_css_class("flat");
@@ -889,22 +973,22 @@ fn activity_row(
         button.set_tooltip_text(Some("The original workspace is closed"));
     }
 
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.set_margin_top(5);
-    row.set_margin_bottom(5);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_margin_top(2);
+    row.set_margin_bottom(2);
     row.append(&color_bar(color));
 
     let icon_name = status
         .map(|status| agent_status_icon_name(status, seen))
         .unwrap_or("application-exit-symbolic");
     let icon = gtk::Image::from_icon_name(icon_name);
-    icon.set_pixel_size(14);
+    icon.set_pixel_size(12);
     if let Some(status) = status {
         icon.add_css_class(agent_status_css_class(status, seen));
     }
     row.append(&icon);
 
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_hexpand(true);
     let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let agent = gtk::Label::new(Some(agent));
@@ -920,30 +1004,24 @@ fn activity_row(
     }
     text.append(&heading);
 
-    let summary = gtk::Label::new(Some(summary));
+    let summary = gtk::Label::new(Some(&format!(
+        "{summary} · {workspace_label} · {surface_label}"
+    )));
     summary.set_halign(gtk::Align::Start);
     summary.set_xalign(0.0);
-    summary.set_wrap(true);
-    summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    summary.set_lines(3);
+    summary.set_wrap(false);
+    summary.set_single_line_mode(true);
+    summary.set_lines(1);
     summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
     summary.set_max_width_chars(44);
+    summary.add_css_class("caption");
+    summary.add_css_class("dim-label");
     text.append(&summary);
-
-    let context = gtk::Label::new(Some(&format!("{workspace_label} · {surface_label}")));
-    context.set_halign(gtk::Align::Start);
-    context.set_xalign(0.0);
-    context.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    context.set_single_line_mode(true);
-    context.add_css_class("caption");
-    context.add_css_class("dim-label");
-    text.append(&context);
     row.append(&text);
     button.set_child(Some(&row));
 
     if enabled {
         button.connect_clicked(move |_| {
-            popover.popdown();
             let bridge = bridge.clone();
             gtk::glib::MainContext::default().spawn_local(async move {
                 let _ = bridge
@@ -2335,7 +2413,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn activity_entry_point_and_rows_remain_available_and_navigable() {
+    async fn activity_panel_and_agents_bar_switch_remain_available_and_navigable() {
         if gtk::init().is_err() {
             return;
         }
@@ -2348,27 +2426,28 @@ mod tests {
             NotificationStore::new(),
             store.clone(),
             None,
+            false,
         );
-        let menu_buttons: Vec<gtk::MenuButton> = descendant_widgets(&sidebar.header)
-            .into_iter()
-            .filter_map(|widget| widget.downcast().ok())
-            .collect();
-        let activity_button = menu_buttons
-            .iter()
-            .find(|button| button.tooltip_text().as_deref() == Some("Agent activity"))
-            .unwrap()
-            .clone();
         let window = gtk::Window::new();
-        window.set_child(Some(&sidebar.header));
+        window.set_default_size(300, 720);
+        window.set_child(Some(&sidebar.root));
         window.present();
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
-        activity_button.set_active(true);
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
-        assert!(sidebar.activity_popover.is_visible());
-        assert!(matches!(
-            rx.try_recv().unwrap(),
-            GtkCommand::RefreshActivityPopover
-        ));
+        assert!(descendant_widgets(&sidebar.header)
+            .into_iter()
+            .filter_map(|widget| widget.downcast::<gtk::MenuButton>().ok())
+            .all(|button| button.tooltip_text().as_deref() != Some("Agent activity")));
+        assert!(
+            !sidebar.activity_panel.is_visible(),
+            "Agent Activity must stay hidden without live Agents"
+        );
+        let activity_split = sidebar
+            .root
+            .first_child()
+            .unwrap()
+            .downcast::<gtk::Paned>()
+            .unwrap();
+        assert_eq!(activity_split.orientation(), gtk::Orientation::Vertical);
 
         let workspace = WorkspaceId::new();
         let pane = PaneId::new();
@@ -2395,42 +2474,63 @@ mod tests {
         recent.status = None;
         assert!(store.push(recent));
 
-        sidebar.refresh_activity_popover(
-            &[ActivityNowEntry {
-                agent: "codex".into(),
-                status: AgentStatus::Working,
-                status_text: "Running tests".into(),
-                seen: true,
-                workspace,
-                pane,
-                surface,
-                workspace_label: "flowmux-terminal".into(),
-                surface_label: "zsh".into(),
-                color: "#abcdef".into(),
-            }],
-            &HashSet::from([workspace]),
+        let current = [ActivityNowEntry {
+            agent: "codex".into(),
+            status: AgentStatus::Working,
+            status_text: "Running tests".into(),
+            seen: true,
+            workspace,
+            pane,
+            surface,
+            workspace_label: "flowmux-terminal".into(),
+            surface_label: "zsh".into(),
+            color: "#abcdef".into(),
+        }];
+        let workspaces = HashSet::from([workspace]);
+        sidebar.refresh_activity_panel(&current, &workspaces);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(sidebar.activity_panel.is_visible());
+        assert!(
+            (activity_split.position() * 3 - activity_split.height() * 2).abs() <= 3,
+            "divider must start at two thirds: position={} height={}",
+            activity_split.position(),
+            activity_split.height()
         );
-        let rendered = sidebar.activity_popover.child().unwrap();
+        let rendered = sidebar.activity_panel.first_child().unwrap();
         let widgets = descendant_widgets(&rendered);
         let labels: Vec<gtk::Label> = widgets
             .iter()
             .filter_map(|widget| widget.clone().downcast().ok())
             .collect();
-        for expected in ["NOW", "RECENT", "Running tests", "Session ended"] {
+        for expected in ["NOW", "RECENT"] {
             assert!(labels.iter().any(|label| label.label() == expected));
+        }
+        for expected in ["Running tests", "Session ended"] {
+            assert!(labels
+                .iter()
+                .any(|label| label.label().starts_with(expected)));
         }
         let summary = labels
             .iter()
             .find(|label| label.label().starts_with("Completed:"))
             .unwrap();
-        assert!(summary.wraps());
-        assert_eq!(summary.lines(), 3);
+        assert!(!summary.wraps());
+        assert!(summary.is_single_line_mode());
+        assert_eq!(summary.lines(), 1);
+        assert!(summary.label().contains("flowmux-terminal · zsh"));
 
         let scroll = widgets
             .iter()
             .find_map(|widget| widget.clone().downcast::<gtk::ScrolledWindow>().ok())
             .unwrap();
-        assert_eq!(scroll.max_content_height(), 480);
+        assert!(scroll.vexpands());
+        let clear = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<gtk::Button>().ok())
+            .find(|button| button.tooltip_text().as_deref() == Some("Clear recent Agent activity"))
+            .unwrap();
+        assert_eq!(clear.icon_name().as_deref(), Some("user-trash-symbolic"));
+        assert!(descendant_labels(&clear).is_empty());
         let rows: Vec<gtk::Button> = widgets
             .into_iter()
             .filter_map(|widget| widget.downcast().ok())
@@ -2454,6 +2554,34 @@ mod tests {
                 surface: target_surface,
             } if target_workspace == workspace && target_pane == pane && target_surface == surface
         ));
+
+        sidebar.agent_bar_button.emit_clicked();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        assert!(!sidebar.activity_panel.is_visible());
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GtkCommand::SetAgentBarMode { enabled: true }
+        ));
+
+        activity_split.set_position(300);
+        sidebar.agent_bar_button.emit_clicked();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        assert!(sidebar.activity_panel.is_visible());
+        assert_eq!(
+            activity_split.position(),
+            300,
+            "switching modes must preserve the user-adjusted divider"
+        );
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GtkCommand::SetAgentBarMode { enabled: false }
+        ));
+
+        sidebar.refresh_activity_panel(&[], &workspaces);
+        assert!(
+            !sidebar.activity_panel.is_visible(),
+            "Agent Activity must hide when the last live Agent disappears"
+        );
     }
 
     /// Smoke test that row_widget can build a stable widget tree with a name
@@ -2576,6 +2704,7 @@ mod tests {
             NotificationStore::new(),
             ActivityStore::new(),
             None,
+            false,
         );
         let mut ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/worktree")));
         sidebar.upsert(&ws);
@@ -2623,7 +2752,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn footer_orders_usage_worktrees_and_file_browser_buttons() {
+    fn footer_orders_agents_bar_before_usage_worktrees_and_file_browser_buttons() {
         if gtk::init().is_err() {
             return;
         }
@@ -2635,6 +2764,7 @@ mod tests {
             NotificationStore::new(),
             ActivityStore::new(),
             None,
+            false,
         );
         let footer = sidebar
             .root
@@ -2653,6 +2783,15 @@ mod tests {
             .iter()
             .position(|name| name == "flowmux-usage-button")
             .expect("usage button must exist");
+        let agents = names
+            .iter()
+            .position(|name| name == "flowmux-agent-bar-button")
+            .expect("Agents bar button must exist");
+        assert_eq!(agents + 1, usage);
+        assert_eq!(
+            sidebar.agent_bar_button.tooltip_text().as_deref(),
+            Some("Agents bar")
+        );
         assert_eq!(
             sidebar.usage_button().tooltip_text().as_deref(),
             Some("AI usage (Ctrl+Alt+U)")
@@ -2683,6 +2822,7 @@ mod tests {
             NotificationStore::new(),
             ActivityStore::new(),
             None,
+            false,
         );
         let titles = sidebar.workspace_titles();
 
@@ -2743,6 +2883,7 @@ mod tests {
             NotificationStore::new(),
             ActivityStore::new(),
             None,
+            false,
         );
 
         let workspaces: Vec<Workspace> = (0..4)

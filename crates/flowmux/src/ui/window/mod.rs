@@ -875,6 +875,7 @@ impl WindowController {
                 let _ = rx.await;
             });
         };
+        let initial_options = flowmux_config::options::load();
         let sidebar = Sidebar::new(
             on_select,
             on_close,
@@ -882,13 +883,13 @@ impl WindowController {
             notifications.clone(),
             activities.clone(),
             tokio_handle.clone(),
+            initial_options.agent_bar_mode,
         );
         let agent_bar = AgentBar::new(bridge.clone());
         let agent_bar_attentions = Rc::new(RefCell::new(HashSet::new()));
 
         let pane_registry: Rc<RefCell<PaneRegistry>> =
             Rc::new(RefCell::new(PaneRegistry::default()));
-        let initial_options = flowmux_config::options::load();
         tracing::info!(
             zoom_percent = initial_options.zoom_percent,
             engine = ?initial_options.default_browser_engine,
@@ -1839,7 +1840,7 @@ impl WindowController {
             command @ (GtkCommand::AddNotification { .. }
             | GtkCommand::AddActivity { .. }
             | GtkCommand::ClearActivities
-            | GtkCommand::RefreshActivityPopover
+            | GtkCommand::SetAgentBarMode { .. }
             | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::CloseDesktopNotifications { .. }
@@ -5852,7 +5853,7 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
-        controller.options.borrow_mut().agent_bar_enabled = true;
+        controller.options.borrow_mut().agent_bar_mode = true;
         controller.render_workspace(&ws);
 
         // Split the original pane to the right. The new pane is the
@@ -6026,7 +6027,7 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
-        controller.options.borrow_mut().agent_bar_enabled = true;
+        controller.options.borrow_mut().agent_bar_mode = true;
         controller.render_workspace(&ws);
 
         let agent_dir = root.join("agent");
@@ -6905,7 +6906,7 @@ mod tests {
         {
             let mut options = controller.options.borrow_mut();
             options.system_notifications_enabled = true;
-            options.agent_bar_enabled = true;
+            options.agent_bar_mode = true;
         }
         controller.render_workspace(&ws);
         store.set_active_workspace(Some(ws_id)).await;
@@ -6968,7 +6969,7 @@ mod tests {
             .active_surface(pane)
             .expect("single workspace pane should have an active surface");
 
-        controller.options.borrow_mut().agent_bar_enabled = false;
+        controller.options.borrow_mut().agent_bar_mode = false;
         controller
             .store
             .set_agent_activity(
@@ -6988,7 +6989,7 @@ mod tests {
             "disabled Agent Bar option must hide live agent items"
         );
 
-        controller.options.borrow_mut().agent_bar_enabled = true;
+        controller.options.borrow_mut().agent_bar_mode = true;
         controller.refresh_agent_bar().await;
         assert!(
             agent_bar_visible(&controller),
@@ -7033,6 +7034,7 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
+        controller.options.borrow_mut().agent_bar_mode = true;
         controller.render_workspace(&ws_a_model);
         controller.render_workspace(&ws_b_model);
         store.set_active_workspace(Some(ws_a)).await;

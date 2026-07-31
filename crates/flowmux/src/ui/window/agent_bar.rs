@@ -7,7 +7,7 @@ use super::*;
 
 impl WindowController {
     pub(super) async fn refresh_agent_bar(&self) {
-        if !self.options.borrow().agent_bar_enabled {
+        if !self.options.borrow().agent_bar_mode {
             self.agent_bar.bar.render(
                 &flowmux_core::AgentBarModel {
                     visible: false,
@@ -50,7 +50,7 @@ impl WindowController {
             .render(&model, &attentions, focused_surface);
     }
 
-    pub(super) async fn refresh_activity_popover(&self) {
+    pub(super) async fn refresh_activity_panel(&self) {
         let state = self.store.snapshot().await;
         let current = current_activity_entries(&state);
         let workspaces = state
@@ -58,7 +58,7 @@ impl WindowController {
             .iter()
             .map(|workspace| workspace.id)
             .collect();
-        self.sidebar.refresh_activity_popover(&current, &workspaces);
+        self.sidebar.refresh_activity_panel(&current, &workspaces);
     }
 
     pub(super) async fn open_activity_target(

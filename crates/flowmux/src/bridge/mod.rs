@@ -549,7 +549,9 @@ pub enum GtkCommand {
         entry: ActivityEntry,
     },
     ClearActivities,
-    RefreshActivityPopover,
+    SetAgentBarMode {
+        enabled: bool,
+    },
     OpenActivityTarget {
         workspace: WorkspaceId,
         pane: PaneId,

@@ -58,10 +58,10 @@ pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 /// the user can opt out to keep only the in-app bell list.
 pub const SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT: bool = true;
 
-/// Default for [`Options::agent_bar_enabled`]. The Agent Bar is part of the
-/// default agent workflow surface and can be hidden when the user wants more
-/// vertical terminal space.
-pub const AGENT_BAR_ENABLED_DEFAULT: bool = true;
+/// Default for [`Options::agent_bar_mode`]. Agent Activity starts in the
+/// resizable lower part of the side panel; users can switch it to the compact
+/// bottom bar.
+pub const AGENT_BAR_MODE_DEFAULT: bool = false;
 
 /// Default for [`Options::cursor_blink`]. The terminal cursor blinks on first
 /// launch, matching VTE / most terminals.
@@ -156,11 +156,11 @@ pub struct Options {
     /// is sent. Default: [`SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT`] (`true`).
     #[serde(default = "default_system_notifications_enabled")]
     pub system_notifications_enabled: bool,
-    /// When true, show the bottom Agent Bar whenever live agents exist. When
-    /// false, agent tracking and notifications continue, but the bottom bar is
-    /// hidden. Default: [`AGENT_BAR_ENABLED_DEFAULT`] (`true`).
-    #[serde(default = "default_agent_bar_enabled")]
-    pub agent_bar_enabled: bool,
+    /// When true, show live agents in the bottom bar. When false, show Agent
+    /// Activity in the resizable lower part of the side panel. Default:
+    /// [`AGENT_BAR_MODE_DEFAULT`] (`false`).
+    #[serde(default = "default_agent_bar_mode")]
+    pub agent_bar_mode: bool,
     /// When true, the terminal cursor blinks. Default:
     /// [`CURSOR_BLINK_DEFAULT`] (`true`).
     #[serde(default = "default_cursor_blink")]
@@ -233,8 +233,8 @@ fn default_system_notifications_enabled() -> bool {
     SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT
 }
 
-fn default_agent_bar_enabled() -> bool {
-    AGENT_BAR_ENABLED_DEFAULT
+fn default_agent_bar_mode() -> bool {
+    AGENT_BAR_MODE_DEFAULT
 }
 
 fn default_cursor_blink() -> bool {
@@ -258,7 +258,7 @@ impl Default for Options {
             scrollback_lines: None,
             default_shell: None,
             system_notifications_enabled: default_system_notifications_enabled(),
-            agent_bar_enabled: default_agent_bar_enabled(),
+            agent_bar_mode: default_agent_bar_mode(),
             cursor_blink: default_cursor_blink(),
             cursor_blink_interval_ms: default_cursor_blink_interval(),
             font_family: None,
@@ -425,8 +425,8 @@ impl Options {
     }
 
     /// Builder-style setter for the bottom Agent Bar visibility flag.
-    pub fn with_agent_bar_enabled(mut self, enabled: bool) -> Self {
-        self.agent_bar_enabled = enabled;
+    pub fn with_agent_bar_mode(mut self, enabled: bool) -> Self {
+        self.agent_bar_mode = enabled;
         self
     }
 
@@ -557,7 +557,7 @@ mod tests {
             opts.agent_notification_target,
             AgentNotificationTarget::AgentBar
         );
-        assert!(opts.agent_bar_enabled);
+        assert!(!opts.agent_bar_mode);
     }
 
     #[test]
@@ -601,16 +601,27 @@ mod tests {
     fn options_serde_roundtrip_with_custom_engine() {
         let opts = Options::default()
             .with_zoom_percent(140)
-            .with_agent_bar_enabled(false)
+            .with_agent_bar_mode(false)
             .with_engine(BrowserEngine::Custom {
                 name: "Brave".into(),
             })
             .with_agent_notification_target(AgentNotificationTarget::Both);
         let s = serde_json::to_string(&opts).unwrap();
-        assert!(s.contains("\"agent_bar_enabled\":false"));
+        assert!(s.contains("\"agent_bar_mode\":false"));
         assert!(s.contains("\"agent_notification_target\":\"both\""));
         let back: Options = serde_json::from_str(&s).unwrap();
         assert_eq!(opts, back);
+    }
+
+    #[test]
+    fn legacy_agent_bar_enabled_uses_new_activity_panel_default() {
+        let mut value = serde_json::to_value(Options::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("agent_bar_mode");
+        object.insert("agent_bar_enabled".into(), true.into());
+
+        let opts: Options = serde_json::from_value(value).unwrap();
+        assert!(!opts.agent_bar_mode);
     }
 
     #[test]

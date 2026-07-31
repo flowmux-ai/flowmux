@@ -30,6 +30,7 @@ impl WindowController {
                             return;
                         }
                         *options_cell.borrow_mut() = opts.clone();
+                        controller.sidebar.set_agent_bar_mode(opts.agent_bar_mode);
                         // Re-resolves the theme (preset + overrides), repaints
                         // every terminal, reapplies the effective font, and
                         // reloads the CSS provider.
@@ -62,13 +63,17 @@ impl WindowController {
                             engine = ?opts.default_browser_engine,
                             focus_border_color = %opts.focus_border_color,
                             focus_border_opacity = opts.focus_border_opacity,
-                            agent_bar_enabled = opts.agent_bar_enabled,
+                            agent_bar_mode = opts.agent_bar_mode,
                             keybindings_overrides = opts.keybindings.len(),
                             "options applied"
                         );
                         let controller = controller.clone();
+                        let agent_bar_mode = opts.agent_bar_mode;
                         glib::MainContext::default().spawn_local(async move {
                             controller.refresh_agent_bar().await;
+                            if !agent_bar_mode {
+                                controller.refresh_activity_panel().await;
+                            }
                         });
                     },
                     // Live preview from the Theme tab; also called on Cancel /

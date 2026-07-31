@@ -521,6 +521,7 @@ impl WindowController {
             NotificationStore::new(),
             ActivityStore::new(),
             self.notifications.tokio_handle(),
+            self.options.borrow().agent_bar_mode,
         );
         sidebar.upsert(&workspace);
         sidebar.select_workspace(workspace_id);
