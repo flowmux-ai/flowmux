@@ -8,7 +8,7 @@
 
 [Website](https://flowmux-ai.github.io/) · [Latest release](https://github.com/flowmux-ai/flowmux-terminal/releases/latest)
 
-<img src=resources/screenshot/screenshot_1.png  width="850"/>
+<img src=resources/screenshot/screenshot_1.gif  width="850"/>
 
 </div>
 
