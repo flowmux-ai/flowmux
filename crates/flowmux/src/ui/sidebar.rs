@@ -2335,7 +2335,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn activity_entry_point_and_rows_remain_available_and_navigable() {
+    async fn activity_entry_point_and_rows_remain_available_and_navigable() {
         if gtk::init().is_err() {
             return;
         }
@@ -2353,9 +2353,22 @@ mod tests {
             .into_iter()
             .filter_map(|widget| widget.downcast().ok())
             .collect();
-        assert!(menu_buttons
+        let activity_button = menu_buttons
             .iter()
-            .any(|button| button.tooltip_text().as_deref() == Some("Agent activity")));
+            .find(|button| button.tooltip_text().as_deref() == Some("Agent activity"))
+            .unwrap()
+            .clone();
+        let window = gtk::Window::new();
+        window.set_child(Some(&sidebar.header));
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        activity_button.set_active(true);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(sidebar.activity_popover.is_visible());
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GtkCommand::RefreshActivityPopover
+        ));
 
         let workspace = WorkspaceId::new();
         let pane = PaneId::new();
@@ -2382,9 +2395,7 @@ mod tests {
         recent.status = None;
         assert!(store.push(recent));
 
-        let popover = gtk::Popover::new();
-        let rendered = render_activity_list(
-            &store,
+        sidebar.refresh_activity_popover(
             &[ActivityNowEntry {
                 agent: "codex".into(),
                 status: AgentStatus::Working,
@@ -2398,9 +2409,8 @@ mod tests {
                 color: "#abcdef".into(),
             }],
             &HashSet::from([workspace]),
-            bridge,
-            popover,
         );
+        let rendered = sidebar.activity_popover.child().unwrap();
         let widgets = descendant_widgets(&rendered);
         let labels: Vec<gtk::Label> = widgets
             .iter()
@@ -2435,9 +2445,7 @@ mod tests {
             })
             .unwrap();
         completed.emit_clicked();
-        while gtk::glib::MainContext::default().pending() {
-            gtk::glib::MainContext::default().iteration(false);
-        }
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(matches!(
             rx.try_recv().unwrap(),
             GtkCommand::OpenActivityTarget {
