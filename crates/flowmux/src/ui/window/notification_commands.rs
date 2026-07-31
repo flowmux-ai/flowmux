@@ -318,7 +318,6 @@ impl WindowController {
             }
             GtkCommand::SetAgentStatus { workspace } => {
                 self.sync_workspace_agent_status(workspace).await;
-                self.refresh_activity_panel().await;
             }
             GtkCommand::QueryAgentSurfaceVisible { surface, ack } => {
                 let _ = ack.send(self.is_agent_surface_visible(surface));

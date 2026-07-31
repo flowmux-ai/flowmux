@@ -88,7 +88,7 @@ impl WindowController {
         let attention = self.store.workspace_agent_attention_status(workspace).await;
         self.sidebar.set_agent_status(workspace, attention);
         self.sync_workspace_label(workspace).await;
-        self.refresh_agent_bar().await;
+        self.refresh_activity_panel().await;
     }
     pub(super) async fn sync_workspace_agent_status_from_store(&self, workspace: WorkspaceId) {
         self.sync_workspace_agent_status(workspace).await;
@@ -214,6 +214,7 @@ impl WindowController {
             self.refresh_agent_screen_status(surface, None).await;
         }
         self.refresh_agent_bar().await;
+        self.refresh_activity_panel().await;
     }
     pub(super) async fn open_agent_bar_item(
         &self,

@@ -795,6 +795,11 @@ impl Sidebar {
             !enabled && self.activity_has_agents.get(),
         );
     }
+
+    #[cfg(test)]
+    pub(crate) fn activity_panel_is_visible(&self) -> bool {
+        self.activity_panel.is_visible()
+    }
 }
 
 fn set_activity_panel_visible(

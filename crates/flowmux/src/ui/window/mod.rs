@@ -2831,6 +2831,10 @@ mod tests {
         controller.agent_bar.bar.root.property::<bool>("visible")
     }
 
+    fn activity_panel_visible(controller: &WindowController) -> bool {
+        controller.sidebar.activity_panel_is_visible()
+    }
+
     #[test]
     fn dirty_editor_dialog_lists_multilingual_paths_and_limits_long_lists() {
         let labels = vec![
@@ -3025,6 +3029,25 @@ mod tests {
                 PathBuf::from("/tmp/flowmux-order-third"),
             )
             .await;
+        let first_workspace = store.get_workspace(first).await.unwrap();
+        let first_pane = first_workspace.surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let first_surface = first_workspace.surfaces[0]
+            .root_pane
+            .active_surface_id(first_pane)
+            .unwrap();
+        store
+            .set_agent_activity(
+                first_surface,
+                Some(flowmux_core::AgentPresence::new(
+                    "claude",
+                    flowmux_core::AgentActivity::Idle,
+                    None,
+                )),
+            )
+            .await;
         assert!(store.reorder_workspace(third, 0).await);
         store.set_active_workspace(Some(second)).await;
         assert_eq!(
@@ -3045,6 +3068,10 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
+        controller.options.borrow_mut().agent_bar_mode = false;
+        controller.sidebar.set_agent_bar_mode(false);
+        controller.window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
 
         controller.restore_from_store().await;
 
@@ -3057,6 +3084,10 @@ mod tests {
             .collect();
         assert_eq!(restored, vec![third, first, second]);
         assert_eq!(controller.sidebar.selected_workspace(), Some(second));
+        assert!(
+            activity_panel_visible(&controller),
+            "restoring a live Agent must immediately show Agent Activity"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -6955,6 +6986,56 @@ mod tests {
         assert!(
             !agent_bar_visible(&controller),
             "SetAgentStatus must hide Agent Bar after the last agent is cleared"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn process_agent_sync_refreshes_activity_panel_visibility() {
+        let (controller, ws_id, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.ActivityProcessSync").await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .expect("single workspace pane should have an active surface");
+        controller.options.borrow_mut().agent_bar_mode = false;
+        controller.sidebar.set_agent_bar_mode(false);
+        controller.window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+
+        controller
+            .store
+            .set_agent_activity(
+                surface,
+                Some(flowmux_core::AgentPresence::new(
+                    "claude",
+                    flowmux_core::AgentActivity::Running,
+                    Some(42),
+                )),
+            )
+            .await;
+        assert_eq!(
+            current_activity_entries(&controller.store.snapshot().await).len(),
+            1,
+            "test setup must create one live Agent"
+        );
+        controller.sync_workspace_agent_status(ws_id).await;
+        assert_eq!(
+            current_activity_entries(&controller.store.snapshot().await).len(),
+            1,
+            "Agent sync must preserve the live Agent"
+        );
+        assert!(
+            activity_panel_visible(&controller),
+            "process-detected Agents must show Agent Activity"
+        );
+
+        controller.store.set_agent_activity(surface, None).await;
+        controller.sync_workspace_agent_status(ws_id).await;
+        assert!(
+            !activity_panel_visible(&controller),
+            "Agent Activity must hide when process detection clears the last Agent"
         );
     }
 
