@@ -21,6 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 use vte::prelude::*;
 
 #[derive(Clone)]
@@ -65,6 +66,25 @@ pub struct GhosttyPane {
 /// Shift+Enter input sequence: VTE-era agent TUIs treat ESC+CR as "insert a
 /// literal newline" at the prompt without submitting.
 pub const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
+
+/// Full-screen Agent TUIs can repaint several times per frame. Keep one
+/// bounded callback pending per terminal instead of queuing one UI refresh for
+/// every VTE grid mutation.
+const AGENT_CONTENT_REFRESH_DELAY: Duration = Duration::from_millis(100);
+
+fn schedule_agent_content_refresh(
+    refresh_pending: Rc<Cell<bool>>,
+    refresh: Rc<RefCell<dyn FnMut(SurfaceId)>>,
+    surface: SurfaceId,
+) {
+    if refresh_pending.replace(true) {
+        return;
+    }
+    glib::timeout_add_local_once(AGENT_CONTENT_REFRESH_DELAY, move || {
+        refresh_pending.set(false);
+        (refresh.borrow_mut())(surface);
+    });
+}
 
 const SEARCH_REGEX_COMPILE_FLAGS: u32 = 0x0008_0000 | 0x4000_0000;
 const PCRE2_CASELESS: u32 = 0x0000_0008;
@@ -561,7 +581,12 @@ impl GhosttyPane {
         term.set_audible_bell(false);
         {
             let dirty = scrollback_dirty.clone();
-            term.connect_contents_changed(move |_| dirty.set(true));
+            let refresh_pending = Rc::new(Cell::new(false));
+            let refresh = callbacks.on_terminal_contents_changed.clone();
+            term.connect_contents_changed(move |_| {
+                dirty.set(true);
+                schedule_agent_content_refresh(refresh_pending.clone(), refresh.clone(), surface);
+            });
         }
         // Snap the viewport back to the live cursor row whenever the user
         // types: someone who scrolled up to inspect scrollback should not
@@ -3082,5 +3107,72 @@ mod tests {
             container.upgrade().is_none(),
             "closed terminal retained its GTK container"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_content_refresh_requests_are_coalesced_and_bounded() {
+        let calls = Rc::new(Cell::new(0));
+        let retained = Rc::new(());
+        let retained_weak = Rc::downgrade(&retained);
+        let surface = SurfaceId::new();
+        let refresh: Rc<RefCell<dyn FnMut(SurfaceId)>> = {
+            let calls = calls.clone();
+            Rc::new(RefCell::new(move |changed_surface| {
+                let _keep_until_callback_is_released = &retained;
+                assert_eq!(changed_surface, surface);
+                calls.set(calls.get() + 1);
+            }))
+        };
+        let pending = Rc::new(Cell::new(false));
+        for _ in 0..3 {
+            schedule_agent_content_refresh(pending.clone(), refresh.clone(), surface);
+        }
+        drop(refresh);
+        gtk::glib::timeout_future(AGENT_CONTENT_REFRESH_DELAY * 2).await;
+        assert_eq!(
+            calls.get(),
+            1,
+            "one repaint burst must enqueue only one Agent refresh"
+        );
+        assert!(
+            retained_weak.upgrade().is_none(),
+            "a completed content refresh must release its callback"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn terminal_output_requests_an_agent_content_refresh() {
+        let calls = Rc::new(Cell::new(0));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        callbacks.on_terminal_contents_changed = {
+            let calls = calls.clone();
+            Rc::new(RefCell::new(move |_| calls.set(calls.get() + 1)))
+        };
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            5_000,
+            callbacks,
+        );
+        gtk::glib::timeout_future(AGENT_CONTENT_REFRESH_DELAY * 3).await;
+        calls.set(0);
+
+        pane.write_input(b"printf 'codex working\\n'\n").unwrap();
+        for _ in 0..20 {
+            if calls.get() > 0 {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        }
+        assert!(
+            calls.get() > 0,
+            "real PTY output must request an Agent content refresh"
+        );
+        pane.close_pty();
     }
 }

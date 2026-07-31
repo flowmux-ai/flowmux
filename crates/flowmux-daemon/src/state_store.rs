@@ -2910,6 +2910,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn repeated_agent_screen_signal_does_not_publish_an_unchanged_item() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some("Codex Working"), None)
+                .await,
+            Some((ws_id, Some(AgentStatus::Working)))
+        );
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some("Codex Working"), None)
+                .await,
+            None,
+            "an unchanged screen-derived item must not trigger another UI rebuild"
+        );
+    }
+
+    #[tokio::test]
     async fn report_agent_screen_signals_ignores_codegraph_installer_agent_list() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store

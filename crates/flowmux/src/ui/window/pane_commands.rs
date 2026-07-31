@@ -495,6 +495,9 @@ impl WindowController {
                 self.refresh_agent_screen_status(surface, Some(signal_title))
                     .await;
             }
+            GtkCommand::TerminalContentsChanged { surface } => {
+                self.refresh_agent_screen_status(surface, None).await;
+            }
             GtkCommand::RefreshWindowTitle => {
                 self.refresh_window_title().await;
             }

@@ -673,7 +673,11 @@ impl Pane {
                     session_id: None,
                 };
                 match surface.agent.as_mut() {
-                    Some(agent) => Some(agent.apply_report(report, visible)),
+                    Some(agent) => {
+                        let before = agent.clone();
+                        let accepted = agent.apply_report(report, visible);
+                        Some(accepted && *agent != before)
+                    }
                     None => {
                         surface.agent = AgentPresence::from_report(report, visible);
                         Some(surface.agent.is_some())

@@ -323,6 +323,12 @@ impl PaneCallbackRouter {
                     );
                 }))
             },
+            on_terminal_contents_changed: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |surface| {
+                    dispatch_detached(&bridge, GtkCommand::TerminalContentsChanged { surface });
+                }))
+            },
             read_options: {
                 let options = options.clone();
                 Rc::new(move || options.borrow().clone())

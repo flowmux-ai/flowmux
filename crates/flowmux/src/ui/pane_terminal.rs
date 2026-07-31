@@ -125,6 +125,9 @@ pub struct PaneCallbacks {
     /// such as vi, claude, codex, or tmux inside the shell. Empty titles are
     /// ignored by the caller.
     pub on_terminal_title_changed: Rc<RefCell<dyn FnMut(PaneId, SurfaceId, String)>>,
+    /// The terminal grid changed. The VTE backend coalesces rapid repaint
+    /// bursts before invoking this callback.
+    pub on_terminal_contents_changed: Rc<RefCell<dyn FnMut(SurfaceId)>>,
     /// Return the current user options. Used when creating a new BrowserPane to
     /// choose the engine and apply zoom immediately after widget creation. This
     /// cheaply clones the `Rc<RefCell<Options>>` held by WindowController, so
@@ -188,6 +191,7 @@ impl PaneCallbacks {
             on_browser_uri_changed: Rc::new(RefCell::new(|_, _, _| {})),
             on_browser_title_changed: Rc::new(RefCell::new(|_, _, _| {})),
             on_terminal_title_changed: Rc::new(RefCell::new(|_, _, _| {})),
+            on_terminal_contents_changed: Rc::new(RefCell::new(|_| {})),
             read_options: Rc::new(flowmux_config::options::Options::default),
             position_of_surface_in_pane: Rc::new(|_, _| None),
             #[cfg(target_os = "macos")]

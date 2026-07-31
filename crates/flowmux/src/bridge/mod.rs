@@ -462,6 +462,11 @@ pub enum GtkCommand {
         surface: SurfaceId,
         title: String,
     },
+    /// The terminal grid changed after a short coalescing window. Re-scan the
+    /// surface so screen-derived Agent state reaches the UI without a click.
+    TerminalContentsChanged {
+        surface: SurfaceId,
+    },
     /// Recompute the window title as "flowmux - {focused tab name}".
     /// Sent after focus changes, tab activation, or tab label changes.
     RefreshWindowTitle,

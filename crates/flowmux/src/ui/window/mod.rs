@@ -1893,6 +1893,7 @@ impl WindowController {
             | GtkCommand::BrowserUriChanged { .. }
             | GtkCommand::BrowserTitleChanged { .. }
             | GtkCommand::TerminalTitleChanged { .. }
+            | GtkCommand::TerminalContentsChanged { .. }
             | GtkCommand::RefreshWindowTitle
             | GtkCommand::PaneFocused { .. }
             | GtkCommand::PaneSendKeys { .. }
@@ -2833,6 +2834,27 @@ mod tests {
 
     fn activity_panel_visible(controller: &WindowController) -> bool {
         controller.sidebar.activity_panel_is_visible()
+    }
+
+    fn agent_bar_label_texts(controller: &WindowController) -> Vec<String> {
+        let mut labels = Vec::new();
+        let mut pending = vec![controller
+            .agent_bar
+            .bar
+            .root
+            .clone()
+            .upcast::<gtk::Widget>()];
+        while let Some(widget) = pending.pop() {
+            if let Ok(label) = widget.clone().downcast::<gtk::Label>() {
+                labels.push(label.label().to_string());
+            }
+            let mut child = widget.first_child();
+            while let Some(next) = child {
+                child = next.next_sibling();
+                pending.push(next);
+            }
+        }
+        labels
     }
 
     #[test]
@@ -6987,6 +7009,72 @@ mod tests {
             !agent_bar_visible(&controller),
             "SetAgentStatus must hide Agent Bar after the last agent is cleared"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn terminal_content_dispatch_refreshes_agent_items_without_focus_event() {
+        use vte::prelude::*;
+
+        let (controller, _ws_id, pane) = build_single_workspace_controller(
+            "com.flowmux.App.UiTest.AgentTerminalContentsChanged",
+        )
+        .await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .expect("single workspace pane should have an active surface");
+        let terminal = controller
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&surface)
+            .cloned()
+            .expect("surface should have a terminal widget");
+
+        terminal.widget.feed(b"\x1b[2J\x1b[Hcodex working\r\n");
+        for _ in 0..40 {
+            if terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("codex working"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(terminal
+            .screen_text()
+            .is_some_and(|text| text.contains("codex working")));
+        controller
+            .dispatch(GtkCommand::TerminalContentsChanged { surface })
+            .await;
+        assert!(agent_bar_visible(&controller));
+        assert!(agent_bar_label_texts(&controller)
+            .iter()
+            .any(|text| text == "working"));
+
+        terminal
+            .widget
+            .feed(b"\x1b[2J\x1b[Hcodex needs approval\r\n");
+        for _ in 0..40 {
+            if terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("codex needs approval"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(terminal
+            .screen_text()
+            .is_some_and(|text| text.contains("codex needs approval")));
+        controller
+            .dispatch(GtkCommand::TerminalContentsChanged { surface })
+            .await;
+        assert!(agent_bar_label_texts(&controller)
+            .iter()
+            .any(|text| text == "blocked"));
     }
 
     #[cfg(not(target_os = "macos"))]
