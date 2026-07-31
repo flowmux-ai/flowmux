@@ -49,6 +49,41 @@ impl WindowController {
             .bar
             .render(&model, &attentions, focused_surface);
     }
+
+    pub(super) async fn refresh_activity_popover(&self) {
+        let state = self.store.snapshot().await;
+        let current = current_activity_entries(&state);
+        let workspaces = state
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id)
+            .collect();
+        self.sidebar.refresh_activity_popover(&current, &workspaces);
+    }
+
+    pub(super) async fn open_activity_target(
+        &self,
+        workspace: WorkspaceId,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) {
+        let Some(workspace_state) = self.store.get_workspace(workspace).await else {
+            return;
+        };
+        self.activate_workspace(workspace).await;
+        let tab_exists = workspace_state
+            .surfaces
+            .iter()
+            .any(|root| root.root_pane.find_surface(pane, surface).is_some());
+        if tab_exists && self.pane_registry.borrow().has_pane(pane) {
+            if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
+                self.activate_surface_now(pane, surface).await;
+            }
+            self.focus_pane(pane);
+        }
+        self.window.present();
+    }
+
     pub(super) async fn sync_workspace_agent_status(&self, workspace: WorkspaceId) {
         let attention = self.store.workspace_agent_attention_status(workspace).await;
         self.sidebar.set_agent_status(workspace, attention);

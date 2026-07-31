@@ -6,6 +6,26 @@ use super::*;
 impl WindowController {
     pub(super) async fn dispatch_notification_command(&self, cmd: GtkCommand) {
         match cmd {
+            GtkCommand::AddActivity { entry } => {
+                if self.activities.push(entry) {
+                    self.refresh_activity_popover().await;
+                }
+            }
+            GtkCommand::ClearActivities => {
+                if self.activities.clear() {
+                    self.refresh_activity_popover().await;
+                }
+            }
+            GtkCommand::RefreshActivityPopover => {
+                self.refresh_activity_popover().await;
+            }
+            GtkCommand::OpenActivityTarget {
+                workspace,
+                pane,
+                surface,
+            } => {
+                self.open_activity_target(workspace, pane, surface).await;
+            }
             GtkCommand::AddNotification {
                 pane,
                 surface,

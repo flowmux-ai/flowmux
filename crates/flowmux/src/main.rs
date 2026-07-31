@@ -6,6 +6,7 @@
 //! through an [`async_channel`] bridge.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod activity;
 mod bridge;
 mod builtin_icons;
 mod ipc_handler;
@@ -258,9 +259,22 @@ fn main() -> anyhow::Result<()> {
             tick.tick().await; // consume the immediate first tick
             loop {
                 tick.tick().await;
-                for (workspace, surface, pid) in sweep_store.live_agent_presences().await {
+                for (_, surface, pid) in sweep_store.live_agent_presences().await {
                     if !flowmux_procmon::pid_alive(pid) {
-                        sweep_store.clear_dead_agent_activity(surface).await;
+                        let Some(removed) =
+                            sweep_store.clear_dead_agent_presence(surface, pid).await
+                        else {
+                            continue;
+                        };
+                        let workspace = removed.workspace;
+                        let _ = sweep_tx
+                            .send(crate::bridge::GtkCommand::AddActivity {
+                                entry: crate::activity::ActivityEntry::session_ended(
+                                    removed,
+                                    "flowmux:proc",
+                                ),
+                            })
+                            .await;
                         let _ = sweep_tx
                             .send(crate::bridge::GtkCommand::SetAgentStatus { workspace })
                             .await;

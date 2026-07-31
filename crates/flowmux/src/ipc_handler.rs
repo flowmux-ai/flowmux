@@ -7,6 +7,7 @@
 //! [`Bridge`] to the GTK main loop and the response is awaited via a
 //! `oneshot` channel.
 
+use crate::activity::ActivityEntry;
 use crate::bridge::{Bridge, BrowserActionResult, BrowserOp, GtkCommand};
 use flowmux_core::{AgentStatusReport, SplitDirection};
 use flowmux_daemon::DaemonHandler;
@@ -699,13 +700,26 @@ impl GuiHandler {
                 },
                 None => Response::AgentSession { session_id: None },
             },
-            Request::AgentSessionForget { agent, surface } => match agent_session_store() {
-                Some(store) => match store.forget(&agent, surface) {
-                    Ok(()) => Response::Ok,
-                    Err(e) => Response::Error(RpcError::Io(e.to_string())),
-                },
-                None => Response::Ok,
-            },
+            Request::AgentSessionForget { agent, surface } => {
+                let live_claude_session = agent.eq_ignore_ascii_case("claude")
+                    && self
+                        .inner
+                        .store()
+                        .located_agent_presence(surface)
+                        .await
+                        .is_some_and(|located| located.presence.name.eq_ignore_ascii_case(&agent));
+                if live_claude_session {
+                    Response::Ok
+                } else {
+                    match agent_session_store() {
+                        Some(store) => match store.forget(&agent, surface) {
+                            Ok(()) => Response::Ok,
+                            Err(e) => Response::Error(RpcError::Io(e.to_string())),
+                        },
+                        None => Response::Ok,
+                    }
+                }
+            }
 
             // ---- Live agent activity (Running / NeedsInput / Idle).
             // Hooks pass FLOWMUX_SURFACE_ID, so a surface is expected;
@@ -724,21 +738,24 @@ impl GuiHandler {
                 ..
             } => match surface {
                 Some(surface) => {
-                    // Start/activity hooks refresh the native binding. An
-                    // intentional Claude SessionEnd follows this update with
-                    // AgentSessionForget; app teardown leaves it intact so a
-                    // relaunch can resume the still-active session.
-                    if let Some(session_id) = session_id.as_deref() {
-                        if let Some(store) = agent_session_store() {
-                            if let Err(error) = store.record(&agent, surface, session_id) {
-                                warn!(%surface, %agent, %error, "failed to persist agent session");
-                            }
-                        }
-                    }
                     if status.is_none() && activity.is_none() {
-                        if let Some(ws_id) =
-                            self.inner.store().set_agent_activity(surface, None).await
+                        if let Some(removed) = self
+                            .inner
+                            .store()
+                            .end_agent_session(surface, &agent, seq, session_id.as_deref())
+                            .await
                         {
+                            let ws_id = removed.workspace;
+                            let _ = self
+                                .bridge
+                                .tx
+                                .send(GtkCommand::AddActivity {
+                                    entry: ActivityEntry::session_ended(
+                                        removed,
+                                        source.as_deref().unwrap_or("flowmux:hook"),
+                                    ),
+                                })
+                                .await;
                             let _ = self
                                 .bridge
                                 .tx
@@ -756,6 +773,9 @@ impl GuiHandler {
                             })
                             .await;
                         let surface_visible = visibility_rx.await.unwrap_or(false);
+                        let record_activity = source.as_deref() == Some("flowmux:hook");
+                        let session_binding = session_id.clone();
+                        let session_agent = agent.clone();
                         let report = AgentStatusReport {
                             name: agent,
                             status,
@@ -773,11 +793,34 @@ impl GuiHandler {
                             .report_agent_status_with_visibility(surface, report, surface_visible)
                             .await
                         {
+                            if let Some(session_id) = session_binding.as_deref() {
+                                if let Some(store) = agent_session_store() {
+                                    if let Err(error) =
+                                        store.record(&session_agent, surface, session_id)
+                                    {
+                                        warn!(%surface, agent = %session_agent, %error, "failed to persist agent session");
+                                    }
+                                }
+                            }
                             let _ = self
                                 .bridge
                                 .tx
                                 .send(GtkCommand::SetAgentStatus { workspace: ws_id })
                                 .await;
+                            if record_activity {
+                                if let Some(located) =
+                                    self.inner.store().located_agent_presence(surface).await
+                                {
+                                    if let Some(entry) = ActivityEntry::from_hook_presence(located)
+                                    {
+                                        let _ = self
+                                            .bridge
+                                            .tx
+                                            .send(GtkCommand::AddActivity { entry })
+                                            .await;
+                                    }
+                                }
+                            }
                         }
                     }
                     Response::Ok

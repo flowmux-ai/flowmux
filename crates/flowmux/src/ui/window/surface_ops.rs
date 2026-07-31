@@ -519,6 +519,7 @@ impl WindowController {
             },
             sidebar_bridge,
             NotificationStore::new(),
+            ActivityStore::new(),
             self.notifications.tokio_handle(),
         );
         sidebar.upsert(&workspace);

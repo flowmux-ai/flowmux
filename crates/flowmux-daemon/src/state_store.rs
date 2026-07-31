@@ -7,11 +7,11 @@
 //! boot.
 
 use flowmux_core::{
-    detect_agent_idle_name_from_signals, detect_agent_name_from_signals,
-    detect_agent_status_from_signals, terminal_tab_title_for_cwd, AgentPresence, AgentStatus,
-    AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent, PaneId,
-    PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace,
-    WorkspaceAgentBlock, WorkspaceId,
+    agent_bar_color_for_surface, detect_agent_idle_name_from_signals,
+    detect_agent_name_from_signals, detect_agent_status_from_signals, terminal_tab_title_for_cwd,
+    AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane,
+    PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId,
+    SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -46,6 +46,17 @@ pub struct MoveSurfaceOutcome {
     pub src_pane_removed: bool,
     /// Collapsing the source removed its workspace entirely.
     pub src_workspace_removed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedAgentPresence {
+    pub workspace: WorkspaceId,
+    pub pane: PaneId,
+    pub surface: SurfaceId,
+    pub workspace_label: String,
+    pub surface_label: String,
+    pub color: String,
+    pub presence: AgentPresence,
 }
 
 impl MoveSurfaceOutcome {
@@ -949,25 +960,119 @@ impl StateStore {
         found
     }
 
+    pub async fn located_agent_presence(
+        &self,
+        surface_id: SurfaceId,
+    ) -> Option<LocatedAgentPresence> {
+        let s = self.inner.lock().await;
+        s.workspaces.iter().find_map(|workspace| {
+            workspace.surfaces.iter().find_map(|surface| {
+                located_agent_in_pane(&surface.root_pane, surface_id).map(
+                    |(pane, surface_label, presence)| LocatedAgentPresence {
+                        workspace: workspace.id,
+                        pane,
+                        surface: surface_id,
+                        workspace_label: workspace.display_title().to_string(),
+                        surface_label,
+                        color: workspace
+                            .color
+                            .clone()
+                            .unwrap_or_else(|| agent_bar_color_for_surface(surface_id)),
+                        presence,
+                    },
+                )
+            })
+        })
+    }
+
+    /// Remove a hook-owned presence only when the teardown still belongs to
+    /// the current agent session. This keeps a delayed SessionEnd from clearing
+    /// a newer session that reused the same tab.
+    pub async fn end_agent_session(
+        &self,
+        surface_id: SurfaceId,
+        agent: &str,
+        seq: Option<u64>,
+        session_id: Option<&str>,
+    ) -> Option<LocatedAgentPresence> {
+        self.remove_agent_presence_if_current(surface_id, Some(agent), seq, session_id, None, true)
+            .await
+    }
+
+    /// Remove a presence whose recorded process has exited. PID liveness is the
+    /// authority here, so no hook sequence/session constraint is needed.
+    pub async fn clear_dead_agent_presence(
+        &self,
+        surface_id: SurfaceId,
+        expected_pid: u32,
+    ) -> Option<LocatedAgentPresence> {
+        self.remove_agent_presence_if_current(
+            surface_id,
+            None,
+            None,
+            None,
+            Some(expected_pid),
+            false,
+        )
+        .await
+    }
+
+    async fn remove_agent_presence_if_current(
+        &self,
+        surface_id: SurfaceId,
+        agent: Option<&str>,
+        seq: Option<u64>,
+        session_id: Option<&str>,
+        expected_pid: Option<u32>,
+        suppress_screen_restore: bool,
+    ) -> Option<LocatedAgentPresence> {
+        let removed = {
+            let mut s = self.inner.lock().await;
+            s.workspaces.iter_mut().find_map(|workspace| {
+                let workspace_id = workspace.id;
+                let workspace_label = workspace.display_title().to_string();
+                let color = workspace
+                    .color
+                    .clone()
+                    .unwrap_or_else(|| agent_bar_color_for_surface(surface_id));
+                workspace.surfaces.iter_mut().find_map(|surface| {
+                    take_current_agent_from_pane(
+                        &mut surface.root_pane,
+                        surface_id,
+                        agent,
+                        seq,
+                        session_id,
+                        expected_pid,
+                    )
+                    .map(|(pane, surface_label, presence)| {
+                        LocatedAgentPresence {
+                            workspace: workspace_id,
+                            pane,
+                            surface: surface_id,
+                            workspace_label: workspace_label.clone(),
+                            surface_label,
+                            color: color.clone(),
+                            presence,
+                        }
+                    })
+                })
+            })
+        };
+        if removed.is_some() {
+            let mut cleared = self.cleared_agent_surfaces.lock().await;
+            if suppress_screen_restore {
+                cleared.insert(surface_id);
+            } else {
+                cleared.remove(&surface_id);
+            }
+        }
+        removed
+    }
+
     pub async fn clear_dead_agent_activity(&self, surface_id: SurfaceId) -> Option<WorkspaceId> {
-        let mut s = self.inner.lock().await;
-        let mut found = None;
-        for ws in s.workspaces.iter_mut() {
-            for surface in ws.surfaces.iter_mut() {
-                if surface.root_pane.set_surface_agent(surface_id, None) {
-                    found = Some(ws.id);
-                    break;
-                }
-            }
-            if found.is_some() {
-                break;
-            }
-        }
-        drop(s);
-        if found.is_some() {
-            self.cleared_agent_surfaces.lock().await.remove(&surface_id);
-        }
-        found
+        self.remove_agent_presence_if_current(surface_id, None, None, None, None, false)
+            .await
+            .map(|removed| removed.workspace)
     }
 
     /// Merge a live agent status report into a tab surface. Returns the owning
@@ -2216,6 +2321,87 @@ fn first_active_pane_surface(pane: &Pane) -> Option<PaneSurface> {
     }
 }
 
+fn located_agent_in_pane(
+    pane: &Pane,
+    surface_id: SurfaceId,
+) -> Option<(PaneId, String, AgentPresence)> {
+    match pane {
+        Pane::Leaf {
+            id,
+            content: PaneContent::Tabs { surfaces, .. },
+        } => surfaces
+            .iter()
+            .find(|surface| surface.id == surface_id)
+            .and_then(|surface| {
+                surface
+                    .agent
+                    .clone()
+                    .map(|presence| (*id, surface.title.clone(), presence))
+            }),
+        Pane::Leaf { .. } => None,
+        Pane::Split { first, second, .. } => located_agent_in_pane(first, surface_id)
+            .or_else(|| located_agent_in_pane(second, surface_id)),
+    }
+}
+
+fn take_current_agent_from_pane(
+    pane: &mut Pane,
+    surface_id: SurfaceId,
+    agent: Option<&str>,
+    seq: Option<u64>,
+    session_id: Option<&str>,
+    expected_pid: Option<u32>,
+) -> Option<(PaneId, String, AgentPresence)> {
+    match pane {
+        Pane::Leaf {
+            id,
+            content: PaneContent::Tabs { surfaces, .. },
+        } => {
+            let surface = surfaces
+                .iter_mut()
+                .find(|surface| surface.id == surface_id)?;
+            let presence = surface.agent.as_ref()?;
+            let invalid_hook_seq = agent.is_some()
+                && match (presence.seq, seq) {
+                    (Some(current), Some(incoming)) => incoming <= current,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+            let invalid_hook_session = agent.is_some()
+                && match (presence.session_id.as_deref(), session_id) {
+                    (Some(current), Some(incoming)) => current != incoming,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+            if agent.is_some_and(|agent| !presence.name.eq_ignore_ascii_case(agent))
+                || invalid_hook_seq
+                || invalid_hook_session
+                || expected_pid.is_some_and(|pid| presence.pid != Some(pid))
+            {
+                return None;
+            }
+            surface
+                .agent
+                .take()
+                .map(|presence| (*id, surface.title.clone(), presence))
+        }
+        Pane::Leaf { .. } => None,
+        Pane::Split { first, second, .. } => {
+            take_current_agent_from_pane(first, surface_id, agent, seq, session_id, expected_pid)
+                .or_else(|| {
+                    take_current_agent_from_pane(
+                        second,
+                        surface_id,
+                        agent,
+                        seq,
+                        session_id,
+                        expected_pid,
+                    )
+                })
+        }
+    }
+}
+
 fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPresence) {
     let (Some(existing_pid), Some(incoming_pid)) = (existing.pid, report.pid) else {
         return;
@@ -3109,6 +3295,113 @@ Do you want to continue?";
         assert_eq!(
             store.live_agent_presences().await,
             vec![(ws_id, surface, 43)]
+        );
+    }
+
+    #[tokio::test]
+    async fn session_end_only_removes_the_current_agent_session() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(
+                Some("activity-demo".into()),
+                std::path::PathBuf::from("/tmp/activity-demo"),
+            )
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+        let pane = first_pane(&ws);
+        store
+            .report_agent_status(
+                surface,
+                AgentStatusReport {
+                    name: "claude".into(),
+                    status: Some(AgentStatus::Working),
+                    activity: None,
+                    pid: Some(42),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(20),
+                    message: None,
+                    custom_status: Some("Starting turn".into()),
+                    session_id: Some("session-new".into()),
+                },
+            )
+            .await;
+
+        assert!(store
+            .end_agent_session(surface, "claude", Some(10), Some("session-new"))
+            .await
+            .is_none());
+        assert!(store
+            .end_agent_session(surface, "claude", Some(21), Some("session-old"))
+            .await
+            .is_none());
+        assert!(store
+            .end_agent_session(surface, "claude", None, Some("session-new"))
+            .await
+            .is_none());
+        assert!(store
+            .end_agent_session(surface, "claude", Some(21), None)
+            .await
+            .is_none());
+        assert!(store.located_agent_presence(surface).await.is_some());
+
+        let removed = store
+            .end_agent_session(surface, "claude", Some(21), Some("session-new"))
+            .await
+            .expect("matching SessionEnd should remove presence");
+        assert_eq!(removed.workspace, ws_id);
+        assert_eq!(removed.pane, pane);
+        assert_eq!(removed.surface, surface);
+        assert_eq!(removed.workspace_label, "activity-demo");
+        assert_eq!(removed.presence.session_id.as_deref(), Some("session-new"));
+        assert!(store.located_agent_presence(surface).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn dead_pid_clear_cannot_remove_a_replacement_process() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let old_pid = u32::MAX - 1;
+        let replacement_pid = u32::MAX;
+        for (pid, seq) in [(old_pid, 1), (replacement_pid, 2)] {
+            assert!(store
+                .report_agent_status(
+                    surface,
+                    AgentStatusReport {
+                        name: "codex".into(),
+                        status: Some(AgentStatus::Working),
+                        activity: None,
+                        pid: Some(pid),
+                        source: Some("flowmux:hook".into()),
+                        seq: Some(seq),
+                        message: None,
+                        custom_status: Some("Working".into()),
+                        session_id: None,
+                    },
+                )
+                .await
+                .is_some());
+        }
+
+        assert!(store
+            .clear_dead_agent_presence(surface, old_pid)
+            .await
+            .is_none());
+        assert_eq!(
+            store.live_agent_presences().await,
+            vec![(ws_id, surface, replacement_pid)]
+        );
+        assert_eq!(
+            store
+                .clear_dead_agent_presence(surface, replacement_pid)
+                .await
+                .unwrap()
+                .presence
+                .pid,
+            Some(replacement_pid)
         );
     }
 

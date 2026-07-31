@@ -3,6 +3,7 @@
 //! stack and exposes a [`WindowController`] that routes [`GtkCommand`]
 //! values from the bridge to widget operations.
 
+use crate::activity::{current_activity_entries, ActivityStore};
 use crate::bridge::{
     Bridge, BrowserActionResult, BrowserOp, BrowserOpenOutcome, FocusDir, GtkCommand, WsNav,
 };
@@ -445,6 +446,7 @@ pub struct WindowController {
     /// a preset; new panes read the current value at creation time.
     theme: Rc<RefCell<Arc<ResolvedTheme>>>,
     notifications: notification_coordinator::NotificationCoordinator,
+    activities: ActivityStore,
     options: Rc<RefCell<flowmux_config::options::Options>>,
     /// Global CssProvider. When the options dialog changes focus border color
     /// or opacity, reload CSS into this same instance so every pane updates immediately.
@@ -835,6 +837,7 @@ impl WindowController {
         let worktree_removals_in_progress = Rc::new(RefCell::new(HashSet::new()));
         let worktree_tokio_handle = tokio_handle.clone();
         let notifications = NotificationStore::new();
+        let activities = ActivityStore::new();
         let stack = gtk::Stack::new();
         stack.set_transition_type(gtk::StackTransitionType::Crossfade);
         stack.set_hexpand(true);
@@ -877,6 +880,7 @@ impl WindowController {
             on_close,
             bridge.clone(),
             notifications.clone(),
+            activities.clone(),
             tokio_handle.clone(),
         );
         let agent_bar = AgentBar::new(bridge.clone());
@@ -1128,6 +1132,7 @@ impl WindowController {
                 notifications,
                 tokio_handle,
             ),
+            activities,
             options,
             css_provider,
             clipboard_toast,
@@ -1832,6 +1837,10 @@ impl WindowController {
                 self.dispatch_browser_command(command).await;
             }
             command @ (GtkCommand::AddNotification { .. }
+            | GtkCommand::AddActivity { .. }
+            | GtkCommand::ClearActivities
+            | GtkCommand::RefreshActivityPopover
+            | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::CloseDesktopNotifications { .. }
             | GtkCommand::RefreshLauncherBadge
@@ -6989,7 +6998,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn open_agent_bar_item_activates_workspace_pane_and_surface() {
+    async fn agent_bar_and_activity_items_activate_workspace_pane_and_surface() {
         adw::init().expect("libadwaita should initialize in GTK test");
         let root_a = std::env::temp_dir().join("flowmux-agent-bar-click-a");
         let root_b = std::env::temp_dir().join("flowmux-agent-bar-click-b");
@@ -7083,6 +7092,40 @@ mod tests {
                 .visible_child_name()
                 .map(|name| name.to_string()),
             Some(ws_b.to_string())
+        );
+
+        controller.activate_workspace(ws_a).await;
+        controller
+            .dispatch(GtkCommand::OpenActivityTarget {
+                workspace: ws_b,
+                pane: pane_b,
+                surface: surface_b,
+            })
+            .await;
+        assert_eq!(store.snapshot().await.active_workspace, Some(ws_b));
+        assert_eq!(controller.focused_pane.get(), Some(pane_b));
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane_b),
+            Some(surface_b)
+        );
+
+        controller.activate_workspace(ws_a).await;
+        controller
+            .dispatch(GtkCommand::OpenActivityTarget {
+                workspace: ws_b,
+                pane: pane_b,
+                surface: SurfaceId::new(),
+            })
+            .await;
+        assert_eq!(
+            store.snapshot().await.active_workspace,
+            Some(ws_b),
+            "a closed target tab should fall back to its workspace"
+        );
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane_b),
+            Some(surface_b),
+            "workspace fallback must not disturb the current tab"
         );
     }
 

@@ -8,6 +8,7 @@
 //! them via `glib::MainContext::spawn_local` and dispatches into the
 //! window controller.
 
+use crate::activity::ActivityEntry;
 use flowmux_core::{
     NotificationId, NotificationLevel, PaneId, PaneSurface, PlacementStrategy, SplitDirection,
     SurfaceId, WorkspaceId,
@@ -244,7 +245,9 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<(), String>>,
     },
     /// Temporarily expand one pane without changing the persisted split tree.
-    TogglePaneZoom { pane: PaneId },
+    TogglePaneZoom {
+        pane: PaneId,
+    },
     ResizePane {
         pane: PaneId,
         ratio: f32,
@@ -268,13 +271,20 @@ pub enum GtkCommand {
     /// If `from = None`, focus the active workspace's first leaf pane.
     /// This handles pressing Alt+arrow immediately after selecting only
     /// a workspace row in the side panel.
-    FocusDirection { from: Option<PaneId>, dir: FocusDir },
+    FocusDirection {
+        from: Option<PaneId>,
+        dir: FocusDir,
+    },
     /// Open a brand-new terminal surface in the active workspace.
     /// (Reserved for the planned horizontal surface-tab bar; currently
     /// unused since the sidebar shows workspaces, not surfaces.)
-    NewSurface { pane: PaneId },
+    NewSurface {
+        pane: PaneId,
+    },
     /// Open a new tab in the target pane and run tig in its shell.
-    OpenTig { pane: PaneId },
+    OpenTig {
+        pane: PaneId,
+    },
     /// Open a terminal tab in the target workspace for `flowmux new-tab`.
     CreateSurface {
         workspace: WorkspaceId,
@@ -283,14 +293,20 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<(PaneId, SurfaceId), String>>,
     },
     /// Add an empty about:blank browser tab to the same pane.
-    NewBrowserSurface { pane: PaneId },
+    NewBrowserSurface {
+        pane: PaneId,
+    },
     /// Toggle the right-side FileBrowser rooted at `pane`'s current directory:
     /// open it if hidden, close it if already showing. `None` targets the
     /// currently focused pane (used by the side-panel footer button and the
     /// Ctrl+Alt+F keybinding, neither of which has a pane context of its own).
-    ToggleFileBrowser { pane: Option<PaneId> },
+    ToggleFileBrowser {
+        pane: Option<PaneId>,
+    },
     /// Toggle the right-side Git worktree panel for the focused pane.
-    ToggleWorktreePanel { pane: Option<PaneId> },
+    ToggleWorktreePanel {
+        pane: Option<PaneId>,
+    },
     /// Reload worktrees for the panel's current source pane.
     RefreshWorktrees,
     /// Deliver a background worktree listing to the GTK main thread.
@@ -300,9 +316,13 @@ pub enum GtkCommand {
             Result<flowmux_vcs::worktree::WorktreeList, flowmux_vcs::worktree::WorktreeListError>,
     },
     /// Show cached Git and workspace details for a worktree.
-    ShowWorktreeInfo { path: PathBuf },
+    ShowWorktreeInfo {
+        path: PathBuf,
+    },
     /// Confirm and remove a worktree checkout while retaining its branch.
-    RemoveWorktree { path: PathBuf },
+    RemoveWorktree {
+        path: PathBuf,
+    },
     /// Deliver a completed background worktree removal to the GTK main thread.
     WorktreeRemovalFinished {
         path: PathBuf,
@@ -310,11 +330,15 @@ pub enum GtkCommand {
         result: Result<(), flowmux_vcs::worktree::RemoveWorktreeError>,
     },
     /// Move keyboard focus out of the right-side Git worktree panel.
-    WorktreePanelFocusOut { dir: FocusDir },
+    WorktreePanelFocusOut {
+        dir: FocusDir,
+    },
     /// Close the worktree panel and restore focus to its source pane.
     WorktreePanelCloseAndRestoreFocus,
     /// Move keyboard focus out of the right-side FileBrowser.
-    FileBrowserFocusOut { dir: FocusDir },
+    FileBrowserFocusOut {
+        dir: FocusDir,
+    },
     /// Close the right-side FileBrowser and restore focus to the source pane.
     FileBrowserCloseAndRestoreFocus,
     /// Open a file in an editor surface selected from the source workspace.
@@ -325,13 +349,25 @@ pub enum GtkCommand {
     /// Open a Ctrl-clicked terminal URL in a new browser tab in the same
     /// pane. `pane` is the source terminal pane and `url` has already had
     /// trailing punctuation trimmed.
-    OpenUrlInBrowserTab { pane: PaneId, url: String },
+    OpenUrlInBrowserTab {
+        pane: PaneId,
+        url: String,
+    },
     /// Open a Ctrl-clicked terminal image path in a dedicated viewer window.
-    OpenImageViewer { pane: PaneId, path: PathBuf },
+    OpenImageViewer {
+        pane: PaneId,
+        path: PathBuf,
+    },
     /// Open a Ctrl-clicked terminal Markdown path in the Markdown viewer binary.
-    OpenMarkdownViewer { pane: PaneId, path: PathBuf },
+    OpenMarkdownViewer {
+        pane: PaneId,
+        path: PathBuf,
+    },
     /// Switch the active pane-local surface tab.
-    ActivateSurface { pane: PaneId, surface: SurfaceId },
+    ActivateSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Close a pane-local surface tab.
     CloseSurface {
         pane: PaneId,
@@ -346,7 +382,10 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<(), String>>,
     },
     /// Open the rename dialog for a pane-local surface tab.
-    ShowRenameSurfaceDialog { pane: PaneId, surface: SurfaceId },
+    ShowRenameSurfaceDialog {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Reorder a terminal or browser tab within the same pane by drag and
     /// drop. `target_index` is the final position after the move and is
     /// clamped to the end if it exceeds the length.
@@ -359,7 +398,10 @@ pub enum GtkCommand {
     /// Tear a pane-local surface tab out into its own top-level window. The
     /// existing GTK widget is moved, so the running terminal/browser state is
     /// preserved and the source pane loses that tab.
-    TearOffSurface { pane: PaneId, surface: SurfaceId },
+    TearOffSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Move a pane-local surface tab into another pane (possibly in another
     /// workspace) by drag and drop. The existing GTK widget is moved, so the
     /// running terminal/browser state is preserved. `target_index` is the final
@@ -426,9 +468,13 @@ pub enum GtkCommand {
     /// Emitted when a pane receives keyboard focus. The workspace side-panel
     /// label and subtitles are based on the MRU focused pane's active
     /// surface, so they need recomputation on focus moves.
-    PaneFocused { pane: PaneId },
+    PaneFocused {
+        pane: PaneId,
+    },
     /// Create a brand-new workspace and add it to the sidebar.
-    NewWorkspace { root: std::path::PathBuf },
+    NewWorkspace {
+        root: std::path::PathBuf,
+    },
     /// Remove a workspace entirely (sidebar row + stack page + state).
     /// Triggered by the hover X button on a sidebar row, and by
     /// tmux-compat teardown (kill-pane of the last pane / kill-server).
@@ -441,7 +487,9 @@ pub enum GtkCommand {
     },
     /// Remove every open workspace. Triggered by the sidebar context
     /// menu's "Close all tabs" item.
-    RemoveAllWorkspaces { ack: oneshot::Sender<()> },
+    RemoveAllWorkspaces {
+        ack: oneshot::Sender<()>,
+    },
     /// Rename a workspace and refresh its sidebar row.
     RenameWorkspace {
         id: WorkspaceId,
@@ -464,9 +512,13 @@ pub enum GtkCommand {
     /// Open the 'Change tab name' dialog for `id`. Bridge-driven so
     /// the dialog runs in the window dispatch loop where the parent
     /// window reference is in scope.
-    ShowRenameDialog { id: WorkspaceId },
+    ShowRenameDialog {
+        id: WorkspaceId,
+    },
     /// Open the color picker dialog for `id`.
-    ShowColorDialog { id: WorkspaceId },
+    ShowColorDialog {
+        id: WorkspaceId,
+    },
     /// Append a notification to the in-process log shown in the
     /// sidebar's bell popover. flowmux-notify still delivers the real
     /// desktop notification through D-Bus; this is the GUI tee.
@@ -491,6 +543,18 @@ pub enum GtkCommand {
         level: NotificationLevel,
         ack: oneshot::Sender<Option<NotificationId>>,
     },
+    /// Append one accepted hook transition or session teardown to the bounded
+    /// in-memory Agent activity history.
+    AddActivity {
+        entry: ActivityEntry,
+    },
+    ClearActivities,
+    RefreshActivityPopover,
+    OpenActivityTarget {
+        workspace: WorkspaceId,
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Tell the GUI store which `org.gtk.Notifications` id was
     /// assigned to a previously-added entry. Used by the bell popover
     /// to ask the daemon to withdraw the toast (and shrink the dock
@@ -505,7 +569,9 @@ pub enum GtkCommand {
     /// Ubuntu Dock's per-app notification counter, so the dock badge
     /// shrinks in lockstep. The dispatcher coalesces this with the
     /// store-level `mark_*_read` sweep that produced the ids.
-    CloseDesktopNotifications { desktop_ids: Vec<String> },
+    CloseDesktopNotifications {
+        desktop_ids: Vec<String>,
+    },
     /// Historic no-op. Earlier flowmux drove the dock badge directly
     /// via `com.canonical.Unity.LauncherEntry::Update`; the badge
     /// counter is now derived by the dock from
@@ -517,7 +583,9 @@ pub enum GtkCommand {
     /// User clicked a row in the bell popover. Mark the entry read,
     /// activate its workspace (if known), and grab focus on the source
     /// pane (if known). Mirrors cmux's `openNotification → focusTab`.
-    OpenNotification { id: NotificationId },
+    OpenNotification {
+        id: NotificationId,
+    },
     /// CLI notification management: read the in-process transcript.
     ListNotifications {
         unread_only: bool,
@@ -530,29 +598,41 @@ pub enum GtkCommand {
         ack: oneshot::Sender<bool>,
     },
     /// CLI notification management: open the oldest unread entry.
-    OpenOldestUnreadNotification { ack: oneshot::Sender<bool> },
+    OpenOldestUnreadNotification {
+        ack: oneshot::Sender<bool>,
+    },
     /// CLI notification management: mark one entry as read.
     MarkNotificationRead {
         id: NotificationId,
         ack: oneshot::Sender<bool>,
     },
     /// CLI notification management: clear the transcript.
-    ClearNotifications { ack: oneshot::Sender<bool> },
+    ClearNotifications {
+        ack: oneshot::Sender<bool>,
+    },
     /// User clicked the trash button on a bell-popover row. Drop the
     /// entry from the in-process transcript, withdraw its FDO toast
     /// (when one exists) and re-publish the dock badge unread count.
     /// Refreshes the popover so the row vanishes immediately.
-    DeleteNotification { id: NotificationId },
+    DeleteNotification {
+        id: NotificationId,
+    },
     /// Cycle to the previous / next workspace in sidebar order.
-    FocusWorkspaceDir { dir: WsNav },
+    FocusWorkspaceDir {
+        dir: WsNav,
+    },
     /// Jump straight to the N-th workspace (1-indexed; clamped to
     /// what currently exists).
-    FocusWorkspaceAt { idx: u8 },
+    FocusWorkspaceAt {
+        idx: u8,
+    },
     /// A side-panel workspace row was clicked or row-activated. The
     /// dispatcher routes it through activate_workspace so GtkStack
     /// visibility, store active_workspace, and first-leaf grab_focus happen
     /// in one flow shared by clicks, Alt+number, and Ctrl+Tab.
-    ActivateWorkspace { id: WorkspaceId },
+    ActivateWorkspace {
+        id: WorkspaceId,
+    },
     /// A bottom agent-bar item was clicked. The dispatcher activates the
     /// workspace, switches to that pane-local tab, focuses the pane, and
     /// acknowledges matching notifications through the normal read path.
@@ -597,23 +677,33 @@ pub enum GtkCommand {
     /// currently-focused pane (or, if no pane in `workspace` is focused,
     /// the workspace's first leaf pane's active terminal). Fired by the
     /// sidebar workspace right-click "Show in folder" item.
-    ShowFocusedPaneFolder { workspace: WorkspaceId },
+    ShowFocusedPaneFolder {
+        workspace: WorkspaceId,
+    },
     /// Open the system file manager at a specific surface's cwd. Fired
     /// by the pane tab right-click "Show in folder" item. Only meaningful
     /// for terminal surfaces; the caller skips browser tabs before sending.
-    ShowSurfaceFolder { pane: PaneId, surface: SurfaceId },
+    ShowSurfaceFolder {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Copy a single surface's text identifier to the clipboard — the
     /// cwd for terminal surfaces, the current URL for browser surfaces.
     /// Fired by per-pane and per-tab "Copy path" / "Copy URL"
     /// right-click items. The dispatcher resolves which one based on
     /// the surface kind so the caller does not need to branch.
-    CopySurfaceText { pane: PaneId, surface: SurfaceId },
+    CopySurfaceText {
+        pane: PaneId,
+        surface: SurfaceId,
+    },
     /// Copy the workspace's currently-focused pane's text identifier
     /// (terminal cwd or browser URL) to the clipboard. Used by the
     /// sidebar workspace right-click "Copy path" item; uses the same
     /// focused-pane → first-leaf-pane → workspace.root_dir resolution
     /// as ShowFocusedPaneFolder.
-    CopyFocusedPaneText { workspace: WorkspaceId },
+    CopyFocusedPaneText {
+        workspace: WorkspaceId,
+    },
     /// Drop every notification from the in-process transcript and
     /// withdraw their matching desktop toasts in one sweep. Fired by
     /// the "All Clear" button at the top of the bell popover.
@@ -622,7 +712,9 @@ pub enum GtkCommand {
     /// breathing opacity of the workspace's left color bar.
     /// `activity: None` clears the presence (session end / dead PID).
     /// Fire-and-forget — the sidebar render has no reply.
-    SetAgentStatus { workspace: WorkspaceId },
+    SetAgentStatus {
+        workspace: WorkspaceId,
+    },
     /// Ask the GTK thread whether an agent surface is genuinely visible:
     /// active app window, focused containing pane, and active pane tab.
     QueryAgentSurfaceVisible {

@@ -18,6 +18,7 @@
 //! rows expose hover-X close, color bar, right-click menu (rename /
 //! recolor / close).
 
+use crate::activity::{ActivityEntry, ActivityNowEntry, ActivityStore};
 use crate::bridge::{Bridge, GtkCommand};
 use crate::notifications::{NotificationEntry, NotificationStore};
 use crate::ui::update_banner::UpdateBanner;
@@ -136,8 +137,10 @@ pub struct Sidebar {
     on_close: Rc<dyn Fn(WorkspaceId)>,
     bell_button: gtk::MenuButton,
     bell_popover: gtk::Popover,
+    activity_popover: gtk::Popover,
     usage_button: gtk::MenuButton,
     notifications: NotificationStore,
+    activities: ActivityStore,
     attentions: Rc<RefCell<HashSet<WorkspaceId>>>,
     notification_workspaces: Rc<RefCell<HashSet<WorkspaceId>>>,
     notification_badges: Rc<RefCell<HashMap<WorkspaceId, gtk::Box>>>,
@@ -166,6 +169,7 @@ impl Sidebar {
         on_close: C,
         bridge: Bridge,
         notifications: NotificationStore,
+        activities: ActivityStore,
         tokio_handle: Option<tokio::runtime::Handle>,
     ) -> Self
     where
@@ -228,6 +232,21 @@ impl Sidebar {
         bell_popover.set_size_request(320, -1);
         bell_button.set_popover(Some(&bell_popover));
 
+        let activity_button = gtk::MenuButton::new();
+        activity_button.set_icon_name("view-list-symbolic");
+        activity_button.set_tooltip_text(Some("Agent activity"));
+        activity_button.update_property(&[gtk::accessible::Property::Label("Agent activity")]);
+        let activity_popover = gtk::Popover::new();
+        activity_popover.set_size_request(400, -1);
+        activity_button.set_popover(Some(&activity_popover));
+        let bridge_for_activity = bridge.clone();
+        activity_popover.connect_show(move |_| {
+            let bridge = bridge_for_activity.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::RefreshActivityPopover).await;
+            });
+        });
+
         let store_for_show = notifications.clone();
         let bridge_for_rows = bridge.clone();
         let bridge_for_close = bridge.clone();
@@ -273,6 +292,7 @@ impl Sidebar {
         header.set_title_widget(Some(&header_title));
         header.pack_start(&new_btn);
         header.pack_end(&bell_button);
+        header.pack_end(&activity_button);
 
         // ---- Bottom footer: small left options button ----
         // Click dispatches ShowOptionsDialog through the bridge so the window
@@ -370,8 +390,10 @@ impl Sidebar {
             on_close,
             bell_button,
             bell_popover,
+            activity_popover,
             usage_button,
             notifications,
+            activities,
             attentions,
             notification_workspaces: Rc::new(RefCell::new(HashSet::new())),
             notification_badges: Rc::new(RefCell::new(HashMap::new())),
@@ -676,6 +698,280 @@ impl Sidebar {
                 self.bridge.clone(),
                 self.bell_popover.clone(),
             )));
+        }
+    }
+
+    pub fn refresh_activity_popover(
+        &self,
+        current: &[ActivityNowEntry],
+        existing_workspaces: &HashSet<WorkspaceId>,
+    ) {
+        if self.activity_popover.is_visible() {
+            self.activity_popover.set_child(Some(&render_activity_list(
+                &self.activities,
+                current,
+                existing_workspaces,
+                self.bridge.clone(),
+                self.activity_popover.clone(),
+            )));
+        }
+    }
+}
+
+fn render_activity_list(
+    store: &ActivityStore,
+    current: &[ActivityNowEntry],
+    existing_workspaces: &HashSet<WorkspaceId>,
+    bridge: Bridge,
+    popover: gtk::Popover,
+) -> gtk::Widget {
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    root.set_margin_top(8);
+    root.set_margin_bottom(8);
+    root.set_margin_start(8);
+    root.set_margin_end(8);
+
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let title = gtk::Label::new(Some("Agent Activity"));
+    title.add_css_class("heading");
+    title.set_halign(gtk::Align::Start);
+    title.set_hexpand(true);
+    header.append(&title);
+    let clear = gtk::Button::with_label("Clear");
+    clear.add_css_class("flat");
+    clear.set_tooltip_text(Some("Clear recent Agent activity"));
+    clear.update_property(&[gtk::accessible::Property::Label(
+        "Clear recent Agent activity",
+    )]);
+    let bridge_for_clear = bridge.clone();
+    clear.connect_clicked(move |_| {
+        let bridge = bridge_for_clear.clone();
+        gtk::glib::MainContext::default().spawn_local(async move {
+            let _ = bridge.tx.send(GtkCommand::ClearActivities).await;
+        });
+    });
+    header.append(&clear);
+    root.append(&header);
+
+    let scroll = gtk::ScrolledWindow::new();
+    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    scroll.set_min_content_height(180);
+    scroll.set_max_content_height(480);
+    scroll.set_propagate_natural_height(true);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+
+    content.append(&activity_section_label("NOW"));
+    if current.is_empty() {
+        content.append(&activity_empty_label("No active Agents."));
+    } else {
+        for entry in current {
+            content.append(&activity_now_row(
+                entry,
+                store,
+                bridge.clone(),
+                popover.clone(),
+            ));
+        }
+    }
+
+    content.append(&activity_section_label("RECENT"));
+    let entries = store.entries();
+    if entries.is_empty() {
+        content.append(&activity_empty_label("No recent activity."));
+    } else {
+        for entry in entries.iter().rev() {
+            content.append(&activity_recent_row(
+                entry,
+                existing_workspaces.contains(&entry.workspace),
+                bridge.clone(),
+                popover.clone(),
+            ));
+        }
+    }
+    scroll.set_child(Some(&content));
+    root.append(&scroll);
+    root.upcast()
+}
+
+fn activity_section_label(text: &str) -> gtk::Widget {
+    let label = gtk::Label::new(Some(text));
+    label.set_halign(gtk::Align::Start);
+    label.add_css_class("caption-heading");
+    label.add_css_class("dim-label");
+    label.set_margin_top(4);
+    label.upcast()
+}
+
+fn activity_empty_label(text: &str) -> gtk::Widget {
+    let label = gtk::Label::new(Some(text));
+    label.set_halign(gtk::Align::Start);
+    label.add_css_class("dim-label");
+    label.set_margin_start(8);
+    label.set_margin_bottom(6);
+    label.upcast()
+}
+
+fn activity_now_row(
+    entry: &ActivityNowEntry,
+    store: &ActivityStore,
+    bridge: Bridge,
+    popover: gtk::Popover,
+) -> gtk::Widget {
+    let when = store
+        .entries()
+        .iter()
+        .rev()
+        .find(|recent| recent.surface == entry.surface)
+        .map(|recent| format_relative_time(&recent.created_at));
+    activity_row(
+        &entry.agent,
+        Some(entry.status),
+        entry.seen,
+        &entry.status_text,
+        &entry.workspace_label,
+        &entry.surface_label,
+        &entry.color,
+        when.as_deref(),
+        true,
+        entry.workspace,
+        entry.pane,
+        entry.surface,
+        bridge,
+        popover,
+    )
+}
+
+fn activity_recent_row(
+    entry: &ActivityEntry,
+    workspace_exists: bool,
+    bridge: Bridge,
+    popover: gtk::Popover,
+) -> gtk::Widget {
+    activity_row(
+        &entry.agent,
+        entry.status,
+        false,
+        &entry.summary,
+        &entry.workspace_label,
+        &entry.surface_label,
+        &entry.color,
+        Some(&format_relative_time(&entry.created_at)),
+        workspace_exists,
+        entry.workspace,
+        entry.pane,
+        entry.surface,
+        bridge,
+        popover,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn activity_row(
+    agent: &str,
+    status: Option<AgentStatus>,
+    seen: bool,
+    summary: &str,
+    workspace_label: &str,
+    surface_label: &str,
+    color: &str,
+    when: Option<&str>,
+    enabled: bool,
+    workspace: WorkspaceId,
+    pane: flowmux_core::PaneId,
+    surface: flowmux_core::SurfaceId,
+    bridge: Bridge,
+    popover: gtk::Popover,
+) -> gtk::Widget {
+    let button = gtk::Button::new();
+    button.add_css_class("flat");
+    button.set_sensitive(enabled);
+    if !enabled {
+        button.set_tooltip_text(Some("The original workspace is closed"));
+    }
+
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.set_margin_top(5);
+    row.set_margin_bottom(5);
+    row.append(&color_bar(color));
+
+    let icon_name = status
+        .map(|status| agent_status_icon_name(status, seen))
+        .unwrap_or("application-exit-symbolic");
+    let icon = gtk::Image::from_icon_name(icon_name);
+    icon.set_pixel_size(14);
+    if let Some(status) = status {
+        icon.add_css_class(agent_status_css_class(status, seen));
+    }
+    row.append(&icon);
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    text.set_hexpand(true);
+    let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let agent = gtk::Label::new(Some(agent));
+    agent.set_halign(gtk::Align::Start);
+    agent.set_hexpand(true);
+    agent.add_css_class("caption-heading");
+    heading.append(&agent);
+    if let Some(when) = when {
+        let when = gtk::Label::new(Some(when));
+        when.add_css_class("caption");
+        when.add_css_class("dim-label");
+        heading.append(&when);
+    }
+    text.append(&heading);
+
+    let summary = gtk::Label::new(Some(summary));
+    summary.set_halign(gtk::Align::Start);
+    summary.set_xalign(0.0);
+    summary.set_wrap(true);
+    summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    summary.set_lines(3);
+    summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    summary.set_max_width_chars(44);
+    text.append(&summary);
+
+    let context = gtk::Label::new(Some(&format!("{workspace_label} · {surface_label}")));
+    context.set_halign(gtk::Align::Start);
+    context.set_xalign(0.0);
+    context.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    context.set_single_line_mode(true);
+    context.add_css_class("caption");
+    context.add_css_class("dim-label");
+    text.append(&context);
+    row.append(&text);
+    button.set_child(Some(&row));
+
+    if enabled {
+        button.connect_clicked(move |_| {
+            popover.popdown();
+            let bridge = bridge.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::OpenActivityTarget {
+                        workspace,
+                        pane,
+                        surface,
+                    })
+                    .await;
+            });
+        });
+    }
+    button.upcast()
+}
+
+fn format_relative_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
+    let seconds = chrono::Utc::now()
+        .signed_duration_since(*ts)
+        .num_seconds()
+        .max(0);
+    match seconds {
+        0..=59 => format!("{seconds}s"),
+        60..=3599 => format!("{}m", seconds / 60),
+        3600..=86_399 => format!("{}h", seconds / 3600),
+        _ => {
+            let local: chrono::DateTime<chrono::Local> = (*ts).into();
+            local.format("%m/%d").to_string()
         }
     }
 }
@@ -1825,6 +2121,22 @@ mod tests {
         labels
     }
 
+    #[cfg(not(target_os = "macos"))]
+    fn descendant_widgets(widget: &impl IsA<gtk::Widget>) -> Vec<gtk::Widget> {
+        fn visit(widget: &gtk::Widget, widgets: &mut Vec<gtk::Widget>) {
+            widgets.push(widget.clone());
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                visit(&current, widgets);
+                child = current.next_sibling();
+            }
+        }
+
+        let mut widgets = Vec::new();
+        visit(widget.as_ref(), &mut widgets);
+        widgets
+    }
+
     fn ws_with_active_terminal_cwd(cwd: Option<PathBuf>) -> Workspace {
         let surface = PaneSurface::terminal("auto", cwd.clone());
         let surface_id = surface.id;
@@ -2004,6 +2316,138 @@ mod tests {
             .all(|segment| segment.x1 != 6.5));
     }
 
+    #[test]
+    fn activity_relative_time_uses_compact_units() {
+        let now = chrono::Utc::now();
+        assert_eq!(
+            format_relative_time(&(now - chrono::Duration::seconds(10))),
+            "10s"
+        );
+        assert_eq!(
+            format_relative_time(&(now - chrono::Duration::seconds(90))),
+            "1m"
+        );
+        assert_eq!(
+            format_relative_time(&(now - chrono::Duration::hours(2))),
+            "2h"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn activity_entry_point_and_rows_remain_available_and_navigable() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let (bridge, rx) = crate::bridge::Bridge::new();
+        let store = ActivityStore::new();
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge.clone(),
+            NotificationStore::new(),
+            store.clone(),
+            None,
+        );
+        let menu_buttons: Vec<gtk::MenuButton> = descendant_widgets(&sidebar.header)
+            .into_iter()
+            .filter_map(|widget| widget.downcast().ok())
+            .collect();
+        assert!(menu_buttons
+            .iter()
+            .any(|button| button.tooltip_text().as_deref() == Some("Agent activity")));
+
+        let workspace = WorkspaceId::new();
+        let pane = PaneId::new();
+        let surface = SurfaceId::new();
+        let mut recent = ActivityEntry {
+            agent: "claude".into(),
+            status: Some(AgentStatus::Done),
+            summary: "Completed: fixed a deliberately long summary without changing the window"
+                .into(),
+            created_at: chrono::Utc::now() - chrono::Duration::minutes(2),
+            workspace,
+            pane,
+            surface,
+            workspace_label: "flowmux-terminal".into(),
+            surface_label: "zsh".into(),
+            color: "#abcdef".into(),
+            session_id: Some("session-1".into()),
+            source: "flowmux:hook".into(),
+        };
+        assert!(store.push(recent.clone()));
+        recent.workspace = WorkspaceId::new();
+        recent.surface = SurfaceId::new();
+        recent.summary = "Session ended".into();
+        recent.status = None;
+        assert!(store.push(recent));
+
+        let popover = gtk::Popover::new();
+        let rendered = render_activity_list(
+            &store,
+            &[ActivityNowEntry {
+                agent: "codex".into(),
+                status: AgentStatus::Working,
+                status_text: "Running tests".into(),
+                seen: true,
+                workspace,
+                pane,
+                surface,
+                workspace_label: "flowmux-terminal".into(),
+                surface_label: "zsh".into(),
+                color: "#abcdef".into(),
+            }],
+            &HashSet::from([workspace]),
+            bridge,
+            popover,
+        );
+        let widgets = descendant_widgets(&rendered);
+        let labels: Vec<gtk::Label> = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast().ok())
+            .collect();
+        for expected in ["NOW", "RECENT", "Running tests", "Session ended"] {
+            assert!(labels.iter().any(|label| label.label() == expected));
+        }
+        let summary = labels
+            .iter()
+            .find(|label| label.label().starts_with("Completed:"))
+            .unwrap();
+        assert!(summary.wraps());
+        assert_eq!(summary.lines(), 3);
+
+        let scroll = widgets
+            .iter()
+            .find_map(|widget| widget.clone().downcast::<gtk::ScrolledWindow>().ok())
+            .unwrap();
+        assert_eq!(scroll.max_content_height(), 480);
+        let rows: Vec<gtk::Button> = widgets
+            .into_iter()
+            .filter_map(|widget| widget.downcast().ok())
+            .collect();
+        assert!(rows.iter().any(|button| !button.is_sensitive()));
+        let completed = rows
+            .into_iter()
+            .find(|button| {
+                descendant_labels(button)
+                    .iter()
+                    .any(|label| label.label().starts_with("Completed:"))
+            })
+            .unwrap();
+        completed.emit_clicked();
+        while gtk::glib::MainContext::default().pending() {
+            gtk::glib::MainContext::default().iteration(false);
+        }
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            GtkCommand::OpenActivityTarget {
+                workspace: target_workspace,
+                pane: target_pane,
+                surface: target_surface,
+            } if target_workspace == workspace && target_pane == pane && target_surface == surface
+        ));
+    }
+
     /// Smoke test that row_widget can build a stable widget tree with a name
     /// and subtitle lines. Requires GTK init, so headless environments skip it.
     #[cfg(not(target_os = "macos"))]
@@ -2117,7 +2561,14 @@ mod tests {
             return;
         }
         let bridge = crate::bridge::Bridge::new().0;
-        let sidebar = Sidebar::new(|_| {}, |_| {}, bridge, NotificationStore::new(), None);
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+        );
         let mut ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/worktree")));
         sidebar.upsert(&ws);
 
@@ -2169,7 +2620,14 @@ mod tests {
             return;
         }
         let bridge = crate::bridge::Bridge::new().0;
-        let sidebar = Sidebar::new(|_| {}, |_| {}, bridge, NotificationStore::new(), None);
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+        );
         let footer = sidebar
             .root
             .last_child()
@@ -2210,7 +2668,14 @@ mod tests {
             return;
         }
         let bridge = crate::bridge::Bridge::new().0;
-        let sidebar = Sidebar::new(|_| {}, |_| {}, bridge, NotificationStore::new(), None);
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+        );
         let titles = sidebar.workspace_titles();
 
         let mut ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/home/u/dev/projA")));
@@ -2263,7 +2728,14 @@ mod tests {
             return;
         }
         let bridge = crate::bridge::Bridge::new().0;
-        let sidebar = Sidebar::new(|_| {}, |_| {}, bridge, NotificationStore::new(), None);
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+        );
 
         let workspaces: Vec<Workspace> = (0..4)
             .map(|index| {

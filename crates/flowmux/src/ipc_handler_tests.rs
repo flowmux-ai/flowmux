@@ -504,10 +504,10 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
         status: None,
         activity: Some(AgentActivity::Running),
         pid: Some(1234),
-        source: None,
+        source: Some("flowmux:hook".into()),
         seq: Some(10),
         message: None,
-        custom_status: None,
+        custom_status: Some("Starting turn".into()),
         session_id: None,
     });
     tokio::pin!(response);
@@ -535,6 +535,18 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
         command,
         GtkCommand::SetAgentStatus { workspace } if workspace == expected_workspace
     ));
+    let command = rx
+        .recv()
+        .await
+        .expect("accepted hook update should dispatch AddActivity");
+    let GtkCommand::AddActivity { entry } = command else {
+        panic!("expected AddActivity");
+    };
+    assert_eq!(entry.agent, "codex");
+    assert_eq!(entry.summary, "Starting turn");
+    assert_eq!(entry.workspace, expected_workspace);
+    assert_eq!(entry.pane, pane);
+    assert_eq!(entry.surface, surface);
     assert_eq!(
         handler
             .inner
@@ -570,6 +582,17 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
     let command = rx
         .recv()
         .await
+        .expect("activity clear should dispatch Session ended");
+    let GtkCommand::AddActivity { entry } = command else {
+        panic!("expected AddActivity");
+    };
+    assert_eq!(entry.summary, "Session ended");
+    assert_eq!(entry.status, None);
+    assert_eq!(entry.workspace, expected_workspace);
+
+    let command = rx
+        .recv()
+        .await
         .expect("activity clear should dispatch SetAgentStatus");
     assert!(matches!(
         command,
@@ -586,9 +609,63 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
     );
 }
 
+#[tokio::test]
+async fn stale_and_screen_reports_do_not_emit_recent_activity() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    for (source, seq, custom_status) in [
+        ("flowmux:hook", 20, "Starting turn"),
+        ("flowmux:hook", 19, "Completed: stale"),
+        ("flowmux:screen", 21, "Working"),
+    ] {
+        let response = handler.handle(Request::AgentActivityUpdate {
+            pane: Some(pane),
+            surface: Some(surface),
+            agent: "codex".into(),
+            status: Some(AgentStatus::Working),
+            activity: None,
+            pid: None,
+            source: Some(source.into()),
+            seq: Some(seq),
+            message: None,
+            custom_status: Some(custom_status.into()),
+            session_id: Some("session-1".into()),
+        });
+        tokio::pin!(response);
+        let command = tokio::select! {
+            response = &mut response => panic!("activity update returned before visibility query: {response:?}"),
+            command = rx.recv() => command.unwrap(),
+        };
+        let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+            panic!("expected visibility query");
+        };
+        ack.send(false).unwrap();
+        assert!(matches!(response.await, Response::Ok));
+
+        if seq == 20 {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                GtkCommand::SetAgentStatus { .. }
+            ));
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                GtkCommand::AddActivity { .. }
+            ));
+        } else if seq == 21 {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                GtkCommand::SetAgentStatus { .. }
+            ));
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "{source} seq {seq} unexpectedly emitted recent activity"
+        );
+    }
+}
+
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "current_thread")]
-async fn agent_activity_session_id_is_persisted_for_restart_resume() {
+async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it() {
     let _guard = home_env_lock();
     let _restore = DataEnvRestore(std::env::var_os("XDG_DATA_HOME"));
     let data = tempfile::tempdir().unwrap();
@@ -619,6 +696,14 @@ async fn agent_activity_session_id_is_persisted_for_restart_resume() {
     };
     ack.send(false).unwrap();
     assert!(matches!(response.await, Response::Ok));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::SetAgentStatus { .. }
+    ));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::AddActivity { .. }
+    ));
 
     let store =
         flowmux_state::AgentSessionStore::new(data.path().join("flowmux").join("agent-sessions"));
@@ -626,6 +711,76 @@ async fn agent_activity_session_id_is_persisted_for_restart_resume() {
         store.lookup("claude", surface).as_deref(),
         Some("claude-session-1")
     );
+
+    assert!(matches!(
+        handler
+            .handle(Request::AgentActivityUpdate {
+                pane: Some(pane),
+                surface: Some(surface),
+                agent: "claude".into(),
+                status: None,
+                activity: None,
+                pid: Some(4321),
+                source: Some("flowmux:hook".into()),
+                seq: Some(10),
+                message: None,
+                custom_status: Some("Session ended".into()),
+                session_id: Some("stale-session".into()),
+            })
+            .await,
+        Response::Ok
+    ));
+    assert!(rx.try_recv().is_err());
+    assert!(matches!(
+        handler
+            .handle(Request::AgentSessionForget {
+                agent: "claude".into(),
+                surface,
+            })
+            .await,
+        Response::Ok
+    ));
+    assert_eq!(
+        store.lookup("claude", surface).as_deref(),
+        Some("claude-session-1")
+    );
+
+    assert!(matches!(
+        handler
+            .handle(Request::AgentActivityUpdate {
+                pane: Some(pane),
+                surface: Some(surface),
+                agent: "claude".into(),
+                status: None,
+                activity: None,
+                pid: Some(4321),
+                source: Some("flowmux:hook".into()),
+                seq: Some(12),
+                message: None,
+                custom_status: Some("Session ended".into()),
+                session_id: Some("claude-session-1".into()),
+            })
+            .await,
+        Response::Ok
+    ));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::AddActivity { .. }
+    ));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::SetAgentStatus { .. }
+    ));
+    assert!(matches!(
+        handler
+            .handle(Request::AgentSessionForget {
+                agent: "claude".into(),
+                surface,
+            })
+            .await,
+        Response::Ok
+    ));
+    assert_eq!(store.lookup("claude", surface), None);
 }
 
 #[tokio::test]
