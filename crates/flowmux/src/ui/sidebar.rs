@@ -40,6 +40,15 @@ type RowsCell = Rc<RefCell<Vec<(WorkspaceId, gtk::ListBoxRow)>>>;
 const WORKSPACE_DND_MIME: &str = "application/x-flowmux-workspace";
 const SIDEBAR_TREE_GUTTER_WIDTH: i32 = 14;
 
+#[derive(Default)]
+struct ActivityPanelLayoutState {
+    initialized: Cell<bool>,
+    user_adjusted: Cell<bool>,
+    updating_position: Cell<bool>,
+    layout_pending: Cell<bool>,
+    last_split_height: Cell<i32>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TreeBranch {
     Middle,
@@ -142,7 +151,7 @@ pub struct Sidebar {
     activity_panel: gtk::Box,
     activity_list: gtk::Box,
     activity_split: gtk::Paned,
-    activity_position_initialized: Rc<Cell<bool>>,
+    activity_layout: Rc<ActivityPanelLayoutState>,
     activity_has_agents: Rc<Cell<bool>>,
     agent_bar_mode: Rc<Cell<bool>>,
     agent_bar_button: gtk::ToggleButton,
@@ -403,8 +412,39 @@ impl Sidebar {
 
         let activity_panel_for_toggle = activity_panel.clone();
         let activity_split_for_toggle = activity_split.clone();
-        let activity_position_initialized = Rc::new(Cell::new(false));
-        let activity_position_initialized_for_toggle = activity_position_initialized.clone();
+        let activity_layout = Rc::new(ActivityPanelLayoutState::default());
+        let activity_panel_for_position = activity_panel.clone();
+        let activity_layout_for_position = activity_layout.clone();
+        activity_split.connect_position_notify(move |split| {
+            let height = split.height();
+            let previous_height = activity_layout_for_position
+                .last_split_height
+                .replace(height);
+            if activity_layout_for_position.updating_position.get()
+                || !activity_layout_for_position.initialized.get()
+                || height <= 0
+                || height != previous_height
+                || !activity_panel_for_position.is_visible()
+                || activity_layout_for_position.layout_pending.get()
+            {
+                return;
+            }
+            // At a stable allocation, a position change not initiated by our
+            // pending layout is the user's divider adjustment.
+            activity_layout_for_position.user_adjusted.set(true);
+        });
+        let activity_panel_for_resize = activity_panel.clone();
+        let activity_layout_for_resize = activity_layout.clone();
+        activity_split.connect_max_position_notify(move |split| {
+            if activity_panel_for_resize.is_visible() {
+                schedule_activity_panel_layout(
+                    &activity_panel_for_resize,
+                    split,
+                    &activity_layout_for_resize,
+                );
+            }
+        });
+        let activity_layout_for_toggle = activity_layout.clone();
         let activity_has_agents = Rc::new(Cell::new(false));
         let activity_has_agents_for_toggle = activity_has_agents.clone();
         let agent_bar_mode = Rc::new(Cell::new(agent_bar_mode));
@@ -416,7 +456,7 @@ impl Sidebar {
             set_activity_panel_visible(
                 &activity_panel_for_toggle,
                 &activity_split_for_toggle,
-                &activity_position_initialized_for_toggle,
+                &activity_layout_for_toggle,
                 !enabled && activity_has_agents_for_toggle.get(),
             );
             let bridge = bridge_for_toggle.clone();
@@ -445,7 +485,7 @@ impl Sidebar {
             activity_panel,
             activity_list,
             activity_split,
-            activity_position_initialized,
+            activity_layout,
             activity_has_agents,
             agent_bar_mode,
             agent_bar_button,
@@ -766,21 +806,20 @@ impl Sidebar {
     ) {
         let has_agents = !current.is_empty();
         self.activity_has_agents.set(has_agents);
+        if has_agents {
+            render_activity_rows(
+                &self.activity_list,
+                &self.activities,
+                current,
+                focused_surface,
+                self.bridge.clone(),
+            );
+        }
         set_activity_panel_visible(
             &self.activity_panel,
             &self.activity_split,
-            &self.activity_position_initialized,
+            &self.activity_layout,
             has_agents && !self.agent_bar_mode.get(),
-        );
-        if !has_agents {
-            return;
-        }
-        render_activity_rows(
-            &self.activity_list,
-            &self.activities,
-            current,
-            focused_surface,
-            self.bridge.clone(),
         );
     }
 
@@ -790,7 +829,7 @@ impl Sidebar {
         set_activity_panel_visible(
             &self.activity_panel,
             &self.activity_split,
-            &self.activity_position_initialized,
+            &self.activity_layout,
             !enabled && self.activity_has_agents.get(),
         );
     }
@@ -804,18 +843,67 @@ impl Sidebar {
 fn set_activity_panel_visible(
     panel: &gtk::Box,
     split: &gtk::Paned,
-    position_initialized: &Rc<Cell<bool>>,
+    layout: &Rc<ActivityPanelLayoutState>,
     visible: bool,
 ) {
     panel.set_visible(visible);
-    if visible && !position_initialized.replace(true) {
-        split.add_tick_callback(|split, _| {
-            if split.height() == 0 {
-                return gtk::glib::ControlFlow::Continue;
-            }
-            split.set_position(split.height() * 2 / 3);
-            gtk::glib::ControlFlow::Break
-        });
+    if visible {
+        schedule_activity_panel_layout(panel, split, layout);
+    }
+}
+
+fn schedule_activity_panel_layout(
+    panel: &gtk::Box,
+    split: &gtk::Paned,
+    layout: &Rc<ActivityPanelLayoutState>,
+) {
+    if layout.layout_pending.replace(true) {
+        return;
+    }
+    let panel = panel.clone();
+    let layout = layout.clone();
+    split.add_tick_callback(move |split, _| {
+        let total_height = split.height();
+        if total_height <= 0 || panel.width() <= 0 {
+            return gtk::glib::ControlFlow::Continue;
+        }
+
+        let (_, natural_height, _, _) = panel.measure(gtk::Orientation::Vertical, panel.width());
+        let current_height = total_height.saturating_sub(split.position());
+        let target_height = activity_panel_target_height(
+            total_height,
+            natural_height,
+            current_height,
+            layout.user_adjusted.get(),
+        );
+
+        layout.last_split_height.set(total_height);
+        layout.updating_position.set(true);
+        split.set_position(total_height.saturating_sub(target_height));
+        layout.updating_position.set(false);
+        layout.initialized.set(true);
+        layout.layout_pending.set(false);
+        gtk::glib::ControlFlow::Break
+    });
+}
+
+fn activity_panel_target_height(
+    total_height: i32,
+    natural_height: i32,
+    current_height: i32,
+    user_adjusted: bool,
+) -> i32 {
+    let maximum_auto_height = total_height.max(0) / 3;
+    let automatic_height = natural_height.clamp(0, maximum_auto_height);
+    if !user_adjusted {
+        return automatic_height;
+    }
+    // A user height below the cap becomes the baseline until content outgrows
+    // it. Above the cap, preserve the divider and let the list scroll there.
+    if current_height > maximum_auto_height {
+        current_height.min(total_height)
+    } else {
+        current_height.max(automatic_height)
     }
 }
 
@@ -835,7 +923,7 @@ fn activity_list() -> (gtk::Widget, gtk::Box) {
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     scroll.set_vscrollbar_policy(gtk::PolicyType::Automatic);
     scroll.set_overlay_scrolling(false);
-    scroll.set_min_content_height(180);
+    scroll.set_propagate_natural_height(true);
     scroll.set_vexpand(true);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
     scroll.set_child(Some(&content));
@@ -2109,6 +2197,27 @@ mod tests {
         MetadataTreeRowLayout { row, line }
     }
 
+    #[test]
+    fn activity_panel_automatically_fits_content_until_one_third() {
+        assert_eq!(activity_panel_target_height(900, 96, 300, false), 96);
+        assert_eq!(activity_panel_target_height(900, 240, 96, false), 240);
+        assert_eq!(activity_panel_target_height(900, 420, 240, false), 300);
+        assert_eq!(activity_panel_target_height(900, 96, 300, false), 96);
+    }
+
+    #[test]
+    fn activity_panel_grows_from_a_user_adjusted_height() {
+        assert_eq!(activity_panel_target_height(900, 120, 180, true), 180);
+        assert_eq!(activity_panel_target_height(900, 240, 180, true), 240);
+        assert_eq!(activity_panel_target_height(900, 420, 240, true), 300);
+    }
+
+    #[test]
+    fn activity_panel_preserves_user_height_above_one_third() {
+        assert_eq!(activity_panel_target_height(900, 120, 360, true), 360);
+        assert_eq!(activity_panel_target_height(900, 600, 360, true), 360);
+    }
+
     #[cfg(not(target_os = "macos"))]
     fn tree_gutter_widths(meta: &gtk::Box) -> Vec<i32> {
         let mut widths = Vec::new();
@@ -2434,11 +2543,17 @@ mod tests {
         sidebar.refresh_activity_panel(&current, Some(surface));
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         assert!(sidebar.activity_panel.is_visible());
+        let (_, one_agent_natural_height, _, _) = sidebar
+            .activity_panel
+            .measure(gtk::Orientation::Vertical, sidebar.activity_panel.width());
+        let one_agent_height = activity_split.height() - activity_split.position();
         assert!(
-            (activity_split.position() * 3 - activity_split.height() * 2).abs() <= 3,
-            "divider must start at two thirds: position={} height={}",
-            activity_split.position(),
-            activity_split.height()
+            (one_agent_height - one_agent_natural_height).abs() <= 3,
+            "one Agent must use its natural height: actual={one_agent_height} natural={one_agent_natural_height}"
+        );
+        assert!(
+            one_agent_height * 3 < activity_split.height(),
+            "one Agent must not reserve the full lower third"
         );
         let rendered = sidebar.activity_panel.first_child().unwrap();
         let widgets = descendant_widgets(&rendered);
@@ -2501,6 +2616,56 @@ mod tests {
             } if target_workspace == workspace && target_pane == pane && target_surface == surface
         ));
 
+        assert!(!sidebar.activity_layout.user_adjusted.get());
+        sidebar.refresh_activity_panel(&[], None);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(!sidebar.activity_layout.user_adjusted.get());
+        sidebar.refresh_activity_panel(&current, Some(surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(!sidebar.activity_layout.user_adjusted.get());
+        assert!(
+            ((activity_split.height() - activity_split.position()) - one_agent_natural_height)
+                .abs()
+                <= 3,
+            "hiding and restoring Agents must preserve automatic sizing"
+        );
+
+        let maximum_auto_height = activity_split.height() / 3;
+        let user_height = (one_agent_natural_height + 12).min(maximum_auto_height - 1);
+        activity_split.set_position(activity_split.height() - user_height);
+        assert!(sidebar.activity_layout.user_adjusted.get());
+        sidebar.refresh_activity_panel(&current, Some(surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(
+            ((activity_split.height() - activity_split.position()) - user_height).abs() <= 3,
+            "one Agent must first fill the user-adjusted height"
+        );
+
+        let two: Vec<_> = (0..2)
+            .map(|index| {
+                let mut entry = current[0].clone();
+                entry.surface = SurfaceId::new();
+                entry.status_text = format!("Growing Agent {index}");
+                entry
+            })
+            .collect();
+        sidebar.refresh_activity_panel(&two, Some(two[1].surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        let (_, two_agent_natural_height, _, _) = sidebar
+            .activity_panel
+            .measure(gtk::Orientation::Vertical, sidebar.activity_panel.width());
+        assert!(
+            two_agent_natural_height > user_height
+                && two_agent_natural_height < maximum_auto_height,
+            "test setup must place two Agents between the user height and one-third cap"
+        );
+        assert!(
+            ((activity_split.height() - activity_split.position()) - two_agent_natural_height)
+                .abs()
+                <= 3,
+            "Agents must resume natural growth after filling the user height"
+        );
+
         let many: Vec<_> = (0..8)
             .map(|index| {
                 let mut entry = current[0].clone();
@@ -2512,6 +2677,11 @@ mod tests {
         let bottom_surface = many.last().unwrap().surface;
         sidebar.refresh_activity_panel(&many, Some(bottom_surface));
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        let many_agent_height = activity_split.height() - activity_split.position();
+        assert!(
+            (many_agent_height * 3 - activity_split.height()).abs() <= 3,
+            "overflowing Agents must stop growing at one third"
+        );
         let adjustment = scroll.vadjustment();
         let bottom = adjustment.upper() - adjustment.page_size();
         assert!(bottom > 0.0, "test setup must overflow the Agents list");
@@ -2534,14 +2704,25 @@ mod tests {
             GtkCommand::SetAgentBarMode { enabled: true }
         ));
 
-        activity_split.set_position(300);
+        let above_one_third_height = activity_split.height() / 3 + 24;
+        let user_position = activity_split.height() - above_one_third_height;
+        activity_split.set_position(user_position);
         sidebar.agent_bar_button.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(sidebar.activity_panel.is_visible());
         assert_eq!(
             activity_split.position(),
-            300,
+            user_position,
             "switching modes must preserve the user-adjusted divider"
+        );
+        assert!(
+            (activity_split.height() - activity_split.position()) * 3 > activity_split.height(),
+            "test setup must preserve a user height above one third"
+        );
+        assert!(
+            refreshed_scroll.vadjustment().upper() - refreshed_scroll.vadjustment().page_size()
+                > 0.0,
+            "a user height above one third must keep overflowing Agents scrollable"
         );
         assert!(matches!(
             rx.try_recv().unwrap(),
@@ -2554,6 +2735,48 @@ mod tests {
             "Agent Activity must hide when the last live Agent disappears"
         );
         window.close();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn refreshing_activity_content_releases_replaced_row() {
+        let (bridge, _rx) = crate::bridge::Bridge::new();
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge,
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+            true,
+        );
+        let surface = SurfaceId::new();
+        let mut current = [ActivityNowEntry {
+            agent: "codex".into(),
+            status: AgentStatus::Working,
+            status_text: "Running tests".into(),
+            seen: true,
+            workspace: WorkspaceId::new(),
+            pane: PaneId::new(),
+            surface,
+            workspace_label: "flowmux-terminal".into(),
+            surface_label: "zsh".into(),
+            color: "#abcdef".into(),
+        }];
+        sidebar.refresh_activity_panel(&current, Some(surface));
+        let replaced_row = sidebar.activity_list.first_child().unwrap().downgrade();
+
+        current[0].status_text = "Reviewing patch".into();
+        sidebar.refresh_activity_panel(&current, Some(surface));
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+
+        assert!(
+            replaced_row.upgrade().is_none(),
+            "refreshing Agent content must release the replaced row and its handlers"
+        );
+        assert!(descendant_labels(&sidebar.activity_list)
+            .iter()
+            .any(|label| label.label().starts_with("Reviewing patch")));
     }
 
     /// Smoke test that row_widget can build a stable widget tree with a name
