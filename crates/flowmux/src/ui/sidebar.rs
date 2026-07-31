@@ -973,6 +973,8 @@ fn activity_row(
 ) -> gtk::Widget {
     let button = gtk::Button::new();
     button.add_css_class("flat");
+    button.set_vexpand(false);
+    button.set_valign(gtk::Align::Start);
     button.set_sensitive(enabled);
     if !enabled {
         button.set_tooltip_text(Some("The original workspace is closed"));
@@ -1014,9 +1016,9 @@ fn activity_row(
     )));
     summary.set_halign(gtk::Align::Start);
     summary.set_xalign(0.0);
-    summary.set_wrap(false);
-    summary.set_single_line_mode(true);
-    summary.set_lines(1);
+    summary.set_wrap(true);
+    summary.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    summary.set_lines(3);
     summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
     summary.set_max_width_chars(44);
     summary.add_css_class("caption");
@@ -2519,9 +2521,9 @@ mod tests {
             .iter()
             .find(|label| label.label().starts_with("Completed:"))
             .unwrap();
-        assert!(!summary.wraps());
-        assert!(summary.is_single_line_mode());
-        assert_eq!(summary.lines(), 1);
+        assert!(summary.wraps());
+        assert!(!summary.is_single_line_mode());
+        assert_eq!(summary.lines(), 3);
         assert!(summary.label().contains("flowmux-terminal · zsh"));
 
         let scroll = widgets
@@ -2549,6 +2551,8 @@ mod tests {
                     .any(|label| label.label().starts_with("Completed:"))
             })
             .unwrap();
+        assert!(!completed.vexpands());
+        assert_eq!(completed.valign(), gtk::Align::Start);
         completed.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(matches!(
