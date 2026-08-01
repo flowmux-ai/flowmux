@@ -462,8 +462,8 @@ pub enum GtkCommand {
         surface: SurfaceId,
         title: String,
     },
-    /// The terminal grid changed after a short coalescing window. Re-scan the
-    /// surface so screen-derived Agent state reaches the UI without a click.
+    /// The terminal grid changed. Re-scan the surface so screen-derived Agent
+    /// state reaches the UI without a click. Same-turn events are coalesced.
     TerminalContentsChanged {
         surface: SurfaceId,
     },

@@ -21,7 +21,6 @@ use std::cell::{Cell, RefCell};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
 use vte::prelude::*;
 
 #[derive(Clone)]
@@ -67,11 +66,9 @@ pub struct GhosttyPane {
 /// literal newline" at the prompt without submitting.
 pub const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
 
-/// Full-screen Agent TUIs can repaint several times per frame. Keep one
-/// bounded callback pending per terminal instead of queuing one UI refresh for
-/// every VTE grid mutation.
-const AGENT_CONTENT_REFRESH_DELAY: Duration = Duration::from_millis(100);
-
+/// Full-screen Agent TUIs can emit several content events in one main-loop
+/// turn. Keep one bounded callback pending per terminal instead of queuing one
+/// UI refresh for every VTE grid mutation.
 fn schedule_agent_content_refresh(
     refresh_pending: Rc<Cell<bool>>,
     refresh: Rc<RefCell<dyn FnMut(SurfaceId)>>,
@@ -80,7 +77,7 @@ fn schedule_agent_content_refresh(
     if refresh_pending.replace(true) {
         return;
     }
-    glib::timeout_add_local_once(AGENT_CONTENT_REFRESH_DELAY, move || {
+    glib::idle_add_local_once(move || {
         refresh_pending.set(false);
         (refresh.borrow_mut())(surface);
     });
@@ -2647,6 +2644,15 @@ except (ChildProcessError, ValueError):
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "macos"))]
+    async fn wait_for_idle_cycle() {
+        let (idle_tx, idle_rx) = tokio::sync::oneshot::channel();
+        glib::idle_add_local_once(move || {
+            let _ = idle_tx.send(());
+        });
+        idle_rx.await.expect("idle callback must run");
+    }
+
     #[test]
     fn literal_search_escapes_every_pcre_metacharacter() {
         assert_eq!(
@@ -3128,8 +3134,9 @@ mod tests {
         for _ in 0..3 {
             schedule_agent_content_refresh(pending.clone(), refresh.clone(), surface);
         }
+        assert_eq!(calls.get(), 0, "refresh must be queued on the event loop");
         drop(refresh);
-        gtk::glib::timeout_future(AGENT_CONTENT_REFRESH_DELAY * 2).await;
+        wait_for_idle_cycle().await;
         assert_eq!(
             calls.get(),
             1,
@@ -3159,7 +3166,24 @@ mod tests {
             5_000,
             callbacks,
         );
-        gtk::glib::timeout_future(AGENT_CONTENT_REFRESH_DELAY * 3).await;
+        pane.write_input(b"printf 'flowmux-ready\\n'\n").unwrap();
+        for _ in 0..20 {
+            if pane
+                .screen_text()
+                .as_deref()
+                .is_some_and(|text| text.contains("flowmux-ready"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            pane.screen_text()
+                .as_deref()
+                .is_some_and(|text| text.contains("flowmux-ready")),
+            "test shell must become ready"
+        );
+        wait_for_idle_cycle().await;
         calls.set(0);
 
         pane.write_input(b"printf 'codex working\\n'\n").unwrap();
@@ -3167,7 +3191,7 @@ mod tests {
             if calls.get() > 0 {
                 break;
             }
-            gtk::glib::timeout_future(Duration::from_millis(50)).await;
+            gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         }
         assert!(
             calls.get() > 0,
