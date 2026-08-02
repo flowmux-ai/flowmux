@@ -39,6 +39,7 @@ type RowsCell = Rc<RefCell<Vec<(WorkspaceId, gtk::ListBoxRow)>>>;
 
 const WORKSPACE_DND_MIME: &str = "application/x-flowmux-workspace";
 const SIDEBAR_TREE_GUTTER_WIDTH: i32 = 14;
+const ACTIVITY_PANEL_BOTTOM_PADDING_PX: i32 = 10;
 
 #[derive(Default)]
 struct ActivityPanelLayoutState {
@@ -894,7 +895,9 @@ fn activity_panel_target_height(
     user_adjusted: bool,
 ) -> i32 {
     let maximum_auto_height = total_height.max(0) / 3;
-    let automatic_height = natural_height.clamp(0, maximum_auto_height);
+    let automatic_height = natural_height
+        .saturating_add(ACTIVITY_PANEL_BOTTOM_PADDING_PX)
+        .clamp(0, maximum_auto_height);
     if !user_adjusted {
         return automatic_height;
     }
@@ -2199,16 +2202,16 @@ mod tests {
 
     #[test]
     fn activity_panel_automatically_fits_content_until_one_third() {
-        assert_eq!(activity_panel_target_height(900, 96, 300, false), 96);
-        assert_eq!(activity_panel_target_height(900, 240, 96, false), 240);
+        assert_eq!(activity_panel_target_height(900, 96, 300, false), 106);
+        assert_eq!(activity_panel_target_height(900, 240, 96, false), 250);
         assert_eq!(activity_panel_target_height(900, 420, 240, false), 300);
-        assert_eq!(activity_panel_target_height(900, 96, 300, false), 96);
+        assert_eq!(activity_panel_target_height(900, 96, 300, false), 106);
     }
 
     #[test]
     fn activity_panel_grows_from_a_user_adjusted_height() {
         assert_eq!(activity_panel_target_height(900, 120, 180, true), 180);
-        assert_eq!(activity_panel_target_height(900, 240, 180, true), 240);
+        assert_eq!(activity_panel_target_height(900, 240, 180, true), 250);
         assert_eq!(activity_panel_target_height(900, 420, 240, true), 300);
     }
 
@@ -2548,8 +2551,12 @@ mod tests {
             .measure(gtk::Orientation::Vertical, sidebar.activity_panel.width());
         let one_agent_height = activity_split.height() - activity_split.position();
         assert!(
-            (one_agent_height - one_agent_natural_height).abs() <= 3,
-            "one Agent must use its natural height: actual={one_agent_height} natural={one_agent_natural_height}"
+            (one_agent_height
+                - one_agent_natural_height
+                - ACTIVITY_PANEL_BOTTOM_PADDING_PX)
+                .abs()
+                <= 3,
+            "one Agent must include bottom padding: actual={one_agent_height} natural={one_agent_natural_height}"
         );
         assert!(
             one_agent_height * 3 < activity_split.height(),
@@ -2624,7 +2631,9 @@ mod tests {
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         assert!(!sidebar.activity_layout.user_adjusted.get());
         assert!(
-            ((activity_split.height() - activity_split.position()) - one_agent_natural_height)
+            ((activity_split.height() - activity_split.position())
+                - one_agent_natural_height
+                - ACTIVITY_PANEL_BOTTOM_PADDING_PX)
                 .abs()
                 <= 3,
             "hiding and restoring Agents must preserve automatic sizing"
@@ -2656,11 +2665,14 @@ mod tests {
             .measure(gtk::Orientation::Vertical, sidebar.activity_panel.width());
         assert!(
             two_agent_natural_height > user_height
-                && two_agent_natural_height < maximum_auto_height,
+                && two_agent_natural_height + ACTIVITY_PANEL_BOTTOM_PADDING_PX
+                    < maximum_auto_height,
             "test setup must place two Agents between the user height and one-third cap"
         );
         assert!(
-            ((activity_split.height() - activity_split.position()) - two_agent_natural_height)
+            ((activity_split.height() - activity_split.position())
+                - two_agent_natural_height
+                - ACTIVITY_PANEL_BOTTOM_PADDING_PX)
                 .abs()
                 <= 3,
             "Agents must resume natural growth after filling the user height"
