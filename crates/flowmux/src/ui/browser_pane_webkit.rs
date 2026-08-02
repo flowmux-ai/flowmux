@@ -184,7 +184,7 @@ impl BrowserPane {
 
                 // WebKit requires a related WebView return value before it
                 // completes window.open(). The real destination is routed to
-                // a FlowMux browser tab above, so keep this contract-only view
+                // a flowmux browser tab above, so keep this contract-only view
                 // hidden and block its duplicate navigation.
                 //
                 // Tearing the view down on the next main-loop turn is NOT

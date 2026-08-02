@@ -23,7 +23,7 @@ fn banner_props(
             (String::new(), None, false, None, false)
         }
         BannerState::Available(v) => (
-            format!("FlowMux {v} is available"),
+            format!("flowmux {v} is available"),
             Some(match update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => "Update",
                 UpdateGate::ReleasePage => "Open release page (.deb)",
@@ -47,7 +47,7 @@ fn banner_props(
             false,
         ),
         BannerState::Done(v) => (
-            format!("FlowMux {v} is installed. Restart FlowMux to use it."),
+            format!("flowmux {v} is installed. Restart flowmux to use it."),
             Some("Dismiss"),
             true,
             None,
@@ -361,7 +361,7 @@ mod tests {
     fn done_announces_next_launch_and_dismisses() {
         let (title, button, revealed, progress, ignore) =
             banner_props(&BannerState::Done(V), InstallOrigin::Source);
-        assert!(title.contains("Restart FlowMux"), "{title}");
+        assert!(title.contains("Restart flowmux"), "{title}");
         assert_eq!(button, Some("Dismiss"));
         assert!(revealed);
         assert_eq!(progress, None);

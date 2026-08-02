@@ -1207,7 +1207,7 @@ impl WindowController {
             if self.stack.child_by_name("__empty").is_none() {
                 let status = adw::StatusPage::builder()
                     .icon_name("utilities-terminal-symbolic")
-                    .title("FlowMux")
+                    .title("flowmux")
                     .description("No workspaces yet")
                     .build();
                 self.stack.add_named(&status, Some("__empty"));

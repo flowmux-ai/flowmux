@@ -320,7 +320,7 @@ mod tests {
         assert!(index.contains("font-src 'self' data:"));
         assert!(!index.contains("script-src 'self' 'unsafe-inline'"));
         assert!(index.contains("Cross-Origin-Resource-Policy: same-origin"));
-        assert!(index.contains("Flowmux editor"));
+        assert!(index.contains("flowmux editor"));
 
         let worker = request(&server, "HEAD", "editor.worker.js");
         assert!(worker.starts_with("HTTP/1.1 200 OK\r\n"));

@@ -25,7 +25,7 @@ version = "0.8.10"
 edition = "2021"
 rust-version = "1.93"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/flowmux-ai/flowmux-terminal"
+repository = "https://github.com/flowmux-ai/flowmux"
 authors = ["The flowmux Authors"]
 
 [workspace.dependencies]

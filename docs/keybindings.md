@@ -36,14 +36,14 @@ Ctrl/Cmd+P opens a file, Ctrl/Cmd+Shift+F searches the workspace, and
 Ctrl/Cmd+W closes the current document. Standard editing chords —
 Ctrl/Cmd+C/X/V copy/cut/paste, Ctrl/Cmd+A select all, Ctrl/Cmd+Z undo —
 work natively inside the editor, and the terminal-style Ctrl+Shift+C/V
-copy/paste also routes to the focused editor. Flowmux surface shortcuts
+copy/paste also routes to the focused editor. flowmux surface shortcuts
 such as Alt+W remain global.
 
 ## Context behavior
 
 | Input | Terminal, browser, or Files focused | Embedded editor focused |
 |---|---|---|
-| Flowmux layout, tab, workspace, panel, window, zoom, palette, and tig shortcuts listed above | Runs the flowmux action | Runs the same flowmux action |
+| flowmux layout, tab, workspace, panel, window, zoom, palette, and tig shortcuts listed above | Runs the flowmux action | Runs the same flowmux action |
 | copy / paste | Targets the focused terminal or file view | Targets the editor selection or cursor |
 | terminal-search | Searches the focused terminal or browser | Searches the editor workspace |
 | Alt+Arrow | Moves focus between panes | Moves focus between panes |
