@@ -381,13 +381,13 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             check_sensitive: true,
         },
         BannerState::Current => UpdateTabProps {
-            status: "You are using the latest version of FlowMux.".into(),
+            status: "You are using the latest version of flowmux.".into(),
             update_version: None,
             update_label: None,
             check_sensitive: true,
         },
         BannerState::Available(version) | BannerState::Ignored(version) => UpdateTabProps {
-            status: format!("FlowMux v{version} is available."),
+            status: format!("flowmux v{version} is available."),
             update_version: Some(*version),
             update_label: Some(match crate::update::origin::update_gate(origin) {
                 UpdateGate::SourceBuild => format!("Update to v{version}"),
@@ -396,19 +396,19 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             check_sensitive: true,
         },
         BannerState::Running(Stage::Fetching, percent, version) => UpdateTabProps {
-            status: format!("Downloading FlowMux v{version}: {percent}%"),
+            status: format!("Downloading flowmux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
         },
         BannerState::Running(Stage::Installing, percent, version) => UpdateTabProps {
-            status: format!("Building and installing FlowMux v{version}: {percent}%"),
+            status: format!("Building and installing flowmux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,
         },
         BannerState::Done(version) => UpdateTabProps {
-            status: format!("FlowMux v{version} is installed. Restart FlowMux to use it."),
+            status: format!("flowmux v{version} is installed. Restart flowmux to use it."),
             update_version: None,
             update_label: None,
             check_sensitive: true,
@@ -498,7 +498,7 @@ fn show_newer_update_prompt(
     on_choice: impl FnOnce(Option<Version>) + 'static,
 ) {
     let body = format!(
-        "You were about to update to FlowMux v{selected}, but v{latest} is now available. Which version would you like to install?"
+        "You were about to update to flowmux v{selected}, but v{latest} is now available. Which version would you like to install?"
     );
     let dialog = adw::AlertDialog::new(Some("A newer version is available"), Some(&body));
     dialog.add_response("cancel", "Cancel");
@@ -539,7 +539,7 @@ fn build_update_tab(
 
     let group = adw::PreferencesGroup::builder()
         .title("Software Update")
-        .description("Check for a new FlowMux release and use the update action for this install.")
+        .description("Check for a new flowmux release and use the update action for this install.")
         .build();
 
     let version_row = adw::ActionRow::builder()
@@ -665,7 +665,7 @@ fn build_update_tab(
             if crate::update::origin::update_gate(install_origin) == UpdateGate::ReleasePage {
                 match crate::ui::update_banner::open_release_page(install_origin, selected) {
                     Ok(()) => status_row
-                        .set_subtitle(&format!("Opened the release page for FlowMux v{selected}.")),
+                        .set_subtitle(&format!("Opened the release page for flowmux v{selected}.")),
                     Err(error) => {
                         tracing::warn!(%error, %selected, "could not open release page");
                         status_row.set_subtitle(&format!("Could not open the release page: {error}"));
@@ -794,10 +794,10 @@ fn show_about_popup(parent: &impl IsA<gtk::Widget>) {
 
 fn about_body_with_version(version: &str) -> String {
     format!(
-        "FlowMux - Agent Workflow Multiplexer Terminal\n\n\
-         FlowMux was inspired by the cmux (macOS) project.\n\n\
+        "flowmux - Agent Workflow Multiplexer Terminal\n\n\
+         flowmux was inspired by the cmux (macOS) project.\n\n\
          Maintained by JSUYA (Junsu Choi).\n\
-         <a href=\"https://github.com/flowmux-ai/flowmux-terminal\">https://github.com/flowmux-ai/flowmux-terminal</a>\n\n\
+         <a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>\n\n\
          Version: v{}",
         version
     )
@@ -1315,11 +1315,11 @@ mod tests {
     #[test]
     fn about_body_contains_requested_copy() {
         let body = about_body_with_version("9.8.7-6");
-        assert!(body.contains("FlowMux - Agent Workflow Multiplexer Terminal"));
-        assert!(body.contains("FlowMux was inspired by the cmux (macOS) project."));
+        assert!(body.contains("flowmux - Agent Workflow Multiplexer Terminal"));
+        assert!(body.contains("flowmux was inspired by the cmux (macOS) project."));
         assert!(body.contains("Maintained by JSUYA (Junsu Choi)."));
         assert!(body.contains(
-            "<a href=\"https://github.com/flowmux-ai/flowmux-terminal\">https://github.com/flowmux-ai/flowmux-terminal</a>"
+            "<a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>"
         ));
         assert!(body.ends_with("Version: v9.8.7-6"));
     }

@@ -1,4 +1,4 @@
-# Flowmux Editor Web Third-Party Notices
+# flowmux Editor Web Third-Party Notices
 
 The compiled editor assets include Monaco Editor 0.53.0 under the MIT License.
 The package version is pinned in `package-lock.json`.

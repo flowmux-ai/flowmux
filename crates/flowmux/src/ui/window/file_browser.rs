@@ -102,7 +102,7 @@ impl WindowController {
         // A file owns one pane-level Editor surface, just like a terminal tab.
         // Never reuse an existing editor for a different file: doing so hides
         // the previous document inside the WebView instead of leaving a visible
-        // FlowMux tab the user can move, split, or return to.
+        // flowmux tab the user can move, split, or return to.
         let editor_root = editor_workspace_root(&path, &workspace_state.root_dir);
         let Some((workspace_id, editor_surface)) = self
             .store

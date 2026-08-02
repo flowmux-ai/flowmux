@@ -1,12 +1,12 @@
 
 <div align="center">
   
-# Flowmux
+# flowmux
 ![icon](resources/icons/flowmux-180.png)
 
 **Agent Workflow Multiplexer Terminal** — *Go with the agents' flow.*
 
-[Website](https://flowmux-ai.github.io/) · [Latest release](https://github.com/flowmux-ai/flowmux-terminal/releases/latest)
+[Website](https://flowmux.org/) · [Latest release](https://github.com/flowmux-ai/flowmux/releases/latest)
 
 <img src=resources/screenshot/screenshot_1.gif  width="850"/>
 
@@ -172,7 +172,7 @@ The image viewer loads **ThorVG** at runtime (`dlopen`). It is **optional** —
 flowmux builds and runs without it; only the image viewer needs it, and shows a
 "ThorVG is not installed" message until it is present (no rebuild needed).
 
-On macOS, install the Homebrew package and restart FlowMux:
+On macOS, install the Homebrew package and restart flowmux:
 
 ```bash
 brew install thorvg
@@ -225,7 +225,7 @@ scripts/check-ubuntu-compat.sh # Docker smoke check for 24.04/26.04
 ```
 
 The Monaco editor bundle under `editor/flowmux-editor-web/dist` is committed,
-so regular Flowmux builds and installs do not require Node.js. Only developers
+so regular flowmux builds and installs do not require Node.js. Only developers
 who change the editor frontend need Node.js 20 or newer and npm. Rebuild and
 verify the locked assets with:
 

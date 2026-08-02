@@ -72,7 +72,7 @@ pub fn update_gate(origin: InstallOrigin) -> UpdateGate {
 
 pub fn release_page_url(version: Version) -> String {
     format!(
-        "https://github.com/flowmux-ai/flowmux-terminal/releases/tag/{}",
+        "https://github.com/flowmux-ai/flowmux/releases/tag/{}",
         version.tag()
     )
 }

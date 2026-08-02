@@ -16,7 +16,7 @@ use std::sync::{
     Arc,
 };
 
-const REPO_URL: &str = "https://github.com/flowmux-ai/flowmux-terminal.git";
+const REPO_URL: &str = "https://github.com/flowmux-ai/flowmux.git";
 const CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]

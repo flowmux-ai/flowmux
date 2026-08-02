@@ -1,21 +1,21 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Flowmux pane 내장 에디터 구현 계획
+# flowmux pane 내장 에디터 구현 계획
 
 ## 1. 문서 목적
 
-이 문서는 Flowmux에 확장 마켓이나 별도 IDE shell을 넣지 않고도, 일상적인 개발 작업에 충분히 정밀하고 안정적인 pane 내장 편집 환경을 추가하기 위한 구현 계획이다.
+이 문서는 flowmux에 확장 마켓이나 별도 IDE shell을 넣지 않고도, 일상적인 개발 작업에 충분히 정밀하고 안정적인 pane 내장 편집 환경을 추가하기 위한 구현 계획이다.
 
 핵심 목표는 다음과 같다.
 
 - 파일 뷰어에서 파일을 한 번 클릭하거나 `Enter`를 누르면 적절한 pane에서 즉시 편집한다.
 - 편집, 저장, 찾기, 바꾸기, 빠른 파일 열기, 워크스페이스 검색을 제품 기본 기능으로 제공한다.
 - 파일 변경 충돌, dirty 문서 종료, 비정상 종료 복구까지 포함해 데이터 손실을 방지한다.
-- Flowmux의 기존 pane, surface, focus, tab, workspace 복원 구조에 자연스럽게 통합한다.
+- flowmux의 기존 pane, surface, focus, tab, workspace 복원 구조에 자연스럽게 통합한다.
 - 언어별 지능형 기능은 핵심 편집기가 안정된 뒤 선택적인 후속 작업으로 분리한다.
-- 범용 IDE shell을 복제하지 않고 terminal·browser·file browser와 조화를 이루는 Flowmux 고유의 편집 경험을 만든다.
+- 범용 IDE shell을 복제하지 않고 terminal·browser·file browser와 조화를 이루는 flowmux 고유의 편집 경험을 만든다.
 
-이 계획에서 `Editor surface`는 Flowmux pane의 바깥 tab 하나를 뜻한다. 화면에는 현재 파일 하나만 표시하며, 다른 파일 선택은 기존 file browser가 담당한다.
+이 계획에서 `Editor surface`는 flowmux pane의 바깥 tab 하나를 뜻한다. 화면에는 현재 파일 하나만 표시하며, 다른 파일 선택은 기존 file browser가 담당한다.
 
 ## 구현 상태 (2026-07-19)
 
@@ -77,7 +77,7 @@ workspace 일괄 바꾸기, 별도 Workspace Tools 패널, 직접 LSP 연동과 
 
 ## 3. 현재 구조에서 확인된 연결 지점
 
-현재 Flowmux에는 `Terminal`과 `Browser` 두 surface 종류가 있으며, pane 하나가 여러 surface를 tab으로 관리한다.
+현재 flowmux에는 `Terminal`과 `Browser` 두 surface 종류가 있으며, pane 하나가 여러 surface를 tab으로 관리한다.
 
 - surface 모델: `crates/flowmux-core/src/lib.rs`
 - surface 렌더링 및 `PaneRegistry`: `crates/flowmux/src/ui/workspace_view.rs`
@@ -94,7 +94,7 @@ workspace 일괄 바꾸기, 별도 Workspace Tools 패널, 직접 LSP 연동과 
 
 ### 4.1 편집 엔진은 Monaco Editor를 직접 사용한다
 
-Monaco는 편집 품질과 접근 가능한 API가 충분하고, Flowmux 전용 UI를 구성하기 쉽다. 다만 Monaco는 독립 편집기일 뿐 VS Code 확장 실행 환경이 아니며, 이번 계획에서도 그런 호환성을 만들지 않는다.
+Monaco는 편집 품질과 접근 가능한 API가 충분하고, flowmux 전용 UI를 구성하기 쉽다. 다만 Monaco는 독립 편집기일 뿐 VS Code 확장 실행 환경이 아니며, 이번 계획에서도 그런 호환성을 만들지 않는다.
 
 초기 선택은 다음과 같다.
 
@@ -133,14 +133,14 @@ Workspace
 
 이 구조의 장점은 다음과 같다.
 
-- 기존 Flowmux tab이 현재 파일 이름을 표시하므로 tab을 중첩하지 않는다.
+- 기존 flowmux tab이 현재 파일 이름을 표시하므로 tab을 중첩하지 않는다.
 - 파일 선택과 전환은 기존 file browser 한 곳에서 처리한다.
 - 파일 수가 늘어도 WebView와 worker 수가 파일 수만큼 증가하지 않는다.
 - 저장, 검색, LSP, 복구 상태를 Editor 단위에서 일관되게 관리할 수 있다.
 
 동일 pane에서 이미 열린 파일은 기존 document model을 재사용한다. 다른 pane의 Editor surface로 focus를 강제로 옮기지 않고 사용자가 파일을 연 대상 pane을 우선한다.
 
-### 4.3 Flowmux가 파일 상태의 최종 소유자다
+### 4.3 flowmux가 파일 상태의 최종 소유자다
 
 WebView JavaScript가 경로를 받아 직접 파일을 읽거나 쓰게 하지 않는다. Rust의 `DocumentService`가 다음을 전담한다.
 
@@ -303,13 +303,13 @@ Markdown preview와 `Open Externally`는 context menu의 명시적 동작으로 
 - `identity_path`: 중복 판별과 file watcher용 canonical path
 - `save_path`: 실제 저장 대상이며 symlink 정책을 따른다
 
-workspace 밖을 가리키는 symlink를 열 수 있는지는 기존 Flowmux 보안 정책과 함께 결정한다. 정책 확정 전에는 경계를 넘는 파일을 read-only로 여는 것이 안전한 기본값이다.
+workspace 밖을 가리키는 symlink를 열 수 있는지는 기존 flowmux 보안 정책과 함께 결정한다. 정책 확정 전에는 경계를 넘는 파일을 read-only로 여는 것이 안전한 기본값이다.
 
 ## 7. 편집기 UX
 
 ### 7.1 화면 구성
 
-Flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
+flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
 
 ```text
 ┌─ current file ─────────────────────────────────────┐
@@ -320,7 +320,7 @@ Flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
 └─────────────────────────────────────────────────────┘
 ```
 
-- 바깥 Flowmux tab: 현재 파일 이름을 표시하고 Terminal·Browser·파일 편집 화면을 전환
+- 바깥 flowmux tab: 현재 파일 이름을 표시하고 Terminal·Browser·파일 편집 화면을 전환
 - 편집 화면: 우측 상단 mode switch 외 toolbar, document tab, context rail, status strip 없이 Monaco가 pane을 채움
 - 저장 상태: 평상시 숨기고 dirty, read-only, external-change일 때만 작은 상태 표시
 - 기존 file browser: 프로젝트 탐색의 유일한 기본 UI
@@ -340,7 +340,7 @@ Flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
 
 ### 7.3 focus와 shortcut 정책
 
-shortcut은 focus context에 따라 해석한다. 기존 Flowmux 전역 shortcut을 빼앗지 않는다.
+shortcut은 focus context에 따라 해석한다. 기존 flowmux 전역 shortcut을 빼앗지 않는다.
 
 | 입력 | Editor focus일 때 |
 |---|---|
@@ -353,8 +353,8 @@ shortcut은 focus context에 따라 해석한다. 기존 Flowmux 전역 shortcut
 | `Ctrl+P` | 빠른 파일 열기 |
 | `Ctrl+G` | 줄로 이동 |
 | `Ctrl+W` | 현재 문서 닫기 |
-| `Alt+W` | 기존 Flowmux surface 닫기 유지 |
-| `Ctrl+Shift+P` | 기존 Flowmux command palette 유지, Editor 명령도 등록 |
+| `Alt+W` | 기존 flowmux surface 닫기 유지 |
+| `Ctrl+Shift+P` | 기존 flowmux command palette 유지, Editor 명령도 등록 |
 
 IME 조합 중에는 전역 command가 키 입력을 가로채지 않도록 composition 상태를 반드시 확인한다.
 
@@ -394,7 +394,7 @@ IME 조합 중에는 전역 command가 키 입력을 가로채지 않도록 comp
 - pane 닫기
 - workspace 닫기
 - tear-off window 닫기
-- Flowmux 종료
+- flowmux 종료
 
 dirty 문서가 있으면 `Save`, `Discard`, `Cancel`을 제공한다. 여러 문서가 dirty이면 문서별 선택이 가능한 목록을 표시한다. 저장 실패 후에는 닫기를 계속 진행하지 않는다.
 
@@ -431,7 +431,7 @@ dirty buffer는 debounce된 recovery snapshot으로 저장한다.
 
 `SearchService`가 workspace 파일 index를 background에서 만든다.
 
-- `.gitignore`, 숨김 파일 정책, Flowmux exclude 설정을 존중한다.
+- `.gitignore`, 숨김 파일 정책, flowmux exclude 설정을 존중한다.
 - fuzzy score와 최근 열었던 파일 가중치를 함께 사용한다.
 - 결과는 상대 경로와 상위 디렉터리를 함께 표시한다.
 - index 갱신은 file watcher event를 증분 반영한다.
@@ -494,7 +494,7 @@ workspace 일괄 바꾸기는 v1에 포함하지 않는다. 후속 구현을 결
 - WebKitGTK와 WKWebView에서 Monaco worker 로드
 - 한글·일본어 IME와 composition event
 - clipboard, multi-cursor, undo/redo
-- Flowmux global shortcut과 Editor shortcut의 focus 분리
+- flowmux global shortcut과 Editor shortcut의 focus 분리
 - theme 전환, zoom, screen reader 기본 동작
 - 10만 줄 파일, 긴 한 줄 파일, 다수 document model의 반응성
 - 한 pane당 WebView 메모리와 첫 usable frame 시간
@@ -622,7 +622,7 @@ workspace 일괄 바꾸기와 별도 Workspace Tools panel은 v1 이후에 각�
 - pane split/drag/tear-off/close와 앱 종료 회귀 검사
 - frontend dependency lock, license notice, SBOM 갱신
 - Linux 패키징과 macOS bundle asset 경로 검증
-- 실제 실행 중인 Flowmux에서 사용자 시나리오 검증
+- 실제 실행 중인 flowmux에서 사용자 시나리오 검증
 
 완료 조건:
 
@@ -666,7 +666,7 @@ workspace 일괄 바꾸기와 별도 Workspace Tools panel은 v1 이후에 각�
 
 ### 12.3 실제 UI 검증
 
-자동 테스트만으로 완료 처리하지 않는다. 최소한 Ubuntu 24.04의 실행 중인 Flowmux에서 다음 시나리오를 재현한다.
+자동 테스트만으로 완료 처리하지 않는다. 최소한 Ubuntu 24.04의 실행 중인 flowmux에서 다음 시나리오를 재현한다.
 
 1. terminal이 최근 focus된 pane과 file browser source pane이 다른 상태를 만든다.
 2. file browser에서 텍스트 파일을 한 번 클릭한다.
@@ -713,7 +713,7 @@ large-file mode는 syntax tokenization, minimap, semantic 기능을 단계적으
 
 - Monaco Editor의 MIT license와 notice를 배포물에 포함한다.
 - frontend의 직접·전이 dependency license를 lockfile 기준으로 수집한다.
-- GPL-3.0-or-later인 Flowmux source와 함께 필요한 source·notice 제공 의무를 유지한다.
+- GPL-3.0-or-later인 flowmux source와 함께 필요한 source·notice 제공 의무를 유지한다.
 - minified JavaScript만 배포하지 않고 대응하는 source와 재현 가능한 build 절차를 저장소에 둔다.
 - editor asset 목록을 기존 third-party license 문서 또는 전용 generated notice에 반영한다.
 - 이름, icon, UI 문구에서 Visual Studio Code 제품으로 오인될 branding을 사용하지 않는다.
@@ -739,7 +739,7 @@ large-file mode는 syntax tokenization, minimap, semantic 기능을 단계적으
 - 정한 reference hardware에서 확정된 성능 예산을 통과한다.
 - runtime Node.js, extension host, 외부 extension registry 없이 동작한다.
 - dependency license notice, source, build 절차가 배포물과 저장소에 준비되어 있다.
-- 실행 중인 Flowmux에서 사용자 시나리오 검증을 완료한다.
+- 실행 중인 flowmux에서 사용자 시나리오 검증을 완료한다.
 
 ## 17. 구현 결정 결과
 

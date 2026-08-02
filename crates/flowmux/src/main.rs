@@ -300,7 +300,7 @@ fn main() -> anyhow::Result<()> {
         {
             // macOS can emit another application activation while presenting
             // a secondary window. Do not raise the main window over an image
-            // viewer (or another FlowMux window) that is already active.
+            // viewer (or another flowmux window) that is already active.
             let active_window_is_active = app
                 .active_window()
                 .as_ref()

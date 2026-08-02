@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Safe document I/O for the Flowmux editor.
+//! Safe document I/O for the flowmux editor.
 //!
 //! UI code never reads or writes arbitrary paths directly. `DocumentService`
 //! owns workspace boundaries, text decoding, version checks, external-change
