@@ -12,6 +12,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::gdk;
 use gtk::glib;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use zip::ZipArchive;
 
 use super::thorvg as tvg;
@@ -51,6 +52,11 @@ pub fn open_image_viewer(parent: &adw::ApplicationWindow, path: PathBuf) {
             let picture = image_picture(&path);
             picture.set_paintable(Some(&texture_from_frame(&frame)));
             set_viewer_content(&window, &picture);
+        }
+        ViewerContent::Svg(frame) => {
+            window.set_default_size(frame.width as i32, frame.height as i32);
+            let view = SvgView::new(path, frame);
+            set_viewer_content(&window, &view);
         }
         ViewerContent::Animated(renderer) => {
             let initial = renderer.borrow().frame();
@@ -105,6 +111,7 @@ fn image_picture(path: &Path) -> gtk::Picture {
 
 enum ViewerContent {
     Static(RenderedFrame),
+    Svg(RenderedFrame),
     Animated(Rc<RefCell<ThorvgAnimationRenderer>>),
 }
 
@@ -118,7 +125,7 @@ fn load_viewer_content(path: &Path) -> Result<ViewerContent, String> {
         // ThorVG has no loader for these (e.g. gif); decode with the
         // `image` crate, then hand the pixels to ThorVG to render.
         ImageKind::Raster => render_raster(path).map(ViewerContent::Static),
-        ImageKind::Svg => render_native(path).map(ViewerContent::Static),
+        ImageKind::Svg => render_native(path).map(ViewerContent::Svg),
         ImageKind::Lottie => ThorvgAnimationRenderer::new(path)
             .map(|renderer| ViewerContent::Animated(Rc::new(RefCell::new(renderer)))),
     }
@@ -163,6 +170,101 @@ struct RenderedFrame {
     width: u32,
     height: u32,
     buffer: Vec<u32>,
+}
+
+mod svg_view {
+    use super::*;
+    use gtk::subclass::prelude::*;
+
+    pub struct SvgView {
+        pub path: RefCell<PathBuf>,
+        pub source_size: std::cell::Cell<(u32, u32)>,
+        pub texture: RefCell<Option<((u32, u32), gdk::MemoryTexture)>>,
+    }
+
+    impl Default for SvgView {
+        fn default() -> Self {
+            Self {
+                path: RefCell::new(PathBuf::new()),
+                source_size: std::cell::Cell::new((1, 1)),
+                texture: RefCell::new(None),
+            }
+        }
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for SvgView {
+        const NAME: &'static str = "FlowmuxSvgView";
+        type Type = super::SvgView;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for SvgView {}
+
+    impl WidgetImpl for SvgView {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let (width, height) = self.source_size.get();
+            let natural = match orientation {
+                gtk::Orientation::Horizontal => width,
+                gtk::Orientation::Vertical => height,
+                _ => unreachable!(),
+            };
+            (0, natural.min(i32::MAX as u32) as i32, -1, -1)
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            let allocation = (widget.width().max(1) as u32, widget.height().max(1) as u32);
+            let display_size = fit_size_within(self.source_size.get(), allocation);
+            let scale = widget.scale_factor().max(1) as u32;
+            let render_size = (
+                display_size.0.saturating_mul(scale),
+                display_size.1.saturating_mul(scale),
+            );
+
+            let mut cached = self.texture.borrow_mut();
+            if cached.as_ref().map(|(size, _)| *size) != Some(render_size) {
+                match render_native_at(&self.path.borrow(), render_size) {
+                    Ok(frame) => {
+                        *cached = Some((render_size, texture_from_frame(&frame)));
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to rerender SVG after resize");
+                    }
+                }
+            }
+
+            let Some((_, texture)) = cached.as_ref() else {
+                return;
+            };
+            let x = (allocation.0 - display_size.0) as f32 / 2.0;
+            let y = (allocation.1 - display_size.1) as f32 / 2.0;
+            snapshot.append_texture(
+                texture,
+                &gtk::graphene::Rect::new(x, y, display_size.0 as f32, display_size.1 as f32),
+            );
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct SvgView(ObjectSubclass<svg_view::SvgView>) @extends gtk::Widget;
+}
+
+impl SvgView {
+    fn new(path: PathBuf, frame: RenderedFrame) -> Self {
+        let view: Self = glib::Object::new();
+        let imp = view.imp();
+        imp.path.replace(path);
+        imp.source_size.set((frame.width, frame.height));
+        imp.texture.replace(Some((
+            (frame.width, frame.height),
+            texture_from_frame(&frame),
+        )));
+        view.set_hexpand(true);
+        view.set_vexpand(true);
+        view
+    }
 }
 
 fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
@@ -228,6 +330,17 @@ fn render_raster(path: &Path) -> Result<RenderedFrame, String> {
 /// Load an image through ThorVG's native file loaders (svg, png, jpg, webp).
 /// ThorVG picks the loader from the file's extension and content.
 fn render_native(path: &Path) -> Result<RenderedFrame, String> {
+    render_native_with_size(path, None)
+}
+
+fn render_native_at(path: &Path, size: (u32, u32)) -> Result<RenderedFrame, String> {
+    render_native_with_size(path, Some(size))
+}
+
+fn render_native_with_size(
+    path: &Path,
+    requested_size: Option<(u32, u32)>,
+) -> Result<RenderedFrame, String> {
     let path = path
         .to_str()
         .ok_or_else(|| "image path is not valid UTF-8".to_string())?;
@@ -249,10 +362,12 @@ fn render_native(path: &Path) -> Result<RenderedFrame, String> {
 
     let (source_width, source_height) = picture_size(picture)
         .unwrap_or((DEFAULT_LOTTIE_WIDTH as f32, DEFAULT_LOTTIE_HEIGHT as f32));
-    let (width, height) = fit_size(
-        (source_width.ceil() as u32).max(1),
-        (source_height.ceil() as u32).max(1),
-    );
+    let (width, height) = requested_size.unwrap_or_else(|| {
+        fit_size(
+            (source_width.ceil() as u32).max(1),
+            (source_height.ceil() as u32).max(1),
+        )
+    });
     let mut canvas = match ThorvgCanvas::new(width, height) {
         Ok(canvas) => canvas,
         Err(err) => {
@@ -633,6 +748,20 @@ fn fit_size(width: u32, height: u32) -> (u32, u32) {
     )
 }
 
+fn fit_size_within(source: (u32, u32), bounds: (u32, u32)) -> (u32, u32) {
+    let (source_width, source_height) = source;
+    let (bound_width, bound_height) = bounds;
+    if source_width == 0 || source_height == 0 || bound_width == 0 || bound_height == 0 {
+        return (1, 1);
+    }
+    let scale =
+        (bound_width as f64 / source_width as f64).min(bound_height as f64 / source_height as f64);
+    (
+        ((source_width as f64 * scale).round() as u32).max(1),
+        ((source_height as f64 * scale).round() as u32).max(1),
+    )
+}
+
 fn check(result: tvg::Tvg_Result, context: &str) -> Result<(), String> {
     if result == tvg::Tvg_Result::TVG_RESULT_SUCCESS {
         Ok(())
@@ -664,6 +793,12 @@ mod tests {
             fit_size(0, 0),
             (DEFAULT_LOTTIE_WIDTH, DEFAULT_LOTTIE_HEIGHT)
         );
+    }
+
+    #[test]
+    fn fit_size_within_scales_vectors_to_the_available_space() {
+        assert_eq!(fit_size_within((400, 200), (800, 600)), (800, 400));
+        assert_eq!(fit_size_within((400, 200), (300, 600)), (300, 150));
     }
 
     #[test]
@@ -727,6 +862,23 @@ mod tests {
 
         assert_eq!((frame.width, frame.height), (4, 2));
         assert_eq!(frame.buffer.len(), 8);
+        assert!(frame.buffer.iter().any(|pixel| (pixel >> 24) == 0xff));
+    }
+
+    #[test]
+    fn render_native_rerenders_vector_at_requested_size() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vector.svg");
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="#ff0000"/></svg>"##,
+        )
+        .expect("write svg");
+
+        let frame = render_native_at(&path, (800, 400)).expect("rerender svg");
+
+        assert_eq!((frame.width, frame.height), (800, 400));
+        assert_eq!(frame.buffer.len(), 800 * 400);
         assert!(frame.buffer.iter().any(|pixel| (pixel >> 24) == 0xff));
     }
 
