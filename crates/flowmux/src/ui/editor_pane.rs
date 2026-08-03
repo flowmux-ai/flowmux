@@ -19,6 +19,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const RECOVERY_DEBOUNCE: Duration = Duration::from_millis(350);
+const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+const FLUSH_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const QUICK_OPEN_LIMIT: usize = 2_000;
 const LAST_EDITOR_ZOOM_FILE: &str = "editor-zoom-percent";
 
@@ -93,6 +95,8 @@ struct SearchWorker {
 struct DiffWorker {
     receiver: Receiver<HostMessage>,
 }
+
+type FlushCompletion = Rc<RefCell<Option<Result<(), String>>>>;
 
 #[derive(Default)]
 pub(super) struct EditorBridgeReceive {
@@ -200,6 +204,8 @@ pub(super) struct EditorHostState {
     recovery_flush_pending: Cell<bool>,
     search_worker: RefCell<Option<SearchWorker>>,
     diff_worker: RefCell<Option<DiffWorker>>,
+    next_flush_request: Cell<u64>,
+    pending_flushes: RefCell<HashMap<u64, FlushCompletion>>,
 }
 
 impl EditorHostState {
@@ -267,6 +273,8 @@ impl EditorHostState {
             recovery_flush_pending: Cell::new(false),
             search_worker: RefCell::new(None),
             diff_worker: RefCell::new(None),
+            next_flush_request: Cell::new(0),
+            pending_flushes: RefCell::new(HashMap::new()),
         };
         host.stage_recovery_operations();
         host
@@ -335,6 +343,46 @@ impl EditorHostState {
             Ok(session) => session.dirty_document_paths(),
             Err(_) => Vec::new(),
         }
+    }
+
+    pub(super) fn start_flush(&self) -> (u64, FlushCompletion, HostMessage) {
+        let request_id = self.next_flush_request.get().wrapping_add(1);
+        self.next_flush_request.set(request_id);
+        let completion = Rc::new(RefCell::new(None));
+        self.pending_flushes
+            .borrow_mut()
+            .insert(request_id, completion.clone());
+        (
+            request_id,
+            completion,
+            HostMessage::FlushChanges { request_id },
+        )
+    }
+
+    fn finish_flush(&self, request_id: u64) {
+        if let Some(completion) = self.pending_flushes.borrow_mut().remove(&request_id) {
+            *completion.borrow_mut() = Some(Ok(()));
+        }
+    }
+
+    pub(super) fn cancel_flush(&self, request_id: u64) {
+        self.pending_flushes.borrow_mut().remove(&request_id);
+    }
+
+    pub(super) async fn wait_for_flush(
+        &self,
+        request_id: u64,
+        completion: FlushCompletion,
+    ) -> Result<(), String> {
+        let attempts = FLUSH_TIMEOUT.as_millis() / FLUSH_POLL_INTERVAL.as_millis();
+        for _ in 0..attempts {
+            if let Some(result) = completion.borrow_mut().take() {
+                return result;
+            }
+            gtk::glib::timeout_future(FLUSH_POLL_INTERVAL).await;
+        }
+        self.pending_flushes.borrow_mut().remove(&request_id);
+        Err("Timed out while synchronizing editor changes.".into())
     }
 
     pub(super) fn save_all_dirty(&self) -> (Vec<HostMessage>, Result<(), String>) {
@@ -788,6 +836,9 @@ pub(super) fn handle_bridge_message(
                 native_edit_action = Some(action);
                 native_edit_text = text;
             }
+            EditorMessage::FlushCompleted { request_id } => {
+                host.finish_flush(request_id);
+            }
             message => {
                 scripts.extend(queue_host_messages(bridge, host.handle(message)));
                 if host.stage_recovery_operations() {
@@ -1066,6 +1117,29 @@ mod tests {
 
         assert_eq!(dispatch.focus_direction, Some(EditorFocusDirection::Down));
         assert!(dispatch.scripts.is_empty());
+    }
+
+    #[test]
+    fn flush_completion_releases_the_native_close_waiter() {
+        let workspace = tempfile::tempdir().unwrap();
+        let host = Rc::new(EditorHostState::new(
+            workspace.path(),
+            EditorSessionState::default(),
+        ));
+        let bridge = EditorBridgeState::new(SurfaceId::new());
+        let (request_id, completion, message) = host.start_flush();
+        assert_eq!(message, HostMessage::FlushChanges { request_id });
+        let raw = serde_json::json!({
+            "protocolVersion": flowmux_editor::PROTOCOL_VERSION,
+            "surfaceId": bridge.surface_id,
+            "type": "flush_completed",
+            "requestId": request_id,
+        })
+        .to_string();
+
+        handle_bridge_message(&bridge, &host, &raw);
+
+        assert_eq!(*completion.borrow(), Some(Ok(())));
     }
 
     #[test]

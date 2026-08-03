@@ -95,6 +95,9 @@ pub enum HostMessage {
         active_document_id: Option<String>,
         zoom_percent: u16,
     },
+    FlushChanges {
+        request_id: u64,
+    },
     OpenDocument {
         document: DocumentPayload,
     },
@@ -110,6 +113,11 @@ pub enum HostMessage {
         document_version: u64,
     },
     SaveCompleted {
+        document_id: String,
+        document_version: u64,
+        change_sequence: u64,
+    },
+    DocumentChangeApplied {
         document_id: String,
         document_version: u64,
         change_sequence: u64,
@@ -228,6 +236,10 @@ pub enum EditorMessage {
         document_id: String,
         document_version: u64,
     },
+    DocumentDirty {
+        document_id: String,
+        document_version: u64,
+    },
     DocumentChanged {
         document_id: String,
         document_version: u64,
@@ -294,6 +306,9 @@ pub enum EditorMessage {
         document_id: String,
         document_version: u64,
         action: ConflictAction,
+    },
+    FlushCompleted {
+        request_id: u64,
     },
 }
 
@@ -386,7 +401,9 @@ pub fn javascript_for_host_message(
 
 fn validate_editor_message(message: &EditorMessage) -> Result<(), ProtocolError> {
     match message {
-        EditorMessage::EditorReady | EditorMessage::FocusDirectionRequested { .. } => Ok(()),
+        EditorMessage::EditorReady
+        | EditorMessage::FocusDirectionRequested { .. }
+        | EditorMessage::FlushCompleted { .. } => Ok(()),
         EditorMessage::ZoomChanged { zoom_percent }
             if (EDITOR_ZOOM_MIN..=EDITOR_ZOOM_MAX).contains(zoom_percent) =>
         {
@@ -399,6 +416,7 @@ fn validate_editor_message(message: &EditorMessage) -> Result<(), ProtocolError>
             _ => Err(ProtocolError::InvalidNativeEditRequest),
         },
         EditorMessage::ActiveDocumentChanged { document_id, .. }
+        | EditorMessage::DocumentDirty { document_id, .. }
         | EditorMessage::CloseRequested { document_id, .. }
         | EditorMessage::DiscardCloseRequested { document_id, .. }
         | EditorMessage::RecoveryDecision { document_id, .. }
@@ -492,11 +510,13 @@ fn validate_host_message(message: &HostMessage) -> Result<(), ProtocolError> {
             }
             Ok(())
         }
+        HostMessage::FlushChanges { .. } => Ok(()),
         HostMessage::OpenDocument { document }
         | HostMessage::ReplaceDocument { document }
         | HostMessage::SaveAsCompleted { document, .. } => validate_document(document),
         HostMessage::CloseDocument { document_id, .. }
         | HostMessage::SetActiveDocument { document_id, .. }
+        | HostMessage::DocumentChangeApplied { document_id, .. }
         | HostMessage::SaveCompleted { document_id, .. }
         | HostMessage::SaveFailed { document_id, .. }
         | HostMessage::SaveAsFailed { document_id, .. }
@@ -719,6 +739,45 @@ mod tests {
                 change_sequence: 2,
                 content: "한글 日本語 العربية 🙂\n".into(),
             }
+        );
+    }
+
+    #[test]
+    fn dirty_change_ack_and_flush_messages_round_trip() {
+        let dirty = serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "surfaceId": "surface-1",
+            "type": "document_dirty",
+            "documentId": "document-1",
+            "documentVersion": 7
+        })
+        .to_string();
+        assert!(matches!(
+            parse_editor_message(&dirty).unwrap().1,
+            EditorMessage::DocumentDirty {
+                document_version: 7,
+                ..
+            }
+        ));
+
+        let flush =
+            serialize_host_message("surface-1", &HostMessage::FlushChanges { request_id: 11 })
+                .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&flush).unwrap()["requestId"],
+            11
+        );
+
+        let completed = serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "surfaceId": "surface-1",
+            "type": "flush_completed",
+            "requestId": 11
+        })
+        .to_string();
+        assert_eq!(
+            parse_editor_message(&completed).unwrap().1,
+            EditorMessage::FlushCompleted { request_id: 11 }
         );
     }
 

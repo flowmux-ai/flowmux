@@ -7,7 +7,7 @@ use crate::{
     RecoveryDiskState, RecoveryOperation, RecoverySnapshot, RecoveryStore, SearchDocument,
     TextDocumentEncoding, TextDocumentLineEnding, TextEncoding,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use thiserror::Error;
@@ -24,6 +24,8 @@ pub enum EditorSessionError {
         expected: u64,
         actual: u64,
     },
+    #[error("editor changes are still syncing")]
+    PendingClientChanges,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -57,6 +59,7 @@ pub struct EditorSession {
     pending_recoveries: HashMap<DocumentId, (RecoverySnapshot, RecoveryDiskState)>,
     recovery_base_hashes: HashMap<DocumentId, String>,
     recovery_operations: Vec<RecoveryOperation>,
+    pending_client_dirty: HashSet<DocumentId>,
 }
 
 impl EditorSession {
@@ -72,6 +75,7 @@ impl EditorSession {
             pending_recoveries: HashMap::new(),
             recovery_base_hashes: HashMap::new(),
             recovery_operations: Vec::new(),
+            pending_client_dirty: HashSet::new(),
         })
     }
 
@@ -143,7 +147,9 @@ impl EditorSession {
         self.open_order
             .iter()
             .filter_map(|id| self.documents.snapshot(*id).ok())
-            .filter(|snapshot| snapshot.is_dirty())
+            .filter(|snapshot| {
+                snapshot.is_dirty() || self.pending_client_dirty.contains(&snapshot.id)
+            })
             .map(|snapshot| snapshot.display_path)
             .collect()
     }
@@ -186,6 +192,9 @@ impl EditorSession {
     /// Successful saves are returned as replacement messages so a surface that
     /// remains open after a later save failure is resynchronized with the host.
     pub fn save_all_dirty(&mut self) -> (Vec<HostMessage>, Result<(), EditorSessionError>) {
+        if !self.pending_client_dirty.is_empty() {
+            return (Vec::new(), Err(EditorSessionError::PendingClientChanges));
+        }
         let mut messages = Vec::new();
         for id in self.open_order.clone() {
             let snapshot = match self.documents.snapshot(id) {
@@ -221,9 +230,9 @@ impl EditorSession {
             .iter()
             .copied()
             .filter(|id| {
-                self.documents
-                    .snapshot(*id)
-                    .is_ok_and(|snapshot| snapshot.is_dirty())
+                self.documents.snapshot(*id).is_ok_and(|snapshot| {
+                    snapshot.is_dirty() || self.pending_client_dirty.contains(id)
+                })
             })
             .collect();
         for id in dirty_ids {
@@ -245,6 +254,7 @@ impl EditorSession {
                 self.reported_disk_status.remove(&id);
                 self.view_states.remove(&id);
             }
+            self.pending_client_dirty.remove(&id);
             self.queue_recovery_removal(id, &snapshot.identity_path);
         }
         if self.active.is_some_and(|id| !self.open_order.contains(&id)) {
@@ -324,6 +334,7 @@ impl EditorSession {
                 .copied()
                 .unwrap_or(DiskStatus::Unchanged);
             let (version, dirty) = self.documents.version_and_dirty(id)?;
+            let dirty = dirty || self.pending_client_dirty.contains(&id);
 
             // A pending recovery proposal pins the document version; reloading
             // here would bump it and make the eventual `RecoveryDecision` stale.
@@ -360,7 +371,8 @@ impl EditorSession {
             EditorMessage::EditorReady
             | EditorMessage::ZoomChanged { .. }
             | EditorMessage::NativeEditRequested { .. }
-            | EditorMessage::FocusDirectionRequested { .. } => Ok(Vec::new()),
+            | EditorMessage::FocusDirectionRequested { .. }
+            | EditorMessage::FlushCompleted { .. } => Ok(Vec::new()),
             EditorMessage::ActiveDocumentChanged {
                 document_id,
                 document_version,
@@ -369,16 +381,29 @@ impl EditorSession {
                 self.active = Some(id);
                 Ok(Vec::new())
             }
+            EditorMessage::DocumentDirty {
+                document_id,
+                document_version,
+            } => {
+                let id = self.checked_document(&document_id, document_version)?;
+                self.pending_client_dirty.insert(id);
+                Ok(Vec::new())
+            }
             EditorMessage::DocumentChanged {
                 document_id,
                 document_version,
+                change_sequence,
                 content,
-                ..
             } => {
                 let id = self.checked_document(&document_id, document_version)?;
-                self.documents.update_text(id, document_version, content)?;
+                let updated = self.documents.update_text(id, document_version, content)?;
+                self.pending_client_dirty.remove(&id);
                 self.queue_recovery_write(id)?;
-                Ok(Vec::new())
+                Ok(vec![HostMessage::DocumentChangeApplied {
+                    document_id,
+                    document_version: updated.version,
+                    change_sequence,
+                }])
             }
             EditorMessage::SaveRequested {
                 document_id,
@@ -474,6 +499,7 @@ impl EditorSession {
         self.open_order.retain(|candidate| *candidate != id);
         self.reported_disk_status.remove(&id);
         self.view_states.remove(&id);
+        self.pending_client_dirty.remove(&id);
         // An undecided recovery proposal must survive the close: deleting the
         // snapshot here would silently discard the only copy of crash edits
         // the user never answered `RecoveryChoice::Discard` for.
@@ -781,7 +807,7 @@ impl EditorSession {
                 self.documents.disk_status(snapshot.id),
                 Ok(DiskStatus::Unchanged)
             );
-        let dirty = snapshot.is_dirty();
+        let dirty = snapshot.is_dirty() || self.pending_client_dirty.contains(&snapshot.id);
         let encoding = match snapshot.encoding {
             TextEncoding::Utf8 => TextDocumentEncoding::Utf8,
             TextEncoding::Utf8Bom => TextDocumentEncoding::Utf8Bom,
@@ -974,6 +1000,76 @@ mod tests {
         ));
         assert!(session.contains_document(&path));
         assert!(!session.contains_document(workspace.path().join("missing.rs")));
+    }
+
+    #[test]
+    fn client_dirty_blocks_close_until_the_content_is_applied() {
+        let workspace = tempdir().unwrap();
+        let path = workspace.path().join("pending.txt");
+        fs::write(&path, "disk\n").unwrap();
+        let mut session = EditorSession::new(workspace.path()).unwrap();
+        let document = open_payload(session.open_document(&path).unwrap());
+
+        session
+            .handle_editor_message(EditorMessage::DocumentDirty {
+                document_id: document.id.clone(),
+                document_version: document.version,
+            })
+            .unwrap();
+
+        assert_eq!(session.dirty_document_paths(), vec![path.clone()]);
+        assert!(matches!(
+            session.save_all_dirty().1,
+            Err(EditorSessionError::PendingClientChanges)
+        ));
+
+        let messages = session
+            .handle_editor_message(EditorMessage::DocumentChanged {
+                document_id: document.id,
+                document_version: document.version,
+                change_sequence: 1,
+                content: "typed\n".into(),
+            })
+            .unwrap();
+        let [HostMessage::DocumentChangeApplied {
+            document_version,
+            change_sequence: 1,
+            ..
+        }] = messages.as_slice()
+        else {
+            panic!("expected document change acknowledgement");
+        };
+        assert_eq!(*document_version, document.version + 1);
+        assert!(session.save_all_dirty().1.is_ok());
+        assert_eq!(fs::read_to_string(path).unwrap(), "typed\n");
+    }
+
+    #[test]
+    fn client_dirty_prevents_external_reload_before_sync() {
+        let workspace = tempdir().unwrap();
+        let path = workspace.path().join("external.txt");
+        fs::write(&path, "disk\n").unwrap();
+        let mut session = EditorSession::new(workspace.path()).unwrap();
+        let document = open_payload(session.open_document(&path).unwrap());
+        session
+            .handle_editor_message(EditorMessage::DocumentDirty {
+                document_id: document.id,
+                document_version: document.version,
+            })
+            .unwrap();
+
+        fs::write(&path, "external\n").unwrap();
+        let messages = session.poll_external_changes().unwrap();
+        assert!(messages
+            .iter()
+            .all(|message| !matches!(message, HostMessage::ReplaceDocument { .. })));
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            HostMessage::DocumentDiskStatus {
+                status: DocumentDiskStatus::Modified,
+                ..
+            }
+        )));
     }
 
     #[test]

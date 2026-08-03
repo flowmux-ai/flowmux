@@ -572,11 +572,6 @@ impl WindowController {
                 if prompting_for_close.get() {
                     return glib::Propagation::Stop;
                 }
-                if editor_for_close.dirty_document_paths().is_empty() {
-                    editor_for_close.prepare_for_close();
-                    return glib::Propagation::Proceed;
-                }
-
                 prompting_for_close.set(true);
                 let window = window.clone();
                 let editor = editor_for_close.clone();

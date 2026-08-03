@@ -350,8 +350,8 @@ fn dirty_editor_dialog_body(labels: &[String]) -> String {
     body
 }
 
-async fn show_editor_save_error(parent: &adw::ApplicationWindow, error: &str) {
-    let dialog = adw::AlertDialog::new(Some("Could not save changes"), Some(error));
+async fn show_editor_error(parent: &adw::ApplicationWindow, title: &str, error: &str) {
+    let dialog = adw::AlertDialog::new(Some(title), Some(error));
     dialog.add_response("ok", "OK");
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
@@ -397,6 +397,12 @@ async fn confirm_dirty_editor_close(
     parent: &adw::ApplicationWindow,
     editors: Vec<EditorPane>,
 ) -> bool {
+    for editor in &editors {
+        if let Err(error) = editor.flush_pending_changes().await {
+            show_editor_error(parent, "Could not synchronize changes", &error).await;
+            return false;
+        }
+    }
     let labels = dirty_editor_labels(&editors);
     if labels.is_empty() {
         return true;
@@ -417,7 +423,7 @@ async fn confirm_dirty_editor_close(
         Ok("save") => {
             for editor in editors {
                 if let Err(error) = editor.save_all_dirty() {
-                    show_editor_save_error(parent, &error).await;
+                    show_editor_error(parent, "Could not save changes", &error).await;
                     return false;
                 }
             }
@@ -1327,7 +1333,7 @@ impl WindowController {
                     .values()
                     .cloned()
                     .collect::<Vec<_>>();
-                if !dirty_editor_labels(&editors).is_empty() {
+                if !editors.is_empty() {
                     controller.window_close.prompting.set(true);
                     let pending = controller.clone();
                     glib::spawn_future_local(async move {

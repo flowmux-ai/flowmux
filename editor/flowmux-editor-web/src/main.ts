@@ -101,6 +101,8 @@ interface OpenDocument {
   saveError: string | null;
   /** Content edits not yet sent to the host (throttled, see syncDocument). */
   pendingChanges: boolean;
+  /** Change sequences sent to the host but not acknowledged yet. */
+  outstandingChanges: Set<number>;
   changeTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -187,6 +189,7 @@ let selectedSearchResult = 0;
 let renderedSearchResults: SearchSelection[] = [];
 const recentPaths: string[] = [];
 const documents = new Map<string, OpenDocument>();
+const pendingFlushRequests = new Set<number>();
 
 interface SearchSelection {
   path: string;
@@ -472,6 +475,11 @@ function handleHostMessage(message: HostMessage): void {
         addOrReplaceDocument(document);
       }
       activateDocument(message.activeDocumentId);
+      flushChangesForHost();
+      break;
+    case "flush_changes":
+      pendingFlushRequests.add(message.requestId);
+      flushChangesForHost();
       break;
     case "open_document":
     case "replace_document":
@@ -497,6 +505,15 @@ function handleHostMessage(message: HostMessage): void {
           closeAfterSaveDocumentId = null;
           requestClose(document);
         }
+      }
+      break;
+    }
+    case "document_change_applied": {
+      const document = documents.get(message.documentId);
+      if (document !== undefined) {
+        document.outstandingChanges.delete(message.changeSequence);
+        document.payload.version = Math.max(document.payload.version, message.documentVersion);
+        flushChangesForHost();
       }
       break;
     }
@@ -637,6 +654,7 @@ function addOrReplaceDocument(payload: DocumentPayload): void {
     // The host's replacement supersedes anything typed but not yet synced.
     clearChangeTimer(existing);
     existing.pendingChanges = false;
+    existing.outstandingChanges.clear();
     const viewState = activeDocumentId === payload.id ? editor.saveViewState() : null;
     existing.suppressChanges = true;
     if (existing.model.getValue() !== payload.content) {
@@ -662,6 +680,7 @@ function addOrReplaceDocument(payload: DocumentPayload): void {
       existing.restoreViewPending = true;
     }
     renderState();
+    flushChangesForHost();
     return;
   }
 
@@ -679,6 +698,7 @@ function addOrReplaceDocument(payload: DocumentPayload): void {
     restoreViewPending: true,
     saveError: null,
     pendingChanges: false,
+    outstandingChanges: new Set<number>(),
     changeTimer: null,
   };
   model.onDidChangeContent(() => {
@@ -690,6 +710,15 @@ function addOrReplaceDocument(payload: DocumentPayload): void {
     }
     document.payload.dirty = true;
     document.saveError = null;
+    if (!document.pendingChanges) {
+      postToHost({
+        protocolVersion: PROTOCOL_VERSION,
+        surfaceId,
+        type: "document_dirty",
+        documentId: document.payload.id,
+        documentVersion: document.payload.version,
+      });
+    }
     document.pendingChanges = true;
     if (document.changeTimer === null) {
       document.changeTimer = setTimeout(() => syncDocument(document), CHANGE_SYNC_DELAY_MS);
@@ -717,6 +746,7 @@ function syncDocument(document: OpenDocument): void {
   const edit = advanceDocumentEdit(document.payload.version, document.changeSequence);
   document.payload.version = edit.nextVersion;
   document.changeSequence = edit.changeSequence;
+  document.outstandingChanges.add(edit.changeSequence);
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -726,6 +756,27 @@ function syncDocument(document: OpenDocument): void {
     changeSequence: edit.changeSequence,
     content: document.model.getValue(),
   });
+}
+
+function flushChangesForHost(): void {
+  if (pendingFlushRequests.size === 0) {
+    return;
+  }
+  for (const document of documents.values()) {
+    syncDocument(document);
+  }
+  if ([...documents.values()].some((document) => document.outstandingChanges.size > 0)) {
+    return;
+  }
+  for (const requestId of pendingFlushRequests) {
+    postToHost({
+      protocolVersion: PROTOCOL_VERSION,
+      surfaceId,
+      type: "flush_completed",
+      requestId,
+    });
+  }
+  pendingFlushRequests.clear();
 }
 
 function activateDocument(documentId: string | null): void {
@@ -796,6 +847,7 @@ function closeDocument(documentId: string): void {
   } else {
     renderState();
   }
+  flushChangesForHost();
 }
 
 function requestClose(document: OpenDocument): void {

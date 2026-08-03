@@ -75,6 +75,7 @@ export type HostMessage =
       activeDocumentId: string | null;
       zoomPercent: number;
     })
+  | (HostMessageBase & { type: "flush_changes"; requestId: number })
   | (HostMessageBase & { type: "open_document"; document: DocumentPayload })
   | (HostMessageBase & { type: "replace_document"; document: DocumentPayload })
   | (HostMessageBase & { type: "close_document"; documentId: string; documentVersion: number })
@@ -85,6 +86,12 @@ export type HostMessage =
     })
   | (HostMessageBase & {
       type: "save_completed";
+      documentId: string;
+      documentVersion: number;
+      changeSequence: number;
+    })
+  | (HostMessageBase & {
+      type: "document_change_applied";
       documentId: string;
       documentVersion: number;
       changeSequence: number;
@@ -183,6 +190,11 @@ export type EditorMessage =
       documentVersion: number;
     })
   | (EditorMessageBase & {
+      type: "document_dirty";
+      documentId: string;
+      documentVersion: number;
+    })
+  | (EditorMessageBase & {
       type: "document_changed";
       documentId: string;
       documentVersion: number;
@@ -255,7 +267,8 @@ export type EditorMessage =
       documentId: string;
       documentVersion: number;
       action: "compare" | "keep_mine" | "reload_from_disk";
-    });
+    })
+  | (EditorMessageBase & { type: "flush_completed"; requestId: number });
 
 export interface DocumentEditAdvance {
   baseVersion: number;
@@ -299,6 +312,8 @@ export function isHostMessage(value: unknown): value is HostMessage {
         value.zoomPercent >= 50 &&
         value.zoomPercent <= 200
       );
+    case "flush_changes":
+      return isVersion(value.requestId);
     case "open_document":
     case "replace_document":
       return isDocumentPayload(value.document);
@@ -306,6 +321,7 @@ export function isHostMessage(value: unknown): value is HostMessage {
     case "set_active_document":
       return typeof value.documentId === "string" && isVersion(value.documentVersion);
     case "save_completed":
+    case "document_change_applied":
       return (
         typeof value.documentId === "string" &&
         isVersion(value.documentVersion) &&

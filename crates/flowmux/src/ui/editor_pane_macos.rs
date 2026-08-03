@@ -516,6 +516,15 @@ impl EditorPane {
         self.host.dirty_document_paths()
     }
 
+    pub async fn flush_pending_changes(&self) -> Result<(), String> {
+        let (request_id, completion, message) = self.host.start_flush();
+        if let Err(error) = self.send(message) {
+            self.host.cancel_flush(request_id);
+            return Err(error.to_string());
+        }
+        self.host.wait_for_flush(request_id, completion).await
+    }
+
     pub fn save_all_dirty(&self) -> Result<(), String> {
         let (messages, result) = self.host.save_all_dirty();
         for message in messages {

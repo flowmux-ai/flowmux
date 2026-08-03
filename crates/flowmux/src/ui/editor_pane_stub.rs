@@ -80,6 +80,10 @@ impl EditorPane {
         Vec::new()
     }
 
+    pub async fn flush_pending_changes(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn save_all_dirty(&self) -> Result<(), String> {
         Ok(())
     }

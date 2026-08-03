@@ -133,6 +133,38 @@ test("advances the local version while sending the host's current base version",
   });
 });
 
+test("accepts flush requests and document change acknowledgements", () => {
+  assert.equal(
+    isHostMessage({
+      protocolVersion: 1,
+      surfaceId: "surface-1",
+      type: "flush_changes",
+      requestId: 4,
+    }),
+    true,
+  );
+  assert.equal(
+    isHostMessage({
+      protocolVersion: 1,
+      surfaceId: "surface-1",
+      type: "document_change_applied",
+      documentId: "document-1",
+      documentVersion: 8,
+      changeSequence: 4,
+    }),
+    true,
+  );
+  assert.equal(
+    isHostMessage({
+      protocolVersion: 1,
+      surfaceId: "surface-1",
+      type: "flush_changes",
+      requestId: -1,
+    }),
+    false,
+  );
+});
+
 test("accepts complete workspace search results with multilingual ranges", () => {
   const message = {
     protocolVersion: PROTOCOL_VERSION,
