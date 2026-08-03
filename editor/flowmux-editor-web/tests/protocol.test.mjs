@@ -36,6 +36,7 @@ test("accepts a complete multilingual initialization message", () => {
       documents: [koreanDocument],
       activeDocumentId: koreanDocument.id,
       zoomPercent: 130,
+      maxDocumentBytes: 16 * 1024 * 1024,
     }),
     true,
   );

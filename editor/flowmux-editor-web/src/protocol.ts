@@ -74,6 +74,7 @@ export type HostMessage =
       documents: DocumentPayload[];
       activeDocumentId: string | null;
       zoomPercent: number;
+      maxDocumentBytes: number;
     })
   | (HostMessageBase & { type: "flush_changes"; requestId: number })
   | (HostMessageBase & { type: "open_document"; document: DocumentPayload })
@@ -268,7 +269,11 @@ export type EditorMessage =
       documentVersion: number;
       action: "compare" | "keep_mine" | "reload_from_disk";
     })
-  | (EditorMessageBase & { type: "flush_completed"; requestId: number });
+  | (EditorMessageBase & {
+      type: "flush_completed";
+      requestId: number;
+      error: string | null;
+    });
 
 export interface DocumentEditAdvance {
   baseVersion: number;
@@ -310,7 +315,9 @@ export function isHostMessage(value: unknown): value is HostMessage {
         (value.activeDocumentId === null || typeof value.activeDocumentId === "string") &&
         isVersion(value.zoomPercent) &&
         value.zoomPercent >= 50 &&
-        value.zoomPercent <= 200
+        value.zoomPercent <= 200 &&
+        isVersion(value.maxDocumentBytes) &&
+        value.maxDocumentBytes > 0
       );
     case "flush_changes":
       return isVersion(value.requestId);

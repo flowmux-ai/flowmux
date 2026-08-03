@@ -18,6 +18,7 @@ import {
   adjustedZoomPercent,
   conflictUiState,
   editorZoomDirectionForKey,
+  utf8ByteLength,
   visibleDocumentState,
 } from "./editor_state";
 import { focusDirectionForKey } from "./focus_navigation";
@@ -165,6 +166,7 @@ let surfaceId = new URLSearchParams(window.location.search).get("surface") ?? "u
 let activeDocumentId: string | null = null;
 let editorFontSize = 13;
 let editorZoomPercent = 100;
+let maxDocumentBytes = 16 * 1024 * 1024;
 let zoomToastTimer: ReturnType<typeof setTimeout> | null = null;
 let wordWrapEnabled = false;
 let minimapEnabled = false;
@@ -461,6 +463,7 @@ function handleHostMessage(message: HostMessage): void {
       break;
     case "initialize_editor":
       setEditorZoom(message.zoomPercent, false);
+      maxDocumentBytes = message.maxDocumentBytes;
       clearViewStateTimer();
       resetCloseDialog();
       resetRecoveryDialog(true);
@@ -737,10 +740,16 @@ function clearChangeTimer(document: OpenDocument): void {
 }
 
 /** Flush throttled edits so the host's document version catches up. */
-function syncDocument(document: OpenDocument): void {
+function syncDocument(document: OpenDocument): boolean {
   clearChangeTimer(document);
   if (!document.pendingChanges) {
-    return;
+    return true;
+  }
+  const content = document.model.getValue();
+  if (utf8ByteLength(content) > maxDocumentBytes) {
+    document.saveError = `The document exceeds the ${Math.floor(maxDocumentBytes / (1024 * 1024))} MiB editing limit. Reduce it before saving or closing.`;
+    renderState();
+    return false;
   }
   document.pendingChanges = false;
   const edit = advanceDocumentEdit(document.payload.version, document.changeSequence);
@@ -754,26 +763,36 @@ function syncDocument(document: OpenDocument): void {
     documentId: document.payload.id,
     documentVersion: edit.baseVersion,
     changeSequence: edit.changeSequence,
-    content: document.model.getValue(),
+    content,
   });
+  return true;
 }
 
 function flushChangesForHost(): void {
   if (pendingFlushRequests.size === 0) {
     return;
   }
-  for (const document of documents.values()) {
-    syncDocument(document);
+  const oversized = [...documents.values()].filter((document) => !syncDocument(document));
+  if (oversized.length > 0) {
+    completeFlushRequests(
+      `Cannot synchronize ${oversized.map((document) => `“${document.payload.name}”`).join(", ")}: document exceeds the editing limit.`,
+    );
+    return;
   }
   if ([...documents.values()].some((document) => document.outstandingChanges.size > 0)) {
     return;
   }
+  completeFlushRequests(null);
+}
+
+function completeFlushRequests(error: string | null): void {
   for (const requestId of pendingFlushRequests) {
     postToHost({
       protocolVersion: PROTOCOL_VERSION,
       surfaceId,
       type: "flush_completed",
       requestId,
+      error,
     });
   }
   pendingFlushRequests.clear();
@@ -851,7 +870,9 @@ function closeDocument(documentId: string): void {
 }
 
 function requestClose(document: OpenDocument): void {
-  syncDocument(document);
+  if (!syncDocument(document)) {
+    return;
+  }
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -916,7 +937,6 @@ function discardCloseDialogDocument(): void {
     return;
   }
   hideCloseDialog();
-  syncDocument(document);
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -995,7 +1015,9 @@ function requestConflictAction(action: "compare" | "keep_mine" | "reload_from_di
   if (document === undefined || !document.payload.externalChange) {
     return;
   }
-  syncDocument(document);
+  if (action !== "reload_from_disk" && !syncDocument(document)) {
+    return;
+  }
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -1093,7 +1115,10 @@ function submitSaveAs(): void {
     return;
   }
   saveAsError.textContent = "Saving…";
-  syncDocument(document);
+  if (!syncDocument(document)) {
+    saveAsError.textContent = document.saveError ?? "The document is too large to save.";
+    return;
+  }
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -1425,7 +1450,9 @@ function reportActiveViewState(): void {
   document.payload.cursorLine = Math.max(0, position.lineNumber - 1);
   document.payload.cursorColumn = Math.max(0, position.column - 1);
   document.payload.scrollTop = Math.max(0, editor.getScrollTop());
-  syncDocument(document);
+  if (!syncDocument(document)) {
+    return;
+  }
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,
@@ -1443,7 +1470,9 @@ function requestSave(documentId: string | null = activeDocumentId): void {
   if (document === undefined || document.payload.readOnly || !document.payload.dirty) {
     return;
   }
-  syncDocument(document);
+  if (!syncDocument(document)) {
+    return;
+  }
   postToHost({
     protocolVersion: PROTOCOL_VERSION,
     surfaceId,

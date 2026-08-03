@@ -6,6 +6,10 @@ export const EDITOR_ZOOM_MIN = 50;
 export const EDITOR_ZOOM_MAX = 200;
 export const EDITOR_ZOOM_STEP = 10;
 
+export function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
 export function adjustedZoomPercent(current: number, direction: number): number {
   const delta = Math.sign(direction) * EDITOR_ZOOM_STEP;
   return Math.min(EDITOR_ZOOM_MAX, Math.max(EDITOR_ZOOM_MIN, current + delta));

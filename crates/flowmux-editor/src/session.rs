@@ -136,6 +136,7 @@ impl EditorSession {
             documents,
             active_document_id: self.active.map(protocol_id),
             zoom_percent,
+            max_document_bytes: crate::DEFAULT_MAX_DOCUMENT_BYTES,
         }
     }
 

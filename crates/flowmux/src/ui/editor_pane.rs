@@ -288,6 +288,7 @@ impl EditorHostState {
                 documents: Vec::new(),
                 active_document_id: None,
                 zoom_percent: self.zoom_percent.get(),
+                max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
             },
         }
     }
@@ -359,9 +360,9 @@ impl EditorHostState {
         )
     }
 
-    fn finish_flush(&self, request_id: u64) {
+    fn finish_flush(&self, request_id: u64, error: Option<String>) {
         if let Some(completion) = self.pending_flushes.borrow_mut().remove(&request_id) {
-            *completion.borrow_mut() = Some(Ok(()));
+            *completion.borrow_mut() = Some(error.map_or(Ok(()), Err));
         }
     }
 
@@ -836,8 +837,8 @@ pub(super) fn handle_bridge_message(
                 native_edit_action = Some(action);
                 native_edit_text = text;
             }
-            EditorMessage::FlushCompleted { request_id } => {
-                host.finish_flush(request_id);
+            EditorMessage::FlushCompleted { request_id, error } => {
+                host.finish_flush(request_id, error);
             }
             message => {
                 scripts.extend(queue_host_messages(bridge, host.handle(message)));
@@ -1067,6 +1068,7 @@ mod tests {
                 documents: Vec::new(),
                 active_document_id: None,
                 zoom_percent: 100,
+                max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
             })
             .unwrap()
             .is_none());
@@ -1140,6 +1142,21 @@ mod tests {
         handle_bridge_message(&bridge, &host, &raw);
 
         assert_eq!(*completion.borrow(), Some(Ok(())));
+
+        let (request_id, completion, _) = host.start_flush();
+        let raw = serde_json::json!({
+            "protocolVersion": flowmux_editor::PROTOCOL_VERSION,
+            "surfaceId": bridge.surface_id,
+            "type": "flush_completed",
+            "requestId": request_id,
+            "error": "Document exceeds the editing limit.",
+        })
+        .to_string();
+        handle_bridge_message(&bridge, &host, &raw);
+        assert_eq!(
+            *completion.borrow(),
+            Some(Err("Document exceeds the editing limit.".into()))
+        );
     }
 
     #[test]

@@ -94,6 +94,7 @@ pub enum HostMessage {
         documents: Vec<DocumentPayload>,
         active_document_id: Option<String>,
         zoom_percent: u16,
+        max_document_bytes: u64,
     },
     FlushChanges {
         request_id: u64,
@@ -309,6 +310,7 @@ pub enum EditorMessage {
     },
     FlushCompleted {
         request_id: u64,
+        error: Option<String>,
     },
 }
 
@@ -401,9 +403,16 @@ pub fn javascript_for_host_message(
 
 fn validate_editor_message(message: &EditorMessage) -> Result<(), ProtocolError> {
     match message {
-        EditorMessage::EditorReady
-        | EditorMessage::FocusDirectionRequested { .. }
-        | EditorMessage::FlushCompleted { .. } => Ok(()),
+        EditorMessage::EditorReady | EditorMessage::FocusDirectionRequested { .. } => Ok(()),
+        EditorMessage::FlushCompleted { error, .. } => {
+            if error
+                .as_ref()
+                .is_some_and(|error| error.is_empty() || error.len() > MAX_SEARCH_QUERY_BYTES)
+            {
+                return Err(ProtocolError::InvalidViewState);
+            }
+            Ok(())
+        }
         EditorMessage::ZoomChanged { zoom_percent }
             if (EDITOR_ZOOM_MIN..=EDITOR_ZOOM_MAX).contains(zoom_percent) =>
         {
@@ -497,9 +506,13 @@ fn validate_host_message(message: &HostMessage) -> Result<(), ProtocolError> {
             documents,
             active_document_id,
             zoom_percent,
+            max_document_bytes,
             ..
         } => {
             if !(EDITOR_ZOOM_MIN..=EDITOR_ZOOM_MAX).contains(zoom_percent) {
+                return Err(ProtocolError::InvalidViewState);
+            }
+            if *max_document_bytes != DEFAULT_MAX_DOCUMENT_BYTES {
                 return Err(ProtocolError::InvalidViewState);
             }
             for document in documents {
@@ -777,7 +790,10 @@ mod tests {
         .to_string();
         assert_eq!(
             parse_editor_message(&completed).unwrap().1,
-            EditorMessage::FlushCompleted { request_id: 11 }
+            EditorMessage::FlushCompleted {
+                request_id: 11,
+                error: None,
+            }
         );
     }
 

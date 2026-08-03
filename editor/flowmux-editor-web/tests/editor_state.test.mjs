@@ -6,8 +6,14 @@ import {
   adjustedZoomPercent,
   conflictUiState,
   editorZoomDirectionForKey,
+  utf8ByteLength,
   visibleDocumentState,
 } from "../.test-build/editor_state.js";
+
+test("document byte limits use UTF-8 bytes", () => {
+  assert.equal(utf8ByteLength("abc"), 3);
+  assert.equal(utf8ByteLength("한🙂"), 7);
+});
 
 test("editor zoom moves in ten percent steps inside its supported range", () => {
   assert.equal(adjustedZoomPercent(100, 1), 110);
