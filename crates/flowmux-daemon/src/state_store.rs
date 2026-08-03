@@ -1926,18 +1926,6 @@ impl StateStore {
         None
     }
 
-    /// Add an editor surface to a workspace's first pane and return its id.
-    pub async fn add_editor_surface(&self, workspace: WorkspaceId) -> Option<SurfaceId> {
-        let mut s = self.inner.lock().await;
-        let w = s.workspaces.iter_mut().find(|w| w.id == workspace)?;
-        let pane = w.surfaces.first()?.root_pane.first_leaf_id()?;
-        let tab = PaneSurface::editor("Editor", w.root_dir.clone());
-        let surface_id = w.surfaces[0].root_pane.add_surface_to_leaf(pane, tab)?;
-        drop(s);
-        self.mark_dirty();
-        Some(surface_id)
-    }
-
     /// Add an editor surface to a specific pane using the supplied document root.
     pub async fn add_editor_surface_to_pane(
         &self,
