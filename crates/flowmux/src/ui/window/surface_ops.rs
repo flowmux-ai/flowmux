@@ -694,12 +694,18 @@ impl WindowController {
             return Err("destination pane is not rendered".to_string());
         }
 
-        let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
-            return Err("source pane no longer exists".to_string());
-        };
         if self.store.workspace_of_pane(dst_pane).await.is_none() {
             return Err("destination pane no longer exists".to_string());
         }
+        let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
+            return match surface_model {
+                Some(surface_model) => {
+                    self.import_surface_to_pane(surface_model, dst_pane, target_index)
+                        .await
+                }
+                None => Err("source pane no longer exists".to_string()),
+            };
+        };
 
         let moving = self
             .pane_registry
@@ -979,12 +985,18 @@ impl WindowController {
             return Err("destination pane is not rendered".to_string());
         }
 
-        let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
-            return Err("source pane no longer exists".to_string());
-        };
         if self.store.workspace_of_pane(dst_pane).await.is_none() {
             return Err("destination pane no longer exists".to_string());
         }
+        let Some(src_workspace) = self.store.workspace_of_pane(src_pane).await else {
+            return match surface_model {
+                Some(surface_model) => {
+                    self.split_imported_surface_into_pane(surface_model, dst_pane, direction)
+                        .await
+                }
+                None => Err("source pane no longer exists".to_string()),
+            };
+        };
 
         let moving = self
             .pane_registry

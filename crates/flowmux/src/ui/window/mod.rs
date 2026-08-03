@@ -8663,6 +8663,128 @@ mod tests {
         assert_eq!(before, after, "moved terminal must be the same live widget");
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn file_drop_imports_editor_tab_then_moves_and_splits() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let root = tempfile::tempdir().unwrap();
+        let first_file = root.path().join("first.rs");
+        let split_file = root.path().join("split.rs");
+        std::fs::write(&first_file, "fn first() {}\n").unwrap();
+        std::fs::write(&split_file, "fn split() {}\n").unwrap();
+
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("ui".into()), root.path().to_path_buf())
+            .await;
+        let src = store.get_workspace(ws_id).await.unwrap().surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let (_, dst) = store
+            .split_pane(src, flowmux_core::SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let ws = store.get_workspace(ws_id).await.unwrap();
+
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.FileDrop")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&ws);
+
+        let model = crate::ui::workspace_view::editor_surface_for_file_drop(&first_file).unwrap();
+        let (ack_tx, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::MoveSurfaceToPane {
+                src_pane: PaneId::new(),
+                surface: model.id,
+                surface_model: Some(model),
+                dst_pane: src,
+                target_index: usize::MAX,
+                ack: ack_tx,
+            })
+            .await;
+        ack_rx.await.unwrap().expect("file should import as a tab");
+
+        let imported = store.get_workspace(ws_id).await.unwrap().surfaces[0]
+            .root_pane
+            .active_surface_id(src)
+            .unwrap();
+        let before = controller.pane_registry.borrow().editors[&imported]
+            .root
+            .clone();
+        assert_eq!(
+            controller.pane_registry.borrow().editors[&imported]
+                .session_state()
+                .active_file,
+            Some(std::fs::canonicalize(&first_file).unwrap())
+        );
+
+        let (ack_tx, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::MoveSurfaceToPane {
+                src_pane: src,
+                surface: imported,
+                surface_model: None,
+                dst_pane: dst,
+                target_index: usize::MAX,
+                ack: ack_tx,
+            })
+            .await;
+        ack_rx.await.unwrap().expect("editor tab should move");
+        {
+            let registry = controller.pane_registry.borrow();
+            let moved = &registry.editors[&imported];
+            assert_eq!(moved.pane_id(), dst);
+            assert_eq!(moved.root, before, "moving must preserve the live editor");
+        }
+
+        let model = crate::ui::workspace_view::editor_surface_for_file_drop(&split_file).unwrap();
+        let (ack_tx, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::SplitSurfaceIntoPane {
+                src_pane: PaneId::new(),
+                surface: model.id,
+                surface_model: Some(model),
+                dst_pane: dst,
+                direction: flowmux_core::SplitDirection::Horizontal,
+                ack: ack_tx,
+            })
+            .await;
+        ack_rx
+            .await
+            .unwrap()
+            .expect("file should import into a split");
+
+        let canonical_split = std::fs::canonicalize(&split_file).unwrap();
+        let split_pane = {
+            let registry = controller.pane_registry.borrow();
+            let split_editor = registry
+                .editors
+                .values()
+                .find(|editor| {
+                    editor.session_state().active_file.as_ref() == Some(&canonical_split)
+                })
+                .expect("split editor should be rendered");
+            split_editor.pane_id()
+        };
+        assert_ne!(split_pane, dst);
+        assert!(store.get_workspace(ws_id).await.unwrap().surfaces[0]
+            .root_pane
+            .parent_split_id(split_pane)
+            .is_some());
+    }
+
     /// Moving the only tab out of a pane collapses that pane but keeps the
     /// workspace, and the moved widget survives.
     #[cfg(not(target_os = "macos"))]

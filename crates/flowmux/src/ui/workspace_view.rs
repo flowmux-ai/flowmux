@@ -11,24 +11,31 @@ use crate::ui::editor_pane::EditorPane;
 use crate::ui::ghostty_pane::{is_flatpak_sandbox, GhosttyPane};
 use crate::ui::pane_terminal::{PaneCallbacks, PaneTerminal, TabDropCommand};
 use flowmux_core::{
-    terminal_tab_title_for_cwd, Pane, PaneContent, PaneId, PaneSurface, SplitDirection, Surface,
-    SurfaceId, SurfaceKind, Workspace, WorkspaceId,
+    terminal_tab_title_for_cwd, EditorFileState, Pane, PaneContent, PaneId, PaneSurface,
+    SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
 };
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub(crate) const TAB_DND_MIME: &str = "application/x-flowmux-tab";
 pub(crate) const TAB_DND_PAYLOAD_MAX: usize = 64 * 1024;
+const FILE_DND_PREFIX: &str = "flowmux-file|";
 
 #[derive(Debug, Clone)]
 pub(crate) struct TabDndPayload {
     pub src_pane: PaneId,
     pub src_surface: SurfaceId,
     pub surface: Option<PaneSurface>,
+}
+
+enum PaneDndPayload {
+    Tab(Box<TabDndPayload>),
+    File(PathBuf),
 }
 
 pub(crate) fn tab_dnd_content_formats() -> gtk::gdk::ContentFormats {
@@ -47,6 +54,18 @@ fn tab_dnd_content_provider(payload: String) -> gtk::gdk::ContentProvider {
     let mime_provider = gtk::gdk::ContentProvider::for_bytes(TAB_DND_MIME, &bytes);
     let value_provider = gtk::gdk::ContentProvider::for_value(&payload.to_value());
     gtk::gdk::ContentProvider::new_union(&[mime_provider, value_provider])
+}
+
+pub(crate) fn file_dnd_content_provider(path: &Path) -> Option<gtk::gdk::ContentProvider> {
+    if !path.is_file()
+        || crate::ui::file_browser::file_open_target(path)
+            != crate::ui::file_browser::FileOpenTarget::Editor
+    {
+        return None;
+    }
+    serde_json::to_string(path)
+        .ok()
+        .map(|path| tab_dnd_content_provider(format!("{FILE_DND_PREFIX}{path}")))
 }
 
 pub(crate) async fn read_tab_dnd_payload_from_drop(
@@ -1754,6 +1773,47 @@ pub(crate) fn parse_tab_dnd_payload(payload: &str) -> Result<TabDndPayload, &'st
     })
 }
 
+fn parse_pane_dnd_payload(payload: &str) -> Result<PaneDndPayload, &'static str> {
+    if let Some(path) = payload.strip_prefix(FILE_DND_PREFIX) {
+        return serde_json::from_str(path)
+            .map(PaneDndPayload::File)
+            .map_err(|_| "invalid file path");
+    }
+    parse_tab_dnd_payload(payload).map(|payload| PaneDndPayload::Tab(Box::new(payload)))
+}
+
+pub(crate) fn editor_surface_for_file_drop(path: &Path) -> Result<PaneSurface, String> {
+    if !path.is_file()
+        || crate::ui::file_browser::file_open_target(path)
+            != crate::ui::file_browser::FileOpenTarget::Editor
+    {
+        return Err("file is not editor-openable".to_string());
+    }
+
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let title = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Editor".to_string());
+    let mut surface = PaneSurface::editor(title, path.parent().unwrap_or(&path).to_path_buf());
+    let SurfaceKind::Editor { session, .. } = &mut surface.kind else {
+        unreachable!("PaneSurface::editor must create an editor surface");
+    };
+    session.open_files.push(EditorFileState {
+        path: path.clone(),
+        cursor_line: 0,
+        cursor_column: 0,
+        scroll_top: 0.0,
+    });
+    session.active_file = Some(path);
+    Ok(surface)
+}
+
+fn file_drop_parts(path: &Path) -> Result<(PaneId, SurfaceId, PaneSurface), String> {
+    let surface = editor_surface_for_file_drop(path)?;
+    Ok((PaneId::new(), surface.id, surface))
+}
+
 #[cfg(test)]
 mod tab_dnd_tests {
     use super::*;
@@ -1802,6 +1862,45 @@ mod tab_dnd_tests {
     #[test]
     fn parse_tab_dnd_payload_rejects_plain_text() {
         assert!(parse_tab_dnd_payload("not a tab drag").is_err());
+    }
+
+    #[test]
+    fn file_dnd_payload_builds_editor_surface_with_open_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("dragged|설정.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let payload = format!("{FILE_DND_PREFIX}{}", serde_json::to_string(&path).unwrap());
+
+        let PaneDndPayload::File(parsed) = parse_pane_dnd_payload(&payload).unwrap() else {
+            panic!("file payload should parse as a file");
+        };
+        assert_eq!(parsed, path);
+        assert!(file_dnd_content_provider(&path).is_some());
+
+        let surface = editor_surface_for_file_drop(&path).unwrap();
+        assert_eq!(surface.title, "dragged|설정.rs");
+        let SurfaceKind::Editor {
+            workspace_root,
+            session,
+        } = surface.kind
+        else {
+            panic!("file drop should create an editor surface");
+        };
+        let canonical = std::fs::canonicalize(path).unwrap();
+        assert_eq!(workspace_root, canonical.parent().unwrap());
+        assert_eq!(session.active_file.as_ref(), Some(&canonical));
+        assert_eq!(session.open_files.len(), 1);
+        assert_eq!(session.open_files[0].path, canonical);
+    }
+
+    #[test]
+    fn file_dnd_rejects_non_editor_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("archive.zip");
+        std::fs::write(&path, b"PK\0binary").unwrap();
+
+        assert!(file_dnd_content_provider(&path).is_none());
+        assert!(editor_surface_for_file_drop(&path).is_err());
     }
 
     #[test]
@@ -2420,16 +2519,11 @@ fn attach_tab_dnd_handlers(
     let committed_for_drop = committed_tab_drop.clone();
     let split_candidate_for_drop = split_candidate.clone();
     drop_target.connect_drop(move |_, value, x, _y| {
-        saw_target_for_drop.set(true);
-        if committed_for_drop.replace(true) {
-            return false;
-        }
-        split_candidate_for_drop.borrow_mut().take();
         tracing::debug!(%target_pane, %target_surface, "tab drop fired");
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-before");
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-after");
         let payload = match value.get::<String>() {
-            Ok(payload) => match parse_tab_dnd_payload(&payload) {
+            Ok(payload) => match parse_pane_dnd_payload(&payload) {
                 Ok(payload) => payload,
                 Err(error) => {
                     tracing::warn!(error, "tab drop: payload invalid");
@@ -2441,9 +2535,27 @@ fn attach_tab_dnd_handlers(
                 return false;
             }
         };
-        let src_pane = payload.src_pane;
-        let src_surface = payload.src_surface;
-        let src_surface_model = payload.surface;
+        let (src_pane, src_surface, src_surface_model) = match payload {
+            PaneDndPayload::Tab(payload) => {
+                saw_target_for_drop.set(true);
+                if committed_for_drop.replace(true) {
+                    return false;
+                }
+                (payload.src_pane, payload.src_surface, payload.surface)
+            }
+            PaneDndPayload::File(path) => {
+                saw_target_for_drop.set(false);
+                committed_for_drop.set(false);
+                match file_drop_parts(&path) {
+                    Ok((pane, surface, model)) => (pane, surface, Some(model)),
+                    Err(error) => {
+                        tracing::warn!(%error, path = %path.display(), "file drop rejected");
+                        return false;
+                    }
+                }
+            }
+        };
+        split_candidate_for_drop.borrow_mut().take();
         // Dropping a tab onto itself within the same pane is a no-op.
         if src_pane == target_pane && src_surface == target_surface {
             tracing::debug!(%src_surface, "tab drop: dropped onto self, ignoring");
@@ -2870,12 +2982,6 @@ fn attach_pane_body_dnd(
     let committed_drop = callbacks.tab_drag_drop_committed.clone();
     let split_candidate = callbacks.tab_drag_split_candidate.clone();
     drop_target.connect_drop(move |_, drop, x, y| {
-        saw_drop_target.set(true);
-        if committed_drop.replace(true) {
-            drop.finish(gtk::gdk::DragAction::empty());
-            return true;
-        }
-        split_candidate.borrow_mut().take();
         let (w, h) = (frame.width() as f64, frame.height() as f64);
         let landed = landed_drop_zone(
             zone.get(),
@@ -2888,8 +2994,14 @@ fn attach_pane_body_dnd(
 
         let drop = drop.clone();
         let dispatch_tab_drop = dispatch_tab_drop.clone();
+        let saw_drop_target = saw_drop_target.clone();
+        let committed_drop = committed_drop.clone();
+        let split_candidate = split_candidate.clone();
         gtk::glib::MainContext::default().spawn_local(async move {
-            let payload = match read_tab_dnd_payload_from_drop(&drop).await {
+            let payload = match read_tab_dnd_payload_text(&drop).await.and_then(|payload| {
+                parse_pane_dnd_payload(&payload)
+                    .map_err(|error| format!("payload invalid: {error}"))
+            }) {
                 Ok(payload) => payload,
                 Err(error) => {
                     tracing::warn!(error = %error, "pane-body tab drop: failed to read payload");
@@ -2897,9 +3009,29 @@ fn attach_pane_body_dnd(
                     return;
                 }
             };
-            let src_pane = payload.src_pane;
-            let src_surface = payload.src_surface;
-            let src_surface_model = payload.surface;
+            let (src_pane, src_surface, src_surface_model) = match payload {
+                PaneDndPayload::Tab(payload) => {
+                    saw_drop_target.set(true);
+                    if committed_drop.replace(true) {
+                        drop.finish(gtk::gdk::DragAction::empty());
+                        return;
+                    }
+                    (payload.src_pane, payload.src_surface, payload.surface)
+                }
+                PaneDndPayload::File(path) => {
+                    saw_drop_target.set(false);
+                    committed_drop.set(false);
+                    match file_drop_parts(&path) {
+                        Ok((pane, surface, model)) => (pane, surface, Some(model)),
+                        Err(error) => {
+                            tracing::warn!(%error, path = %path.display(), "file drop rejected");
+                            drop.finish(gtk::gdk::DragAction::empty());
+                            return;
+                        }
+                    }
+                }
+            };
+            split_candidate.borrow_mut().take();
             let command = tab_drop_command_for_pane_zone(
                 src_pane,
                 src_surface,

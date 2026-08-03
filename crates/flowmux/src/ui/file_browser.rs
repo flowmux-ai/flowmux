@@ -1595,6 +1595,16 @@ impl FileBrowserPanel {
         );
         list_row.add_controller(click);
 
+        if !row.is_dir {
+            let drag_source = gtk::DragSource::new();
+            drag_source.set_actions(gdk::DragAction::MOVE);
+            let path = row.path.clone();
+            drag_source.connect_prepare(move |_, _, _| {
+                crate::ui::workspace_view::file_dnd_content_provider(&path)
+            });
+            list_row.add_controller(drag_source);
+        }
+
         list_row
     }
 }
@@ -2999,6 +3009,31 @@ mod tests {
         let binary = tmp.path.join("program");
         fs::write(&binary, b"text\0binary").unwrap();
         assert_eq!(file_open_target(&binary), FileOpenTarget::Binary);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn file_rows_are_drag_sources_but_directories_are_not() {
+        let panel = FileBrowserPanel::new();
+        let mut file = reconciliation_row("file.rs");
+        let file_row = panel.build_row(&file);
+        assert!((0..file_row.observe_controllers().n_items()).any(|index| {
+            file_row
+                .observe_controllers()
+                .item(index)
+                .is_some_and(|controller| controller.is::<gtk::DragSource>())
+        }));
+
+        file.is_dir = true;
+        let directory_row = panel.build_row(&file);
+        assert!(
+            !(0..directory_row.observe_controllers().n_items()).any(|index| {
+                directory_row
+                    .observe_controllers()
+                    .item(index)
+                    .is_some_and(|controller| controller.is::<gtk::DragSource>())
+            })
+        );
     }
 
     #[test]
