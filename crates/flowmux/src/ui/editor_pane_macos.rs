@@ -335,8 +335,12 @@ impl EditorPane {
                 let Some(web_widget) = web_widget.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
+                if !web_widget.is_mapped() {
+                    native_focused.set(false);
+                    return glib::ControlFlow::Continue;
+                }
                 sync_native_view_frame(&native, &web_widget);
-                let focused = web_widget.is_mapped() && native_view_has_focus(&native.web_view);
+                let focused = native_view_has_focus(&native.web_view);
                 if native_focus_entered(&native_focused, focused) {
                     if let Some(callback) = on_focus.borrow_mut().as_mut() {
                         callback(pane_id.get());
@@ -379,6 +383,7 @@ impl EditorPane {
             let bridge = pane.bridge.clone();
             let host = Rc::downgrade(&pane.host);
             let native = Rc::downgrade(&pane.native);
+            let web_widget = pane.web_widget.downgrade();
             let tick = Rc::new(Cell::new(0_u8));
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 let Some(host) = host.upgrade() else {
@@ -387,6 +392,12 @@ impl EditorPane {
                 let Some(native) = native.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
+                let Some(web_widget) = web_widget.upgrade() else {
+                    return glib::ControlFlow::Break;
+                };
+                if !web_widget.is_mapped() {
+                    return glib::ControlFlow::Continue;
+                }
                 for script in queue_host_messages(&bridge, host.poll_search_messages()) {
                     evaluate_script(&native.web_view, &script);
                 }

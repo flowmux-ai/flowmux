@@ -237,6 +237,9 @@ impl EditorPane {
                 let Some(web_view) = web_view.upgrade() else {
                     return gtk::glib::ControlFlow::Break;
                 };
+                if !web_view.is_mapped() {
+                    return gtk::glib::ControlFlow::Continue;
+                }
                 for script in queue_host_messages(&bridge, host.poll_search_messages()) {
                     evaluate_script(&web_view, &script);
                 }
