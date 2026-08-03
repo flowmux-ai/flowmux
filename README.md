@@ -96,7 +96,7 @@ token and activity totals without interrupting running sessions.
   agents in a neighbouring pane (snapshot, click, type, read state). Import a
   session from Firefox / Chrome / Chromium / Brave / Edge / Arc; **Web
   Inspector** opens WebKit dev tools.
-- **Embedded editor** — single-click a text file in Files to edit it in the
+- **Embedded editor** — double-click a text file in Files to edit it in the
   selected pane. Supports multilingual text and paths, atomic save, find and
   replace, Quick Open, workspace search, conflict comparison, close guards,
   and crash recovery without a separate editor runtime.

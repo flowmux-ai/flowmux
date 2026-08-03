@@ -8,7 +8,7 @@
 
 핵심 목표는 다음과 같다.
 
-- 파일 뷰어에서 파일을 한 번 클릭하거나 `Enter`를 누르면 적절한 pane에서 즉시 편집한다.
+- 파일 뷰어에서 파일을 두 번 클릭하거나 `Enter`를 누르면 적절한 pane에서 즉시 편집한다.
 - 편집, 저장, 찾기, 바꾸기, 빠른 파일 열기, 워크스페이스 검색을 제품 기본 기능으로 제공한다.
 - 파일 변경 충돌, dirty 문서 종료, 비정상 종료 복구까지 포함해 데이터 손실을 방지한다.
 - flowmux의 기존 pane, surface, focus, tab, workspace 복원 구조에 자연스럽게 통합한다.
@@ -23,19 +23,19 @@
 
 | 영역 | 상태 | 구현 결과 |
 |---|---|---|
-| 파일 열기 | 완료 | file browser의 단일 클릭과 `Enter`가 같은 경로를 사용해 source pane, 최근 focus pane, 첫 pane 순으로 Editor surface를 생성하거나 재사용한다. |
+| 파일 열기 | 완료 | file browser의 double-click과 `Enter`가 같은 경로를 사용해 source pane, 최근 focus pane, 첫 pane 순으로 파일별 Editor surface를 생성한다. |
 | 기본 편집 | 완료 | 다국어 본문·경로, syntax highlighting, undo/redo, multi-cursor, 들여쓰기, 접기, bracket matching을 지원한다. |
-| Edit/Diff 모드 | 완료 | 우측 상단 전환 버튼으로 일반 편집과 Monaco diff를 오가며, Git workspace에서는 `HEAD`, 일반 폴더에서는 디스크 내용을 기준으로 현재 편집본을 비교한다. 수정 쪽은 계속 편집할 수 있다. |
+| 충돌 비교 | 완료 | 외부 변경 충돌의 `Compare`에서 디스크 내용과 현재 편집본을 Monaco diff로 비교한다. 일반 Git `HEAD` Diff 모드는 제공하지 않는다. |
 | 저장 | 완료 | atomic save, Save As, save all, read-only 처리와 version 기반 dirty 상태를 지원한다. |
 | 찾기와 탐색 | 완료 | 파일 내 find/replace, go to line, Quick Open, 취소 가능한 workspace 검색과 결과 range 이동을 지원한다. |
-| 데이터 안전 | 완료 | 외부 변경 감지, clean reload, dirty conflict 비교·선택, 삭제 파일 재생성, 종료 guard, 비정상 종료 복구를 지원한다. |
+| 데이터 안전 | 완료 | 외부 변경 감지, clean reload, dirty conflict 비교·선택, 삭제 파일 재생성, flush/ack 종료 guard와 비정상 종료 복구를 지원한다. recovery snapshot은 I/O 비용을 위해 throttle된다. |
 | 세션 통합 | 완료 | 열린 파일, 활성 파일, cursor·scroll 상태를 workspace와 함께 복원하고 pane 이동·분할·닫기 수명주기에 연결한다. |
 | 외형과 배포 | 완료 | 앱 light/dark appearance, editor 색상·글꼴·zoom을 연동하고 frontend asset과 license notice를 Linux/macOS 패키지에 포함한다. |
 | workspace 일괄 바꾸기 | 후속 | 여러 파일을 한 번에 수정하는 기능은 단순 편집 흐름에 필요하지 않고 안전한 preview·부분 실패 정책이 더 필요하므로 v1에서 제외한다. |
 | Workspace Tools 패널 | 후속 | 기존 file browser와 검색 overlay로 v1 흐름이 완성되므로 별도 Files/Search/Problems panel은 추가하지 않는다. |
 | LSP와 Problems | 선택적 v1.1 | 핵심 편집·저장과 분리해 별도 결정과 검증을 거친 뒤 추가한다. 언어 서버를 자동 설치하거나 내려받지는 않는다. |
 
-macOS 설치 bundle에서 file browser 단일 클릭, line number와 다국어 글꼴 렌더링, Monaco find, 두벌식 한글 IME 조합, 저장, Edit/Diff 전환을 실제 키·포인터 입력으로 검증했다. Linux의 한글·일본어 IME, 양 플랫폼의 clipboard와 screen reader 흐름은 출시 전 반복 검증 항목으로 남긴다.
+macOS 설치 bundle에서 file browser double-click, line number와 다국어 글꼴 렌더링, Monaco find, 두벌식 한글 IME 조합과 저장을 실제 키·포인터 입력으로 검증했다. Linux의 한글·일본어 IME, 양 플랫폼의 clipboard와 screen reader 흐름은 출시 전 반복 검증 항목으로 남긴다.
 
 ## 2. 확정 범위와 비목표
 
@@ -119,9 +119,9 @@ Monaco 통합에는 다음 제약을 구현 기준으로 고정한다.
 - Monaco 내부 class와 충돌할 수 있는 범용 CSS class 이름을 외부 container에 사용하지 않는다.
 - Codicon font는 bundle에 포함하고 CSP의 font source를 해당 local/data asset으로 제한한다.
 
-### 4.2 pane마다 편집 화면 하나를 재사용한다
+### 4.2 파일마다 Editor surface 하나를 사용한다
 
-pane마다 workspace root가 같은 Editor surface를 최대 하나 재사용하고, 파일을 선택할 때 그 surface의 현재 Monaco document model을 교체한다. 열린 buffer는 데이터 안전을 위해 유지할 수 있지만 화면 안에 별도 document tab을 만들지는 않는다.
+파일을 열 때 선택한 pane에 파일별 Editor surface를 새 tab으로 만든다. 기존 파일을 다른 파일로 교체하지 않으므로 각 파일은 flowmux tab bar에서 직접 이동·분할·tear-off할 수 있다. Editor 화면 안에는 별도 document tab을 만들지 않는다.
 
 ```text
 Workspace
@@ -131,14 +131,14 @@ Workspace
    └─ Browser surface
 ```
 
-이 구조의 장점은 다음과 같다.
+이 구조의 특성은 다음과 같다.
 
 - 기존 flowmux tab이 현재 파일 이름을 표시하므로 tab을 중첩하지 않는다.
-- 파일 선택과 전환은 기존 file browser 한 곳에서 처리한다.
-- 파일 수가 늘어도 WebView와 worker 수가 파일 수만큼 증가하지 않는다.
-- 저장, 검색, LSP, 복구 상태를 Editor 단위에서 일관되게 관리할 수 있다.
+- 파일 선택은 기존 file browser가, 열린 파일 전환은 flowmux tab bar가 처리한다.
+- 각 tab은 독립된 WebView와 복구 scope를 가지므로 pane 이동과 tear-off가 다른 파일에 영향을 주지 않는다.
+- 열린 파일 수만큼 WebView가 증가하므로 lazy start와 hidden idle 비용을 측정한다.
 
-동일 pane에서 이미 열린 파일은 기존 document model을 재사용한다. 다른 pane의 Editor surface로 focus를 강제로 옮기지 않고 사용자가 파일을 연 대상 pane을 우선한다.
+같은 파일을 여러 tab에서 여는 경우에도 복구 snapshot은 `SurfaceId`별로 격리한다. 한 tab의 저장·닫기가 다른 tab의 복구본을 제거해서는 안 된다.
 
 ### 4.3 flowmux가 파일 상태의 최종 소유자다
 
@@ -275,9 +275,9 @@ Monaco worker가 안정적으로 동작하도록 `file://` 대신 loopback의 �
 1. 파일 뷰어를 연 `source_pane`이 현재 workspace에 남아 있으면 선택한다.
 2. 그렇지 않으면 현재 workspace의 가장 최근 focus pane을 선택한다.
 3. MRU가 없으면 workspace의 `first_leaf_id()`를 선택한다.
-4. 선택한 pane에 같은 workspace root의 Editor surface가 있으면 재사용한다.
-5. 없으면 Editor surface를 새 tab으로 추가하고 활성화한다.
-6. Editor surface의 현재 파일을 선택한 파일로 바꾸고 바깥 tab 제목을 파일 이름으로 갱신한다.
+4. 선택한 pane에 Editor surface를 새 tab으로 추가하고 활성화한다.
+5. 선택한 파일을 열고 바깥 tab 제목을 파일 이름으로 갱신한다.
+6. 파일 열기에 실패하면 방금 만든 빈 Editor surface를 제거한다.
 7. 기존 Terminal 또는 Browser surface를 교체하거나 닫지 않는다.
 
 resolver는 UI와 분리된 순수 함수로 작성해 pane 삭제, 빈 MRU, 오래된 source pane, 이미 열린 파일 조건을 단위 테스트한다.
@@ -313,7 +313,6 @@ flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
 
 ```text
 ┌─ current file ─────────────────────────────────────┐
-│                                      [Edit] [Diff]  │
 │                   Monaco editor                     │
 │                                                     │
 │                                      Unsaved        │
@@ -321,22 +320,20 @@ flowmux Editor는 별도 IDE shell이나 activity bar를 만들지 않는다.
 ```
 
 - 바깥 flowmux tab: 현재 파일 이름을 표시하고 Terminal·Browser·파일 편집 화면을 전환
-- 편집 화면: 우측 상단 mode switch 외 toolbar, document tab, context rail, status strip 없이 Monaco가 pane을 채움
+- 편집 화면: toolbar, document tab, context rail, status strip 없이 Monaco가 pane을 채움
 - 저장 상태: 평상시 숨기고 dirty, read-only, external-change일 때만 작은 상태 표시
 - 기존 file browser: 프로젝트 탐색의 유일한 기본 UI
 - 기존 right panel: v1에서는 변경하지 않으며 file browser와 검색 overlay를 그대로 사용
 
-파일 이름은 바깥 tab에서, 파일 전환은 file browser에서 담당한다. 편집 영역 안에는 현재 작업에 필요한 요소만 표시한다.
+파일 이름과 열린 파일 전환은 바깥 tab에서, 새 파일 선택은 file browser에서 담당한다. 편집 영역 안에는 현재 작업에 필요한 요소만 표시한다.
 
-### 7.2 Edit/Diff 모드
+### 7.2 외부 변경 충돌 비교
 
-- `Edit`가 기본 모드이며 현재 document model을 단일 Monaco editor로 표시한다.
-- `Diff`는 같은 Editor surface 안에서 Monaco DiffEditor로 전환한다.
-- Git workspace의 기준은 `HEAD`의 같은 파일이고, 추적되지 않은 새 파일의 기준은 빈 내용이다.
-- Git이 아닌 workspace의 기준은 현재 디스크 내용이다.
-- 원본 쪽은 read-only이고 수정 쪽은 현재 document model을 그대로 사용해 계속 편집·저장할 수 있다.
-- 문서를 전환하거나 닫을 때 diff 전용 model을 즉시 해제한다.
-- 외부 변경 충돌의 `Compare`는 일반 Diff 모드와 달리 현재 디스크 내용과 편집본을 비교한다.
+- 평상시에는 현재 document model을 단일 Monaco editor로 표시한다.
+- 디스크 내용과 dirty 편집본이 충돌할 때만 `Compare`가 Monaco DiffEditor를 연다.
+- 원본 쪽은 read-only이고 수정 쪽은 현재 document model을 그대로 사용한다.
+- 비교를 닫거나 문서를 닫을 때 diff 전용 원본 model을 즉시 해제한다.
+- 일반 Git `HEAD` 비교와 상시 Edit/Diff mode switch는 v1 범위에 포함하지 않는다.
 
 ### 7.3 focus와 shortcut 정책
 
@@ -554,16 +551,16 @@ workspace 일괄 바꾸기는 v1에 포함하지 않는다. 후속 구현을 결
 - `GtkCommand::OpenFileInEditor` 추가
 - 순수 `EditorTargetResolver` 구현
 - source pane → MRU → first leaf fallback 적용
-- 선택한 pane의 Editor surface 생성·재사용과 동일 파일 dedup 적용
+- 선택한 pane에 파일별 Editor surface 생성
 - text/binary/preview/large-file classifier 구현
 - Markdown preview와 `Open Externally` context action 보존
 - Editor 준비 중 loading 및 실패 UI 추가
 
 완료 조건:
 
-- 단일 클릭과 `Enter`가 동일한 resolver를 사용한다.
+- double-click과 `Enter`가 동일한 resolver를 사용한다.
 - 대상 pane이 삭제되거나 focus 기록이 오래되어도 결정적인 fallback이 동작한다.
-- 같은 파일을 반복해서 열어도 중복 document가 생기지 않는다.
+- 같은 파일을 반복해서 열면 독립된 Editor tab이 생성된다.
 - 기존 이미지·영상·PDF preview가 회귀하지 않는다.
 
 ### Phase 4 — 정밀 편집 UX, 약 1~2주
@@ -575,8 +572,7 @@ workspace 일괄 바꾸기는 v1에 포함하지 않는다. 후속 구현을 결
 - word wrap, whitespace, minimap, font, zoom 설정
 - theme와 focus 상태 연동
 - keyboard navigation, screen reader, IME 검증
-- external conflict banner와 diff view 완성
-- 우측 상단 Edit/Diff 전환과 editable modified view 완성
+- external conflict banner와 충돌 비교 diff view 완성
 
 완료 조건:
 
@@ -656,7 +652,7 @@ workspace 일괄 바꾸기와 별도 Workspace Tools panel은 v1 이후에 각�
 ### 12.2 통합 테스트
 
 - Rust-WebView protocol schema와 version mismatch
-- 동일 파일 반복 open과 선택한 pane의 surface 재사용
+- 동일 파일을 여러 tab에서 열 때 session·recovery 격리
 - Editor 준비 전 여러 open 요청의 순서 보존
 - dirty document가 있는 surface/pane/workspace/window close
 - pane move, split, tear-off 후 document 상태 유지
@@ -669,7 +665,7 @@ workspace 일괄 바꾸기와 별도 Workspace Tools panel은 v1 이후에 각�
 자동 테스트만으로 완료 처리하지 않는다. 최소한 Ubuntu 24.04의 실행 중인 flowmux에서 다음 시나리오를 재현한다.
 
 1. terminal이 최근 focus된 pane과 file browser source pane이 다른 상태를 만든다.
-2. file browser에서 텍스트 파일을 한 번 클릭한다.
+2. file browser에서 텍스트 파일을 두 번 클릭한다.
 3. 규칙에 맞는 pane에 Editor surface가 생성되는지 확인한다.
 4. 한글을 입력하고 `Ctrl+S`로 저장한다.
 5. terminal에서 파일 내용이 즉시 일치하는지 확인한다.
@@ -701,7 +697,7 @@ large-file mode는 syntax tokenization, minimap, semantic 기능을 단계적으
 | 위험 | 대응 | 중단 또는 축소 조건 |
 |---|---|---|
 | WebKit IME/focus 불안정 | Phase 0에서 실제 조합 입력 검증 | 제품 수준으로 해결할 수 없으면 GtkSourceView 평가 |
-| WebView 메모리 증가 | pane당 Editor 하나, lazy start, hidden idle 측정 | 예산 초과가 지속되면 동시 Editor 수 정책 축소 |
+| WebView 메모리 증가 | 파일별 Editor의 lazy start와 hidden idle 측정 | 예산 초과가 지속되면 동시 Editor 수 정책 축소 |
 | global shortcut 충돌 | focus-context dispatch, composition 보호 | 핵심 shortcut을 안정적으로 분리 못하면 UX 재설계 |
 | 파일 손실 | 중앙 `DocumentService`, atomic save, close guard, recovery | 모든 종료 경로가 guard를 통과하기 전 출시 금지 |
 | 검색 replace 오류 | preview, version check, partial failure 보고 | dirty 문서 일관성을 보장 못하면 replace를 v1에서 제외 |
@@ -726,12 +722,12 @@ large-file mode는 syntax tokenization, minimap, semantic 기능을 단계적으
 
 다음 조건을 모두 만족해야 pane 내장 에디터 v1으로 간주한다.
 
-- 파일 단일 클릭과 `Enter`가 source pane → MRU → first pane 규칙대로 동작한다.
-- 선택한 pane의 Editor surface와 열린 문서를 중복 없이 재사용한다.
+- 파일 double-click과 `Enter`가 source pane → MRU → first pane 규칙대로 동작한다.
+- 선택한 pane에 파일별 Editor surface가 생성되고 pane 이동·tear-off 후에도 상태가 유지된다.
 - 편집, 저장, 모두 저장, Save As, find/replace, quick open, workspace search가 동작한다.
-- Edit/Diff 전환이 동작하고 Git `HEAD` 또는 디스크 기준과 현재 편집본을 안전하게 비교한다.
+- 외부 변경 충돌에서 디스크 기준과 현재 편집본을 안전하게 비교한다.
 - encoding, BOM, line ending, final newline과 파일 권한을 의도치 않게 바꾸지 않는다.
-- dirty close, 외부 변경 충돌, 저장 실패, 비정상 종료에서 데이터 손실이 없다.
+- dirty close, 외부 변경 충돌과 저장 실패에서 최신 편집본을 조용히 버리지 않으며 비정상 종료에서는 마지막 recovery snapshot을 제안한다.
 - 앱 재시작 후 open file, active file, cursor와 recovery 상태를 복원한다.
 - 한글·일본어 IME, clipboard, keyboard-only 흐름, 고대비 상태를 검증한다.
 - pane split, drag, tear-off, close, workspace restore가 Editor 상태를 손상시키지 않는다.
@@ -748,7 +744,7 @@ large-file mode는 syntax tokenization, minimap, semantic 기능을 단계적으
 1. Monaco를 platform WebView에 직접 임베드하고 GtkSourceView를 함께 유지하지 않는다.
 2. build된 editor asset은 앱에 포함하고 version이 있는 Rust-WebView message로 문서 상태를 교환한다.
 3. Rust `DocumentService`만 파일을 읽고 쓰며 workspace 경계와 path를 검증한다.
-4. 기본 편집은 `Edit`, 기준본 비교는 같은 surface의 `Diff`로 제공하며 수정 쪽 model을 공유한다.
+4. 평상시는 단일 editor를 사용하고 외부 변경 충돌의 `Compare`에서만 같은 surface의 DiffEditor를 연다.
 5. 직접 LSP와 Problems UI는 핵심 에디터와 분리해 선택적 v1.1로 둔다.
 6. workspace 일괄 바꾸기와 별도 Workspace Tools panel은 단순 pane 편집 UX의 v1 범위에서 제외한다.
 
