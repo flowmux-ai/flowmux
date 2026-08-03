@@ -7054,12 +7054,18 @@ mod tests {
             .get(&surface)
             .cloned()
             .expect("surface should have a terminal widget");
+        controller
+            .store
+            .reconcile_process_agents(&[(surface, Some("codex"))])
+            .await;
 
-        terminal.widget.feed(b"\x1b[2J\x1b[Hcodex working\r\n");
+        terminal
+            .widget
+            .feed(b"\x1b[2J\x1b[HWorking (0s - esc to interrupt)\r\n");
         for _ in 0..40 {
             if terminal
                 .screen_text()
-                .is_some_and(|text| text.contains("codex working"))
+                .is_some_and(|text| text.contains("Working (0s"))
             {
                 break;
             }
@@ -7067,7 +7073,7 @@ mod tests {
         }
         assert!(terminal
             .screen_text()
-            .is_some_and(|text| text.contains("codex working")));
+            .is_some_and(|text| text.contains("Working (0s")));
         controller
             .dispatch(GtkCommand::TerminalContentsChanged { surface })
             .await;

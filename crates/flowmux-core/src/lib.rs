@@ -632,18 +632,9 @@ impl Pane {
                     .is_some_and(|name| existing_agent.is_some_and(|agent| agent.name != name));
                 if source == "flowmux:screen"
                     && !incoming_is_different_agent
+                    && status != AgentStatus::Idle
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.name == "claude" && agent.source.as_deref() == Some("flowmux:hook")
-                    })
-                {
-                    return Some(false);
-                }
-                if source == "flowmux:screen"
-                    && !incoming_is_different_agent
-                    && status == AgentStatus::Idle
-                    && surface.agent.as_ref().is_some_and(|agent| {
-                        matches!(agent.status, AgentStatus::Working | AgentStatus::Blocked)
-                            && agent.source.as_deref() == Some("flowmux:hook")
                     })
                 {
                     return Some(false);
@@ -739,8 +730,9 @@ impl Pane {
     /// process subtree, or `None` when no agent process is present. This is the
     /// authoritative *existence* signal: it creates an idle, process-owned
     /// presence the moment an agent process appears (independent of TUI text,
-    /// OSC title, or hooks) and drops it when the process exits back to a plain
-    /// shell. Hook/screen-owned presences are left to their own lifecycles.
+    /// OSC title, or hooks) and drops PID-less presence when the process exits
+    /// back to a plain shell. PID-backed hook presence remains owned by the
+    /// liveness sweep.
     /// Returns `Some(true)` when the presence changed, `Some(false)` when
     /// unchanged, `None` when the surface is not in this pane tree.
     pub fn reconcile_process_agent(
@@ -2225,7 +2217,7 @@ fn reconcile_surface_process_agent(
             true
         }
         (Some(existing), None) => {
-            if existing.source.as_deref() == Some(AGENT_SOURCE_PROC) {
+            if existing.pid.is_none() {
                 *slot = None;
                 true
             } else {
@@ -2265,7 +2257,7 @@ pub struct AgentPresence {
     pub status: AgentStatus,
     /// PID of the agent process (from the wrapper shim's
     /// `FLOWMUX_AGENT_PID`). `None` for agents without a wrapper; such
-    /// presences are cleared by hooks only, not the PID sweep.
+    /// presences are reconciled against process-tree truth.
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -2412,61 +2404,73 @@ pub fn detect_agent_status_from_signals(
 ) -> Option<AgentStatus> {
     let title = osc_title.unwrap_or_default().trim();
     let title_lower = title.to_ascii_lowercase();
-    if title_lower.contains("action required")
-        || title_lower.contains("needs input")
-        || title_lower.contains("permission required")
-        || title_lower.contains("needs permission")
+    let title_names_agent = detect_agent_name_from_surface_title(title).is_some();
+    if title_names_agent
+        && (title_lower.contains("action required")
+            || title_lower.contains("needs input")
+            || title_lower.contains("permission required")
+            || title_lower.contains("needs permission"))
     {
         return Some(AgentStatus::Blocked);
     }
     if title.chars().any(is_braille_spinner)
-        || title_lower.contains("working")
-        || title_lower.contains("thinking")
-        || title_lower.contains("running")
+        || (title_names_agent
+            && (title_lower.contains("working")
+                || title_lower.contains("thinking")
+                || title_lower.contains("running")))
     {
         return Some(AgentStatus::Working);
+    }
+    if title_names_agent && title_lower.contains("idle") {
+        return Some(AgentStatus::Idle);
     }
 
     let text = screen_text.unwrap_or_default();
-    let recent = text
+    let recent: Vec<String> = text
         .lines()
         .rev()
         .filter(|line| !line.trim().is_empty())
-        .take(80)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_ascii_lowercase();
-    if recent.contains("do you want to")
-        || recent.contains("approve this")
-        || recent.contains("approve command")
-        || recent.contains("requires approval")
-        || recent.contains("waiting for approval")
-        || recent.contains("awaiting approval")
-        || recent.contains("needs approval")
-        || recent.contains("allow this")
-        || recent.contains("permission to")
-        || recent.contains("permission prompt")
-        || recent.contains("requires permission")
-        || recent.contains("continue?")
-        || recent.contains("proceed?")
-        || recent.contains("action required")
-    {
-        return Some(AgentStatus::Blocked);
-    }
-    if recent.contains("working")
-        || recent.contains("thinking")
-        || recent.contains("running tool")
-        || recent.contains("executing")
-    {
-        return Some(AgentStatus::Working);
-    }
-    if title_lower.contains("idle") {
+        .take(12)
+        .map(str::to_ascii_lowercase)
+        .collect();
+    if recent.iter().any(|line| is_agent_idle_prompt_line(line)) {
         return Some(AgentStatus::Idle);
     }
+    if recent.iter().any(|line| {
+        line.contains("do you want to")
+            || line.contains("approve this")
+            || line.contains("approve command")
+            || line.contains("requires approval")
+            || line.contains("waiting for approval")
+            || line.contains("awaiting approval")
+            || line.contains("needs approval")
+            || line.contains("allow this")
+            || line.contains("permission to")
+            || line.contains("permission prompt")
+            || line.contains("requires permission")
+            || line.contains("continue?")
+            || line.contains("proceed?")
+            || line.contains("action required")
+    }) {
+        return Some(AgentStatus::Blocked);
+    }
+    if recent.iter().any(|line| is_agent_working_status_line(line)) {
+        return Some(AgentStatus::Working);
+    }
     None
+}
+
+fn is_agent_working_status_line(line: &str) -> bool {
+    let line = line.trim().trim_start_matches(['•', '●', '◉']).trim_start();
+    ["working", "thinking", "running tool", "executing"]
+        .into_iter()
+        .any(|status| {
+            line.strip_prefix(status).is_some_and(|rest| {
+                rest.trim_start().starts_with('(')
+                    || rest.contains("esc to interrupt")
+                    || rest.contains("ctrl+c to stop")
+            })
+        })
 }
 
 pub fn detect_agent_name_from_signals(
@@ -2567,7 +2571,9 @@ fn is_agent_idle_prompt_line(line: &str) -> bool {
         || line.starts_with("clear;")
         || line.contains("; echo ");
     !is_shell_command
-        && (line.contains("press / for commands")
+        && (line.starts_with("› ")
+            || line.starts_with("❯ ")
+            || line.contains("press / for commands")
             || line.contains("press / to")
             || line.contains("type /")
             || line.contains("ask anything")

@@ -1315,7 +1315,7 @@ fn opencode_plugin_source_with_argv(argv: &[String]) -> String {
     //
     // Events we surface today:
     // - `session.status` busy/retry → `running` (agent started/resumed)
-    // - `session.idle`              → `stop` (agent finished)
+    // - `session.status` idle       → `stop` (agent finished)
     // - `session.error`             → `notification` (agent errored)
     // - `permission.asked`          → `notification` (needs approval)
     // - `permission.replied`        → `running` (approval handled)
@@ -1437,13 +1437,14 @@ export const server = async () => ({{
     if (!event || typeof event.type !== "string") return;
     const t = event.type;
     const payload = sessionPayload(event);
-    if (t === "session.created" || t === "session.updated") {{
+    if (t === "session.created") {{
       fireFlowmuxHook("session-start", payload);
-    }} else if (t === "session.idle") fireFlowmuxHook("stop", payload);
-    else if (t === "session.status") {{
+    }} else if (t === "session.status") {{
       const status = event.properties && event.properties.status;
       if (status && (status.type === "busy" || status.type === "retry")) {{
         fireFlowmuxHook("running", payload);
+      }} else if (status && status.type === "idle") {{
+        fireFlowmuxHook("stop", payload);
       }}
     }} else if (t === "session.error") {{
       fireFlowmuxHook("notification", JSON.stringify({{ message: "OpenCode session error" }}));
@@ -2106,9 +2107,12 @@ hooks = true
         let src = opencode_plugin_source("/usr/local/bin/flowmux");
         assert!(src.contains(FLOWMUX_OPENCODE_PLUGIN_MARKER));
         assert!(src.contains("/usr/local/bin/flowmux"));
-        assert!(src.contains("session.idle"));
         assert!(src.contains("session.created"));
-        assert!(src.contains("session.updated"));
+        assert!(src.contains("session.status"));
+        assert!(src.contains("status.type === \"idle\""));
+        assert!(src.contains("fireFlowmuxHook(\"stop\", payload)"));
+        assert!(!src.contains("t === \"session.updated\""));
+        assert!(!src.contains("t === \"session.idle\""));
         assert!(src.contains("sessionPayload"));
         assert!(src.contains("session_id"));
         // Must be an ESM module so OpenCode 1.14+ loads it.

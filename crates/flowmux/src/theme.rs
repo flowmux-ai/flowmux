@@ -504,7 +504,9 @@ paned > separator {{
     color: rgba(239, 68, 68, 0.95);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-working,
-.navigation-sidebar row image.flowmux-sidebar-agent-working {{
+.navigation-sidebar row image.flowmux-sidebar-agent-working,
+.flowmux-agent-bar-item label.flowmux-sidebar-agent-working,
+.flowmux-agent-bar-item spinner.flowmux-sidebar-agent-working {{
     color: rgba(245, 158, 11, 0.95);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-done,
@@ -533,6 +535,10 @@ paned > separator {{
     padding: 3px 6px;
     border: 1px solid transparent;
     border-radius: 6px;
+}}
+.flowmux-agent-bar-item.flowmux-agent-bar-working {{
+    background-color: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.58);
 }}
 .flowmux-agent-bar-item:hover {{
     background-color: {control_hover};
@@ -1017,6 +1023,8 @@ mod tests {
         assert!(
             css.contains(".flowmux-agent-bar")
                 && css.contains(".flowmux-agent-bar-item.flowmux-attention")
+                && css.contains(".flowmux-agent-bar-item.flowmux-agent-bar-working")
+                && css.contains(".flowmux-agent-bar-item spinner.flowmux-sidebar-agent-working")
                 && css.contains(".flowmux-agent-bar-item.focused")
                 && css.contains(".flowmux-agent-bar-item.flowmux-drop-before")
                 && css.contains(&format!("min-width: {AGENT_BAR_ITEM_MIN_WIDTH_PX}px")),

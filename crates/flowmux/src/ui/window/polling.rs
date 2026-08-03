@@ -24,20 +24,11 @@ pub(super) fn install_heap_trim() {
 #[cfg(not(target_env = "gnu"))]
 pub(super) fn install_heap_trim() {}
 
-fn agent_poll_delay(has_hook_presence: bool) -> Duration {
-    if has_hook_presence {
-        Duration::from_secs(10)
-    } else {
-        Duration::from_secs(2)
-    }
-}
-
-fn schedule_agent_process_poll(controller: WindowController, delay: Duration) {
-    glib::timeout_add_local_once(delay, move || {
+fn schedule_agent_process_poll(controller: WindowController) {
+    glib::timeout_add_local_once(Duration::from_secs(2), move || {
         glib::MainContext::default().spawn_local(async move {
             controller.poll_agent_processes().await;
-            let delay = agent_poll_delay(controller.store.has_hook_agent_presence().await);
-            schedule_agent_process_poll(controller, delay);
+            schedule_agent_process_poll(controller);
         });
     });
 }
@@ -156,11 +147,10 @@ impl WindowController {
             glib::ControlFlow::Continue
         });
     }
-    /// Agent Bar presence is driven primarily by process truth. Poll every 2s
-    /// when process detection is the only signal, then relax to 10s while a
-    /// lifecycle-hook presence is healthy.
+    /// Agent Bar presence is driven primarily by process truth. Keep the 2s
+    /// cadence even when another tab has hooks so starts and exits do not lag.
     pub(super) fn install_agent_process_polling(&self) {
-        schedule_agent_process_poll(self.clone(), Duration::from_secs(2));
+        schedule_agent_process_poll(self.clone());
     }
     pub(super) async fn poll_agent_processes(&self) {
         let pids = self.pane_registry.borrow().terminal_agent_pids();
@@ -297,15 +287,5 @@ impl WindowController {
         self.sidebar.set_notification_workspaces(&workspaces);
         self.pane_registry.borrow().set_notification_panes(&panes);
         self.notifications.refresh_launcher_badge();
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn agent_polling_relaxes_for_hook_backed_sessions() {
-        assert_eq!(agent_poll_delay(false), Duration::from_secs(2));
-        assert_eq!(agent_poll_delay(true), Duration::from_secs(10));
     }
 }

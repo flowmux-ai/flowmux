@@ -2289,14 +2289,22 @@ fn reconcile_drops_proc_presence_when_agent_process_exits() {
 }
 
 #[test]
-fn reconcile_leaves_hook_owned_presence_when_process_absent() {
-    // A hook-owned presence must not be dropped by the process sweep; the
-    // hook (and the pid liveness sweep) own its lifecycle.
+fn reconcile_keeps_pid_backed_hook_presence_when_process_absent() {
+    // The pid liveness sweep owns PID-backed hook presence.
     let mut p = AgentPresence::new("claude", AgentActivity::Running, Some(42));
     p.source = Some("flowmux:hook".into());
     let mut slot = Some(p);
     assert!(!reconcile_surface_process_agent(&mut slot, None));
     assert!(slot.is_some());
+}
+
+#[test]
+fn reconcile_drops_pidless_hook_presence_when_process_absent() {
+    let mut p = AgentPresence::new("opencode", AgentActivity::Running, None);
+    p.source = Some("flowmux:hook".into());
+    let mut slot = Some(p);
+    assert!(reconcile_surface_process_agent(&mut slot, None));
+    assert!(slot.is_none());
 }
 
 #[test]
@@ -2359,6 +2367,36 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
     assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Idle));
     // Still present — a second settle is a no-op.
     assert_eq!(pane.settle_screen_idle(surface_id, true), Some(false));
+}
+
+#[test]
+fn idle_screen_prompt_settles_hook_working_status() {
+    let mut surface = PaneSurface::terminal("agent", None);
+    let surface_id = surface.id;
+    let mut presence = AgentPresence::new("claude", AgentActivity::Running, Some(42));
+    presence.source = Some("flowmux:hook".into());
+    surface.agent = Some(presence);
+    let mut pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: surface_id,
+            surfaces: vec![surface],
+        },
+    };
+
+    assert_eq!(
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Idle,
+            "flowmux:screen",
+            Some("claude"),
+            true,
+        ),
+        Some(true)
+    );
+    let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+    assert_eq!(agent.status, AgentStatus::Idle);
+    assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
 }
 
 #[test]
@@ -2641,6 +2679,25 @@ fn detector_reads_strong_osc_and_screen_signals() {
     );
     assert_eq!(
         detect_agent_status_from_signals(Some("Auto-approve all enabled (Shift+Tab)"), None),
+        None
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(Some("• Working (0s • esc to interrupt)"), None),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(
+            Some("The working status was stale.\n\n› Find and fix a bug in @filename"),
+            Some("scratchpad"),
+        ),
+        Some(AgentStatus::Idle)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(Some("why is the working status stale?"), None),
+        None
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(None, Some("working-notes")),
         None
     );
 }

@@ -101,6 +101,9 @@ impl AgentBar {
         let button = gtk::Button::new();
         button.add_css_class("flat");
         button.add_css_class("flowmux-agent-bar-item");
+        if item.status == AgentStatus::Working {
+            button.add_css_class("flowmux-agent-bar-working");
+        }
         button.set_size_request(AGENT_BAR_ITEM_MAX_WIDTH_PX as i32, -1);
         button.set_hexpand(false);
         button.set_tooltip_text(Some(&format!("{}: {}", item.agent_name, item.status_text)));
@@ -111,10 +114,18 @@ impl AgentBar {
         let stripe = color_stripe(&item.color);
         row.append(&stripe);
 
-        let icon = gtk::Image::from_icon_name(agent_status_icon_name(item.status, item.seen));
-        icon.set_pixel_size(12);
-        icon.add_css_class(agent_status_css_class(item.status, item.seen));
-        row.append(&icon);
+        if item.status == AgentStatus::Working {
+            let spinner = gtk::Spinner::new();
+            spinner.set_spinning(true);
+            spinner.set_size_request(12, 12);
+            spinner.add_css_class(agent_status_css_class(item.status, item.seen));
+            row.append(&spinner);
+        } else {
+            let icon = gtk::Image::from_icon_name(agent_status_icon_name(item.status, item.seen));
+            icon.set_pixel_size(12);
+            icon.add_css_class(agent_status_css_class(item.status, item.seen));
+            row.append(&icon);
+        }
 
         let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
         text.set_hexpand(true);
@@ -388,6 +399,7 @@ fn agent_status_css_class(status: AgentStatus, seen: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flowmux_core::{AgentBarVisualStatus, PaneId, WorkspaceId};
 
     #[test]
     fn reordered_agent_bar_order_moves_items_before_or_after_target() {
@@ -425,5 +437,38 @@ mod tests {
             agent_status_css_class(AgentStatus::Blocked, true),
             "flowmux-sidebar-agent-idle"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn working_item_uses_spinner_and_highlight_class() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let (bridge, _rx) = Bridge::new();
+        let bar = AgentBar::new(bridge);
+        let item = AgentBarItem {
+            workspace: WorkspaceId::new(),
+            pane: PaneId::new(),
+            surface: SurfaceId::new(),
+            agent_name: "codex".into(),
+            status: AgentStatus::Working,
+            visual_status: AgentBarVisualStatus::Working,
+            seen: true,
+            status_text: "working".into(),
+            color: "#f59e0b".into(),
+        };
+
+        let button = bar.item_button(&item);
+        assert!(button.has_css_class("flowmux-agent-bar-working"));
+        let row = button.child().unwrap().downcast::<gtk::Box>().unwrap();
+        let spinner = row
+            .first_child()
+            .unwrap()
+            .next_sibling()
+            .unwrap()
+            .downcast::<gtk::Spinner>()
+            .unwrap();
+        assert!(spinner.is_spinning());
     }
 }

@@ -1201,7 +1201,7 @@ impl StateStore {
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
-        let idle_agent_name = if detected_status.is_none() {
+        let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
             detect_agent_idle_name_from_signals(screen_text, osc_title)
         } else {
             None
@@ -1358,24 +1358,6 @@ impl StateStore {
             }
         }
         out
-    }
-
-    /// Whether a live agent presence is currently backed by lifecycle hooks.
-    /// Process-only and screen-only detections stay on the fast polling path.
-    pub async fn has_hook_agent_presence(&self) -> bool {
-        let s = self.inner.lock().await;
-        s.workspaces.iter().any(|workspace| {
-            let mut found = Vec::new();
-            for surface in &workspace.surfaces {
-                surface.root_pane.collect_agent_presences(&mut found);
-            }
-            found.iter().any(|(_, presence)| {
-                presence
-                    .source
-                    .as_deref()
-                    .is_some_and(|source| source.starts_with("flowmux:hook"))
-            })
-        })
     }
 
     pub async fn update_surface_cwd(
@@ -2795,7 +2777,6 @@ mod tests {
         assert_eq!(agent.name, "codex");
         assert_eq!(agent.status, AgentStatus::Idle);
         assert_eq!(agent.source.as_deref(), Some("flowmux:proc"));
-        assert!(!store.has_hook_agent_presence().await);
 
         // Idempotent: same detection reports no change.
         assert!(store
@@ -2854,6 +2835,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconcile_process_agents_drops_pidless_hook_presence() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        store
+            .report_agent_status(
+                surface,
+                AgentStatusReport {
+                    name: "opencode".into(),
+                    status: Some(AgentStatus::Working),
+                    activity: None,
+                    pid: None,
+                    source: Some("flowmux:hook".into()),
+                    seq: None,
+                    message: None,
+                    custom_status: None,
+                    session_id: None,
+                },
+            )
+            .await;
+
+        assert_eq!(
+            store.reconcile_process_agents(&[(surface, None)]).await,
+            vec![(ws_id, None)]
+        );
+        assert!(store.located_agent_presence(surface).await.is_none());
+    }
+
+    #[tokio::test]
     async fn report_agent_screen_signals_restores_idle_presence_from_agent_name() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
@@ -2908,13 +2922,21 @@ mod tests {
 
         assert_eq!(
             store
-                .report_agent_screen_signals(surface, Some("Codex Working"), None)
+                .report_agent_screen_signals(
+                    surface,
+                    Some("Codex\n• Working (0s • esc to interrupt)"),
+                    Some("Codex"),
+                )
                 .await,
             Some((ws_id, Some(AgentStatus::Working)))
         );
         assert_eq!(
             store
-                .report_agent_screen_signals(surface, Some("Codex Working"), None)
+                .report_agent_screen_signals(
+                    surface,
+                    Some("Codex\n• Working (0s • esc to interrupt)"),
+                    Some("Codex"),
+                )
                 .await,
             None,
             "an unchanged screen-derived item must not trigger another UI rebuild"
@@ -3035,7 +3057,7 @@ Do you want to continue?";
         );
         assert_eq!(
             store
-                .report_agent_screen_signals(surface, None, Some("Codex Working"))
+                .report_agent_screen_signals(surface, None, Some("Codex ⠋ working"))
                 .await,
             Some((ws_id, Some(AgentStatus::Working)))
         );
@@ -3056,7 +3078,6 @@ Do you want to continue?";
             store.live_agent_presences().await,
             vec![(ws_id, surface, 42)]
         );
-        assert!(store.has_hook_agent_presence().await);
     }
 
     #[tokio::test]
