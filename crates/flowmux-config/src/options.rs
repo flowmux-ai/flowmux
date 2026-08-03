@@ -5,8 +5,9 @@
 //! Stored at `$XDG_CONFIG_HOME/flowmux/options.json`. All fields use
 //! `#[serde(default)]`, so partial user files load safely.
 //!
-//! Zoom is an integer percentage (10..=200), and [`Options::zoom_factor`]
-//! returns the 0.1..=2.0 scale accepted by GTK/terminal/WebView. Changing the web
+//! Zoom is stored as an absolute integer percentage (50..=200), and
+//! [`Options::zoom_factor`] returns the 0.5..=2.0 scale accepted by
+//! GTK/terminal/WebView. Changing the web
 //! view engine option does not affect existing browser tabs; it applies only
 //! to newly created browser tabs.
 
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Minimum zoom percentage.
-pub const ZOOM_MIN: u16 = 10;
+pub const ZOOM_MIN: u16 = 50;
 /// Maximum zoom percentage.
 pub const ZOOM_MAX: u16 = 200;
 /// Default zoom percentage.
@@ -322,7 +323,7 @@ impl Options {
         ms.clamp(CURSOR_BLINK_INTERVAL_MIN, CURSOR_BLINK_INTERVAL_MAX)
     }
 
-    /// Scale in 0.1..=2.0 form for terminal font sizing and WebView zoom.
+    /// Scale in 0.5..=2.0 form for terminal font sizing and WebView zoom.
     pub fn zoom_factor(&self) -> f64 {
         Self::clamp_zoom(self.zoom_percent) as f64 / 100.0
     }
@@ -525,8 +526,8 @@ mod tests {
     #[test]
     fn clamp_zoom_keeps_value_inside_range() {
         assert_eq!(Options::clamp_zoom(0), ZOOM_MIN);
-        assert_eq!(Options::clamp_zoom(5), ZOOM_MIN);
-        assert_eq!(Options::clamp_zoom(10), 10);
+        assert_eq!(Options::clamp_zoom(49), ZOOM_MIN);
+        assert_eq!(Options::clamp_zoom(50), 50);
         assert_eq!(Options::clamp_zoom(100), 100);
         assert_eq!(Options::clamp_zoom(200), 200);
         assert_eq!(Options::clamp_zoom(500), ZOOM_MAX);

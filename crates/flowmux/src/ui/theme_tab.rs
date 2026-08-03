@@ -4,8 +4,7 @@
 //! A list of built-in theme presets (from `flowmux-config`) with color
 //! swatches, plus per-color override pickers. Every interaction updates
 //! the shared [`ThemeSelection`] and calls `on_change` so the dialog can
-//! live-preview the look; nothing is persisted until the dialog's OK
-//! button collects the state.
+//! persist and apply the look immediately.
 
 use adw::prelude::*;
 use flowmux_config::ghostty::GhosttyConfig;
@@ -15,7 +14,7 @@ use gtk::gdk;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// Theme selection shared with the options dialog; read on OK.
+/// Theme selection shared with the options dialog.
 #[derive(Clone, Default)]
 pub struct ThemeSelection {
     /// Preset id, or `None` when the user has not picked one (legacy

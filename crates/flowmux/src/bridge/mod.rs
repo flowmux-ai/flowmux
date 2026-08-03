@@ -206,9 +206,8 @@ pub enum WsNav {
 /// `oneshot::Sender` for replies if the caller needs the result.
 #[derive(Debug)]
 pub enum GtkCommand {
-    /// Show the modal options dialog from the GTK side.
-    /// The dialog owns OK / cancel handling and returns nothing through
-    /// the bridge.
+    /// Show the options dialog from the GTK side. Changes apply immediately;
+    /// the dialog returns nothing through the bridge.
     ShowOptionsDialog,
     /// Show the command palette from the GTK side.
     ShowCommandPalette,

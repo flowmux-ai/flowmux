@@ -11,7 +11,6 @@ impl WindowController {
                 let options_cell = self.options.clone();
                 let window = self.window.clone();
                 let controller = self.clone();
-                let preview_controller = self.clone();
                 let theme = self.current_theme();
                 let default_font_family = theme.font_family();
                 let default_font_size = theme.font_size();
@@ -75,11 +74,6 @@ impl WindowController {
                                 controller.refresh_activity_panel().await;
                             }
                         });
-                    },
-                    // Live preview from the Theme tab; also called on Cancel /
-                    // close with the original options to restore the look.
-                    move |opts| {
-                        preview_controller.apply_runtime_theme(opts);
                     },
                     install_origin,
                     update_state,

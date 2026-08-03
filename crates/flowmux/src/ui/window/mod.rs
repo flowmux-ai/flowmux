@@ -791,8 +791,8 @@ impl WindowController {
     /// Re-resolve the theme from `opts` and repaint everything that
     /// depends on it: every open terminal (colors + font), the global CSS
     /// provider, and libadwaita's dark/light color scheme. New panes pick
-    /// up the swapped theme automatically. Used both for the Theme tab's
-    /// live preview and for the final apply on OK.
+    /// up the swapped theme automatically. Used for every immediate options
+    /// update.
     pub(super) fn apply_runtime_theme(&self, opts: &flowmux_config::options::Options) {
         let resolved = Arc::new(ResolvedTheme::resolve(opts));
         *self.theme.borrow_mut() = resolved.clone();

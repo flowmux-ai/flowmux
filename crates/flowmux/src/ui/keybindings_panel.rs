@@ -3,19 +3,12 @@
 //!
 //! Lists every editable [`ActionId`] with its currently bound
 //! accelerators and lets the user edit, capture, unbind, or reset each
-//! one. Edits are written into a shared `Rc<RefCell<KeybindingOverrides>>`
-//! that the parent dialog hands to `collect_options` when the user
-//! clicks OK, so changes only persist on OK — Cancel or window close
-//! discards everything.
-//!
-//! Live application is not wired here. The parent [`super::options_dialog`]
-//! shows a "Changes take effect after restart" hint, and the install
-//! routine in [`crate::keybindings::install_accels`] re-reads
-//! `options.json` on the next launch.
+//! one. Every committed edit updates the shared overrides and immediately
+//! asks the parent options dialog to persist and install the new bindings.
 //!
 //! Layout:
 //!
-//! * [Restart hint label]
+//! * [Immediate-apply hint label]
 //! * Scrollable [`gtk::ListBox`] grouped logically (pane / workspace /
 //!   tabs / clipboard / window).
 //! * "Reset all keybindings to defaults" footer button.
@@ -32,15 +25,12 @@ use gtk::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Shared editable state passed in by the parent dialog. Edits made
-/// inside the panel mutate this cell; the parent reads it on OK.
+/// Shared editable state passed in by the parent dialog.
 pub type SharedOverrides = Rc<RefCell<KeybindingOverrides>>;
 
 /// Build the keybindings tab widget.
 ///
-/// `state` is the same `Rc<RefCell<...>>` the dialog later reads inside
-/// its OK handler — anything written here is what the user keeps.
-pub fn build(state: SharedOverrides) -> gtk::Box {
+pub fn build(state: SharedOverrides, on_change: Rc<dyn Fn()>) -> gtk::Box {
     let outer = gtk::Box::new(gtk::Orientation::Vertical, 8);
     outer.set_margin_top(12);
     outer.set_margin_bottom(12);
@@ -48,8 +38,8 @@ pub fn build(state: SharedOverrides) -> gtk::Box {
     outer.set_margin_end(16);
 
     let hint = gtk::Label::new(Some(
-        "Changes take effect immediately when you click OK. Use GTK \
-         accelerator syntax (e.g. <Ctrl><Shift>c). Separate multiple \
+        "Changes take effect immediately. Use GTK accelerator syntax \
+         (e.g. <Ctrl><Shift>c). Separate multiple \
          shortcuts with commas. Leave the field blank to unbind an action.",
     ));
     hint.set_wrap(true);
@@ -67,7 +57,7 @@ pub fn build(state: SharedOverrides) -> gtk::Box {
     let row_refresh: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
 
     for action in ActionId::editable() {
-        let (row, refresh) = build_row(action, state.clone());
+        let (row, refresh) = build_row(action, state.clone(), on_change.clone());
         list.append(&row);
         row_refresh.borrow_mut().push(refresh);
     }
@@ -83,11 +73,13 @@ pub fn build(state: SharedOverrides) -> gtk::Box {
     {
         let state = state.clone();
         let row_refresh = row_refresh.clone();
+        let on_change = on_change.clone();
         reset_all.connect_clicked(move |_| {
             state.borrow_mut().clear_all();
             for refresh in row_refresh.borrow().iter() {
                 refresh();
             }
+            on_change();
         });
     }
     let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -103,7 +95,11 @@ pub fn build(state: SharedOverrides) -> gtk::Box {
 /// Build one row for `action` and return both the row widget and a
 /// closure the global Reset path calls to refresh the visible accel
 /// chip after the underlying `KeybindingOverrides` changes.
-fn build_row(action: ActionId, state: SharedOverrides) -> (adw::ActionRow, Rc<dyn Fn()>) {
+fn build_row(
+    action: ActionId,
+    state: SharedOverrides,
+    on_change: Rc<dyn Fn()>,
+) -> (adw::ActionRow, Rc<dyn Fn()>) {
     let row = adw::ActionRow::new();
     row.set_title(action.label());
     row.set_subtitle(action.as_str());
@@ -123,8 +119,15 @@ fn build_row(action: ActionId, state: SharedOverrides) -> (adw::ActionRow, Rc<dy
     {
         let state = state.clone();
         let accel_label = accel_label.clone();
+        let on_change = on_change.clone();
         edit_btn.connect_clicked(move |btn| {
-            present_edit_dialog(btn, action, state.clone(), accel_label.clone());
+            present_edit_dialog(
+                btn,
+                action,
+                state.clone(),
+                accel_label.clone(),
+                on_change.clone(),
+            );
         });
     }
 
@@ -162,6 +165,7 @@ fn present_edit_dialog(
     action: ActionId,
     state: SharedOverrides,
     accel_label: gtk::Label,
+    on_change: Rc<dyn Fn()>,
 ) {
     let parent = anchor.root().and_then(|r| r.downcast::<gtk::Window>().ok());
 
@@ -250,6 +254,7 @@ fn present_edit_dialog(
         let entry = entry.clone();
         let accel_label = accel_label.clone();
         let error_label = error_label.clone();
+        let on_change = on_change.clone();
         ok_btn.connect_clicked(move |_| {
             let raw = entry.text().to_string();
             match parse_accel_list(&raw) {
@@ -264,6 +269,7 @@ fn present_edit_dialog(
                     }
                     drop(overrides);
                     refresh_accel_label(&accel_label, &state.borrow(), action);
+                    on_change();
                     dialog.close();
                 }
                 Err(bad) => {
@@ -354,7 +360,7 @@ pub fn parse_accel_list(raw: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Same comparison the `OK` handler uses to drop overrides that match
+/// Same comparison the edit handler uses to drop overrides that match
 /// the default — keeps `options.json` from filling up with redundant
 /// entries when the user resets via the dialog.
 fn accels_equal_to_default(accels: &[String], action: ActionId) -> bool {
@@ -417,8 +423,7 @@ fn is_modifier_key(keyval: gtk::gdk::Key) -> bool {
 }
 
 /// Conflict report: every accel string bound to two or more actions
-/// after applying the user's overrides. Empty result means the OK
-/// handler can save without prompting.
+/// after applying the user's overrides.
 pub fn detect_conflicts(overrides: &KeybindingOverrides) -> Vec<(String, Vec<ActionId>)> {
     use std::collections::BTreeMap;
     let mut by_accel: BTreeMap<String, Vec<ActionId>> = BTreeMap::new();

@@ -3,7 +3,7 @@
 //!
 //! It exposes:
 //!
-//! * Global zoom percentage (10..=200% SpinButton)
+//! * Global zoom percentage (DropDown of whole-point terminal zoom values)
 //! * Terminal font family (DropDown of installed, curated developer fonts,
 //!   plus a "System default" sentinel that inherits the theme font) and size
 //!   (SpinButton, points). Applied live to every open terminal.
@@ -15,8 +15,8 @@
 //! * Agent Bar visibility toggle (Switch, default on).
 //! * Software update status, manual release check, and update action.
 //!
-//! OK / Cancel close the dialog. `on_apply` is called only on OK, and the
-//! dialog closes itself so the caller only handles the callback.
+//! Every option change calls `on_apply` immediately. The header has a single
+//! Close button because there is no pending state to confirm or cancel.
 //!
 //! Layering: this module only owns GTK widgets. Saving options to disk and
 //! applying zoom to terminal/WebView are handled by [`crate::ui::window`]. The
@@ -29,16 +29,16 @@ use flowmux_config::keybindings::KeybindingOverrides;
 use flowmux_config::options::{
     BrowserEngine, Options, CURSOR_BLINK_INTERVAL_MAX, CURSOR_BLINK_INTERVAL_MIN,
     FOCUS_BORDER_OPACITY_MAX, FOCUS_BORDER_OPACITY_MIN, SCROLLBACK_LINES_MAX, SCROLLBACK_LINES_MIN,
-    ZOOM_MAX, ZOOM_MIN,
+    ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN,
 };
 use flowmux_core::AgentNotificationTarget;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 type UpdateCheckCompletion = Box<dyn FnOnce(Result<BannerState, String>)>;
 
-/// Present the modal options dialog. If the user clicks OK, `on_apply` is
-/// called with the new [`Options`]. Cancel or window close does not call back.
+/// Present the options dialog. Every setting change calls `on_apply` with the
+/// complete new [`Options`].
 /// `default_font_family` / `default_font_size` are the resolved theme font,
 /// used to seed the font widgets when the user has no override.
 pub fn present(
@@ -47,7 +47,6 @@ pub fn present(
     default_font_family: String,
     default_font_size: f32,
     on_apply: impl Fn(Options) + 'static,
-    on_preview: impl Fn(&Options) + 'static,
     install_origin: InstallOrigin,
     update_state: BannerState,
     on_check_update: impl Fn(UpdateCheckCompletion) -> bool + 'static,
@@ -59,7 +58,6 @@ pub fn present(
         default_font_family,
         default_font_size,
         on_apply,
-        on_preview,
         install_origin,
         update_state,
         on_check_update,
@@ -74,6 +72,22 @@ fn defer_widget_action(action: impl FnOnce() + 'static) {
     gtk::glib::idle_add_local_once(action);
 }
 
+fn connect_selected_notify(widget: &gtk::DropDown, on_change: Rc<dyn Fn()>) {
+    widget.connect_selected_notify(move |_| on_change());
+}
+
+fn connect_value_changed(widget: &gtk::SpinButton, on_change: Rc<dyn Fn()>) {
+    widget.connect_value_changed(move |_| on_change());
+}
+
+fn connect_toggled(widget: &gtk::CheckButton, on_change: Rc<dyn Fn()>) {
+    widget.connect_toggled(move |_| on_change());
+}
+
+fn connect_active_notify(widget: &gtk::Switch, on_change: Rc<dyn Fn()>) {
+    widget.connect_active_notify(move |_| on_change());
+}
+
 /// Build only the dialog widget tree so tests can inspect widget state
 /// without calling `present`.
 fn build_dialog(
@@ -82,7 +96,6 @@ fn build_dialog(
     default_font_family: String,
     default_font_size: f32,
     on_apply: impl Fn(Options) + 'static,
-    on_preview: impl Fn(&Options) + 'static,
     install_origin: InstallOrigin,
     update_state: BannerState,
     on_check_update: impl Fn(UpdateCheckCompletion) -> bool + 'static,
@@ -106,14 +119,11 @@ fn build_dialog(
     header.set_show_start_title_buttons(false);
     header.set_show_end_title_buttons(false);
 
-    let cancel_btn = gtk::Button::with_label("Cancel");
-    let ok_btn = gtk::Button::with_label("OK");
-    ok_btn.add_css_class("suggested-action");
-    header.pack_start(&cancel_btn);
-    header.pack_end(&ok_btn);
+    let close_btn = gtk::Button::with_label("Close");
+    header.pack_end(&close_btn);
 
-    let zoom_spin = build_zoom_spin(current.zoom_percent);
     let font_widgets = build_font_widgets(parent, current, &default_font_family, default_font_size);
+    let zoom_picker = ZoomPicker::new(current.zoom_percent, font_widgets.size_spin.value());
     let engine_drop = build_engine_drop(&current.default_browser_engine);
     let focus_color_btn = build_focus_color_button(current.focus_border_color_or_default());
     let opacity_widgets = build_focus_opacity_row(current.focus_border_opacity);
@@ -133,7 +143,7 @@ fn build_dialog(
     general.set_margin_bottom(16);
     general.set_margin_start(20);
     general.set_margin_end(20);
-    general.append(&row("Global zoom (%)", &zoom_spin));
+    general.append(&row("Global zoom (%)", &zoom_picker.drop));
     general.append(&row("Terminal font", &font_widgets.family_drop));
     general.append(&row("Font size (pt)", &font_widgets.size_spin));
     general.append(&row("Browser web view", &engine_drop));
@@ -171,34 +181,106 @@ fn build_dialog(
         .child(&general)
         .build();
 
-    // Keybindings tab — edits write into kb_state below, picked up by
-    // collect_options when the user clicks OK.
-    let kb_state = std::rc::Rc::new(std::cell::RefCell::new(current.keybindings.clone()));
-    let keybindings_tab = crate::ui::keybindings_panel::build(kb_state.clone());
-
-    // Theme tab — selections write into theme_state and preview live via
-    // on_preview; OK persists them through collect_options, and Cancel /
-    // close restores the original look (see connect_close_request below).
-    let on_preview = std::rc::Rc::new(on_preview);
-    let theme_state = std::rc::Rc::new(std::cell::RefCell::new(
-        crate::ui::theme_tab::ThemeSelection {
-            theme: current.theme.clone(),
-            overrides: current.theme_overrides.clone(),
-        },
-    ));
-    let preview_theme: std::rc::Rc<dyn Fn()> = {
+    let kb_state = Rc::new(RefCell::new(current.keybindings.clone()));
+    let theme_state = Rc::new(RefCell::new(crate::ui::theme_tab::ThemeSelection {
+        theme: current.theme.clone(),
+        overrides: current.theme_overrides.clone(),
+    }));
+    let on_apply = Rc::new(on_apply);
+    let apply_current: Rc<dyn Fn()> = {
+        let zoom_picker = zoom_picker.clone();
+        let engine_drop = engine_drop.clone();
+        let focus_color_btn = focus_color_btn.clone();
+        let opacity_spin = opacity_widgets.spin.clone();
+        let persist_check = persist_check.clone();
+        let auto_resume_check = auto_resume_check.clone();
+        let scrollback_check = scrollback_check.clone();
+        let scrollback_lines_spin = scrollback_lines_spin.clone();
+        let default_shell_entry = default_shell_entry.clone();
+        let system_notify_switch = system_notify_switch.clone();
+        let agent_bar_switch = agent_bar_switch.clone();
+        let cursor_blink_switch = cursor_blink_switch.clone();
+        let blink_interval_spin = blink_interval_spin.clone();
+        let family_drop = font_widgets.family_drop.clone();
+        let font_size_spin = font_widgets.size_spin.clone();
+        let families = font_widgets.families.clone();
+        let on_apply = on_apply.clone();
+        let kb_state = kb_state.clone();
         let theme_state = theme_state.clone();
-        let on_preview = on_preview.clone();
-        let base = current.clone();
-        std::rc::Rc::new(move || {
-            let selection = theme_state.borrow();
-            let mut opts = base.clone();
-            opts.theme = selection.theme.clone();
-            opts.theme_overrides = selection.overrides.clone();
-            on_preview(&opts);
+        let agent_notification_target = current.agent_notification_target;
+        Rc::new(move || {
+            let kb = kb_state.borrow().clone();
+            let conflicts = crate::ui::keybindings_panel::detect_conflicts(&kb);
+            if !conflicts.is_empty() {
+                tracing::warn!(
+                    count = conflicts.len(),
+                    "saving keybindings with overlapping accels — last writer wins at install time"
+                );
+            }
+            on_apply(collect_options(
+                &zoom_picker,
+                &engine_drop,
+                &focus_color_btn,
+                &opacity_spin,
+                &persist_check,
+                &auto_resume_check,
+                &scrollback_check,
+                &scrollback_lines_spin,
+                &default_shell_entry,
+                &system_notify_switch,
+                &agent_bar_switch,
+                &cursor_blink_switch,
+                &blink_interval_spin,
+                &family_drop,
+                &font_size_spin,
+                &families,
+                default_font_size,
+                agent_notification_target,
+                &kb,
+                &theme_state.borrow(),
+            ));
         })
     };
-    let theme_tab = crate::ui::theme_tab::build(theme_state.clone(), preview_theme);
+    let keybindings_tab =
+        crate::ui::keybindings_panel::build(kb_state.clone(), apply_current.clone());
+    let theme_tab = crate::ui::theme_tab::build(theme_state.clone(), apply_current.clone());
+
+    {
+        let apply_current = apply_current.clone();
+        let syncing = zoom_picker.syncing.clone();
+        zoom_picker.drop.connect_selected_notify(move |_| {
+            if !syncing.get() {
+                apply_current();
+            }
+        });
+    }
+    {
+        let apply_current = apply_current.clone();
+        let zoom_picker = zoom_picker.clone();
+        font_widgets.size_spin.connect_value_changed(move |spin| {
+            zoom_picker.rebuild(spin.value());
+            apply_current();
+        });
+    }
+    connect_selected_notify(&font_widgets.family_drop, apply_current.clone());
+    connect_selected_notify(&engine_drop, apply_current.clone());
+    {
+        let apply_current = apply_current.clone();
+        focus_color_btn.connect_rgba_notify(move |_| apply_current());
+    }
+    connect_value_changed(&opacity_widgets.spin, apply_current.clone());
+    connect_toggled(&persist_check, apply_current.clone());
+    connect_toggled(&auto_resume_check, apply_current.clone());
+    connect_toggled(&scrollback_check, apply_current.clone());
+    connect_value_changed(&scrollback_lines_spin, apply_current.clone());
+    {
+        let apply_current = apply_current.clone();
+        default_shell_entry.connect_changed(move |_| apply_current());
+    }
+    connect_active_notify(&system_notify_switch, apply_current.clone());
+    connect_active_notify(&agent_bar_switch, apply_current.clone());
+    connect_active_notify(&cursor_blink_switch, apply_current.clone());
+    connect_value_changed(&blink_interval_spin, apply_current.clone());
     let update_tab = build_update_tab(
         &dialog,
         &about_version(),
@@ -249,8 +331,8 @@ fn build_dialog(
     body.append(&stack);
 
     // Bottom actions. Reset applies Options::default() through the same
-    // on_apply path the OK button uses, so the caller handles persistence
-    // and live CSS reloads while the dialog only closes itself. The
+    // immediate path, so the caller handles persistence and live CSS reloads
+    // while the dialog only closes itself. The
     // global Reset only wipes General-tab options — Keybindings has its
     // own Reset-all button on its own tab so a misclick here does not
     // also blow away every shortcut the user customised.
@@ -276,95 +358,15 @@ fn build_dialog(
 
     {
         let dialog = dialog.clone();
-        cancel_btn.connect_clicked(move |_| {
+        close_btn.connect_clicked(move |_| {
             let dialog = dialog.clone();
             defer_widget_action(move || dialog.close());
         });
     }
-    // Theme previews already repainted the app; when the dialog closes any
-    // way other than OK / Reset, restore the look the user started with.
-    let applied = std::rc::Rc::new(std::cell::Cell::new(false));
-    {
-        let applied = applied.clone();
-        let on_preview = on_preview.clone();
-        let original = current.clone();
-        dialog.connect_close_request(move |_| {
-            if !applied.get() {
-                on_preview(&original);
-            }
-            gtk::glib::Propagation::Proceed
-        });
-    }
-    let on_apply = std::rc::Rc::new(on_apply);
-    {
-        let dialog = dialog.clone();
-        let zoom_spin = zoom_spin.clone();
-        let engine_drop = engine_drop.clone();
-        let focus_color_btn = focus_color_btn.clone();
-        let opacity_spin = opacity_widgets.spin.clone();
-        let persist_check = persist_check.clone();
-        let auto_resume_check = auto_resume_check.clone();
-        let scrollback_check = scrollback_check.clone();
-        let scrollback_lines_spin = scrollback_lines_spin.clone();
-        let default_shell_entry = default_shell_entry.clone();
-        let system_notify_switch = system_notify_switch.clone();
-        let agent_bar_switch = agent_bar_switch.clone();
-        let cursor_blink_switch = cursor_blink_switch.clone();
-        let blink_interval_spin = blink_interval_spin.clone();
-        let family_drop = font_widgets.family_drop.clone();
-        let font_size_spin = font_widgets.size_spin.clone();
-        let families = font_widgets.families.clone();
-        let on_apply = on_apply.clone();
-        let kb_state = kb_state.clone();
-        let theme_state = theme_state.clone();
-        let applied = applied.clone();
-        let agent_notification_target = current.agent_notification_target;
-        ok_btn.connect_clicked(move |_| {
-            let kb = kb_state.borrow().clone();
-            let conflicts = crate::ui::keybindings_panel::detect_conflicts(&kb);
-            if !conflicts.is_empty() {
-                tracing::warn!(
-                    count = conflicts.len(),
-                    "saving keybindings with overlapping accels — last writer wins at install time"
-                );
-            }
-            let opts = collect_options(
-                &zoom_spin,
-                &engine_drop,
-                &focus_color_btn,
-                &opacity_spin,
-                &persist_check,
-                &auto_resume_check,
-                &scrollback_check,
-                &scrollback_lines_spin,
-                &default_shell_entry,
-                &system_notify_switch,
-                &agent_bar_switch,
-                &cursor_blink_switch,
-                &blink_interval_spin,
-                &family_drop,
-                &font_size_spin,
-                &families,
-                default_font_size,
-                agent_notification_target,
-                &kb,
-                &theme_state.borrow(),
-            );
-            applied.set(true);
-            let dialog = dialog.clone();
-            let on_apply = on_apply.clone();
-            defer_widget_action(move || {
-                (on_apply)(opts);
-                dialog.close();
-            });
-        });
-    }
     {
         let dialog = dialog.clone();
         let on_apply = on_apply.clone();
-        let applied = applied.clone();
         reset_btn.connect_clicked(move |_| {
-            applied.set(true);
             let dialog = dialog.clone();
             let on_apply = on_apply.clone();
             defer_widget_action(move || {
@@ -864,25 +866,85 @@ pub(crate) fn row(label_text: &str, value_widget: &impl IsA<gtk::Widget>) -> gtk
     row
 }
 
-/// 10..=200% SpinButton. It steps by 1% and supports keyboard or mouse-wheel
-/// changes. If direct text entry goes out of range, [`Options::clamp_zoom`]
-/// clamps it when OK is clicked.
-fn build_zoom_spin(initial: u16) -> gtk::SpinButton {
-    let initial = Options::clamp_zoom(initial);
-    let adj = gtk::Adjustment::new(
-        initial as f64,
-        ZOOM_MIN as f64,
-        ZOOM_MAX as f64,
-        1.0,
-        10.0,
-        0.0,
-    );
-    let spin = gtk::SpinButton::new(Some(&adj), 1.0, 0);
-    spin.set_numeric(true);
-    spin.set_snap_to_ticks(true);
-    spin.set_value(initial as f64);
-    spin.set_width_chars(6);
-    spin
+/// DropDown restricted to one representative percentage for each distinct
+/// whole-point terminal size produced by the 8f8a941 rendering fix.
+#[derive(Clone)]
+struct ZoomPicker {
+    drop: gtk::DropDown,
+    values: Rc<RefCell<Vec<u16>>>,
+    syncing: Rc<Cell<bool>>,
+}
+
+impl ZoomPicker {
+    fn new(initial: u16, font_size: f64) -> Self {
+        let picker = Self {
+            drop: gtk::DropDown::from_strings(&[]),
+            values: Rc::new(RefCell::new(Vec::new())),
+            syncing: Rc::new(Cell::new(false)),
+        };
+        picker.rebuild_with_current(font_size, initial);
+        picker
+    }
+
+    fn rebuild(&self, font_size: f64) {
+        self.rebuild_with_current(font_size, self.selected());
+    }
+
+    fn rebuild_with_current(&self, font_size: f64, current: u16) {
+        let values = valid_zoom_percentages(font_size);
+        let labels: Vec<String> = values.iter().map(|value| format!("{value}%")).collect();
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let selected = values
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, value)| value.abs_diff(current))
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        self.syncing.set(true);
+        self.drop
+            .set_model(Some(&gtk::StringList::new(&label_refs)));
+        *self.values.borrow_mut() = values;
+        self.drop.set_selected(selected as u32);
+        self.syncing.set(false);
+    }
+
+    fn selected(&self) -> u16 {
+        self.values
+            .borrow()
+            .get(self.drop.selected() as usize)
+            .copied()
+            .unwrap_or(ZOOM_DEFAULT)
+    }
+}
+
+fn valid_zoom_percentages(font_size: f64) -> Vec<u16> {
+    let font_size = if font_size.is_finite() && font_size > 0.0 {
+        font_size
+    } else {
+        12.0
+    };
+    let mut best: Vec<(f64, u16, f64)> = Vec::new();
+    for percent in ZOOM_MIN..=ZOOM_MAX {
+        let rendered = crate::theme::terminal_zoom_points(font_size, percent);
+        let error = (font_size * percent as f64 / 100.0 - rendered).abs();
+        if let Some(entry) = best.iter_mut().find(|entry| entry.0 == rendered) {
+            if error < entry.2 {
+                *entry = (rendered, percent, error);
+            }
+        } else {
+            best.push((rendered, percent, error));
+        }
+    }
+    for fixed in [ZOOM_MIN, ZOOM_DEFAULT, ZOOM_MAX] {
+        let rendered = crate::theme::terminal_zoom_points(font_size, fixed);
+        if let Some(entry) = best.iter_mut().find(|entry| entry.0 == rendered) {
+            entry.1 = fixed;
+        }
+    }
+    let mut values: Vec<u16> = best.into_iter().map(|(_, percent, _)| percent).collect();
+    values.sort_unstable();
+    values.dedup();
+    values
 }
 
 /// DropDown for WebKit / Chrome / Firefox. Custom engines are serializable in
@@ -896,13 +958,12 @@ fn build_engine_drop(initial: &BrowserEngine) -> gtk::DropDown {
     drop
 }
 
-/// Collect the user's intent from dialog widgets into [`Options`]. SpinButton
-/// values may be out of range due to direct text entry, so clamp zoom and
-/// opacity again. [`color_button_hex`] normalizes the focus color from GdkRGBA
-/// to six-digit `#rrggbb`.
+/// Collect the user's intent from dialog widgets into [`Options`]. Clamp zoom
+/// and opacity again before persistence. [`color_button_hex`] normalizes the
+/// focus color from GdkRGBA to six-digit `#rrggbb`.
 #[allow(clippy::too_many_arguments)]
 fn collect_options(
-    spin: &gtk::SpinButton,
+    zoom_picker: &ZoomPicker,
     drop: &gtk::DropDown,
     focus_color: &gtk::ColorDialogButton,
     opacity_spin: &gtk::SpinButton,
@@ -923,7 +984,7 @@ fn collect_options(
     keybindings: &KeybindingOverrides,
     theme_selection: &crate::ui::theme_tab::ThemeSelection,
 ) -> Options {
-    let zoom = Options::clamp_zoom(spin.value_as_int().max(0) as u16);
+    let zoom = zoom_picker.selected();
     let engine = engine_options()
         .get(drop.selected() as usize)
         .cloned()
@@ -1141,7 +1202,7 @@ fn color_button_hex(button: &gtk::ColorDialogButton) -> String {
 /// Widgets for focus border opacity (%). The slider and SpinButton share the
 /// same [`gtk::Adjustment`], so dragging the slider updates the number and
 /// direct numeric input moves the slider. Append `row` to the dialog body and
-/// read `spin` from `collect_options` when OK is clicked.
+/// read `spin` from `collect_options` whenever either value changes.
 struct FocusOpacityRow {
     row: gtk::Box,
     spin: gtk::SpinButton,
@@ -1304,6 +1365,67 @@ fn engine_index_of(engine: &BrowserEngine) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn widget_tree(root: &gtk::Widget) -> Vec<gtk::Widget> {
+        let mut widgets = vec![root.clone()];
+        let mut child = root.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            widgets.extend(widget_tree(&widget));
+        }
+        widgets
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn dialog_applies_changes_immediately_and_has_close_only() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.OptionsImmediateApply")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let parent = adw::ApplicationWindow::builder().application(&app).build();
+        let applied = Rc::new(RefCell::new(Vec::new()));
+        let applied_from_dialog = applied.clone();
+        let dialog = build_dialog(
+            &parent,
+            &Options::default(),
+            "monospace".into(),
+            12.0,
+            move |opts| applied_from_dialog.borrow_mut().push(opts),
+            InstallOrigin::Source,
+            BannerState::Hidden,
+            |_| false,
+            |_| false,
+        );
+        let widgets = widget_tree(dialog.upcast_ref());
+        let button_labels: Vec<String> = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<gtk::Button>().ok())
+            .filter_map(|button| button.label().map(|label| label.to_string()))
+            .collect();
+        assert!(button_labels.iter().any(|label| label == "Close"));
+        assert!(!button_labels.iter().any(|label| label == "OK"));
+        assert!(!button_labels.iter().any(|label| label == "Cancel"));
+
+        let font_label = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<gtk::Label>().ok())
+            .find(|label| label.text() == "Font size (pt)")
+            .unwrap();
+        let font_size = font_label
+            .parent()
+            .and_then(|row| row.last_child())
+            .and_then(|widget| widget.downcast::<gtk::SpinButton>().ok())
+            .unwrap();
+        let calls_before = applied.borrow().len();
+        font_size.set_value(14.0);
+        assert_eq!(applied.borrow().len(), calls_before + 1);
+        assert_eq!(applied.borrow().last().unwrap().font_size, Some(14.0));
+    }
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
@@ -1488,7 +1610,7 @@ mod tests {
         if gtk::init().is_err() {
             return;
         }
-        let zoom = build_zoom_spin(120);
+        let zoom = ZoomPicker::new(117, 12.0);
         let engine = build_engine_drop(&BrowserEngine::Firefox);
         let focus_color = build_focus_color_button("#abcdef");
         let opacity = build_focus_opacity_row(40);
@@ -1539,7 +1661,7 @@ mod tests {
             opts.agent_notification_target,
             AgentNotificationTarget::Both
         );
-        assert_eq!(opts.zoom_percent, 120);
+        assert_eq!(opts.zoom_percent, 117);
         assert_eq!(opts.default_browser_engine, BrowserEngine::Firefox);
         assert_eq!(opts.focus_border_opacity, 40);
         assert!(!opts.persist_browser_session);
@@ -1561,6 +1683,8 @@ mod tests {
         let agent_bar_off = build_agent_bar_switch(false);
         let blink_off = build_cursor_blink_switch(false);
         let blink_interval = build_blink_interval_spin(800);
+        zoom.drop
+            .set_selected((zoom.values.borrow().len() - 1) as u32);
         default_shell.set_text("  ");
         let opts = collect_options(
             &zoom,
@@ -1595,6 +1719,7 @@ mod tests {
         assert!(!opts.restore_terminal_scrollback);
         assert!(!opts.system_notifications_enabled);
         assert!(!opts.agent_bar_mode);
+        assert_eq!(opts.zoom_percent, 200);
         assert_eq!(opts.default_shell, None);
         assert_eq!(opts.font_family, Some("Fira Code".to_string()));
         assert_eq!(opts.font_size, Some(15.0));
@@ -1633,9 +1758,57 @@ mod tests {
         assert_eq!(recommended_families(&installed), vec!["Hack".to_string()]);
     }
 
-    /// GTK init is needed to verify that the slider and SpinButton share the
-    /// same Adjustment. Headless environments skip this; when GTK starts, the
-    /// test checks that the built widgets move together.
+    #[test]
+    fn whole_point_zoom_values_match_the_fractional_vte_fix() {
+        assert_eq!(
+            valid_zoom_percentages(12.0),
+            vec![
+                50, 58, 67, 75, 83, 92, 100, 108, 117, 125, 133, 142, 150, 158, 167, 175, 183, 192,
+                200,
+            ]
+        );
+        assert_eq!(
+            crate::theme::terminal_zoom_points(12.0, 85),
+            crate::theme::terminal_zoom_points(12.0, 83)
+        );
+
+        for font_size in 4..=96 {
+            let font_size = font_size as f64;
+            let rendered: Vec<i32> = valid_zoom_percentages(font_size)
+                .into_iter()
+                .map(|percent| crate::theme::terminal_zoom_points(font_size, percent) as i32)
+                .collect();
+            let mut all_rendered: Vec<i32> = (ZOOM_MIN..=ZOOM_MAX)
+                .map(|percent| crate::theme::terminal_zoom_points(font_size, percent) as i32)
+                .collect();
+            all_rendered.dedup();
+            assert_eq!(rendered, all_rendered, "font size {font_size}");
+        }
+    }
+
+    /// GTK init is needed to verify the DropDown model. Headless environments
+    /// skip this check.
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn zoom_picker_only_exposes_whole_point_values() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let picker = ZoomPicker::new(85, 12.0);
+        assert_eq!(picker.selected(), 83);
+        assert_eq!(picker.values.borrow().first(), Some(&50));
+        assert_eq!(picker.values.borrow().last(), Some(&200));
+        assert_eq!(picker.drop.model().map(|model| model.n_items()), Some(19));
+
+        picker.rebuild(14.0);
+        assert!(picker.values.borrow().contains(&100));
+        assert!(picker
+            .values
+            .borrow()
+            .iter()
+            .all(|value| (50..=200).contains(value)));
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn focus_opacity_row_widgets_share_adjustment_and_clamp_initial() {

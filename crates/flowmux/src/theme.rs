@@ -191,10 +191,10 @@ impl ResolvedTheme {
         options: &flowmux_config::options::Options,
     ) -> pango::FontDescription {
         let mut font = self.font_with_overrides(options.font_family.as_deref(), options.font_size);
-        if options.zoom_percent != 100 && font.size() > 0 {
+        if options.zoom_percent != flowmux_config::options::ZOOM_DEFAULT && font.size() > 0 {
             let points = font.size() as f64 / pango::SCALE as f64;
             font.set_size(
-                ((points * options.zoom_factor()).round().max(1.0) * pango::SCALE as f64) as i32,
+                (terminal_zoom_points(points, options.zoom_percent) * pango::SCALE as f64) as i32,
             );
         }
         font
@@ -661,6 +661,19 @@ paned > separator {{
             toast_border = toast_border_css,
             agent_item_min = AGENT_BAR_ITEM_MIN_WIDTH_PX,
         )
+    }
+}
+
+/// The whole-point terminal zoom rule introduced by 8f8a941. At 100% the
+/// configured font size is preserved; other zoom levels are rounded to avoid
+/// VTE's fractional scaling damage path.
+pub(crate) fn terminal_zoom_points(points: f64, zoom_percent: u16) -> f64 {
+    if zoom_percent == flowmux_config::options::ZOOM_DEFAULT {
+        points
+    } else {
+        (points * flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0)
+            .round()
+            .max(1.0)
     }
 }
 
