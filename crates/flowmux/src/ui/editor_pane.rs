@@ -293,15 +293,15 @@ impl EditorHostState {
         host
     }
 
-    pub(super) fn initialize_message(&self) -> HostMessage {
+    pub(super) fn initialize_messages(&self) -> Vec<HostMessage> {
         match &*self.session.borrow() {
-            Ok(session) => session.initialize_message(self.zoom_percent.get()),
-            Err(_) => HostMessage::InitializeEditor {
+            Ok(session) => session.initialize_messages(self.zoom_percent.get()),
+            Err(_) => vec![HostMessage::InitializeEditor {
                 documents: Vec::new(),
                 active_document_id: None,
                 zoom_percent: self.zoom_percent.get(),
                 max_document_bytes: flowmux_editor::DEFAULT_MAX_DOCUMENT_BYTES,
-            },
+            }],
         }
     }
 
@@ -312,7 +312,7 @@ impl EditorHostState {
     /// Everything a freshly reloaded page needs after a web-process crash:
     /// the full document set plus any still-undecided recovery proposals.
     pub(super) fn reinitialize_messages(&self) -> Vec<HostMessage> {
-        let mut messages = vec![self.initialize_message()];
+        let mut messages = self.initialize_messages();
         if let Ok(session) = &*self.session.borrow() {
             messages.extend(session.pending_recovery_messages());
         }

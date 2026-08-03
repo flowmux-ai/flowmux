@@ -214,8 +214,10 @@ impl EditorPane {
         };
         let initial_appearance = pane.appearance.borrow().clone();
         pane.apply_appearance(initial_appearance);
-        if let Err(error) = pane.send(pane.host.initialize_message()) {
-            tracing::error!(%error, "failed to queue editor initialization");
+        for message in pane.host.initialize_messages() {
+            if let Err(error) = pane.send(message) {
+                tracing::error!(%error, "failed to queue editor initialization");
+            }
         }
         for message in pane.host.take_startup_messages() {
             if let Err(error) = pane.send(message) {

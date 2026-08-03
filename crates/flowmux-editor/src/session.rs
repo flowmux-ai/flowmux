@@ -123,19 +123,36 @@ impl EditorSession {
         }
     }
 
-    pub fn initialize_message(&self, zoom_percent: u16) -> HostMessage {
-        let documents = self
+    pub fn initialize_messages(&self, zoom_percent: u16) -> Vec<HostMessage> {
+        let documents: Vec<_> = self
             .open_order
             .iter()
             .filter_map(|id| self.documents.snapshot(*id).ok())
-            .map(|snapshot| self.payload(snapshot))
+            .map(|snapshot| (snapshot.id, self.payload(snapshot)))
             .collect();
-        HostMessage::InitializeEditor {
-            documents,
-            active_document_id: self.active.map(protocol_id),
+        let last_document = documents.last().map(|(id, _)| *id);
+        let mut documents = documents.into_iter();
+        let first = documents.next();
+        let first_document = first.as_ref().map(|(id, _)| *id);
+        let active_document_id = first_document
+            .filter(|id| Some(*id) == self.active && last_document == Some(*id))
+            .map(protocol_id);
+        let mut messages = vec![HostMessage::InitializeEditor {
+            documents: first.into_iter().map(|(_, document)| document).collect(),
+            active_document_id,
             zoom_percent,
             max_document_bytes: crate::DEFAULT_MAX_DOCUMENT_BYTES,
+        }];
+        messages.extend(documents.map(|(_, document)| HostMessage::OpenDocument { document }));
+        if let Some(active) = self.active.filter(|active| Some(*active) != last_document) {
+            if let Ok(document) = self.documents.snapshot(active) {
+                messages.push(HostMessage::SetActiveDocument {
+                    document_id: protocol_id(active),
+                    document_version: document.version,
+                });
+            }
         }
+        messages
     }
 
     pub fn dirty_document_paths(&self) -> Vec<PathBuf> {
@@ -984,20 +1001,25 @@ mod tests {
         session.open_document(&second_path).unwrap();
         session.activate_path(&first_path);
 
-        let HostMessage::InitializeEditor {
-            documents,
-            active_document_id,
-            zoom_percent,
-            ..
-        } = session.initialize_message(125)
-        else {
-            panic!("expected editor initialization");
-        };
-        assert_eq!(active_document_id.as_deref(), Some(first.id.as_str()));
-        assert_eq!(zoom_percent, 125);
-        assert_eq!(documents[0].cursor_line, 7);
-        assert_eq!(documents[0].cursor_column, 3);
-        assert_eq!(documents[0].scroll_top, 88.5);
+        let messages = session.initialize_messages(125);
+        assert!(matches!(
+            &messages[0],
+            HostMessage::InitializeEditor {
+                documents,
+                active_document_id: None,
+                zoom_percent: 125,
+                ..
+            } if documents.first().is_some_and(|document|
+                documents.len() == 1
+                    && document.cursor_line == 7
+                    && document.cursor_column == 3
+                    && document.scroll_top == 88.5)
+        ));
+        assert!(matches!(&messages[1], HostMessage::OpenDocument { .. }));
+        assert!(matches!(
+            &messages[2],
+            HostMessage::SetActiveDocument { document_id, .. } if document_id == &first.id
+        ));
 
         session
             .handle_editor_message(EditorMessage::ViewStateChanged {
@@ -1492,10 +1514,10 @@ mod tests {
             }] if document_id == &document.id
         ));
         assert!(session.poll_external_changes().unwrap().is_empty());
-        let initialized = session.initialize_message(100);
+        let initialized = session.initialize_messages(100);
         assert!(matches!(
-            initialized,
-            HostMessage::InitializeEditor { documents, .. }
+            initialized.as_slice(),
+            [HostMessage::InitializeEditor { documents, .. }]
                 if documents[0].content == "편집 중\n" && documents[0].dirty
         ));
         assert_eq!(fs::read_to_string(path).unwrap(), "외부 변경\n");
