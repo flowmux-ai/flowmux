@@ -147,6 +147,7 @@ impl Handler for GuiHandler {
                 Request::PaneSplit { .. }
                 | Request::PaneSendKeys { .. }
                 | Request::PaneReadScreen { .. }
+                | Request::TerminalOutput { .. }
                 | Request::SurfaceFocus { .. }
                 | Request::SurfaceClose { .. }
                 | Request::PaneFocus { .. }
@@ -359,6 +360,21 @@ impl GuiHandler {
                         "read-screen: this pane has no readable terminal surface".into(),
                     )),
                     Ok(Err(e)) => Response::Error(RpcError::NotFound(e)),
+                    Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                }
+            }
+            Request::TerminalOutput { surface } => {
+                let (tx, rx) = oneshot::channel();
+                if let Err(error) = self
+                    .bridge
+                    .tx
+                    .send(GtkCommand::TerminalOutputObserved { surface, ack: tx })
+                    .await
+                {
+                    return Response::Error(RpcError::Internal(error.to_string()));
+                }
+                match rx.await {
+                    Ok(()) => Response::Ok,
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }

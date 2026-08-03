@@ -2,11 +2,9 @@
 //! Integration test for `flowmuxctl pty-tee`.
 //!
 //! Spawns the real `flowmuxctl` binary as a PTY proxy in front of a
-//! tiny shell command that emits OSC 9 / 99 / 777 escapes, and asserts
-//! that a fake daemon listening on a Unix socket receives the matching
-//! `Request::Notify` envelopes — i.e. the end-to-end path from
-//! "agent prints OSC into the terminal" all the way to
-//! "daemon's notify handler is invoked" is wired up.
+//! tiny shell command that emits normal output and OSC 9 / 99 / 777 escapes,
+//! and asserts that a fake daemon listening on a Unix socket receives the
+//! matching `Request::TerminalOutput` and `Request::Notify` envelopes.
 //!
 //! This is the regression guard the user asked for after we discovered
 //! legacy terminal-widget paths silently swallowed these escapes.
@@ -20,6 +18,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use flowmux_ipc::protocol::{Envelope, Payload, Response};
+
 fn flowmuxctl_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_flowmuxctl"))
 }
@@ -27,7 +27,7 @@ fn flowmuxctl_path() -> PathBuf {
 /// Spin up a fake daemon on `socket` that:
 /// * Records every JSON envelope received.
 /// * Replies to `notify` requests with a `notified` response so the
-///   tee's IPC client doesn't error out.
+///   notification path can continue, and acknowledges all other requests.
 ///
 /// Returns a receiver that yields each captured envelope as a String.
 fn spawn_fake_daemon(socket: PathBuf) -> mpsc::Receiver<String> {
@@ -53,17 +53,22 @@ fn spawn_fake_daemon(socket: PathBuf) -> mpsc::Receiver<String> {
                             Ok(_) => {}
                             Err(_) => break,
                         }
+                        let line = line.trim_end().to_string();
+                        let request: serde_json::Value =
+                            serde_json::from_str(&line).expect("parse request envelope");
                         // Forward the raw line to the test thread.
-                        let _ = tx.send(line.trim_end().to_string());
-                        // Reply with a minimal `notified` envelope so
-                        // the tee's IPC client treats the call as
-                        // successful and stays connected for the next
-                        // OSC.
-                        let env = serde_json::json!({
-                            "id": next_id,
-                            "kind": "response",
-                            "notified": { "desktop_id": "desktop-1" }
-                        });
+                        let _ = tx.send(line);
+                        let response = if request["verb"] == "notify" {
+                            Response::Notified {
+                                desktop_id: Some("desktop-1".into()),
+                            }
+                        } else {
+                            Response::Ok
+                        };
+                        let env = Envelope {
+                            id: request["id"].as_u64().unwrap_or(next_id),
+                            payload: Payload::Response(response),
+                        };
                         next_id += 1;
                         // Best-effort write; the tee may have closed
                         // the connection if its child exited fast.
@@ -349,6 +354,19 @@ fn osc_9_round_trips_to_daemon_notify_request() {
     assert!(
         notify.contains("\"level\":\"info\""),
         "OSC 9 'Build complete' should map to NotificationLevel::Info: {notify}"
+    );
+}
+
+#[test]
+fn regular_output_round_trips_to_daemon_terminal_output_request() {
+    let envelopes = run_tee_with_osc(&[]);
+    let output = envelopes
+        .iter()
+        .find(|line| line.contains("\"verb\":\"terminal_output\""))
+        .expect("expected a terminal_output envelope for ordinary PTY bytes");
+    assert!(
+        output.contains("\"surface\":\"22222222-2222-2222-2222-222222222222\""),
+        "terminal output event must identify its background surface: {output}"
     );
 }
 

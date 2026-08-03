@@ -261,6 +261,15 @@ pub enum Request {
         pane: PaneId,
     },
 
+    /// Internal signal from `flowmuxctl pty-tee`: bytes were forwarded from
+    /// the child PTY to this terminal surface. VTE does not emit its
+    /// `contents-changed` signal while a tab or workspace is unmapped, so the
+    /// GUI uses this renderer-independent event to refresh Agent and workspace
+    /// items for background surfaces too.
+    TerminalOutput {
+        surface: SurfaceId,
+    },
+
     /// `flowmux focus-pane <pane>` — grab keyboard focus for a pane.
     /// Non-destructive.
     PaneFocus {
@@ -1006,6 +1015,15 @@ mod tests {
                 assert_eq!(s, surface);
                 assert_eq!(session_id, "sess-abc");
             }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_output_event_roundtrips_with_surface_identity() {
+        let surface = SurfaceId::new();
+        match roundtrip_request(Request::TerminalOutput { surface }) {
+            Request::TerminalOutput { surface: decoded } => assert_eq!(decoded, surface),
             other => panic!("wrong variant: {other:?}"),
         }
     }

@@ -267,10 +267,10 @@ enum Cmd {
     /// wrapper around the user's shell.
     ///
     /// Forks the child argv on an inner PTY, pumps bytes between the
-    /// outer terminal pane and the inner shell, and snoops every
+    /// outer terminal pane and the inner shell, snoops every
     /// inner→outer byte through the OSC parser so OSC 9 / 99 / 777
-    /// notifications emitted by agents like Claude Code or Codex
-    /// reach the daemon's `Request::Notify` path without depending on
+    /// notifications reach `Request::Notify`, and coalesces output into
+    /// `Request::TerminalOutput` so background Agent state does not depend on
     /// a GUI terminal signal.
     ///
     /// Hidden because end users should never invoke it directly —

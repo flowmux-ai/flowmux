@@ -916,12 +916,11 @@ impl GhosttyPane {
             argv
         };
         // Wrap the shell argv with `flowmuxctl pty-tee` so OSC 9/99/777
-        // emitted by terminal-side agents (Claude Code, Codex, …)
-        // reach the desktop notification subsystem even on VTE
-        // versions (0.68 on Ubuntu 22.04, 0.76 on Ubuntu 24.04) that
-        // silently drop those escapes. If the helper is missing we
-        // fall back to a direct shell spawn so the terminal still
-        // works — only the OSC sniffer is lost.
+        // notifications and renderer-independent terminal-output events reach
+        // the GUI even when VTE does not signal an unmapped tab/workspace. If
+        // the helper is missing we fall back to a direct shell spawn so the
+        // terminal still works — notifications and background Agent refreshes
+        // are then unavailable.
         let argv = wrap_argv_with_pty_tee(argv, id, surface);
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         let cwd_str = cwd.as_ref().and_then(|p| p.to_str());
@@ -1069,9 +1068,9 @@ impl GhosttyPane {
 fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -> Vec<String> {
     let Some(ctl) = flowmux_terminal::find_flowmuxctl() else {
         tracing::warn!(
-            "flowmuxctl not found next to the GUI binary; OSC 9/99/777 alarms \
-             from terminal-side agents will be silently dropped until it is \
-             installed. Falling back to a direct shell spawn."
+            "flowmuxctl not found next to the GUI binary; terminal-side \
+             notifications and background Agent refreshes are unavailable \
+             until it is installed. Falling back to a direct shell spawn."
         );
         return argv;
     };

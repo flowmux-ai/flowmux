@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `flowmuxctl pty-tee` — PTY proxy that snoops OSC notifications.
+//! `flowmuxctl pty-tee` — PTY proxy that snoops terminal-side events.
 //!
 //! ## Why this exists
 //!
@@ -16,15 +16,18 @@
 //!     terminal pane  <-->  outer PTY (stdin/stdout)  <-->  pty-tee  <-->  inner PTY  <-->  shell
 //!                                                  |
 //!                                                  +--> OscExtractor --> Request::Notify
+//!                                                  +--> output event --> Request::TerminalOutput
 //! ```
 //!
 //! Bytes flow verbatim except for cursor-key normalization while a
 //! foreground TUI has enabled application cursor mode (`smkx` /
 //! DECCKM). The inner-to-outer half is also fed to
 //! `flowmux_notify::OscExtractor`, and any parsed OSC notification is
-//! forwarded to the daemon over the existing IPC socket. The shell's
-//! view (its `tty`, its termios, its environment) is unchanged from a
-//! direct terminal spawn.
+//! forwarded to the daemon over the existing IPC socket. It also coalesces
+//! output into renderer-independent refresh events, since VTE does not emit
+//! `contents-changed` for hidden tabs and workspaces. The shell's view (its
+//! `tty`, its termios, its environment) is unchanged from a direct terminal
+//! spawn.
 //!
 //! ## Why a separate process
 //!
@@ -36,7 +39,10 @@
 
 use anyhow::{anyhow, Context};
 use flowmux_core::{terminal_tab_title_for_cwd, NotificationLevel, PaneId, SurfaceId};
-use flowmux_ipc::{client::Client, protocol::Request};
+use flowmux_ipc::{
+    client::Client,
+    protocol::{Request, Response},
+};
 use flowmux_notify::{osc::parse_osc, OscExtractor};
 use flowmux_terminal::TerminalInputModes;
 use nix::libc;
@@ -53,7 +59,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 /// Self-pipe write end. Signal handlers wake the I/O loop by writing
@@ -85,6 +91,25 @@ struct NotifyEvent {
     level: NotificationLevel,
 }
 
+enum PtyEvent {
+    Notify(NotifyEvent),
+    Output,
+}
+
+struct OutputRefreshState {
+    queued: AtomicBool,
+    supported: AtomicBool,
+}
+
+impl OutputRefreshState {
+    fn new() -> Self {
+        Self {
+            queued: AtomicBool::new(false),
+            supported: AtomicBool::new(true),
+        }
+    }
+}
+
 /// Public entry point used by `main.rs`. Returns the inner shell's exit
 /// code so `flowmuxctl` can exit transparently — the terminal pane sees the
 /// child exit at the user's expected status.
@@ -107,17 +132,20 @@ pub fn run(
         .unwrap_or_else(flowmux_config::paths::runtime_socket);
 
     // Spin up the IPC worker BEFORE the I/O loop starts so the first
-    // OSC arriving in the very first millisecond doesn't get dropped.
-    let (notify_tx, notify_rx) = mpsc::channel::<NotifyEvent>();
+    // terminal-side event arriving in the very first millisecond doesn't get
+    // dropped.
+    let (event_tx, event_rx) = mpsc::channel::<PtyEvent>();
+    let output_refresh = Arc::new(OutputRefreshState::new());
+    let output_refresh_for_worker = output_refresh.clone();
     let worker = std::thread::Builder::new()
         .name("flowmuxctl-pty-tee-ipc".into())
-        .spawn(move || ipc_worker(socket, pane, surface, notify_rx))
+        .spawn(move || ipc_worker(socket, pane, surface, event_rx, output_refresh_for_worker))
         .context("spawn ipc worker thread")?;
 
-    let result = run_pty_pump(child_argv, notify_tx);
+    let result = run_pty_pump(child_argv, event_tx, output_refresh);
 
     // Worker shuts down naturally when the sender half drops. Join so
-    // the last in-flight Notify isn't truncated mid-write on exit.
+    // the last in-flight event isn't truncated mid-write on exit.
     let _ = worker.join();
 
     result
@@ -125,7 +153,8 @@ pub fn run(
 
 fn run_pty_pump(
     child_argv: Vec<OsString>,
-    notify_tx: mpsc::Sender<NotifyEvent>,
+    event_tx: mpsc::Sender<PtyEvent>,
+    output_refresh: Arc<OutputRefreshState>,
 ) -> anyhow::Result<i32> {
     // 1. Allocate the inner PTY pair the shell will live on.
     let OpenptyResult { master, slave } = openpty(None, None).context("openpty for inner shell")?;
@@ -255,7 +284,7 @@ fn run_pty_pump(
                     master_fd,
                     &mut extractor,
                     &pending,
-                    &notify_tx,
+                    &event_tx,
                 );
                 break;
             }
@@ -269,7 +298,7 @@ fn run_pty_pump(
             // remaining inner-master bytes below and break.
             if let Some(code) = try_reap(child_pid) {
                 drain_inner(master_fd, &mut extractor);
-                flush_pending(&pending, &notify_tx);
+                flush_pending(&pending, &event_tx);
                 exit_code = code;
                 break;
             }
@@ -287,7 +316,7 @@ fn run_pty_pump(
                             master_fd,
                             &mut extractor,
                             &pending,
-                            &notify_tx,
+                            &event_tx,
                         );
                         break;
                     }
@@ -299,7 +328,7 @@ fn run_pty_pump(
                         master_fd,
                         &mut extractor,
                         &pending,
-                        &notify_tx,
+                        &event_tx,
                     );
                     break;
                 }
@@ -310,7 +339,7 @@ fn run_pty_pump(
         }
         if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
             exit_code =
-                terminate_inner_group(child_pid, master_fd, &mut extractor, &pending, &notify_tx);
+                terminate_inner_group(child_pid, master_fd, &mut extractor, &pending, &event_tx);
             break;
         }
 
@@ -328,7 +357,7 @@ fn run_pty_pump(
                             master_fd,
                             &mut extractor,
                             &pending,
-                            &notify_tx,
+                            &event_tx,
                         );
                         break;
                     }
@@ -338,14 +367,18 @@ fn run_pty_pump(
                     if alternate_screen_exited {
                         cwd_tracker.emit_shell_title(child_pid);
                     }
-                    flush_pending(&pending, &notify_tx);
+                    flush_pending(&pending, &event_tx);
+                    // Preserve notification latency: OSC notifications enter
+                    // the IPC queue before the debounced screen refresh for
+                    // the same output chunk.
+                    queue_output_refresh(&event_tx, &output_refresh);
                     cwd_tracker.emit_if_changed(child_pid);
                 }
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
                     let code = wait_blocking(child_pid).unwrap_or(0);
                     drain_inner(master_fd, &mut extractor);
-                    flush_pending(&pending, &notify_tx);
+                    flush_pending(&pending, &event_tx);
                     exit_code = code;
                     break;
                 }
@@ -355,7 +388,7 @@ fn run_pty_pump(
             && fds[1].revents & libc::POLLIN == 0
         {
             drain_inner(master_fd, &mut extractor);
-            flush_pending(&pending, &notify_tx);
+            flush_pending(&pending, &event_tx);
             let code = wait_blocking(child_pid).unwrap_or(0);
             exit_code = code;
             break;
@@ -375,7 +408,7 @@ fn terminate_inner_group<F: FnMut(&str)>(
     master_fd: RawFd,
     extractor: &mut OscExtractor<F>,
     pending: &Rc<RefCell<Vec<String>>>,
-    notify_tx: &mpsc::Sender<NotifyEvent>,
+    event_tx: &mpsc::Sender<PtyEvent>,
 ) -> i32 {
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
@@ -398,7 +431,7 @@ fn terminate_inner_group<F: FnMut(&str)>(
     }
 
     drain_inner(master_fd, extractor);
-    flush_pending(pending, notify_tx);
+    flush_pending(pending, event_tx);
     exit_code.unwrap_or(128 + libc::SIGKILL)
 }
 
@@ -515,7 +548,8 @@ fn ipc_worker(
     socket: PathBuf,
     pane: Option<PaneId>,
     surface: Option<SurfaceId>,
-    rx: mpsc::Receiver<NotifyEvent>,
+    rx: mpsc::Receiver<PtyEvent>,
+    output_refresh: Arc<OutputRefreshState>,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -523,7 +557,7 @@ fn ipc_worker(
     {
         Ok(rt) => rt,
         Err(e) => {
-            tracing::warn!(error = %e, "ipc worker: tokio runtime; notifications disabled");
+            tracing::warn!(error = %e, "ipc worker: tokio runtime; terminal events disabled");
             for _ in rx.iter() {}
             return;
         }
@@ -535,7 +569,7 @@ fn ipc_worker(
             None => {
                 tracing::warn!(
                     socket = %socket.display(),
-                    "ipc worker: daemon unreachable; notifications disabled"
+                    "ipc worker: daemon unreachable; terminal events disabled"
                 );
                 for _ in rx.iter() {}
                 return;
@@ -544,7 +578,7 @@ fn ipc_worker(
 
         loop {
             match rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(ev) => {
+                Ok(PtyEvent::Notify(ev)) => {
                     let req = Request::Notify {
                         pane,
                         surface,
@@ -554,6 +588,32 @@ fn ipc_worker(
                     };
                     if let Err(e) = client.call(req).await {
                         tracing::warn!(error = %e, "ipc worker: notify call failed");
+                    }
+                }
+                Ok(PtyEvent::Output) => {
+                    // Give the outer VTE time to consume the bytes that pty-tee
+                    // just wrote, while rate-limiting screen scans for busy
+                    // TUIs. The GTK acknowledgement below then keeps at most
+                    // one follow-up refresh queued while output continues.
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    output_refresh.queued.store(false, Ordering::Release);
+                    let Some(surface) = surface else {
+                        output_refresh.supported.store(false, Ordering::Release);
+                        continue;
+                    };
+                    match client.call(Request::TerminalOutput { surface }).await {
+                        Ok(Response::Ok) => {}
+                        Ok(response) => {
+                            output_refresh.supported.store(false, Ordering::Release);
+                            tracing::debug!(
+                                ?response,
+                                "ipc worker: daemon does not support background terminal output events"
+                            );
+                        }
+                        Err(error) => {
+                            output_refresh.supported.store(false, Ordering::Release);
+                            tracing::warn!(%error, "ipc worker: terminal output call failed");
+                        }
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -580,18 +640,27 @@ async fn connect_with_retry(socket: &std::path::Path) -> Option<Client> {
 
 // ---- Helpers -----------------------------------------------------
 
-fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::Sender<NotifyEvent>) {
+fn queue_output_refresh(tx: &mpsc::Sender<PtyEvent>, state: &OutputRefreshState) {
+    if !state.supported.load(Ordering::Acquire) || state.queued.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if tx.send(PtyEvent::Output).is_err() {
+        state.queued.store(false, Ordering::Release);
+    }
+}
+
+fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::Sender<PtyEvent>) {
     let drained: Vec<String> = pending.borrow_mut().drain(..).collect();
     for payload in drained {
         if let Some(n) = parse_osc(&payload) {
             // Best-effort send. Worker may have shut down on a fatal
             // error; in that case the notification is silently dropped
             // — better than blocking the I/O loop.
-            let _ = tx.send(NotifyEvent {
+            let _ = tx.send(PtyEvent::Notify(NotifyEvent {
                 title: n.title,
                 body: n.body,
                 level: n.level,
-            });
+            }));
         }
     }
 }
@@ -819,6 +888,27 @@ impl Drop for SavedTermios {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_output_events_coalesce_until_worker_accepts_one() {
+        let (tx, rx) = mpsc::channel();
+        let state = OutputRefreshState::new();
+
+        queue_output_refresh(&tx, &state);
+        queue_output_refresh(&tx, &state);
+        queue_output_refresh(&tx, &state);
+        assert!(matches!(rx.try_recv(), Ok(PtyEvent::Output)));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        state.queued.store(false, Ordering::Release);
+        queue_output_refresh(&tx, &state);
+        assert!(matches!(rx.try_recv(), Ok(PtyEvent::Output)));
+
+        state.supported.store(false, Ordering::Release);
+        state.queued.store(false, Ordering::Release);
+        queue_output_refresh(&tx, &state);
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
 
     #[test]
     fn shell_title_osc_drops_control_bytes() {

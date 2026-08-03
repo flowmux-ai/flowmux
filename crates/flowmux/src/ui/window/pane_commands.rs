@@ -498,6 +498,10 @@ impl WindowController {
             GtkCommand::TerminalContentsChanged { surface } => {
                 self.refresh_agent_screen_status(surface, None).await;
             }
+            GtkCommand::TerminalOutputObserved { surface, ack } => {
+                self.refresh_agent_screen_status(surface, None).await;
+                let _ = ack.send(());
+            }
             GtkCommand::RefreshWindowTitle => {
                 self.refresh_window_title().await;
             }

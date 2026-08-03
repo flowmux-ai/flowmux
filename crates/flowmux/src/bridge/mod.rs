@@ -466,6 +466,14 @@ pub enum GtkCommand {
     TerminalContentsChanged {
         surface: SurfaceId,
     },
+    /// `pty-tee` observed output for a terminal surface. Unlike VTE's
+    /// `contents-changed` signal this also fires while the tab/workspace is
+    /// unmapped. The acknowledgement keeps the PTY-side coalescer bounded until
+    /// the GTK state and both side-panel views have caught up.
+    TerminalOutputObserved {
+        surface: SurfaceId,
+        ack: oneshot::Sender<()>,
+    },
     /// Recompute the window title as "flowmux - {focused tab name}".
     /// Sent after focus changes, tab activation, or tab label changes.
     RefreshWindowTitle,

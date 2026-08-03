@@ -1900,6 +1900,7 @@ impl WindowController {
             | GtkCommand::BrowserTitleChanged { .. }
             | GtkCommand::TerminalTitleChanged { .. }
             | GtkCommand::TerminalContentsChanged { .. }
+            | GtkCommand::TerminalOutputObserved { .. }
             | GtkCommand::RefreshWindowTitle
             | GtkCommand::PaneFocused { .. }
             | GtkCommand::PaneSendKeys { .. }
@@ -7103,6 +7104,156 @@ mod tests {
         assert!(agent_bar_label_texts(&controller)
             .iter()
             .any(|text| text == "blocked"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn hidden_workspace_terminal_events_refresh_agent_and_workspace_items() {
+        use vte::prelude::*;
+
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let background_root = std::env::temp_dir().join("flowmux-agent-background-events");
+        let foreground_root = std::env::temp_dir().join("flowmux-agent-foreground-events");
+        std::fs::create_dir_all(&background_root).unwrap();
+        std::fs::create_dir_all(&foreground_root).unwrap();
+        let background_workspace = store
+            .create_workspace(Some("background".into()), background_root)
+            .await;
+        let foreground_workspace = store
+            .create_workspace(Some("foreground".into()), foreground_root)
+            .await;
+        let background = store.get_workspace(background_workspace).await.unwrap();
+        let foreground = store.get_workspace(foreground_workspace).await.unwrap();
+        let background_pane = background.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let foreground_pane = foreground.surfaces[0].root_pane.first_leaf_id().unwrap();
+
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.AgentBackgroundEvents")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.options.borrow_mut().agent_bar_mode = true;
+        controller.render_workspace(&background);
+        controller.render_workspace(&foreground);
+        store.set_active_workspace(Some(foreground_workspace)).await;
+        controller.focused_pane.set(Some(foreground_pane));
+        controller.window.present();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+
+        let background_surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(background_pane)
+            .expect("background pane should have an active surface");
+        let terminal = controller
+            .pane_registry
+            .borrow()
+            .terminals
+            .get(&background_surface)
+            .cloned()
+            .expect("background surface should have a terminal widget");
+        assert!(
+            !terminal.container.is_mapped(),
+            "test setup must leave the source workspace hidden"
+        );
+        assert_eq!(
+            store.snapshot().await.active_workspace,
+            Some(foreground_workspace)
+        );
+
+        terminal
+            .widget
+            .feed(b"\x1b[2J\x1b[HWorking (0s - esc to interrupt)\r\n");
+        for _ in 0..40 {
+            if terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("Working (0s"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(
+            terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("Working (0s")),
+            "hidden terminal text must be readable before refreshing Agent state"
+        );
+        // Seed process truth only after VTE has consumed the fixture. The
+        // controller's real 2s process poll runs during GTK tests and would
+        // correctly remove an earlier fake presence because no Codex child is
+        // actually running under this test terminal.
+        store
+            .reconcile_process_agents(&[(background_surface, Some("codex"))])
+            .await;
+        assert_eq!(
+            store.workspace_agent_status(background_workspace).await,
+            Some(flowmux_core::AgentStatus::Idle),
+            "test setup must seed a background Agent presence"
+        );
+        controller
+            .sync_workspace_agent_status(background_workspace)
+            .await;
+        let (ack, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::TerminalOutputObserved {
+                surface: background_surface,
+                ack,
+            })
+            .await;
+        ack_rx.await.unwrap();
+        assert_eq!(
+            store.workspace_agent_status(background_workspace).await,
+            Some(flowmux_core::AgentStatus::Working),
+            "hidden workspace output must update the shared Agent model"
+        );
+        assert!(
+            agent_bar_label_texts(&controller)
+                .iter()
+                .any(|text| text == "working"),
+            "hidden workspace output must refresh its Agent item"
+        );
+
+        terminal
+            .widget
+            .feed(b"\x1b[2J\x1b[Hcodex needs approval\r\n");
+        for _ in 0..40 {
+            if terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("codex needs approval"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        let (ack, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::TerminalOutputObserved {
+                surface: background_surface,
+                ack,
+            })
+            .await;
+        ack_rx.await.unwrap();
+        assert!(
+            controller
+                .sidebar
+                .workspace_row_contains(background_workspace, "blocked"),
+            "hidden workspace output must refresh its workspace item"
+        );
+        assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+        assert_eq!(
+            store.snapshot().await.active_workspace,
+            Some(foreground_workspace)
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

@@ -280,6 +280,29 @@ async fn pane_read_screen_dispatches_terminal_command_and_waits_for_ack() {
 }
 
 #[tokio::test]
+async fn terminal_output_dispatches_background_safe_refresh_and_waits_for_ack() {
+    let (handler, rx, _pane, surface) = single_pane_handler().await;
+    let response = handler.handle(Request::TerminalOutput { surface });
+    tokio::pin!(response);
+
+    let command = tokio::select! {
+        response = &mut response => panic!("terminal output completed before bridge ack: {response:?}"),
+        command = rx.recv() => command.expect("terminal output should dispatch to GTK"),
+    };
+    let GtkCommand::TerminalOutputObserved {
+        surface: command_surface,
+        ack,
+    } = command
+    else {
+        panic!("expected TerminalOutputObserved command");
+    };
+    assert_eq!(command_surface, surface);
+    ack.send(()).unwrap();
+
+    assert!(matches!(response.await, Response::Ok));
+}
+
+#[tokio::test]
 async fn notify_dispatches_add_notification_before_desktop_delivery() {
     let (handler, rx, pane, surface) = single_pane_handler().await;
     let expected_workspace = handler.inner.store().workspace_for_pane(pane).await;
