@@ -68,6 +68,12 @@ pub fn present(
     dialog.present();
 }
 
+/// Let widget-originated actions (including AT-SPI `DoAction`) return before
+/// callbacks rebuild Pango styles or close the widget tree they came from.
+fn defer_widget_action(action: impl FnOnce() + 'static) {
+    gtk::glib::idle_add_local_once(action);
+}
+
 /// Build only the dialog widget tree so tests can inspect widget state
 /// without calling `present`.
 fn build_dialog(
@@ -270,7 +276,10 @@ fn build_dialog(
 
     {
         let dialog = dialog.clone();
-        cancel_btn.connect_clicked(move |_| dialog.close());
+        cancel_btn.connect_clicked(move |_| {
+            let dialog = dialog.clone();
+            defer_widget_action(move || dialog.close());
+        });
     }
     // Theme previews already repainted the app; when the dialog closes any
     // way other than OK / Reset, restore the look the user started with.
@@ -342,8 +351,12 @@ fn build_dialog(
                 &theme_state.borrow(),
             );
             applied.set(true);
-            (on_apply)(opts);
-            dialog.close();
+            let dialog = dialog.clone();
+            let on_apply = on_apply.clone();
+            defer_widget_action(move || {
+                (on_apply)(opts);
+                dialog.close();
+            });
         });
     }
     {
@@ -352,8 +365,12 @@ fn build_dialog(
         let applied = applied.clone();
         reset_btn.connect_clicked(move |_| {
             applied.set(true);
-            (on_apply)(Options::default());
-            dialog.close();
+            let dialog = dialog.clone();
+            let on_apply = on_apply.clone();
+            defer_widget_action(move || {
+                (on_apply)(Options::default());
+                dialog.close();
+            });
         });
     }
     {
@@ -1287,6 +1304,24 @@ fn engine_index_of(engine: &BrowserEngine) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn widget_action_finishes_before_deferred_dialog_work() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let ran = Rc::new(std::cell::Cell::new(false));
+        let ran_later = ran.clone();
+        defer_widget_action(move || ran_later.set(true));
+
+        assert!(!ran.get());
+        let context = gtk::glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+        assert!(ran.get());
+    }
 
     #[test]
     fn engine_options_lists_three_builtin_variants_in_label_order() {
