@@ -35,6 +35,7 @@ use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 const MESSAGE_HANDLER_NAME: &str = "flowmuxEditor";
@@ -66,7 +67,7 @@ pub struct EditorPane {
     native: Rc<NativeEditorView>,
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
-    _asset_server: Rc<EditorAssetServer>,
+    _asset_server: Arc<EditorAssetServer>,
     appearance: Rc<RefCell<EditorAppearance>>,
     file_monitors: Rc<RefCell<HashMap<PathBuf, gio::FileMonitor>>>,
     file_monitor_generation: Rc<Cell<u64>>,
@@ -263,7 +264,7 @@ impl EditorPane {
         restored: EditorSessionState,
         appearance: EditorAppearance,
     ) -> Result<Self, String> {
-        let asset_server = Rc::new(EditorAssetServer::start().map_err(|error| error.to_string())?);
+        let asset_server = EditorAssetServer::shared().map_err(|error| error.to_string())?;
         let editor_url = asset_server
             .editor_url(&surface_id.0.to_string())
             .map_err(|error| error.to_string())?;

@@ -4,7 +4,7 @@
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use thiserror::Error;
@@ -97,6 +97,16 @@ pub struct EditorAssetServer {
 }
 
 impl EditorAssetServer {
+    pub fn shared() -> Result<Arc<Self>, EditorAssetServerError> {
+        static SERVER: OnceLock<Arc<EditorAssetServer>> = OnceLock::new();
+        if let Some(server) = SERVER.get() {
+            return Ok(server.clone());
+        }
+        let server = Arc::new(Self::start()?);
+        // ponytail: one process-wide immutable asset server; process exit owns shutdown.
+        Ok(SERVER.get_or_init(|| server).clone())
+    }
+
     pub fn start() -> Result<Self, EditorAssetServerError> {
         let listener =
             TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(EditorAssetServerError::Bind)?;
@@ -369,6 +379,14 @@ mod tests {
         drop(server);
 
         assert!(stopping.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn shared_server_reuses_one_worker() {
+        let first = EditorAssetServer::shared().unwrap();
+        let second = EditorAssetServer::shared().unwrap();
+
+        assert!(Arc::ptr_eq(&first, &second));
     }
 
     fn request(server: &EditorAssetServer, method: &str, path: &str) -> String {

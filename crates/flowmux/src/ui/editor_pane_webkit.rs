@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use webkit6::prelude::*;
 
@@ -31,7 +32,7 @@ pub struct EditorPane {
     user_content_manager: webkit6::UserContentManager,
     bridge: Rc<EditorBridgeState>,
     host: Rc<EditorHostState>,
-    _asset_server: Rc<EditorAssetServer>,
+    _asset_server: Arc<EditorAssetServer>,
     _network_session: webkit6::NetworkSession,
     closed: Rc<Cell<bool>>,
     appearance: Rc<RefCell<EditorAppearance>>,
@@ -48,7 +49,7 @@ impl EditorPane {
         restored: EditorSessionState,
         appearance: EditorAppearance,
     ) -> Result<Self, String> {
-        let asset_server = Rc::new(EditorAssetServer::start().map_err(|error| error.to_string())?);
+        let asset_server = EditorAssetServer::shared().map_err(|error| error.to_string())?;
         let editor_url = asset_server
             .editor_url(&surface_id.0.to_string())
             .map_err(|error| error.to_string())?;
