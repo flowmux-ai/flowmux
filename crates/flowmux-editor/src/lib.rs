@@ -36,18 +36,42 @@ pub use web_assets::{EditorAssetServer, EditorAssetServerError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, Permissions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
 pub const DEFAULT_MAX_DOCUMENT_BYTES: u64 = 16 * 1024 * 1024;
+const TEXT_CLASSIFICATION_BYTES: u64 = 8 * 1024;
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
 
-/// Whether the embedded editor can open this file under the same validation
-/// rules used by [`DocumentService`].
-pub fn is_editable_text_file(path: &Path) -> bool {
-    read_text_document(path, DEFAULT_MAX_DOCUMENT_BYTES).is_ok()
+/// Whether a small prefix looks like text the embedded editor can open.
+///
+/// [`DocumentService`] performs the complete validation when the file opens.
+pub fn is_probably_editable_text_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() > DEFAULT_MAX_DOCUMENT_BYTES {
+        return false;
+    }
+    let Ok(file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut bytes = Vec::with_capacity(TEXT_CLASSIFICATION_BYTES as usize);
+    if file
+        .take(TEXT_CLASSIFICATION_BYTES)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.contains(&0)
+    {
+        return false;
+    }
+    let payload = bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes);
+    match std::str::from_utf8(payload) {
+        Ok(_) => true,
+        Err(error) => error.error_len().is_none(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -740,6 +764,21 @@ mod tests {
 
     fn write(path: &Path, bytes: &[u8]) {
         fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn text_classification_samples_then_full_open_validates() {
+        let workspace = tempdir().unwrap();
+        let path = workspace.path().join("late-binary");
+        let mut bytes = vec![b'a'; TEXT_CLASSIFICATION_BYTES as usize];
+        bytes.push(0);
+        write(&path, &bytes);
+
+        assert!(is_probably_editable_text_file(&path));
+        assert!(matches!(
+            DocumentService::new(workspace.path()).unwrap().open(&path),
+            Err(DocumentError::Binary { .. })
+        ));
     }
 
     #[test]

@@ -2496,7 +2496,7 @@ pub(crate) fn file_open_target(path: &Path) -> FileOpenTarget {
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
     else {
-        return if flowmux_editor::is_editable_text_file(path) {
+        return if flowmux_editor::is_probably_editable_text_file(path) {
             FileOpenTarget::Editor
         } else {
             FileOpenTarget::Binary
@@ -2535,7 +2535,7 @@ pub(crate) fn file_open_target(path: &Path) -> FileOpenTarget {
             | "jar"
             | "wasm"
     );
-    if known_binary_format || !flowmux_editor::is_editable_text_file(path) {
+    if known_binary_format || !flowmux_editor::is_probably_editable_text_file(path) {
         FileOpenTarget::Binary
     } else {
         FileOpenTarget::Editor
