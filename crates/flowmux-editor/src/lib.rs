@@ -28,8 +28,8 @@ pub use search::{
     DEFAULT_MAX_SEARCH_RESULTS,
 };
 pub use session::{
-    diff_base_content, EditorFileSessionState, EditorSession, EditorSessionError,
-    EditorSessionSnapshot, EditorViewState,
+    EditorFileSessionState, EditorSession, EditorSessionError, EditorSessionSnapshot,
+    EditorViewState,
 };
 pub use web_assets::{EditorAssetServer, EditorAssetServerError};
 

@@ -252,11 +252,6 @@ export type EditorMessage =
     })
   | (EditorMessageBase & { type: "search_cancelled"; requestId: string })
   | (EditorMessageBase & {
-      type: "diff_requested";
-      documentId: string;
-      documentVersion: number;
-    })
-  | (EditorMessageBase & {
       type: "search_result_open_requested";
       path: string;
       line: number;

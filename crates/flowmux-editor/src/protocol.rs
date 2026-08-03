@@ -293,10 +293,6 @@ pub enum EditorMessage {
     SearchCancelled {
         request_id: String,
     },
-    DiffRequested {
-        document_id: String,
-        document_version: u64,
-    },
     SearchResultOpenRequested {
         path: String,
         line: u32,
@@ -429,7 +425,6 @@ fn validate_editor_message(message: &EditorMessage) -> Result<(), ProtocolError>
         | EditorMessage::CloseRequested { document_id, .. }
         | EditorMessage::DiscardCloseRequested { document_id, .. }
         | EditorMessage::RecoveryDecision { document_id, .. }
-        | EditorMessage::DiffRequested { document_id, .. }
         | EditorMessage::ConflictActionRequested { document_id, .. } => {
             validate_identifier("document ID", document_id)
         }
@@ -1158,22 +1153,6 @@ mod tests {
                 action: ConflictAction::ReloadFromDisk,
                 ..
             }
-        ));
-
-        let diff = serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "surfaceId": "surface-1",
-            "type": "diff_requested",
-            "documentId": "document-1",
-            "documentVersion": 4
-        })
-        .to_string();
-        assert!(matches!(
-            parse_editor_message(&diff).unwrap().1,
-            EditorMessage::DiffRequested {
-                document_id,
-                document_version: 4
-            } if document_id == "document-1"
         ));
     }
 }

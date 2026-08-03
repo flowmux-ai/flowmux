@@ -9,7 +9,6 @@ use crate::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -464,13 +463,12 @@ impl EditorSession {
                 );
                 Ok(Vec::new())
             }
-            // Search and diff are handled by the pane on worker threads; the
-            // session only validates and supplies their inputs.
+            // Search is handled by the pane on worker threads; the session
+            // only validates and supplies its inputs.
             EditorMessage::QuickOpenRequested { .. }
             | EditorMessage::WorkspaceSearchRequested { .. }
             | EditorMessage::SearchCancelled { .. }
-            | EditorMessage::SearchResultOpenRequested { .. }
-            | EditorMessage::DiffRequested { .. } => Ok(Vec::new()),
+            | EditorMessage::SearchResultOpenRequested { .. } => Ok(Vec::new()),
             EditorMessage::ConflictActionRequested {
                 document_id,
                 document_version,
@@ -692,18 +690,6 @@ impl EditorSession {
             .collect()
     }
 
-    /// Validate a `DiffRequested` message and return the file the diff base
-    /// should be computed for. The content fetch itself (`diff_base_content`)
-    /// runs `git` and reads the disk, so callers run it off the UI thread.
-    pub fn diff_target(
-        &self,
-        document_id: &str,
-        document_version: u64,
-    ) -> Result<PathBuf, EditorSessionError> {
-        let id = self.checked_document(document_id, document_version)?;
-        Ok(self.documents.snapshot(id)?.identity_path)
-    }
-
     fn recovery_decision(
         &mut self,
         document_id: String,
@@ -843,69 +829,6 @@ impl EditorSession {
     }
 }
 
-/// Content the diff view compares the editing buffer against: the file's
-/// `HEAD` blob in a Git workspace, the on-disk content otherwise. Runs `git`
-/// subprocesses and reads the file — call from a worker thread, not the UI.
-pub fn diff_base_content(workspace_root: &Path, identity_path: &Path) -> String {
-    match git_head_content(workspace_root, identity_path) {
-        Some(content) => content.unwrap_or_default(),
-        None => crate::read_text_document(identity_path, crate::DEFAULT_MAX_DOCUMENT_BYTES)
-            .map(|loaded| loaded.text)
-            .unwrap_or_default(),
-    }
-}
-
-fn git_head_content(workspace_root: &Path, path: &Path) -> Option<Option<String>> {
-    let root = Command::new("git")
-        .arg("-C")
-        .arg(workspace_root)
-        .args(["rev-parse", "--show-toplevel"])
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .ok()?;
-    if !root.status.success() {
-        return None;
-    }
-    let root = String::from_utf8(root.stdout).ok()?;
-    let root = PathBuf::from(root.trim_end_matches(['\r', '\n']));
-    let root = root.canonicalize().ok()?;
-    let relative = path.strip_prefix(&root).ok()?;
-    let relative = relative
-        .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    let object = format!("HEAD:{relative}");
-
-    let size = Command::new("git")
-        .arg("-C")
-        .arg(&root)
-        .args(["cat-file", "-s"])
-        .arg(&object)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .ok()?;
-    if !size.status.success() {
-        return Some(None);
-    }
-    let size = String::from_utf8(size.stdout).ok()?;
-    let size = size.trim().parse::<u64>().ok()?;
-    if size > crate::DEFAULT_MAX_DOCUMENT_BYTES {
-        return None;
-    }
-
-    let content = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["cat-file", "-p"])
-        .arg(object)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .ok()?;
-    if !content.status.success() {
-        return None;
-    }
-    Some(Some(String::from_utf8(content.stdout).ok()?))
-}
-
 fn protocol_id(id: DocumentId) -> String {
     format!("document-{}", id.get())
 }
@@ -922,7 +845,6 @@ fn protocol_disk_status(status: DiskStatus) -> DocumentDiskStatus {
 mod tests {
     use super::*;
     use std::fs;
-    use std::process::Command;
     use tempfile::tempdir;
 
     fn open_payload(messages: Vec<HostMessage>) -> DocumentPayload {
@@ -936,50 +858,6 @@ mod tests {
         for operation in session.take_recovery_operations() {
             store.apply(&operation).unwrap();
         }
-    }
-
-    fn git(directory: &Path, arguments: &[&str]) {
-        let status = Command::new("git")
-            .args(arguments)
-            .current_dir(directory)
-            .env("GIT_AUTHOR_NAME", "JunsuChoi")
-            .env("GIT_AUTHOR_EMAIL", "jsuya.choi@samsung.com")
-            .env("GIT_COMMITTER_NAME", "JunsuChoi")
-            .env("GIT_COMMITTER_EMAIL", "jsuya.choi@samsung.com")
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {arguments:?} failed");
-    }
-
-    #[test]
-    fn diff_uses_head_content_as_the_base_for_working_tree_changes() {
-        let workspace = tempdir().unwrap();
-        git(workspace.path(), &["init", "-q"]);
-        let path = workspace.path().join("변경-日本語🙂.txt");
-        fs::write(&path, "기준 내용\n").unwrap();
-        git(workspace.path(), &["add", "."]);
-        git(
-            workspace.path(),
-            &[
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-q",
-                "-m",
-                "baseline",
-            ],
-        );
-        fs::write(&path, "작업 중인 내용\n").unwrap();
-
-        let mut session = EditorSession::new(workspace.path()).unwrap();
-        let document = open_payload(session.open_document(&path).unwrap());
-        let target = session.diff_target(&document.id, document.version).unwrap();
-
-        assert_eq!(target, fs::canonicalize(&path).unwrap());
-        assert_eq!(
-            diff_base_content(&fs::canonicalize(workspace.path()).unwrap(), &target),
-            "기준 내용\n"
-        );
     }
 
     #[test]

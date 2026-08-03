@@ -3,11 +3,11 @@
 
 use flowmux_core::{EditorFileState, EditorSessionState, PaneId, SurfaceId};
 use flowmux_editor::{
-    diff_base_content, index_workspace_files, javascript_for_host_message, parse_editor_message,
-    search_workspace, EditorFileSessionState, EditorFocusDirection, EditorMessage,
-    EditorNativeEditAction, EditorSession, EditorSessionSnapshot, EditorViewState, HostMessage,
-    ProtocolError, RecoveryOperation, RecoveryStore, SearchCancellation, SearchOptions,
-    WorkspaceSearchResult, EDITOR_ZOOM_DEFAULT, EDITOR_ZOOM_MAX, EDITOR_ZOOM_MIN,
+    index_workspace_files, javascript_for_host_message, parse_editor_message, search_workspace,
+    EditorFileSessionState, EditorFocusDirection, EditorMessage, EditorNativeEditAction,
+    EditorSession, EditorSessionSnapshot, EditorViewState, HostMessage, ProtocolError,
+    RecoveryOperation, RecoveryStore, SearchCancellation, SearchOptions, WorkspaceSearchResult,
+    EDITOR_ZOOM_DEFAULT, EDITOR_ZOOM_MAX, EDITOR_ZOOM_MIN,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -88,12 +88,6 @@ struct SearchWorker {
     kind: SearchWorkerKind,
     cancellation: SearchCancellation,
     receiver: Receiver<SearchWorkerMessage>,
-}
-
-/// Fetches the diff base (`git` + disk read) off the UI thread; the result is
-/// picked up by the same tick that polls search workers.
-struct DiffWorker {
-    receiver: Receiver<HostMessage>,
 }
 
 type FlushCompletion = Rc<RefCell<Option<Result<(), String>>>>;
@@ -203,7 +197,6 @@ pub(super) struct EditorHostState {
     pending_recovery: RefCell<HashMap<PathBuf, RecoveryOperation>>,
     recovery_flush_pending: Cell<bool>,
     search_worker: RefCell<Option<SearchWorker>>,
-    diff_worker: RefCell<Option<DiffWorker>>,
     next_flush_request: Cell<u64>,
     pending_flushes: RefCell<HashMap<u64, FlushCompletion>>,
 }
@@ -293,7 +286,6 @@ impl EditorHostState {
             pending_recovery: RefCell::new(HashMap::new()),
             recovery_flush_pending: Cell::new(false),
             search_worker: RefCell::new(None),
-            diff_worker: RefCell::new(None),
             next_flush_request: Cell::new(0),
             pending_flushes: RefCell::new(HashMap::new()),
         };
@@ -444,10 +436,6 @@ impl EditorHostState {
                 column,
                 length,
             } => self.open_search_result(path, line, column, length),
-            EditorMessage::DiffRequested {
-                document_id,
-                document_version,
-            } => self.start_diff(document_id, document_version),
             message => self.handle_session_message(message),
         }
     }
@@ -571,64 +559,6 @@ impl EditorHostState {
         Vec::new()
     }
 
-    fn start_diff(&self, document_id: String, document_version: u64) -> Vec<HostMessage> {
-        let target = match &*self.session.borrow() {
-            Ok(session) => session.diff_target(&document_id, document_version),
-            Err(error) => {
-                tracing::warn!(%error, "editor document session is unavailable");
-                return Vec::new();
-            }
-        };
-        let target = match target {
-            Ok(target) => target,
-            Err(error) => {
-                tracing::warn!(%error, "editor diff request was rejected");
-                return Vec::new();
-            }
-        };
-        let root = self.workspace_root.clone();
-        let (sender, receiver) = mpsc::channel();
-        let spawned = std::thread::Builder::new()
-            .name("flowmux-editor-diff".into())
-            .spawn(move || {
-                let disk_content = diff_base_content(&root, &target);
-                let _ = sender.send(HostMessage::ShowDiff {
-                    document_id,
-                    document_version,
-                    disk_content,
-                });
-            });
-        match spawned {
-            // A newer request replaces the pending worker; its stale result
-            // would be rejected by the WebView's version check anyway.
-            Ok(_) => *self.diff_worker.borrow_mut() = Some(DiffWorker { receiver }),
-            Err(error) => tracing::warn!(%error, "failed to start editor diff worker"),
-        }
-        Vec::new()
-    }
-
-    fn poll_diff_messages(&self) -> Vec<HostMessage> {
-        let received = {
-            let worker = self.diff_worker.borrow();
-            let Some(worker) = worker.as_ref() else {
-                return Vec::new();
-            };
-            match worker.receiver.try_recv() {
-                Ok(message) => Some(message),
-                Err(TryRecvError::Empty) => return Vec::new(),
-                Err(TryRecvError::Disconnected) => None,
-            }
-        };
-        self.diff_worker.borrow_mut().take();
-        match received {
-            Some(message) => vec![message],
-            None => {
-                tracing::warn!("editor diff worker stopped unexpectedly");
-                Vec::new()
-            }
-        }
-    }
-
     fn cancel_search(&self, request_id: &str) {
         let matches = self
             .search_worker
@@ -671,9 +601,7 @@ impl EditorHostState {
     }
 
     pub(super) fn poll_search_messages(&self) -> Vec<HostMessage> {
-        let mut messages = self.poll_diff_messages();
-        messages.extend(self.poll_search_worker_messages());
-        messages
+        self.poll_search_worker_messages()
     }
 
     fn poll_search_worker_messages(&self) -> Vec<HostMessage> {
