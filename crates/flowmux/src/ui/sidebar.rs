@@ -406,7 +406,7 @@ impl Sidebar {
             .end_child(&activity_panel)
             .resize_start_child(true)
             .resize_end_child(false)
-            .shrink_start_child(true)
+            .shrink_start_child(false)
             .shrink_end_child(true)
             .build();
         activity_split.add_css_class("flowmux-agents-split");
@@ -2222,6 +2222,17 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
+    async fn wait_for_activity_panel_layout(sidebar: &Sidebar) {
+        for _ in 0..100 {
+            if !sidebar.activity_layout.layout_pending.get() {
+                return;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("Agents panel layout did not settle");
+    }
+
+    #[cfg(not(target_os = "macos"))]
     fn tree_gutter_widths(meta: &gtk::Box) -> Vec<i32> {
         let mut widths = Vec::new();
         let mut child = meta.first_child();
@@ -2544,7 +2555,7 @@ mod tests {
             color: "#abcdef".into(),
         }];
         sidebar.refresh_activity_panel(&current, Some(surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         assert!(sidebar.activity_panel.is_visible());
         let (_, one_agent_natural_height, _, _) = sidebar
             .activity_panel
@@ -2628,7 +2639,7 @@ mod tests {
         gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
         assert!(!sidebar.activity_layout.user_adjusted.get());
         sidebar.refresh_activity_panel(&current, Some(surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         assert!(!sidebar.activity_layout.user_adjusted.get());
         assert!(
             ((activity_split.height() - activity_split.position())
@@ -2644,7 +2655,7 @@ mod tests {
         activity_split.set_position(activity_split.height() - user_height);
         assert!(sidebar.activity_layout.user_adjusted.get());
         sidebar.refresh_activity_panel(&current, Some(surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         assert!(
             ((activity_split.height() - activity_split.position()) - user_height).abs() <= 3,
             "one Agent must first fill the user-adjusted height"
@@ -2659,7 +2670,7 @@ mod tests {
             })
             .collect();
         sidebar.refresh_activity_panel(&two, Some(two[1].surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         let (_, two_agent_natural_height, _, _) = sidebar
             .activity_panel
             .measure(gtk::Orientation::Vertical, sidebar.activity_panel.width());
@@ -2688,7 +2699,7 @@ mod tests {
             .collect();
         let bottom_surface = many.last().unwrap().surface;
         sidebar.refresh_activity_panel(&many, Some(bottom_surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         let many_agent_height = activity_split.height() - activity_split.position();
         assert!(
             (many_agent_height * 3 - activity_split.height()).abs() <= 3,
@@ -2700,7 +2711,7 @@ mod tests {
         adjustment.set_value(bottom);
         let position = adjustment.value();
         sidebar.refresh_activity_panel(&many, Some(bottom_surface));
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         let refreshed_scroll = descendant_widgets(&rendered)
             .into_iter()
             .find_map(|widget| widget.downcast::<gtk::ScrolledWindow>().ok())
@@ -2720,7 +2731,7 @@ mod tests {
         let user_position = activity_split.height() - above_one_third_height;
         activity_split.set_position(user_position);
         sidebar.agent_bar_button.emit_clicked();
-        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        wait_for_activity_panel_layout(&sidebar).await;
         assert!(sidebar.activity_panel.is_visible());
         assert_eq!(
             activity_split.position(),
