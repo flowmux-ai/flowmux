@@ -7,6 +7,8 @@ use std::borrow::Cow;
 #[derive(Debug, Default, Clone)]
 pub struct TerminalInputModes {
     application_cursor: bool,
+    alternate_screen: bool,
+    alternate_screen_exited: bool,
     output_escape: Vec<u8>,
 }
 
@@ -15,9 +17,13 @@ impl TerminalInputModes {
         self.application_cursor
     }
 
+    pub fn take_alternate_screen_exit(&mut self) -> bool {
+        std::mem::take(&mut self.alternate_screen_exited)
+    }
+
     /// Observe bytes emitted by the terminal application and update the
-    /// input modes those bytes select. The important case for ncurses apps
-    /// such as tig is DECCKM (`CSI ? 1 h/l`), toggled by smkx/rmkx.
+    /// input modes those bytes select. This tracks DECCKM for cursor input and
+    /// alternate-screen exit so the caller can restore shell-owned UI state.
     pub fn observe_output(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             if self.output_escape.is_empty() {
@@ -98,6 +104,14 @@ impl TerminalInputModes {
         if has_decckm {
             self.application_cursor = final_byte == b'h';
         }
+        let has_alternate_screen = private_params
+            .split(|b| *b == b';')
+            .any(|param| matches!(param, b"47" | b"1047" | b"1049"));
+        if has_alternate_screen {
+            let enabled = final_byte == b'h';
+            self.alternate_screen_exited |= self.alternate_screen && !enabled;
+            self.alternate_screen = enabled;
+        }
     }
 }
 
@@ -170,5 +184,19 @@ mod tests {
         modes.observe_output(b"\x1b[?7;1h");
 
         assert!(modes.application_cursor());
+    }
+
+    #[test]
+    fn alternate_screen_exit_is_reported_once_across_output_chunks() {
+        let mut modes = TerminalInputModes::default();
+        modes.observe_output(b"\x1b[?10");
+        modes.observe_output(b"49h");
+        assert!(modes.alternate_screen);
+        assert!(!modes.take_alternate_screen_exit());
+
+        modes.observe_output(b"\x1b[?1049l");
+        assert!(!modes.alternate_screen);
+        assert!(modes.take_alternate_screen_exit());
+        assert!(!modes.take_alternate_screen_exit());
     }
 }

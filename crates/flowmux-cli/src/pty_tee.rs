@@ -35,7 +35,7 @@
 //!   touch a renderer-version-specific API.
 
 use anyhow::{anyhow, Context};
-use flowmux_core::{NotificationLevel, PaneId, SurfaceId};
+use flowmux_core::{terminal_tab_title_for_cwd, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{client::Client, protocol::Request};
 use flowmux_notify::{osc::parse_osc, OscExtractor};
 use flowmux_terminal::TerminalInputModes;
@@ -319,6 +319,7 @@ fn run_pty_pump(
             match read_some(master_fd, &mut buf) {
                 ReadOutcome::Data(slice) => {
                     input_modes.observe_output(slice);
+                    let alternate_screen_exited = input_modes.take_alternate_screen_exit();
                     extractor.feed(slice);
                     if let Err(e) = write_all(libc::STDOUT_FILENO, slice) {
                         tracing::warn!(error = %e, "write to outer stdout failed; exiting");
@@ -330,6 +331,12 @@ fn run_pty_pump(
                             &notify_tx,
                         );
                         break;
+                    }
+                    // Full-screen TUIs often restore a blank or stale OSC title.
+                    // Re-entering the normal screen is the event that lets the
+                    // existing title pipeline restore tab/workspace/window names.
+                    if alternate_screen_exited {
+                        cwd_tracker.emit_shell_title(child_pid);
                     }
                     flush_pending(&pending, &notify_tx);
                     cwd_tracker.emit_if_changed(child_pid);
@@ -664,6 +671,23 @@ impl CwdOscTracker {
             self.last = Some(cwd);
         }
     }
+
+    fn emit_shell_title(&self, pid: Pid) {
+        let cwd = child_cwd(pid).or_else(|| self.last.clone());
+        let title = terminal_tab_title_for_cwd(cwd.as_deref());
+        let _ = write_all(libc::STDOUT_FILENO, &osc0_for_title(&title));
+    }
+}
+
+fn osc0_for_title(title: &str) -> Vec<u8> {
+    let mut seq = b"\x1b]0;".to_vec();
+    seq.extend(
+        title
+            .bytes()
+            .filter(|byte| !matches!(byte, 0x00..=0x1f | 0x7f)),
+    );
+    seq.push(b'\x07');
+    seq
 }
 
 fn osc7_for_path(path: &Path) -> Vec<u8> {
@@ -789,5 +813,18 @@ impl SavedTermios {
 impl Drop for SavedTermios {
     fn drop(&mut self) {
         let _ = termios::tcsetattr(std::io::stdin(), SetArg::TCSAFLUSH, &self.termios);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_title_osc_drops_control_bytes() {
+        assert_eq!(
+            osc0_for_title("vim\x1b]0;stale\x07프로젝트"),
+            b"\x1b]0;vim]0;stale\xed\x94\x84\xeb\xa1\x9c\xec\xa0\x9d\xed\x8a\xb8\x07"
+        );
     }
 }
