@@ -8,11 +8,12 @@ export interface FocusNavigationKey {
   ctrlKey: boolean;
   shiftKey: boolean;
   metaKey: boolean;
+  isComposing: boolean;
 }
 
 /** Keep Monaco's normal key handling; only plain Alt+arrow leaves the editor. */
 export function focusDirectionForKey(event: FocusNavigationKey): EditorFocusDirection | null {
-  if (!event.altKey || event.ctrlKey || event.shiftKey || event.metaKey) {
+  if (event.isComposing || !event.altKey || event.ctrlKey || event.shiftKey || event.metaKey) {
     return null;
   }
   switch (event.key) {

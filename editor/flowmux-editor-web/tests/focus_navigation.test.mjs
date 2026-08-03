@@ -11,6 +11,7 @@ function key(key, overrides = {}) {
     ctrlKey: false,
     shiftKey: false,
     metaKey: false,
+    isComposing: false,
     ...overrides,
   };
 }
@@ -28,4 +29,5 @@ test("typing and editor navigation remain owned by Monaco", () => {
   assert.equal(focusDirectionForKey(key("ArrowRight", { altKey: true, shiftKey: true })), null);
   assert.equal(focusDirectionForKey(key("ArrowUp", { altKey: true, ctrlKey: true })), null);
   assert.equal(focusDirectionForKey(key("ArrowDown", { altKey: true, metaKey: true })), null);
+  assert.equal(focusDirectionForKey(key("ArrowLeft", { altKey: true, isComposing: true })), null);
 });
