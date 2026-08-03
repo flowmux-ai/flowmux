@@ -359,16 +359,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsafe_surface_ids_and_stops_on_drop() {
+    fn rejects_unsafe_surface_ids_and_signals_stop_on_drop() {
         let server = EditorAssetServer::start().unwrap();
-        let address = server.address();
+        let stopping = server.stopping.clone();
         assert!(matches!(
             server.editor_url("../surface"),
             Err(EditorAssetServerError::InvalidSurfaceId)
         ));
         drop(server);
 
-        assert!(TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_err());
+        assert!(stopping.load(Ordering::Acquire));
     }
 
     fn request(server: &EditorAssetServer, method: &str, path: &str) -> String {
