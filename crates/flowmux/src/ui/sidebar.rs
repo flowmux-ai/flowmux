@@ -406,7 +406,7 @@ impl Sidebar {
             .end_child(&activity_panel)
             .resize_start_child(true)
             .resize_end_child(false)
-            .shrink_start_child(false)
+            .shrink_start_child(true)
             .shrink_end_child(true)
             .build();
         activity_split.add_css_class("flowmux-agents-split");
