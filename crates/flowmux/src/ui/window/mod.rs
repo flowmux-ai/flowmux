@@ -1505,6 +1505,7 @@ impl WindowController {
             self.sidebar.upsert_with_details(&ws, details);
         }
         self.refresh_agent_bar().await;
+        self.refresh_activity_panel().await;
     }
 
     /// Handle a pane focus event, update MRU, and sync label/subtitles. Focusing
@@ -1531,7 +1532,6 @@ impl WindowController {
         if let Some(surface) = active_surface {
             self.refresh_agent_screen_status(surface, None).await;
         }
-        self.refresh_activity_panel().await;
     }
 
     /// Called right before exit. Record window size, maximized state, sidebar
@@ -2840,6 +2840,22 @@ mod tests {
 
     fn activity_panel_visible(controller: &WindowController) -> bool {
         controller.sidebar.activity_panel_is_visible()
+    }
+
+    fn sidebar_label_texts(controller: &WindowController) -> Vec<String> {
+        let mut labels = Vec::new();
+        let mut pending = vec![controller.sidebar.root.clone().upcast::<gtk::Widget>()];
+        while let Some(widget) = pending.pop() {
+            if let Ok(label) = widget.clone().downcast::<gtk::Label>() {
+                labels.push(label.label().to_string());
+            }
+            let mut child = widget.first_child();
+            while let Some(next) = child {
+                child = next.next_sibling();
+                pending.push(next);
+            }
+        }
+        labels
     }
 
     fn agent_bar_label_texts(controller: &WindowController) -> Vec<String> {
@@ -7131,6 +7147,82 @@ mod tests {
             !activity_panel_visible(&controller),
             "Agent Activity must hide when process detection clears the last Agent"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn background_cwd_event_refreshes_activity_workspace_name() {
+        let (controller, background_workspace, background_pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.ActivityBackgroundCwd").await;
+        let background_surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(background_pane)
+            .expect("single workspace pane should have an active surface");
+        let foreground_root = std::env::temp_dir().join("flowmux-activity-foreground");
+        std::fs::create_dir_all(&foreground_root).unwrap();
+        let foreground_workspace = controller
+            .store
+            .create_workspace(Some("foreground".into()), foreground_root)
+            .await;
+        let foreground = controller
+            .store
+            .get_workspace(foreground_workspace)
+            .await
+            .expect("foreground workspace should exist");
+        let foreground_pane = foreground.surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .expect("foreground workspace should have a pane");
+        controller.render_workspace(&foreground);
+        controller
+            .store
+            .set_active_workspace(Some(foreground_workspace))
+            .await;
+        controller.focused_pane.set(Some(foreground_pane));
+        controller.options.borrow_mut().agent_bar_mode = false;
+        controller.sidebar.set_agent_bar_mode(false);
+        controller
+            .store
+            .set_agent_activity(
+                background_surface,
+                Some(flowmux_core::AgentPresence::new(
+                    "claude",
+                    flowmux_core::AgentActivity::Running,
+                    Some(42),
+                )),
+            )
+            .await;
+        controller
+            .sync_workspace_agent_status(background_workspace)
+            .await;
+        let initial_name = controller
+            .store
+            .get_workspace(background_workspace)
+            .await
+            .expect("workspace should exist")
+            .display_title()
+            .to_string();
+        assert!(sidebar_label_texts(&controller)
+            .iter()
+            .any(|text| text.contains(&format!(" · {initial_name} · "))));
+
+        controller
+            .dispatch(GtkCommand::TerminalCwdChanged {
+                pane: background_pane,
+                surface: background_surface,
+                cwd: std::path::PathBuf::from("/tmp/background-agent-dir"),
+            })
+            .await;
+
+        assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+        assert_eq!(
+            controller.store.snapshot().await.active_workspace,
+            Some(foreground_workspace)
+        );
+        assert!(sidebar_label_texts(&controller)
+            .iter()
+            .any(|text| text.contains(" · background-agent-dir · ")));
     }
 
     #[cfg(not(target_os = "macos"))]
