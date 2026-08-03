@@ -382,12 +382,8 @@ impl PaneRegistry {
         {
             self.terminals
                 .iter()
-                .filter_map(|(surface, terminal)| {
-                    terminal
-                        .announced_current_dir()
-                        .is_none()
-                        .then(|| (terminal.id(), *surface, None, terminal.pid.get()))
-                })
+                .filter(|(_, terminal)| terminal.announced_current_dir().is_none())
+                .map(|(surface, terminal)| (terminal.id(), *surface, None, terminal.pid.get()))
                 .collect()
         }
     }
@@ -976,10 +972,8 @@ impl PaneRegistry {
             MovingHandle::Terminal(terminal)
         } else if let Some(browser) = self.browsers.remove(&surface) {
             MovingHandle::Browser(browser)
-        } else if let Some(editor) = self.editors.remove(&surface) {
-            MovingHandle::Editor(editor)
         } else {
-            return None;
+            MovingHandle::Editor(self.editors.remove(&surface)?)
         };
 
         if let Some(tabs) = self.surface_tabs.get_mut(&pane) {
