@@ -70,7 +70,6 @@ export type HostMessage =
   | (HostMessageBase & { type: "set_appearance"; appearance: EditorAppearance })
   | (HostMessageBase & {
       type: "initialize_editor";
-      workspaceName: string;
       documents: DocumentPayload[];
       activeDocumentId: string | null;
       zoomPercent: number;
@@ -304,7 +303,6 @@ export function isHostMessage(value: unknown): value is HostMessage {
       return isEditorAppearance(value.appearance);
     case "initialize_editor":
       return (
-        typeof value.workspaceName === "string" &&
         Array.isArray(value.documents) &&
         value.documents.every(isDocumentPayload) &&
         (value.activeDocumentId === null || typeof value.activeDocumentId === "string") &&

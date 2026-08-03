@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { languageForPath, languageLabel } from "../.test-build/language.js";
+import { languageForPath } from "../.test-build/language.js";
 
 test("recognizes exact file names and common extensions", () => {
   assert.equal(languageForPath("/workspace/Cargo.toml"), "toml");
@@ -22,5 +22,4 @@ test("falls back to plain text for unknown or extensionless files", () => {
   assert.equal(languageForPath("README"), "plaintext");
   assert.equal(languageForPath("archive.unknown"), "plaintext");
   assert.equal(languageForPath("trailing."), "plaintext");
-  assert.equal(languageLabel("plaintext"), "Plain text");
 });

@@ -108,7 +108,6 @@ pub struct DocumentSnapshot {
     pub saved_version: u64,
     pub encoding: TextEncoding,
     pub line_ending: LineEnding,
-    pub has_final_newline: bool,
     pub read_only: bool,
 }
 
@@ -235,16 +234,6 @@ impl DocumentService {
         &self.workspace_root
     }
 
-    pub fn contains_path(&self, path: impl AsRef<Path>) -> bool {
-        let Ok(display_path) = absolute_path(path.as_ref()) else {
-            return false;
-        };
-        let Ok(identity_path) = fs::canonicalize(display_path) else {
-            return false;
-        };
-        self.identities.contains_key(&identity_path)
-    }
-
     pub fn open(&mut self, path: impl AsRef<Path>) -> Result<OpenDocument, DocumentError> {
         let display_path = absolute_path(path.as_ref())?;
         let identity_path = fs::canonicalize(&display_path)
@@ -265,7 +254,6 @@ impl DocumentService {
             id,
             display_path,
             identity_path: identity_path.clone(),
-            has_final_newline: loaded.text.ends_with('\n'),
             text: loaded.text,
             version: 1,
             saved_version: 1,
@@ -334,7 +322,6 @@ impl DocumentService {
             .ok_or(DocumentError::NotOpen(id))?;
         require_version(&document.snapshot, base_version)?;
         document.snapshot.version = document.snapshot.version.saturating_add(1);
-        document.snapshot.has_final_newline = text.ends_with('\n');
         document.snapshot.text = text;
         Ok(document.snapshot.clone())
     }
@@ -586,7 +573,6 @@ impl DocumentService {
         document.snapshot.saved_version = version;
         document.snapshot.encoding = loaded.encoding;
         document.snapshot.line_ending = loaded.line_ending;
-        document.snapshot.has_final_newline = document.snapshot.text.ends_with('\n');
         document.snapshot.read_only = loaded.read_only;
         document.base_bytes = loaded.bytes;
         document.base_missing = false;
@@ -805,7 +791,6 @@ mod tests {
         let opened = service.open(&path).unwrap();
         assert_eq!(opened.document.encoding, TextEncoding::Utf8);
         assert_eq!(opened.document.line_ending, LineEnding::Lf);
-        assert!(opened.document.has_final_newline);
         let updated = service
             .update_text(
                 opened.document.id,

@@ -32,7 +32,6 @@ test("accepts a complete multilingual initialization message", () => {
       protocolVersion: PROTOCOL_VERSION,
       surfaceId: "surface-1",
       type: "initialize_editor",
-      workspaceName: "다국어 프로젝트",
       documents: [koreanDocument],
       activeDocumentId: koreanDocument.id,
       zoomPercent: 130,

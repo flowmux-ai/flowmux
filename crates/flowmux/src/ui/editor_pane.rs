@@ -293,11 +293,10 @@ impl EditorHostState {
         host
     }
 
-    pub(super) fn initialize_message(&self, workspace_name: String) -> HostMessage {
+    pub(super) fn initialize_message(&self) -> HostMessage {
         match &*self.session.borrow() {
-            Ok(session) => session.initialize_message(workspace_name, self.zoom_percent.get()),
+            Ok(session) => session.initialize_message(self.zoom_percent.get()),
             Err(_) => HostMessage::InitializeEditor {
-                workspace_name,
                 documents: Vec::new(),
                 active_document_id: None,
                 zoom_percent: self.zoom_percent.get(),
@@ -312,8 +311,8 @@ impl EditorHostState {
 
     /// Everything a freshly reloaded page needs after a web-process crash:
     /// the full document set plus any still-undecided recovery proposals.
-    pub(super) fn reinitialize_messages(&self, workspace_name: String) -> Vec<HostMessage> {
-        let mut messages = vec![self.initialize_message(workspace_name)];
+    pub(super) fn reinitialize_messages(&self) -> Vec<HostMessage> {
+        let mut messages = vec![self.initialize_message()];
         if let Ok(session) = &*self.session.borrow() {
             messages.extend(session.pending_recovery_messages());
         }
@@ -1022,7 +1021,6 @@ mod tests {
         let bridge = EditorBridgeState::new(surface_id);
         assert!(bridge
             .queue(HostMessage::InitializeEditor {
-                workspace_name: "다국어".into(),
                 documents: Vec::new(),
                 active_document_id: None,
                 zoom_percent: 100,

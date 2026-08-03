@@ -123,7 +123,7 @@ impl EditorSession {
         }
     }
 
-    pub fn initialize_message(&self, workspace_name: String, zoom_percent: u16) -> HostMessage {
+    pub fn initialize_message(&self, zoom_percent: u16) -> HostMessage {
         let documents = self
             .open_order
             .iter()
@@ -131,16 +131,11 @@ impl EditorSession {
             .map(|snapshot| self.payload(snapshot))
             .collect();
         HostMessage::InitializeEditor {
-            workspace_name,
             documents,
             active_document_id: self.active.map(protocol_id),
             zoom_percent,
             max_document_bytes: crate::DEFAULT_MAX_DOCUMENT_BYTES,
         }
-    }
-
-    pub fn contains_document(&self, path: impl AsRef<Path>) -> bool {
-        self.documents.contains_path(path)
     }
 
     pub fn dirty_document_paths(&self) -> Vec<PathBuf> {
@@ -894,8 +889,6 @@ mod tests {
             session.open_document(&path).unwrap().as_slice(),
             [HostMessage::SetActiveDocument { document_id, .. }] if document_id == &document.id
         ));
-        assert!(session.contains_document(&path));
-        assert!(!session.contains_document(workspace.path().join("missing.rs")));
     }
 
     #[test]
@@ -996,7 +989,7 @@ mod tests {
             active_document_id,
             zoom_percent,
             ..
-        } = session.initialize_message("workspace".into(), 125)
+        } = session.initialize_message(125)
         else {
             panic!("expected editor initialization");
         };
@@ -1499,7 +1492,7 @@ mod tests {
             }] if document_id == &document.id
         ));
         assert!(session.poll_external_changes().unwrap().is_empty());
-        let initialized = session.initialize_message("workspace".into(), 100);
+        let initialized = session.initialize_message(100);
         assert!(matches!(
             initialized,
             HostMessage::InitializeEditor { documents, .. }
@@ -1826,7 +1819,6 @@ mod tests {
         session.discard_all_dirty();
 
         assert!(session.dirty_document_paths().is_empty());
-        assert!(session.contains_document(&path));
         assert_eq!(
             session.session_snapshot().open_files.len(),
             1,

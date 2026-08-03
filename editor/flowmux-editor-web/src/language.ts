@@ -81,19 +81,3 @@ export function languageForPath(path: string): string {
   }
   return EXTENSION_LANGUAGES[fileName.slice(extensionIndex + 1)] ?? "plaintext";
 }
-
-export function languageLabel(language: string): string {
-  const labels: Readonly<Record<string, string>> = {
-    cpp: "C++",
-    csharp: "C#",
-    javascript: "JavaScript",
-    json: "JSON",
-    markdown: "Markdown",
-    plaintext: "Plain text",
-    shell: "Shell",
-    typescript: "TypeScript",
-    xml: "XML",
-    yaml: "YAML",
-  };
-  return labels[language] ?? language.charAt(0).toUpperCase() + language.slice(1);
-}

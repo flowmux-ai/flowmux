@@ -90,7 +90,6 @@ pub enum HostMessage {
         appearance: EditorAppearance,
     },
     InitializeEditor {
-        workspace_name: String,
         documents: Vec<DocumentPayload>,
         active_document_id: Option<String>,
         zoom_percent: u16,

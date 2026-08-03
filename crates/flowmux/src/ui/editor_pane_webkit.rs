@@ -167,7 +167,6 @@ impl EditorPane {
             let host = Rc::downgrade(&host);
             let closed = closed.clone();
             let appearance = appearance.clone();
-            let workspace_root = workspace_root.clone();
             web_view.connect_web_process_terminated(move |web_view, reason| {
                 if closed.get() {
                     return;
@@ -180,7 +179,7 @@ impl EditorPane {
                 let mut messages = vec![HostMessage::SetAppearance {
                     appearance: appearance.borrow().clone(),
                 }];
-                messages.extend(host.reinitialize_messages(workspace_name(&workspace_root)));
+                messages.extend(host.reinitialize_messages());
                 for message in messages {
                     if let Err(error) = bridge.queue(message) {
                         tracing::warn!(%error, "failed to queue editor reinitialization");
@@ -214,10 +213,7 @@ impl EditorPane {
         };
         let initial_appearance = pane.appearance.borrow().clone();
         pane.apply_appearance(initial_appearance);
-        if let Err(error) = pane.send(
-            pane.host
-                .initialize_message(workspace_name(pane.workspace_root())),
-        ) {
+        if let Err(error) = pane.send(pane.host.initialize_message()) {
             tracing::error!(%error, "failed to queue editor initialization");
         }
         for message in pane.host.take_startup_messages() {
@@ -444,11 +440,4 @@ fn perform_native_edit(
         EditorNativeEditAction::Copy => "Copy",
         EditorNativeEditAction::Paste => "Paste",
     });
-}
-
-fn workspace_name(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| path.display().to_string())
 }
