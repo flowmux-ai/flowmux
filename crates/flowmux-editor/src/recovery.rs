@@ -104,6 +104,7 @@ pub enum RecoveryError {
 pub struct RecoveryStore {
     workspace_id: String,
     directory: PathBuf,
+    scope_id: Option<String>,
 }
 
 impl RecoveryStore {
@@ -111,16 +112,37 @@ impl RecoveryStore {
         state_root: impl AsRef<Path>,
         workspace_root: impl AsRef<Path>,
     ) -> Result<Self, RecoveryError> {
-        let workspace_root = fs::canonicalize(workspace_root.as_ref())
-            .map_err(|source| recovery_io("resolve workspace", workspace_root.as_ref(), source))?;
+        Self::create(state_root.as_ref(), workspace_root.as_ref(), None)
+    }
+
+    pub fn new_scoped(
+        state_root: impl AsRef<Path>,
+        workspace_root: impl AsRef<Path>,
+        scope: &str,
+    ) -> Result<Self, RecoveryError> {
+        Self::create(
+            state_root.as_ref(),
+            workspace_root.as_ref(),
+            Some(content_hash(scope.as_bytes())),
+        )
+    }
+
+    fn create(
+        state_root: &Path,
+        workspace_root: &Path,
+        scope_id: Option<String>,
+    ) -> Result<Self, RecoveryError> {
+        let workspace_root = fs::canonicalize(workspace_root)
+            .map_err(|source| recovery_io("resolve workspace", workspace_root, source))?;
         let workspace_id = content_hash(workspace_root.to_string_lossy().as_bytes());
-        let recovery_root = state_root.as_ref().join("editor-recovery");
+        let recovery_root = state_root.join("editor-recovery");
         let directory = recovery_root.join(&workspace_id);
         create_private_directory(&directory)?;
         prune_stale_snapshots(&recovery_root);
         Ok(Self {
             workspace_id,
             directory,
+            scope_id,
         })
     }
 
@@ -178,6 +200,17 @@ impl RecoveryStore {
         let path = self.snapshot_path(identity_path);
         let mut file = match fs::File::open(&path) {
             Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound && self.scope_id.is_some() => {
+                let legacy = self.legacy_snapshot_path(identity_path);
+                match fs::rename(&legacy, &path) {
+                    Ok(()) => fs::File::open(&path)
+                        .map_err(|source| recovery_io("open claimed snapshot", &path, source))?,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                    Err(source) => {
+                        return Err(recovery_io("claim legacy snapshot", legacy, source));
+                    }
+                }
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(recovery_io("open snapshot", &path, source)),
         };
@@ -243,9 +276,18 @@ impl RecoveryStore {
     }
 
     pub fn snapshot_path(&self, identity_path: impl AsRef<Path>) -> PathBuf {
+        let document_id = content_hash(identity_path.as_ref().to_string_lossy().as_bytes());
+        let file_name = self.scope_id.as_ref().map_or_else(
+            || format!("{document_id}.json"),
+            |scope_id| format!("{scope_id}-{document_id}.json"),
+        );
+        self.directory.join(file_name)
+    }
+
+    fn legacy_snapshot_path(&self, identity_path: &Path) -> PathBuf {
         self.directory.join(format!(
             "{}.json",
-            content_hash(identity_path.as_ref().to_string_lossy().as_bytes())
+            content_hash(identity_path.to_string_lossy().as_bytes())
         ))
     }
 }
@@ -383,6 +425,56 @@ mod tests {
         store.remove(&path).unwrap();
         store.remove(&path).unwrap();
         assert!(store.read(&path).unwrap().is_none());
+    }
+
+    #[test]
+    fn scoped_stores_keep_same_document_recoveries_independent() {
+        let workspace = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let path = workspace.path().join("shared.txt");
+        fs::write(&path, "base\n").unwrap();
+        let first = RecoveryStore::new_scoped(state.path(), workspace.path(), "surface-1").unwrap();
+        let second =
+            RecoveryStore::new_scoped(state.path(), workspace.path(), "surface-2").unwrap();
+        let mut first_snapshot = snapshot(&first, &path, b"base\n");
+        first_snapshot.content = "first tab\n".into();
+        let mut second_snapshot = snapshot(&second, &path, b"base\n");
+        second_snapshot.content = "second tab\n".into();
+
+        first.write(&first_snapshot).unwrap();
+        second.write(&second_snapshot).unwrap();
+
+        assert_ne!(first.snapshot_path(&path), second.snapshot_path(&path));
+        assert_eq!(first.read(&path).unwrap().unwrap().0.content, "first tab\n");
+        assert_eq!(
+            second.read(&path).unwrap().unwrap().0.content,
+            "second tab\n"
+        );
+        first.remove(&path).unwrap();
+        assert!(first.read(&path).unwrap().is_none());
+        assert_eq!(
+            second.read(&path).unwrap().unwrap().0.content,
+            "second tab\n"
+        );
+    }
+
+    #[test]
+    fn first_scoped_store_claims_a_legacy_snapshot() {
+        let workspace = tempdir().unwrap();
+        let state = tempdir().unwrap();
+        let path = workspace.path().join("legacy.txt");
+        fs::write(&path, "base\n").unwrap();
+        let legacy = RecoveryStore::new(state.path(), workspace.path()).unwrap();
+        legacy.write(&snapshot(&legacy, &path, b"base\n")).unwrap();
+        let legacy_path = legacy.snapshot_path(&path);
+        let first = RecoveryStore::new_scoped(state.path(), workspace.path(), "surface-1").unwrap();
+        let second =
+            RecoveryStore::new_scoped(state.path(), workspace.path(), "surface-2").unwrap();
+
+        assert!(first.read(&path).unwrap().is_some());
+        assert!(!legacy_path.exists());
+        assert!(first.snapshot_path(&path).exists());
+        assert!(second.read(&path).unwrap().is_none());
     }
 
     #[test]

@@ -209,13 +209,34 @@ pub(super) struct EditorHostState {
 }
 
 impl EditorHostState {
+    #[cfg(test)]
     pub(super) fn new(workspace_root: &Path, restored: EditorSessionState) -> Self {
+        Self::create(workspace_root, restored, None)
+    }
+
+    pub(super) fn new_scoped(
+        workspace_root: &Path,
+        restored: EditorSessionState,
+        surface_id: SurfaceId,
+    ) -> Self {
+        Self::create(workspace_root, restored, Some(surface_id.0.to_string()))
+    }
+
+    fn create(
+        workspace_root: &Path,
+        restored: EditorSessionState,
+        recovery_scope: Option<String>,
+    ) -> Self {
         let zoom_percent = restored
             .zoom_percent
             .map(clamp_editor_zoom)
             .unwrap_or_else(load_last_editor_zoom);
         let recovery_store = flowmux_config::paths::state_dir().and_then(|state_root| {
-            match RecoveryStore::new(state_root, workspace_root) {
+            let store = match recovery_scope.as_deref() {
+                Some(scope) => RecoveryStore::new_scoped(state_root, workspace_root, scope),
+                None => RecoveryStore::new(state_root, workspace_root),
+            };
+            match store {
                 Ok(store) => Some(store),
                 Err(error) => {
                     tracing::warn!(%error, "editor recovery store is unavailable");

@@ -57,7 +57,11 @@ impl EditorPane {
             .expect("editor URLs end with the generated entry point")
             .to_string();
         let bridge = Rc::new(EditorBridgeState::new(surface_id));
-        let host = Rc::new(EditorHostState::new(&workspace_root, restored));
+        let host = Rc::new(EditorHostState::new_scoped(
+            &workspace_root,
+            restored,
+            surface_id,
+        ));
         let pane_id = Rc::new(Cell::new(pane_id));
         let on_focus_direction: EditorFocusDirectionCallback = Rc::new(RefCell::new(None));
         let closed = Rc::new(Cell::new(false));
