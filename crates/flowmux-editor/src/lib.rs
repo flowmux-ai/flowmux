@@ -469,14 +469,28 @@ impl DocumentService {
     }
 
     pub fn disk_status(&self, id: DocumentId) -> Result<DiskStatus, DocumentError> {
+        self.disk_status_inner(id, true)
+    }
+
+    pub fn disk_status_after_fs_event(&self, id: DocumentId) -> Result<DiskStatus, DocumentError> {
+        self.disk_status_inner(id, false)
+    }
+
+    fn disk_status_inner(
+        &self,
+        id: DocumentId,
+        trust_unchanged_metadata: bool,
+    ) -> Result<DiskStatus, DocumentError> {
         let document = self.documents.get(&id).ok_or(DocumentError::NotOpen(id))?;
-        if let Some((mtime, len)) = document.base_disk.get() {
-            if !document.base_missing
-                && fs::metadata(&document.snapshot.identity_path).is_ok_and(|metadata| {
-                    metadata.len() == len && metadata.modified().ok() == Some(mtime)
-                })
-            {
-                return Ok(DiskStatus::Unchanged);
+        if trust_unchanged_metadata {
+            if let Some((mtime, len)) = document.base_disk.get() {
+                if !document.base_missing
+                    && fs::metadata(&document.snapshot.identity_path).is_ok_and(|metadata| {
+                        metadata.len() == len && metadata.modified().ok() == Some(mtime)
+                    })
+                {
+                    return Ok(DiskStatus::Unchanged);
+                }
             }
         }
         match fs::read(&document.snapshot.identity_path) {
@@ -930,6 +944,33 @@ mod tests {
         assert_eq!(
             service.disk_status(opened.id).unwrap(),
             DiskStatus::Unchanged
+        );
+    }
+
+    #[test]
+    fn fs_event_rechecks_content_when_length_and_mtime_match() {
+        let workspace = tempdir().unwrap();
+        let path = workspace.path().join("preserved-mtime.txt");
+        write(&path, b"before\n");
+        let original_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let mut service = DocumentService::new(workspace.path()).unwrap();
+        let opened = service.open(&path).unwrap().document;
+
+        write(&path, b"after!\n");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(original_mtime))
+            .unwrap();
+
+        assert_eq!(
+            service.disk_status(opened.id).unwrap(),
+            DiskStatus::Unchanged
+        );
+        assert_eq!(
+            service.disk_status_after_fs_event(opened.id).unwrap(),
+            DiskStatus::Modified
         );
     }
 

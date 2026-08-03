@@ -383,7 +383,9 @@ impl EditorPane {
                 let Some(web_view) = web_view.upgrade() else {
                     return;
                 };
-                for script in queue_host_messages(&bridge, host.poll_external_changes()) {
+                for script in
+                    queue_host_messages(&bridge, host.poll_external_changes_after_fs_event())
+                {
                     evaluate_script(&web_view, &script);
                 }
             });

@@ -705,7 +705,16 @@ impl EditorHostState {
     }
 
     pub(super) fn poll_external_changes(&self) -> Vec<HostMessage> {
+        self.poll_external_changes_inner(false)
+    }
+
+    pub(super) fn poll_external_changes_after_fs_event(&self) -> Vec<HostMessage> {
+        self.poll_external_changes_inner(true)
+    }
+
+    fn poll_external_changes_inner(&self, after_fs_event: bool) -> Vec<HostMessage> {
         let result = match &mut *self.session.borrow_mut() {
+            Ok(session) if after_fs_event => session.poll_external_changes_after_fs_event(),
             Ok(session) => session.poll_external_changes(),
             Err(error) => {
                 tracing::warn!(%error, "editor document session is unavailable");

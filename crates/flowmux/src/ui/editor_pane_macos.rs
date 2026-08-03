@@ -590,7 +590,9 @@ impl EditorPane {
                 let Some(native) = native.upgrade() else {
                     return;
                 };
-                for script in queue_host_messages(&bridge, host.poll_external_changes()) {
+                for script in
+                    queue_host_messages(&bridge, host.poll_external_changes_after_fs_event())
+                {
                     evaluate_script(&native.web_view, &script);
                 }
             });

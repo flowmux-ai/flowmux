@@ -325,9 +325,26 @@ impl EditorSession {
     }
 
     pub fn poll_external_changes(&mut self) -> Result<Vec<HostMessage>, EditorSessionError> {
+        self.poll_external_changes_inner(false)
+    }
+
+    pub fn poll_external_changes_after_fs_event(
+        &mut self,
+    ) -> Result<Vec<HostMessage>, EditorSessionError> {
+        self.poll_external_changes_inner(true)
+    }
+
+    fn poll_external_changes_inner(
+        &mut self,
+        after_fs_event: bool,
+    ) -> Result<Vec<HostMessage>, EditorSessionError> {
         let mut messages = Vec::new();
         for id in self.open_order.clone() {
-            let status = self.documents.disk_status(id)?;
+            let status = if after_fs_event {
+                self.documents.disk_status_after_fs_event(id)?
+            } else {
+                self.documents.disk_status(id)?
+            };
             let previous = self
                 .reported_disk_status
                 .get(&id)
