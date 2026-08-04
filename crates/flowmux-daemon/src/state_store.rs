@@ -7,11 +7,11 @@
 //! boot.
 
 use flowmux_core::{
-    agent_bar_color_for_surface, detect_agent_idle_name_from_signals,
+    agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_idle_name_from_signals,
     detect_agent_name_from_signals, detect_agent_progress_text, detect_agent_status_from_signals,
-    terminal_tab_title_for_cwd, AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome,
-    EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
-    Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    terminal_tab_title_for_cwd, AgentBarModel, AgentPresence, AgentStatus, AgentStatusReport,
+    CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome,
+    SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -370,6 +370,18 @@ impl StateStore {
 
     pub async fn snapshot(&self) -> State {
         self.inner.lock().await.clone()
+    }
+
+    /// Build the complete Agents UI model while holding the state lock, cloning
+    /// only the small fields rendered by the bar/panel. Persisted terminal
+    /// scrollback never leaves the store through this path.
+    pub async fn agent_bar_model(&self) -> AgentBarModel {
+        let s = self.inner.lock().await;
+        let ordered_ids = workspace_ids_in_display_order(&s);
+        let workspaces = ordered_ids
+            .iter()
+            .filter_map(|id| s.workspaces.iter().find(|workspace| workspace.id == *id));
+        collect_agent_bar_model(workspaces)
     }
 
     pub async fn list_workspaces(&self) -> Vec<WorkspaceId> {
@@ -1787,6 +1799,15 @@ impl StateStore {
     pub async fn get_workspace(&self, id: WorkspaceId) -> Option<Workspace> {
         let s = self.inner.lock().await;
         s.workspaces.iter().find(|w| w.id == id).cloned()
+    }
+
+    /// UI metadata clone that intentionally omits terminal replay buffers.
+    pub async fn get_workspace_without_scrollback(&self, id: WorkspaceId) -> Option<Workspace> {
+        let s = self.inner.lock().await;
+        s.workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .map(Workspace::clone_without_scrollback)
     }
 
     /// Active workspace, falling back to the first one available.

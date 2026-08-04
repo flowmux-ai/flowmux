@@ -88,7 +88,7 @@ impl WindowController {
                 if let Some(ws) = self.store.get_workspace(id).await {
                     self.sidebar.upsert(&ws);
                 }
-                self.refresh_agent_bar().await;
+                self.refresh_agent_displays().await;
                 let _ = ack.send(());
             }
             GtkCommand::ReorderWorkspace { id, target_index } => {

@@ -401,6 +401,21 @@ mod tests {
     use super::*;
     use flowmux_core::{AgentBarVisualStatus, PaneId, WorkspaceId};
 
+    fn working_item() -> AgentBarItem {
+        AgentBarItem {
+            workspace: WorkspaceId::new(),
+            pane: PaneId::new(),
+            surface: SurfaceId::new(),
+            surface_label: "terminal".into(),
+            agent_name: "codex".into(),
+            status: AgentStatus::Working,
+            visual_status: AgentBarVisualStatus::Working,
+            seen: true,
+            status_text: "working".into(),
+            color: "#f59e0b".into(),
+        }
+    }
+
     #[test]
     fn reordered_agent_bar_order_moves_items_before_or_after_target() {
         let a = SurfaceId::new();
@@ -447,17 +462,7 @@ mod tests {
         }
         let (bridge, _rx) = Bridge::new();
         let bar = AgentBar::new(bridge);
-        let item = AgentBarItem {
-            workspace: WorkspaceId::new(),
-            pane: PaneId::new(),
-            surface: SurfaceId::new(),
-            agent_name: "codex".into(),
-            status: AgentStatus::Working,
-            visual_status: AgentBarVisualStatus::Working,
-            seen: true,
-            status_text: "working".into(),
-            color: "#f59e0b".into(),
-        };
+        let item = working_item();
 
         let button = bar.item_button(&item);
         assert!(button.has_css_class("flowmux-agent-bar-working"));

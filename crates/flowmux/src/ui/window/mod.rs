@@ -1473,7 +1473,7 @@ impl WindowController {
     }
 
     async fn sync_workspace_label(&self, ws_id: WorkspaceId) {
-        let Some(ws) = self.store.get_workspace(ws_id).await else {
+        let Some(mut ws) = self.store.get_workspace_without_scrollback(ws_id).await else {
             return;
         };
 
@@ -1494,18 +1494,16 @@ impl WindowController {
 
         if let Some(head_pane) = head_pane {
             if let Some(new_name) = focused_surface_full_title(&ws, head_pane) {
-                self.store.set_workspace_name(ws_id, new_name).await;
+                if ws.name != new_name {
+                    self.store.set_workspace_name(ws_id, new_name.clone()).await;
+                    ws.name = new_name;
+                }
             }
         }
 
-        // Re-read the updated workspace from store before drawing the sidebar;
-        // the local ws is stale after set_workspace_name.
-        if let Some(ws) = self.store.get_workspace(ws_id).await {
-            let details = workspace_row_details(&ws, &mru);
-            self.sidebar.upsert_with_details(&ws, details);
-        }
-        self.refresh_agent_bar().await;
-        self.refresh_activity_panel().await;
+        let details = workspace_row_details(&ws, &mru);
+        self.sidebar.upsert_with_details(&ws, details);
+        self.refresh_agent_displays().await;
     }
 
     /// Handle a pane focus event, update MRU, and sync label/subtitles. Focusing
@@ -1666,7 +1664,7 @@ impl WindowController {
             }
         }
         self.show_status_when_empty();
-        self.refresh_agent_bar().await;
+        self.refresh_agent_displays().await;
     }
 
     /// Inline copy of the `GtkCommand::ActivateSurface` arm — used by
@@ -7316,13 +7314,13 @@ mod tests {
             )
             .await;
         assert_eq!(
-            current_activity_entries(&controller.store.snapshot().await).len(),
+            current_activity_entries(&controller.store.agent_bar_model().await).len(),
             1,
             "test setup must create one live Agent"
         );
         controller.sync_workspace_agent_status(ws_id).await;
         assert_eq!(
-            current_activity_entries(&controller.store.snapshot().await).len(),
+            current_activity_entries(&controller.store.agent_bar_model().await).len(),
             1,
             "Agent sync must preserve the live Agent"
         );
@@ -7454,7 +7452,7 @@ mod tests {
         );
 
         controller.options.borrow_mut().agent_bar_mode = true;
-        controller.refresh_agent_bar().await;
+        controller.refresh_agent_displays().await;
         assert!(
             agent_bar_visible(&controller),
             "re-enabling Agent Bar should render existing live agents"

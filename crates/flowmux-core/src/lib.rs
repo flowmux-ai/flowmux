@@ -221,6 +221,31 @@ impl Workspace {
             .unwrap_or(&self.name)
     }
 
+    /// Clone workspace metadata for UI rendering without copying persisted
+    /// terminal history. Agent/status, cwd, titles, git metadata, and the pane
+    /// shape are preserved; only replay-only scrollback is omitted.
+    pub fn clone_without_scrollback(&self) -> Self {
+        Self {
+            id: self.id,
+            name: self.name.clone(),
+            custom_title: self.custom_title.clone(),
+            root_dir: self.root_dir.clone(),
+            git: self.git.clone(),
+            listening_ports: self.listening_ports.clone(),
+            surfaces: self
+                .surfaces
+                .iter()
+                .map(|surface| Surface {
+                    id: surface.id,
+                    kind: surface.kind.clone(),
+                    title: surface.title.clone(),
+                    root_pane: surface.root_pane.clone_without_scrollback(),
+                })
+                .collect(),
+            color: self.color.clone(),
+        }
+    }
+
     pub fn agent_status_rollup(&self) -> Option<AgentStatus> {
         rollup_agent_statuses(
             self.surfaces
@@ -414,6 +439,28 @@ pub enum PlacementStrategy {
 }
 
 impl Pane {
+    fn clone_without_scrollback(&self) -> Self {
+        match self {
+            Self::Leaf { id, content } => Self::Leaf {
+                id: *id,
+                content: content.clone_without_scrollback(),
+            },
+            Self::Split {
+                id,
+                direction,
+                ratio,
+                first,
+                second,
+            } => Self::Split {
+                id: *id,
+                direction: *direction,
+                ratio: *ratio,
+                first: Box::new(first.clone_without_scrollback()),
+                second: Box::new(second.clone_without_scrollback()),
+            },
+        }
+    }
+
     /// Find the leaf with `target` and replace it with a new split that
     /// keeps the original leaf as `first` and adds a fresh sibling as
     /// `second`. Returns the new sibling's [`PaneId`] on success, or
@@ -992,13 +1039,9 @@ impl Pane {
                     let Some(agent) = &surface.agent else {
                         continue;
                     };
-                    if let Some(item) = AgentBarItem::from_presence(
-                        workspace,
-                        *id,
-                        surface.id,
-                        agent,
-                        workspace_color,
-                    ) {
+                    if let Some(item) =
+                        AgentBarItem::from_presence(workspace, *id, surface, agent, workspace_color)
+                    {
                         out.push(item);
                     }
                 }
@@ -1748,6 +1791,27 @@ impl PaneSurface {
 }
 
 impl PaneContent {
+    fn clone_without_scrollback(&self) -> Self {
+        match self {
+            Self::Tabs { active, surfaces } => Self::Tabs {
+                active: *active,
+                surfaces: surfaces
+                    .iter()
+                    .map(|surface| PaneSurface {
+                        id: surface.id,
+                        title: surface.title.clone(),
+                        title_locked: surface.title_locked,
+                        kind: surface.kind.clone(),
+                        scrollback: None,
+                        agent: surface.agent.clone(),
+                    })
+                    .collect(),
+            },
+            Self::Terminal { pid } => Self::Terminal { pid: *pid },
+            Self::Browser { url } => Self::Browser { url: url.clone() },
+        }
+    }
+
     pub fn tabbed_terminal(title: impl Into<String>, cwd: Option<PathBuf>) -> Self {
         let surface = PaneSurface::terminal(title, cwd);
         Self::Tabs {
@@ -2101,6 +2165,7 @@ pub struct AgentBarItem {
     pub workspace: WorkspaceId,
     pub pane: PaneId,
     pub surface: SurfaceId,
+    pub surface_label: String,
     pub agent_name: String,
     pub status: AgentStatus,
     pub visual_status: AgentBarVisualStatus,
@@ -2113,7 +2178,7 @@ impl AgentBarItem {
     fn from_presence(
         workspace: WorkspaceId,
         pane: PaneId,
-        surface: SurfaceId,
+        surface: &PaneSurface,
         agent: &AgentPresence,
         workspace_color: Option<&str>,
     ) -> Option<Self> {
@@ -2122,7 +2187,8 @@ impl AgentBarItem {
         Some(Self {
             workspace,
             pane,
-            surface,
+            surface: surface.id,
+            surface_label: surface.title.clone(),
             agent_name: agent.name.clone(),
             status,
             visual_status,
@@ -2133,7 +2199,7 @@ impl AgentBarItem {
                 .unwrap_or_else(|| status.as_str().to_string()),
             color: workspace_color
                 .map(str::to_string)
-                .unwrap_or_else(|| agent_bar_color_for_surface(surface)),
+                .unwrap_or_else(|| agent_bar_color_for_surface(surface.id)),
         })
     }
 }

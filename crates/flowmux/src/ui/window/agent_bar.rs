@@ -6,33 +6,18 @@
 use super::*;
 
 impl WindowController {
-    pub(super) async fn refresh_agent_bar(&self) {
-        if !self.options.borrow().agent_bar_mode {
-            self.agent_bar.bar.render(
-                &flowmux_core::AgentBarModel {
-                    visible: false,
-                    items: Vec::new(),
-                },
-                &HashSet::new(),
-                None,
-            );
-            return;
-        }
+    fn hide_agent_bar(&self) {
+        self.agent_bar.bar.render(
+            &flowmux_core::AgentBarModel {
+                visible: false,
+                items: Vec::new(),
+            },
+            &HashSet::new(),
+            None,
+        );
+    }
 
-        let snap = self.store.snapshot().await;
-        let mut ordered = Vec::new();
-        for ws_id in &snap.workspace_order {
-            if let Some(ws) = snap.workspaces.iter().find(|ws| ws.id == *ws_id) {
-                ordered.push(ws);
-            }
-        }
-        for ws in &snap.workspaces {
-            if !snap.workspace_order.contains(&ws.id) {
-                ordered.push(ws);
-            }
-        }
-
-        let model = flowmux_core::collect_agent_bar_model(ordered);
+    fn render_agent_bar(&self, model: &flowmux_core::AgentBarModel) {
         let live_surfaces: HashSet<SurfaceId> =
             model.items.iter().map(|item| item.surface).collect();
         let focused_surface = self
@@ -47,18 +32,32 @@ impl WindowController {
         };
         self.agent_bar
             .bar
-            .render(&model, &attentions, focused_surface);
+            .render(model, &attentions, focused_surface);
     }
 
-    pub(super) async fn refresh_activity_panel(&self) {
-        let state = self.store.snapshot().await;
-        let current = current_activity_entries(&state);
+    fn render_activity_panel(&self, model: &flowmux_core::AgentBarModel) {
+        let current = current_activity_entries(model);
         let focused_surface = self
             .focused_pane
             .get()
             .and_then(|pane| self.pane_registry.borrow().active_surface(pane));
         self.sidebar
             .refresh_activity_panel(&current, focused_surface);
+    }
+
+    pub(super) async fn refresh_agent_displays(&self) {
+        let model = self.store.agent_bar_model().await;
+        if self.options.borrow().agent_bar_mode {
+            self.render_agent_bar(&model);
+        } else {
+            self.hide_agent_bar();
+        }
+        self.render_activity_panel(&model);
+    }
+
+    pub(super) async fn refresh_activity_panel(&self) {
+        let model = self.store.agent_bar_model().await;
+        self.render_activity_panel(&model);
     }
 
     pub(super) async fn open_activity_target(
@@ -212,8 +211,7 @@ impl WindowController {
         for surface in surfaces {
             self.refresh_agent_screen_status(surface, None).await;
         }
-        self.refresh_agent_bar().await;
-        self.refresh_activity_panel().await;
+        self.refresh_agent_displays().await;
     }
     pub(super) async fn open_agent_bar_item(
         &self,

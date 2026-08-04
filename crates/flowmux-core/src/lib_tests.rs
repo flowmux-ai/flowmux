@@ -2995,6 +2995,36 @@ fn set_surface_scrollback_is_terminal_only_bounded_and_idempotent() {
 }
 
 #[test]
+fn workspace_ui_clone_omits_scrollback_and_keeps_live_agent_metadata() {
+    let pane = PaneId::new();
+    let mut terminal = PaneSurface::terminal("agent", Some(PathBuf::from("/tmp/project")));
+    let surface = terminal.id;
+    terminal.scrollback = Some("x".repeat(TERMINAL_SCROLLBACK_MAX_BYTES));
+    terminal.agent = Some(AgentPresence::new(
+        "claude",
+        AgentActivity::Running,
+        Some(42),
+    ));
+    let workspace = workspace_with_tab_leaves(vec![(pane, vec![terminal])]);
+
+    let cloned = workspace.clone_without_scrollback();
+
+    assert!(workspace.surfaces[0]
+        .root_pane
+        .find_surface(pane, surface)
+        .unwrap()
+        .scrollback
+        .is_some());
+    let cloned_surface = cloned.surfaces[0]
+        .root_pane
+        .find_surface(pane, surface)
+        .unwrap();
+    assert_eq!(cloned_surface.title, "agent");
+    assert!(cloned_surface.scrollback.is_none());
+    assert_eq!(cloned_surface.agent.unwrap().name, "claude");
+}
+
+#[test]
 fn pane_surface_scrollback_round_trips_and_old_json_defaults_empty() {
     let mut surface = PaneSurface::terminal("shell", None);
     surface.scrollback = Some("previous output".into());

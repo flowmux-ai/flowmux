@@ -17,10 +17,7 @@ impl WindowController {
                     tracing::warn!(%error, "agent display mode save failed");
                 }
                 self.sidebar.set_agent_bar_mode(enabled);
-                self.refresh_agent_bar().await;
-                if !enabled {
-                    self.refresh_activity_panel().await;
-                }
+                self.refresh_agent_displays().await;
             }
             GtkCommand::OpenActivityTarget {
                 workspace,

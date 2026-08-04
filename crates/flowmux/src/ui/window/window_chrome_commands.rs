@@ -67,12 +67,8 @@ impl WindowController {
                             "options applied"
                         );
                         let controller = controller.clone();
-                        let agent_bar_mode = opts.agent_bar_mode;
                         glib::MainContext::default().spawn_local(async move {
-                            controller.refresh_agent_bar().await;
-                            if !agent_bar_mode {
-                                controller.refresh_activity_panel().await;
-                            }
+                            controller.refresh_agent_displays().await;
                         });
                     },
                     install_origin,

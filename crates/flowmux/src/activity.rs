@@ -39,50 +39,21 @@ pub struct ActivityNowEntry {
     pub color: String,
 }
 
-pub fn current_activity_entries(state: &flowmux_state::State) -> Vec<ActivityNowEntry> {
-    let mut workspaces = Vec::new();
-    for workspace_id in &state.workspace_order {
-        if let Some(workspace) = state
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.id == *workspace_id)
-        {
-            workspaces.push(workspace);
-        }
-    }
-    for workspace in &state.workspaces {
-        if !state.workspace_order.contains(&workspace.id) {
-            workspaces.push(workspace);
-        }
-    }
-
-    workspaces
-        .into_iter()
-        .flat_map(|workspace| {
-            workspace
-                .collect_agent_bar_items()
-                .into_iter()
-                .map(move |item| {
-                    let surface_label = workspace
-                        .surfaces
-                        .iter()
-                        .find_map(|surface| {
-                            surface.root_pane.surface_title(item.pane, item.surface)
-                        })
-                        .unwrap_or("tab")
-                        .to_string();
-                    ActivityNowEntry {
-                        agent: item.agent_name,
-                        status: item.status,
-                        status_text: item.status_text,
-                        seen: item.seen,
-                        workspace: item.workspace,
-                        pane: item.pane,
-                        surface: item.surface,
-                        surface_label,
-                        color: item.color,
-                    }
-                })
+pub fn current_activity_entries(model: &flowmux_core::AgentBarModel) -> Vec<ActivityNowEntry> {
+    model
+        .items
+        .iter()
+        .cloned()
+        .map(|item| ActivityNowEntry {
+            agent: item.agent_name,
+            status: item.status,
+            status_text: item.status_text,
+            seen: item.seen,
+            workspace: item.workspace,
+            pane: item.pane,
+            surface: item.surface,
+            surface_label: item.surface_label,
+            color: item.color,
         })
         .collect()
 }
@@ -313,7 +284,8 @@ mod tests {
             ..Default::default()
         };
 
-        let entries = current_activity_entries(&state);
+        let model = flowmux_core::collect_agent_bar_model(state.workspaces.iter());
+        let entries = current_activity_entries(&model);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].agent, "codex");
         assert_eq!(entries[0].status_text, "Running tests");
