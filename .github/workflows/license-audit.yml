@@ -12,8 +12,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    paths:
+    paths: &license_paths
       - .github/workflows/license-audit.yml
       - .github/workflows/release.yml
       - Cargo.toml
@@ -43,6 +42,8 @@ on:
       - 'editor/flowmux-editor-web/dist/*NOTICE*'
       - editor/flowmux-editor-web/dist/main.js
       - 'editor/flowmux-editor-web/scripts/**'
+  pull_request:
+    paths: *license_paths
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
