@@ -53,6 +53,12 @@ impl WindowOwner {
 pub struct SavedWindow {
     pub instance_id: Uuid,
     pub owner_pid: u32,
+    /// Kernel boot id at save time. A record from a different boot predates a
+    /// reboot: every PTY it owned is dead and its pid may have been reused, so
+    /// restart discards its workspaces instead of restoring dead panes.
+    /// `None` (old state files, non-Linux) keeps the always-restore behavior.
+    #[serde(default)]
+    pub boot_id: Option<String>,
     #[serde(default)]
     pub layout: Option<WindowLayout>,
     #[serde(default)]
@@ -183,6 +189,7 @@ fn migrate_legacy_state(state: &mut State) {
         state.windows.push(SavedWindow {
             instance_id: legacy_id,
             owner_pid: 0,
+            boot_id: None,
             layout: state.window.take(),
             sidebar_position: state.sidebar_position.take(),
             workspace_order: ordered_workspace_ids(state),
@@ -222,22 +229,112 @@ fn ordered_workspace_ids(state: &State) -> Vec<flowmux_core::WorkspaceId> {
     order
 }
 
+/// Kernel boot id of the running system. `None` on non-Linux platforms
+/// or when `/proc` is unavailable, which disables reboot detection and
+/// keeps the always-restore behavior.
+// ponytail: Linux-only via /proc; add a sysctl(kern.boottime) branch if
+// macOS ever needs reboot detection.
+fn current_boot_id() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Every terminal/browser tab id in the workspace's pane trees.
+fn workspace_surface_ids(workspace: &Workspace, out: &mut Vec<flowmux_core::SurfaceId>) {
+    fn rec(pane: &flowmux_core::Pane, out: &mut Vec<flowmux_core::SurfaceId>) {
+        match pane {
+            flowmux_core::Pane::Leaf { content, .. } => {
+                if let flowmux_core::PaneContent::Tabs { surfaces, .. } = content {
+                    out.extend(surfaces.iter().map(|surface| surface.id));
+                }
+            }
+            flowmux_core::Pane::Split { first, second, .. } => {
+                rec(first, out);
+                rec(second, out);
+            }
+        }
+    }
+    for surface in &workspace.surfaces {
+        rec(&surface.root_pane, out);
+    }
+}
+
 /// Atomically claim every unowned or dead-process workspace for a new GUI
 /// window. The on-disk ownership update happens before returning so two
 /// concurrent launches cannot restore the same workspace set.
+///
+/// Workspaces owned by a window from a previous kernel boot are discarded,
+/// not claimed: after a reboot their processes and agent sessions are gone,
+/// so restoring the workspace would only show dead panes. Their saved agent
+/// session bindings are forgotten too.
 pub fn claim_window(owner: WindowOwner) -> Result<State, StateError> {
-    claim_window_from(&default_path()?, owner)
+    let path = default_path()?;
+    let (state, expired_surfaces) = claim_window_impl(&path, owner, current_boot_id())?;
+    if !expired_surfaces.is_empty() {
+        if let Some(store) = default_agent_session_store() {
+            for surface in &expired_surfaces {
+                let _ = store.forget_surface(*surface);
+            }
+        }
+    }
+    Ok(state)
 }
 
 pub fn claim_window_from(path: &Path, owner: WindowOwner) -> Result<State, StateError> {
+    claim_window_impl(path, owner, current_boot_id()).map(|(state, _)| state)
+}
+
+fn claim_window_impl(
+    path: &Path,
+    owner: WindowOwner,
+    current_boot: Option<String>,
+) -> Result<(State, Vec<flowmux_core::SurfaceId>), StateError> {
     let _lock = instance_lock::acquire_for_state(path)?;
     let mut disk = load_from(path)?;
+    let stale_boot = |window: &SavedWindow| {
+        matches!(
+            (&window.boot_id, &current_boot),
+            (Some(saved), Some(now)) if saved != now
+        )
+    };
+    // A pid from a previous boot can be reused by an unrelated process,
+    // so the liveness check only applies within the current boot.
     let live_owners = disk
         .windows
         .iter()
-        .filter(|window| flowmux_procmon::pid_alive(window.owner_pid))
+        .filter(|window| !stale_boot(window) && flowmux_procmon::pid_alive(window.owner_pid))
         .map(|window| window.instance_id)
         .collect::<HashSet<_>>();
+    let expired_owners = disk
+        .windows
+        .iter()
+        .filter(|window| stale_boot(window))
+        .map(|window| window.instance_id)
+        .collect::<HashSet<_>>();
+    let expired = disk
+        .workspaces
+        .iter()
+        .filter_map(|workspace| {
+            disk.workspace_owners
+                .get(&workspace.id)
+                .is_some_and(|owner| expired_owners.contains(owner))
+                .then_some(workspace.id)
+        })
+        .collect::<HashSet<_>>();
+    let mut expired_surfaces = Vec::new();
+    for workspace in &disk.workspaces {
+        if expired.contains(&workspace.id) {
+            workspace_surface_ids(workspace, &mut expired_surfaces);
+        }
+    }
+    disk.workspaces
+        .retain(|workspace| !expired.contains(&workspace.id));
+    disk.workspace_order
+        .retain(|workspace| !expired.contains(workspace));
+    disk.workspace_owners
+        .retain(|workspace, _| !expired.contains(workspace));
     let claimed = disk
         .workspaces
         .iter()
@@ -280,6 +377,7 @@ pub fn claim_window_from(path: &Path, owner: WindowOwner) -> Result<State, State
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
         owner_pid: owner.pid,
+        boot_id: current_boot.clone(),
         layout: layout.clone(),
         sidebar_position,
         workspace_order: workspace_order.clone(),
@@ -289,17 +387,20 @@ pub fn claim_window_from(path: &Path, owner: WindowOwner) -> Result<State, State
     disk.sidebar_position = None;
     save_to(path, &disk)?;
 
-    Ok(State {
-        schema_version: SCHEMA_VERSION,
-        workspaces,
-        workspace_order,
-        active_workspace,
-        window: layout,
-        sidebar_position,
-        windows: Vec::new(),
-        workspace_owners: HashMap::new(),
-        last_saved: disk.last_saved,
-    })
+    Ok((
+        State {
+            schema_version: SCHEMA_VERSION,
+            workspaces,
+            workspace_order,
+            active_workspace,
+            window: layout,
+            sidebar_position,
+            windows: Vec::new(),
+            workspace_owners: HashMap::new(),
+            last_saved: disk.last_saved,
+        },
+        expired_surfaces,
+    ))
 }
 
 /// Merge one window's latest snapshot into the shared state while preserving
@@ -352,6 +453,7 @@ fn save_window_owned_to(
     disk.windows.push(SavedWindow {
         instance_id: owner.instance_id,
         owner_pid: owner.pid,
+        boot_id: current_boot_id(),
         layout: snapshot.window.clone(),
         sidebar_position: snapshot.sidebar_position,
         workspace_order: owned_order,
@@ -380,6 +482,123 @@ mod tests {
             surfaces: vec![],
             color: None,
         }
+    }
+
+    /// Workspace holding one terminal tab with a fixed surface id, owned by
+    /// `owner` whose window record was saved under `boot_id`.
+    fn state_with_owned_workspace(
+        owner: WindowOwner,
+        boot_id: Option<&str>,
+        tab: SurfaceId,
+    ) -> State {
+        let mut workspace = sample_workspace();
+        workspace.surfaces.push(Surface {
+            id: SurfaceId::new(),
+            kind: SurfaceKind::Terminal {
+                shell: None,
+                cwd: None,
+            },
+            title: "tab".into(),
+            root_pane: Pane::Leaf {
+                id: PaneId::new(),
+                content: PaneContent::Tabs {
+                    active: tab,
+                    surfaces: vec![PaneSurface {
+                        id: tab,
+                        title: "tab".into(),
+                        title_locked: false,
+                        kind: SurfaceKind::Terminal {
+                            shell: None,
+                            cwd: None,
+                        },
+                        scrollback: Some("old output".into()),
+                        agent: None,
+                    }],
+                },
+            },
+        });
+        let id = workspace.id;
+        let mut state = State::default();
+        state.workspaces.push(workspace);
+        state.workspace_order.push(id);
+        state.workspace_owners.insert(id, owner.instance_id);
+        state.windows.push(SavedWindow {
+            instance_id: owner.instance_id,
+            owner_pid: owner.pid,
+            boot_id: boot_id.map(str::to_string),
+            layout: None,
+            sidebar_position: None,
+            workspace_order: vec![id],
+            active_workspace: Some(id),
+        });
+        state
+    }
+
+    #[test]
+    fn dead_window_from_same_boot_is_still_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let dead = WindowOwner {
+            instance_id: Uuid::new_v4(),
+            pid: 999_999,
+        };
+        let tab = SurfaceId::new();
+        save_to(
+            &path,
+            &state_with_owned_workspace(dead, Some("boot-a"), tab),
+        )
+        .unwrap();
+
+        let (claimed, expired) =
+            claim_window_impl(&path, WindowOwner::current(), Some("boot-a".into())).unwrap();
+        assert_eq!(claimed.workspaces.len(), 1, "same-boot crash must restore");
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn reboot_expires_stale_boot_workspaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let dead = WindowOwner {
+            instance_id: Uuid::new_v4(),
+            pid: 999_999,
+        };
+        let tab = SurfaceId::new();
+        save_to(
+            &path,
+            &state_with_owned_workspace(dead, Some("boot-a"), tab),
+        )
+        .unwrap();
+
+        let (claimed, expired) =
+            claim_window_impl(&path, WindowOwner::current(), Some("boot-b".into())).unwrap();
+        assert!(
+            claimed.workspaces.is_empty(),
+            "workspaces from a previous boot must not be restored"
+        );
+        assert_eq!(expired, vec![tab], "the dead tab is reported for cleanup");
+
+        let disk = load_from(&path).unwrap();
+        assert!(disk.workspaces.is_empty());
+        assert!(disk.workspace_owners.is_empty());
+        assert!(disk.workspace_order.is_empty());
+    }
+
+    #[test]
+    fn window_without_boot_id_keeps_legacy_restore_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let dead = WindowOwner {
+            instance_id: Uuid::new_v4(),
+            pid: 999_999,
+        };
+        let tab = SurfaceId::new();
+        save_to(&path, &state_with_owned_workspace(dead, None, tab)).unwrap();
+
+        let (claimed, expired) =
+            claim_window_impl(&path, WindowOwner::current(), Some("boot-b".into())).unwrap();
+        assert_eq!(claimed.workspaces.len(), 1, "old state files must restore");
+        assert!(expired.is_empty());
     }
 
     #[test]
