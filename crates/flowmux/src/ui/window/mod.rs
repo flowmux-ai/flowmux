@@ -1562,6 +1562,8 @@ impl WindowController {
     /// Drop the workspace's stack page entirely (used when its last
     /// surface is closed).
     pub fn drop_workspace(&self, id: WorkspaceId) {
+        let closing_surfaces = self.pane_registry.borrow().surface_ids_in_workspace(id);
+        self.forget_agent_surfaces(&closing_surfaces);
         let dropping_zoomed_workspace = self
             .pane_zoom
             .active
@@ -1577,6 +1579,11 @@ impl WindowController {
         if let Some(old) = surfaces.remove(&id) {
             self.stack.remove(&old);
         }
+    }
+
+    fn forget_agent_surfaces(&self, surfaces: &[SurfaceId]) {
+        forget_saved_agent_sessions(surfaces);
+        self.activities.forget_surfaces(surfaces);
     }
 
     /// Show a modal "Are you sure you want to close this workspace?"

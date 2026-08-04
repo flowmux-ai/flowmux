@@ -90,8 +90,13 @@ impl WindowController {
                     return;
                 }
                 let outcome = self.store.close_pane(pane).await;
-                if outcome.is_some() {
-                    forget_saved_agent_sessions(&closing_surfaces);
+                if outcome.is_some()
+                    && !matches!(
+                        outcome,
+                        Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
+                    )
+                {
+                    self.forget_agent_surfaces(&closing_surfaces);
                 }
                 match outcome {
                     None => {
@@ -277,8 +282,13 @@ impl WindowController {
                     return;
                 }
                 let outcome = self.store.close_surface(pane, surface).await;
-                if outcome.is_some() {
-                    forget_saved_agent_sessions(&[surface]);
+                if outcome.is_some()
+                    && !matches!(
+                        outcome,
+                        Some(flowmux_daemon::CloseOutcome::WorkspaceRemoved { .. })
+                    )
+                {
+                    self.forget_agent_surfaces(&[surface]);
                 }
                 match outcome {
                     None => {

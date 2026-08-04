@@ -187,6 +187,13 @@ impl ActivityStore {
     pub fn entries(&self) -> Vec<ActivityEntry> {
         self.entries.borrow().iter().cloned().collect()
     }
+
+    pub fn forget_surfaces(&self, surfaces: &[SurfaceId]) {
+        let mut sessions = self.active_sessions.borrow_mut();
+        for surface in surfaces {
+            sessions.remove(surface);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +375,26 @@ mod tests {
             "Session started"
         )));
         assert_eq!(store.entries().len(), 3);
+    }
+
+    #[test]
+    fn forgetting_a_closed_surface_allows_the_next_start() {
+        let store = ActivityStore::new();
+        let surface = SurfaceId::new();
+        assert!(store.push(entry(
+            surface,
+            Some(AgentStatus::Unknown),
+            "Session started"
+        )));
+
+        store.forget_surfaces(&[surface]);
+
+        assert!(store.push(entry(
+            surface,
+            Some(AgentStatus::Unknown),
+            "Session started"
+        )));
+        assert_eq!(store.entries().len(), 2);
     }
 
     #[test]
