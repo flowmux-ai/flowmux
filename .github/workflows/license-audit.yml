@@ -29,9 +29,11 @@ on:
       - 'crates/flowmux-config/themes/**'
       - 'crates/flowmux-md-viewer/tests/fixtures/**'
       - crates/flowmux-editor/src/web_assets.rs
+      - crates/flowmux/src/theme.rs
       - 'resources/themes/**'
       - packaging/flatpak/com.flowmux.App.yml
       - scripts/generate-third-party-licenses.sh
+      - scripts/check-license-assets.sh
       - scripts/install-macos.sh
       - scripts/install-thorvg.sh
       - editor/flowmux-editor-web/package.json
@@ -71,6 +73,9 @@ jobs:
         run: |
           scripts/generate-third-party-licenses.sh
           git diff --exit-code THIRD_PARTY_LICENSES.md
+
+      - name: Check asset license notices
+        run: scripts/check-license-assets.sh
 
       - name: Install editor dependencies
         working-directory: editor/flowmux-editor-web
