@@ -54,6 +54,9 @@ modules:
       - install -Dm644 LICENSE /app/share/licenses/flowmux/LICENSE
       - install -Dm644 NOTICE  /app/share/licenses/flowmux/NOTICE
       - install -Dm644 THIRD_PARTY_LICENSES.md /app/share/licenses/flowmux/THIRD_PARTY_LICENSES.md
+      - install -Dm644 THIRD_PARTY_ASSET_NOTICES.md /app/share/licenses/flowmux/THIRD_PARTY_ASSET_NOTICES.md
+      - install -Dm644 editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md /app/share/licenses/flowmux/EDITOR_THIRD_PARTY_NOTICES.md
+      - install -Dm644 editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt /app/share/licenses/flowmux/MONACO_THIRD_PARTY_NOTICES.txt
     sources:
       - type: dir
         path: ../..

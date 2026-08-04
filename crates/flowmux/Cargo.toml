@@ -40,6 +40,9 @@ assets = [
     ["../../LICENSE", "usr/share/doc/flowmux/LICENSE", "644"],
     ["../../NOTICE",  "usr/share/doc/flowmux/NOTICE",  "644"],
     ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/flowmux/THIRD_PARTY_LICENSES.md", "644"],
+    ["../../THIRD_PARTY_ASSET_NOTICES.md", "usr/share/doc/flowmux/THIRD_PARTY_ASSET_NOTICES.md", "644"],
+    ["../../editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md", "usr/share/doc/flowmux/EDITOR_THIRD_PARTY_NOTICES.md", "644"],
+    ["../../editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt", "usr/share/doc/flowmux/MONACO_THIRD_PARTY_NOTICES.txt", "644"],
     ["../../README.md", "usr/share/doc/flowmux/README.md", "644"],
 ]
 

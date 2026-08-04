@@ -87,10 +87,11 @@ jobs:
           cp target/release/flowmux-md-viewer  "$stage/"
           cp target/release/flowmuxctl         "$stage/"
           cp target/release/flowmux-daemon     "$stage/"
-          cp LICENSE NOTICE README.md      "$stage/"
-          if [ -f THIRD_PARTY_LICENSES.md ]; then
-            cp THIRD_PARTY_LICENSES.md "$stage/"
-          fi
+          cp LICENSE NOTICE README.md \
+            THIRD_PARTY_LICENSES.md THIRD_PARTY_ASSET_NOTICES.md "$stage/"
+          cp editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md \
+            "$stage/EDITOR_THIRD_PARTY_NOTICES.md"
+          cp editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt "$stage/"
           tar -C dist -czf "dist/${stage_name}.tar.gz" "$stage_name"
           (cd dist && sha256sum "${stage_name}.tar.gz" > "${stage_name}.tar.gz.sha256")
 
