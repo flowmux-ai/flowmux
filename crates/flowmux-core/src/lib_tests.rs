@@ -2748,6 +2748,14 @@ fn detector_reads_live_progress_text_without_the_bullet() {
         Some("Working (12s • esc to interrupt)")
     );
     assert_eq!(
+        detect_agent_progress_text(Some("Claude\n✶ Processing… (2m 34s · ↓ 6.4k tokens)\n")),
+        Some("Processing… (2m 34s · ↓ 6.4k tokens)")
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(Some("✶ Processing… (2m 34s · ↓ 6.4k tokens)"), None),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
         detect_agent_progress_text(Some("ordinary test output\n")),
         None
     );

@@ -2472,16 +2472,23 @@ pub fn detect_agent_status_from_signals(
 }
 
 fn is_agent_working_status_line(line: &str) -> bool {
-    let line = line.trim().trim_start_matches(['•', '●', '◉']).trim_start();
-    ["working", "thinking", "running tool", "executing"]
-        .into_iter()
-        .any(|status| {
-            line.strip_prefix(status).is_some_and(|rest| {
-                rest.trim_start().starts_with('(')
-                    || rest.contains("esc to interrupt")
-                    || rest.contains("ctrl+c to stop")
-            })
+    let line = trim_agent_status_prefix(line);
+    [
+        "working",
+        "thinking",
+        "processing",
+        "processing…",
+        "running tool",
+        "executing",
+    ]
+    .into_iter()
+    .any(|status| {
+        line.strip_prefix(status).is_some_and(|rest| {
+            rest.trim_start().starts_with('(')
+                || rest.contains("esc to interrupt")
+                || rest.contains("ctrl+c to stop")
         })
+    })
 }
 
 pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
@@ -2491,9 +2498,15 @@ pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
         .filter(|line| !line.trim().is_empty())
         .take(12)
         .find_map(|line| {
-            let line = line.trim().trim_start_matches(['•', '●', '◉']).trim_start();
+            let line = trim_agent_status_prefix(line);
             is_agent_working_status_line(&line.to_ascii_lowercase()).then_some(line)
         })
+}
+
+fn trim_agent_status_prefix(line: &str) -> &str {
+    line.trim()
+        .trim_start_matches(['•', '●', '◉', '✢', '✳', '✶', '✻', '✽'])
+        .trim_start()
 }
 
 pub fn detect_agent_name_from_signals(
