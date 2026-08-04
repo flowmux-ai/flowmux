@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Palette data is MIT-licensed: Copyright (c) 2024 Mitchell Hashimoto and
+# Ghostty contributors; Copyright (C) 2011 Chris Kempson (Tomorrow Theme).
+# Full terms: THIRD_PARTY_ASSET_NOTICES.md in the flowmux source distribution.
 # flowmux theme — example
 #
 # Copy this file to `$XDG_CONFIG_HOME/flowmux/theme` (typically

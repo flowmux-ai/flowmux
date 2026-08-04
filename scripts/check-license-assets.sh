@@ -33,6 +33,8 @@ for theme in crates/flowmux-config/themes/*.theme; do
 done
 
 rg -Fq "SPDX-License-Identifier: GPL-3.0-or-later" resources/themes/example.theme
+rg -Fq "Ghostty contributors" resources/themes/example.theme
+rg -Fq "Chris Kempson" resources/themes/example.theme
 rg -Fq "CC BY-SA 4.0" crates/flowmux-md-viewer/tests/fixtures/README.md
 rg -Fq "0.29.0.gfm.13/test/spec.txt" crates/flowmux-md-viewer/tests/fixtures/README.md
 
