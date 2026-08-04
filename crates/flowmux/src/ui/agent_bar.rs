@@ -212,55 +212,75 @@ impl AgentBar {
                 &surface.to_string().to_value(),
             ))
         });
-        let button_for_begin = button.clone();
+        let button_for_begin = button.downgrade();
         drag_source.connect_drag_begin(move |_, _| {
-            button_for_begin.set_opacity(0.4);
-            button_for_begin.add_css_class("flowmux-dragging");
+            if let Some(button) = button_for_begin.upgrade() {
+                button.set_opacity(0.4);
+                button.add_css_class("flowmux-dragging");
+            }
         });
-        let button_for_end = button.clone();
+        let button_for_end = button.downgrade();
         drag_source.connect_drag_end(move |_, _, _| {
-            button_for_end.set_opacity(1.0);
-            button_for_end.remove_css_class("flowmux-dragging");
+            if let Some(button) = button_for_end.upgrade() {
+                button.set_opacity(1.0);
+                button.remove_css_class("flowmux-dragging");
+            }
         });
-        let button_for_cancel = button.clone();
+        let button_for_cancel = button.downgrade();
         drag_source.connect_drag_cancel(move |_, _, _| {
-            button_for_cancel.set_opacity(1.0);
-            button_for_cancel.remove_css_class("flowmux-dragging");
+            if let Some(button) = button_for_cancel.upgrade() {
+                button.set_opacity(1.0);
+                button.remove_css_class("flowmux-dragging");
+            }
             false
         });
         button.add_controller(drag_source);
 
         let drop_target =
             gtk::DropTarget::new(gtk::glib::types::Type::STRING, gtk::gdk::DragAction::MOVE);
-        let button_for_motion = button.clone();
+        let button_for_motion = button.downgrade();
         drop_target.connect_motion(move |_, x, _y| {
-            let width = button_for_motion.width();
+            let Some(button) = button_for_motion.upgrade() else {
+                return gtk::gdk::DragAction::empty();
+            };
+            let width = button.width();
             let before = if width > 0 {
                 x < (width as f64) / 2.0
             } else {
                 true
             };
             if before {
-                button_for_motion.remove_css_class("flowmux-drop-after");
-                button_for_motion.add_css_class("flowmux-drop-before");
+                button.remove_css_class("flowmux-drop-after");
+                button.add_css_class("flowmux-drop-before");
             } else {
-                button_for_motion.remove_css_class("flowmux-drop-before");
-                button_for_motion.add_css_class("flowmux-drop-after");
+                button.remove_css_class("flowmux-drop-before");
+                button.add_css_class("flowmux-drop-after");
             }
             gtk::gdk::DragAction::MOVE
         });
-        let button_for_leave = button.clone();
+        let button_for_leave = button.downgrade();
         drop_target.connect_leave(move |_| {
-            button_for_leave.remove_css_class("flowmux-drop-before");
-            button_for_leave.remove_css_class("flowmux-drop-after");
+            if let Some(button) = button_for_leave.upgrade() {
+                button.remove_css_class("flowmux-drop-before");
+                button.remove_css_class("flowmux-drop-after");
+            }
         });
         let order_for_drop = self.item_order.clone();
-        let items_for_drop = self.items.clone();
-        let item_buttons_for_drop = self.item_buttons.clone();
-        let button_for_drop = button.clone();
+        let items_for_drop = self.items.downgrade();
+        let item_buttons_for_drop = Rc::downgrade(&self.item_buttons);
+        let button_for_drop = button.downgrade();
         drop_target.connect_drop(move |_, value, x, _y| {
-            button_for_drop.remove_css_class("flowmux-drop-before");
-            button_for_drop.remove_css_class("flowmux-drop-after");
+            let Some(button) = button_for_drop.upgrade() else {
+                return false;
+            };
+            let Some(items) = items_for_drop.upgrade() else {
+                return false;
+            };
+            let Some(item_buttons) = item_buttons_for_drop.upgrade() else {
+                return false;
+            };
+            button.remove_css_class("flowmux-drop-before");
+            button.remove_css_class("flowmux-drop-after");
             let Ok(payload) = value.get::<String>() else {
                 return false;
             };
@@ -271,7 +291,7 @@ impl AgentBar {
                 return false;
             }
             let mut order = order_for_drop.borrow_mut();
-            let target_width = button_for_drop.width();
+            let target_width = button.width();
             let before = if target_width > 0 {
                 x < (target_width as f64) / 2.0
             } else {
@@ -282,7 +302,7 @@ impl AgentBar {
                 return false;
             };
             *order = next_order;
-            reorder_item_widgets(&items_for_drop, &item_buttons_for_drop.borrow(), &order);
+            reorder_item_widgets(&items, &item_buttons.borrow(), &order);
             true
         });
         button.add_controller(drop_target);
@@ -475,5 +495,62 @@ mod tests {
             .downcast::<gtk::Spinner>()
             .unwrap();
         assert!(spinner.is_spinning());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn rerender_releases_buttons_with_dnd_controllers() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let (bridge, _rx) = Bridge::new();
+        let bar = AgentBar::new(bridge);
+        let item = working_item();
+        bar.render(
+            &AgentBarModel {
+                visible: true,
+                items: vec![item.clone()],
+            },
+            &HashSet::new(),
+            None,
+        );
+        let weak = bar.item_buttons.borrow()[&item.surface].downgrade();
+
+        bar.render(
+            &AgentBarModel {
+                visible: false,
+                items: Vec::new(),
+            },
+            &HashSet::new(),
+            None,
+        );
+
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn dropping_bar_releases_current_dnd_item_graph() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let (bridge, _rx) = Bridge::new();
+        let bar = AgentBar::new(bridge);
+        let item = working_item();
+        bar.render(
+            &AgentBarModel {
+                visible: true,
+                items: vec![item.clone()],
+            },
+            &HashSet::new(),
+            None,
+        );
+        let button = bar.item_buttons.borrow()[&item.surface].downgrade();
+        let items = bar.items.downgrade();
+
+        drop(bar);
+
+        assert!(button.upgrade().is_none());
+        assert!(items.upgrade().is_none());
     }
 }
