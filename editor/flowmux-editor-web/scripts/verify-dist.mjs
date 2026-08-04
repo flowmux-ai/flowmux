@@ -5,6 +5,16 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+const lock = JSON.parse(await readFile(resolve(root, "package-lock.json"), "utf8"));
+const dependencies = Object.keys(manifest.dependencies ?? {});
+if (dependencies.length !== 1 || dependencies[0] !== "monaco-editor") {
+  throw new Error("Review and document the editor production dependencies");
+}
+const monaco = lock.packages["node_modules/monaco-editor"];
+if (monaco?.license !== "MIT") {
+  throw new Error("The editor dependency license is not approved");
+}
 const requiredFiles = [
   "MONACO_THIRD_PARTY_NOTICES.txt",
   "THIRD_PARTY_NOTICES.md",
@@ -50,6 +60,9 @@ if (
 const main = await readFile(resolve(root, "dist", "main.js"), "utf8");
 const css = await readFile(resolve(root, "dist", "main.css"), "utf8");
 const notice = await readFile(resolve(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+if (!notice.includes(`Monaco Editor ${monaco.version}`)) {
+  throw new Error("The editor dependency notice is out of date");
+}
 const distributedNotice = await readFile(
   resolve(root, "dist", "THIRD_PARTY_NOTICES.md"),
   "utf8",

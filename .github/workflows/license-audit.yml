@@ -3,17 +3,44 @@
 name: License audit
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to audit
+        required: false
+        type: string
+  push:
+    branches:
+      - main
   pull_request:
     paths:
+      - .github/workflows/license-audit.yml
+      - .github/workflows/release.yml
+      - Cargo.toml
       - Cargo.lock
+      - 'crates/**/Cargo.toml'
       - deny.toml
       - about.toml
       - about.hbs
+      - LICENSE
+      - NOTICE
       - THIRD_PARTY_LICENSES.md
+      - THIRD_PARTY_ASSET_NOTICES.md
+      - 'crates/flowmux-config/themes/**'
+      - 'crates/flowmux-md-viewer/tests/fixtures/**'
+      - crates/flowmux-editor/src/web_assets.rs
+      - 'resources/themes/**'
+      - packaging/flatpak/com.flowmux.App.yml
       - scripts/generate-third-party-licenses.sh
+      - scripts/install-macos.sh
+      - scripts/install-thorvg.sh
       - editor/flowmux-editor-web/package.json
       - editor/flowmux-editor-web/package-lock.json
+      - editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt
       - editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md
+      - 'editor/flowmux-editor-web/dist/*NOTICE*'
+      - editor/flowmux-editor-web/dist/main.js
+      - 'editor/flowmux-editor-web/scripts/**'
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
@@ -25,6 +52,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -43,27 +72,10 @@ jobs:
           scripts/generate-third-party-licenses.sh
           git diff --exit-code THIRD_PARTY_LICENSES.md
 
+      - name: Install editor dependencies
+        working-directory: editor/flowmux-editor-web
+        run: npm ci --ignore-scripts
+
       - name: Check editor dependency notice
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const root = 'editor/flowmux-editor-web';
-          const manifest = JSON.parse(fs.readFileSync(`${root}/package.json`, 'utf8'));
-          const lock = JSON.parse(fs.readFileSync(`${root}/package-lock.json`, 'utf8'));
-          const dependencies = Object.keys(manifest.dependencies ?? {});
-          if (dependencies.length !== 1 || dependencies[0] !== 'monaco-editor') {
-            throw new Error('Review and document the editor production dependencies');
-          }
-          const dependency = lock.packages['node_modules/monaco-editor'];
-          if (dependency?.license !== 'MIT') {
-            throw new Error('The editor dependency license is not approved');
-          }
-          const notice = fs.readFileSync(`${root}/THIRD_PARTY_NOTICES.md`, 'utf8');
-          if (!notice.includes(`Monaco Editor ${dependency.version}`)) {
-            throw new Error('The editor dependency notice is out of date');
-          }
-          const distributed = fs.readFileSync(`${root}/dist/THIRD_PARTY_NOTICES.md`, 'utf8');
-          if (distributed !== notice) {
-            throw new Error('The distributed editor dependency notice is out of date');
-          }
-          NODE
+        working-directory: editor/flowmux-editor-web
+        run: npm run verify

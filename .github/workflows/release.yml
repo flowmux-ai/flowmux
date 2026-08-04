@@ -17,8 +17,15 @@ permissions:
   contents: write
 
 jobs:
+  license-audit:
+    name: License audit
+    uses: ./.github/workflows/license-audit.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
+
   build:
     name: Build linux-x86_64
+    needs: license-audit
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
