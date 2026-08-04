@@ -2,9 +2,9 @@
 
 # Third-Party Asset Notices
 
-This file covers third-party color data and specification fixtures distributed
-with flowmux. Rust and editor dependencies are documented separately in
-`THIRD_PARTY_LICENSES.md` and the editor notice files.
+This file covers third-party color data distributed with flowmux. Rust and
+editor dependencies are documented separately in `THIRD_PARTY_LICENSES.md`
+and the editor notice files.
 
 ## Built-in themes and default palette
 
@@ -51,16 +51,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-## Markdown specification fixtures
-
-The test fixtures below are unmodified snapshots of their upstream sources.
-They are licensed under Creative Commons Attribution-ShareAlike 4.0
-International (<https://creativecommons.org/licenses/by-sa/4.0/>).
-
-- `crates/flowmux-md-viewer/tests/fixtures/commonmark-0.31.2-spec.json`:
-  CommonMark 0.31.2 specification examples, Copyright (C) 2014-16 John
-  MacFarlane. Source: <https://spec.commonmark.org/0.31.2/spec.json>
-- `crates/flowmux-md-viewer/tests/fixtures/gfm-spec.txt`: GitHub Flavored
-  Markdown 0.29-gfm specification, based on the CommonMark specification by
-  John MacFarlane. Source: <https://raw.githubusercontent.com/github/cmark-gfm/master/test/spec.txt>
