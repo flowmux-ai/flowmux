@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const requiredFiles = [
+  "MONACO_THIRD_PARTY_NOTICES.txt",
   "THIRD_PARTY_NOTICES.md",
   "index.html",
   "main.js",
@@ -48,6 +49,39 @@ if (
 
 const main = await readFile(resolve(root, "dist", "main.js"), "utf8");
 const css = await readFile(resolve(root, "dist", "main.css"), "utf8");
+const notice = await readFile(resolve(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+const distributedNotice = await readFile(
+  resolve(root, "dist", "THIRD_PARTY_NOTICES.md"),
+  "utf8",
+);
+const monacoNotice = await readFile(
+  resolve(root, "MONACO_THIRD_PARTY_NOTICES.txt"),
+  "utf8",
+);
+const upstreamMonacoNotice = await readFile(
+  resolve(root, "node_modules", "monaco-editor", "ThirdPartyNotices.txt"),
+  "utf8",
+);
+const distributedMonacoNotice = await readFile(
+  resolve(root, "dist", "MONACO_THIRD_PARTY_NOTICES.txt"),
+  "utf8",
+);
+if (distributedNotice !== notice) {
+  throw new Error("The distributed editor notice is out of date");
+}
+if (monacoNotice !== upstreamMonacoNotice) {
+  throw new Error("The tracked Monaco notice differs from the installed package");
+}
+if (distributedMonacoNotice !== monacoNotice) {
+  throw new Error("The distributed Monaco notice is out of date");
+}
+if (
+  !notice.includes("DOMPurify 3.1.7") ||
+  !main.includes("@license DOMPurify 3.1.7") ||
+  !main.includes("Apache license 2.0 and Mozilla Public License 2.0")
+) {
+  throw new Error("The editor bundle is missing the DOMPurify license notice");
+}
 if (
   html.includes('id="mode-switch"') ||
   html.includes('id="mode-edit"') ||

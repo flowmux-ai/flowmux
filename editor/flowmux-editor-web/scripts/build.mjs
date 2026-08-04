@@ -38,3 +38,7 @@ await cp(
   resolve(root, "THIRD_PARTY_NOTICES.md"),
   resolve(output, "THIRD_PARTY_NOTICES.md"),
 );
+await cp(
+  resolve(root, "MONACO_THIRD_PARTY_NOTICES.txt"),
+  resolve(output, "MONACO_THIRD_PARTY_NOTICES.txt"),
+);

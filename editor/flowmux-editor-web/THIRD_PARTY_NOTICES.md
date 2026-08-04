@@ -1,7 +1,9 @@
 # flowmux Editor Web Third-Party Notices
 
-The compiled editor assets include Monaco Editor 0.53.0 under the MIT License.
-The package version is pinned in `package-lock.json`.
+The compiled editor assets include Monaco Editor 0.53.0 and components bundled
+by Monaco. The package version is pinned in `package-lock.json`. Monaco's
+complete upstream component notices are distributed verbatim in
+`MONACO_THIRD_PARTY_NOTICES.txt`.
 
 ## Monaco Editor
 
@@ -26,3 +28,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## DOMPurify
+
+Monaco includes DOMPurify 3.1.7, Copyright Cure53 and other contributors,
+under Apache-2.0 OR MPL-2.0. Its license marker is retained in `main.js`; the
+full Apache 2.0 and MPL 2.0 texts are also included in the distribution's
+`THIRD_PARTY_LICENSES.md`.

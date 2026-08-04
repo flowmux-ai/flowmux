@@ -75,6 +75,13 @@ const ASSETS: &[Asset] = &[
         content_type: "text/markdown; charset=utf-8",
         bytes: include_bytes!("../../../editor/flowmux-editor-web/dist/THIRD_PARTY_NOTICES.md"),
     },
+    Asset {
+        path: "MONACO_THIRD_PARTY_NOTICES.txt",
+        content_type: "text/plain; charset=utf-8",
+        bytes: include_bytes!(
+            "../../../editor/flowmux-editor-web/dist/MONACO_THIRD_PARTY_NOTICES.txt"
+        ),
+    },
 ];
 
 #[derive(Debug, Error)]

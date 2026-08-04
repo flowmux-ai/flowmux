@@ -19,10 +19,11 @@ The committed editor frontend has a separate locked npm dependency graph:
 Built-in theme colors, the default terminal palette, and Markdown
 specification fixtures are documented in `THIRD_PARTY_ASSET_NOTICES.md`.
 
-The Monaco copyright notice and MIT license are distributed beside the editor
-assets in `editor/flowmux-editor-web/dist/THIRD_PARTY_NOTICES.md`. Exact npm
-versions and integrity hashes are recorded in
-`editor/flowmux-editor-web/package-lock.json`.
+The Monaco copyright notice, DOMPurify notice, and Monaco's complete upstream
+component notices are distributed beside the editor assets in
+`editor/flowmux-editor-web/dist/THIRD_PARTY_NOTICES.md` and
+`MONACO_THIRD_PARTY_NOTICES.txt`. Exact npm versions and integrity hashes are
+recorded in `editor/flowmux-editor-web/package-lock.json`.
 
 ## License Overview
 
