@@ -21,6 +21,19 @@ async fn single_pane_handler() -> (
     PaneId,
     SurfaceId,
 ) {
+    // No agent-session store: tests must never write the developer's real
+    // `$XDG_DATA_HOME/flowmux/agent-sessions/`.
+    single_pane_handler_with_store(None).await
+}
+
+async fn single_pane_handler_with_store(
+    session_store: Option<flowmux_state::AgentSessionStore>,
+) -> (
+    GuiHandler,
+    async_channel::Receiver<GtkCommand>,
+    PaneId,
+    SurfaceId,
+) {
     let store = StateStore::new_lazy(State::default());
     store
         .create_workspace(
@@ -39,7 +52,7 @@ async fn single_pane_handler() -> (
     let pane = tree[0].panes[0].id;
     let tab = tree[0].panes[0].tabs[0].id;
     let (bridge, rx) = Bridge::new();
-    let handler = GuiHandler::new(DaemonHandler::new(store), bridge);
+    let handler = GuiHandler::with_session_store(DaemonHandler::new(store), bridge, session_store);
     (handler, rx, pane, tab)
 }
 
@@ -429,19 +442,6 @@ impl Drop for HomeEnvRestore {
     }
 }
 
-struct DataEnvRestore(Option<std::ffi::OsString>);
-
-impl Drop for DataEnvRestore {
-    fn drop(&mut self) {
-        unsafe {
-            match self.0.take() {
-                Some(value) => std::env::set_var("XDG_DATA_HOME", value),
-                None => std::env::remove_var("XDG_DATA_HOME"),
-            }
-        }
-    }
-}
-
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "current_thread")]
 async fn import_cookies_dispatches_inject_for_firefox_fixture() {
@@ -686,16 +686,11 @@ async fn stale_and_screen_reports_do_not_emit_recent_activity() {
     }
 }
 
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "current_thread")]
 async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it() {
-    let _guard = home_env_lock();
-    let _restore = DataEnvRestore(std::env::var_os("XDG_DATA_HOME"));
     let data = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("XDG_DATA_HOME", data.path());
-    }
-    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let store = flowmux_state::AgentSessionStore::new(data.path().to_path_buf());
+    let (handler, rx, pane, surface) = single_pane_handler_with_store(Some(store.clone())).await;
     let response = handler.handle(Request::AgentActivityUpdate {
         pane: Some(pane),
         surface: Some(surface),
@@ -728,8 +723,6 @@ async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it()
         GtkCommand::AddActivity { .. }
     ));
 
-    let store =
-        flowmux_state::AgentSessionStore::new(data.path().join("flowmux").join("agent-sessions"));
     assert_eq!(
         store.lookup("claude", surface).as_deref(),
         Some("claude-session-1")

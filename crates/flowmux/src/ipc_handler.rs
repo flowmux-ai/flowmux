@@ -18,14 +18,6 @@ use std::pin::Pin;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-/// Resolve the agent-session store rooted at
-/// `$XDG_DATA_HOME/flowmux/agent-sessions/`. Returns `None` when the
-/// XDG data dir is unavailable (very rare on Linux, but possible in
-/// minimal containers without HOME / XDG_DATA_HOME).
-fn agent_session_store() -> Option<flowmux_state::AgentSessionStore> {
-    flowmux_state::default_agent_session_store()
-}
-
 fn browser_error_response(error: String) -> Response {
     if error.starts_with("browser pane not found:")
         || error.starts_with("pane not found:")
@@ -129,11 +121,28 @@ impl TryFrom<Request> for BrowserActionRequest {
 pub struct GuiHandler {
     inner: DaemonHandler,
     bridge: Bridge,
+    /// Agent-session store rooted at `$XDG_DATA_HOME/flowmux/agent-sessions/`.
+    /// `None` when the XDG data dir is unavailable (very rare on Linux, but
+    /// possible in minimal containers without HOME / XDG_DATA_HOME). Injected
+    /// so tests never touch the developer's real store.
+    session_store: Option<flowmux_state::AgentSessionStore>,
 }
 
 impl GuiHandler {
     pub fn new(inner: DaemonHandler, bridge: Bridge) -> Self {
-        Self { inner, bridge }
+        Self::with_session_store(inner, bridge, flowmux_state::default_agent_session_store())
+    }
+
+    pub fn with_session_store(
+        inner: DaemonHandler,
+        bridge: Bridge,
+        session_store: Option<flowmux_state::AgentSessionStore>,
+    ) -> Self {
+        Self {
+            inner,
+            bridge,
+            session_store,
+        }
     }
 }
 
@@ -701,7 +710,7 @@ impl GuiHandler {
                 agent,
                 surface,
                 session_id,
-            } => match agent_session_store() {
+            } => match self.session_store.as_ref() {
                 Some(store) => match store.record(&agent, surface, &session_id) {
                     Ok(()) => Response::Ok,
                     Err(e) => Response::Error(RpcError::Io(e.to_string())),
@@ -710,7 +719,7 @@ impl GuiHandler {
                     "XDG data dir unavailable; cannot persist agent session".into(),
                 )),
             },
-            Request::AgentSessionGet { agent, surface } => match agent_session_store() {
+            Request::AgentSessionGet { agent, surface } => match self.session_store.as_ref() {
                 Some(store) => Response::AgentSession {
                     session_id: store.lookup(&agent, surface),
                 },
@@ -727,7 +736,7 @@ impl GuiHandler {
                 if live_claude_session {
                     Response::Ok
                 } else {
-                    match agent_session_store() {
+                    match self.session_store.as_ref() {
                         Some(store) => match store.forget(&agent, surface) {
                             Ok(()) => Response::Ok,
                             Err(e) => Response::Error(RpcError::Io(e.to_string())),
@@ -810,7 +819,7 @@ impl GuiHandler {
                             .await
                         {
                             if let Some(session_id) = session_binding.as_deref() {
-                                if let Some(store) = agent_session_store() {
+                                if let Some(store) = self.session_store.as_ref() {
                                     if let Err(error) =
                                         store.record(&session_agent, surface, session_id)
                                     {

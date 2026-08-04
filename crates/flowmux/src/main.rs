@@ -193,6 +193,8 @@ fn main() -> anyhow::Result<()> {
     // to scope to the right window.
     refresh_runtime_socket_pointer(&socket);
 
+    spawn_agent_hook_repair();
+
     // Tokio runtime hosts the IPC server, the state store, and any
     // async desktop-bus interactions.
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -508,12 +510,10 @@ fn process_exists(_pid: u32) -> bool {
     true
 }
 
-fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
-    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    if args.is_empty() {
-        return Ok(false);
-    }
-
+/// Locate the `flowmuxctl` binary that pairs with this GUI build:
+/// sibling of the executable, the private `lib/flowmux/` install dir,
+/// or bare `flowmuxctl` from PATH as a last resort.
+fn flowmuxctl_program() -> PathBuf {
     let current_exe = std::env::current_exe().ok();
     let sibling = current_exe
         .as_ref()
@@ -525,9 +525,46 @@ fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
         .and_then(|p| p.parent())
         .map(|prefix| prefix.join("lib").join("flowmux").join("flowmuxctl"))
         .filter(|p| p.is_file());
-    let program = sibling
+    sibling
         .or(private_install)
-        .unwrap_or_else(|| PathBuf::from("flowmuxctl"));
+        .unwrap_or_else(|| PathBuf::from("flowmuxctl"))
+}
+
+/// Re-run the sanctioned repair (`flowmuxctl fix`) in the background on
+/// every boot. Agent auto-resume depends on hooks living in files other
+/// tools rewrite (`~/.claude/settings.json`, `~/.codex/config.toml`); when
+/// another installer drops our entries, session ids stop being recorded
+/// and resume silently dies until the user happens to run `flowmux fix`.
+/// The repair is idempotent and skips writes when nothing drifted.
+fn spawn_agent_hook_repair() {
+    let program = flowmuxctl_program();
+    match Command::new(&program)
+        .arg("fix")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(mut child) => {
+            info!("agent hook self-repair started (flowmuxctl fix)");
+            // Reap the child so it never lingers as a zombie.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(error) => {
+            tracing::warn!(%error, program = %program.display(), "could not start agent hook self-repair");
+        }
+    }
+}
+
+fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.is_empty() {
+        return Ok(false);
+    }
+
+    let program = flowmuxctl_program();
 
     #[cfg(unix)]
     {
