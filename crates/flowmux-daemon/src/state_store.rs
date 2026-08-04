@@ -8,10 +8,10 @@
 
 use flowmux_core::{
     agent_bar_color_for_surface, detect_agent_idle_name_from_signals,
-    detect_agent_name_from_signals, detect_agent_status_from_signals, terminal_tab_title_for_cwd,
-    AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane,
-    PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId,
-    SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    detect_agent_name_from_signals, detect_agent_progress_text, detect_agent_status_from_signals,
+    terminal_tab_title_for_cwd, AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome,
+    EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
+    Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -1201,6 +1201,9 @@ impl StateStore {
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
+        let progress_text = matches!(detected_status, Some(AgentStatus::Working))
+            .then(|| detect_agent_progress_text(screen_text))
+            .flatten();
         let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
             detect_agent_idle_name_from_signals(screen_text, osc_title)
         } else {
@@ -1236,6 +1239,7 @@ impl StateStore {
                     status,
                     "flowmux:screen",
                     agent_name,
+                    progress_text,
                     surface_visible,
                 ) {
                     found = true;
@@ -2940,6 +2944,27 @@ mod tests {
                 .await,
             None,
             "an unchanged screen-derived item must not trigger another UI rebuild"
+        );
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("Codex\n• Working (1s • esc to interrupt)"),
+                    Some("Codex"),
+                )
+                .await,
+            Some((ws_id, Some(AgentStatus::Working))),
+            "changed progress text must trigger an event without a status transition"
+        );
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status_text(),
+            Some("Working (1s • esc to interrupt)")
         );
     }
 

@@ -972,7 +972,6 @@ fn activity_now_row(
         Some(entry.status),
         entry.seen,
         &entry.status_text,
-        &entry.workspace_label,
         &entry.surface_label,
         &entry.color,
         when.as_deref(),
@@ -995,7 +994,6 @@ fn activity_row(
     status: Option<AgentStatus>,
     seen: bool,
     summary: &str,
-    workspace_label: &str,
     surface_label: &str,
     color: &str,
     when: Option<&str>,
@@ -1045,9 +1043,7 @@ fn activity_row(
     }
     text.append(&heading);
 
-    let summary = gtk::Label::new(Some(&format!(
-        "{summary} · {workspace_label} · {surface_label}"
-    )));
+    let summary = gtk::Label::new(Some(&format!("{summary} · {surface_label}")));
     summary.set_halign(gtk::Align::Start);
     summary.set_xalign(0.0);
     summary.set_wrap(true);
@@ -2550,7 +2546,6 @@ mod tests {
             workspace,
             pane,
             surface,
-            workspace_label: "flowmux-terminal".into(),
             surface_label: "zsh".into(),
             color: "#abcdef".into(),
         }];
@@ -2593,7 +2588,7 @@ mod tests {
         assert!(summary.wraps());
         assert!(!summary.is_single_line_mode());
         assert_eq!(summary.lines(), 3);
-        assert!(summary.label().contains("flowmux-terminal · zsh"));
+        assert_eq!(summary.label(), "Running tests · zsh");
 
         let scroll = widgets
             .iter()
@@ -2782,7 +2777,6 @@ mod tests {
             workspace: WorkspaceId::new(),
             pane: PaneId::new(),
             surface,
-            workspace_label: "flowmux-terminal".into(),
             surface_label: "zsh".into(),
             color: "#abcdef".into(),
         }];

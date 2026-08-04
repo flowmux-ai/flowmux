@@ -2360,6 +2360,7 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
         AgentStatus::Working,
         "flowmux:screen",
         Some("codex"),
+        None,
         true,
     );
     // Working turn ends: proc presence settles to Idle, not cleared.
@@ -2390,6 +2391,7 @@ fn idle_screen_prompt_settles_hook_working_status() {
             AgentStatus::Idle,
             "flowmux:screen",
             Some("claude"),
+            None,
             true,
         ),
         Some(true)
@@ -2482,11 +2484,45 @@ fn screen_fallback_does_not_override_claude_hook_presence() {
             AgentStatus::Blocked,
             "flowmux:screen",
             Some("claude"),
+            None,
             true,
         ),
         Some(false)
     );
     assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Idle));
+}
+
+#[test]
+fn screen_progress_refines_matching_claude_hook_presence() {
+    let mut surface = PaneSurface::terminal("agent", None);
+    let surface_id = surface.id;
+    let mut presence = AgentPresence::new("claude", AgentActivity::Running, Some(42));
+    presence.source = Some("flowmux:hook".into());
+    presence.seq = Some(1);
+    presence.custom_status = Some("Using Bash".into());
+    surface.agent = Some(presence);
+    let mut pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: surface_id,
+            surfaces: vec![surface],
+        },
+    };
+
+    assert_eq!(
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Working,
+            "flowmux:screen",
+            Some("claude"),
+            Some("Working (2s • esc to interrupt)"),
+            true,
+        ),
+        Some(true)
+    );
+    let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+    assert_eq!(agent.status_text(), Some("Working (2s • esc to interrupt)"));
+    assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
 }
 
 #[test]
@@ -2511,6 +2547,7 @@ fn screen_fallback_does_not_take_ownership_from_matching_hook_presence() {
             AgentStatus::Working,
             "flowmux:screen",
             Some("codex"),
+            None,
             true,
         ),
         Some(true)
@@ -2556,6 +2593,7 @@ fn screen_fallback_replaces_stale_claude_name_when_agent_signal_differs() {
                 AgentStatus::Blocked,
                 "flowmux:screen",
                 Some(detected_agent),
+                None,
                 true,
             ),
             Some(true),
@@ -2597,6 +2635,7 @@ fn screen_fallback_uses_opencode_title_before_claude_screen_text() {
             AgentStatus::Blocked,
             "flowmux:screen",
             Some("claude"),
+            None,
             true,
         ),
         Some(true)
@@ -2698,6 +2737,18 @@ fn detector_reads_strong_osc_and_screen_signals() {
     );
     assert_eq!(
         detect_agent_status_from_signals(None, Some("working-notes")),
+        None
+    );
+}
+
+#[test]
+fn detector_reads_live_progress_text_without_the_bullet() {
+    assert_eq!(
+        detect_agent_progress_text(Some("Codex\n• Working (12s • esc to interrupt)\n")),
+        Some("Working (12s • esc to interrupt)")
+    );
+    assert_eq!(
+        detect_agent_progress_text(Some("ordinary test output\n")),
         None
     );
 }

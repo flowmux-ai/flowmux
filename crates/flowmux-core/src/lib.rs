@@ -615,6 +615,7 @@ impl Pane {
         status: AgentStatus,
         source: &'static str,
         agent_name: Option<&str>,
+        status_text: Option<&str>,
         surface_visible: bool,
     ) -> Option<bool> {
         match self {
@@ -634,7 +635,9 @@ impl Pane {
                     && !incoming_is_different_agent
                     && status != AgentStatus::Idle
                     && surface.agent.as_ref().is_some_and(|agent| {
-                        agent.name == "claude" && agent.source.as_deref() == Some("flowmux:hook")
+                        agent.name == "claude"
+                            && agent.source.as_deref() == Some("flowmux:hook")
+                            && (agent.status != status || status_text.is_none())
                     })
                 {
                     return Some(false);
@@ -652,6 +655,10 @@ impl Pane {
 
                 let name = incoming_name
                     .or_else(|| surface.agent.as_ref().map(|agent| agent.name.clone()))?;
+                let same_status = surface
+                    .agent
+                    .as_ref()
+                    .filter(|agent| agent.status == status);
                 let report = AgentStatusReport {
                     name,
                     status: Some(status),
@@ -659,8 +666,10 @@ impl Pane {
                     pid: None,
                     source: Some(source.into()),
                     seq: None,
-                    message: None,
-                    custom_status: None,
+                    message: same_status.and_then(|agent| agent.message.clone()),
+                    custom_status: status_text
+                        .map(str::to_string)
+                        .or_else(|| same_status.and_then(|agent| agent.custom_status.clone())),
                     session_id: None,
                 };
                 match surface.agent.as_mut() {
@@ -682,6 +691,7 @@ impl Pane {
                     status,
                     source,
                     agent_name,
+                    status_text,
                     surface_visible,
                 )
                 .or_else(|| {
@@ -690,6 +700,7 @@ impl Pane {
                         status,
                         source,
                         agent_name,
+                        status_text,
                         surface_visible,
                     )
                 }),
@@ -2470,6 +2481,18 @@ fn is_agent_working_status_line(line: &str) -> bool {
                     || rest.contains("esc to interrupt")
                     || rest.contains("ctrl+c to stop")
             })
+        })
+}
+
+pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
+    screen_text?
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+        .find_map(|line| {
+            let line = line.trim().trim_start_matches(['•', '●', '◉']).trim_start();
+            is_agent_working_status_line(&line.to_ascii_lowercase()).then_some(line)
         })
 }
 

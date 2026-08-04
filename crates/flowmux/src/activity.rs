@@ -35,7 +35,6 @@ pub struct ActivityNowEntry {
     pub workspace: WorkspaceId,
     pub pane: PaneId,
     pub surface: SurfaceId,
-    pub workspace_label: String,
     pub surface_label: String,
     pub color: String,
 }
@@ -80,7 +79,6 @@ pub fn current_activity_entries(state: &flowmux_state::State) -> Vec<ActivityNow
                         workspace: item.workspace,
                         pane: item.pane,
                         surface: item.surface,
-                        workspace_label: workspace.display_title().to_string(),
                         surface_label,
                         color: item.color,
                     }
@@ -276,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn now_entries_use_live_state_and_display_labels() {
+    fn now_entries_use_live_state_and_agent_tab_label() {
         let workspace = WorkspaceId::new();
         let pane = PaneId::new();
         let mut tab = PaneSurface::terminal("zsh", Some(PathBuf::from("/tmp/flowmux")));
@@ -319,7 +317,6 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].agent, "codex");
         assert_eq!(entries[0].status_text, "Running tests");
-        assert_eq!(entries[0].workspace_label, "flowmux-terminal");
         assert_eq!(entries[0].surface_label, "zsh");
         assert_eq!(entries[0].color, "#123456");
     }

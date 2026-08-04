@@ -7081,7 +7081,7 @@ mod tests {
         assert!(agent_bar_visible(&controller));
         assert!(agent_bar_label_texts(&controller)
             .iter()
-            .any(|text| text == "working"));
+            .any(|text| text.starts_with("Working (0s")));
 
         terminal
             .widget
@@ -7219,9 +7219,42 @@ mod tests {
         assert!(
             agent_bar_label_texts(&controller)
                 .iter()
-                .any(|text| text == "working"),
+                .any(|text| text == "Working (0s - esc to interrupt)"),
             "hidden workspace output must refresh its Agent item"
         );
+        assert!(controller
+            .sidebar
+            .workspace_row_contains(background_workspace, "Working (0s - esc to interrupt)"));
+        assert!(sidebar_label_texts(&controller)
+            .iter()
+            .any(|text| text.starts_with("Working (0s - esc to interrupt) ·")));
+
+        terminal
+            .widget
+            .feed(b"\x1b[2J\x1b[HWorking (1s - esc to interrupt)\r\n");
+        for _ in 0..40 {
+            if terminal
+                .screen_text()
+                .is_some_and(|text| text.contains("Working (1s"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        let (ack, ack_rx) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::TerminalOutputObserved {
+                surface: background_surface,
+                ack,
+            })
+            .await;
+        ack_rx.await.unwrap();
+        assert!(controller
+            .sidebar
+            .workspace_row_contains(background_workspace, "Working (1s - esc to interrupt)"));
+        assert!(sidebar_label_texts(&controller)
+            .iter()
+            .any(|text| text.starts_with("Working (1s - esc to interrupt) ·")));
 
         terminal
             .widget
@@ -7308,7 +7341,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn background_cwd_event_refreshes_activity_workspace_name() {
+    async fn background_cwd_event_refreshes_activity_agent_tab_name() {
         let (controller, background_workspace, background_pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.ActivityBackgroundCwd").await;
         let background_surface = controller
@@ -7353,16 +7386,14 @@ mod tests {
         controller
             .sync_workspace_agent_status(background_workspace)
             .await;
-        let initial_name = controller
+        let initial_tab_name = controller
             .store
-            .get_workspace(background_workspace)
+            .surface_title(background_pane, background_surface)
             .await
-            .expect("workspace should exist")
-            .display_title()
-            .to_string();
+            .expect("Agent tab should exist");
         assert!(sidebar_label_texts(&controller)
             .iter()
-            .any(|text| text.contains(&format!(" · {initial_name} · "))));
+            .any(|text| text == &format!("working · {initial_tab_name}")));
 
         controller
             .dispatch(GtkCommand::TerminalCwdChanged {
@@ -7377,9 +7408,18 @@ mod tests {
             controller.store.snapshot().await.active_workspace,
             Some(foreground_workspace)
         );
-        assert!(sidebar_label_texts(&controller)
-            .iter()
-            .any(|text| text.contains(" · background-agent-dir · ")));
+        let updated_tab_name = controller
+            .store
+            .surface_title(background_pane, background_surface)
+            .await
+            .expect("Agent tab should still exist");
+        let labels = sidebar_label_texts(&controller);
+        assert!(
+            labels
+                .iter()
+                .any(|text| text == &format!("working · {updated_tab_name}")),
+            "rendered labels: {labels:?}"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
