@@ -1,4 +1,6 @@
-# Solarized Light — color values from Ethan Schoonover's Solarized (MIT).
+# SPDX-License-Identifier: MIT
+# Solarized Light — Copyright (c) 2011 Ethan Schoonover.
+# Source: https://github.com/altercation/solarized
 background = #fdf6e3
 foreground = #657b83
 cursor-color = #657b83

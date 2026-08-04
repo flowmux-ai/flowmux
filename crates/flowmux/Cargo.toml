@@ -12,7 +12,7 @@ description = "GTK4 + libadwaita main application."
 [package.metadata.deb]
 name = "flowmux"
 maintainer = "The flowmux Authors <noreply@flowmux.invalid>"
-copyright = "2026 The flowmux Authors. Upstream cmux: 2024-present Manaflow, Inc."
+copyright = "2026 The flowmux Authors"
 license-file = ["../../LICENSE", "0"]
 extended-description = """
 A Linux/GTK4 terminal with vertical tabs and notifications for AI

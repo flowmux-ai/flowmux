@@ -1,4 +1,6 @@
-# Catppuccin Mocha — color values from the Catppuccin palette (MIT).
+# SPDX-License-Identifier: MIT
+# Catppuccin Mocha — Copyright (c) 2021 Catppuccin.
+# Source: https://github.com/catppuccin/catppuccin
 background = #1e1e2e
 foreground = #cdd6f4
 cursor-color = #f5e0dc

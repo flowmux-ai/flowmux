@@ -1,4 +1,6 @@
-# Gruvbox Dark — color values from the gruvbox scheme (MIT).
+# SPDX-License-Identifier: MIT
+# Gruvbox Dark — by Pavel Pertsev (morhetz).
+# Source: https://github.com/morhetz/gruvbox
 background = #282828
 foreground = #ebdbb2
 cursor-color = #ebdbb2

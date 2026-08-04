@@ -1,4 +1,5 @@
 ---
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: rust-testing
 description: Write and run Rust tests for this workspace correctly. Use when asked to add tests, run the suite, fix failing tests, set up coverage, or verify a change. Knows the GUI-vs-headless split, the xvfb + dbus harness CI mirrors, single-test filtering, and famous test crates (proptest, insta, rstest, nextest).
 ---

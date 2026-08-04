@@ -4,8 +4,8 @@
 # Build and install ThorVG with every image loader enabled and the C API
 # exposed, which is what flowmux's image viewer links against.
 #
-# flowmux does NOT vendor ThorVG. It links the system ThorVG through the
-# `thorvg-sys` crate in pkg-config mode, so ThorVG must be installed first.
+# flowmux does NOT vendor ThorVG. Its hand-written `dlopen` shim loads the
+# system ThorVG C API at runtime, so ThorVG must be installed first.
 # Ubuntu (through 24.04) does not package ThorVG, so this script builds it
 # from source with meson/ninja. ThorVG source is cloned into a temporary
 # directory outside the repo and removed afterwards.
@@ -17,8 +17,7 @@
 
 set -euo pipefail
 
-# Match the ThorVG version the `thorvg-sys` crate generates its bindings from
-# (0.2.1+thorvg-1.0.6) to avoid C API version skew.
+# Match the C API version used by flowmux's hand-written bindings.
 THORVG_VERSION="${THORVG_VERSION:-v1.0.6}"
 PREFIX="${PREFIX:-/usr/local}"
 

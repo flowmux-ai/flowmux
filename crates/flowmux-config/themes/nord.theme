@@ -1,4 +1,6 @@
-# Nord — color values from the Nord palette (MIT).
+# SPDX-License-Identifier: MIT
+# Nord — Copyright (c) 2016-present Sven Greb.
+# Source: https://github.com/nordtheme/nord
 background = #2e3440
 foreground = #d8dee9
 cursor-color = #d8dee9

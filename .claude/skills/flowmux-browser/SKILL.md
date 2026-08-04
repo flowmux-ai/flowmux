@@ -1,4 +1,5 @@
 ---
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: flowmux-browser
 description: Drive the in-app browser pane that ships with flowmux. Use when you need to open URLs, take page snapshots, or interact with web pages from inside a flowmux terminal pane — instead of spawning Playwright / Puppeteer / a system Chromium.
 ---

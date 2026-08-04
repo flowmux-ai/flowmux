@@ -16,6 +16,9 @@ The committed editor frontend has a separate locked npm dependency graph:
 - `@types/trusted-types` 1.0.6 (MIT) is a build-time type dependency of Monaco.
 - esbuild's platform packages use the same esbuild version and MIT license.
 
+Built-in theme colors, the default terminal palette, and Markdown
+specification fixtures are documented in `THIRD_PARTY_ASSET_NOTICES.md`.
+
 The Monaco copyright notice and MIT license are distributed beside the editor
 assets in `editor/flowmux-editor-web/dist/THIRD_PARTY_NOTICES.md`. Exact npm
 versions and integrity hashes are recorded in

@@ -10,8 +10,11 @@ option) any later version. See the LICENSE file for the full text.
 
 flowmux is an unofficial Linux/GTK4 reimplementation inspired by cmux
 (https://github.com/manaflow-ai/cmux), a macOS/AppKit terminal for AI
-coding agents. cmux is dual-licensed (GPL-3.0-or-later OR commercial);
-flowmux is distributed only under GPL-3.0-or-later.
+coding agents. The cmux repository's default license is
+GPL-3.0-or-later. Its LICENSE also states that separate commercial terms
+may be offered for material for which Manaflow controls the necessary
+rights. flowmux uses no commercial license and is distributed only under
+GPL-3.0-or-later.
 
 Because cmux is available under GPL-3.0-or-later, the upstream copyright
 notice is preserved:
@@ -37,6 +40,10 @@ Third-party components
 Runtime dependencies retain their own licenses; see
 THIRD_PARTY_LICENSES.md for the dependency license inventory generated
 from Cargo metadata.
+
+Built-in theme colors, the default terminal palette, and Markdown
+specification fixtures retain their own licenses and attribution; see
+THIRD_PARTY_ASSET_NOTICES.md.
 
 The image viewer links the system ThorVG library (MIT), which is
 installed separately (see scripts/install-thorvg.sh) and, like GTK,

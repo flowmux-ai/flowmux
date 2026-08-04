@@ -1,4 +1,6 @@
-# Catppuccin Latte — color values from the Catppuccin palette (MIT).
+# SPDX-License-Identifier: MIT
+# Catppuccin Latte — Copyright (c) 2021 Catppuccin.
+# Source: https://github.com/catppuccin/catppuccin
 background = #eff1f5
 foreground = #4c4f69
 cursor-color = #dc8a78

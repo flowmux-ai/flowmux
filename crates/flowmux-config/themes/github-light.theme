@@ -1,4 +1,6 @@
-# GitHub Light — color values from GitHub's VS Code themes (MIT).
+# SPDX-License-Identifier: MIT
+# GitHub Light — Copyright (c) 2020 Primer.
+# Source: https://github.com/primer/github-vscode-theme
 background = #ffffff
 foreground = #24292f
 cursor-color = #24292f

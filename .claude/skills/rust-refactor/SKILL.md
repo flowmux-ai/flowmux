@@ -1,4 +1,5 @@
 ---
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: rust-refactor
 description: Refactor and clean up Rust code in this workspace using Clippy-driven, idiomatic patterns. Use when asked to refactor, simplify, clean up, de-duplicate, reduce clones/allocations, tighten error handling, or modernize Rust in any crate under crates/. Pairs with rust-testing — refactor behind green tests.
 ---
