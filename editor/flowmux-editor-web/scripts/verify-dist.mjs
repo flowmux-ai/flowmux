@@ -60,6 +60,10 @@ if (
 const main = await readFile(resolve(root, "dist", "main.js"), "utf8");
 const css = await readFile(resolve(root, "dist", "main.css"), "utf8");
 const notice = await readFile(resolve(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+const licenseInventory = await readFile(
+  resolve(root, "..", "..", "THIRD_PARTY_LICENSES.md"),
+  "utf8",
+);
 if (!notice.includes(`Monaco Editor ${monaco.version}`)) {
   throw new Error("The editor dependency notice is out of date");
 }
@@ -90,6 +94,8 @@ if (distributedMonacoNotice !== monacoNotice) {
 }
 if (
   !notice.includes("DOMPurify 3.1.7") ||
+  !notice.includes("copy under Apache-2.0") ||
+  !licenseInventory.includes("Apache License\n                           Version 2.0") ||
   !main.includes("@license DOMPurify 3.1.7") ||
   !main.includes("Apache license 2.0 and Mozilla Public License 2.0")
 ) {

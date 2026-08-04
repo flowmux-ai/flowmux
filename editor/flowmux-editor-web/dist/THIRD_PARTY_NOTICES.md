@@ -31,7 +31,8 @@ SOFTWARE.
 
 ## DOMPurify
 
-Monaco includes DOMPurify 3.1.7, Copyright Cure53 and other contributors,
-under Apache-2.0 OR MPL-2.0. Its license marker is retained in `main.js`; the
-full Apache 2.0 and MPL 2.0 texts are also included in the distribution's
+Monaco includes DOMPurify 3.1.7, Copyright 2024 Dr.-Ing. Mario Heiderich,
+Cure53. DOMPurify offers Apache-2.0 OR MPL-2.0; flowmux distributes the bundled
+copy under Apache-2.0. Its license marker is retained in `main.js`, and the
+full Apache 2.0 text is included in the distribution's
 `THIRD_PARTY_LICENSES.md`.
