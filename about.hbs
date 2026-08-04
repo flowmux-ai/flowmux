@@ -20,10 +20,11 @@ Built-in theme colors, the default terminal palette, and Markdown
 specification fixtures are documented in `THIRD_PARTY_ASSET_NOTICES.md`.
 
 The Monaco copyright notice, DOMPurify notice, and Monaco's complete upstream
-component notices are distributed beside the editor assets in
-`editor/flowmux-editor-web/dist/THIRD_PARTY_NOTICES.md` and
-`MONACO_THIRD_PARTY_NOTICES.txt`. Exact npm versions and integrity hashes are
-recorded in `editor/flowmux-editor-web/package-lock.json`.
+component notices are distributed with flowmux. Canonical source copies are
+stored in `editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md` and
+`editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt`. Exact npm versions
+and integrity hashes are recorded in
+`editor/flowmux-editor-web/package-lock.json`.
 
 ## License Overview
 
