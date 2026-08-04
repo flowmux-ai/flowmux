@@ -269,6 +269,40 @@ fn workspace_ids_in_display_order(s: &State) -> Vec<WorkspaceId> {
     ordered
 }
 
+fn collect_pane_surface_ids(pane: &Pane, target: Option<PaneId>, out: &mut Vec<SurfaceId>) {
+    match pane {
+        Pane::Leaf {
+            id,
+            content: PaneContent::Tabs { surfaces, .. },
+        } if target.is_none_or(|target| target == *id) => {
+            out.extend(surfaces.iter().map(|surface| surface.id));
+        }
+        Pane::Leaf { .. } => {}
+        Pane::Split { first, second, .. } => {
+            collect_pane_surface_ids(first, target, out);
+            collect_pane_surface_ids(second, target, out);
+        }
+    }
+}
+
+fn workspace_pane_surface_ids(workspace: &Workspace) -> Vec<SurfaceId> {
+    let mut ids = Vec::new();
+    for surface in &workspace.surfaces {
+        collect_pane_surface_ids(&surface.root_pane, None, &mut ids);
+    }
+    ids
+}
+
+fn state_pane_surface_ids(state: &State, pane: PaneId) -> Vec<SurfaceId> {
+    let mut ids = Vec::new();
+    for workspace in &state.workspaces {
+        for surface in &workspace.surfaces {
+            collect_pane_surface_ids(&surface.root_pane, Some(pane), &mut ids);
+        }
+    }
+    ids
+}
+
 #[derive(Clone)]
 pub struct StateStore {
     inner: Arc<Mutex<State>>,
@@ -281,6 +315,16 @@ pub struct StateStore {
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
 
 impl StateStore {
+    async fn forget_cleared_agent_surfaces(&self, surfaces: &[SurfaceId]) {
+        if surfaces.is_empty() {
+            return;
+        }
+        let mut cleared = self.cleared_agent_surfaces.lock().await;
+        for surface in surfaces {
+            cleared.remove(surface);
+        }
+    }
+
     /// Construct from inside a tokio runtime context. Spawns the
     /// persistence loop on the current runtime.
     pub fn new(initial: State) -> Self {
@@ -556,9 +600,11 @@ impl StateStore {
     /// Returns `None` if the pane wasn't found.
     pub async fn close_pane(&self, target: PaneId) -> Option<CloseOutcome> {
         let mut s = self.inner.lock().await;
+        let closed_surfaces = state_pane_surface_ids(&s, target);
         let outcome = remove_pane_leaf_locked(&mut s, target);
         drop(s);
         if outcome.is_some() {
+            self.forget_cleared_agent_surfaces(&closed_surfaces).await;
             self.mark_dirty();
         }
         outcome
@@ -1705,6 +1751,12 @@ impl StateStore {
     /// button. Returns true if a workspace with that id existed.
     pub async fn remove_workspace(&self, id: WorkspaceId) -> bool {
         let mut s = self.inner.lock().await;
+        let closed_surfaces = s
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .map(workspace_pane_surface_ids)
+            .unwrap_or_default();
         let before = s.workspaces.len();
         s.workspaces.retain(|w| w.id != id);
         s.workspace_order.retain(|x| *x != id);
@@ -1714,6 +1766,7 @@ impl StateStore {
         let removed = s.workspaces.len() < before;
         drop(s);
         if removed {
+            self.forget_cleared_agent_surfaces(&closed_surfaces).await;
             self.mark_dirty();
         }
         removed
@@ -1726,6 +1779,11 @@ impl StateStore {
     /// nothing is left to activate.
     pub async fn remove_all_workspaces(&self) -> Vec<WorkspaceId> {
         let mut s = self.inner.lock().await;
+        let closed_surfaces = s
+            .workspaces
+            .iter()
+            .flat_map(workspace_pane_surface_ids)
+            .collect::<Vec<_>>();
         let removed: Vec<WorkspaceId> = s.workspace_order.clone();
         let removed = if removed.is_empty() {
             s.workspaces.iter().map(|w| w.id).collect()
@@ -1737,6 +1795,7 @@ impl StateStore {
         s.active_workspace = None;
         drop(s);
         if !removed.is_empty() {
+            self.forget_cleared_agent_surfaces(&closed_surfaces).await;
             self.mark_dirty();
         }
         removed
@@ -2046,6 +2105,7 @@ impl StateStore {
         }
         drop(s);
         if result.is_some() {
+            self.forget_cleared_agent_surfaces(&[surface_id]).await;
             self.mark_dirty();
         }
         result
@@ -3914,6 +3974,87 @@ Do you want to continue?";
             CloseOutcome::WorkspaceRemoved { workspace } if workspace == ws_id
         ));
         assert!(store.snapshot().await.workspaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn close_paths_prune_cleared_agent_surface_latches() {
+        let store = StateStore::new_lazy(State::default());
+
+        let close_surface_workspace = store
+            .create_workspace(
+                Some("close-surface".into()),
+                std::path::PathBuf::from("/tmp/close-surface"),
+            )
+            .await;
+        let workspace = store.get_workspace(close_surface_workspace).await.unwrap();
+        let pane = first_pane(&workspace);
+        let surface = first_pane_active_surface(&workspace);
+        store.cleared_agent_surfaces.lock().await.insert(surface);
+        store.close_surface(pane, surface).await.unwrap();
+        assert!(!store.cleared_agent_surfaces.lock().await.contains(&surface));
+
+        let close_pane_workspace = store
+            .create_workspace(
+                Some("close-pane".into()),
+                std::path::PathBuf::from("/tmp/close-pane"),
+            )
+            .await;
+        let original = first_pane(&store.get_workspace(close_pane_workspace).await.unwrap());
+        let (_, split) = store
+            .split_pane(original, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let workspace = store.get_workspace(close_pane_workspace).await.unwrap();
+        let split_surface = workspace.surfaces[0]
+            .root_pane
+            .active_surface_id(split)
+            .unwrap();
+        store
+            .cleared_agent_surfaces
+            .lock()
+            .await
+            .insert(split_surface);
+        store.close_pane(split).await.unwrap();
+        assert!(!store
+            .cleared_agent_surfaces
+            .lock()
+            .await
+            .contains(&split_surface));
+
+        let remove_workspace = store
+            .create_workspace(
+                Some("remove-workspace".into()),
+                std::path::PathBuf::from("/tmp/remove-workspace"),
+            )
+            .await;
+        let removed_surface =
+            first_pane_active_surface(&store.get_workspace(remove_workspace).await.unwrap());
+        store
+            .cleared_agent_surfaces
+            .lock()
+            .await
+            .insert(removed_surface);
+        assert!(store.remove_workspace(remove_workspace).await);
+        assert!(!store
+            .cleared_agent_surfaces
+            .lock()
+            .await
+            .contains(&removed_surface));
+
+        let remaining = store
+            .snapshot()
+            .await
+            .workspaces
+            .iter()
+            .flat_map(workspace_pane_surface_ids)
+            .collect::<Vec<_>>();
+        store
+            .cleared_agent_surfaces
+            .lock()
+            .await
+            .extend(remaining.iter().copied());
+        store.remove_all_workspaces().await;
+        assert!(store.cleared_agent_surfaces.lock().await.is_empty());
     }
 
     #[tokio::test]
