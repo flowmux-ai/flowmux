@@ -114,6 +114,13 @@ impl Pty {
         }
 
         // ---- Parent. ----
+        // forkpty leaves the master inheritable. Without FD_CLOEXEC every
+        // later child the GUI forks (other panes, helpers) inherits it and
+        // keeps the PTY alive after this process dies — writers on the
+        // slave side then never see a hangup.
+        unsafe {
+            libc::fcntl(master, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
         Ok(Pty {
             master,
             child: pid,
@@ -379,6 +386,18 @@ mod tests {
         let entries = envp_strings(envp);
 
         assert!(entries.iter().any(|e| e == "NO_COLOR=1"));
+    }
+
+    #[test]
+    fn master_fd_is_cloexec() {
+        let pty = Pty::spawn(&["sh", "-c", "true"], None, &[], 40, 8).expect("spawn sh");
+        let flags = unsafe { libc::fcntl(pty.master_fd(), libc::F_GETFD) };
+        assert!(flags >= 0, "F_GETFD failed");
+        assert_ne!(
+            flags & libc::FD_CLOEXEC,
+            0,
+            "PTY master must not leak into later spawned children"
+        );
     }
 
     /// A real child under a PTY: its stdout reaches the master fd. The GTK layer

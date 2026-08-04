@@ -947,7 +947,12 @@ impl GhosttyPane {
         .expect("forkpty spawn");
         pid.set(Some(pty.child_pid()));
         let child_pid = pty.child_pid();
-        let dup_fd = unsafe { libc::dup(pty.master_fd()) };
+        // F_DUPFD_CLOEXEC, not dup(2): a plain dup clears CLOEXEC, and a
+        // leaked master copy in a forked child keeps the pane's PTY alive
+        // after the GUI dies (slave writers then spin on EAGAIN forever
+        // instead of seeing a hangup).
+        let dup_fd = unsafe { libc::fcntl(pty.master_fd(), libc::F_DUPFD_CLOEXEC, 0) };
+        assert!(dup_fd >= 0, "F_DUPFD_CLOEXEC on PTY master failed");
         let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(dup_fd) };
         let vpty =
             vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE).expect("vte foreign pty");

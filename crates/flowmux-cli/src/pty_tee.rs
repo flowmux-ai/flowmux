@@ -123,6 +123,16 @@ pub fn run(
         return Err(anyhow!("pty-tee needs a child argv after `--`"));
     }
 
+    // If the GUI dies without our outer PTY hanging up (crash, or the
+    // master fd leaked into a sibling process), nothing would ever
+    // signal us and the tee would linger as an orphan. Ask the kernel
+    // for a SIGHUP on parent death so we tear down like a normal
+    // terminal hangup.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGHUP);
+    }
+
     // Resolve the daemon socket using the same precedence as the rest
     // of `flowmuxctl`: explicit --socket > FLOWMUX_SOCKET_PATH (env
     // injected by the GUI) > FLOWMUX_SOCKET (legacy) > XDG runtime.
@@ -700,6 +710,12 @@ fn read_some<'a>(fd: RawFd, buf: &'a mut [u8]) -> ReadOutcome<'a> {
 
 fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
     while !data.is_empty() {
+        // A blocked write must still honor SIGHUP/SIGTERM/SIGINT: the
+        // pump loop only checks this flag between polls, so a tee stuck
+        // here would otherwise be immune to graceful termination.
+        if TERMINATION_REQUESTED.load(Ordering::Relaxed) {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
         let n = unsafe { libc::write(fd, data.as_ptr() as *const _, data.len()) };
         if n > 0 {
             data = &data[n as usize..];
@@ -707,16 +723,38 @@ fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
         }
         let err = std::io::Error::last_os_error();
         match err.raw_os_error() {
-            Some(libc::EINTR) => continue,
+            Some(libc::EINTR) => {}
             // EAGAIN == EWOULDBLOCK on every Linux libc.
-            Some(libc::EAGAIN) => {
-                // Tiny spin — the receiver (kernel pty buffer or terminal pane)
-                // drains within microseconds in practice.
-                std::thread::yield_now();
-                continue;
-            }
+            Some(libc::EAGAIN) => wait_writable(fd)?,
             _ => return Err(err),
         }
+    }
+    Ok(())
+}
+
+/// Sleep in `poll` until `fd` is writable. Spinning on EAGAIN instead
+/// burned a full core for hours when an orphaned pane's reader was gone
+/// for good. POLLERR/POLLHUP surface as an error so callers tear the
+/// session down. The finite timeout is the backstop for a termination
+/// signal landing between the flag check in `write_all` and the poll.
+fn wait_writable(fd: RawFd) -> std::io::Result<()> {
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLOUT,
+        revents: 0,
+    };
+    let rc = unsafe { libc::poll(&mut pfd, 1, 100) };
+    if rc < 0 {
+        let err = std::io::Error::last_os_error();
+        // EINTR: a signal handler ran; let write_all re-check the
+        // termination flag.
+        if err.raw_os_error() == Some(libc::EINTR) {
+            return Ok(());
+        }
+        return Err(err);
+    }
+    if rc > 0 && pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+        return Err(std::io::ErrorKind::BrokenPipe.into());
     }
     Ok(())
 }
@@ -908,6 +946,53 @@ mod tests {
         state.queued.store(false, Ordering::Release);
         queue_output_refresh(&tx, &state);
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    /// Both cases share the global TERMINATION_REQUESTED flag, so they
+    /// live in one test to avoid a parallel-test race on it.
+    #[test]
+    fn blocked_write_all_honors_termination_and_waits_for_drain() {
+        let (pipe_r, pipe_w) = nix::unistd::pipe().expect("pipe");
+        set_nonblocking(pipe_w.as_raw_fd()).expect("nonblocking write end");
+
+        // Fill the pipe until the kernel buffer is at capacity.
+        let chunk = [0u8; 4096];
+        loop {
+            let n =
+                unsafe { libc::write(pipe_w.as_raw_fd(), chunk.as_ptr() as *const _, chunk.len()) };
+            if n < 0 {
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EAGAIN)
+                );
+                break;
+            }
+        }
+
+        // Case 1: termination requested → the blocked write gives up
+        // instead of retrying forever (the pre-fix code spun on EAGAIN
+        // here until SIGKILL).
+        TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
+        let err = write_all(pipe_w.as_raw_fd(), b"x").expect_err("blocked write must abort");
+        assert_eq!(err.kind(), std::io::ErrorKind::Interrupted);
+        TERMINATION_REQUESTED.store(false, Ordering::Relaxed);
+
+        // Case 2: a reader draining the pipe lets the same blocked
+        // write complete via the poll path.
+        let reader_fd = pipe_r.as_raw_fd();
+        let drainer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let mut sink = [0u8; 65536];
+            loop {
+                let n = unsafe { libc::read(reader_fd, sink.as_mut_ptr() as *mut _, sink.len()) };
+                if n <= 0 {
+                    break;
+                }
+            }
+        });
+        write_all(pipe_w.as_raw_fd(), b"payload").expect("write completes once drained");
+        drop(pipe_w);
+        drainer.join().expect("drainer thread");
     }
 
     #[test]
