@@ -34,6 +34,7 @@ done
 
 rg -Fq "SPDX-License-Identifier: GPL-3.0-or-later" resources/themes/example.theme
 rg -Fq "CC BY-SA 4.0" crates/flowmux-md-viewer/tests/fixtures/README.md
+rg -Fq "0.29.0.gfm.13/test/spec.txt" crates/flowmux-md-viewer/tests/fixtures/README.md
 
 sha256sum --check --status <<'EOF'
 d431b29d97b6f73e69d547109cf5081578fac931e72afe95639ebe766c1b2a20  crates/flowmux-md-viewer/tests/fixtures/commonmark-0.31.2-spec.json

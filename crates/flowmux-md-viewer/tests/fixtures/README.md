@@ -9,7 +9,7 @@
   [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 - `gfm-spec.txt` is an unmodified snapshot of the GitHub Flavored Markdown
   0.29-gfm specification from
-  <https://raw.githubusercontent.com/github/cmark-gfm/master/test/spec.txt>.
+  <https://raw.githubusercontent.com/github/cmark-gfm/0.29.0.gfm.13/test/spec.txt>.
   It is based on the CommonMark specification by John MacFarlane and licensed
   under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
