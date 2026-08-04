@@ -250,6 +250,12 @@ jobs:
           else:
               out.append("_Initial release — full history included above._")
 
+          out.append("")
+          out.append(
+              f"**Corresponding source**: "
+              f"https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz"
+          )
+
           print("\n".join(out).rstrip() + "\n")
           PY
 

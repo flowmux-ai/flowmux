@@ -8,31 +8,16 @@ under the terms of the GNU General Public License as published by the
 Free Software Foundation, either version 3 of the License, or (at your
 option) any later version. See the LICENSE file for the full text.
 
-flowmux is an unofficial Linux/GTK4 reimplementation inspired by cmux
-(https://github.com/manaflow-ai/cmux), a macOS/AppKit terminal for AI
-coding agents. The cmux repository's default license is
-GPL-3.0-or-later. Its LICENSE also states that separate commercial terms
-may be offered for material for which Manaflow controls the necessary
-rights. flowmux uses no commercial license and is distributed only under
-GPL-3.0-or-later.
+Browser automation compatibility
+--------------------------------
 
-Because cmux is available under GPL-3.0-or-later, the upstream copyright
-notice is preserved:
+The browser automation compatibility layer in crates/flowmux-browser was
+reimplemented with reference to cmux's GPL-3.0-or-later implementation
+(https://github.com/manaflow-ai/cmux):
 
     Copyright (c) 2024-present Manaflow, Inc.
 
-flowmux does not redistribute cmux source code; it independently
-reimplements observable behavior described in cmux's public
-documentation (README, cmux.com/docs, CHANGELOG, configuration schemas)
-for Linux desktop environments.
-
-Trademarks
-----------
-
-"cmux" and "Manaflow" are not used as project, package, binary, or
-distribution names by flowmux. The "flowmux" name is intentionally distinct.
-References to cmux in documentation are for attribution and behavioral
-reference only.
+It was modified for Rust/WebKitGTK in 2026.
 
 Third-party components
 ----------------------
