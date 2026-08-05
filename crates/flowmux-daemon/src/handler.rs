@@ -62,6 +62,57 @@ impl DaemonHandler {
         }
         Some(guard)
     }
+
+    /// Deliver a desktop notification whose click action routes back to `id`.
+    /// The GUI passes its in-process notification id; headless callers generate
+    /// one because they have no click target to restore.
+    pub async fn send_notification(
+        &self,
+        id: NotificationId,
+        pane: Option<PaneId>,
+        title: String,
+        body: String,
+        level: flowmux_core::NotificationLevel,
+    ) -> Response {
+        let n = Notification {
+            id,
+            level,
+            title,
+            body,
+            source_pane: pane,
+            created_at: chrono::Utc::now(),
+            read: false,
+        };
+        let mut desktop_id = None;
+        if let Some(guard) = self.ensure_notifier().await {
+            if let Some(notifier) = guard.as_ref() {
+                match notifier.send(&n).await {
+                    Ok(id) => {
+                        desktop_id = Some(id.clone());
+                        flowmux_config::notify_debug!(
+                            "daemon/notify",
+                            "desktop toast sent ok desktop_id={id}"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "desktop notification failed");
+                        flowmux_config::notify_debug!("daemon/notify", "desktop toast FAILED: {e}");
+                    }
+                }
+            } else {
+                flowmux_config::notify_debug!(
+                    "daemon/notify",
+                    "notifier guard present but inner None — D-Bus init never succeeded"
+                );
+            }
+        } else {
+            flowmux_config::notify_debug!(
+                "daemon/notify",
+                "ensure_notifier() returned None — no D-Bus session?"
+            );
+        }
+        Response::Notified { desktop_id }
+    }
 }
 
 impl Handler for DaemonHandler {
@@ -113,47 +164,8 @@ impl Handler for DaemonHandler {
                         "daemon/notify",
                         "Notify reached daemon handler pane={pane:?} title={title:?} level={level:?}"
                     );
-                    let n = Notification {
-                        id: NotificationId::new(),
-                        level,
-                        title,
-                        body,
-                        source_pane: pane,
-                        created_at: chrono::Utc::now(),
-                        read: false,
-                    };
-                    let mut desktop_id: Option<String> = None;
-                    if let Some(guard) = self.ensure_notifier().await {
-                        if let Some(notifier) = guard.as_ref() {
-                            match notifier.send(&n).await {
-                                Ok(id) => {
-                                    desktop_id = Some(id.clone());
-                                    flowmux_config::notify_debug!(
-                                        "daemon/notify",
-                                        "desktop toast sent ok desktop_id={id}"
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!(error = %e, "desktop notification failed");
-                                    flowmux_config::notify_debug!(
-                                        "daemon/notify",
-                                        "desktop toast FAILED: {e}"
-                                    );
-                                }
-                            }
-                        } else {
-                            flowmux_config::notify_debug!(
-                                "daemon/notify",
-                                "notifier guard present but inner None — D-Bus init never succeeded"
-                            );
-                        }
-                    } else {
-                        flowmux_config::notify_debug!(
-                            "daemon/notify",
-                            "ensure_notifier() returned None — no D-Bus session?"
-                        );
-                    }
-                    Response::Notified { desktop_id }
+                    self.send_notification(NotificationId::new(), pane, title, body, level)
+                        .await
                 }
 
                 Request::CloseDesktopNotification { desktop_id } => {

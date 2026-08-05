@@ -24,6 +24,7 @@ use flowmux_config::paths;
 use flowmux_daemon::{DaemonHandler, StateStore};
 use ipc_handler::GuiHandler;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
@@ -200,6 +201,13 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let _notification_action_router = match rt.block_on(register_notification_action_router()) {
+        Ok(connection) => Some(connection),
+        Err(error) => {
+            tracing::warn!(%error, "could not register desktop notification action router");
+            None
+        }
+    };
 
     // Each process claims only workspaces left by exited owners. Every save
     // briefly locks state.json, reloads it, replaces this window's slice, and
@@ -414,6 +422,70 @@ fn build_application() -> adw::Application {
 
 fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active
+}
+
+const APP_OBJECT_PATH: &str = "/com/flowmux/App";
+
+struct NotificationActionRouter;
+
+#[zbus::interface(name = "org.freedesktop.Application")]
+impl NotificationActionRouter {
+    async fn activate_action(
+        &self,
+        action_name: &str,
+        parameters: Vec<zbus::zvariant::OwnedValue>,
+        _platform_data: HashMap<String, zbus::zvariant::OwnedValue>,
+    ) {
+        if action_name != flowmux_notify::OPEN_NOTIFICATION_ACTION {
+            return;
+        }
+        let Some(target) = parameters
+            .first()
+            .and_then(|value| <&str>::try_from(value).ok())
+        else {
+            tracing::warn!("desktop notification action omitted its target");
+            return;
+        };
+        let Some((pid, id)) = parse_notification_action_target(target) else {
+            tracing::warn!(%target, "invalid desktop notification action target");
+            return;
+        };
+
+        let socket = paths::runtime_socket_for_pid(pid);
+        let result = async {
+            let client = flowmux_ipc::client::Client::connect(&socket).await?;
+            client
+                .call(flowmux_ipc::protocol::Request::NotificationOpen { id })
+                .await
+        }
+        .await;
+        match result {
+            Ok(flowmux_ipc::protocol::Response::NotificationState { changed: true }) => {}
+            Ok(response) => {
+                tracing::warn!(?response, ?socket, %id, "notification target was not opened")
+            }
+            Err(error) => {
+                tracing::warn!(%error, ?socket, %id, "notification target is unavailable")
+            }
+        }
+    }
+}
+
+async fn register_notification_action_router() -> zbus::Result<zbus::Connection> {
+    let connection = zbus::connection::Builder::session()?
+        .serve_at(APP_OBJECT_PATH, NotificationActionRouter)?
+        .build()
+        .await?;
+    let reply = connection
+        .request_name_with_flags(APP_ID, Default::default())
+        .await?;
+    tracing::debug!(?reply, "desktop notification action router registered");
+    Ok(connection)
+}
+
+fn parse_notification_action_target(target: &str) -> Option<(u32, flowmux_core::NotificationId)> {
+    let (pid, id) = target.split_once(':')?;
+    Some((pid.parse().ok()?, id.parse().ok()?))
 }
 
 /// Refresh the stable "current daemon" pointer used by env-less CLI
@@ -651,6 +723,17 @@ mod tests {
              assume this); got flags = {:?}",
             app.flags()
         );
+    }
+
+    #[test]
+    fn notification_action_target_restores_pid_and_entry_id() {
+        let id = flowmux_core::NotificationId::new();
+        assert_eq!(
+            parse_notification_action_target(&format!("4242:{id}")),
+            Some((4242, id))
+        );
+        assert_eq!(parse_notification_action_target("missing-pid"), None);
+        assert_eq!(parse_notification_action_target("nope:not-a-uuid"), None);
     }
 
     #[test]

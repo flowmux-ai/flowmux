@@ -938,6 +938,7 @@ dependencies = [
  "tracing",
  "vte4",
  "webkit6",
+ "zbus",
  "zip",
 ]
 

@@ -19,5 +19,5 @@ pub mod sender;
 pub mod stream;
 
 pub use osc::{parse_osc, OscNotification};
-pub use sender::{DesktopNotifier, DESKTOP_FILE_BASENAME};
+pub use sender::{DesktopNotifier, DESKTOP_FILE_BASENAME, OPEN_NOTIFICATION_ACTION};
 pub use stream::OscExtractor;

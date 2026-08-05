@@ -947,13 +947,7 @@ impl GuiHandler {
                 if let Some(entry_id) = entry_id {
                     let resp = self
                         .inner
-                        .handle(Request::Notify {
-                            pane,
-                            surface,
-                            title: title.clone(),
-                            body: body.clone(),
-                            level,
-                        })
+                        .send_notification(entry_id, pane, title.clone(), body.clone(), level)
                         .await;
                     // Forward the desktop id (when present) to the
                     // GUI store so the bell popover's "mark all

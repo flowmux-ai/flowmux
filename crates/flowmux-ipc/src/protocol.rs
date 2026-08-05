@@ -325,6 +325,7 @@ pub enum Request {
 
     /// `flowmux notifications open <id>` — mark read and focus the source pane.
     NotificationOpen {
+        #[serde(rename = "notification_id")]
         id: NotificationId,
     },
 
@@ -333,6 +334,7 @@ pub enum Request {
 
     /// `flowmux notifications mark-read <id>`
     NotificationMarkRead {
+        #[serde(rename = "notification_id")]
         id: NotificationId,
     },
 
@@ -725,6 +727,37 @@ mod tests {
         assert_eq!(value["verb"], "pane_split");
         assert_eq!(value["pane"], pane.to_string());
         assert_eq!(value["direction"], "vertical");
+    }
+
+    #[test]
+    fn notification_id_does_not_collide_with_envelope_id() {
+        let id = NotificationId::new();
+        for request in [
+            Request::NotificationOpen { id },
+            Request::NotificationMarkRead { id },
+        ] {
+            let env = Envelope {
+                id: 42,
+                payload: Payload::Request(request),
+            };
+            let json = serde_json::to_string(&env).unwrap();
+            let decoded: Envelope = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&json).unwrap()["id"],
+                42
+            );
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&json).unwrap()["notification_id"],
+                id.to_string()
+            );
+            assert!(matches!(
+                decoded.payload,
+                Payload::Request(Request::NotificationOpen { id: got })
+                    | Payload::Request(Request::NotificationMarkRead { id: got })
+                    if got == id
+            ));
+        }
     }
 
     #[test]
