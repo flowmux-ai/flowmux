@@ -616,8 +616,13 @@ impl BrowserPane {
             root.connect_destroy(move |_| native.web_view.as_super().removeFromSuperview());
         }
         {
+            // WKWebView is a native sibling of the GTK hierarchy, so page
+            // clicks never reach BrowserPane.root's GTK focus controller.
             let native = Rc::downgrade(&native);
             let web_widget = web_widget.downgrade();
+            let pane_id = pane_id.clone();
+            let on_focus = callbacks.on_focus.clone();
+            let native_focused = Cell::new(false);
             gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
                 let Some(native) = native.upgrade() else {
                     return glib::ControlFlow::Break;
@@ -625,7 +630,15 @@ impl BrowserPane {
                 let Some(web_widget) = web_widget.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
+                if !web_widget.is_mapped() {
+                    native_focused.set(false);
+                    return glib::ControlFlow::Continue;
+                }
                 sync_native_view_frame(&native.web_view, &web_widget);
+                let focused = native_view_has_focus(&native.web_view);
+                if native_focus_entered(&native_focused, focused) {
+                    (on_focus.borrow_mut())(pane_id.get());
+                }
                 glib::ControlFlow::Continue
             });
         }
@@ -1044,6 +1057,22 @@ fn native_content_view(window: &gtk::Window) -> Option<Retained<NSView>> {
     unsafe { (&*(ns_window as *mut NSWindow)).contentView() }
 }
 
+fn native_view_has_focus(web_view: &WKWebView) -> bool {
+    let web_view = web_view.as_super();
+    let Some(responder) = web_view.window().and_then(|window| window.firstResponder()) else {
+        return false;
+    };
+    let Some(responder_view) = responder.downcast_ref::<NSView>() else {
+        return false;
+    };
+    std::ptr::eq(responder_view, web_view) || responder_view.isDescendantOf(web_view)
+}
+
+fn native_focus_entered(previous: &Cell<bool>, focused: bool) -> bool {
+    let was_focused = previous.replace(focused);
+    focused && !was_focused
+}
+
 fn focus_native_view(web_view: &WKWebView) {
     let view = web_view.as_super();
     if let Some(window) = view.window() {
@@ -1237,6 +1266,16 @@ fn uuid_for_profile_slug(slug: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_focus_reports_each_browser_entry() {
+        let focused = Cell::new(false);
+
+        assert!(native_focus_entered(&focused, true));
+        assert!(!native_focus_entered(&focused, true));
+        assert!(!native_focus_entered(&focused, false));
+        assert!(native_focus_entered(&focused, true));
+    }
 
     #[test]
     fn normalize_uri_matches_webkit_backend_rules() {
