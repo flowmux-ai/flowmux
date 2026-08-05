@@ -549,13 +549,15 @@ paned > separator {{
 }}
 .flowmux-agent-bar-item.flowmux-agent-bar-working {{
     background-color: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.58);
 }}
 .flowmux-agent-bar-item:hover {{
     background-color: {control_hover};
 }}
 .flowmux-agent-bar-item.focused {{
     border-color: {focus};
+}}
+.flowmux-agent-bar-item.flowmux-agent-bar-working.focused {{
+    border-color: transparent;
 }}
 .flowmux-agent-bar-item.flowmux-attention {{
     background-color: rgba(245, 158, 11, 0.18);
@@ -1069,6 +1071,19 @@ mod tests {
                 && css.contains(".flowmux-agent-bar-item.flowmux-drop-before")
                 && css.contains(&format!("min-width: {AGENT_BAR_ITEM_MIN_WIDTH_PX}px")),
             "agent bar must keep its bottom-bar and item sizing rules"
+        );
+
+        assert!(
+            css.contains(
+                ".flowmux-agent-bar-item.flowmux-agent-bar-working {\n    background-color: rgba(245, 158, 11, 0.12);\n}"
+            ),
+            "working Agent items must use an orange background without a border"
+        );
+        assert!(
+            css.contains(
+                ".flowmux-agent-bar-item.flowmux-agent-bar-working.focused {\n    border-color: transparent;\n}"
+            ),
+            "focused working Agent items must keep their border invisible"
         );
     }
 
