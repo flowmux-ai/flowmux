@@ -6,7 +6,7 @@ use crate::usage::{
 };
 use chrono::{DateTime, Local, Utc};
 use gtk::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -32,6 +32,9 @@ impl UsagePopover {
         popover.set_position(gtk::PositionType::Top);
 
         let state = Rc::new(RefCell::new(UsagePanelState::default()));
+        // Set while a manual (refresh-button) refresh is in flight so its
+        // result render does not replay the bar animation.
+        let manual_refresh = Rc::new(Cell::new(false));
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         root.set_margin_top(10);
@@ -68,10 +71,11 @@ impl UsagePopover {
         scroll.set_child(Some(&cards));
         root.append(&scroll);
         popover.set_child(Some(&root));
-        render_usage(&cards, &refresh_button, &spinner, &state.borrow());
+        render_usage(&cards, &refresh_button, &spinner, &state.borrow(), false);
 
         let (result_tx, result_rx) = async_channel::bounded(1);
         let state_for_results = state.clone();
+        let manual_for_results = manual_refresh.clone();
         let popover_weak = popover.downgrade();
         let cards_weak = cards.downgrade();
         let refresh_weak = refresh_button.downgrade();
@@ -85,6 +89,7 @@ impl UsagePopover {
                     }
                     state.finish_refresh(Utc::now());
                 }
+                let animate = !manual_for_results.replace(false);
                 let Some(popover) = popover_weak.upgrade() else {
                     break;
                 };
@@ -96,7 +101,13 @@ impl UsagePopover {
                     ) else {
                         break;
                     };
-                    render_usage(&cards, &refresh, &spinner, &state_for_results.borrow());
+                    render_usage(
+                        &cards,
+                        &refresh,
+                        &spinner,
+                        &state_for_results.borrow(),
+                        animate,
+                    );
                 }
             }
         });
@@ -119,15 +130,18 @@ impl UsagePopover {
                 &refresh_for_show,
                 &spinner_for_show,
                 &state_for_show.borrow(),
+                true,
             );
         });
 
         let state_for_refresh = state.clone();
+        let manual_for_refresh = manual_refresh.clone();
         let result_tx_for_refresh = result_tx.clone();
         let handle_for_refresh = tokio_handle.clone();
         let cards_for_refresh = cards.clone();
         let spinner_for_refresh = spinner.clone();
         refresh_button.connect_clicked(move |button| {
+            manual_for_refresh.set(true);
             request_refresh(
                 &state_for_refresh,
                 true,
@@ -139,6 +153,7 @@ impl UsagePopover {
                 button,
                 &spinner_for_refresh,
                 &state_for_refresh.borrow(),
+                false,
             );
         });
 
@@ -249,13 +264,14 @@ fn render_usage(
     refresh_button: &gtk::Button,
     spinner: &gtk::Spinner,
     state: &UsagePanelState,
+    animate: bool,
 ) {
     set_refresh_controls(refresh_button, spinner, state.refreshing);
     while let Some(child) = cards.first_child() {
         cards.remove(&child);
     }
-    cards.append(&provider_card(&state.claude, state.refreshing));
-    cards.append(&provider_card(&state.codex, state.refreshing));
+    cards.append(&provider_card(&state.claude, state.refreshing, animate));
+    cards.append(&provider_card(&state.codex, state.refreshing, animate));
 }
 
 fn set_refresh_controls(refresh_button: &gtk::Button, spinner: &gtk::Spinner, refreshing: bool) {
@@ -268,7 +284,7 @@ fn set_refresh_controls(refresh_button: &gtk::Button, spinner: &gtk::Spinner, re
     }
 }
 
-fn provider_card(state: &ProviderState, refreshing: bool) -> gtk::Widget {
+fn provider_card(state: &ProviderState, refreshing: bool, animate: bool) -> gtk::Widget {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::None);
     list.add_css_class("boxed-list");
@@ -325,7 +341,7 @@ fn provider_card(state: &ProviderState, refreshing: bool) -> gtk::Widget {
             content.append(&empty);
         } else {
             for window in &limits.value {
-                content.append(&limit_row(window));
+                content.append(&limit_row(window, animate));
             }
         }
     }
@@ -346,7 +362,7 @@ fn provider_card(state: &ProviderState, refreshing: bool) -> gtk::Widget {
     list.upcast()
 }
 
-fn limit_row(window: &UsageWindow) -> gtk::Widget {
+fn limit_row(window: &UsageWindow, animate: bool) -> gtk::Widget {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 3);
     root.set_margin_top(2);
 
@@ -366,7 +382,11 @@ fn limit_row(window: &UsageWindow) -> gtk::Widget {
     root.append(&header);
 
     let progress = gtk::ProgressBar::new();
-    progress.set_fraction(progress_fraction(window.used_percent));
+    if animate {
+        animate_fraction(&progress, progress_fraction(window.used_percent));
+    } else {
+        progress.set_fraction(progress_fraction(window.used_percent));
+    }
     progress.set_hexpand(true);
     root.append(&progress);
 
@@ -378,6 +398,40 @@ fn limit_row(window: &UsageWindow) -> gtk::Widget {
         root.append(&reset);
     }
     root.upcast()
+}
+
+/// How long a limit bar takes to fill from empty to its value, in
+/// microseconds (frame clock time unit).
+const BAR_ANIMATION_US: f64 = 500_000.0;
+
+/// Grow the bar from 0 to `target` over 0.5 s once it appears on screen.
+/// Cards are rebuilt on every render, so each popover open or refresh
+/// result produces fresh bars and replays the animation.
+fn animate_fraction(progress: &gtk::ProgressBar, target: f64) {
+    progress.set_fraction(0.0);
+    progress.connect_map(move |progress| {
+        let animations_enabled =
+            gtk::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations());
+        if target <= 0.0 || !animations_enabled {
+            progress.set_fraction(target);
+            return;
+        }
+        let start_time = std::cell::Cell::new(None);
+        progress.add_tick_callback(move |progress, clock| {
+            let now = clock.frame_time();
+            let start = start_time.get().unwrap_or_else(|| {
+                start_time.set(Some(now));
+                now
+            });
+            let t = ((now - start) as f64 / BAR_ANIMATION_US).clamp(0.0, 1.0);
+            progress.set_fraction(target * t);
+            if t < 1.0 {
+                gtk::glib::ControlFlow::Continue
+            } else {
+                gtk::glib::ControlFlow::Break
+            }
+        });
+    });
 }
 
 fn provider_name(provider: Provider) -> &'static str {
