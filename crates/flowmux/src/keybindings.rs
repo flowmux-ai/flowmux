@@ -1666,6 +1666,17 @@ mod tests {
 
         gtk::prelude::WidgetExt::activate_action(&window, TOGGLE_USAGE_POPOVER_FULL_ACTION, None)
             .expect("toggle-usage-popover action should be registered");
+        let popover = usage_button.popover().unwrap();
+        for _ in 0..100 {
+            if popover.is_mapped() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            popover.is_mapped(),
+            "AI Usage popover should finish opening"
+        );
         gtk::prelude::GtkWindowExt::set_focus(&window, Some(&usage_button));
         assert_ne!(
             gtk::prelude::GtkWindowExt::focus(&window),
@@ -1683,7 +1694,12 @@ mod tests {
             ),
             glib::Propagation::Stop
         );
-        glib::timeout_future(std::time::Duration::from_millis(250)).await;
+        for _ in 0..100 {
+            if gtk::prelude::GtkWindowExt::focus(&window) == Some(terminal_focus.clone()) {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
         assert_eq!(
             gtk::prelude::GtkWindowExt::focus(&window),
             Some(terminal_focus),
