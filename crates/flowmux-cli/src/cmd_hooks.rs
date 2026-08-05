@@ -6,6 +6,47 @@
 use super::*;
 
 const RESUME_RETURNED_REASON: &str = "flowmux_resume_returned";
+const FLOWMUX_AGENT_NAME_ENV: &str = "FLOWMUX_AGENT_NAME";
+
+pub(crate) fn select_hook_agent_name(
+    reported: &str,
+    env_name: Option<&str>,
+    process_name: Option<&str>,
+) -> String {
+    env_name
+        .and_then(known_agent_name)
+        .or_else(|| process_name.and_then(known_agent_name))
+        .or_else(|| known_agent_name(reported))
+        .unwrap_or(reported)
+        .to_ascii_lowercase()
+}
+
+fn known_agent_name(name: &str) -> Option<&'static str> {
+    let name = name.trim();
+    flowmux_procmon::KNOWN_AGENT_COMMS
+        .iter()
+        .copied()
+        .find(|known| known.eq_ignore_ascii_case(name))
+}
+
+fn resolve_hook_agent_name(reported: &str, pid: Option<u32>) -> String {
+    let env_name = std::env::var(FLOWMUX_AGENT_NAME_ENV).ok();
+    let process_name = pid.and_then(flowmux_procmon::agent_name_for_pid);
+    select_hook_agent_name(reported, env_name.as_deref(), process_name)
+}
+
+fn hook_agent_display_name(agent: &str) -> &str {
+    match agent {
+        "codex" => "Codex",
+        "claude" => "Claude",
+        "opencode" => "OpenCode",
+        "cline" => "Cline",
+        "gemini" => "Gemini",
+        "aider" => "Aider",
+        "goose" => "Goose",
+        _ => agent,
+    }
+}
 
 /// Claude reports deliberate session replacement/termination with a specific
 /// reason. `other` is non-specific, so retaining that binding preserves
@@ -19,6 +60,7 @@ pub(crate) fn claude_session_end_forgets_resume_binding(reason: Option<&str>) ->
 }
 
 pub(crate) fn claude_session_end_forget_request(
+    agent: &str,
     reason: Option<&str>,
     surface: Option<SurfaceId>,
 ) -> Option<Request> {
@@ -26,7 +68,7 @@ pub(crate) fn claude_session_end_forget_request(
         return None;
     }
     Some(Request::AgentSessionForget {
-        agent: "claude".into(),
+        agent: agent.to_ascii_lowercase(),
         surface: surface?,
     })
 }
@@ -257,6 +299,8 @@ pub(crate) async fn run_claude_hook_event(
         ClaudeHookEvent::SessionStart => pid_from_env_or_parent(),
         _ => pid_from_env(),
     };
+    let agent = resolve_hook_agent_name("claude", pid);
+    let agent_display_name = hook_agent_display_name(&agent);
     // Most events carry exactly one request; Stop/Notification carry two
     // (the user-facing toast *and* the activity flip) so the existing
     // "ready" notification keeps firing alongside the new live-status
@@ -267,7 +311,7 @@ pub(crate) async fn run_claude_hook_event(
             let body = normalized_activity_text(input.last_assistant_message.as_deref());
             let status_text = completed_activity_text(body.as_deref());
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 Some(Idle),
                 pid,
                 pane,
@@ -276,13 +320,18 @@ pub(crate) async fn run_claude_hook_event(
                 Some(&status_text),
                 input.session_id.as_deref(),
             ));
-            reqs.push(build_stop_notify("Claude", body.as_deref(), pane, surface));
+            reqs.push(build_stop_notify(
+                agent_display_name,
+                body.as_deref(),
+                pane,
+                surface,
+            ));
         }
         ClaudeHookEvent::Notification => {
             let msg = normalized_activity_text(input.message.as_deref());
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 Some(NeedsInput),
                 pid,
                 pane,
@@ -292,7 +341,7 @@ pub(crate) async fn run_claude_hook_event(
                 input.session_id.as_deref(),
             ));
             reqs.push(build_notification_notify(
-                "Claude",
+                agent_display_name,
                 msg.as_deref(),
                 pane,
                 surface,
@@ -302,7 +351,7 @@ pub(crate) async fn run_claude_hook_event(
         // liveness sweep) without claiming it is working yet.
         ClaudeHookEvent::SessionStart => {
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 Some(Idle),
                 pid,
                 pane,
@@ -316,7 +365,7 @@ pub(crate) async fn run_claude_hook_event(
         // actively working this turn — and clears any "needs input".
         ClaudeHookEvent::PromptSubmit => {
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 Some(Running),
                 pid,
                 pane,
@@ -329,7 +378,7 @@ pub(crate) async fn run_claude_hook_event(
         ClaudeHookEvent::PreToolUse => {
             let status_text = tool_activity_text(input.tool_name.as_deref());
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 Some(Running),
                 pid,
                 pane,
@@ -344,7 +393,7 @@ pub(crate) async fn run_claude_hook_event(
         // SessionEnd too.
         ClaudeHookEvent::SessionEnd => {
             reqs.push(build_activity_update_with_metadata(
-                "claude",
+                &agent,
                 None,
                 pid,
                 pane,
@@ -354,7 +403,7 @@ pub(crate) async fn run_claude_hook_event(
                 input.session_id.as_deref(),
             ));
             if let Some(request) =
-                claude_session_end_forget_request(input.reason.as_deref(), surface)
+                claude_session_end_forget_request(&agent, input.reason.as_deref(), surface)
             {
                 reqs.push(request);
             }
@@ -368,7 +417,7 @@ pub(crate) async fn run_claude_hook_event(
     Ok(())
 }
 pub(crate) async fn run_generic_agent_hook_event(
-    agent: &str,
+    reported_agent: &str,
     event: &AgentHookEvent,
     socket: Option<PathBuf>,
 ) -> anyhow::Result<()> {
@@ -388,28 +437,30 @@ pub(crate) async fn run_generic_agent_hook_event(
     // env, preserving the legacy code path.
     let pane = cli_pane.or(env_pane);
     let surface = cli_surface.or(env_surface);
-    flowmux_config::notify_debug!(
-        "cli/hook",
-        "entry agent={agent:?} event={event:?} cli_pane={cli_pane:?} cli_surface={cli_surface:?} env_pane={env_pane:?} env_surface={env_surface:?} resolved_pane={pane:?} resolved_surface={surface:?} socket_arg={socket:?}"
-    );
     use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
     let pid = match event {
         AgentHookEvent::SessionStart { .. } => hooks::pid_from_env_or_parent(),
         _ => hooks::pid_from_env(),
     };
+    let agent = resolve_hook_agent_name(reported_agent, pid);
+    let agent_display_name = hook_agent_display_name(&agent);
+    flowmux_config::notify_debug!(
+        "cli/hook",
+        "entry reported_agent={reported_agent:?} resolved_agent={agent:?} event={event:?} cli_pane={cli_pane:?} cli_surface={cli_surface:?} env_pane={env_pane:?} env_surface={env_surface:?} resolved_pane={pane:?} resolved_surface={surface:?} socket_arg={socket:?}"
+    );
     let mut reqs: Vec<_> = Vec::new();
     match event {
         AgentHookEvent::Stop { args, .. } => {
             let input = read_codex_hook_input(args);
             if let Some(request) =
-                generic_resume_return_forget_request(agent, input.reason.as_deref(), surface)
+                generic_resume_return_forget_request(&agent, input.reason.as_deref(), surface)
             {
                 reqs.push(request);
             } else {
                 let body = normalized_activity_text(input.last_assistant_message.as_deref());
                 let status_text = completed_activity_text(body.as_deref());
                 reqs.push(build_activity_update_with_metadata(
-                    agent,
+                    &agent,
                     Some(Idle),
                     pid,
                     pane,
@@ -418,7 +469,12 @@ pub(crate) async fn run_generic_agent_hook_event(
                     Some(&status_text),
                     input.session_id.as_deref(),
                 ));
-                reqs.push(build_stop_notify(agent, body.as_deref(), pane, surface));
+                reqs.push(build_stop_notify(
+                    agent_display_name,
+                    body.as_deref(),
+                    pane,
+                    surface,
+                ));
             }
         }
         AgentHookEvent::Notification { args, .. } => {
@@ -426,7 +482,7 @@ pub(crate) async fn run_generic_agent_hook_event(
             let msg = normalized_activity_text(input.message.as_deref());
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(
-                agent,
+                &agent,
                 Some(NeedsInput),
                 pid,
                 pane,
@@ -436,7 +492,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 input.session_id.as_deref(),
             ));
             reqs.push(build_notification_notify(
-                agent,
+                agent_display_name,
                 msg.as_deref(),
                 pane,
                 surface,
@@ -445,7 +501,7 @@ pub(crate) async fn run_generic_agent_hook_event(
         AgentHookEvent::Running { args, .. } => {
             let input = read_codex_hook_input(args);
             reqs.push(build_activity_update_with_metadata(
-                agent,
+                &agent,
                 Some(Running),
                 pid,
                 pane,
@@ -461,7 +517,7 @@ pub(crate) async fn run_generic_agent_hook_event(
         AgentHookEvent::SessionStart { args, .. } => {
             let input = read_codex_hook_input(args);
             reqs.push(build_unknown_activity_update_with_session(
-                agent,
+                &agent,
                 pid,
                 pane,
                 surface,

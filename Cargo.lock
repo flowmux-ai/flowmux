@@ -968,6 +968,7 @@ dependencies = [
  "flowmux-daemon",
  "flowmux-ipc",
  "flowmux-notify",
+ "flowmux-procmon",
  "flowmux-state",
  "flowmux-terminal",
  "libc",

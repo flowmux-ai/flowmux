@@ -1529,14 +1529,32 @@ fn claude_session_end_only_forgets_deliberate_termination() {
 
     let surface = SurfaceId::new();
     assert!(matches!(
-        claude_session_end_forget_request(Some("prompt_input_exit"), Some(surface)),
+        claude_session_end_forget_request("codex", Some("prompt_input_exit"), Some(surface)),
         Some(Request::AgentSessionForget {
             agent,
             surface: got_surface,
-        }) if agent == "claude" && got_surface == surface
+        }) if agent == "codex" && got_surface == surface
     ));
-    assert!(claude_session_end_forget_request(Some("other"), Some(surface)).is_none());
-    assert!(claude_session_end_forget_request(Some("prompt_input_exit"), None).is_none());
+    assert!(claude_session_end_forget_request("claude", Some("other"), Some(surface)).is_none());
+    assert!(claude_session_end_forget_request("claude", Some("prompt_input_exit"), None).is_none());
+}
+
+#[test]
+fn hook_agent_identity_prefers_wrapper_then_process_truth() {
+    use crate::cmd_hooks::select_hook_agent_name;
+
+    assert_eq!(
+        select_hook_agent_name("claude", Some("codex"), Some("claude")),
+        "codex"
+    );
+    assert_eq!(
+        select_hook_agent_name("claude", None, Some("codex")),
+        "codex"
+    );
+    assert_eq!(
+        select_hook_agent_name("OpenCode", Some("unknown"), None),
+        "opencode"
+    );
 }
 
 #[test]

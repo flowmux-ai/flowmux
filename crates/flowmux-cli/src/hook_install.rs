@@ -338,9 +338,9 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 
 /// Agents that get a PID-capturing wrapper shim. The GUI prepends the
 /// shim dir to a PTY's `PATH`, so typing `claude` / `codex` resolves to
-/// these scripts first. They export `FLOWMUX_AGENT_PID=$$` (read by the
-/// hooks) and then `exec` the real binary, so they are otherwise fully
-/// transparent.
+/// these scripts first. They export `FLOWMUX_AGENT_PID=$$` and the canonical
+/// agent name (read by the hooks), then `exec` the real binary, so they are
+/// otherwise fully transparent.
 const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "cline"];
 
 /// Body of a wrapper shim for `agent`. Skips flowmux-managed shims when
@@ -356,6 +356,7 @@ fn shim_script(agent: &str) -> String {
 # then transparently exec's the real binary. Safe to run outside flowmux.
 if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
+  export FLOWMUX_AGENT_NAME={agent}
   if command -v flowmuxctl >/dev/null 2>&1; then
     flowmuxctl hooks {agent} session-start >/dev/null 2>&1 </dev/null &
   elif command -v flowmux >/dev/null 2>&1; then
@@ -1684,6 +1685,7 @@ mod tests {
         let body = shim_script("claude");
         assert!(body.starts_with("#!/usr/bin/env bash"));
         assert!(body.contains("export FLOWMUX_AGENT_PID=$$"));
+        assert!(body.contains("export FLOWMUX_AGENT_NAME=claude"));
         // Only when inside flowmux, so it stays transparent elsewhere.
         assert!(body.contains("FLOWMUX_SURFACE_ID"));
         // Registers presence even for agents without their own startup hook.

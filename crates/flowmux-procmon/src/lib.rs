@@ -78,7 +78,20 @@ pub fn descendants(root: u32) -> Result<HashSet<u32>, ProcError> {
     Ok(out)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub fn descendants(root: u32) -> Result<HashSet<u32>, ProcError> {
+    let mut out = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(pid) = stack.pop() {
+        if !out.insert(pid) {
+            continue;
+        }
+        stack.extend(child_pids(pid));
+    }
+    Ok(out)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn descendants(root: u32) -> Result<HashSet<u32>, ProcError> {
     Ok(HashSet::from([root]))
 }
@@ -91,7 +104,20 @@ pub fn comm_of(pid: u32) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub fn comm_of(pid: u32) -> Option<String> {
+    let mut buffer = [0_u8; 256];
+    let len = unsafe {
+        libc::proc_name(
+            pid as libc::c_int,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+        )
+    };
+    (len > 0).then(|| String::from_utf8_lossy(&buffer[..len as usize]).into_owned())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn comm_of(pid: u32) -> Option<String> {
     if pid != std::process::id() {
         return None;
@@ -123,7 +149,7 @@ fn match_agent_comm(comm: &str) -> Option<&'static str> {
 /// never sets `process.title`, so its `comm` stays `node` and
 /// [`match_agent_comm`] can't see it — unlike `claude` (sets `process.title`)
 /// or `codex` (native binary). Lowercase for case-insensitive comparison.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_SCRIPT_INTERPRETERS: &[&str] = &["node", "bun", "deno", "python", "python3"];
 
 /// Resolve an agent name from a process's argv when `argv[0]` is a known script
@@ -133,7 +159,7 @@ const AGENT_SCRIPT_INTERPRETERS: &[&str] = &["node", "bun", "deno", "python", "p
 /// A non-interpreter `argv[0]` returns `None`: native binaries are matched by
 /// `comm` instead, so a shell merely touching a file named `cline` can't
 /// false-match.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
     let interpreter = std::path::Path::new(argv.first()?)
         .file_name()?
@@ -171,16 +197,100 @@ fn cmdline_of(pid: u32) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(target_os = "macos")]
+fn cmdline_of(pid: u32) -> Vec<String> {
+    let mut argmax_mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    let mut argmax = 0_i32;
+    let mut argmax_size = std::mem::size_of_val(&argmax);
+    let rc = unsafe {
+        libc::sysctl(
+            argmax_mib.as_mut_ptr(),
+            argmax_mib.len() as libc::c_uint,
+            (&mut argmax as *mut i32).cast(),
+            &mut argmax_size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || argmax <= 0 {
+        return Vec::new();
+    }
+
+    let mut raw = vec![0_u8; argmax as usize];
+    let mut raw_size = raw.len();
+    let mut procargs_mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
+    let rc = unsafe {
+        libc::sysctl(
+            procargs_mib.as_mut_ptr(),
+            procargs_mib.len() as libc::c_uint,
+            raw.as_mut_ptr().cast(),
+            &mut raw_size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return Vec::new();
+    }
+    raw.truncate(raw_size);
+    parse_macos_procargs(&raw)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_procargs(raw: &[u8]) -> Vec<String> {
+    let Some(argc_bytes) = raw.get(..std::mem::size_of::<i32>()) else {
+        return Vec::new();
+    };
+    let argc = i32::from_ne_bytes(argc_bytes.try_into().expect("argc is four bytes"));
+    if argc <= 0 {
+        return Vec::new();
+    }
+
+    let mut cursor = std::mem::size_of::<i32>();
+    while cursor < raw.len() && raw[cursor] != 0 {
+        cursor += 1;
+    }
+    while cursor < raw.len() && raw[cursor] == 0 {
+        cursor += 1;
+    }
+
+    let mut argv = Vec::with_capacity(argc as usize);
+    for _ in 0..argc {
+        let start = cursor;
+        while cursor < raw.len() && raw[cursor] != 0 {
+            cursor += 1;
+        }
+        if cursor == raw.len() {
+            return Vec::new();
+        }
+        argv.push(String::from_utf8_lossy(&raw[start..cursor]).into_owned());
+        cursor += 1;
+    }
+    argv
+}
+
 /// Canonical agent name for a single PID: the kernel `comm` first (covers
 /// native binaries and agents that set `process.title`), falling back to the
 /// argv script name for interpreter-hosted agents like Cline. See
 /// [`agent_from_argv`].
-#[cfg(target_os = "linux")]
-fn agent_of_pid(pid: u32) -> Option<&'static str> {
-    if let Some(name) = comm_of(pid).as_deref().and_then(match_agent_comm) {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn agent_name_for_pid(pid: u32) -> Option<&'static str> {
+    let comm = comm_of(pid)?;
+    if let Some(name) = match_agent_comm(&comm) {
         return Some(name);
     }
+    if !AGENT_SCRIPT_INTERPRETERS
+        .iter()
+        .any(|interpreter| interpreter.eq_ignore_ascii_case(comm.trim()))
+    {
+        return None;
+    }
     agent_from_argv(&cmdline_of(pid))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn agent_name_for_pid(pid: u32) -> Option<&'static str> {
+    comm_of(pid).as_deref().and_then(match_agent_comm)
 }
 
 /// Direct child PIDs of `pid`, unioned across **every** thread of the
@@ -214,9 +324,33 @@ fn read_children(pid: u32) -> Option<Vec<u32>> {
     any.then_some(kids)
 }
 
+#[cfg(target_os = "macos")]
+fn child_pids(pid: u32) -> Vec<u32> {
+    let count = unsafe { libc::proc_listchildpids(pid as libc::pid_t, std::ptr::null_mut(), 0) };
+    if count <= 0 {
+        return Vec::new();
+    }
+    let mut children = vec![0_i32; count as usize];
+    let written = unsafe {
+        libc::proc_listchildpids(
+            pid as libc::pid_t,
+            children.as_mut_ptr().cast(),
+            std::mem::size_of_val(children.as_slice()) as libc::c_int,
+        )
+    };
+    if written <= 0 {
+        return Vec::new();
+    }
+    children.truncate(written as usize);
+    children
+        .into_iter()
+        .filter_map(|pid| u32::try_from(pid).ok())
+        .collect()
+}
+
 /// Cap on process-tree nodes visited per detection, a defensive bound so a
 /// pathological tree can never turn one poll into an unbounded `/proc` walk.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_TREE_NODE_CAP: usize = 512;
 
 /// Detect which AI coding agent, if any, is running anywhere in the process
@@ -239,7 +373,7 @@ pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
         // Feature unavailable: one full scan, matching the old behaviour.
         let mut pids: Vec<u32> = descendants(root).ok()?.into_iter().collect();
         pids.sort_unstable();
-        return pids.iter().copied().find_map(agent_of_pid);
+        return pids.iter().copied().find_map(agent_name_for_pid);
     }
     let mut stack = vec![root];
     let mut seen = HashSet::new();
@@ -247,7 +381,7 @@ pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
         if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
             continue;
         }
-        if let Some(name) = agent_of_pid(pid) {
+        if let Some(name) = agent_name_for_pid(pid) {
             return Some(name);
         }
         stack.extend(read_children(pid).unwrap_or_default());
@@ -255,7 +389,23 @@ pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
     None
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
+    let mut stack = vec![root];
+    let mut seen = HashSet::new();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
+            continue;
+        }
+        if let Some(name) = agent_name_for_pid(pid) {
+            return Some(name);
+        }
+        stack.extend(child_pids(pid));
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
     descendants(root)
         .ok()?
@@ -383,7 +533,7 @@ mod tests {
         assert_eq!(match_agent_comm("python"), None);
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn agent_from_argv_resolves_interpreter_hosted_agents() {
         let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
@@ -412,6 +562,42 @@ mod tests {
         assert_eq!(agent_from_argv(&argv(&["bash", "cline"])), None);
         // An interpreter running an unrelated script matches nothing.
         assert_eq!(agent_from_argv(&argv(&["node", "/srv/server.js"])), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_procargs_parser_returns_only_argv() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&3_i32.to_ne_bytes());
+        raw.extend_from_slice(b"/usr/local/bin/node\0\0");
+        raw.extend_from_slice(b"node\0/Users/dev/.local/bin/codex\0--quiet\0");
+        raw.extend_from_slice(b"HOME=/Users/dev\0");
+
+        let argv = parse_macos_procargs(&raw);
+        assert_eq!(argv, ["node", "/Users/dev/.local/bin/codex", "--quiet"]);
+        assert_eq!(agent_from_argv(&argv), Some("codex"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_reads_current_process_name_and_argv() {
+        let pid = std::process::id();
+        assert!(comm_of(pid).is_some_and(|name| !name.is_empty()));
+        assert!(!cmdline_of(pid).is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_descendants_include_a_live_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let descendants = descendants(std::process::id()).unwrap();
+        let found = descendants.contains(&child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(found, "child {} missing from {descendants:?}", child.id());
     }
 
     #[test]
