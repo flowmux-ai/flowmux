@@ -259,7 +259,7 @@ impl ResolvedTheme {
     /// CSS rules that paint the pane frame and tint the sidebar to match
     /// the terminal background. `focus_border_color` is the hex color chosen
     /// in options, and `focus_border_alpha` is the 0.0..=1.0 opacity from
-    /// the same options. The focused pane's 1px border is rendered as
+    /// the same options. The focused pane's 2px header accent is rendered as
     /// `rgba(r,g,b,alpha)` so slider changes apply immediately.
     pub fn css(&self, focus_border_color: &str, focus_border_alpha: f32) -> String {
         let bg_css = rgba_css(&self.bg);
@@ -298,10 +298,10 @@ impl ResolvedTheme {
 }}
 .flowmux-pane.focused .flowmux-pane-tabbar,
 .flowmux-pane.flowmux-notification .flowmux-pane-tabbar {{
-    box-shadow: inset 0 2px {focus};
+    border-top: 2px solid {focus};
 }}
 .flowmux-pane.focused.flowmux-solo .flowmux-pane-tabbar {{
-    box-shadow: none;
+    border-top-color: transparent;
 }}
 .flowmux-pane.flowmux-pane-zoomed {{
     box-shadow: inset 0 0 0 2px {focus_full};
@@ -318,6 +318,7 @@ impl ResolvedTheme {
 .flowmux-pane-tabbar {{
     min-height: 26px;
     background-color: {tabbar};
+    border-top: 2px solid transparent;
     border-bottom: 1px solid {border};
     padding: 0 2px;
 }}
@@ -939,14 +940,14 @@ mod tests {
             pane_rule.contains("border: 0;") && pane_rule.contains("border-radius: 0;"),
             "pane shell must remain flat"
         );
-        let solo_rule_idx = css
-            .find(".flowmux-pane.focused.flowmux-solo .flowmux-pane-tabbar {")
-            .expect("solo override missing");
-        let tail = &css[solo_rule_idx..];
         assert!(
-            css.contains(".flowmux-pane.focused .flowmux-pane-tabbar,")
-                && css.contains("box-shadow: inset 0 2px")
-                && tail.contains("box-shadow: none"),
+            css.contains(
+                ".flowmux-pane.focused .flowmux-pane-tabbar,\n.flowmux-pane.flowmux-notification .flowmux-pane-tabbar {\n    border-top: 2px solid rgba("
+            ) && css.contains(".flowmux-pane-tabbar {\n    min-height: 26px;\n    background-color:")
+                && css.contains("border-top: 2px solid transparent")
+                && css.contains(
+                    ".flowmux-pane.focused.flowmux-solo .flowmux-pane-tabbar {\n    border-top-color: transparent;"
+                ),
             "focus accent must stay in the pane header and disappear for solo panes"
         );
     }
