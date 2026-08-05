@@ -170,7 +170,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 The image viewer loads **ThorVG** at runtime (`dlopen`). It is **optional** —
 flowmux builds and runs without it; only the image viewer needs it, and shows a
-"ThorVG is not installed" message until it is present (no rebuild needed).
+"ThorVG is unavailable or incompatible" message until a build with its C API
+and image loaders is present (no flowmux rebuild needed).
 
 On macOS, install the Homebrew package and restart flowmux:
 
@@ -183,6 +184,7 @@ Ubuntu does not package ThorVG, so install it with the helper script (needs
 
 ```bash
 sudo scripts/install-thorvg.sh     # ThorVG v1.0.6 → /usr/local, then restart flowmux
+PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 ```
 
 ThorVG must be built with the C API and all loaders; the script does that

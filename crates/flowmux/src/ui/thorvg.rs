@@ -5,8 +5,8 @@
 //! ThorVG is an **optional runtime dependency**: flowmux builds and runs
 //! without it. The library is loaded lazily with `dlopen` the first time the
 //! image viewer is used. If it is not installed, [`available`] returns `false`
-//! and the viewer shows a "ThorVG is not installed" message instead of an
-//! image.
+//! and the viewer reports that ThorVG is unavailable or incompatible instead
+//! of showing an image.
 //!
 //! Only the subset of the ThorVG C API used by
 //! [`crate::ui::image_viewer`] is bound here. The type and function names
@@ -18,6 +18,7 @@
 #![allow(dead_code)]
 
 use std::ffi::{c_char, c_void};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use libloading::{Library, Symbol};
@@ -113,12 +114,25 @@ const LIBRARY_CANDIDATES: &[&str] = &[
 const LIBRARY_CANDIDATES: &[&str] = &["libthorvg-1.so.1", "libthorvg-1.so", "libthorvg.so"];
 
 fn load() -> Option<Api> {
-    let lib = LIBRARY_CANDIDATES
-        .iter()
-        .find_map(|candidate| unsafe { Library::new(candidate).ok() })?;
+    let user_library = std::env::var_os("HOME").map(|home| {
+        Path::new(&home)
+            .join(".local/lib")
+            .join(if cfg!(target_os = "macos") {
+                "libthorvg-1.dylib"
+            } else {
+                "libthorvg-1.so.1"
+            })
+    });
+    user_library
+        .as_deref()
+        .into_iter()
+        .chain(LIBRARY_CANDIDATES.iter().map(Path::new))
+        .find_map(|candidate| unsafe { Library::new(candidate).ok() }.and_then(load_api))
+}
 
+fn load_api(lib: Library) -> Option<Api> {
     // Resolve a symbol into a typed function pointer, returning None from
-    // `load` if any is missing (treated as "ThorVG unavailable").
+    // this candidate if any is missing, then let `load` try the next library.
     macro_rules! sym {
         ($name:literal) => {{
             let s: Symbol<_> = unsafe { lib.get($name).ok()? };

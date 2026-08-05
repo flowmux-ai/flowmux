@@ -625,9 +625,9 @@ impl ThorvgEngine {
     fn init() -> Result<Self, String> {
         if !tvg::available() {
             return Err(
-                "ThorVG is not installed.\n\nThe image viewer needs the ThorVG \
-                 library. Install it (see the project README, e.g. \
-                 scripts/install-thorvg.sh) and try again."
+                "ThorVG is unavailable or incompatible.\n\nThe image viewer needs ThorVG \
+                 with its C API and image loaders. Install or reinstall it with \
+                 scripts/install-thorvg.sh and try again."
                     .to_string(),
             );
         }

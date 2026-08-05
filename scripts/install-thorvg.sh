@@ -13,7 +13,7 @@
 # Usage:
 #   scripts/install-thorvg.sh              # build + install to /usr/local (sudo)
 #   THORVG_VERSION=v1.0.6 scripts/install-thorvg.sh
-#   PREFIX=$HOME/.local scripts/install-thorvg.sh   # no sudo (set PKG_CONFIG_PATH)
+#   PREFIX=$HOME/.local scripts/install-thorvg.sh   # no sudo
 
 set -euo pipefail
 
@@ -46,6 +46,7 @@ git clone --depth 1 --branch "$THORVG_VERSION" https://github.com/thorvg/thorvg.
 echo "==> configuring (all loaders, C API, CPU/software engine)"
 meson setup "$src_dir/build" "$src_dir" \
     --prefix="$PREFIX" \
+    --libdir=lib \
     --buildtype=release \
     -Dloaders=all \
     -Dsavers=all \
@@ -73,11 +74,22 @@ case "$PREFIX" in
 esac
 
 echo "==> verifying"
-if PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" \
-     pkg-config --exists thorvg-1; then
-    ver="$(PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" pkg-config --modversion thorvg-1)"
-    echo "==> done. thorvg-1 $ver installed under $PREFIX"
-else
+THORVG_PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+if ! PKG_CONFIG_PATH="$THORVG_PKG_CONFIG_PATH" pkg-config --exists thorvg-1; then
     echo "==> installed under $PREFIX, but pkg-config could not find thorvg-1." >&2
     echo "    Add its pkgconfig dir to PKG_CONFIG_PATH before building flowmux." >&2
+    exit 1
 fi
+
+# Linking a C API call catches stale SONAME symlinks and ThorVG builds made
+# without `-Dbindings=capi`; pkg-config alone reports both as installed.
+printf '%s\n' '#include <thorvg_capi.h>' \
+    'int main() {' \
+    '  if (tvg_engine_init(0) != TVG_RESULT_SUCCESS) return 1;' \
+    '  return tvg_engine_term() == TVG_RESULT_SUCCESS ? 0 : 1;' \
+    '}' | c++ -x c++ - -o "$src_dir/verify-thorvg" \
+        $(PKG_CONFIG_PATH="$THORVG_PKG_CONFIG_PATH" pkg-config --cflags --libs thorvg-1)
+LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}" "$src_dir/verify-thorvg"
+
+ver="$(PKG_CONFIG_PATH="$THORVG_PKG_CONFIG_PATH" pkg-config --modversion thorvg-1)"
+echo "==> done. thorvg-1 $ver with C API installed under $PREFIX"
