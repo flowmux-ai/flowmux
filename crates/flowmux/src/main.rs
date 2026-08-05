@@ -201,7 +201,8 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let _notification_action_router = match rt.block_on(register_notification_action_router()) {
+    let _notification_action_router = match rt.block_on(register_notification_action_router(APP_ID))
+    {
         Ok(connection) => Some(connection),
         Err(error) => {
             tracing::warn!(%error, "could not register desktop notification action router");
@@ -471,13 +472,13 @@ impl NotificationActionRouter {
     }
 }
 
-async fn register_notification_action_router() -> zbus::Result<zbus::Connection> {
+async fn register_notification_action_router(app_id: &str) -> zbus::Result<zbus::Connection> {
     let connection = zbus::connection::Builder::session()?
         .serve_at(APP_OBJECT_PATH, NotificationActionRouter)?
         .build()
         .await?;
     let reply = connection
-        .request_name_with_flags(APP_ID, Default::default())
+        .request_name_with_flags(app_id, Default::default())
         .await?;
     tracing::debug!(?reply, "desktop notification action router registered");
     Ok(connection)
@@ -698,6 +699,55 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     use gtk::gio::ApplicationFlags;
 
+    struct NotificationOpenHandler(tokio::sync::mpsc::Sender<flowmux_core::NotificationId>);
+
+    impl flowmux_ipc::server::Handler for NotificationOpenHandler {
+        fn handle<'a>(
+            &'a self,
+            request: flowmux_ipc::protocol::Request,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = flowmux_ipc::protocol::Response> + Send + 'a>,
+        > {
+            Box::pin(async move {
+                match request {
+                    flowmux_ipc::protocol::Request::NotificationOpen { id } => {
+                        let _ = self.0.send(id).await;
+                        flowmux_ipc::protocol::Response::NotificationState { changed: true }
+                    }
+                    _ => flowmux_ipc::protocol::Response::Ok,
+                }
+            })
+        }
+    }
+
+    async fn activate_notification(
+        caller: &zbus::Connection,
+        app_id: &str,
+        target: String,
+    ) -> zbus::Result<()> {
+        let proxy = zbus::Proxy::new(
+            caller,
+            app_id,
+            APP_OBJECT_PATH,
+            "org.freedesktop.Application",
+        )
+        .await?;
+        let parameters = vec![zbus::zvariant::OwnedValue::from(zbus::zvariant::Str::from(
+            target,
+        ))];
+        let _: () = proxy
+            .call(
+                "ActivateAction",
+                &(
+                    flowmux_notify::OPEN_NOTIFICATION_ACTION,
+                    parameters,
+                    HashMap::<String, zbus::zvariant::OwnedValue>::new(),
+                ),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Regression guard for cross-window workspace navigation: the bug was
     /// that two `flowmux` launches collapsed into one process under
     /// GApplication's default singleton behavior, then both windows
@@ -734,6 +784,94 @@ mod tests {
         );
         assert_eq!(parse_notification_action_target("missing-pid"), None);
         assert_eq!(parse_notification_action_target("nope:not-a-uuid"), None);
+    }
+
+    #[tokio::test]
+    async fn queued_notification_router_takes_over_and_targets_the_source_pid_socket() {
+        let socket = paths::runtime_socket_for_pid(std::process::id());
+        assert!(
+            !socket.exists(),
+            "test PID socket already exists: {socket:?}"
+        );
+
+        let (opened_tx, mut opened_rx) = tokio::sync::mpsc::channel(2);
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move {
+            flowmux_ipc::server::run(&server_socket, Arc::new(NotificationOpenHandler(opened_tx)))
+                .await
+        });
+        for _ in 0..100 {
+            if socket.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(socket.exists(), "test IPC server did not start");
+
+        let app_id = format!("{APP_ID}.NotificationRouterTest{}", std::process::id());
+        let primary = register_notification_action_router(&app_id).await.unwrap();
+        let queued = register_notification_action_router(&app_id).await.unwrap();
+        let caller = zbus::Connection::session().await.unwrap();
+        let bus = zbus::fdo::DBusProxy::new(&caller).await.unwrap();
+        let bus_name = app_id.as_str().try_into().unwrap();
+        assert_eq!(
+            bus.get_name_owner(bus_name).await.unwrap().as_str(),
+            primary.unique_name().unwrap().as_str()
+        );
+
+        let first_id = flowmux_core::NotificationId::new();
+        activate_notification(
+            &caller,
+            &app_id,
+            format!("{}:{first_id}", std::process::id()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), opened_rx.recv())
+                .await
+                .unwrap(),
+            Some(first_id)
+        );
+
+        assert!(primary.release_name(app_id.as_str()).await.unwrap());
+        for _ in 0..100 {
+            let owner = bus
+                .get_name_owner(app_id.as_str().try_into().unwrap())
+                .await;
+            if owner.as_ref().ok().map(|name| name.as_str())
+                == Some(queued.unique_name().unwrap().as_str())
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            bus.get_name_owner(app_id.as_str().try_into().unwrap())
+                .await
+                .unwrap()
+                .as_str(),
+            queued.unique_name().unwrap().as_str()
+        );
+
+        let second_id = flowmux_core::NotificationId::new();
+        activate_notification(
+            &caller,
+            &app_id,
+            format!("{}:{second_id}", std::process::id()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), opened_rx.recv())
+                .await
+                .unwrap(),
+            Some(second_id)
+        );
+
+        server.abort();
+        let _ = server.await;
+        std::fs::remove_file(socket).unwrap();
     }
 
     #[test]
