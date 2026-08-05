@@ -44,6 +44,14 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M1.5 4A1.5 1.5 0 0 1 3 2.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5zM3 5.5v6h10v-6z",
     },
     SymbolicIcon {
+        name: "flowmux-split-down-symbolic",
+        path: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm.5 1.5v7h9v-7zM3.5 7.25h9v1.5h-9z",
+    },
+    SymbolicIcon {
+        name: "flowmux-split-right-symbolic",
+        path: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm.5 1.5v7h9v-7zM7.25 4.5h1.5v7h-1.5z",
+    },
+    SymbolicIcon {
         name: "go-down-symbolic",
         path: "M8.8 2.5v8.1l3-3 1.2 1.2-5 5-5-5 1.2-1.2 3 3V2.5z",
     },
@@ -283,6 +291,14 @@ mod tests {
         assert!(tmp
             .path()
             .join("hicolor/scalable/actions/vcs-branch-symbolic.svg")
+            .exists());
+        assert!(tmp
+            .path()
+            .join("hicolor/scalable/actions/flowmux-split-right-symbolic.svg")
+            .exists());
+        assert!(tmp
+            .path()
+            .join("hicolor/scalable/actions/flowmux-split-down-symbolic.svg")
             .exists());
         assert!(tmp
             .path()

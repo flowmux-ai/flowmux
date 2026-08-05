@@ -435,8 +435,8 @@ impl WindowController {
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 1);
         tools.add_css_class("flowmux-pane-tools");
         for (icon, tooltip) in [
-            ("go-next-symbolic", "Split right"),
-            ("go-down-symbolic", "Split down"),
+            ("flowmux-split-right-symbolic", "Split right"),
+            ("flowmux-split-down-symbolic", "Split down"),
             ("tab-new-symbolic", "Add tab"),
             ("web-browser-symbolic", "Add browser tab"),
         ] {

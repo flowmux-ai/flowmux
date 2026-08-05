@@ -1450,14 +1450,14 @@ fn build_leaf_pane(
         stack.add_named(&widget, Some(&surface.id.to_string()));
     }
 
-    let split_right = pane_tool_button("go-next-symbolic", "Split right");
+    let split_right = pane_tool_button("flowmux-split-right-symbolic", "Split right");
     {
         let cb = callbacks.on_split_right.clone();
         split_right.connect_clicked(move |_| (cb.borrow_mut())(pane_id));
     }
     tools.append(&split_right);
 
-    let split_down = pane_tool_button("go-down-symbolic", "Split down");
+    let split_down = pane_tool_button("flowmux-split-down-symbolic", "Split down");
     {
         let cb = callbacks.on_split_down.clone();
         split_down.connect_clicked(move |_| (cb.borrow_mut())(pane_id));
