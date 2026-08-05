@@ -2335,6 +2335,20 @@ fn prepend_path_entry(dir: &std::path::Path, base: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
+fn resolve_zsh_real_zdotdir(
+    wrapper_dir: &std::path::Path,
+    inherited_real_zdotdir: Option<PathBuf>,
+    inherited_zdotdir: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    [inherited_real_zdotdir, inherited_zdotdir, home]
+        .into_iter()
+        .flatten()
+        .find(|path| path != wrapper_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(target_os = "macos")]
 fn add_macos_zsh_agent_path_guard(extra_env: &mut Vec<(String, String)>) {
     let shell = std::env::var_os("SHELL").map(PathBuf::from);
     if shell
@@ -2352,10 +2366,12 @@ fn add_macos_zsh_agent_path_guard(extra_env: &mut Vec<(String, String)>) {
     else {
         return;
     };
-    let real_zdotdir = std::env::var_os("ZDOTDIR")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let real_zdotdir = resolve_zsh_real_zdotdir(
+        &wrapper_dir,
+        std::env::var_os("FLOWMUX_REAL_ZDOTDIR").map(PathBuf::from),
+        std::env::var_os("ZDOTDIR").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    );
     if write_zsh_agent_path_guard_files(&wrapper_dir).is_err() {
         return;
     }
@@ -2891,6 +2907,34 @@ mod tests {
         assert_eq!(
             prepend_path_entry(std::path::Path::new("/tmp/flowmux-shims"), ""),
             "/tmp/flowmux-shims"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn nested_flowmux_zsh_guard_preserves_real_zdotdir_without_self_reference() {
+        let wrapper_dir =
+            PathBuf::from("/Users/example/Library/Application Support/flowmux/zsh-flowmux");
+        let real_zdotdir = PathBuf::from("/Users/example/.config/zsh");
+        let home = PathBuf::from("/Users/example");
+
+        assert_eq!(
+            resolve_zsh_real_zdotdir(
+                &wrapper_dir,
+                Some(real_zdotdir.clone()),
+                Some(wrapper_dir.clone()),
+                Some(home.clone()),
+            ),
+            real_zdotdir
+        );
+        assert_eq!(
+            resolve_zsh_real_zdotdir(
+                &wrapper_dir,
+                Some(wrapper_dir.clone()),
+                Some(wrapper_dir.clone()),
+                Some(home.clone()),
+            ),
+            home
         );
     }
 
