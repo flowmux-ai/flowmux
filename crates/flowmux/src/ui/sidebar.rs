@@ -982,6 +982,9 @@ fn activity_now_row(
         bridge,
     );
     row.add_css_class("flowmux-agent-bar-item");
+    if entry.status == AgentStatus::Working {
+        row.add_css_class("flowmux-agent-bar-working");
+    }
     if focused {
         row.add_css_class("focused");
     }
@@ -1017,15 +1020,23 @@ fn activity_row(
     row.set_margin_bottom(2);
     row.append(&color_bar(color));
 
-    let icon_name = status
-        .map(|status| agent_status_icon_name(status, seen))
-        .unwrap_or("application-exit-symbolic");
-    let icon = gtk::Image::from_icon_name(icon_name);
-    icon.set_pixel_size(12);
-    if let Some(status) = status {
-        icon.add_css_class(agent_status_css_class(status, seen));
+    if status == Some(AgentStatus::Working) {
+        let spinner = gtk::Spinner::new();
+        spinner.set_spinning(true);
+        spinner.set_size_request(12, 12);
+        spinner.add_css_class(agent_status_css_class(AgentStatus::Working, seen));
+        row.append(&spinner);
+    } else {
+        let icon_name = status
+            .map(|status| agent_status_icon_name(status, seen))
+            .unwrap_or("application-exit-symbolic");
+        let icon = gtk::Image::from_icon_name(icon_name);
+        icon.set_pixel_size(12);
+        if let Some(status) = status {
+            icon.add_css_class(agent_status_css_class(status, seen));
+        }
+        row.append(&icon);
     }
-    row.append(&icon);
 
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_hexpand(true);
@@ -1052,7 +1063,11 @@ fn activity_row(
     summary.set_ellipsize(gtk::pango::EllipsizeMode::End);
     summary.set_max_width_chars(44);
     summary.add_css_class("caption");
-    summary.add_css_class("dim-label");
+    if let Some(status) = status {
+        summary.add_css_class(agent_status_css_class(status, seen));
+    } else {
+        summary.add_css_class("dim-label");
+    }
     text.append(&summary);
     row.append(&text);
     button.set_child(Some(&row));
@@ -2589,6 +2604,15 @@ mod tests {
         assert!(!summary.is_single_line_mode());
         assert_eq!(summary.lines(), 3);
         assert_eq!(summary.label(), "Running tests · zsh");
+        assert!(summary.has_css_class("flowmux-sidebar-agent-working"));
+        assert!(!summary.has_css_class("dim-label"));
+
+        let spinner = widgets
+            .iter()
+            .find_map(|widget| widget.clone().downcast::<gtk::Spinner>().ok())
+            .expect("working Agent list item must use an animated spinner");
+        assert!(spinner.is_spinning());
+        assert!(spinner.has_css_class("flowmux-sidebar-agent-working"));
 
         let scroll = widgets
             .iter()
@@ -2617,6 +2641,7 @@ mod tests {
         assert!(!selected.vexpands());
         assert_eq!(selected.valign(), gtk::Align::Start);
         assert!(selected.has_css_class("flowmux-agent-bar-item"));
+        assert!(selected.has_css_class("flowmux-agent-bar-working"));
         assert!(selected.has_css_class("focused"));
         selected.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;

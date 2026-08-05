@@ -500,7 +500,9 @@ paned > separator {{
     background-color: rgba(59, 130, 246, 0.14);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-blocked,
-.navigation-sidebar row image.flowmux-sidebar-agent-blocked {{
+.navigation-sidebar row image.flowmux-sidebar-agent-blocked,
+.flowmux-agent-bar-item label.flowmux-sidebar-agent-blocked,
+.flowmux-agent-bar-item image.flowmux-sidebar-agent-blocked {{
     color: rgba(239, 68, 68, 0.95);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-working,
@@ -510,13 +512,19 @@ paned > separator {{
     color: rgba(245, 158, 11, 0.95);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-done,
-.navigation-sidebar row image.flowmux-sidebar-agent-done {{
+.navigation-sidebar row image.flowmux-sidebar-agent-done,
+.flowmux-agent-bar-item label.flowmux-sidebar-agent-done,
+.flowmux-agent-bar-item image.flowmux-sidebar-agent-done {{
     color: rgba(59, 130, 246, 0.95);
 }}
 .navigation-sidebar row label.flowmux-sidebar-agent-idle,
 .navigation-sidebar row image.flowmux-sidebar-agent-idle,
 .navigation-sidebar row label.flowmux-sidebar-agent-unknown,
-.navigation-sidebar row image.flowmux-sidebar-agent-unknown {{
+.navigation-sidebar row image.flowmux-sidebar-agent-unknown,
+.flowmux-agent-bar-item label.flowmux-sidebar-agent-idle,
+.flowmux-agent-bar-item image.flowmux-sidebar-agent-idle,
+.flowmux-agent-bar-item label.flowmux-sidebar-agent-unknown,
+.flowmux-agent-bar-item image.flowmux-sidebar-agent-unknown {{
     color: @sidebar_fg_color;
     opacity: 0.72;
 }}
@@ -1038,6 +1046,9 @@ mod tests {
                 && css.contains(".flowmux-agent-bar-item.flowmux-attention")
                 && css.contains(".flowmux-agent-bar-item.flowmux-agent-bar-working")
                 && css.contains(".flowmux-agent-bar-item spinner.flowmux-sidebar-agent-working")
+                && css.contains(".flowmux-agent-bar-item label.flowmux-sidebar-agent-blocked")
+                && css.contains(".flowmux-agent-bar-item image.flowmux-sidebar-agent-done")
+                && css.contains(".flowmux-agent-bar-item label.flowmux-sidebar-agent-idle")
                 && css.contains(".flowmux-agent-bar-item.focused")
                 && css.contains(".flowmux-agent-bar-item.flowmux-drop-before")
                 && css.contains(&format!("min-width: {AGENT_BAR_ITEM_MIN_WIDTH_PX}px")),
