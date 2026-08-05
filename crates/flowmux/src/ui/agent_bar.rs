@@ -2,6 +2,7 @@
 //! Bottom bar for live AI agents across all workspaces.
 
 use crate::bridge::{Bridge, GtkCommand};
+use crate::ui::{agent_status_css_class, agent_status_indicator};
 use flowmux_core::{
     AgentBarItem, AgentBarModel, AgentStatus, SurfaceId, AGENT_BAR_ITEM_MAX_WIDTH_PX,
 };
@@ -114,18 +115,7 @@ impl AgentBar {
         let stripe = color_stripe(&item.color);
         row.append(&stripe);
 
-        if item.status == AgentStatus::Working {
-            let spinner = gtk::Spinner::new();
-            spinner.set_spinning(true);
-            spinner.set_size_request(12, 12);
-            spinner.add_css_class(agent_status_css_class(item.status, item.seen));
-            row.append(&spinner);
-        } else {
-            let icon = gtk::Image::from_icon_name(agent_status_icon_name(item.status, item.seen));
-            icon.set_pixel_size(12);
-            icon.add_css_class(agent_status_css_class(item.status, item.seen));
-            row.append(&icon);
-        }
+        row.append(&agent_status_indicator(item.status, item.seen));
 
         let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
         text.set_hexpand(true);
@@ -393,27 +383,6 @@ fn color_stripe(color: &str) -> gtk::DrawingArea {
         let _ = cr.fill();
     });
     stripe
-}
-
-fn agent_status_icon_name(status: AgentStatus, seen: bool) -> &'static str {
-    match status {
-        AgentStatus::Blocked => "dialog-warning-symbolic",
-        AgentStatus::Working => "process-working-symbolic",
-        AgentStatus::Done if !seen => "emblem-ok-symbolic",
-        AgentStatus::Done | AgentStatus::Idle => "media-playback-pause-symbolic",
-        AgentStatus::Unknown => "dialog-question-symbolic",
-    }
-}
-
-fn agent_status_css_class(status: AgentStatus, seen: bool) -> &'static str {
-    match status {
-        AgentStatus::Blocked if !seen => "flowmux-sidebar-agent-blocked",
-        AgentStatus::Blocked => "flowmux-sidebar-agent-idle",
-        AgentStatus::Working => "flowmux-sidebar-agent-working",
-        AgentStatus::Done if !seen => "flowmux-sidebar-agent-done",
-        AgentStatus::Done | AgentStatus::Idle => "flowmux-sidebar-agent-idle",
-        AgentStatus::Unknown => "flowmux-sidebar-agent-unknown",
-    }
 }
 
 #[cfg(test)]

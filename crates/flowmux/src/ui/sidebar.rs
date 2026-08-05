@@ -28,6 +28,7 @@ use crate::ui::usage_popover::UsagePopover;
 use crate::ui::workspace_view::{
     read_tab_dnd_payload_from_drop, tab_dnd_content_formats, tab_dnd_formats_accept_payload,
 };
+use crate::ui::{agent_status_css_class, agent_status_icon_name, agent_status_indicator};
 use adw::prelude::*;
 use flowmux_core::{AgentStatus, NotificationLevel, PrState, SurfaceId, Workspace, WorkspaceId};
 use std::cell::{Cell, RefCell};
@@ -1020,21 +1021,11 @@ fn activity_row(
     row.set_margin_bottom(2);
     row.append(&color_bar(color));
 
-    if status == Some(AgentStatus::Working) {
-        let spinner = gtk::Spinner::new();
-        spinner.set_spinning(true);
-        spinner.set_size_request(12, 12);
-        spinner.add_css_class(agent_status_css_class(AgentStatus::Working, seen));
-        row.append(&spinner);
+    if let Some(status) = status {
+        row.append(&agent_status_indicator(status, seen));
     } else {
-        let icon_name = status
-            .map(|status| agent_status_icon_name(status, seen))
-            .unwrap_or("application-exit-symbolic");
-        let icon = gtk::Image::from_icon_name(icon_name);
+        let icon = gtk::Image::from_icon_name("application-exit-symbolic");
         icon.set_pixel_size(12);
-        if let Some(status) = status {
-            icon.add_css_class(agent_status_css_class(status, seen));
-        }
         row.append(&icon);
     }
 
@@ -2165,27 +2156,6 @@ fn sidebar_path_label(line: &str, primary: bool) -> gtk::Label {
         label.add_css_class("flowmux-sidebar-subtitle-primary");
     }
     label
-}
-
-fn agent_status_icon_name(status: AgentStatus, seen: bool) -> &'static str {
-    match status {
-        AgentStatus::Blocked => "dialog-warning-symbolic",
-        AgentStatus::Working => "process-working-symbolic",
-        AgentStatus::Done if !seen => "emblem-ok-symbolic",
-        AgentStatus::Done | AgentStatus::Idle => "media-playback-pause-symbolic",
-        AgentStatus::Unknown => "dialog-question-symbolic",
-    }
-}
-
-fn agent_status_css_class(status: AgentStatus, seen: bool) -> &'static str {
-    match status {
-        AgentStatus::Blocked if !seen => "flowmux-sidebar-agent-blocked",
-        AgentStatus::Blocked => "flowmux-sidebar-agent-idle",
-        AgentStatus::Working => "flowmux-sidebar-agent-working",
-        AgentStatus::Done if !seen => "flowmux-sidebar-agent-done",
-        AgentStatus::Done | AgentStatus::Idle => "flowmux-sidebar-agent-idle",
-        AgentStatus::Unknown => "flowmux-sidebar-agent-unknown",
-    }
 }
 
 #[cfg(test)]
