@@ -32,7 +32,7 @@ use flowmux_config::keybindings::KeybindingOverrides;
 use flowmux_config::options::Options;
 use flowmux_core::SplitDirection;
 use gtk::glib;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use tokio::sync::oneshot;
@@ -40,6 +40,14 @@ use tokio::sync::oneshot;
 /// Tracks which pane currently has keyboard focus so split / close /
 /// focus-direction shortcuts know where to operate.
 pub type FocusedPane = Rc<Cell<Option<flowmux_core::PaneId>>>;
+
+#[derive(Default)]
+struct UsagePopoverFocus {
+    widget: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
+    restore_on_close: Cell<bool>,
+}
+
+type SavedUsagePopoverFocus = Rc<UsagePopoverFocus>;
 
 /// Group prefix for every flowmux window action. `set_accels_for_action`
 /// and `add_action_entries` both need the namespaced name (`win.copy`)
@@ -405,8 +413,9 @@ pub fn install_actions(
             })
             .build()
     };
-    install_usage_popover_accel_capture(window, &usage_button);
-    let toggle_usage_popover = make_toggle_usage_popover_action(usage_button);
+    let usage_popover_focus = Rc::new(UsagePopoverFocus::default());
+    install_usage_popover_accel_capture(window, &usage_button, usage_popover_focus.clone());
+    let toggle_usage_popover = make_toggle_usage_popover_action(usage_button, usage_popover_focus);
 
     let [w1, w2, w3, w4, w5, w6, w7, w8] = ws_jumps;
     window.add_action_entries([
@@ -552,13 +561,35 @@ fn make_open_tig_action(
 /// so the next shortcut press always opens it again.
 fn make_toggle_usage_popover_action(
     usage_button: gtk::MenuButton,
+    saved_focus: SavedUsagePopoverFocus,
 ) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder("toggle-usage-popover")
-        .activate(move |_, _, _| {
+        .activate(move |window, _, _| {
             tracing::debug!(action = "toggle-usage-popover", "key action fired");
-            usage_button.set_active(!usage_button.is_active());
+            if usage_button.is_active() {
+                saved_focus.restore_on_close.set(true);
+                usage_button.set_active(false);
+            } else {
+                *saved_focus.widget.borrow_mut() =
+                    gtk::prelude::GtkWindowExt::focus(window).map(|widget| widget.downgrade());
+                usage_button.set_active(true);
+            }
         })
         .build()
+}
+
+fn restore_usage_popover_focus(saved_focus: &SavedUsagePopoverFocus) {
+    let Some(widget) = saved_focus
+        .widget
+        .borrow_mut()
+        .take()
+        .and_then(|focus| focus.upgrade())
+    else {
+        return;
+    };
+    glib::idle_add_local_once(move || {
+        widget.grab_focus();
+    });
 }
 
 /// A modal popover owns the keyboard grab while it is open, so its closing
@@ -569,6 +600,7 @@ fn make_toggle_usage_popover_action(
 fn install_usage_popover_accel_capture(
     window: &adw::ApplicationWindow,
     usage_button: &gtk::MenuButton,
+    saved_focus: SavedUsagePopoverFocus,
 ) {
     let Some(popover) = usage_button.popover() else {
         tracing::warn!("AI usage button has no popover for shortcut capture");
@@ -577,13 +609,21 @@ fn install_usage_popover_accel_capture(
 
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let saved_focus_for_closed = saved_focus.clone();
+    popover.connect_closed(move |_| {
+        if saved_focus_for_closed.restore_on_close.replace(false) {
+            restore_usage_popover_focus(&saved_focus_for_closed);
+        } else {
+            saved_focus_for_closed.widget.borrow_mut().take();
+        }
+    });
     let window = window.clone();
     let usage_button = usage_button.clone();
     key.connect_key_pressed(move |_, keyval, _keycode, state| {
         let Some(app) = window.application() else {
             return glib::Propagation::Proceed;
         };
-        close_usage_popover_for_key_event(&app, &usage_button, keyval, state)
+        close_usage_popover_for_key_event(&app, &usage_button, &saved_focus, keyval, state)
     });
     popover.add_controller(key);
 }
@@ -591,6 +631,7 @@ fn install_usage_popover_accel_capture(
 fn close_usage_popover_for_key_event(
     app: &gtk::Application,
     usage_button: &gtk::MenuButton,
+    saved_focus: &SavedUsagePopoverFocus,
     keyval: gtk::gdk::Key,
     state: gtk::gdk::ModifierType,
 ) -> glib::Propagation {
@@ -602,6 +643,7 @@ fn close_usage_popover_for_key_event(
         action = "toggle-usage-popover",
         "popover capture closed AI usage"
     );
+    saved_focus.restore_on_close.set(true);
     usage_button.set_active(false);
     glib::Propagation::Stop
 }
@@ -1097,8 +1139,8 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_alt_z_toggles_focused_pane_zoom_without_stealing_redo() {
-        assert_eq!(default_for(ActionId::TogglePaneZoom), vec!["<Ctrl><Alt>z"]);
+    fn ctrl_alt_m_toggles_focused_pane_zoom() {
+        assert_eq!(default_for(ActionId::TogglePaneZoom), vec!["<Ctrl><Alt>m"]);
         assert!(ActionId::TogglePaneZoom.is_user_editable());
     }
 
@@ -1503,7 +1545,11 @@ mod tests {
         let usage_button = gtk::MenuButton::new();
         usage_button.set_popover(Some(&gtk::Popover::new()));
         window.set_content(Some(&usage_button));
-        window.add_action_entries([make_toggle_usage_popover_action(usage_button.clone())]);
+        let saved_focus = Rc::new(UsagePopoverFocus::default());
+        window.add_action_entries([make_toggle_usage_popover_action(
+            usage_button.clone(),
+            saved_focus,
+        )]);
 
         assert!(!usage_button.is_active());
         gtk::prelude::WidgetExt::activate_action(&window, "win.toggle-usage-popover", None)
@@ -1542,8 +1588,12 @@ mod tests {
         let usage_button = gtk::MenuButton::new();
         usage_button.set_popover(Some(&gtk::Popover::new()));
         window.set_content(Some(&usage_button));
-        window.add_action_entries([make_toggle_usage_popover_action(usage_button.clone())]);
-        install_usage_popover_accel_capture(&window, &usage_button);
+        let saved_focus = Rc::new(UsagePopoverFocus::default());
+        window.add_action_entries([make_toggle_usage_popover_action(
+            usage_button.clone(),
+            saved_focus.clone(),
+        )]);
+        install_usage_popover_accel_capture(&window, &usage_button, saved_focus.clone());
 
         app.set_accels_for_action(TOGGLE_USAGE_POPOVER_FULL_ACTION, &["<Ctrl><Alt>x"]);
         let ctrl_alt = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK;
@@ -1553,6 +1603,7 @@ mod tests {
             close_usage_popover_for_key_event(
                 app.upcast_ref(),
                 &usage_button,
+                &saved_focus,
                 gtk::gdk::Key::u,
                 ctrl_alt,
             ),
@@ -1567,6 +1618,7 @@ mod tests {
             close_usage_popover_for_key_event(
                 app.upcast_ref(),
                 &usage_button,
+                &saved_focus,
                 gtk::gdk::Key::x,
                 ctrl_alt | gtk::gdk::ModifierType::LOCK_MASK,
             ),
@@ -1575,6 +1627,67 @@ mod tests {
         assert!(
             !usage_button.is_active(),
             "the current accelerator must close the open popover even with CapsLock enabled"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn shortcut_close_restores_focus_to_the_previous_widget() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.UsagePopoverFocus")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let window = adw::ApplicationWindow::builder()
+            .application(&app)
+            .default_width(320)
+            .default_height(240)
+            .build();
+        let terminal = gtk::Entry::new();
+        let usage_button = gtk::MenuButton::new();
+        usage_button.set_focus_on_click(false);
+        usage_button.set_popover(Some(&gtk::Popover::new()));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.append(&terminal);
+        content.append(&usage_button);
+        window.set_content(Some(&content));
+
+        let saved_focus = Rc::new(UsagePopoverFocus::default());
+        window.add_action_entries([make_toggle_usage_popover_action(
+            usage_button.clone(),
+            saved_focus.clone(),
+        )]);
+        install_usage_popover_accel_capture(&window, &usage_button, saved_focus.clone());
+        app.set_accels_for_action(TOGGLE_USAGE_POPOVER_FULL_ACTION, &["<Ctrl><Alt>u"]);
+        window.present();
+        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&terminal));
+        let terminal_focus = gtk::prelude::GtkWindowExt::focus(&window).unwrap();
+
+        gtk::prelude::WidgetExt::activate_action(&window, TOGGLE_USAGE_POPOVER_FULL_ACTION, None)
+            .expect("toggle-usage-popover action should be registered");
+        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&usage_button));
+        assert_ne!(
+            gtk::prelude::GtkWindowExt::focus(&window),
+            Some(terminal_focus.clone())
+        );
+
+        let ctrl_alt = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK;
+        assert_eq!(
+            close_usage_popover_for_key_event(
+                app.upcast_ref(),
+                &usage_button,
+                &saved_focus,
+                gtk::gdk::Key::u,
+                ctrl_alt,
+            ),
+            glib::Propagation::Stop
+        );
+        glib::timeout_future(std::time::Duration::from_millis(250)).await;
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&window),
+            Some(terminal_focus),
+            "closing AI Usage with its shortcut must restore the previous terminal focus"
         );
     }
 

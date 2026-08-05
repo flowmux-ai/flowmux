@@ -261,7 +261,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::NewWindow, &["<Ctrl><Shift>n"]),
     (ActionId::CommandPalette, &["<Ctrl><Shift>p"]),
     (ActionId::TerminalSearch, &["<Ctrl><Shift>f"]),
-    (ActionId::TogglePaneZoom, &["<Ctrl><Alt>z"]),
+    (ActionId::TogglePaneZoom, &["<Ctrl><Alt>m"]),
     (ActionId::CopyPanePath, &["<Ctrl><Shift>k"]),
     (ActionId::ToggleWorktreePanel, &["<Ctrl><Alt>w"]),
     (ActionId::ToggleFileBrowser, &["<Ctrl><Alt>f"]),
@@ -313,7 +313,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::NewWindow, &["<Meta><Shift>n"]),
     (ActionId::CommandPalette, &["<Meta><Shift>p"]),
     (ActionId::TerminalSearch, &["<Ctrl><Shift>f"]),
-    (ActionId::TogglePaneZoom, &["<Ctrl><Alt>z"]),
+    (ActionId::TogglePaneZoom, &["<Ctrl><Alt>m"]),
     (ActionId::CopyPanePath, &["<Meta><Shift>k"]),
     (ActionId::ToggleWorktreePanel, &["<Meta><Alt>w"]),
     (ActionId::ToggleFileBrowser, &["<Meta><Alt>f"]),
@@ -547,20 +547,20 @@ mod tests {
     }
 
     #[test]
-    fn pane_zoom_default_avoids_editor_redo_and_can_be_rebound() {
-        assert_eq!(default_accels(ActionId::TogglePaneZoom), &["<Ctrl><Alt>z"]);
+    fn pane_zoom_default_can_be_rebound() {
+        assert_eq!(default_accels(ActionId::TogglePaneZoom), &["<Ctrl><Alt>m"]);
 
         let mut overrides = KeybindingOverrides::new();
-        overrides.set(ActionId::TogglePaneZoom, vec!["<Alt>z".to_string()]);
+        overrides.set(ActionId::TogglePaneZoom, vec!["<Alt>m".to_string()]);
         let json = serde_json::to_string(&overrides).unwrap();
-        assert!(json.contains(r#""toggle-pane-zoom":["<Alt>z"]"#));
+        assert!(json.contains(r#""toggle-pane-zoom":["<Alt>m"]"#));
 
         let resolved = overrides.resolve();
         let zoom = resolved
             .iter()
             .find(|(action, _)| *action == ActionId::TogglePaneZoom)
             .unwrap();
-        assert_eq!(zoom.1, vec!["<Alt>z".to_string()]);
+        assert_eq!(zoom.1, vec!["<Alt>m".to_string()]);
     }
 
     #[test]

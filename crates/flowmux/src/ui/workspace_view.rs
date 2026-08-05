@@ -1450,6 +1450,13 @@ fn build_leaf_pane(
         stack.add_named(&widget, Some(&surface.id.to_string()));
     }
 
+    let zoom = pane_tool_button("view-fullscreen-symbolic", "Maximize or restore pane");
+    {
+        let cb = callbacks.on_toggle_pane_zoom.clone();
+        zoom.connect_clicked(move |_| (cb.borrow_mut())(pane_id));
+    }
+    tools.append(&zoom);
+
     let split_right = pane_tool_button("flowmux-split-right-symbolic", "Split right");
     {
         let cb = callbacks.on_split_right.clone();

@@ -88,6 +88,12 @@ impl PaneCallbackRouter {
                     dispatch_with_ack(&bridge, move |ack| GtkCommand::CloseFocused { pane, ack });
                 }))
             },
+            on_toggle_pane_zoom: {
+                let bridge = bridge.clone();
+                Rc::new(RefCell::new(move |pane| {
+                    dispatch_detached(&bridge, GtkCommand::TogglePaneZoom { pane });
+                }))
+            },
             on_focus: {
                 let bridge = bridge.clone();
                 let focused = focused.clone();

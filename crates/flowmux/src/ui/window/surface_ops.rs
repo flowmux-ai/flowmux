@@ -435,6 +435,7 @@ impl WindowController {
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 1);
         tools.add_css_class("flowmux-pane-tools");
         for (icon, tooltip) in [
+            ("view-fullscreen-symbolic", "Maximize or restore pane"),
             ("flowmux-split-right-symbolic", "Split right"),
             ("flowmux-split-down-symbolic", "Split down"),
             ("tab-new-symbolic", "Add tab"),

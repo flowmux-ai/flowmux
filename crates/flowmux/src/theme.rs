@@ -303,6 +303,9 @@ impl ResolvedTheme {
 .flowmux-pane.focused.flowmux-solo .flowmux-pane-tabbar {{
     box-shadow: none;
 }}
+.flowmux-pane.flowmux-pane-zoomed {{
+    box-shadow: inset 0 0 0 2px {focus_full};
+}}
 .flowmux-pane .flowmux-terminal {{
     padding: 7px;
     border-radius: 0;
@@ -944,6 +947,19 @@ mod tests {
                 && tail.contains("box-shadow: none"),
             "focus accent must stay in the pane header and disappear for solo panes"
         );
+    }
+
+    #[test]
+    fn zoomed_pane_uses_full_accent_border() {
+        let css = sample_css();
+        let rule = css
+            .split(".flowmux-pane.flowmux-pane-zoomed {")
+            .nth(1)
+            .expect("zoomed pane rule missing")
+            .split('}')
+            .next()
+            .unwrap();
+        assert!(rule.contains("box-shadow: inset 0 0 0 2px"));
     }
 
     #[test]
