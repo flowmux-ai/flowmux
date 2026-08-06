@@ -2285,11 +2285,11 @@ fn update_surface_scrollback_in_state(
 ) -> Option<WorkspaceId> {
     for ws in state.workspaces.iter_mut() {
         for surface in ws.surfaces.iter_mut() {
-            if surface
-                .root_pane
-                .set_surface_scrollback(pane, surface_id, text.clone())
-            {
-                return Some(ws.id);
+            if surface.root_pane.find_surface(pane, surface_id).is_some() {
+                return surface
+                    .root_pane
+                    .set_surface_scrollback(pane, surface_id, text)
+                    .then_some(ws.id);
             }
         }
     }

@@ -5,6 +5,11 @@
 
 use super::*;
 
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+}
+
 /// glibc never returns burst-freed main-arena memory to the OS on its own:
 /// long-lived small allocations pin the heap top, and the dynamic mmap
 /// threshold routes multi-MB transients through sbrk, so a single allocation
@@ -21,7 +26,18 @@ pub(super) fn install_heap_trim() {
     });
 }
 
-#[cfg(not(target_env = "gnu"))]
+/// macOS malloc also retains freed arena pages after large terminal snapshot
+/// bursts. Ask every zone to release all currently reclaimable pages on the
+/// same bounded cadence as the glibc path.
+#[cfg(target_os = "macos")]
+pub(super) fn install_heap_trim() {
+    glib::timeout_add_seconds_local(60, || {
+        unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+        glib::ControlFlow::Continue
+    });
+}
+
+#[cfg(not(any(target_env = "gnu", target_os = "macos")))]
 pub(super) fn install_heap_trim() {}
 
 fn schedule_agent_process_poll(controller: WindowController) {

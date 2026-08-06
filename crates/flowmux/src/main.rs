@@ -74,6 +74,8 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    install_memory_efficient_renderer();
+
     let previous_crash = match flowmux_config::diagnostics::take_unreported_crash() {
         Ok(path) => path,
         Err(error) => {
@@ -420,6 +422,20 @@ fn build_application() -> adw::Application {
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build()
 }
+
+/// GTK's OpenGL renderer keeps several full-window GPU surfaces alive while a
+/// terminal TUI repaints. On a Retina-sized window that can account for
+/// hundreds of MiB of physical footprint. Cairo uses one software-backed
+/// surface and keeps the footprint stable; an explicit user choice still wins.
+#[cfg(target_os = "macos")]
+fn install_memory_efficient_renderer() {
+    if std::env::var_os("GSK_RENDERER").is_none() {
+        std::env::set_var("GSK_RENDERER", "cairo");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_memory_efficient_renderer() {}
 
 fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active
