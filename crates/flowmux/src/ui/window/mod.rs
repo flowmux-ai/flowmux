@@ -336,6 +336,7 @@ struct ActivePaneZoom {
     workspace: WorkspaceId,
     frame: gtk::Widget,
     origin: PaneZoomOrigin,
+    source: PaneZoomRect,
 }
 
 enum PaneZoomOrigin {
@@ -352,13 +353,19 @@ struct PaneZoomState {
 }
 
 struct PaneZoomTransition {
-    overlay: gtk::Fixed,
-    frame: gtk::Widget,
+    finish: Rc<RefCell<Option<Box<dyn FnOnce(bool)>>>>,
+}
+
+impl PaneZoomTransition {
+    fn finish(self, completed: bool) {
+        if let Some(finish) = self.finish.borrow_mut().take() {
+            finish(completed);
+        }
+    }
 }
 
 struct PendingPaneZoomTransition {
     overlay: gtk::Fixed,
-    picture: gtk::Picture,
     source: PaneZoomRect,
     generation: u64,
     _native_views_suspend: crate::ui::browser_pane::NativeBrowserViewsSuspend,
@@ -559,19 +566,27 @@ fn detach_pane_for_zoom(frame: &gtk::Widget, stack: &gtk::Stack) -> Option<PaneZ
         return None;
     };
     stack.add_named(frame, Some(PANE_ZOOM_PAGE));
-    stack.set_visible_child_name(PANE_ZOOM_PAGE);
+    set_visible_stack_child_immediately(stack, PANE_ZOOM_PAGE);
     Some(origin)
 }
 
+fn set_visible_stack_child_immediately(stack: &gtk::Stack, name: &str) {
+    let transition = stack.transition_type();
+    stack.set_transition_type(gtk::StackTransitionType::None);
+    stack.set_visible_child_name(name);
+    stack.set_transition_type(transition);
+}
+
 fn restore_pane_from_zoom(frame: &gtk::Widget, stack: &gtk::Stack, origin: PaneZoomOrigin) {
+    if frame.parent().as_ref() == Some(stack.upcast_ref()) {
+        stack.remove(frame);
+    }
     match origin {
         PaneZoomOrigin::PanedStart { paned, position } => {
-            stack.remove(frame);
             paned.set_start_child(Some(frame));
             restore_paned_position(paned, position);
         }
         PaneZoomOrigin::PanedEnd { paned, position } => {
-            stack.remove(frame);
             paned.set_end_child(Some(frame));
             restore_paned_position(paned, position);
         }
@@ -583,6 +598,33 @@ fn refresh_pane_after_zoom(frame: &gtk::Widget) {
     frame.set_opacity(1.0);
     frame.queue_resize();
     frame.queue_draw();
+}
+
+fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId) {
+    glib::idle_add_local_once(move || {
+        let registry = registry.borrow();
+        if let Some(term) = registry.active_terminal(pane) {
+            term.grab_focus();
+        } else if let Some(browser) = registry.active_browser(pane) {
+            browser.grab_focus();
+        } else if let Some(editor) = registry.active_editor(pane) {
+            editor.grab_focus();
+        } else {
+            tracing::debug!(%pane, "focus_pane: no surface registered for pane");
+        }
+    });
+}
+
+fn set_pane_zoom_widget_rect(
+    overlay: &gtk::Fixed,
+    widget: &gtk::Widget,
+    base: PaneZoomRect,
+    rect: PaneZoomRect,
+) {
+    let transform = gtk::gsk::Transform::new()
+        .translate(&gtk::graphene::Point::new(rect.x, rect.y))
+        .scale(rect.width / base.width, rect.height / base.height);
+    overlay.set_child_transform(widget, Some(&transform));
 }
 
 fn set_window_content(window: &adw::ApplicationWindow, content: &impl IsA<gtk::Widget>) {
@@ -806,54 +848,32 @@ impl WindowController {
         self.pane_zoom
             .transition_generation
             .set(self.pane_zoom.transition_generation.get().wrapping_add(1));
-        let Some(transition) = self.pane_zoom.transition.borrow_mut().take() else {
-            return;
-        };
-        if transition.overlay.parent().as_ref()
-            == Some(self.content_overlay.upcast_ref::<gtk::Widget>())
-        {
-            self.content_overlay.remove_overlay(&transition.overlay);
+        if let Some(transition) = self.pane_zoom.transition.borrow_mut().take() {
+            transition.finish(false);
         }
-        refresh_pane_after_zoom(&transition.frame);
     }
 
     fn prepare_pane_zoom_transition(
         &self,
         frame: &gtk::Widget,
+        source: PaneZoomRect,
     ) -> Option<PendingPaneZoomTransition> {
         if !adw::is_animations_enabled(frame) {
             return None;
         }
-        let source = frame
-            .compute_bounds(&self.content_overlay)
-            .and_then(PaneZoomRect::from_bounds)?;
-        let paintable = gtk::WidgetPaintable::new(Some(frame)).current_image();
-        let picture = gtk::Picture::for_paintable(&paintable);
-        picture.set_can_shrink(true);
-        picture.set_content_fit(gtk::ContentFit::Fill);
-        picture.set_size_request(source.width.round() as i32, source.height.round() as i32);
-
         let overlay = gtk::Fixed::new();
         overlay.set_can_target(false);
         overlay.set_halign(gtk::Align::Fill);
         overlay.set_valign(gtk::Align::Fill);
         overlay.set_hexpand(true);
         overlay.set_vexpand(true);
-        overlay.put(&picture, source.x as f64, source.y as f64);
-        self.content_overlay.add_overlay(&overlay);
 
         let generation = self.pane_zoom.transition_generation.get().wrapping_add(1);
         self.pane_zoom.transition_generation.set(generation);
-        *self.pane_zoom.transition.borrow_mut() = Some(PaneZoomTransition {
-            overlay: overlay.clone(),
-            frame: frame.clone(),
-        });
-        frame.set_opacity(0.0);
 
         let window = self.window.clone().upcast::<gtk::Window>();
         Some(PendingPaneZoomTransition {
             overlay,
-            picture,
             source,
             generation,
             _native_views_suspend: crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -862,21 +882,72 @@ impl WindowController {
         })
     }
 
-    fn start_pane_zoom_transition(
+    fn start_pane_zoom_transition<F>(
         &self,
         pending: Option<PendingPaneZoomTransition>,
         frame: &gtk::Widget,
-    ) {
+        destination: PaneZoomRect,
+        finalize: F,
+    ) where
+        F: FnOnce(bool) + 'static,
+    {
         let Some(pending) = pending else {
+            finalize(true);
             refresh_pane_after_zoom(frame);
             return;
         };
+        if frame.parent().as_ref() != Some(self.stack.upcast_ref()) {
+            finalize(true);
+            refresh_pane_after_zoom(frame);
+            return;
+        }
+        self.stack.remove(frame);
+
+        let base = PaneZoomRect {
+            x: 0.0,
+            y: 0.0,
+            width: pending.source.width.max(destination.width),
+            height: pending.source.height.max(destination.height),
+        };
+        let original_halign = frame.halign();
+        let original_valign = frame.valign();
+        let original_width_request = frame.width_request();
+        let original_height_request = frame.height_request();
+        frame.set_halign(gtk::Align::Start);
+        frame.set_valign(gtk::Align::Start);
+        frame.set_size_request(base.width.round() as i32, base.height.round() as i32);
+        self.content_overlay.add_overlay(&pending.overlay);
+        pending.overlay.put(frame, 0.0, 0.0);
+        set_pane_zoom_widget_rect(&pending.overlay, frame, base, pending.source);
+
         let content_overlay = self.content_overlay.clone();
         let transition = self.pane_zoom.transition.clone();
         let transition_generation = self.pane_zoom.transition_generation.clone();
         let frame = frame.clone();
+        let overlay = pending.overlay.clone();
+        let frame_for_finish = frame.clone();
+        let content_overlay_for_finish = content_overlay.clone();
+        let finish: Rc<RefCell<Option<Box<dyn FnOnce(bool)>>>> =
+            Rc::new(RefCell::new(Some(Box::new(move |completed| {
+                if frame_for_finish.parent().as_ref() == Some(overlay.upcast_ref()) {
+                    overlay.remove(&frame_for_finish);
+                }
+                frame_for_finish.set_size_request(original_width_request, original_height_request);
+                frame_for_finish.set_halign(original_halign);
+                frame_for_finish.set_valign(original_valign);
+                if overlay.parent().as_ref()
+                    == Some(content_overlay_for_finish.upcast_ref::<gtk::Widget>())
+                {
+                    content_overlay_for_finish.remove_overlay(&overlay);
+                }
+                finalize(completed);
+                refresh_pane_after_zoom(&frame_for_finish);
+            }))));
+        *self.pane_zoom.transition.borrow_mut() = Some(PaneZoomTransition {
+            finish: finish.clone(),
+        });
+        let primed = Cell::new(false);
         let started_at = Cell::new(None::<i64>);
-        let target = Cell::new(None::<PaneZoomRect>);
         let duration_micros = PANE_ZOOM_ANIMATION_DURATION.as_micros() as f32;
 
         pending.overlay.add_tick_callback(move |overlay, clock| {
@@ -884,17 +955,9 @@ impl WindowController {
             if transition_generation.get() != pending.generation {
                 return glib::ControlFlow::Break;
             }
-            let Some(destination) = target.get().or_else(|| {
-                frame
-                    .compute_bounds(&content_overlay)
-                    .and_then(PaneZoomRect::from_bounds)
-                    .inspect(|bounds| target.set(Some(*bounds)))
-            }) else {
-                content_overlay.remove_overlay(overlay);
-                transition.borrow_mut().take();
-                refresh_pane_after_zoom(&frame);
-                return glib::ControlFlow::Break;
-            };
+            if !primed.replace(true) {
+                return glib::ControlFlow::Continue;
+            }
             let start = started_at.get().unwrap_or_else(|| {
                 let now = clock.frame_time();
                 started_at.set(Some(now));
@@ -903,21 +966,17 @@ impl WindowController {
             let elapsed = clock.frame_time().saturating_sub(start) as f32;
             let progress = (elapsed / duration_micros).clamp(0.0, 1.0);
             let rect = pending.source.interpolate(destination, progress);
-            overlay.move_(&pending.picture, rect.x as f64, rect.y as f64);
-            overlay.set_child_transform(
-                &pending.picture,
-                Some(&gtk::gsk::Transform::new().scale(
-                    rect.width / pending.source.width,
-                    rect.height / pending.source.height,
-                )),
-            );
+            set_pane_zoom_widget_rect(overlay, &frame, base, rect);
 
             if progress < 1.0 {
                 return glib::ControlFlow::Continue;
             }
-            content_overlay.remove_overlay(overlay);
-            transition.borrow_mut().take();
-            refresh_pane_after_zoom(&frame);
+            let completed = transition.borrow_mut().take();
+            if let Some(completed) = completed {
+                completed.finish(true);
+            } else if let Some(finish) = finish.borrow_mut().take() {
+                finish(true);
+            }
             glib::ControlFlow::Break
         });
     }
@@ -927,17 +986,33 @@ impl WindowController {
             return;
         }
         if self.zoomed_pane() == Some(pane) {
-            let pending = self
-                .pane_zoom
-                .active
-                .borrow()
-                .as_ref()
-                .and_then(|active| self.prepare_pane_zoom_transition(&active.frame));
-            let Some(frame) = self.clear_pane_zoom_impl() else {
-                self.cancel_pane_zoom_transition();
+            let Some(active) = self.pane_zoom.active.borrow_mut().take() else {
                 return;
             };
-            self.start_pane_zoom_transition(pending, &frame);
+            let source = active
+                .frame
+                .compute_bounds(&self.content_overlay)
+                .and_then(PaneZoomRect::from_bounds)
+                .unwrap_or(active.source);
+            let pending = self.prepare_pane_zoom_transition(&active.frame, source);
+            let frame = active.frame.clone();
+            let frame_for_finish = frame.clone();
+            let stack = self.stack.clone();
+            let registry = self.pane_registry.clone();
+            let surfaces = self.surfaces.clone();
+            let workspace = active.workspace;
+            let destination = active.source;
+            set_visible_stack_child_immediately(&self.stack, &active.workspace.to_string());
+            self.start_pane_zoom_transition(pending, &frame, destination, move |completed| {
+                registry.borrow_mut().set_pane_zoomed(pane, false);
+                restore_pane_from_zoom(&frame_for_finish, &stack, active.origin);
+                if surfaces.borrow().contains_key(&workspace) {
+                    set_visible_stack_child_immediately(&stack, &workspace.to_string());
+                }
+                if completed {
+                    grab_registered_pane_focus(registry, pane);
+                }
+            });
             self.focus_pane(pane);
             return;
         }
@@ -953,7 +1028,31 @@ impl WindowController {
             };
             (frame, workspace)
         };
-        let pending = self.prepare_pane_zoom_transition(&frame);
+        if self
+            .pane_registry
+            .borrow()
+            .pane_ids_in_workspace(workspace)
+            .take(2)
+            .count()
+            == 1
+        {
+            self.clipboard_toast.show_with_message("Already full size");
+            return;
+        }
+        let Some(source) = frame
+            .compute_bounds(&self.content_overlay)
+            .and_then(PaneZoomRect::from_bounds)
+        else {
+            return;
+        };
+        let Some(destination) = self
+            .stack
+            .compute_bounds(&self.content_overlay)
+            .and_then(PaneZoomRect::from_bounds)
+        else {
+            return;
+        };
+        let pending = self.prepare_pane_zoom_transition(&frame, source);
         let Some(origin) = detach_pane_for_zoom(&frame, &self.stack) else {
             self.cancel_pane_zoom_transition();
             tracing::warn!(%pane, "pane zoom: unsupported parent");
@@ -965,6 +1064,7 @@ impl WindowController {
             workspace,
             frame,
             origin,
+            source,
         });
         let frame = self
             .pane_zoom
@@ -974,7 +1074,19 @@ impl WindowController {
             .expect("pane zoom was just activated")
             .frame
             .clone();
-        self.start_pane_zoom_transition(pending, &frame);
+        set_visible_stack_child_immediately(&self.stack, &workspace.to_string());
+        let frame_for_finish = frame.clone();
+        let stack = self.stack.clone();
+        let registry = self.pane_registry.clone();
+        self.start_pane_zoom_transition(pending, &frame, destination, move |completed| {
+            if frame_for_finish.parent().is_none() {
+                stack.add_named(&frame_for_finish, Some(PANE_ZOOM_PAGE));
+            }
+            set_visible_stack_child_immediately(&stack, PANE_ZOOM_PAGE);
+            if completed {
+                grab_registered_pane_focus(registry, pane);
+            }
+        });
         self.focus_pane(pane);
     }
 
@@ -993,8 +1105,7 @@ impl WindowController {
 
         restore_pane_from_zoom(&active.frame, &self.stack, active.origin);
         if self.surfaces.borrow().contains_key(&active.workspace) {
-            self.stack
-                .set_visible_child_name(&active.workspace.to_string());
+            set_visible_stack_child_immediately(&self.stack, &active.workspace.to_string());
         }
         Some(active.frame)
     }
@@ -1966,18 +2077,7 @@ impl WindowController {
             let _ = bridge.tx.send(GtkCommand::PaneFocused { pane }).await;
             let _ = bridge.tx.send(GtkCommand::RefreshWindowTitle).await;
         });
-        glib::idle_add_local_once(move || {
-            let r = registry.borrow();
-            if let Some(term) = r.active_terminal(pane) {
-                term.grab_focus();
-            } else if let Some(browser) = r.active_browser(pane) {
-                browser.grab_focus();
-            } else if let Some(editor) = r.active_editor(pane) {
-                editor.grab_focus();
-            } else {
-                tracing::debug!(%pane, "focus_pane: no surface registered for pane");
-            }
-        });
+        grab_registered_pane_focus(registry, pane);
     }
 
     async fn resize_pane_ratio(&self, pane: PaneId, ratio: f32) -> Result<(), String> {
@@ -3216,6 +3316,55 @@ mod tests {
                 height: 480.0,
             }
         );
+    }
+
+    #[gtk::test]
+    fn pane_zoom_animation_updates_widget_position_and_size() {
+        let overlay = gtk::Fixed::new();
+        let picture = gtk::Picture::new();
+        overlay.put(&picture, 0.0, 0.0);
+        let source = PaneZoomRect {
+            x: 0.0,
+            y: 0.0,
+            width: 320.0,
+            height: 240.0,
+        };
+        let rect = PaneZoomRect {
+            x: 24.0,
+            y: 36.0,
+            width: 640.0,
+            height: 480.0,
+        };
+
+        set_pane_zoom_widget_rect(&overlay, picture.upcast_ref(), source, rect);
+
+        let transform = overlay.child_transform(&picture).unwrap();
+        let position = transform.transform_point(&gtk::graphene::Point::new(0.0, 0.0));
+        let far_corner = transform.transform_point(&gtk::graphene::Point::new(320.0, 240.0));
+        assert_eq!((position.x(), position.y()), (24.0, 36.0));
+        assert_eq!((far_corner.x(), far_corner.y()), (664.0, 516.0));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn single_pane_zoom_reports_that_it_is_already_full_size() {
+        let (controller, _workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.SinglePaneZoom").await;
+
+        controller.toggle_pane_zoom(pane);
+
+        assert!(controller.pane_zoom.active.borrow().is_none());
+        assert!(controller.clipboard_toast.widget().reveals_child());
+        assert_eq!(
+            controller.clipboard_toast.current_message(),
+            "Already full size"
+        );
+        assert!(!controller
+            .pane_registry
+            .borrow()
+            .pane_frame(pane)
+            .unwrap()
+            .has_css_class("flowmux-pane-zoomed"));
     }
 
     fn workspace_with_tabbed_surface(
