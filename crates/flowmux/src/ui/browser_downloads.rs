@@ -165,6 +165,12 @@ pub(crate) struct DownloadManager {
     inner: Rc<DownloadManagerInner>,
 }
 
+#[derive(Clone)]
+#[cfg(target_os = "linux")]
+pub(crate) struct WeakDownloadManager {
+    inner: Weak<DownloadManagerInner>,
+}
+
 struct DownloadManagerInner {
     button: gtk::MenuButton,
     #[cfg(all(test, not(target_os = "macos")))]
@@ -251,6 +257,13 @@ impl DownloadManager {
 
     pub(crate) fn button(&self) -> gtk::MenuButton {
         self.inner.button.clone()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn downgrade(&self) -> WeakDownloadManager {
+        WeakDownloadManager {
+            inner: Rc::downgrade(&self.inner),
+        }
     }
 
     pub(crate) fn add<F>(&self, cancel_action: F) -> DownloadItem
@@ -388,6 +401,13 @@ impl DownloadManager {
     #[cfg(test)]
     fn clear_terminal(&self) {
         self.inner.clear_terminal();
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl WeakDownloadManager {
+    pub(crate) fn upgrade(&self) -> Option<DownloadManager> {
+        self.inner.upgrade().map(|inner| DownloadManager { inner })
     }
 }
 
@@ -712,16 +732,22 @@ mod tests {
         assert_eq!(collection.active_count(), 1);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     #[gtk::test]
     fn manager_uses_bounded_vertical_scroller() {
         if gtk::init().is_err() {
             return;
         }
         let manager = DownloadManager::new();
+        let weak = manager.downgrade();
         assert_eq!(manager.scroll_policy(), gtk::PolicyType::Never);
         assert_eq!(manager.max_content_height(), 420);
         assert!(manager.propagates_natural_height());
+        drop(manager);
+        assert!(
+            weak.upgrade().is_none(),
+            "session download callbacks must not retain a closed tab's UI"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

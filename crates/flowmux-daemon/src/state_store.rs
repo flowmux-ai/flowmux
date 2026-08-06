@@ -433,9 +433,21 @@ impl StateStore {
         workspace_ids_in_display_order(&s)
     }
 
-    /// Clone workspace models in the same order shown in the sidebar. This is
-    /// the model source for IPC tree responses; returning `State::workspaces`
-    /// directly would expose creation order after a drag reorder.
+    /// Return the active workspace id without cloning the persisted state.
+    pub async fn active_workspace(&self) -> Option<WorkspaceId> {
+        self.inner.lock().await.active_workspace
+    }
+
+    /// Small workspace-navigation snapshot used by next/previous/number
+    /// shortcuts. Terminal history and workspace metadata stay in the store.
+    pub async fn workspace_order_and_active(&self) -> (Vec<WorkspaceId>, Option<WorkspaceId>) {
+        let s = self.inner.lock().await;
+        (workspace_ids_in_display_order(&s), s.active_workspace)
+    }
+
+    /// Clone workspace models in the same order shown in the sidebar, omitting
+    /// terminal replay buffers that are not part of IPC tree responses. This
+    /// avoids copying up to 256 KiB per terminal for every layout query.
     pub async fn ordered_workspaces(&self) -> Vec<Workspace> {
         let s = self.inner.lock().await;
         let by_id = s
@@ -445,7 +457,11 @@ impl StateStore {
             .collect::<HashMap<_, _>>();
         workspace_ids_in_display_order(&s)
             .into_iter()
-            .filter_map(|id| by_id.get(&id).map(|workspace| (*workspace).clone()))
+            .filter_map(|id| {
+                by_id
+                    .get(&id)
+                    .map(|workspace| workspace.clone_without_scrollback())
+            })
             .collect()
     }
 
@@ -5171,6 +5187,18 @@ Do you want to continue?";
         let c = create_named_workspace(&seed, "c").await;
         let stale = WorkspaceId::new();
         let mut state = seed.snapshot().await;
+        let first_workspace = state.workspaces.iter_mut().find(|ws| ws.id == a).unwrap();
+        let first_pane = first_workspace.surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        let first_surface = first_workspace.surfaces[0]
+            .root_pane
+            .active_surface_id(first_pane)
+            .unwrap();
+        assert!(first_workspace.surfaces[0]
+            .root_pane
+            .set_surface_scrollback(first_pane, first_surface, "saved terminal history".into(),));
         state.workspace_order = vec![c, stale, c];
         state.active_workspace = Some(stale);
 
@@ -5178,16 +5206,27 @@ Do you want to continue?";
         let snapshot = store.snapshot().await;
         assert_eq!(snapshot.workspace_order, vec![c, a, b]);
         assert_eq!(snapshot.active_workspace, Some(c));
-        assert_eq!(store.list_workspaces().await, vec![c, a, b]);
+        assert_eq!(store.active_workspace().await, Some(c));
         assert_eq!(
-            store
-                .ordered_workspaces()
-                .await
-                .iter()
-                .map(|ws| ws.id)
-                .collect::<Vec<_>>(),
+            store.workspace_order_and_active().await,
+            (vec![c, a, b], Some(c))
+        );
+        assert_eq!(store.list_workspaces().await, vec![c, a, b]);
+        let ordered = store.ordered_workspaces().await;
+        assert_eq!(
+            ordered.iter().map(|ws| ws.id).collect::<Vec<_>>(),
             vec![c, a, b]
         );
+        assert!(ordered
+            .iter()
+            .find(|workspace| workspace.id == a)
+            .unwrap()
+            .surfaces[0]
+            .root_pane
+            .find_surface(first_pane, first_surface)
+            .unwrap()
+            .scrollback
+            .is_none());
     }
 
     #[tokio::test]

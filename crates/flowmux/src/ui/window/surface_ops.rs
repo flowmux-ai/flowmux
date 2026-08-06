@@ -22,6 +22,7 @@ impl WindowController {
         ws_id: WorkspaceId,
         removed: PaneId,
     ) {
+        self.forget_closed_pane_ui_state(&[removed]);
         let frame = {
             let r = self.pane_registry.borrow();
             r.pane_frame(removed)

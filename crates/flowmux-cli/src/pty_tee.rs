@@ -68,6 +68,7 @@ use std::time::{Duration, Instant};
 /// `poll` with arbitrary signals on stable Rust.
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
+const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
     if matches!(sig, libc::SIGHUP | libc::SIGTERM | libc::SIGINT) {
@@ -605,7 +606,7 @@ fn ipc_worker(
                     // just wrote, while rate-limiting screen scans for busy
                     // TUIs. The GTK acknowledgement below then keeps at most
                     // one follow-up refresh queued while output continues.
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(OUTPUT_REFRESH_INTERVAL).await;
                     output_refresh.queued.store(false, Ordering::Release);
                     let Some(surface) = surface else {
                         output_refresh.supported.store(false, Ordering::Release);

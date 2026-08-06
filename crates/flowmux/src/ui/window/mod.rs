@@ -1885,8 +1885,16 @@ impl WindowController {
     /// Drop the workspace's stack page entirely (used when its last
     /// surface is closed).
     pub fn drop_workspace(&self, id: WorkspaceId) {
-        let closing_surfaces = self.pane_registry.borrow().surface_ids_in_workspace(id);
+        let (closing_surfaces, closing_panes) = {
+            let registry = self.pane_registry.borrow();
+            (
+                registry.surface_ids_in_workspace(id),
+                registry.pane_ids_in_workspace(id).collect::<Vec<_>>(),
+            )
+        };
         self.forget_agent_surfaces(&closing_surfaces);
+        self.forget_closed_pane_ui_state(&closing_panes);
+        self.focus_mru.borrow_mut().remove(&id);
         let dropping_zoomed_workspace = self
             .pane_zoom
             .active
@@ -1904,9 +1912,40 @@ impl WindowController {
         }
     }
 
+    /// Remove controller-side caches whose keys belong to panes that no longer
+    /// exist. These maps outlive individual workspace widgets, so relying on
+    /// GTK teardown alone would retain file-tree paths and stale MRU ids.
+    fn forget_closed_pane_ui_state(&self, panes: &[PaneId]) {
+        if panes.is_empty() {
+            return;
+        }
+        self.file_browser
+            .pane_states
+            .borrow_mut()
+            .retain(|pane, _| !panes.contains(pane));
+        if self
+            .file_browser
+            .source_pane
+            .get()
+            .is_some_and(|pane| panes.contains(&pane))
+        {
+            self.file_browser.source_pane.set(None);
+            self.file_browser.active.set(false);
+            self.file_browser.panel.hide();
+        }
+        self.focus_mru.borrow_mut().retain(|_, queue| {
+            queue.retain(|pane| !panes.contains(pane));
+            !queue.is_empty()
+        });
+    }
+
     fn forget_agent_surfaces(&self, surfaces: &[SurfaceId]) {
         forget_saved_agent_sessions(surfaces);
         self.activities.forget_surfaces(surfaces);
+        self.agent_bar
+            .attentions
+            .borrow_mut()
+            .retain(|surface| !surfaces.contains(surface));
     }
 
     /// Show a modal "Are you sure you want to close this workspace?"
@@ -6291,6 +6330,36 @@ mod tests {
         assert_eq!(subs[2], ".../flowmux-scn/dev/projectC", "MRU[2] = pane_b");
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn dropping_workspace_forgets_controller_side_pane_caches() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.DropWorkspaceCaches").await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        controller
+            .file_browser
+            .pane_states
+            .borrow_mut()
+            .insert(pane, FileBrowserPaneState::default());
+        controller.file_browser.source_pane.set(Some(pane));
+        controller
+            .focus_mru
+            .borrow_mut()
+            .insert(workspace, std::collections::VecDeque::from([pane]));
+        controller.agent_bar.attentions.borrow_mut().insert(surface);
+
+        controller.drop_workspace(workspace);
+
+        assert!(controller.file_browser.pane_states.borrow().is_empty());
+        assert_eq!(controller.file_browser.source_pane.get(), None);
+        assert!(!controller.focus_mru.borrow().contains_key(&workspace));
+        assert!(!controller.agent_bar.attentions.borrow().contains(&surface));
+    }
+
     /// Regression: closing the right pane of a side-by-side split (the
     /// X-button on the right pane's tab) must collapse only that pane
     /// and leave the surviving left pane visible. The earlier
@@ -6381,6 +6450,20 @@ mod tests {
             agent_bar_visible(&controller),
             "precondition: closing pane starts with an Agent Bar item"
         );
+        controller
+            .file_browser
+            .pane_states
+            .borrow_mut()
+            .insert(left, FileBrowserPaneState::default());
+        controller
+            .file_browser
+            .pane_states
+            .borrow_mut()
+            .insert(right, FileBrowserPaneState::default());
+        controller
+            .focus_mru
+            .borrow_mut()
+            .insert(ws_id, std::collections::VecDeque::from([left, right]));
 
         {
             let r = controller.pane_registry.borrow();
@@ -6413,6 +6496,21 @@ mod tests {
                 "right pane should have been forgotten by PaneRegistry"
             );
         }
+        assert!(controller
+            .file_browser
+            .pane_states
+            .borrow()
+            .contains_key(&left));
+        assert!(!controller
+            .file_browser
+            .pane_states
+            .borrow()
+            .contains_key(&right));
+        assert!(controller
+            .focus_mru
+            .borrow()
+            .get(&ws_id)
+            .is_some_and(|queue| !queue.contains(&right)));
 
         let visible = controller.stack.visible_child_name();
         assert_eq!(

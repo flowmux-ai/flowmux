@@ -23,6 +23,26 @@ use webkit6::prelude::*;
 
 const MESSAGE_HANDLER_NAME: &str = "flowmuxEditor";
 
+thread_local! {
+    /// Editor pages have storage disabled and are restricted to the same local
+    /// asset server, so one ephemeral session avoids a network process/cache
+    /// per editor without mixing user browser data into the editor.
+    static EDITOR_NETWORK_SESSION: RefCell<gtk::glib::WeakRef<webkit6::NetworkSession>> =
+        RefCell::new(gtk::glib::WeakRef::new());
+}
+
+fn shared_editor_network_session() -> webkit6::NetworkSession {
+    EDITOR_NETWORK_SESSION.with(|cached| {
+        if let Some(session) = cached.borrow().upgrade() {
+            return session;
+        }
+        let session = webkit6::NetworkSession::new_ephemeral();
+        session.connect_download_started(|_, download| download.cancel());
+        cached.replace(session.downgrade());
+        session
+    })
+}
+
 #[derive(Clone)]
 pub struct EditorPane {
     pane_id: Rc<Cell<PaneId>>,
@@ -72,8 +92,7 @@ impl EditorPane {
             user_content_manager.register_script_message_handler(MESSAGE_HANDLER_NAME, None),
             "editor script message handler must be unique"
         );
-        let network_session = webkit6::NetworkSession::new_ephemeral();
-        network_session.connect_download_started(|_, download| download.cancel());
+        let network_session = shared_editor_network_session();
         let web_view = webkit6::WebView::builder()
             .network_session(&network_session)
             .user_content_manager(&user_content_manager)
@@ -443,4 +462,16 @@ fn perform_native_edit(
         EditorNativeEditAction::Copy => "Copy",
         EditorNativeEditAction::Paste => "Paste",
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    fn editor_views_share_a_live_ephemeral_network_session() {
+        let first = shared_editor_network_session();
+        let second = shared_editor_network_session();
+        assert_eq!(first, second);
+    }
 }

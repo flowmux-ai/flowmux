@@ -24,8 +24,17 @@ use flowmux_browser::{BrowserProfile, RefScope, RefStore};
 use flowmux_config::options::BrowserEngine;
 use flowmux_core::{PaneId, SurfaceId};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use webkit6::prelude::*;
+
+thread_local! {
+    /// WebKitGTK can otherwise create a separate network process and cache for
+    /// every tab. Weak values share live tabs by profile without keeping an
+    /// unused session alive after its final WebView closes.
+    static NETWORK_SESSIONS: RefCell<HashMap<String, gtk::glib::WeakRef<webkit6::NetworkSession>>> =
+        RefCell::new(HashMap::new());
+}
 
 #[derive(Clone)]
 pub struct BrowserPane {
@@ -35,6 +44,7 @@ pub struct BrowserPane {
     zoom: Rc<Cell<f64>>,
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
+    _download_signal: Rc<NetworkSessionSignal>,
     /// cmux-style server-side ref store. Each snapshot clears + repopulates
     /// the entry for this pane; subsequent click/fill/etc. resolve their
     /// `eN` ref through this map to a CSS selector before injecting JS.
@@ -42,6 +52,19 @@ pub struct BrowserPane {
     /// Scope key — derived from the surface id so multiple browser
     /// surfaces in the same pane keep their refs separate.
     pub ref_scope: RefScope,
+}
+
+struct NetworkSessionSignal {
+    session: gtk::glib::WeakRef<webkit6::NetworkSession>,
+    handler: Option<gtk::glib::SignalHandlerId>,
+}
+
+impl Drop for NetworkSessionSignal {
+    fn drop(&mut self) {
+        if let (Some(session), Some(handler)) = (self.session.upgrade(), self.handler.take()) {
+            session.disconnect(handler);
+        }
+    }
 }
 
 /// Build a [`RefScope`] from a [`SurfaceId`]. The scope is just the
@@ -328,10 +351,20 @@ impl BrowserPane {
         chrome.append(&downloads.button());
         chrome.append(&inspector);
 
-        {
-            let downloads = downloads.clone();
+        let download_signal = {
+            let downloads = downloads.downgrade();
+            let source_web_view = web_view.downgrade();
             let download_directory = download_directory();
-            network_session.connect_download_started(move |_, download| {
+            let handler = network_session.connect_download_started(move |_, download| {
+                let Some(downloads) = downloads.upgrade() else {
+                    return;
+                };
+                let Some(source_web_view) = source_web_view.upgrade() else {
+                    return;
+                };
+                if download.web_view().as_ref() != Some(&source_web_view) {
+                    return;
+                }
                 let native_for_cancel = download.clone();
                 let item = downloads.add(move || native_for_cancel.cancel());
                 {
@@ -367,7 +400,11 @@ impl BrowserPane {
                     });
                 }
             });
-        }
+            Rc::new(NetworkSessionSignal {
+                session: network_session.downgrade(),
+                handler: Some(handler),
+            })
+        };
 
         let find_entry = gtk::SearchEntry::builder()
             .placeholder_text("Find in page…")
@@ -576,6 +613,7 @@ impl BrowserPane {
             zoom,
             zoom_label,
             find_entry,
+            _download_signal: download_signal,
             refs: Rc::new(RefCell::new(RefStore::new())),
             ref_scope: ref_scope_for_surface(surface_id),
         }
@@ -859,6 +897,37 @@ fn build_network_session(
     profile: &BrowserProfile,
     persist_session: bool,
 ) -> webkit6::NetworkSession {
+    let cache_key = format!(
+        "{}:{}",
+        if persist_session {
+            "persistent"
+        } else {
+            "ephemeral"
+        },
+        profile.slug()
+    );
+    if let Some(session) = NETWORK_SESSIONS.with(|sessions| {
+        sessions
+            .borrow()
+            .get(&cache_key)
+            .and_then(gtk::glib::WeakRef::upgrade)
+    }) {
+        return session;
+    }
+
+    let session = build_uncached_network_session(profile, persist_session);
+    NETWORK_SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        sessions.retain(|_, session| session.upgrade().is_some());
+        sessions.insert(cache_key, session.downgrade());
+    });
+    session
+}
+
+fn build_uncached_network_session(
+    profile: &BrowserProfile,
+    persist_session: bool,
+) -> webkit6::NetworkSession {
     if !persist_session {
         tracing::debug!(
             profile = ?profile,
@@ -998,6 +1067,16 @@ mod tests {
             path.file_name().and_then(|n| n.to_str()),
             Some("cookies.sqlite")
         );
+    }
+
+    #[gtk::test]
+    fn browser_tabs_with_the_same_profile_share_a_live_network_session() {
+        let first = build_network_session(&BrowserProfile::Default, false);
+        let second = build_network_session(&BrowserProfile::Default, false);
+        assert_eq!(first, second);
+
+        let other = build_network_session(&BrowserProfile::FirefoxImport, false);
+        assert_ne!(first, other, "browser profile isolation must remain intact");
     }
 
     #[test]

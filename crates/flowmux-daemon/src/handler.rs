@@ -146,12 +146,9 @@ impl Handler for DaemonHandler {
                     }
                 }
 
-                Request::WorkspaceCurrent => {
-                    let state = self.store.snapshot().await;
-                    Response::WorkspaceCurrent {
-                        id: state.active_workspace,
-                    }
-                }
+                Request::WorkspaceCurrent => Response::WorkspaceCurrent {
+                    id: self.store.active_workspace().await,
+                },
 
                 Request::Notify {
                     pane,

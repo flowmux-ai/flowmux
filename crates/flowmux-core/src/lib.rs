@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 const TERMINAL_TAB_TITLE_MAX_CHARS: usize = 17;
@@ -390,7 +391,7 @@ pub struct PaneSurface {
     /// Best-effort plain-text terminal history replayed on the next launch.
     /// Bounded by [`TERMINAL_SCROLLBACK_MAX_BYTES`] before it reaches state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scrollback: Option<String>,
+    pub scrollback: Option<Arc<str>>,
     /// Live AI-agent activity, set from agent lifecycle hooks. Runtime
     /// state only — never persisted, so resumed workspaces start with no
     /// agent presence until the next hook fires.
@@ -1178,7 +1179,7 @@ impl Pane {
             return false;
         }
         let bounded = bound_terminal_scrollback(&text);
-        let next = (!bounded.is_empty()).then_some(bounded);
+        let next = (!bounded.is_empty()).then(|| Arc::<str>::from(bounded));
         if surface.scrollback == next {
             return false;
         }
@@ -2480,58 +2481,64 @@ pub fn detect_agent_status_from_signals(
     osc_title: Option<&str>,
 ) -> Option<AgentStatus> {
     let title = osc_title.unwrap_or_default().trim();
-    let title_lower = title.to_ascii_lowercase();
     let title_names_agent = detect_agent_name_from_surface_title(title).is_some();
     if title_names_agent
-        && (title_lower.contains("action required")
-            || title_lower.contains("needs input")
-            || title_lower.contains("permission required")
-            || title_lower.contains("needs permission"))
+        && [
+            "action required",
+            "needs input",
+            "permission required",
+            "needs permission",
+        ]
+        .into_iter()
+        .any(|needle| contains_ascii_case_insensitive(title, needle))
     {
         return Some(AgentStatus::Blocked);
     }
     if title.chars().any(is_braille_spinner)
         || (title_names_agent
-            && (title_lower.contains("working")
-                || title_lower.contains("thinking")
-                || title_lower.contains("running")))
+            && ["working", "thinking", "running"]
+                .into_iter()
+                .any(|needle| contains_ascii_case_insensitive(title, needle)))
     {
         return Some(AgentStatus::Working);
     }
-    if title_names_agent && title_lower.contains("idle") {
+    if title_names_agent && contains_ascii_case_insensitive(title, "idle") {
         return Some(AgentStatus::Idle);
     }
 
     let text = screen_text.unwrap_or_default();
-    let recent: Vec<String> = text
-        .lines()
-        .rev()
-        .filter(|line| !line.trim().is_empty())
-        .take(12)
-        .map(str::to_ascii_lowercase)
-        .collect();
-    if recent.iter().any(|line| is_agent_idle_prompt_line(line)) {
+    let recent = || {
+        text.lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty())
+            .take(12)
+    };
+    if recent().any(is_agent_idle_prompt_line) {
         return Some(AgentStatus::Idle);
     }
-    if recent.iter().any(|line| {
-        line.contains("do you want to")
-            || line.contains("approve this")
-            || line.contains("approve command")
-            || line.contains("requires approval")
-            || line.contains("waiting for approval")
-            || line.contains("awaiting approval")
-            || line.contains("needs approval")
-            || line.contains("allow this")
-            || line.contains("permission to")
-            || line.contains("permission prompt")
-            || line.contains("requires permission")
-            || line.contains("continue?")
-            || line.contains("proceed?")
-            || line.contains("action required")
+    if recent().any(|line| {
+        [
+            "do you want to",
+            "approve this",
+            "approve command",
+            "requires approval",
+            "waiting for approval",
+            "awaiting approval",
+            "needs approval",
+            "allow this",
+            "permission to",
+            "permission prompt",
+            "requires permission",
+            "continue?",
+            "proceed?",
+            "action required",
+        ]
+        .into_iter()
+        .any(|needle| contains_ascii_case_insensitive(line, needle))
     }) {
         return Some(AgentStatus::Blocked);
     }
-    if recent.iter().any(|line| is_agent_working_status_line(line)) {
+    if recent().any(is_agent_working_status_line) {
         return Some(AgentStatus::Working);
     }
     None
@@ -2549,10 +2556,10 @@ fn is_agent_working_status_line(line: &str) -> bool {
     ]
     .into_iter()
     .any(|status| {
-        line.strip_prefix(status).is_some_and(|rest| {
+        strip_ascii_prefix_case_insensitive(line, status).is_some_and(|rest| {
             rest.trim_start().starts_with('(')
-                || rest.contains("esc to interrupt")
-                || rest.contains("ctrl+c to stop")
+                || contains_ascii_case_insensitive(rest, "esc to interrupt")
+                || contains_ascii_case_insensitive(rest, "ctrl+c to stop")
         })
     })
 }
@@ -2565,7 +2572,7 @@ pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
         .take(12)
         .find_map(|line| {
             let line = trim_agent_status_prefix(line);
-            is_agent_working_status_line(&line.to_ascii_lowercase()).then_some(line)
+            is_agent_working_status_line(line).then_some(line)
         })
 }
 
@@ -2593,31 +2600,34 @@ pub fn detect_agent_name_from_signals(
 }
 
 fn detect_agent_name_from_screen_status_line(line: &str) -> Option<&'static str> {
-    let lower = line.to_ascii_lowercase();
-    if !line_has_agent_status_cue(&lower) {
+    if !line_has_agent_status_cue(line) {
         return None;
     }
-    agent_name_in_text(&lower)
+    agent_name_in_text(line)
 }
 
 fn line_has_agent_status_cue(line: &str) -> bool {
-    line.contains("action required")
-        || line.contains("needs input")
-        || line.contains("permission required")
-        || line.contains("needs permission")
-        || line.contains("approve this")
-        || line.contains("approve command")
-        || line.contains("requires approval")
-        || line.contains("waiting for approval")
-        || line.contains("awaiting approval")
-        || line.contains("needs approval")
-        || line.contains("permission prompt")
-        || line.contains("requires permission")
-        || line.contains("working")
-        || line.contains("thinking")
-        || line.contains("running tool")
-        || line.contains("executing")
-        || line.contains("idle")
+    [
+        "action required",
+        "needs input",
+        "permission required",
+        "needs permission",
+        "approve this",
+        "approve command",
+        "requires approval",
+        "waiting for approval",
+        "awaiting approval",
+        "needs approval",
+        "permission prompt",
+        "requires permission",
+        "working",
+        "thinking",
+        "running tool",
+        "executing",
+        "idle",
+    ]
+    .into_iter()
+    .any(|needle| contains_ascii_case_insensitive(line, needle))
 }
 
 fn agent_name_in_text(text: &str) -> Option<&'static str> {
@@ -2640,46 +2650,48 @@ pub fn detect_agent_idle_name_from_signals(
 ) -> Option<&'static str> {
     let title_agent_name = osc_title.and_then(detect_agent_name_from_surface_title);
     let text = screen_text.unwrap_or_default();
-    let recent = text
-        .lines()
-        .rev()
-        .filter(|line| !line.trim().is_empty())
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_ascii_lowercase();
-    let looks_like_agent_prompt = recent.lines().any(is_agent_idle_prompt_line);
+    let recent = || {
+        text.lines()
+            .rev()
+            .filter(|line| !line.trim().is_empty())
+            .take(12)
+    };
+    let looks_like_agent_prompt = recent().any(is_agent_idle_prompt_line);
     if !looks_like_agent_prompt {
         return (screen_text.is_none() || text.trim().is_empty())
             .then_some(title_agent_name)
             .flatten();
     }
     title_agent_name
-        .or_else(|| agent_name_in_text(&recent))
         .or_else(|| {
-            (recent.contains("ask anything") && recent.contains("ctrl+p commands"))
-                .then_some("opencode")
+            ["opencode", "claude", "codex", "cline"]
+                .into_iter()
+                .find(|name| recent().any(|line| agent_name_in_text(line) == Some(*name)))
+        })
+        .or_else(|| {
+            let asks_anything =
+                recent().any(|line| contains_ascii_case_insensitive(line, "ask anything"));
+            let shows_commands =
+                recent().any(|line| contains_ascii_case_insensitive(line, "ctrl+p commands"));
+            (asks_anything && shows_commands).then_some("opencode")
         })
 }
 
 fn is_agent_idle_prompt_line(line: &str) -> bool {
     let line = line.trim();
     let is_shell_command = line.contains("\\n")
-        || line.starts_with("printf ")
-        || line.starts_with("echo ")
-        || line.starts_with("clear;")
-        || line.contains("; echo ");
+        || starts_with_ascii_case_insensitive(line, "printf ")
+        || starts_with_ascii_case_insensitive(line, "echo ")
+        || starts_with_ascii_case_insensitive(line, "clear;")
+        || contains_ascii_case_insensitive(line, "; echo ");
     !is_shell_command
         && (line.starts_with("› ")
             || line.starts_with("❯ ")
-            || line.contains("press / for commands")
-            || line.contains("press / to")
-            || line.contains("type /")
-            || line.contains("ask anything")
-            || line.contains("ask me anything"))
+            || contains_ascii_case_insensitive(line, "press / for commands")
+            || contains_ascii_case_insensitive(line, "press / to")
+            || contains_ascii_case_insensitive(line, "type /")
+            || contains_ascii_case_insensitive(line, "ask anything")
+            || contains_ascii_case_insensitive(line, "ask me anything"))
 }
 
 fn normalize_agent_report_name_for_surface_title(report: &mut AgentStatusReport, title: &str) {
@@ -2689,18 +2701,18 @@ fn normalize_agent_report_name_for_surface_title(report: &mut AgentStatusReport,
 }
 
 fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {
-    let lower = title.trim_start().to_ascii_lowercase();
-    if starts_with_agent_title_token(&lower, "opencode")
-        || starts_with_agent_title_token(&lower, "open code")
-        || lower.starts_with("oc |")
-        || lower.starts_with("oc|")
+    let title = title.trim_start();
+    if starts_with_agent_title_token(title, "opencode")
+        || starts_with_agent_title_token(title, "open code")
+        || starts_with_ascii_case_insensitive(title, "oc |")
+        || starts_with_ascii_case_insensitive(title, "oc|")
     {
         Some("opencode")
-    } else if starts_with_agent_title_token(&lower, "claude") {
+    } else if starts_with_agent_title_token(title, "claude") {
         Some("claude")
-    } else if starts_with_agent_title_token(&lower, "codex") {
+    } else if starts_with_agent_title_token(title, "codex") {
         Some("codex")
-    } else if starts_with_agent_title_token(&lower, "cline") {
+    } else if starts_with_agent_title_token(title, "cline") {
         Some("cline")
     } else {
         None
@@ -2708,7 +2720,7 @@ fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {
 }
 
 fn starts_with_agent_title_token(title: &str, token: &str) -> bool {
-    let Some(rest) = title.strip_prefix(token) else {
+    let Some(rest) = strip_ascii_prefix_case_insensitive(title, token) else {
         return false;
     };
     match rest.chars().next() {
@@ -2726,11 +2738,42 @@ fn contains_ascii_phrase(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return false;
     }
-    haystack.match_indices(needle).any(|(idx, _)| {
-        let before = haystack[..idx].chars().next_back();
-        let after = haystack[idx + needle.len()..].chars().next();
-        is_agent_name_boundary(before) && is_agent_name_boundary(after)
-    })
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .enumerate()
+        .filter(|(_, candidate)| candidate.eq_ignore_ascii_case(needle.as_bytes()))
+        .any(|(idx, _)| {
+            let Some(before_text) = haystack.get(..idx) else {
+                return false;
+            };
+            let Some(after_text) = haystack.get(idx + needle.len()..) else {
+                return false;
+            };
+            let before = before_text.chars().next_back();
+            let after = after_text.chars().next();
+            is_agent_name_boundary(before) && is_agent_name_boundary(after)
+        })
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    !needle.is_empty()
+        && haystack
+            .as_bytes()
+            .windows(needle.len())
+            .any(|candidate| candidate.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn starts_with_ascii_case_insensitive(text: &str, prefix: &str) -> bool {
+    text.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+fn strip_ascii_prefix_case_insensitive<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    starts_with_ascii_case_insensitive(text, prefix)
+        .then(|| text.get(prefix.len()..))
+        .flatten()
 }
 
 fn is_agent_name_boundary(ch: Option<char>) -> bool {

@@ -509,7 +509,19 @@ impl WindowController {
                 self.refresh_agent_screen_status(surface, None).await;
             }
             GtkCommand::TerminalOutputObserved { surface, ack } => {
-                self.refresh_agent_screen_status(surface, None).await;
+                // Mapped VTE widgets already report their grid changes through
+                // TerminalContentsChanged. The PTY-side signal exists for
+                // hidden tabs/workspaces; skipping it here avoids extracting
+                // and scanning the same visible screen twice.
+                let terminal_is_mapped = self
+                    .pane_registry
+                    .borrow()
+                    .terminals
+                    .get(&surface)
+                    .is_some_and(|terminal| terminal.container.is_mapped());
+                if !terminal_is_mapped {
+                    self.refresh_agent_screen_status(surface, None).await;
+                }
                 let _ = ack.send(());
             }
             GtkCommand::RefreshWindowTitle => {

@@ -248,11 +248,10 @@ impl WindowController {
             .panel
             .row_for_path(&path)
             .ok_or_else(|| "The worktree is no longer in the current list.".to_string())?;
-        let snapshot = self.store.snapshot().await;
-        if let Some(reason) = remove_block_reason(
-            &row.info,
-            self.worktree_in_use(&row.info.path, &snapshot.workspaces),
-        ) {
+        let workspaces = self.store.ordered_workspaces().await;
+        if let Some(reason) =
+            remove_block_reason(&row.info, self.worktree_in_use(&row.info.path, &workspaces))
+        {
             return Err(reason);
         }
         Ok(row)
@@ -535,16 +534,14 @@ impl WindowController {
     }
 
     async fn annotate_worktree_rows(&self, list: &WorktreeList) -> Vec<WorktreeRowView> {
-        let snapshot = self.store.snapshot().await;
+        let workspaces = self.store.ordered_workspaces().await;
         let removals_in_progress = self.worktrees.removals_in_progress.borrow().clone();
         list.items
             .iter()
             .cloned()
             .map(|info| {
-                let remove_block_reason = remove_block_reason(
-                    &info,
-                    self.worktree_in_use(&info.path, &snapshot.workspaces),
-                );
+                let remove_block_reason =
+                    remove_block_reason(&info, self.worktree_in_use(&info.path, &workspaces));
                 let operation_in_progress =
                     removals_in_progress.contains(&normalized_existing_path(&info.path));
                 WorktreeRowView {

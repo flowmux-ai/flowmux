@@ -120,31 +120,32 @@ impl WindowController {
                 show_color_dialog(&self.window, id, current.as_deref(), self.bridge.clone());
             }
             GtkCommand::FocusWorkspaceDir { dir } => {
-                let snap = self.store.snapshot().await;
-                if snap.workspace_order.is_empty() {
+                let (workspace_order, active_workspace) =
+                    self.store.workspace_order_and_active().await;
+                if workspace_order.is_empty() {
                     return;
                 }
-                let active = self.sidebar.selected_workspace().or(snap
-                    .active_workspace
-                    .or_else(|| snap.workspace_order.first().copied()));
+                let active = self
+                    .sidebar
+                    .selected_workspace()
+                    .or(active_workspace.or_else(|| workspace_order.first().copied()));
                 let Some(active) = active else { return };
-                let cur = snap
-                    .workspace_order
+                let cur = workspace_order
                     .iter()
                     .position(|x| *x == active)
                     .unwrap_or(0);
-                let len = snap.workspace_order.len();
+                let len = workspace_order.len();
                 let next = match dir {
                     WsNav::Next => (cur + 1) % len,
                     WsNav::Prev => (cur + len - 1) % len,
                 };
-                let target = snap.workspace_order[next];
+                let target = workspace_order[next];
                 self.activate_workspace(target).await;
             }
             GtkCommand::FocusWorkspaceAt { idx } => {
-                let snap = self.store.snapshot().await;
+                let (workspace_order, _) = self.store.workspace_order_and_active().await;
                 let target_idx = (idx as usize).saturating_sub(1);
-                if let Some(id) = snap.workspace_order.get(target_idx).copied() {
+                if let Some(id) = workspace_order.get(target_idx).copied() {
                     self.activate_workspace(id).await;
                 }
             }

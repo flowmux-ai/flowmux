@@ -21,6 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use vte::prelude::*;
 
 #[derive(Clone)]
@@ -52,9 +53,9 @@ pub struct GhosttyPane {
     /// Codex) repaint constantly; VTE clears the drag-selection on the next
     /// output frame (`deselect_all` in `process_incoming`), so by the time the
     /// user hits Copy `has_selection()` is already false and the live copy is a
-    /// no-op. We snapshot the selected text on every `selection-changed` and
-    /// copy from this cache when the live selection is gone. Cleared on the
-    /// next primary-button press so a fresh click starts clean.
+    /// no-op. We snapshot bounded selected text on `selection-changed` and copy
+    /// from this cache when the live selection is gone. Cleared on the next
+    /// primary-button press so a fresh click starts clean.
     last_selection: Rc<RefCell<Option<String>>>,
     /// Owns the forked child + PTY master. Kept alive for the pane's lifetime so
     /// the shell survives; pane close starts bounded off-thread group reaping.
@@ -66,21 +67,59 @@ pub struct GhosttyPane {
 /// literal newline" at the prompt without submitting.
 pub const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
 
-/// Full-screen Agent TUIs can emit several content events in one main-loop
-/// turn. Keep one bounded callback pending per terminal instead of queuing one
-/// UI refresh for every VTE grid mutation.
+const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const TERMINAL_SELECTION_CACHE_MAX_BYTES: usize = 256 * 1024;
+
+#[derive(Default)]
+struct AgentContentRefreshThrottle {
+    callback_pending: Cell<bool>,
+    next_allowed: Cell<Option<Instant>>,
+}
+
+/// Full-screen Agent TUIs can repaint on every frame. Dispatch the first
+/// refresh immediately, then keep at most one trailing refresh queued during a
+/// sustained burst so extracting and scanning the VTE screen stays bounded.
 fn schedule_agent_content_refresh(
-    refresh_pending: Rc<Cell<bool>>,
+    throttle: Rc<AgentContentRefreshThrottle>,
     refresh: Rc<RefCell<dyn FnMut(SurfaceId)>>,
     surface: SurfaceId,
 ) {
-    if refresh_pending.replace(true) {
+    schedule_agent_content_refresh_with_interval(
+        throttle,
+        refresh,
+        surface,
+        AGENT_CONTENT_REFRESH_INTERVAL,
+    );
+}
+
+fn schedule_agent_content_refresh_with_interval(
+    throttle: Rc<AgentContentRefreshThrottle>,
+    refresh: Rc<RefCell<dyn FnMut(SurfaceId)>>,
+    surface: SurfaceId,
+    interval: Duration,
+) {
+    if throttle.callback_pending.replace(true) {
         return;
     }
-    glib::idle_add_local_once(move || {
-        refresh_pending.set(false);
+    let delay = throttle
+        .next_allowed
+        .get()
+        .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+        .filter(|delay| !delay.is_zero());
+    let run = move || {
+        throttle.callback_pending.set(false);
+        throttle.next_allowed.set(Some(Instant::now() + interval));
         (refresh.borrow_mut())(surface);
-    });
+    };
+    if let Some(delay) = delay {
+        glib::timeout_add_local_once(delay, run);
+    } else {
+        glib::idle_add_local_once(run);
+    }
+}
+
+fn cacheable_terminal_selection(text: &str) -> Option<String> {
+    (!text.is_empty() && text.len() <= TERMINAL_SELECTION_CACHE_MAX_BYTES).then(|| text.to_string())
 }
 
 const SEARCH_REGEX_COMPILE_FLAGS: u32 = 0x0008_0000 | 0x4000_0000;
@@ -578,11 +617,11 @@ impl GhosttyPane {
         term.set_audible_bell(false);
         {
             let dirty = scrollback_dirty.clone();
-            let refresh_pending = Rc::new(Cell::new(false));
+            let refresh_throttle = Rc::new(AgentContentRefreshThrottle::default());
             let refresh = callbacks.on_terminal_contents_changed.clone();
             term.connect_contents_changed(move |_| {
                 dirty.set(true);
-                schedule_agent_content_refresh(refresh_pending.clone(), refresh.clone(), surface);
+                schedule_agent_content_refresh(refresh_throttle.clone(), refresh.clone(), surface);
             });
         }
         // Snap the viewport back to the live cursor row whenever the user
@@ -593,19 +632,18 @@ impl GhosttyPane {
         // pure-Rust terminal backend does in `write_child` (commit 9e12edb).
         term.set_scroll_on_keystroke(true);
 
-        // Snapshot every non-empty selection. Agent TUIs repaint constantly and
-        // VTE drops the drag-selection on the next output frame, so this cache
-        // is what Copy reads once `has_selection()` has gone false. Empty
-        // notifications (the app-repaint deselect) intentionally do not clear
-        // the cache; a fresh primary press does (see install_url_link_handling).
+        // Snapshot ordinary selections. Agent TUIs repaint constantly and VTE
+        // drops the drag-selection on the next output frame, so this cache is
+        // what Copy reads once `has_selection()` has gone false. Oversized
+        // selections are not duplicated into a long-lived fallback buffer.
+        // Empty deselect notifications still leave the current cache alone; a
+        // fresh primary press clears it (see install_url_link_handling).
         {
             let cache = last_selection.clone();
             term.connect_selection_changed(move |t| {
                 if t.has_selection() {
                     if let Some(text) = t.text_selected(vte::Format::Text) {
-                        if !text.is_empty() {
-                            *cache.borrow_mut() = Some(text.to_string());
-                        }
+                        *cache.borrow_mut() = cacheable_terminal_selection(&text);
                     }
                 }
             });
@@ -2886,6 +2924,19 @@ mod tests {
     }
 
     #[test]
+    fn terminal_selection_fallback_cache_is_bounded() {
+        assert_eq!(
+            cacheable_terminal_selection("selected"),
+            Some("selected".into())
+        );
+        assert_eq!(cacheable_terminal_selection(""), None);
+        assert_eq!(
+            cacheable_terminal_selection(&"x".repeat(TERMINAL_SELECTION_CACHE_MAX_BYTES + 1)),
+            None
+        );
+    }
+
+    #[test]
     fn insert_newline_preedit_ordering_covers_ibus_and_macos() {
         assert!(insert_newline_needs_preedit_commit_ordering_for(
             true, false
@@ -3178,9 +3229,9 @@ mod tests {
                 calls.set(calls.get() + 1);
             }))
         };
-        let pending = Rc::new(Cell::new(false));
+        let throttle = Rc::new(AgentContentRefreshThrottle::default());
         for _ in 0..3 {
-            schedule_agent_content_refresh(pending.clone(), refresh.clone(), surface);
+            schedule_agent_content_refresh(throttle.clone(), refresh.clone(), surface);
         }
         assert_eq!(calls.get(), 0, "refresh must be queued on the event loop");
         drop(refresh);
@@ -3193,6 +3244,45 @@ mod tests {
         assert!(
             retained_weak.upgrade().is_none(),
             "a completed content refresh must release its callback"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn sustained_agent_content_refreshes_are_rate_limited_with_a_trailing_update() {
+        let calls = Rc::new(Cell::new(0));
+        let surface = SurfaceId::new();
+        let refresh: Rc<RefCell<dyn FnMut(SurfaceId)>> = {
+            let calls = calls.clone();
+            Rc::new(RefCell::new(move |_| calls.set(calls.get() + 1)))
+        };
+        let throttle = Rc::new(AgentContentRefreshThrottle::default());
+        let interval = Duration::from_millis(20);
+
+        schedule_agent_content_refresh_with_interval(
+            throttle.clone(),
+            refresh.clone(),
+            surface,
+            interval,
+        );
+        wait_for_idle_cycle().await;
+        assert_eq!(calls.get(), 1, "the leading refresh must stay immediate");
+
+        for _ in 0..20 {
+            schedule_agent_content_refresh_with_interval(
+                throttle.clone(),
+                refresh.clone(),
+                surface,
+                interval,
+            );
+        }
+        wait_for_idle_cycle().await;
+        assert_eq!(calls.get(), 1, "a repaint burst must wait for the interval");
+        glib::timeout_future(Duration::from_millis(40)).await;
+        assert_eq!(
+            calls.get(),
+            2,
+            "the latest repaint must receive one trailing refresh"
         );
     }
 

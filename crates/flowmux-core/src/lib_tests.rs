@@ -2999,13 +2999,29 @@ fn workspace_ui_clone_omits_scrollback_and_keeps_live_agent_metadata() {
     let pane = PaneId::new();
     let mut terminal = PaneSurface::terminal("agent", Some(PathBuf::from("/tmp/project")));
     let surface = terminal.id;
-    terminal.scrollback = Some("x".repeat(TERMINAL_SCROLLBACK_MAX_BYTES));
+    terminal.scrollback = Some("x".repeat(TERMINAL_SCROLLBACK_MAX_BYTES).into());
     terminal.agent = Some(AgentPresence::new(
         "claude",
         AgentActivity::Running,
         Some(42),
     ));
     let workspace = workspace_with_tab_leaves(vec![(pane, vec![terminal])]);
+
+    let cloned_with_history = workspace.clone();
+    let original_surface = workspace.surfaces[0]
+        .root_pane
+        .find_surface(pane, surface)
+        .unwrap();
+    let cloned_surface = cloned_with_history.surfaces[0]
+        .root_pane
+        .find_surface(pane, surface)
+        .unwrap();
+    let original_history = original_surface.scrollback.as_ref().unwrap();
+    let cloned_history = cloned_surface.scrollback.as_ref().unwrap();
+    assert!(
+        Arc::ptr_eq(original_history, cloned_history),
+        "state snapshots must share persisted terminal history"
+    );
 
     let cloned = workspace.clone_without_scrollback();
 
