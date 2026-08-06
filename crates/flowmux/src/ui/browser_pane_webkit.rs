@@ -45,9 +45,6 @@ pub struct BrowserPane {
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
     _download_signal: Rc<NetworkSessionSignal>,
-    /// cmux-style server-side ref store. Each snapshot clears + repopulates
-    /// the entry for this pane; subsequent click/fill/etc. resolve their
-    /// `eN` ref through this map to a CSS selector before injecting JS.
     pub refs: Rc<RefCell<RefStore>>,
     /// Scope key — derived from the surface id so multiple browser
     /// surfaces in the same pane keep their refs separate.
