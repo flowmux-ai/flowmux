@@ -25,15 +25,20 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "error: '$1' not found; insta
 need git
 need meson
 need ninja
+need pkg-config
 
 if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
     echo "error: no C++ compiler found (install build-essential)" >&2
     exit 1
 fi
 
-# sudo only when installing into a system prefix we cannot write to.
+# sudo only when installing into a prefix we cannot write to. Create a
+# missing prefix first (e.g. a fresh $HOME/.local) so the -w test does not
+# route a user-writable location through sudo and leave it root-owned.
 SUDO=""
+mkdir -p "$PREFIX" 2>/dev/null || true
 if [ ! -w "$PREFIX" ]; then
+    need sudo
     SUDO="sudo"
 fi
 
