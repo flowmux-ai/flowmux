@@ -218,7 +218,20 @@ pub fn install_actions(
             })
             .build()
     };
-    let new_window = make_new_window_action();
+    // GdkAppLaunchContext defaults to TIME0, which Wayland cannot turn into
+    // an activation token. Capture the key event before the app accel fires.
+    let new_window_timestamp = Rc::new(Cell::new(gtk::gdk::CURRENT_TIME));
+    let key = gtk::EventControllerKey::new();
+    key.set_propagation_phase(gtk::PropagationPhase::Capture);
+    key.connect_key_pressed({
+        let new_window_timestamp = new_window_timestamp.clone();
+        move |key, _, _, _| {
+            new_window_timestamp.set(key.current_event_time());
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(key);
+    let new_window = make_new_window_action(new_window_timestamp);
     let command_palette = {
         let bridge = bridge.clone();
         gtk::gio::ActionEntry::builder("command-palette")
@@ -845,7 +858,9 @@ fn make_close_surface_action(
 /// whatever happens to be on `PATH`. GDK's launch context carries the
 /// compositor activation token, so the new Wayland window receives keyboard
 /// focus instead of leaving input in the old window.
-fn make_new_window_action() -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
+fn make_new_window_action(
+    launch_timestamp: Rc<Cell<u32>>,
+) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder("new-window")
         .activate(move |window: &adw::ApplicationWindow, _, _| {
             tracing::debug!(action = "new-window", "key action fired");
@@ -868,6 +883,7 @@ fn make_new_window_action() -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
                 }
             };
             let context = gtk::prelude::WidgetExt::display(window).app_launch_context();
+            context.set_timestamp(launch_timestamp.replace(gtk::gdk::CURRENT_TIME));
             match app_info.launch(&[], Some(&context)) {
                 Ok(()) => tracing::info!(exe = %exe.display(), "spawned new flowmux window"),
                 Err(e) => {
@@ -1280,7 +1296,9 @@ mod tests {
             .default_width(320)
             .default_height(240)
             .build();
-        window.add_action_entries([make_new_window_action()]);
+        window.add_action_entries([make_new_window_action(Rc::new(Cell::new(
+            gtk::gdk::CURRENT_TIME,
+        )))]);
 
         assert!(
             window.has_action("new-window"),
