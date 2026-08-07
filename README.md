@@ -29,6 +29,17 @@ curl -fsSL https://flowmux.org/install.sh | sh
 The installer downloads the latest `.deb` from GitHub Releases, verifies its
 SHA-256 checksum, and installs it with `apt`. It sends no flowmux telemetry;
 GitHub provides the aggregate download count for each release asset.
+
+Rerun the same command to update to the latest release. To inspect the script
+before running it:
+
+```sh
+curl -fsSL https://flowmux.org/install.sh -o /tmp/flowmux-install.sh
+less /tmp/flowmux-install.sh
+sh /tmp/flowmux-install.sh
+```
+
+Uninstall the release package with `sudo apt remove flowmux`.
   
 ## Control internal browser
 
@@ -164,12 +175,14 @@ flowmux/
 └── NOTICE                 Copyright + attribution
 ```
 
-## Build prerequisites (Ubuntu 24.04 native)
+## Source-build prerequisites (Ubuntu 24.04 native)
 
-`./install.sh` detects these packages and the Rust toolchain, asks before
-installing anything missing with `apt`/`rustup`, then builds and installs
-flowmux. Use `./install.sh --check` for a read-only prerequisite check or
-`./install.sh --yes` to accept dependency-install prompts non-interactively.
+The repository's `./install.sh` is for building from source; it is separate
+from the release installer at `flowmux.org/install.sh`. It detects these
+packages and the Rust toolchain, asks before installing anything missing with
+`apt`/`rustup`, then builds and installs flowmux. Use `./install.sh --check`
+for a read-only prerequisite check or `./install.sh --yes` to accept
+dependency-install prompts non-interactively.
 
 For manual setup, install the same prerequisites with:
 
@@ -315,11 +328,11 @@ while `flowmux fix` repairs marked integration entries.
 
 ## WSL / WSLg
 
-Ubuntu 24.04 and 26.04 on WSLg follow the native host path above:
-install the build prerequisites, run `./install.sh`, then start
-`flowmux` from the Linux side so GTK connects to WSLg's Wayland display. The
-runtime detects WSL and enables the terminal key/resize workarounds that differ
-from a regular GNOME session.
+Ubuntu 24.04 and 26.04 on WSLg can use the release installer at the top of this
+README, then start `flowmux` from the Linux side so GTK connects to WSLg's
+Wayland display. For a source build, follow the source-build prerequisites and
+run the repository's `./install.sh`. The runtime detects WSL and enables the
+terminal key/resize workarounds that differ from a regular GNOME session.
 
 To verify a real WSLg session end to end on 24.04 or 26.04:
 
