@@ -741,9 +741,22 @@ pub struct Bridge {
     pub tx: async_channel::Sender<GtkCommand>,
 }
 
+const GTK_COMMAND_QUEUE_CAPACITY: usize = 64;
+
 impl Bridge {
     pub fn new() -> (Self, async_channel::Receiver<GtkCommand>) {
-        let (tx, rx) = async_channel::unbounded();
+        let (tx, rx) = async_channel::bounded(GTK_COMMAND_QUEUE_CAPACITY);
         (Self { tx }, rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_queue_is_bounded() {
+        let (bridge, _rx) = Bridge::new();
+        assert_eq!(bridge.tx.capacity(), Some(GTK_COMMAND_QUEUE_CAPACITY));
     }
 }

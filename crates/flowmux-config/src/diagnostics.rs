@@ -15,6 +15,7 @@ use tracing_subscriber::Layer;
 
 pub const MAX_CRASH_REPORTS: usize = 20;
 const LAST_SEEN_FILE: &str = ".last-seen";
+const LOG_BUFFERED_LINES_LIMIT: usize = 1_024;
 
 /// Initialize console and daily file logging. `FLOWMUX_LOG`, when valid, is
 /// applied to both layers; otherwise the console keeps the binary's existing
@@ -51,7 +52,9 @@ pub fn init_logging(
         .filename_prefix(filename_prefix)
         .build(&log_dir)
         .with_context(|| format!("open daily log under {}", log_dir.display()))?;
-    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let (writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(LOG_BUFFERED_LINES_LIMIT)
+        .finish(appender);
     let file_filter = override_filter
         .as_deref()
         .and_then(|value| EnvFilter::try_new(value).ok())

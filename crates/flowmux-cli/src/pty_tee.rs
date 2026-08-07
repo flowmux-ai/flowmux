@@ -69,6 +69,7 @@ use std::time::{Duration, Instant};
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
 const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const EVENT_QUEUE_CAPACITY: usize = 16;
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
     if matches!(sig, libc::SIGHUP | libc::SIGTERM | libc::SIGINT) {
@@ -98,14 +99,14 @@ enum PtyEvent {
 }
 
 struct OutputRefreshState {
-    queued: AtomicBool,
+    requested: AtomicBool,
     supported: AtomicBool,
 }
 
 impl OutputRefreshState {
     fn new() -> Self {
         Self {
-            queued: AtomicBool::new(false),
+            requested: AtomicBool::new(false),
             supported: AtomicBool::new(true),
         }
     }
@@ -145,7 +146,7 @@ pub fn run(
     // Spin up the IPC worker BEFORE the I/O loop starts so the first
     // terminal-side event arriving in the very first millisecond doesn't get
     // dropped.
-    let (event_tx, event_rx) = mpsc::channel::<PtyEvent>();
+    let (event_tx, event_rx) = mpsc::sync_channel::<PtyEvent>(EVENT_QUEUE_CAPACITY);
     let output_refresh = Arc::new(OutputRefreshState::new());
     let output_refresh_for_worker = output_refresh.clone();
     let worker = std::thread::Builder::new()
@@ -164,7 +165,7 @@ pub fn run(
 
 fn run_pty_pump(
     child_argv: Vec<OsString>,
-    event_tx: mpsc::Sender<PtyEvent>,
+    event_tx: mpsc::SyncSender<PtyEvent>,
     output_refresh: Arc<OutputRefreshState>,
 ) -> anyhow::Result<i32> {
     // 1. Allocate the inner PTY pair the shell will live on.
@@ -419,7 +420,7 @@ fn terminate_inner_group<F: FnMut(&str)>(
     master_fd: RawFd,
     extractor: &mut OscExtractor<F>,
     pending: &Rc<RefCell<Vec<String>>>,
-    event_tx: &mpsc::Sender<PtyEvent>,
+    event_tx: &mpsc::SyncSender<PtyEvent>,
 ) -> i32 {
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
@@ -601,34 +602,32 @@ fn ipc_worker(
                         tracing::warn!(error = %e, "ipc worker: notify call failed");
                     }
                 }
-                Ok(PtyEvent::Output) => {
-                    // Give the outer VTE time to consume the bytes that pty-tee
-                    // just wrote, while rate-limiting screen scans for busy
-                    // TUIs. The GTK acknowledgement below then keeps at most
-                    // one follow-up refresh queued while output continues.
-                    tokio::time::sleep(OUTPUT_REFRESH_INTERVAL).await;
-                    output_refresh.queued.store(false, Ordering::Release);
-                    let Some(surface) = surface else {
-                        output_refresh.supported.store(false, Ordering::Release);
-                        continue;
-                    };
-                    match client.call(Request::TerminalOutput { surface }).await {
-                        Ok(Response::Ok) => {}
-                        Ok(response) => {
-                            output_refresh.supported.store(false, Ordering::Release);
-                            tracing::debug!(
-                                ?response,
-                                "ipc worker: daemon does not support background terminal output events"
-                            );
-                        }
-                        Err(error) => {
-                            output_refresh.supported.store(false, Ordering::Release);
-                            tracing::warn!(%error, "ipc worker: terminal output call failed");
-                        }
-                    }
-                }
+                Ok(PtyEvent::Output) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            if output_refresh.requested.swap(false, Ordering::AcqRel) {
+                // Give the outer VTE time to consume the bytes that pty-tee
+                // just wrote, while rate-limiting screen scans for busy TUIs.
+                tokio::time::sleep(OUTPUT_REFRESH_INTERVAL).await;
+                let Some(surface) = surface else {
+                    output_refresh.supported.store(false, Ordering::Release);
+                    continue;
+                };
+                match client.call(Request::TerminalOutput { surface }).await {
+                    Ok(Response::Ok) => {}
+                    Ok(response) => {
+                        output_refresh.supported.store(false, Ordering::Release);
+                        tracing::debug!(
+                            ?response,
+                            "ipc worker: daemon does not support background terminal output events"
+                        );
+                    }
+                    Err(error) => {
+                        output_refresh.supported.store(false, Ordering::Release);
+                        tracing::warn!(%error, "ipc worker: terminal output call failed");
+                    }
+                }
             }
         }
     });
@@ -651,23 +650,24 @@ async fn connect_with_retry(socket: &std::path::Path) -> Option<Client> {
 
 // ---- Helpers -----------------------------------------------------
 
-fn queue_output_refresh(tx: &mpsc::Sender<PtyEvent>, state: &OutputRefreshState) {
-    if !state.supported.load(Ordering::Acquire) || state.queued.swap(true, Ordering::AcqRel) {
+fn queue_output_refresh(tx: &mpsc::SyncSender<PtyEvent>, state: &OutputRefreshState) {
+    if !state.supported.load(Ordering::Acquire) || state.requested.swap(true, Ordering::AcqRel) {
         return;
     }
-    if tx.send(PtyEvent::Output).is_err() {
-        state.queued.store(false, Ordering::Release);
+    if matches!(
+        tx.try_send(PtyEvent::Output),
+        Err(mpsc::TrySendError::Disconnected(_))
+    ) {
+        state.requested.store(false, Ordering::Release);
     }
 }
 
-fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::Sender<PtyEvent>) {
-    let drained: Vec<String> = pending.borrow_mut().drain(..).collect();
-    for payload in drained {
+fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::SyncSender<PtyEvent>) {
+    for payload in pending.borrow_mut().drain(..) {
         if let Some(n) = parse_osc(&payload) {
-            // Best-effort send. Worker may have shut down on a fatal
-            // error; in that case the notification is silently dropped
-            // — better than blocking the I/O loop.
-            let _ = tx.send(PtyEvent::Notify(NotifyEvent {
+            // Notifications are best-effort: a stalled daemon must never make
+            // terminal output block or grow this queue without bound.
+            let _ = tx.try_send(PtyEvent::Notify(NotifyEvent {
                 title: n.title,
                 body: n.body,
                 level: n.level,
@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn terminal_output_events_coalesce_until_worker_accepts_one() {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(1);
         let state = OutputRefreshState::new();
 
         queue_output_refresh(&tx, &state);
@@ -939,13 +939,51 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(PtyEvent::Output)));
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
 
-        state.queued.store(false, Ordering::Release);
+        assert!(state.requested.swap(false, Ordering::AcqRel));
         queue_output_refresh(&tx, &state);
         assert!(matches!(rx.try_recv(), Ok(PtyEvent::Output)));
 
         state.supported.store(false, Ordering::Release);
-        state.queued.store(false, Ordering::Release);
+        state.requested.store(false, Ordering::Release);
         queue_output_refresh(&tx, &state);
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn full_event_queue_keeps_the_final_output_refresh_pending() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let state = OutputRefreshState::new();
+        assert!(
+            tx.try_send(PtyEvent::Notify(NotifyEvent {
+                title: String::new(),
+                body: String::new(),
+                level: NotificationLevel::Info,
+            }))
+            .is_ok()
+        );
+
+        queue_output_refresh(&tx, &state);
+
+        assert!(matches!(rx.try_recv(), Ok(PtyEvent::Notify(_))));
+        assert!(state.requested.swap(false, Ordering::AcqRel));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn notification_queue_drops_excess_events_instead_of_growing() {
+        let pending = Rc::new(RefCell::new(vec![
+            "9;first".to_string(),
+            "9;second".to_string(),
+        ]));
+        let (tx, rx) = mpsc::sync_channel(1);
+
+        flush_pending(&pending, &tx);
+
+        assert!(pending.borrow().is_empty());
+        let Ok(PtyEvent::Notify(event)) = rx.try_recv() else {
+            panic!("the first notification should fit in the bounded queue");
+        };
+        assert_eq!(event.body, "first");
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
     }
 

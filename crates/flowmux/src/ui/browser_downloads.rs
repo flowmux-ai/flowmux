@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
+const MAX_DOWNLOAD_ROWS: usize = 50;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DownloadPhase {
     InProgress,
@@ -135,6 +137,21 @@ impl DownloadCollection {
             .filter_map(|(id, entry)| entry.phase().is_terminal().then_some(*id))
             .collect();
         terminal.sort_unstable();
+        for id in &terminal {
+            self.entries.remove(id);
+        }
+        terminal
+    }
+
+    fn trim_terminal_history(&mut self) -> Vec<u64> {
+        let remove_count = self.entries.len().saturating_sub(MAX_DOWNLOAD_ROWS);
+        let mut terminal: Vec<_> = self
+            .entries
+            .iter()
+            .filter_map(|(id, entry)| entry.phase().is_terminal().then_some(*id))
+            .collect();
+        terminal.sort_unstable();
+        terminal.truncate(remove_count);
         for id in &terminal {
             self.entries.remove(id);
         }
@@ -271,6 +288,7 @@ impl DownloadManager {
         F: Fn() + 'static,
     {
         let id = self.inner.collection.borrow_mut().insert();
+        self.inner.trim_terminal_history();
         let name = gtk::Label::new(Some("Preparing download…"));
         name.set_halign(gtk::Align::Start);
         name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
@@ -596,7 +614,19 @@ impl DownloadManagerInner {
         }
         row.cancel.set_visible(false);
         row.remove.set_visible(true);
+        drop(rows);
+        self.trim_terminal_history();
         self.refresh_summary();
+    }
+
+    fn trim_terminal_history(&self) {
+        let ids = self.collection.borrow_mut().trim_terminal_history();
+        let mut rows = self.rows.borrow_mut();
+        for id in ids {
+            if let Some(row) = rows.remove(&id) {
+                self.list.remove(&row.root);
+            }
+        }
     }
 
     fn remove_terminal(&self, id: u64) {
@@ -732,6 +762,22 @@ mod tests {
         assert_eq!(collection.active_count(), 1);
     }
 
+    #[test]
+    fn terminal_download_history_keeps_only_the_newest_rows() {
+        let mut collection = DownloadCollection::default();
+        for _ in 0..(MAX_DOWNLOAD_ROWS + 5) {
+            let id = collection.insert();
+            collection.finish(id);
+            collection.trim_terminal_history();
+        }
+
+        assert_eq!(collection.len(), MAX_DOWNLOAD_ROWS);
+        for id in 0..5 {
+            assert!(collection.phase(id).is_none());
+        }
+        assert!(collection.phase(5).is_some());
+    }
+
     #[cfg(target_os = "linux")]
     #[gtk::test]
     fn manager_uses_bounded_vertical_scroller() {
@@ -765,6 +811,24 @@ mod tests {
         assert_eq!(manager.entry_count(), 1);
         assert_eq!(manager.active_count(), 1);
         active.fail("cleanup".into());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn manager_removes_rows_evicted_from_terminal_history() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let manager = DownloadManager::new();
+        let oldest = manager.add(|| {});
+        oldest.finish();
+        for _ in 1..(MAX_DOWNLOAD_ROWS + 5) {
+            let item = manager.add(|| {});
+            item.finish();
+        }
+
+        assert_eq!(manager.entry_count(), MAX_DOWNLOAD_ROWS);
+        assert!(oldest.status_text().is_empty());
     }
 
     #[cfg(not(target_os = "macos"))]

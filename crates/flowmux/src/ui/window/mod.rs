@@ -8043,7 +8043,7 @@ mod tests {
                 .pane_registry
                 .borrow()
                 .active_terminal(pane_b)
-                .is_some_and(|terminal| terminal.widget.has_focus()),
+                .is_some_and(|terminal| terminal.widget.is_focus()),
             "Agent Bar activation should leave keyboard focus on the target terminal"
         );
         assert_eq!(

@@ -762,8 +762,14 @@ enum WorkspaceOp {
     Focus { workspace: WorkspaceId },
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
+    // ponytail: two glibc arenas cap long-lived per-thread fragmentation;
+    // raise the limit only if allocator contention shows up in profiles.
+    #[cfg(target_env = "gnu")]
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
     flowmux_config::diagnostics::install_panic_hook();
     // Release builds stay quiet — only ERROR events surface so the
     // CLI never spams agent hooks (Claude/Codex/OpenCode) with info
@@ -818,13 +824,9 @@ async fn main() -> anyhow::Result<()> {
         _ => {}
     }
 
-    // pty-tee owns its own (synchronous) PTY pump and a worker thread
-    // for IPC; running it under the outer tokio runtime would prevent
-    // the blocking poll() loop from ever yielding. Dispatch it here,
-    // outside the daemon-connect path, so `Cmd::PtyTee` works even if
-    // the daemon hasn't come up yet — the worker reconnects on its
-    // own with backoff. The `matches!` gate is two lines so we can
-    // destructure-by-value below without borrowing-then-moving `cmd`.
+    // pty-tee owns its synchronous PTY pump and a separate IPC runtime.
+    // Dispatch it before any outer-runtime tasks or daemon connection, so the
+    // blocking pump starves nothing and its worker can reconnect independently.
     if matches!(cmd, Cmd::PtyTee { .. }) {
         let Cmd::PtyTee {
             pane,
@@ -834,15 +836,7 @@ async fn main() -> anyhow::Result<()> {
         else {
             unreachable!("matches! just confirmed the variant")
         };
-        // Escape the outer tokio runtime into a fresh OS thread so the
-        // blocking poll() inside pty_tee::run does not starve runtime
-        // workers; the IPC half lives on its own current-thread tokio
-        // runtime spawned inside pty_tee::ipc_worker.
-        let socket = cli.socket.clone();
-        let handle = std::thread::spawn(move || pty_tee::run(pane, surface, socket, argv));
-        let exit_code = handle
-            .join()
-            .map_err(|_| anyhow::anyhow!("pty-tee thread panicked"))??;
+        let exit_code = pty_tee::run(pane, surface, cli.socket.clone(), argv)?;
         std::process::exit(exit_code);
     }
 

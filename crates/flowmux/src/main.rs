@@ -59,6 +59,12 @@ const _: () = {
 };
 
 fn main() -> anyhow::Result<()> {
+    // ponytail: two glibc arenas cap long-lived per-thread fragmentation;
+    // raise the limit only if allocator contention shows up in profiles.
+    #[cfg(target_env = "gnu")]
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
     flowmux_config::diagnostics::install_panic_hook();
     let default_filter = if cfg!(debug_assertions) {
         "info,flowmux=debug"
@@ -201,6 +207,7 @@ fn main() -> anyhow::Result<()> {
     // Tokio runtime hosts the IPC server, the state store, and any
     // async desktop-bus interactions.
     let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()?;
     let _notification_action_router = match rt.block_on(register_notification_action_router(APP_ID))
@@ -423,19 +430,14 @@ fn build_application() -> adw::Application {
         .build()
 }
 
-/// GTK's OpenGL renderer keeps several full-window GPU surfaces alive while a
-/// terminal TUI repaints. On a Retina-sized window that can account for
-/// hundreds of MiB of physical footprint. Cairo uses one software-backed
-/// surface and keeps the footprint stable; an explicit user choice still wins.
-#[cfg(target_os = "macos")]
+/// GTK's GPU renderer keeps several full-window surfaces alive while a terminal
+/// TUI repaints. Cairo uses one software-backed surface and keeps the footprint
+/// stable; an explicit user choice still wins.
 fn install_memory_efficient_renderer() {
     if std::env::var_os("GSK_RENDERER").is_none() {
         std::env::set_var("GSK_RENDERER", "cairo");
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn install_memory_efficient_renderer() {}
 
 fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active
