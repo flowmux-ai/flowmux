@@ -199,8 +199,16 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
     }
     // Model- or feature-scoped windows (e.g. "seven_day_opus", "fable") arrive
     // as extra top-level objects; keep them all instead of the fixed two.
+    // Enterprise plans report no five_hour/seven_day window at all — their seat
+    // limits arrive only through these extra objects.
+    // "spend" restates "extra_usage" in money with a rounded percent, so it is
+    // dropped whenever the finer-grained section is present.
+    let has_extra_usage = object.get("extra_usage").is_some_and(Value::is_object);
     for (key, entry) in object {
-        if matches!(key.as_str(), "five_hour" | "seven_day" | "limits") || !entry.is_object() {
+        if matches!(key.as_str(), "five_hour" | "seven_day" | "limits")
+            || (key == "spend" && has_extra_usage)
+            || !entry.is_object()
+        {
             continue;
         }
         let (duration_minutes, scope) = window_metadata(key);
@@ -592,5 +600,50 @@ mod tests {
         }"#;
 
         assert_eq!(access_token_from_credentials(raw).unwrap(), "access-secret");
+    }
+
+    #[test]
+    fn enterprise_response_keeps_seat_limits_and_drops_the_spend_restatement() {
+        let value = serde_json::json!({
+            "five_hour": null,
+            "seven_day": null,
+            "seven_day_opus": null,
+            "cinder_cove": {
+                "utilization": 100.0,
+                "resets_at": "2026-09-10T01:35:21.514375+00:00",
+                "limit_dollars": 1000,
+                "used_dollars": 1000.0
+            },
+            "extra_usage": {"monthly_limit": 46600, "used_credits": 25217.0, "utilization": 54.5},
+            "spend": {"percent": 54, "used": {"amount_minor": 25217}},
+            "limits": [],
+            "member_dashboard_available": true
+        });
+
+        let windows = parse_usage_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 2);
+        assert!(windows
+            .iter()
+            .any(|window| window.scope.as_deref() == Some("Cinder cove")
+                && window.used_percent == 100.0));
+        assert!(windows
+            .iter()
+            .any(|window| window.scope.as_deref() == Some("Extra usage")
+                && window.used_percent == 54.5));
+        assert!(!windows
+            .iter()
+            .any(|window| window.scope.as_deref() == Some("Spend")));
+    }
+
+    #[test]
+    fn spend_survives_when_it_is_the_only_credit_section() {
+        let value = serde_json::json!({"spend": {"percent": 54}});
+
+        let windows = parse_usage_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].scope.as_deref(), Some("Spend"));
+        assert_eq!(windows[0].used_percent, 54.0);
     }
 }

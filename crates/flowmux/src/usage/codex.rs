@@ -355,6 +355,26 @@ fn append_snapshot_windows(
             resets_at,
         });
     }
+    // Business/enterprise plans leave primary and secondary null and report the
+    // seat's own allowance as `individualLimit` instead.
+    if let Some(value) = object
+        .get("individualLimit")
+        .filter(|value| !value.is_null())
+    {
+        let window = value.as_object().ok_or_else(invalid_response)?;
+        if let Some(remaining_percent) = window.get("remainingPercent").and_then(Value::as_f64) {
+            windows.push(UsageWindow {
+                label: duration_label(None),
+                scope: scope.or_else(|| Some("Individual".to_owned())),
+                used_percent: 100.0 - remaining_percent,
+                duration_minutes: None,
+                resets_at: window
+                    .get("resetsAt")
+                    .and_then(Value::as_i64)
+                    .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0)),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -763,5 +783,58 @@ mod tests {
 
         assert_eq!(error.kind, UsageErrorKind::NotLoggedIn);
         assert_eq!(error.message, "Check the local Codex login.");
+    }
+
+    #[test]
+    fn business_plan_reports_the_individual_seat_limit() {
+        let value = serde_json::json!({"result": {
+            "rateLimits": {
+                "limitId": "codex",
+                "limitName": null,
+                "primary": null,
+                "secondary": null,
+                "individualLimit": {
+                    "limit": "300",
+                    "used": "120.0",
+                    "remainingPercent": 40,
+                    "resetsAt": 1788220801
+                },
+                "planType": "business"
+            },
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "limitId": "codex",
+                    "primary": null,
+                    "secondary": null,
+                    "individualLimit": {"remainingPercent": 40, "resetsAt": 1788220801}
+                }
+            }
+        }});
+
+        let windows = parse_rate_limits_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].used_percent, 60.0);
+        assert_eq!(windows[0].scope.as_deref(), Some("Individual"));
+        assert_eq!(windows[0].duration_minutes, None);
+        assert_eq!(
+            windows[0].resets_at,
+            DateTime::<Utc>::from_timestamp(1788220801, 0)
+        );
+    }
+
+    #[test]
+    fn named_windows_still_win_over_the_individual_seat_limit_scope() {
+        let value = serde_json::json!({"result": {"rateLimits": {
+            "limitName": "Team pool",
+            "primary": {"usedPercent": 10.0, "windowDurationMins": 300},
+            "individualLimit": {"remainingPercent": 25}
+        }}});
+
+        let windows = parse_rate_limits_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[1].used_percent, 75.0);
+        assert_eq!(windows[1].scope.as_deref(), Some("Team pool"));
     }
 }
