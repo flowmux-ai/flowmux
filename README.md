@@ -156,9 +156,16 @@ flowmux/
 
 ## Build prerequisites (Ubuntu 24.04 native)
 
+`./install.sh` detects these packages and the Rust toolchain, asks before
+installing anything missing with `apt`/`rustup`, then builds and installs
+flowmux. Use `./install.sh --check` for a read-only prerequisite check or
+`./install.sh --yes` to accept dependency-install prompts non-interactively.
+
+For manual setup, install the same prerequisites with:
+
 ```bash
 sudo apt install \
-    build-essential pkg-config git \
+    ca-certificates curl git build-essential pkg-config \
     libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
     libwebkitgtk-6.0-dev libssl-dev \
     libdbus-1-dev libsecret-1-dev
@@ -258,17 +265,17 @@ The script installs `FlowMux.app` under `~/Applications` and copies `flowmux`,
 ### Install to the host
 
 ```bash
-./install.sh                   # release-builds flowmux → installs binaries + app icon
+./install.sh                   # installs missing prerequisites, flowmux, and app icon
 ```
 
 This installs `flowmux`, `flowmuxctl`, and `flowmux-md-viewer` binaries to
 `~/.local/bin` and `~/.cargo/bin`, plus the desktop entry
 (`~/.local/share/applications/com.flowmux.App.desktop`) and the app icons
 (`~/.local/share/icons/hicolor/…`) so flowmux appears in the app launcher.
-It is a plain `cargo build --release` using
-the system VTE library; no Zig toolchain or vendored terminal backend is
-required. ThorVG (image viewer) is optional and loaded at runtime, so the build
-does not depend on it; `install.sh` only prints a note if it is missing.
+It uses the `fast` profile (release optimization without LTO) and the system
+VTE library; no Zig toolchain or vendored terminal backend is required.
+ThorVG (image viewer) is optional and loaded at runtime, so the build does not
+depend on it; `install.sh` only prints a note if it is missing.
 
 After installing, fully restart any running flowmux GUI to pick up the new
 binary.
