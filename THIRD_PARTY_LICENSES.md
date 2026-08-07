@@ -28,8 +28,8 @@ and integrity hashes are recorded in
 
 ## License Overview
 
-- Apache License 2.0 (298)
-- MIT License (117)
+- Apache License 2.0 (303)
+- MIT License (118)
 - Unicode License v3 (20)
 - ISC License (4)
 - BSD 3-Clause "New" or "Revised" License (2)
@@ -5851,6 +5851,7 @@ Used by:
 - cfg-if 1.0.4
 - concurrent-queue 2.5.0
 - core-foundation-sys 0.8.7
+- core-foundation 0.10.1
 - crossbeam-channel 0.5.15
 - crossbeam-deque 0.8.7
 - crossbeam-epoch 0.9.20
@@ -5886,6 +5887,7 @@ Used by:
 - log 0.4.29
 - num-traits 0.2.19
 - once_cell 1.21.4
+- openssl-probe 0.2.1
 - ordered-stream 0.2.0
 - parking 2.2.1
 - parking_lot 0.12.5
@@ -5901,8 +5903,11 @@ Used by:
 - ring 0.17.14
 - rustc_version 0.4.1
 - rustix 1.1.4
+- rustls-native-certs 0.8.3
 - rustls 0.23.42
 - scopeguard 1.2.0
+- security-framework-sys 2.17.0
+- security-framework 3.7.0
 - signal-hook-registry 1.4.8
 - smallvec 1.15.1
 - socket2 0.6.3
@@ -8879,6 +8884,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### MIT License
+
+Used by:
+- schannel 0.1.29
+
+```text
+Copyright (c) 2015 steffengy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ```
 
 ### MIT License
