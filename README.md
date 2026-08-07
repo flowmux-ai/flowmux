@@ -19,6 +19,16 @@ the system VTE widget for terminal emulation, flowmux-owned PTYs, and GTK integr
 Supported on Ubuntu 24.04 and later.
 
 > Unofficial GPL-3.0-or-later reimplementation inspired by [cmux](https://cmux.com/ko), a macOS/AppKit app. Not affiliated with cmux.
+
+## Install (Ubuntu 24.04+, amd64)
+
+```sh
+curl -fsSL https://flowmux.org/install.sh | sh
+```
+
+The installer downloads the latest `.deb` from GitHub Releases, verifies its
+SHA-256 checksum, and installs it with `apt`. It sends no flowmux telemetry;
+GitHub provides the aggregate download count for each release asset.
   
 ## Control internal browser
 
@@ -262,7 +272,7 @@ open "$HOME/Applications/FlowMux.app"
 The script installs `FlowMux.app` under `~/Applications` and copies `flowmux`,
 `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin`.
 
-### Install to the host
+### Install a source build to the host
 
 ```bash
 ./install.sh                   # installs missing prerequisites, flowmux, and app icon
