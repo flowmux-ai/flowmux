@@ -152,6 +152,7 @@ pub struct PaneRegistry {
     /// Tab-bar `gtk::Box` so incremental tab additions can `append`
     /// into the same row instead of rebuilding the whole pane.
     pane_tab_containers: HashMap<PaneId, gtk::Box>,
+    pane_zoom_buttons: HashMap<PaneId, gtk::Button>,
     pane_zoom_badges: HashMap<PaneId, gtk::Label>,
     surface_tab_labels: HashMap<SurfaceId, gtk::Label>,
     pane_workspace: HashMap<PaneId, WorkspaceId>,
@@ -214,6 +215,15 @@ impl PaneRegistry {
         let Some(frame) = self.pane_frames.get(&pane) else {
             return;
         };
+        if let Some(button) = self.pane_zoom_buttons.get(&pane) {
+            if zoomed {
+                button.set_icon_name("view-restore-symbolic");
+                button.set_tooltip_text(Some("Restore pane"));
+            } else {
+                button.set_icon_name("view-fullscreen-symbolic");
+                button.set_tooltip_text(Some("Maximize pane"));
+            }
+        }
         if zoomed {
             frame.add_css_class("flowmux-pane-zoomed");
             if self.pane_zoom_badges.contains_key(&pane) {
@@ -523,6 +533,7 @@ impl PaneRegistry {
             self.surface_stacks.remove(&pane);
             self.surface_tabs.remove(&pane);
             self.pane_tab_containers.remove(&pane);
+            self.pane_zoom_buttons.remove(&pane);
             self.pane_zoom_badges.remove(&pane);
             self.pane_workspace.remove(&pane);
         }
@@ -799,6 +810,7 @@ impl PaneRegistry {
         self.surface_stacks.remove(&pane);
         self.pane_frames.remove(&pane);
         self.pane_tab_containers.remove(&pane);
+        self.pane_zoom_buttons.remove(&pane);
         self.pane_zoom_badges.remove(&pane);
         self.active_terminal_by_pane.remove(&pane);
         self.active_browser_by_pane.remove(&pane);
@@ -1450,7 +1462,7 @@ fn build_leaf_pane(
         stack.add_named(&widget, Some(&surface.id.to_string()));
     }
 
-    let zoom = pane_tool_button("view-fullscreen-symbolic", "Maximize or restore pane");
+    let zoom = pane_tool_button("view-fullscreen-symbolic", "Maximize pane");
     {
         let cb = callbacks.on_toggle_pane_zoom.clone();
         zoom.connect_clicked(move |_| (cb.borrow_mut())(pane_id));
@@ -1538,6 +1550,7 @@ fn build_leaf_pane(
         r.surface_stacks.insert(pane_id, stack);
         r.surface_tabs.insert(pane_id, tab_widgets);
         r.pane_tab_containers.insert(pane_id, tabs);
+        r.pane_zoom_buttons.insert(pane_id, zoom);
         r.pane_workspace.insert(pane_id, workspace);
         r.activate_surface(pane_id, active);
         r.refresh_tab_multi_class(pane_id);
@@ -3215,6 +3228,31 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
 #[cfg(all(test, not(target_os = "macos")))]
 mod pane_menu_tests {
     use super::*;
+
+    #[gtk::test]
+    fn pane_zoom_button_tracks_zoom_state() {
+        let pane = PaneId::new();
+        let frame = gtk::Frame::new(None);
+        let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let button = pane_tool_button("view-fullscreen-symbolic", "Maximize pane");
+        let mut registry = PaneRegistry::default();
+        registry
+            .pane_frames
+            .insert(pane, frame.upcast::<gtk::Widget>());
+        registry.pane_tab_containers.insert(pane, tabs);
+        registry.pane_zoom_buttons.insert(pane, button.clone());
+
+        registry.set_pane_zoomed(pane, true);
+        assert_eq!(button.icon_name().as_deref(), Some("view-restore-symbolic"));
+        assert_eq!(button.tooltip_text().as_deref(), Some("Restore pane"));
+
+        registry.set_pane_zoomed(pane, false);
+        assert_eq!(
+            button.icon_name().as_deref(),
+            Some("view-fullscreen-symbolic")
+        );
+        assert_eq!(button.tooltip_text().as_deref(), Some("Maximize pane"));
+    }
 
     #[gtk::test]
     fn pane_menu_close_item_dispatches_the_owning_pane() {

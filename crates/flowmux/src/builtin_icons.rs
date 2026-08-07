@@ -172,6 +172,10 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M2 2h5v2H4v3H2zm7 0h5v5h-2V4H9zm3 7h2v5H9v-2h3zM2 9h2v3h3v2H2z",
     },
     SymbolicIcon {
+        name: "view-restore-symbolic",
+        path: "M2 7h7v7H7v-3.6l-3.6 3.6L2 12.6 5.6 9H2zm12 2H7V2h2v3.6L12.6 2 14 3.4 10.4 7H14z",
+    },
+    SymbolicIcon {
         name: "zoom-in-symbolic",
         path: "M6.5 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM6.5 3.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4.3 5.8h4.4v1.4H4.3zM5.8 4.3h1.4v4.4H5.8zM9.9 8.9 13.9 12.9 12.8 14 8.8 10z",
     },
@@ -307,6 +311,10 @@ mod tests {
         assert!(tmp
             .path()
             .join("hicolor/scalable/actions/view-fullscreen-symbolic.svg")
+            .exists());
+        assert!(tmp
+            .path()
+            .join("hicolor/scalable/actions/view-restore-symbolic.svg")
             .exists());
         assert!(tmp
             .path()
