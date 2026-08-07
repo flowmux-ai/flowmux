@@ -40,7 +40,7 @@ fn banner_props(
             false,
         ),
         BannerState::Running(Stage::Installing, percent, v) => (
-            format!("Updating to {v} — building & installing {percent}%"),
+            format!("Updating to {v} — installing {percent}%"),
             None,
             true,
             Some(*percent),

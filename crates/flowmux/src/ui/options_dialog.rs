@@ -421,7 +421,7 @@ fn update_tab_props(state: &BannerState, origin: InstallOrigin) -> UpdateTabProp
             check_sensitive: false,
         },
         BannerState::Running(Stage::Installing, percent, version) => UpdateTabProps {
-            status: format!("Building and installing flowmux v{version}: {percent}%"),
+            status: format!("Installing flowmux v{version}: {percent}%"),
             update_version: None,
             update_label: None,
             check_sensitive: false,

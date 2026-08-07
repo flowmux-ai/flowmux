@@ -38,24 +38,6 @@ impl std::fmt::Display for Version {
     }
 }
 
-/// Extract release versions from `git ls-remote --tags` output.
-/// Peeled `refs/tags/vX.Y.Z^{}` entries are ignored — the tag name is
-/// all we need and it appears on the unpeeled line too.
-pub fn parse_ls_remote(output: &str) -> Vec<Version> {
-    output
-        .lines()
-        .filter_map(|line| line.split('\t').nth(1))
-        .filter_map(|r| r.strip_prefix("refs/tags/"))
-        .filter(|tag| !tag.ends_with("^{}"))
-        .filter_map(Version::parse)
-        .collect()
-}
-
-/// Newest release among `versions`, if any.
-pub fn latest(versions: &[Version]) -> Option<Version> {
-    versions.iter().copied().max()
-}
-
 /// True when `latest` is strictly newer than the running build.
 pub fn update_available(current: &str, latest: Version) -> bool {
     Version::parse(current).is_some_and(|current| latest > current)
@@ -171,34 +153,6 @@ mod tests {
             Version::parse(&Version(2, 0, 5).tag()),
             Some(Version(2, 0, 5))
         );
-    }
-
-    #[test]
-    fn ls_remote_output_yields_versions_skipping_peeled_and_foreign_refs() {
-        let out = "\
-0123456789abcdef0123456789abcdef01234567\trefs/tags/v0.6.4
-89abcdef0123456789abcdef0123456789abcdef\trefs/tags/v0.7.0
-89abcdef0123456789abcdef0123456789abcdef\trefs/tags/v0.7.0^{}
-aaaabbbbccccddddeeeeffff0000111122223333\trefs/tags/nightly
-ffffeeeeddddccccbbbbaaaa9999888877776666\trefs/heads/main
-";
-        assert_eq!(
-            parse_ls_remote(out),
-            vec![Version(0, 6, 4), Version(0, 7, 0)]
-        );
-    }
-
-    #[test]
-    fn ls_remote_tolerates_empty_and_garbage_output() {
-        assert_eq!(parse_ls_remote(""), Vec::new());
-        assert_eq!(parse_ls_remote("not a ref line at all"), Vec::new());
-    }
-
-    #[test]
-    fn latest_picks_max_version() {
-        let versions = [Version(0, 6, 4), Version(0, 7, 0), Version(0, 6, 10)];
-        assert_eq!(latest(&versions), Some(Version(0, 7, 0)));
-        assert_eq!(latest(&[]), None);
     }
 
     #[test]

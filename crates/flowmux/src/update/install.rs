@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Tokio side of self-update: the periodic release check and the
-//! install runner executing the [`check`] command plan. This layer is
-//! deliberately thin — every decision (version compare, command
-//! argv, script name) comes from the unit-tested [`check`] module.
+//! Tokio side of self-update: the periodic release check and installer.
+//! Local Linux installs consume the verified GitHub Release tarball;
+//! platforms without a release binary retain the source installer.
 
 use super::check::{self, Version};
 use super::origin::{self, InstallOrigin, UpdateGate};
 use super::{Event, Stage};
 use anyhow::Context;
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicU8, Ordering},
     Arc,
 };
+use tokio::io::AsyncWriteExt;
 
 const REPO_URL: &str = "https://github.com/flowmux-ai/flowmux.git";
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/flowmux-ai/flowmux/releases/latest";
+const RELEASE_DOWNLOAD_URL: &str = "https://github.com/flowmux-ai/flowmux/releases/download";
+const LINUX_RELEASE_TARGET: &str = "x86_64-unknown-linux-gnu";
+const RELEASE_BINARIES: [&str; 3] = ["flowmux", "flowmuxctl", "flowmux-md-viewer"];
 const CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]
@@ -159,7 +164,24 @@ fn clone_dir() -> Option<PathBuf> {
     flowmux_config::paths::host_visible_cache_dir().map(|d| d.join("src"))
 }
 
-/// Combined log of the last update attempt (git + install script).
+fn manual_install_guidance(script: &std::path::Path) -> String {
+    format!("Run `{}` in a terminal, then retry", script.display())
+}
+
+fn release_asset_name(version: Version) -> String {
+    format!("flowmux-{version}-{LINUX_RELEASE_TARGET}.tar.gz")
+}
+
+fn expected_sha256(checksum: &str) -> Option<&str> {
+    let value = checksum.split_whitespace().next()?;
+    (value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some(value)
+}
+
+fn use_release_tarball() -> bool {
+    std::env::consts::OS == "linux" && std::env::consts::ARCH == "x86_64"
+}
+
+/// Combined log of the last update attempt.
 pub fn log_path() -> Option<PathBuf> {
     flowmux_config::paths::host_visible_cache_dir().map(|d| d.join("update.log"))
 }
@@ -186,8 +208,8 @@ pub fn record_release_page_decision(origin: InstallOrigin, version: Version) {
 }
 
 /// Check for a newer release now and then every 24 h, announcing hits
-/// on `tx`. Failures (offline, no git) are logged and stay silent —
-/// the banner simply never appears.
+/// on `tx`. Offline failures are logged and stay silent — the banner
+/// simply never appears.
 pub async fn check_loop(tx: async_channel::Sender<Event>) {
     let mut tick = tokio::time::interval(CHECK_INTERVAL);
     loop {
@@ -209,31 +231,31 @@ pub async fn check_loop(tx: async_channel::Sender<Event>) {
 }
 
 pub(crate) async fn check_once() -> anyhow::Result<Option<Version>> {
-    // std::process on the blocking pool, not tokio::process — GLib's
-    // child watch owns SIGCHLD in the GUI process, so tokio's child
-    // wait never wakes on macOS (see flowmux-vcs `git_output`).
-    let output = tokio::task::spawn_blocking(|| {
-        std::process::Command::new("git")
-            .args(["ls-remote", "--tags", REPO_URL])
-            .stdin(Stdio::null())
-            .output()
-    })
-    .await
-    .context("join ls-remote task")?
-    .context("run git ls-remote")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "git ls-remote failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
     }
-    let versions = check::parse_ls_remote(&String::from_utf8_lossy(&output.stdout));
-    Ok(check::latest(&versions)
-        .filter(|latest| check::update_available(env!("CARGO_PKG_VERSION"), *latest)))
+
+    let release = reqwest::Client::new()
+        .get(LATEST_RELEASE_URL)
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!("flowmux/", env!("CARGO_PKG_VERSION")),
+        )
+        .send()
+        .await
+        .context("check latest GitHub Release")?
+        .error_for_status()
+        .context("latest GitHub Release request failed")?
+        .json::<Release>()
+        .await
+        .context("read latest GitHub Release")?;
+    let latest = Version::parse(&release.tag_name)
+        .with_context(|| format!("invalid release tag {}", release.tag_name))?;
+    Ok(check::update_available(env!("CARGO_PKG_VERSION"), latest).then_some(latest))
 }
 
-/// Bring the managed clone to `version` and run the platform install
-/// script, reporting progress and the final outcome on `tx`.
+/// Install `version`, reporting progress and the final outcome on `tx`.
 pub async fn run_install(version: Version, tx: async_channel::Sender<Event>) {
     let outcome = run_install_inner(version, &tx).await;
     let event = match outcome {
@@ -250,23 +272,177 @@ async fn run_install_inner(
     version: Version,
     tx: &async_channel::Sender<Event>,
 ) -> anyhow::Result<()> {
-    let dir = clone_dir().context("HOME is unset")?;
-    if let Some(parent) = dir.parent() {
+    let log_path = log_path().context("HOME is unset")?;
+    if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).context("create cache dir")?;
     }
-    let mut log =
-        std::fs::File::create(log_path().context("HOME is unset")?).context("create update.log")?;
+    let mut log = std::fs::File::create(log_path).context("create update.log")?;
     let origin = origin::install_origin();
     let gate = origin::update_gate(origin);
+    let action = if gate == UpdateGate::SourceBuild && use_release_tarball() {
+        "ReleaseTarball".to_string()
+    } else {
+        format!("{gate:?}")
+    };
     writeln!(
         log,
-        "install_origin={origin:?} update_action={gate:?} version={version}"
+        "install_origin={origin:?} update_action={action} version={version}"
     )
     .context("write update decision")?;
     if gate != UpdateGate::SourceBuild {
         anyhow::bail!(
             "source self-update is disabled for {origin:?} installs; use the release page"
         );
+    }
+
+    if use_release_tarball() {
+        return run_release_tarball(version, tx, &mut log)
+            .await
+            .with_context(|| {
+                format!(
+                    "Download and install this release manually from {}",
+                    origin::release_page_url(version)
+                )
+            });
+    }
+
+    run_source_install(version, tx, &mut log).await
+}
+
+async fn run_release_tarball(
+    version: Version,
+    tx: &async_channel::Sender<Event>,
+    log: &mut std::fs::File,
+) -> anyhow::Result<()> {
+    let cache_dir = flowmux_config::paths::host_visible_cache_dir().context("HOME is unset")?;
+    let work_dir = cache_dir.join(format!(".update-{}", std::process::id()));
+    if work_dir.exists() {
+        std::fs::remove_dir_all(&work_dir).context("clear previous update staging")?;
+    }
+    let extract_dir = work_dir.join("extracted");
+    std::fs::create_dir_all(&extract_dir).context("create update staging")?;
+
+    let asset = release_asset_name(version);
+    let url = format!("{RELEASE_DOWNLOAD_URL}/{}/{asset}", version.tag());
+    let client = reqwest::Client::new();
+
+    let _ = tx.send(Event::Progress(Stage::Fetching, 0)).await;
+    let fetching = Progress::new(Stage::Fetching, tx);
+    let checksum_text = client
+        .get(format!("{url}.sha256"))
+        .send()
+        .await
+        .context("download release checksum")?
+        .error_for_status()
+        .context("release checksum request failed")?
+        .text()
+        .await
+        .context("read release checksum")?;
+    let expected = expected_sha256(&checksum_text).context("invalid release checksum")?;
+    fetching.report(5);
+
+    let mut response = client
+        .get(&url)
+        .send()
+        .await
+        .context("download release tarball")?
+        .error_for_status()
+        .context("release tarball request failed")?;
+    let total = response.content_length().filter(|total| *total > 0);
+    let archive = work_dir.join(&asset);
+    let mut file = tokio::fs::File::create(&archive)
+        .await
+        .context("create release tarball")?;
+    let mut downloaded = 0_u64;
+    let mut hasher = Sha256::new();
+    while let Some(chunk) = response.chunk().await.context("read release tarball")? {
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .context("write release tarball")?;
+        if let Some(total) = total {
+            fetching.report(5 + (downloaded.saturating_mul(90) / total).min(90) as u8);
+        }
+    }
+    file.flush().await.context("flush release tarball")?;
+    let actual = format!("{:x}", hasher.finalize());
+    if !actual.eq_ignore_ascii_case(expected) {
+        anyhow::bail!("release checksum mismatch: expected {expected}, got {actual}");
+    }
+    writeln!(log, "release_asset={asset} sha256={actual}").context("write release log")?;
+    fetching.report(100);
+
+    let _ = tx.send(Event::Progress(Stage::Installing, 0)).await;
+    let installing = Progress::new(Stage::Installing, tx);
+    let archive_root = asset.trim_end_matches(".tar.gz");
+    let mut tar_argv = vec![
+        "tar".to_string(),
+        "-xzf".to_string(),
+        archive.display().to_string(),
+        "-C".to_string(),
+        extract_dir.display().to_string(),
+        "--strip-components=1".to_string(),
+    ];
+    tar_argv.extend(
+        RELEASE_BINARIES
+            .iter()
+            .map(|binary| format!("{archive_root}/{binary}")),
+    );
+    run_logged(tar_argv, None, None, &*log, installing.clone()).await?;
+    installing.report(40);
+
+    let install_dir = std::env::current_exe()
+        .context("locate running flowmux")?
+        .parent()
+        .context("running flowmux has no parent directory")?
+        .to_path_buf();
+    let staged = extract_dir.clone();
+    let destination = install_dir.clone();
+    tokio::task::spawn_blocking(move || install_release_binaries(&staged, &destination))
+        .await
+        .context("join release install task")??;
+    writeln!(log, "installed_release_to={}", install_dir.display()).context("write install log")?;
+    installing.report(100);
+    let _ = std::fs::remove_dir_all(work_dir);
+    Ok(())
+}
+
+fn install_release_binaries(extracted: &Path, install_dir: &Path) -> anyhow::Result<()> {
+    let mut staged = Vec::new();
+    for binary in RELEASE_BINARIES {
+        let source = extracted.join(binary);
+        if !source.is_file() {
+            anyhow::bail!("release is missing {binary}");
+        }
+        let pending = install_dir.join(format!(".{binary}.pending.{}", std::process::id()));
+        let _ = std::fs::remove_file(&pending);
+        std::fs::copy(&source, &pending).with_context(|| format!("stage {}", pending.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o755))
+                .with_context(|| format!("set permissions on {}", pending.display()))?;
+        }
+        staged.push((pending, install_dir.join(binary)));
+    }
+    for (pending, destination) in staged {
+        std::fs::rename(&pending, &destination)
+            .with_context(|| format!("replace {}", destination.display()))?;
+    }
+    Ok(())
+}
+
+async fn run_source_install(
+    version: Version,
+    tx: &async_channel::Sender<Event>,
+    log: &mut std::fs::File,
+) -> anyhow::Result<()> {
+    let dir = clone_dir().context("HOME is unset")?;
+    let script = check::install_script(std::env::consts::OS);
+    let manual_installer = dir.join(script);
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent).context("create cache dir")?;
     }
 
     // A launcher-started GUI has no ~/.cargo/bin on PATH, so use the same
@@ -284,11 +460,11 @@ async fn run_install_inner(
     .await
     .context("join prerequisite check")?;
     if let Err(message) = prerequisites {
-        writeln!(log, "prerequisites=missing detail={message}")
+        writeln!(&mut *log, "prerequisites=missing detail={message}")
             .context("write prerequisite failure")?;
-        anyhow::bail!(message);
+        anyhow::bail!("{message}. {}", manual_install_guidance(&manual_installer));
     }
-    writeln!(log, "prerequisites=ok").context("write prerequisite result")?;
+    writeln!(&mut *log, "prerequisites=ok").context("write prerequisite result")?;
 
     let _ = tx.send(Event::Progress(Stage::Fetching, 0)).await;
     let fetching = Progress::new(Stage::Fetching, tx);
@@ -296,7 +472,7 @@ async fn run_install_inner(
     let clone_exists = dir.join(".git").is_dir();
     if run_plan(
         check::git_plan(clone_exists, REPO_URL, &dir, &tag),
-        &log,
+        &*log,
         fetching.clone(),
     )
     .await
@@ -308,7 +484,7 @@ async fn run_install_inner(
         std::fs::remove_dir_all(&dir).context("reset managed clone")?;
         run_plan(
             check::git_plan(false, REPO_URL, &dir, &tag),
-            &log,
+            &*log,
             fetching.clone(),
         )
         .await?;
@@ -317,15 +493,15 @@ async fn run_install_inner(
 
     let _ = tx.send(Event::Progress(Stage::Installing, 0)).await;
     let installing = Progress::new(Stage::Installing, tx);
-    let script = check::install_script(std::env::consts::OS);
     run_logged(
         vec!["bash".to_string(), script.to_string()],
         Some(dir),
         path.map(|p| ("PATH", p)),
-        &log,
+        &*log,
         installing.clone(),
     )
-    .await?;
+    .await
+    .with_context(|| manual_install_guidance(&manual_installer))?;
     installing.report(100);
     Ok(())
 }
@@ -458,7 +634,10 @@ async fn run_logged(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{check_prerequisites, output_progress, prerequisite_error, prerequisite_packages};
+    use super::{
+        check_prerequisites, expected_sha256, install_release_binaries, manual_install_guidance,
+        output_progress, prerequisite_error, prerequisite_packages, RELEASE_BINARIES,
+    };
     use crate::update::Stage;
     use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
@@ -472,6 +651,51 @@ mod tests {
         assert!(message.contains("cargo"), "{message}");
         assert!(message.contains("webkitgtk-6.0"), "{message}");
         assert_eq!(prerequisite_error(&[], &[]), None);
+    }
+
+    #[test]
+    fn failed_install_guides_user_to_the_managed_script() {
+        let script = std::path::Path::new("/home/u/.cache/flowmux/src/install.sh");
+        assert_eq!(
+            manual_install_guidance(script),
+            "Run `/home/u/.cache/flowmux/src/install.sh` in a terminal, then retry"
+        );
+    }
+
+    #[test]
+    fn verified_release_binaries_replace_the_existing_install() {
+        assert_eq!(
+            expected_sha256(&format!("{}  flowmux.tar.gz\n", "a".repeat(64))),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(expected_sha256("not-a-checksum"), None);
+
+        let temp = tempfile::tempdir().unwrap();
+        let extracted = temp.path().join("extracted");
+        let installed = temp.path().join("bin");
+        std::fs::create_dir_all(&extracted).unwrap();
+        std::fs::create_dir_all(&installed).unwrap();
+        for binary in RELEASE_BINARIES {
+            std::fs::write(extracted.join(binary), format!("new-{binary}")).unwrap();
+            std::fs::write(installed.join(binary), format!("old-{binary}")).unwrap();
+        }
+
+        install_release_binaries(&extracted, &installed).unwrap();
+
+        for binary in RELEASE_BINARIES {
+            assert_eq!(
+                std::fs::read_to_string(installed.join(binary)).unwrap(),
+                format!("new-{binary}")
+            );
+            assert_eq!(
+                std::fs::metadata(installed.join(binary))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o755
+            );
+        }
     }
 
     #[test]

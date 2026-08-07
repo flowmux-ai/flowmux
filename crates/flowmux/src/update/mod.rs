@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Self-update: detect a newer release tag and choose an action that matches
-//! the running installation. Source installs may build a managed checkout;
-//! packaged and unknown installs open the release page instead.
+//! the running installation. Local Linux installs use a verified release
+//! tarball; packaged and unknown installs open the release page instead.
 //!
 //! Split: [`check`] is the pure, unit-tested core (version parsing,
 //! command plan); [`install`] executes that plan on the tokio runtime;
@@ -50,9 +50,9 @@ pub fn persist_ignored_version(version: Version) -> std::io::Result<()> {
 /// Progress reported by the background install task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
-    /// Bringing the managed clone to the release tag.
+    /// Downloading the release payload.
     Fetching,
-    /// Running the platform install script (build + install).
+    /// Installing the downloaded release.
     Installing,
 }
 
