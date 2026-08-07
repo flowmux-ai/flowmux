@@ -34,6 +34,7 @@ use flowmux_core::SplitDirection;
 use gtk::glib;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::sync::oneshot;
 
@@ -855,19 +856,28 @@ fn make_close_surface_action(
 ///
 /// We re-exec `current_exe()` (not just `"flowmux"`) so a build run out of
 /// `target/release/` opens another copy of the same binary rather than
-/// whatever happens to be on `PATH`. GDK's launch context carries the
-/// compositor activation token, so the new Wayland window receives keyboard
-/// focus instead of leaving input in the old window.
+/// whatever happens to be on `PATH`. If an install replaced that running
+/// inode, fall back to argv[0], which still names the live installed path.
+/// GDK's launch context carries the compositor activation token, so the new
+/// Wayland window receives keyboard focus instead of leaving input in the old
+/// window.
+fn new_window_executable(current_exe: Option<PathBuf>, argv0: Option<PathBuf>) -> Option<PathBuf> {
+    current_exe.filter(|path| path.exists()).or(argv0)
+}
+
 fn make_new_window_action(
     launch_timestamp: Rc<Cell<u32>>,
 ) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder("new-window")
         .activate(move |window: &adw::ApplicationWindow, _, _| {
             tracing::debug!(action = "new-window", "key action fired");
-            let exe = match std::env::current_exe() {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::warn!(error = %e, "new-window: could not resolve current_exe()");
+            let exe = match new_window_executable(
+                std::env::current_exe().ok(),
+                std::env::args_os().next().map(PathBuf::from),
+            ) {
+                Some(path) => path,
+                None => {
+                    tracing::warn!("new-window: could not resolve executable path");
                     return;
                 }
             };
@@ -1303,6 +1313,18 @@ mod tests {
         assert!(
             window.has_action("new-window"),
             "new-window action must be registered on the window so Ctrl+Shift+N routes to it"
+        );
+    }
+
+    #[test]
+    fn new_window_uses_argv0_after_running_binary_is_replaced() {
+        let missing =
+            std::env::temp_dir().join(format!("flowmux-deleted-executable-{}", std::process::id()));
+        let installed = PathBuf::from("/installed/flowmux");
+
+        assert_eq!(
+            new_window_executable(Some(missing), Some(installed.clone())),
+            Some(installed)
         );
     }
 

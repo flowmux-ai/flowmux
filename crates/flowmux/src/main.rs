@@ -136,10 +136,12 @@ fn main() -> anyhow::Result<()> {
     // fcitx keep working, while known non-preedit modules (`wayland`,
     // `simple`, `xim`) are corrected when ibus is reachable. Inside
     // Flatpak we trust the manifest's portal grant; otherwise we require
-    // an installed ibus-daemon binary.
+    // a live IBus socket.
     let ibus_reachable = flowmux_config::paths::is_flatpak_sandbox() || ibus_daemon_available();
     let gtk_im_module = std::env::var("GTK_IM_MODULE").ok();
-    if should_force_ibus_im_module(gtk_im_module.as_deref(), ibus_reachable) {
+    if should_disable_ibus_im_module(gtk_im_module.as_deref(), ibus_reachable) {
+        std::env::remove_var("GTK_IM_MODULE");
+    } else if should_force_ibus_im_module(gtk_im_module.as_deref(), ibus_reachable) {
         std::env::set_var("GTK_IM_MODULE", "ibus");
     }
     if gtk_im_module_is_ibus(std::env::var("GTK_IM_MODULE").ok().as_deref()) {
@@ -688,20 +690,30 @@ fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
     Ok(true)
 }
 
-/// True when an `ibus-daemon` binary is reachable on the standard
-/// system paths. We do not probe `$PATH` because the GUI launcher's
-/// environment may differ from a login shell's — the file check is
-/// authoritative and matches what the GTK4 ibus immodule itself looks
-/// for. If the daemon is not installed, forcing `GTK_IM_MODULE=ibus`
-/// would only swap one broken state for another, so the caller skips
-/// the override.
+/// True when IBus advertises a live Unix socket. A stale daemon can keep
+/// running after its socket is unlinked; forcing `GTK_IM_MODULE=ibus` in that
+/// state makes the immodule swallow every printable key.
 fn ibus_daemon_available() -> bool {
-    const CANDIDATES: &[&str] = &[
-        "/usr/bin/ibus-daemon",
-        "/usr/local/bin/ibus-daemon",
-        "/bin/ibus-daemon",
-    ];
-    CANDIDATES.iter().any(|p| std::path::Path::new(p).exists())
+    let Some(ibus) = ["/usr/bin/ibus", "/usr/local/bin/ibus", "/bin/ibus"]
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+    else {
+        return false;
+    };
+    Command::new(ibus)
+        .arg("address")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| ibus_address_is_reachable(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn ibus_address_is_reachable(address: &str) -> bool {
+    address
+        .trim()
+        .split(',')
+        .find_map(|part| part.strip_prefix("unix:path="))
+        .is_some_and(|path| std::os::unix::net::UnixStream::connect(path).is_ok())
 }
 
 fn should_force_ibus_im_module(current: Option<&str>, ibus_reachable: bool) -> bool {
@@ -713,6 +725,10 @@ fn should_force_ibus_im_module(current: Option<&str>, ibus_reachable: bool) -> b
         Some("wayland" | "simple" | "xim") => true,
         Some(_) => false,
     }
+}
+
+fn should_disable_ibus_im_module(current: Option<&str>, ibus_reachable: bool) -> bool {
+    !ibus_reachable && gtk_im_module_is_ibus(current)
 }
 
 fn gtk_im_module_is_ibus(current: Option<&str>) -> bool {
@@ -913,6 +929,9 @@ mod tests {
         assert!(!should_force_ibus_im_module(Some("fcitx5"), true));
         assert!(!should_force_ibus_im_module(None, false));
         assert!(!should_force_ibus_im_module(Some("wayland"), false));
+        assert!(should_disable_ibus_im_module(Some("ibus"), false));
+        assert!(!should_disable_ibus_im_module(Some("ibus"), true));
+        assert!(!should_disable_ibus_im_module(Some("fcitx"), false));
     }
 
     #[test]
@@ -927,6 +946,18 @@ mod tests {
         assert!(gtk_im_module_is_ibus(Some(" ibus ")));
         assert!(!gtk_im_module_is_ibus(None));
         assert!(!gtk_im_module_is_ibus(Some("wayland")));
+    }
+
+    #[test]
+    fn ibus_reachability_rejects_an_unlinked_socket() {
+        let path = std::env::temp_dir().join(format!("flowmux-ibus-{}.sock", std::process::id()));
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let address = format!("unix:path={},guid=test", path.display());
+        assert!(ibus_address_is_reachable(&address));
+
+        drop(listener);
+        std::fs::remove_file(&path).unwrap();
+        assert!(!ibus_address_is_reachable(&address));
     }
 
     #[test]
