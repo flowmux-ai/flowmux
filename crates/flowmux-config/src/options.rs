@@ -701,8 +701,10 @@ mod tests {
 
     #[test]
     fn editor_minimap_false_round_trips() {
-        let mut opts = Options::default();
-        opts.editor_minimap_enabled = false;
+        let opts = Options {
+            editor_minimap_enabled: false,
+            ..Options::default()
+        };
         let back: Options = serde_json::from_str(&serde_json::to_string(&opts).unwrap()).unwrap();
         assert!(!back.editor_minimap_enabled);
     }
