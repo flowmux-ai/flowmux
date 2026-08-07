@@ -37,6 +37,7 @@ use std::rc::Rc;
 use tokio::sync::oneshot;
 
 type RowsCell = Rc<RefCell<Vec<(WorkspaceId, gtk::ListBoxRow)>>>;
+type WorkspaceHoverHandler = Rc<dyn Fn(WorkspaceId, &gtk::Widget, bool)>;
 
 const WORKSPACE_DND_MIME: &str = "application/x-flowmux-workspace";
 const SIDEBAR_TREE_GUTTER_WIDTH: i32 = 14;
@@ -179,6 +180,7 @@ pub struct Sidebar {
     titles: Rc<RefCell<Vec<(WorkspaceId, String)>>>,
     tab_drag_drop_seen: Rc<Cell<bool>>,
     tab_drag_drop_committed: Rc<Cell<bool>>,
+    workspace_hover_handler: Rc<RefCell<Option<WorkspaceHoverHandler>>>,
     update_banner: UpdateBanner,
 }
 
@@ -503,6 +505,7 @@ impl Sidebar {
             titles: Rc::new(RefCell::new(Vec::new())),
             tab_drag_drop_seen: Rc::new(Cell::new(false)),
             tab_drag_drop_committed: Rc::new(Cell::new(false)),
+            workspace_hover_handler: Rc::new(RefCell::new(None)),
             update_banner,
         }
     }
@@ -544,6 +547,13 @@ impl Sidebar {
         )
     }
 
+    pub(crate) fn connect_workspace_hover<F>(&self, handler: F)
+    where
+        F: Fn(WorkspaceId, &gtk::Widget, bool) + 'static,
+    {
+        *self.workspace_hover_handler.borrow_mut() = Some(Rc::new(handler));
+    }
+
     fn upsert_inner(&self, ws: &Workspace, details: &WorkspaceRowDetails) {
         {
             // Use the displayed title (custom name, else folder-derived name) so
@@ -567,7 +577,13 @@ impl Sidebar {
             return;
         }
         let row = gtk::ListBoxRow::new();
-        let row_widget = row_widget(ws, details, self.on_close.clone(), self.bridge.clone());
+        let row_widget = row_widget(
+            ws,
+            details,
+            self.on_close.clone(),
+            self.bridge.clone(),
+            self.workspace_hover_handler.clone(),
+        );
         row_widget
             .badge
             .set_visible(self.notification_workspaces.borrow().contains(&ws.id));
@@ -1622,6 +1638,7 @@ fn row_widget(
     details: &WorkspaceRowDetails,
     on_close: Rc<dyn Fn(WorkspaceId)>,
     bridge: Bridge,
+    workspace_hover_handler: Rc<RefCell<Option<WorkspaceHoverHandler>>>,
 ) -> WorkspaceRowWidget {
     // Row content (color bar + text column) lives in a horizontal Box;
     // the close button is layered on top via a `gtk::Overlay` rather than
@@ -1677,14 +1694,23 @@ fn row_widget(
 
     let motion = gtk::EventControllerMotion::new();
     let btn_enter = close_btn.clone();
-    motion.connect_enter(move |_, _, _| {
+    let hover_enter = workspace_hover_handler.clone();
+    motion.connect_enter(move |motion, _, _| {
         btn_enter.set_opacity(1.0);
         btn_enter.set_can_target(true);
+        if let (Some(handler), Some(row)) = (hover_enter.borrow().clone(), motion.widget()) {
+            handler(id, &row, true);
+        }
     });
     let btn_leave = close_btn.clone();
-    motion.connect_leave(move |_| {
+    motion.connect_leave(move |motion| {
         btn_leave.set_opacity(0.0);
         btn_leave.set_can_target(false);
+        if let (Some(handler), Some(row)) =
+            (workspace_hover_handler.borrow().clone(), motion.widget())
+        {
+            handler(id, &row, false);
+        }
     });
     row.add_controller(motion);
 
@@ -2802,16 +2828,23 @@ mod tests {
         let ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/home/u/dev/os/flowmux")));
         let bridge = crate::bridge::Bridge::new().0;
         let on_close: Rc<dyn Fn(WorkspaceId)> = Rc::new(|_| {});
+        let on_hover = Rc::new(RefCell::new(None));
 
         for n in 0..=3 {
             let lines: Vec<String> = (0..n).map(|i| format!(".../line{i}")).collect();
             let details = WorkspaceRowDetails::path_only(&lines);
-            let _ = row_widget(&ws, &details, on_close.clone(), bridge.clone());
+            let _ = row_widget(
+                &ws,
+                &details,
+                on_close.clone(),
+                bridge.clone(),
+                on_hover.clone(),
+            );
         }
         // Even with 4 lines, WorkspaceRowDetails truncates to 3.
         let four = vec!["a".into(), "b".into(), "c".into(), "d-overflow".into()];
         let details = WorkspaceRowDetails::path_only(&four);
-        let _ = row_widget(&ws, &details, on_close, bridge);
+        let _ = row_widget(&ws, &details, on_close, bridge, on_hover);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -2834,7 +2867,7 @@ mod tests {
             }],
             path_lines: vec![".../fallback/path".into()],
         };
-        let _ = row_widget(&ws, &details, on_close, bridge);
+        let _ = row_widget(&ws, &details, on_close, bridge, Rc::new(RefCell::new(None)));
     }
 
     #[cfg(not(target_os = "macos"))]

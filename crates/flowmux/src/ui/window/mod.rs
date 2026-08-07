@@ -673,6 +673,212 @@ fn build_split_window_shell(
     split
 }
 
+fn install_workspace_previews(
+    sidebar: &Sidebar,
+    surfaces: Rc<RefCell<HashMap<WorkspaceId, gtk::Widget>>>,
+    overlay: &gtk::Overlay,
+) {
+    let picture = gtk::Picture::new();
+    picture.set_size_request(384, 240);
+    picture.set_content_fit(gtk::ContentFit::Contain);
+    picture.set_can_shrink(true);
+    picture.set_alternative_text(Some("Workspace preview"));
+
+    let frame = gtk::Frame::new(None);
+    frame.add_css_class("card");
+    frame.set_overflow(gtk::Overflow::Hidden);
+    frame.set_child(Some(&picture));
+
+    let mask_picture = gtk::Picture::new();
+    mask_picture.set_content_fit(gtk::ContentFit::Fill);
+    mask_picture.set_can_shrink(true);
+    let mask = gtk::Fixed::new();
+    mask.set_can_target(false);
+    mask.set_halign(gtk::Align::Fill);
+    mask.set_valign(gtk::Align::Fill);
+    mask.put(&mask_picture, 0.0, 0.0);
+    mask.set_visible(false);
+    overlay.add_overlay(&mask);
+
+    let preview = gtk::Fixed::new();
+    preview.set_can_target(false);
+    preview.set_halign(gtk::Align::Fill);
+    preview.set_valign(gtk::Align::Fill);
+    preview.put(&frame, 0.0, 0.0);
+    preview.set_visible(false);
+    overlay.add_overlay(&preview);
+
+    let shown_workspace = Rc::new(Cell::new(None));
+    let pending = Rc::new(RefCell::new(None));
+    let overlay = overlay.clone();
+
+    sidebar.connect_workspace_hover(move |workspace, row, hovered| {
+        if !hovered {
+            hide_workspace_preview(
+                &preview,
+                &picture,
+                &mask,
+                &mask_picture,
+                &pending,
+                &shown_workspace,
+                workspace,
+            );
+            return;
+        }
+        let Some(surface) = surfaces.borrow().get(&workspace).cloned() else {
+            return;
+        };
+        show_workspace_preview(
+            preview.clone(),
+            picture.clone(),
+            frame.clone(),
+            overlay.clone(),
+            mask.clone(),
+            mask_picture.clone(),
+            pending.clone(),
+            shown_workspace.clone(),
+            workspace,
+            row.clone(),
+            surface,
+        );
+    });
+}
+
+type PendingWorkspacePreview = (
+    glib::SourceId,
+    gtk::Stack,
+    gtk::Widget,
+    gtk::StackTransitionType,
+);
+
+fn show_workspace_preview(
+    preview: gtk::Fixed,
+    picture: gtk::Picture,
+    frame: gtk::Frame,
+    overlay: gtk::Overlay,
+    mask: gtk::Fixed,
+    mask_picture: gtk::Picture,
+    pending: Rc<RefCell<Option<PendingWorkspacePreview>>>,
+    shown_workspace: Rc<Cell<Option<WorkspaceId>>>,
+    workspace: WorkspaceId,
+    row: gtk::Widget,
+    surface: gtk::Widget,
+) {
+    cancel_workspace_preview_capture(&mask, &mask_picture, &pending);
+    shown_workspace.set(Some(workspace));
+    let (x, y) = row
+        .compute_bounds(&overlay)
+        .map(|bounds| {
+            workspace_preview_origin(
+                bounds.x() + bounds.width() + 8.0,
+                bounds.y(),
+                overlay.width(),
+                overlay.height(),
+            )
+        })
+        .unwrap_or((8.0, 8.0));
+    let Some(stack) = surface
+        .parent()
+        .and_then(|parent| parent.downcast::<gtk::Stack>().ok())
+    else {
+        return;
+    };
+    let Some(visible) = stack.visible_child() else {
+        return;
+    };
+    if visible == surface {
+        if let Some(texture) = workspace_preview_texture(&surface) {
+            preview.move_(&frame, x, y);
+            picture.set_paintable(Some(&texture));
+            preview.set_visible(true);
+        }
+        return;
+    }
+
+    let Some(bounds) = visible.compute_bounds(&overlay) else {
+        return;
+    };
+    let Some(active_texture) = workspace_preview_texture(&visible) else {
+        return;
+    };
+    mask.move_(&mask_picture, f64::from(bounds.x()), f64::from(bounds.y()));
+    mask_picture.set_size_request(bounds.width() as i32, bounds.height() as i32);
+    mask_picture.set_paintable(Some(&active_texture));
+    mask.set_visible(true);
+
+    let transition = stack.transition_type();
+    stack.set_transition_type(gtk::StackTransitionType::None);
+    stack.set_visible_child(&surface);
+    let pending_for_timeout = pending.clone();
+    let stack_for_timeout = stack.clone();
+    let visible_for_timeout = visible.clone();
+    let source = glib::timeout_add_local_once(Duration::from_millis(34), move || {
+        let texture = workspace_preview_texture(&surface);
+        stack_for_timeout.set_visible_child(&visible_for_timeout);
+        stack_for_timeout.set_transition_type(transition);
+        pending_for_timeout.borrow_mut().take();
+        mask.set_visible(false);
+        mask_picture.set_paintable(gtk::gdk::Paintable::NONE);
+        if shown_workspace.get() == Some(workspace) {
+            if let Some(texture) = texture {
+                preview.move_(&frame, x, y);
+                picture.set_paintable(Some(&texture));
+                preview.set_visible(true);
+            }
+        }
+    });
+    pending.replace(Some((source, stack, visible, transition)));
+}
+
+fn workspace_preview_texture(surface: &gtk::Widget) -> Option<gtk::gdk::Texture> {
+    let renderer = surface.native()?.renderer()?;
+    let stack = surface.parent()?.downcast::<gtk::Stack>().ok()?;
+    let snapshot = gtk::Snapshot::new();
+    stack.snapshot_child(surface, &snapshot);
+    snapshot
+        .to_node()
+        .map(|node| renderer.render_texture(&node, None))
+}
+
+fn cancel_workspace_preview_capture(
+    mask: &gtk::Fixed,
+    mask_picture: &gtk::Picture,
+    pending: &RefCell<Option<PendingWorkspacePreview>>,
+) {
+    if let Some((source, stack, visible, transition)) = pending.borrow_mut().take() {
+        source.remove();
+        stack.set_visible_child(&visible);
+        stack.set_transition_type(transition);
+    }
+    mask.set_visible(false);
+    mask_picture.set_paintable(gtk::gdk::Paintable::NONE);
+}
+
+fn hide_workspace_preview(
+    preview: &gtk::Fixed,
+    picture: &gtk::Picture,
+    mask: &gtk::Fixed,
+    mask_picture: &gtk::Picture,
+    pending: &RefCell<Option<PendingWorkspacePreview>>,
+    shown_workspace: &Cell<Option<WorkspaceId>>,
+    workspace: WorkspaceId,
+) {
+    if shown_workspace.get() != Some(workspace) {
+        return;
+    }
+    cancel_workspace_preview_capture(mask, mask_picture, pending);
+    preview.set_visible(false);
+    picture.set_paintable(gtk::gdk::Paintable::NONE);
+    shown_workspace.set(None);
+}
+
+fn workspace_preview_origin(x: f32, y: f32, width: i32, height: i32) -> (f64, f64) {
+    (
+        x.clamp(8.0, (width - 392).max(8) as f32) as f64,
+        y.clamp(8.0, (height - 248).max(8) as f32) as f64,
+    )
+}
+
 fn install_window_resize_handles(window: &adw::ApplicationWindow, overlay: &gtk::Overlay) {
     const EDGE: i32 = 14;
     const CORNER: i32 = 30;
@@ -1392,6 +1598,7 @@ impl WindowController {
 
         let content_overlay = gtk::Overlay::new();
         content_overlay.set_child(Some(&split));
+        install_workspace_previews(&sidebar, surfaces.clone(), &content_overlay);
         let clipboard_toast = ClipboardToast::new();
         content_overlay.add_overlay(clipboard_toast.widget());
 
@@ -3382,6 +3589,107 @@ mod tests {
         let far_corner = transform.transform_point(&gtk::graphene::Point::new(320.0, 240.0));
         assert_eq!((position.x(), position.y()), (24.0, 36.0));
         assert_eq!((far_corner.x(), far_corner.y()), (664.0, 516.0));
+    }
+
+    #[gtk::test]
+    async fn workspace_preview_tracks_the_hovered_row_and_surface() {
+        let first_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let second_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        let picture = gtk::Picture::new();
+        let frame = gtk::Frame::new(None);
+        frame.set_child(Some(&picture));
+        let preview = gtk::Fixed::new();
+        preview.put(&frame, 0.0, 0.0);
+        let overlay = gtk::Overlay::new();
+        let mask_picture = gtk::Picture::new();
+        let mask = gtk::Fixed::new();
+        mask.put(&mask_picture, 0.0, 0.0);
+        let pending = Rc::new(RefCell::new(None));
+        let shown_workspace = Rc::new(Cell::new(None));
+        let first_workspace = WorkspaceId::new();
+        let second_workspace = WorkspaceId::new();
+        let first_surface = gtk::Label::new(Some("first"));
+        let second_surface = gtk::Label::new(Some("second"));
+        let stack = gtk::Stack::new();
+        stack.add_child(&first_surface);
+        stack.add_child(&second_surface);
+        stack.set_visible_child(&first_surface);
+        let window = gtk::Window::builder()
+            .default_width(400)
+            .default_height(300)
+            .child(&stack)
+            .build();
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        show_workspace_preview(
+            preview.clone(),
+            picture.clone(),
+            frame.clone(),
+            overlay.clone(),
+            mask.clone(),
+            mask_picture.clone(),
+            pending.clone(),
+            shown_workspace.clone(),
+            first_workspace,
+            first_row.clone().upcast(),
+            first_surface.clone().upcast(),
+        );
+        show_workspace_preview(
+            preview.clone(),
+            picture.clone(),
+            frame.clone(),
+            overlay.clone(),
+            mask.clone(),
+            mask_picture.clone(),
+            pending.clone(),
+            shown_workspace.clone(),
+            second_workspace,
+            second_row.clone().upcast(),
+            second_surface.clone().upcast(),
+        );
+        hide_workspace_preview(
+            &preview,
+            &picture,
+            &mask,
+            &mask_picture,
+            &pending,
+            &shown_workspace,
+            first_workspace,
+        );
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        assert!(preview.is_visible());
+        assert_eq!(shown_workspace.get(), Some(second_workspace));
+        assert!(picture
+            .paintable()
+            .unwrap()
+            .downcast::<gtk::gdk::Texture>()
+            .is_ok());
+
+        hide_workspace_preview(
+            &preview,
+            &picture,
+            &mask,
+            &mask_picture,
+            &pending,
+            &shown_workspace,
+            second_workspace,
+        );
+        assert!(!preview.is_visible());
+        assert!(picture.paintable().is_none());
+    }
+
+    #[test]
+    fn workspace_preview_stays_inside_the_window() {
+        assert_eq!(
+            workspace_preview_origin(268.0, 100.0, 1280, 800),
+            (268.0, 100.0)
+        );
+        assert_eq!(
+            workspace_preview_origin(900.0, 700.0, 1000, 700),
+            (608.0, 452.0)
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
