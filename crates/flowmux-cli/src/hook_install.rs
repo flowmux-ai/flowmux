@@ -1530,7 +1530,7 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
 }
 
 fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
-    // The GUI re-runs `flowmuxctl fix` on every boot to self-heal hooks
+    // The GUI re-runs `flowmuxctl hooks setup` on every boot to self-heal hooks
     // another tool's installer removed; skip the write when the target
     // already has exactly this content so user config files keep their
     // mtime on the (common) nothing-drifted boot.

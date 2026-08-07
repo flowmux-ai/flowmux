@@ -224,8 +224,18 @@ APP_ID="com.flowmux.App"
 # ~/.local/bin (and never includes ~/.cargo/bin) for launcher-started apps.
 # Rewrite it to the absolute path so the dock entry works regardless.
 install -d "$DATA_DIR/applications"
-sed "s|^Exec=flowmux$|Exec=$PRIMARY_BIN_DIR/flowmux|" \
-    "resources/desktop/$APP_ID.desktop" \
+DESKTOP_EXEC="$PRIMARY_BIN_DIR/flowmux"
+DESKTOP_EXEC=${DESKTOP_EXEC//\\/\\\\\\\\}
+DESKTOP_EXEC=${DESKTOP_EXEC//\"/\\\"}
+DESKTOP_EXEC=${DESKTOP_EXEC//\`/\\\`}
+DESKTOP_EXEC=${DESKTOP_EXEC//\$/\\\$}
+while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "Exec=flowmux" ]; then
+        printf 'Exec="%s"\n' "$DESKTOP_EXEC"
+    else
+        printf '%s\n' "$line"
+    fi
+done < "resources/desktop/$APP_ID.desktop" \
     > "$DATA_DIR/applications/$APP_ID.desktop"
 chmod 644 "$DATA_DIR/applications/$APP_ID.desktop"
 echo "==> installed desktop entry to $DATA_DIR/applications/$APP_ID.desktop"

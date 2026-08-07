@@ -20,8 +20,12 @@ use std::path::{Path, PathBuf};
 /// with the entry. Mirrors the .deb assets layout.
 pub const APP_ID: &str = "com.flowmux.App";
 
-/// `.desktop` text embedded at compile time.
+/// `.desktop` template embedded at compile time. Packaged installs use it as
+/// written; per-user installs replace both `Exec=flowmux` lines with the
+/// absolute GUI path paired with the running `flowmuxctl` binary.
 pub const DESKTOP_ENTRY: &str = include_str!("../../../resources/desktop/com.flowmux.App.desktop");
+
+const DESKTOP_EXEC_LINE: &str = "Exec=flowmux\n";
 
 /// One icon size we ship. Hicolor expects per-resolution PNGs plus an
 /// optional scalable SVG. Sizes mirror the .deb assets list.
@@ -179,9 +183,60 @@ fn check_text(path: &Path, expected: &str) -> AssetStatus {
     }
 }
 
+/// Resolve the GUI binary paired with a `flowmuxctl` executable. Local source
+/// installs keep both binaries together; distro and Flatpak installs place the
+/// helper under `<prefix>/lib/flowmux/` and the GUI under `<prefix>/bin/`.
+fn paired_flowmux_executable(flowmuxctl: &Path) -> Option<PathBuf> {
+    if flowmuxctl.file_name()? != "flowmuxctl" {
+        return None;
+    }
+    let directory = flowmuxctl.parent()?;
+    if directory.file_name().is_some_and(|name| name == "flowmux")
+        && directory
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "lib")
+    {
+        return directory
+            .parent()?
+            .parent()
+            .map(|prefix| prefix.join("bin").join("flowmux"));
+    }
+    Some(directory.join("flowmux"))
+}
+
+fn desktop_entry_for_executable(executable: Option<&Path>) -> String {
+    let Some(executable) = executable.and_then(Path::to_str) else {
+        return DESKTOP_ENTRY.to_string();
+    };
+    let executable = desktop_exec_arg(executable);
+    DESKTOP_ENTRY.replace(DESKTOP_EXEC_LINE, &format!("Exec={executable}\n"))
+}
+
+fn desktop_exec_arg(executable: &str) -> String {
+    let escaped = executable
+        .replace('\\', "\\\\\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
+        .replace('$', "\\$");
+    format!("\"{escaped}\"")
+}
+
+fn expected_desktop_entry() -> String {
+    let executable = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(paired_flowmux_executable);
+    desktop_entry_for_executable(executable.as_deref())
+}
+
 /// Inspect the on-disk desktop entry + icons without writing.
 pub fn doctor(layout: &DesktopLayout) -> DesktopDoctor {
-    let desktop = check_text(&layout.desktop_path(), DESKTOP_ENTRY);
+    doctor_with_desktop_entry(layout, &expected_desktop_entry())
+}
+
+fn doctor_with_desktop_entry(layout: &DesktopLayout, desktop_entry: &str) -> DesktopDoctor {
+    let desktop = check_text(&layout.desktop_path(), desktop_entry);
     let svg = check_bytes(&layout.icon_svg_path(), SCALABLE_SVG);
     let icons = ICONS
         .iter()
@@ -239,8 +294,15 @@ fn write_if_changed_text(path: &Path, payload: &str, outcome: &mut InstallOutcom
 
 /// Idempotent install of the desktop entry + every embedded icon.
 pub fn install(layout: &DesktopLayout) -> Result<InstallOutcome> {
+    install_with_desktop_entry(layout, &expected_desktop_entry())
+}
+
+fn install_with_desktop_entry(
+    layout: &DesktopLayout,
+    desktop_entry: &str,
+) -> Result<InstallOutcome> {
     let mut outcome = InstallOutcome::default();
-    write_if_changed_text(&layout.desktop_path(), DESKTOP_ENTRY, &mut outcome)?;
+    write_if_changed_text(&layout.desktop_path(), desktop_entry, &mut outcome)?;
     for asset in ICONS {
         write_if_changed_bytes(&layout.icon_png_path(asset.size), asset.bytes, &mut outcome)?;
     }
@@ -309,5 +371,48 @@ mod tests {
         let report = doctor(&layout);
         assert!(matches!(report.desktop, AssetStatus::Drift));
         assert!(report.needs_fix());
+    }
+
+    #[test]
+    fn paired_gui_path_covers_local_and_private_helper_layouts() {
+        assert_eq!(
+            paired_flowmux_executable(Path::new("/home/u/.local/bin/flowmuxctl")),
+            Some(PathBuf::from("/home/u/.local/bin/flowmux"))
+        );
+        assert_eq!(
+            paired_flowmux_executable(Path::new("/usr/lib/flowmux/flowmuxctl")),
+            Some(PathBuf::from("/usr/bin/flowmux"))
+        );
+        assert_eq!(
+            paired_flowmux_executable(Path::new("/app/lib/flowmux/flowmuxctl")),
+            Some(PathBuf::from("/app/bin/flowmux"))
+        );
+    }
+
+    #[test]
+    fn absolute_exec_entry_matches_source_installer_and_stays_idempotent() {
+        let (_dir, layout) = tmp_layout();
+        let entry = desktop_entry_for_executable(Some(Path::new("/home/u/.local/bin/flowmux")));
+        assert_eq!(
+            entry
+                .matches("Exec=\"/home/u/.local/bin/flowmux\"\n")
+                .count(),
+            2
+        );
+        assert!(!entry.contains(DESKTOP_EXEC_LINE));
+
+        let first = install_with_desktop_entry(&layout, &entry).expect("first install");
+        assert!(!first.written.is_empty());
+        let second = install_with_desktop_entry(&layout, &entry).expect("second install");
+        assert!(second.written.is_empty());
+        assert!(!doctor_with_desktop_entry(&layout, &entry).needs_fix());
+    }
+
+    #[test]
+    fn desktop_exec_quotes_reserved_path_characters() {
+        assert_eq!(
+            desktop_exec_arg("/home/user/My Apps/$build`x`/a\\b\"c/flowmux"),
+            "\"/home/user/My Apps/\\$build\\`x\\`/a\\\\\\\\b\\\"c/flowmux\""
+        );
     }
 }
