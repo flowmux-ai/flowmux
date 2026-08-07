@@ -842,10 +842,12 @@ fn make_close_surface_action(
 ///
 /// We re-exec `current_exe()` (not just `"flowmux"`) so a build run out of
 /// `target/release/` opens another copy of the same binary rather than
-/// whatever happens to be on `PATH`.
+/// whatever happens to be on `PATH`. GDK's launch context carries the
+/// compositor activation token, so the new Wayland window receives keyboard
+/// focus instead of leaving input in the old window.
 fn make_new_window_action() -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder("new-window")
-        .activate(move |_, _, _| {
+        .activate(move |window: &adw::ApplicationWindow, _, _| {
             tracing::debug!(action = "new-window", "key action fired");
             let exe = match std::env::current_exe() {
                 Ok(p) => p,
@@ -854,10 +856,20 @@ fn make_new_window_action() -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
                     return;
                 }
             };
-            match std::process::Command::new(&exe).spawn() {
-                Ok(child) => {
-                    tracing::info!(pid = child.id(), exe = %exe.display(), "spawned new flowmux window");
+            let app_info = match gtk::gio::AppInfo::create_from_commandline(
+                glib::shell_quote(&exe),
+                Some("flowmux"),
+                gtk::gio::AppInfoCreateFlags::SUPPORTS_STARTUP_NOTIFICATION,
+            ) {
+                Ok(app_info) => app_info,
+                Err(e) => {
+                    tracing::warn!(error = %e, exe = %exe.display(), "new-window: could not create app info");
+                    return;
                 }
+            };
+            let context = gtk::prelude::WidgetExt::display(window).app_launch_context();
+            match app_info.launch(&[], Some(&context)) {
+                Ok(()) => tracing::info!(exe = %exe.display(), "spawned new flowmux window"),
                 Err(e) => {
                     tracing::warn!(error = %e, exe = %exe.display(), "new-window: failed to spawn");
                 }
