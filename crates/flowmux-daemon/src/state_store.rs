@@ -11,7 +11,8 @@ use flowmux_core::{
     detect_agent_name_from_signals, detect_agent_progress_text, detect_agent_status_from_signals,
     terminal_tab_title_for_cwd, AgentBarModel, AgentPresence, AgentStatus, AgentStatusReport,
     CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome,
-    SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace,
+    WorkspaceAgentBlock, WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -1562,10 +1563,10 @@ impl StateStore {
         &self,
         pane: PaneId,
         surface_id: SurfaceId,
-        text: String,
+        snapshot: impl Into<TerminalScrollback>,
     ) -> Option<WorkspaceId> {
         let mut s = self.inner.lock().await;
-        let updated = update_surface_scrollback_in_state(&mut s, pane, surface_id, text);
+        let updated = update_surface_scrollback_in_state(&mut s, pane, surface_id, snapshot.into());
         drop(s);
         if updated.is_some() {
             self.mark_dirty();
@@ -1577,10 +1578,10 @@ impl StateStore {
         &self,
         pane: PaneId,
         surface_id: SurfaceId,
-        text: String,
+        snapshot: impl Into<TerminalScrollback>,
     ) -> Option<WorkspaceId> {
         let mut s = self.inner.blocking_lock();
-        let updated = update_surface_scrollback_in_state(&mut s, pane, surface_id, text);
+        let updated = update_surface_scrollback_in_state(&mut s, pane, surface_id, snapshot.into());
         drop(s);
         if updated.is_some() {
             self.mark_dirty();
@@ -2297,14 +2298,14 @@ fn update_surface_scrollback_in_state(
     state: &mut State,
     pane: PaneId,
     surface_id: SurfaceId,
-    text: String,
+    snapshot: TerminalScrollback,
 ) -> Option<WorkspaceId> {
     for ws in state.workspaces.iter_mut() {
         for surface in ws.surfaces.iter_mut() {
             if surface.root_pane.find_surface(pane, surface_id).is_some() {
                 return surface
                     .root_pane
-                    .set_surface_scrollback(pane, surface_id, text)
+                    .set_surface_scrollback_snapshot(pane, surface_id, snapshot)
                     .then_some(ws.id);
             }
         }
@@ -4184,8 +4185,8 @@ Do you want to continue?";
             .unwrap()
             .scrollback
             .unwrap();
-        assert!(saved.len() <= flowmux_core::TERMINAL_SCROLLBACK_MAX_BYTES);
-        assert!(saved.ends_with("latest"));
+        assert!(saved.content().len() <= flowmux_core::TERMINAL_SCROLLBACK_MAX_BYTES);
+        assert!(saved.content().ends_with("latest"));
     }
 
     #[tokio::test]

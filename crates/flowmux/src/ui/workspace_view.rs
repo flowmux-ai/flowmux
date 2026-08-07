@@ -12,7 +12,7 @@ use crate::ui::ghostty_pane::{is_flatpak_sandbox, GhosttyPane};
 use crate::ui::pane_terminal::{PaneCallbacks, PaneTerminal, TabDropCommand};
 use flowmux_core::{
     terminal_tab_title_for_cwd, EditorFileState, Pane, PaneContent, PaneId, PaneSurface,
-    SplitDirection, Surface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
+    SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceId,
 };
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -360,32 +360,26 @@ impl PaneRegistry {
             .collect()
     }
 
-    pub fn terminal_scrollback_snapshots(&self) -> Vec<(PaneId, SurfaceId, String)> {
+    pub fn terminal_scrollback_snapshots(&self) -> Vec<(PaneId, SurfaceId, TerminalScrollback)> {
         self.terminals
             .iter()
             .filter_map(|(surface, terminal)| {
-                terminal.screen_text().map(|text| {
-                    (
-                        terminal.id(),
-                        *surface,
-                        normalize_scrollback_snapshot(&text),
-                    )
-                })
+                terminal
+                    .scrollback_snapshot()
+                    .map(|snapshot| (terminal.id(), *surface, snapshot))
             })
             .collect()
     }
 
-    pub fn dirty_terminal_scrollback_snapshots(&self) -> Vec<(PaneId, SurfaceId, String)> {
+    pub fn dirty_terminal_scrollback_snapshots(
+        &self,
+    ) -> Vec<(PaneId, SurfaceId, TerminalScrollback)> {
         self.terminals
             .iter()
             .filter_map(|(surface, terminal)| {
-                terminal.dirty_screen_text().map(|text| {
-                    (
-                        terminal.id(),
-                        *surface,
-                        normalize_scrollback_snapshot(&text),
-                    )
-                })
+                terminal
+                    .dirty_scrollback_snapshot()
+                    .map(|snapshot| (terminal.id(), *surface, snapshot))
             })
             .collect()
     }
@@ -3384,9 +3378,9 @@ fn build_panel(
             if let Some(scrollback) = scrollback_to_restore(
                 opts.restore_terminal_scrollback,
                 is_resuming_agent,
-                surface.scrollback.as_deref(),
+                surface.scrollback.as_ref(),
             ) {
-                pane.restore_scrollback(&scrollback);
+                pane.restore_scrollback(scrollback);
             }
             if let Some(message) = shell_warning {
                 pane.show_message(&message);
@@ -3585,35 +3579,12 @@ fn shell_quote(value: &str) -> String {
 fn scrollback_to_restore(
     enabled: bool,
     is_resuming_agent: bool,
-    scrollback: Option<&str>,
-) -> Option<String> {
+    scrollback: Option<&TerminalScrollback>,
+) -> Option<&TerminalScrollback> {
     if !enabled || is_resuming_agent {
         return None;
     }
     scrollback
-        .map(normalize_scrollback_snapshot)
-        .filter(|text| !text.is_empty())
-}
-
-fn normalize_scrollback_snapshot(text: &str) -> String {
-    let lines: Vec<_> = text.lines().collect();
-    let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {
-        return String::new();
-    };
-    let last = lines
-        .iter()
-        .rposition(|line| !line.trim().is_empty())
-        .unwrap_or(first);
-    let meaningful = &lines[first..=last];
-    if meaningful
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .count()
-        <= 1
-    {
-        return String::new();
-    }
-    meaningful.join("\n")
 }
 
 #[cfg(test)]
@@ -3663,39 +3634,12 @@ mod resume_tests {
 
     #[test]
     fn agent_resume_does_not_replay_scrollback_after_the_clear_sequence() {
-        let scrollback = Some("old prompt\n\n\nold cursor");
+        let scrollback = TerminalScrollback::from("old prompt\n\n\nold cursor");
         assert_eq!(
-            scrollback_to_restore(true, false, scrollback),
-            Some("old prompt\n\n\nold cursor".into())
+            scrollback_to_restore(true, false, Some(&scrollback)),
+            Some(&scrollback)
         );
-        assert_eq!(scrollback_to_restore(true, true, scrollback), None);
-        assert_eq!(scrollback_to_restore(false, false, scrollback), None);
-        assert_eq!(
-            scrollback_to_restore(true, false, Some("\n\n➜  work \n")),
-            None,
-            "legacy idle viewport padding must not move the new cursor"
-        );
-    }
-
-    #[test]
-    fn empty_shell_viewport_is_not_persisted_as_scrollback() {
-        assert_eq!(
-            normalize_scrollback_snapshot("\n\n\n➜  work \n"),
-            "",
-            "viewport padding plus one idle prompt is not history"
-        );
-        assert_eq!(
-            normalize_scrollback_snapshot("➜  work \n\n\n"),
-            "",
-            "trailing viewport padding is not history"
-        );
-    }
-
-    #[test]
-    fn meaningful_scrollback_drops_only_viewport_padding() {
-        assert_eq!(
-            normalize_scrollback_snapshot("\n\ncommand output\n\n➜  work \n\n"),
-            "command output\n\n➜  work "
-        );
+        assert_eq!(scrollback_to_restore(true, true, Some(&scrollback)), None);
+        assert_eq!(scrollback_to_restore(false, false, Some(&scrollback)), None);
     }
 }

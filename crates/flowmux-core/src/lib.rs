@@ -32,6 +32,42 @@ pub fn bound_terminal_scrollback(text: &str) -> String {
     text[start..].to_string()
 }
 
+fn bound_vte_html_scrollback(html: &str) -> Option<String> {
+    const OPEN: &str = "<pre>";
+    const CLOSE: &str = "</pre>";
+
+    let body = html.strip_prefix(OPEN)?.strip_suffix(CLOSE)?;
+    if html.len() <= TERMINAL_SCROLLBACK_MAX_BYTES {
+        return (!body.is_empty()).then(|| html.to_string());
+    }
+
+    // VTE closes every formatting tag before each newline, so retaining only
+    // complete lines from the tail preserves valid markup. The GUI normally
+    // applies this bound before state reaches core; this is the defensive
+    // boundary for oversized or externally supplied snapshots.
+    let budget = TERMINAL_SCROLLBACK_MAX_BYTES.saturating_sub(OPEN.len() + CLOSE.len());
+    let lines: Vec<_> = body.split('\n').collect();
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+    for line in lines.iter().rev() {
+        let separator = usize::from(!kept.is_empty());
+        let Some(next) = used
+            .checked_add(separator)
+            .and_then(|value| value.checked_add(line.len()))
+        else {
+            break;
+        };
+        if next > budget {
+            break;
+        }
+        kept.push(*line);
+        used = next;
+    }
+    kept.reverse();
+    let body = kept.join("\n");
+    (!body.is_empty()).then(|| format!("{OPEN}{body}{CLOSE}"))
+}
+
 pub fn terminal_tab_title_for_cwd(cwd: Option<&Path>) -> String {
     let folder = cwd
         .and_then(|path| path.file_name())
@@ -376,6 +412,80 @@ pub enum SurfaceKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalScrollbackFormat {
+    PlainText,
+    VteHtml,
+}
+
+/// Persisted terminal history. Older state files stored scrollback directly as
+/// a JSON string; the untagged plain-text variant keeps those files readable.
+/// New styled snapshots carry their format explicitly so restore never feeds
+/// HTML markup to VTE as literal terminal text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TerminalScrollback {
+    PlainText(Arc<str>),
+    Formatted {
+        format: TerminalScrollbackFormat,
+        content: Arc<str>,
+    },
+}
+
+impl TerminalScrollback {
+    pub fn plain_text(text: impl Into<Arc<str>>) -> Self {
+        Self::PlainText(text.into())
+    }
+
+    pub fn vte_html(html: impl Into<Arc<str>>) -> Self {
+        Self::Formatted {
+            format: TerminalScrollbackFormat::VteHtml,
+            content: html.into(),
+        }
+    }
+
+    pub fn format(&self) -> TerminalScrollbackFormat {
+        match self {
+            Self::PlainText(_) => TerminalScrollbackFormat::PlainText,
+            Self::Formatted { format, .. } => *format,
+        }
+    }
+
+    pub fn content(&self) -> &str {
+        self.content_arc().as_ref()
+    }
+
+    pub fn content_arc(&self) -> &Arc<str> {
+        match self {
+            Self::PlainText(content) | Self::Formatted { content, .. } => content,
+        }
+    }
+
+    pub fn into_bounded(self) -> Option<Self> {
+        match self.format() {
+            TerminalScrollbackFormat::PlainText => {
+                let bounded = bound_terminal_scrollback(self.content());
+                (!bounded.is_empty()).then(|| Self::plain_text(Arc::<str>::from(bounded)))
+            }
+            TerminalScrollbackFormat::VteHtml => bound_vte_html_scrollback(self.content())
+                .map(|html| Self::vte_html(Arc::<str>::from(html))),
+        }
+    }
+}
+
+impl From<String> for TerminalScrollback {
+    fn from(text: String) -> Self {
+        Self::plain_text(Arc::<str>::from(text))
+    }
+}
+
+impl From<&str> for TerminalScrollback {
+    fn from(text: &str) -> Self {
+        Self::plain_text(Arc::<str>::from(text))
+    }
+}
+
 /// A tab inside a leaf pane. cmux calls these surfaces: each pane can
 /// host multiple terminal/browser/editor surfaces, with exactly one active at
 /// a time.
@@ -388,10 +498,11 @@ pub struct PaneSurface {
     #[serde(default)]
     pub title_locked: bool,
     pub kind: SurfaceKind,
-    /// Best-effort plain-text terminal history replayed on the next launch.
+    /// Best-effort terminal history replayed on the next launch. Legacy state
+    /// is plain text; new VTE snapshots preserve display attributes as HTML.
     /// Bounded by [`TERMINAL_SCROLLBACK_MAX_BYTES`] before it reaches state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scrollback: Option<Arc<str>>,
+    pub scrollback: Option<TerminalScrollback>,
     /// Live AI-agent activity, set from agent lifecycle hooks. Runtime
     /// state only — never persisted, so resumed workspaces start with no
     /// agent presence until the next hook fires.
@@ -1172,14 +1283,23 @@ impl Pane {
         surface_id: SurfaceId,
         text: String,
     ) -> bool {
+        self.set_surface_scrollback_snapshot(target, surface_id, text.into())
+    }
+
+    /// Store a bounded plain-text or styled terminal snapshot for a tab.
+    pub fn set_surface_scrollback_snapshot(
+        &mut self,
+        target: PaneId,
+        surface_id: SurfaceId,
+        snapshot: TerminalScrollback,
+    ) -> bool {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
         if !matches!(surface.kind, SurfaceKind::Terminal { .. }) {
             return false;
         }
-        let bounded = bound_terminal_scrollback(&text);
-        let next = (!bounded.is_empty()).then(|| Arc::<str>::from(bounded));
+        let next = snapshot.into_bounded();
         if surface.scrollback == next {
             return false;
         }

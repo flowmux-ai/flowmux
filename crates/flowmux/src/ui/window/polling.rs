@@ -76,10 +76,10 @@ impl WindowController {
             return;
         }
         let snapshots = self.pane_registry.borrow().terminal_scrollback_snapshots();
-        for (pane, surface, text) in snapshots {
+        for (pane, surface, snapshot) in snapshots {
             let _ = self
                 .store
-                .update_surface_scrollback_blocking(pane, surface, text);
+                .update_surface_scrollback_blocking(pane, surface, snapshot);
         }
     }
 
@@ -136,10 +136,10 @@ impl WindowController {
                     .dirty_terminal_scrollback_snapshots();
                 let controller = controller.clone();
                 glib::MainContext::default().spawn_local(async move {
-                    for (pane, surface, text) in snapshots {
+                    for (pane, surface, snapshot) in snapshots {
                         let _ = controller
                             .store
-                            .update_surface_scrollback(pane, surface, text)
+                            .update_surface_scrollback(pane, surface, snapshot)
                             .await;
                     }
                 });

@@ -14,7 +14,10 @@
 //! Add explicit parsing here if those OSC forms need GUI-native signals.
 
 use crate::ui::pane_terminal::PaneCallbacks;
-use flowmux_core::{PaneId, SurfaceId};
+use crate::ui::terminal_scrollback::{
+    normalize_plain_text_snapshot, replay_bytes, snapshot_from_vte_html,
+};
+use flowmux_core::{PaneId, SurfaceId, TerminalScrollback};
 use gtk::glib;
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -395,13 +398,15 @@ impl GhosttyPane {
         Ok(())
     }
 
-    /// Replay persisted plain text into VTE's display only. This never writes
-    /// into the child PTY, so old prompts and agent output cannot be executed.
-    pub fn restore_scrollback(&self, text: &str) {
-        if text.is_empty() {
-            return;
+    /// Replay persisted terminal history into VTE's display only. Styled HTML
+    /// snapshots are converted to SGR first; nothing is written into the child
+    /// PTY, so old prompts and agent output cannot be executed.
+    pub fn restore_scrollback(&self, snapshot: &TerminalScrollback) {
+        match replay_bytes(snapshot) {
+            Ok(Some(bytes)) => self.widget.feed(&bytes),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "failed to replay styled terminal scrollback"),
         }
-        self.widget.feed(&scrollback_replay_bytes(text));
     }
 
     /// Display an app-generated message without writing it into the child PTY.
@@ -524,22 +529,6 @@ impl GhosttyPane {
         scroll_terminal_to_bottom(&self.widget);
         self.widget.paste_clipboard();
     }
-}
-
-fn scrollback_replay_bytes(text: &str) -> Vec<u8> {
-    let mut replay = Vec::with_capacity(text.len() + text.lines().count());
-    let mut previous = None;
-    for byte in text.bytes() {
-        if byte == b'\n' && previous != Some(b'\r') {
-            replay.push(b'\r');
-        }
-        replay.push(byte);
-        previous = Some(byte);
-    }
-    if !text.ends_with('\n') {
-        replay.extend_from_slice(b"\r\n");
-    }
-    replay
 }
 
 fn uri_to_path(uri: &str) -> Option<PathBuf> {
@@ -1020,17 +1009,32 @@ impl GhosttyPane {
             .map(|g| g.to_string())
     }
 
+    /// Styled terminal history for persistence. VTE exposes cell attributes
+    /// only through its HTML format; `read-screen` continues to use plain text.
+    pub fn scrollback_snapshot(&self) -> Option<TerminalScrollback> {
+        let html = self.widget.text_format(vte::Format::Html)?.to_string();
+        match snapshot_from_vte_html(&html) {
+            Ok(snapshot) => Some(snapshot),
+            Err(error) => {
+                tracing::warn!(%error, "failed to parse VTE styled scrollback; saving plain text");
+                self.screen_text().map(|text| {
+                    TerminalScrollback::plain_text(normalize_plain_text_snapshot(&text))
+                })
+            }
+        }
+    }
+
     /// Extract the terminal buffer only after VTE reported a content change.
     /// A failed extraction restores the dirty flag so the next cycle retries.
-    pub fn dirty_screen_text(&self) -> Option<String> {
+    pub fn dirty_scrollback_snapshot(&self) -> Option<TerminalScrollback> {
         if !self.scrollback_dirty.replace(false) {
             return None;
         }
-        let text = self.screen_text();
-        if text.is_none() {
+        let snapshot = self.scrollback_snapshot();
+        if snapshot.is_none() {
             self.scrollback_dirty.set(true);
         }
-        text
+        snapshot
     }
 
     /// Feed `bytes` to the child, but only *after* any IME syllable still
@@ -2743,12 +2747,6 @@ mod tests {
             TitleWindowResult::Settled(Some("frame-99".into()))
         );
         assert!(!coalesce.window_open.get());
-    }
-
-    #[test]
-    fn scrollback_replay_uses_terminal_safe_line_endings() {
-        assert_eq!(scrollback_replay_bytes("one\ntwo"), b"one\r\ntwo\r\n");
-        assert_eq!(scrollback_replay_bytes("one\r\ntwo\r\n"), b"one\r\ntwo\r\n");
     }
 
     #[test]

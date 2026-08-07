@@ -2980,7 +2980,7 @@ fn set_surface_scrollback_is_terminal_only_bounded_and_idempotent() {
     assert!(tree.set_surface_scrollback(pane, terminal_id, large.clone()));
     assert!(!tree.set_surface_scrollback(pane, terminal_id, large));
     let stored = tree.find_surface(pane, terminal_id).unwrap();
-    assert!(stored.scrollback.unwrap().ends_with("tail"));
+    assert!(stored.scrollback.unwrap().content().ends_with("tail"));
 
     let browser = PaneSurface::browser("docs", "about:blank".into());
     let browser_id = browser.id;
@@ -2992,6 +2992,25 @@ fn set_surface_scrollback_is_terminal_only_bounded_and_idempotent() {
         },
     };
     assert!(!browser_tree.set_surface_scrollback(pane, browser_id, "ignored".into()));
+}
+
+#[test]
+fn styled_scrollback_is_bounded_on_complete_vte_html_lines() {
+    let line = format!("<b><font color=\"#123456\">{}</font></b>", "x".repeat(1024));
+    let html = format!(
+        "<pre>{}\n<b><font color=\"#abcdef\">tail</font></b></pre>",
+        std::iter::repeat_n(line, TERMINAL_SCROLLBACK_MAX_BYTES / 512)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let bounded = TerminalScrollback::vte_html(html).into_bounded().unwrap();
+
+    assert_eq!(bounded.format(), TerminalScrollbackFormat::VteHtml);
+    assert!(bounded.content().len() <= TERMINAL_SCROLLBACK_MAX_BYTES);
+    assert!(bounded.content().starts_with("<pre>"));
+    assert!(bounded
+        .content()
+        .ends_with("<b><font color=\"#abcdef\">tail</font></b></pre>"));
 }
 
 #[test]
@@ -3019,7 +3038,7 @@ fn workspace_ui_clone_omits_scrollback_and_keeps_live_agent_metadata() {
     let original_history = original_surface.scrollback.as_ref().unwrap();
     let cloned_history = cloned_surface.scrollback.as_ref().unwrap();
     assert!(
-        Arc::ptr_eq(original_history, cloned_history),
+        Arc::ptr_eq(original_history.content_arc(), cloned_history.content_arc()),
         "state snapshots must share persisted terminal history"
     );
 
@@ -3046,7 +3065,21 @@ fn pane_surface_scrollback_round_trips_and_old_json_defaults_empty() {
     surface.scrollback = Some("previous output".into());
     let json = serde_json::to_string(&surface).unwrap();
     let restored: PaneSurface = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.scrollback.as_deref(), Some("previous output"));
+    let restored_scrollback = restored.scrollback.unwrap();
+    assert_eq!(
+        restored_scrollback.format(),
+        TerminalScrollbackFormat::PlainText
+    );
+    assert_eq!(restored_scrollback.content(), "previous output");
+
+    let styled = TerminalScrollback::vte_html(
+        "<pre><b><font color=\"#ff0000\">styled</font></b>\nplain</pre>",
+    );
+    surface.scrollback = Some(styled.clone());
+    let json = serde_json::to_string(&surface).unwrap();
+    assert!(json.contains("\"format\":\"vte_html\""));
+    let restored: PaneSurface = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.scrollback, Some(styled));
 
     let old = format!(
         r#"{{"id":"{}","title":"shell","kind":{{"type":"terminal","shell":null,"cwd":null}}}}"#,
