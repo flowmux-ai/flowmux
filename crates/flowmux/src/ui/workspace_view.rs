@@ -1212,6 +1212,10 @@ pub fn split_pane_incremental(
     } else {
         return IncrementalSplitOutcome::Failed;
     };
+    let target_was_visible = match &slot {
+        Slot::Stack(s) => s.visible_child().as_ref() == Some(&target_frame),
+        _ => false,
+    };
 
     // Detach the target frame from its parent. set_*_child(None) automatically
     // unparents the previous child.
@@ -1271,7 +1275,9 @@ pub fn split_pane_incremental(
         }
         Slot::Stack(s) => {
             s.add_named(&paned_widget, Some(parent_stack_name));
-            s.set_visible_child_name(parent_stack_name);
+            if target_was_visible {
+                s.set_visible_child_name(parent_stack_name);
+            }
             IncrementalSplitOutcome::SucceededRoot {
                 new_root: paned_widget,
             }

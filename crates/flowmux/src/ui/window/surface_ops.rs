@@ -318,6 +318,8 @@ impl WindowController {
         let Some(ws) = self.store.get_workspace(ws_id).await else {
             return;
         };
+        let workspace_visible =
+            self.stack.visible_child_name().as_deref() == Some(ws.id.to_string().as_str());
         let surface = ws
             .surfaces
             .iter()
@@ -339,17 +341,19 @@ impl WindowController {
                 // child but does not grab focus, which previously left focus on
                 // the now-hidden old widget after Ctrl+Shift+T / Ctrl+Shift+B.
                 // Defer to idle like ActivateSurface so focus happens after realize.
-                let registry = self.pane_registry.clone();
-                glib::idle_add_local_once(move || {
-                    let r = registry.borrow();
-                    if let Some(term) = r.terminals.get(&surface_id) {
-                        term.grab_focus();
-                    } else if let Some(browser) = r.browsers.get(&surface_id) {
-                        browser.grab_focus();
-                    } else if let Some(editor) = r.editors.get(&surface_id) {
-                        editor.grab_focus();
-                    }
-                });
+                if workspace_visible {
+                    let registry = self.pane_registry.clone();
+                    glib::idle_add_local_once(move || {
+                        let r = registry.borrow();
+                        if let Some(term) = r.terminals.get(&surface_id) {
+                            term.grab_focus();
+                        } else if let Some(browser) = r.browsers.get(&surface_id) {
+                            browser.grab_focus();
+                        } else if let Some(editor) = r.editors.get(&surface_id) {
+                            editor.grab_focus();
+                        }
+                    });
+                }
                 return;
             }
         }

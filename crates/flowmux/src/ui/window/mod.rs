@@ -1858,9 +1858,12 @@ impl WindowController {
     }
 
     pub fn rerender_workspace(&self, ws: &Workspace) {
-        self.clear_pane_zoom();
-        self.sidebar.upsert(ws);
         let name = ws.id.to_string();
+        let activate = self.stack.visible_child_name().as_deref() == Some(name.as_str());
+        if activate {
+            self.clear_pane_zoom();
+        }
+        self.sidebar.upsert(ws);
         {
             // Keep live editors across the rebuild: destroying one would turn
             // its unsaved buffer into a crash-recovery prompt.
@@ -1878,11 +1881,13 @@ impl WindowController {
         }
         self.stack.add_named(&new_widget, Some(&name));
         surfaces.insert(ws.id, new_widget);
-        self.stack.set_visible_child_name(&name);
         drop(surfaces);
         self.refresh_workspace_solo(ws);
-        self.sidebar.select_workspace(ws.id);
-        self.focus_first_leaf_of(ws);
+        if activate {
+            self.stack.set_visible_child_name(&name);
+            self.sidebar.select_workspace(ws.id);
+            self.focus_first_leaf_of(ws);
+        }
     }
 
     /// Stamp the `flowmux-solo` class on the single pane/tab workspace's
@@ -7387,6 +7392,102 @@ mod tests {
             "browser open split should create a browser pane"
         );
         assert_eq!(outcome.placement_strategy, PlacementStrategy::SplitRight);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn browser_open_in_background_workspace_stays_in_background() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let store = StateStore::new_lazy(State::default());
+        let background_workspace = store
+            .create_workspace(
+                Some("background".into()),
+                std::env::temp_dir().join("flowmux-browser-open-background"),
+            )
+            .await;
+        let foreground_workspace = store
+            .create_workspace(
+                Some("foreground".into()),
+                std::env::temp_dir().join("flowmux-browser-open-foreground"),
+            )
+            .await;
+        let background = store.get_workspace(background_workspace).await.unwrap();
+        let foreground = store.get_workspace(foreground_workspace).await.unwrap();
+        let background_pane = background.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let foreground_pane = foreground.surfaces[0].root_pane.first_leaf_id().unwrap();
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.BrowserOpenBackground")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&background);
+        controller.render_workspace(&foreground);
+        store.set_active_workspace(Some(foreground_workspace)).await;
+        controller
+            .stack
+            .set_visible_child_name(&foreground_workspace.to_string());
+        controller.focused_pane.set(Some(foreground_pane));
+        controller.window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        let (ack, outcome) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserOpenSplit {
+                target_pane: Some(background_pane),
+                url: "about:blank".into(),
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        let first = outcome.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert_eq!(first.placement_strategy, PlacementStrategy::SplitRight);
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(foreground_workspace.to_string().as_str())
+        );
+        assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
+
+        let (ack, outcome) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::BrowserOpenSplit {
+                target_pane: Some(background_pane),
+                url: "about:blank#second".into(),
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        let second = outcome.await.unwrap().unwrap();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert_eq!(second.pane, first.pane);
+        assert_eq!(
+            second.placement_strategy,
+            PlacementStrategy::ReuseRightSibling
+        );
+        assert_eq!(store.tab_count_in_pane(second.pane).await, Some(2));
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(foreground_workspace.to_string().as_str())
+        );
+
+        // The tab-attach fallback rebuilds the workspace, so that shared path
+        // must preserve the foreground workspace too.
+        controller.rerender_workspace(&store.get_workspace(background_workspace).await.unwrap());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert_eq!(
+            controller.stack.visible_child_name().as_deref(),
+            Some(foreground_workspace.to_string().as_str())
+        );
+        assert_eq!(store.active_workspace().await, Some(foreground_workspace));
+        assert_eq!(controller.focused_pane.get(), Some(foreground_pane));
     }
 
     /// Regression: same terminal-identity contract across nested splits — the
