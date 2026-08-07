@@ -679,7 +679,6 @@ fn install_workspace_previews(
     overlay: &gtk::Overlay,
 ) {
     let picture = gtk::Picture::new();
-    picture.set_size_request(384, 240);
     picture.set_content_fit(gtk::ContentFit::Contain);
     picture.set_can_shrink(true);
     picture.set_alternative_text(Some("Workspace preview"));
@@ -710,10 +709,12 @@ fn install_workspace_previews(
 
     let shown_workspace = Rc::new(Cell::new(None));
     let pending = Rc::new(RefCell::new(None));
+    let delayed = Rc::new(RefCell::new(None));
     let overlay = overlay.clone();
 
     sidebar.connect_workspace_hover(move |workspace, row, hovered| {
         if !hovered {
+            cancel_workspace_preview_delay(&delayed, Some(workspace));
             hide_workspace_preview(
                 &preview,
                 &picture,
@@ -725,23 +726,65 @@ fn install_workspace_previews(
             );
             return;
         }
-        let Some(surface) = surfaces.borrow().get(&workspace).cloned() else {
-            return;
-        };
-        show_workspace_preview(
-            preview.clone(),
-            picture.clone(),
-            frame.clone(),
-            overlay.clone(),
-            mask.clone(),
-            mask_picture.clone(),
-            pending.clone(),
-            shown_workspace.clone(),
-            workspace,
-            row.clone(),
-            surface,
-        );
+        let surfaces = surfaces.clone();
+        let preview = preview.clone();
+        let picture = picture.clone();
+        let frame = frame.clone();
+        let overlay = overlay.clone();
+        let mask = mask.clone();
+        let mask_picture = mask_picture.clone();
+        let pending = pending.clone();
+        let shown_workspace = shown_workspace.clone();
+        let row = row.clone();
+        schedule_workspace_preview(delayed.clone(), workspace, move || {
+            let Some(surface) = surfaces.borrow().get(&workspace).cloned() else {
+                return;
+            };
+            show_workspace_preview(
+                preview,
+                picture,
+                frame,
+                overlay,
+                mask,
+                mask_picture,
+                pending,
+                shown_workspace,
+                workspace,
+                row,
+                surface,
+            );
+        });
     });
+}
+
+const WORKSPACE_PREVIEW_DELAY: Duration = Duration::from_secs(1);
+type DelayedWorkspacePreview = (WorkspaceId, glib::SourceId);
+
+fn schedule_workspace_preview(
+    delayed: Rc<RefCell<Option<DelayedWorkspacePreview>>>,
+    workspace: WorkspaceId,
+    show: impl FnOnce() + 'static,
+) {
+    cancel_workspace_preview_delay(&delayed, None);
+    let delayed_for_timeout = delayed.clone();
+    let source = glib::timeout_add_local_once(WORKSPACE_PREVIEW_DELAY, move || {
+        delayed_for_timeout.borrow_mut().take();
+        show();
+    });
+    delayed.replace(Some((workspace, source)));
+}
+
+fn cancel_workspace_preview_delay(
+    delayed: &RefCell<Option<DelayedWorkspacePreview>>,
+    workspace: Option<WorkspaceId>,
+) {
+    let should_cancel = delayed
+        .borrow()
+        .as_ref()
+        .is_some_and(|(pending, _)| workspace.map_or(true, |workspace| workspace == *pending));
+    if should_cancel {
+        delayed.borrow_mut().take().unwrap().1.remove();
+    }
 }
 
 type PendingWorkspacePreview = (
@@ -766,6 +809,13 @@ fn show_workspace_preview(
 ) {
     cancel_workspace_preview_capture(&mask, &mask_picture, &pending);
     shown_workspace.set(Some(workspace));
+    let (preview_width, preview_height) = workspace_preview_size(
+        surface.width(),
+        surface.height(),
+        overlay.width(),
+        overlay.height(),
+    );
+    frame.set_size_request(preview_width, preview_height);
     let (x, y) = row
         .compute_bounds(&overlay)
         .map(|bounds| {
@@ -774,6 +824,8 @@ fn show_workspace_preview(
                 bounds.y(),
                 overlay.width(),
                 overlay.height(),
+                preview_width,
+                preview_height,
             )
         })
         .unwrap_or((8.0, 8.0));
@@ -872,10 +924,34 @@ fn hide_workspace_preview(
     shown_workspace.set(None);
 }
 
-fn workspace_preview_origin(x: f32, y: f32, width: i32, height: i32) -> (f64, f64) {
+fn workspace_preview_size(
+    content_width: i32,
+    content_height: i32,
+    window_width: i32,
+    window_height: i32,
+) -> (i32, i32) {
+    let width = f64::from(content_width.max(1));
+    let height = f64::from(content_height.max(1));
+    let max_width = f64::from((window_width - 16).clamp(1, 384));
+    let max_height = f64::from((window_height - 16).clamp(1, 240));
+    let scale = (max_width / width).min(max_height / height);
     (
-        x.clamp(8.0, (width - 392).max(8) as f32) as f64,
-        y.clamp(8.0, (height - 248).max(8) as f32) as f64,
+        (width * scale).round().clamp(1.0, max_width) as i32,
+        (height * scale).round().clamp(1.0, max_height) as i32,
+    )
+}
+
+fn workspace_preview_origin(
+    x: f32,
+    y: f32,
+    width: i32,
+    height: i32,
+    preview_width: i32,
+    preview_height: i32,
+) -> (f64, f64) {
+    (
+        x.clamp(8.0, (width - preview_width - 8).max(8) as f32) as f64,
+        y.clamp(8.0, (height - preview_height - 8).max(8) as f32) as f64,
     )
 }
 
@@ -3681,15 +3757,44 @@ mod tests {
     }
 
     #[test]
-    fn workspace_preview_stays_inside_the_window() {
+    fn workspace_preview_matches_content_and_stays_inside_the_window() {
+        assert_eq!(workspace_preview_size(1600, 900, 1280, 800), (384, 216));
+        assert_eq!(workspace_preview_size(900, 1200, 1280, 800), (180, 240));
+        assert_eq!(workspace_preview_size(1600, 900, 320, 200), (304, 171));
         assert_eq!(
-            workspace_preview_origin(268.0, 100.0, 1280, 800),
+            workspace_preview_origin(268.0, 100.0, 1280, 800, 384, 216),
             (268.0, 100.0)
         );
         assert_eq!(
-            workspace_preview_origin(900.0, 700.0, 1000, 700),
-            (608.0, 452.0)
+            workspace_preview_origin(900.0, 700.0, 1000, 700, 384, 216),
+            (608.0, 476.0)
         );
+    }
+
+    #[gtk::test]
+    async fn workspace_preview_waits_for_sustained_hover() {
+        assert_eq!(WORKSPACE_PREVIEW_DELAY, Duration::from_secs(1));
+        let delayed = Rc::new(RefCell::new(None));
+        let shown = Rc::new(Cell::new(false));
+        let shown_for_timeout = shown.clone();
+        let workspace = WorkspaceId::new();
+
+        schedule_workspace_preview(delayed.clone(), workspace, move || {
+            shown_for_timeout.set(true);
+        });
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert!(!shown.get());
+        gtk::glib::timeout_future(Duration::from_secs(1)).await;
+        assert!(shown.get());
+
+        shown.set(false);
+        schedule_workspace_preview(delayed.clone(), workspace, {
+            let shown = shown.clone();
+            move || shown.set(true)
+        });
+        cancel_workspace_preview_delay(&delayed, Some(workspace));
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert!(!shown.get());
     }
 
     #[cfg(not(target_os = "macos"))]
