@@ -75,6 +75,7 @@ pub struct EditorAppearance {
     pub cursor: String,
     pub selection_background: String,
     pub selection_foreground: String,
+    pub minimap_enabled: bool,
     pub font_family: String,
     pub font_size: f32,
 }
@@ -696,6 +697,7 @@ mod tests {
             cursor: "#005fb8ff".into(),
             selection_background: "#005fb840".into(),
             selection_foreground: "#202020ff".into(),
+            minimap_enabled: true,
             font_family: "Noto Sans Mono CJK KR, 일본어 고정폭".into(),
             font_size: 13.5,
         };
@@ -710,6 +712,7 @@ mod tests {
 
         assert_eq!(value["type"], "set_appearance");
         assert_eq!(value["appearance"]["dark"], false);
+        assert_eq!(value["appearance"]["minimapEnabled"], true);
         assert_eq!(value["appearance"]["fontFamily"], appearance.font_family);
 
         let mut invalid = appearance;

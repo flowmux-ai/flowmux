@@ -68,6 +68,9 @@ pub const AGENT_BAR_MODE_DEFAULT: bool = false;
 /// launch, matching VTE / most terminals.
 pub const CURSOR_BLINK_DEFAULT: bool = true;
 
+/// Show Monaco's code minimap in editor tabs by default.
+pub const EDITOR_MINIMAP_ENABLED_DEFAULT: bool = true;
+
 /// Cursor blink half-period in milliseconds: the time the cursor stays shown
 /// before toggling to hidden (and vice versa). Range clamps to
 /// `[CURSOR_BLINK_INTERVAL_MIN, CURSOR_BLINK_INTERVAL_MAX]`. The default 530ms
@@ -166,6 +169,10 @@ pub struct Options {
     /// [`CURSOR_BLINK_DEFAULT`] (`true`).
     #[serde(default = "default_cursor_blink")]
     pub cursor_blink: bool,
+    /// When true, show the draggable code minimap in editor tabs. Default:
+    /// [`EDITOR_MINIMAP_ENABLED_DEFAULT`] (`true`).
+    #[serde(default = "default_editor_minimap_enabled")]
+    pub editor_minimap_enabled: bool,
     /// Cursor blink half-period in milliseconds (time shown before toggling).
     /// Clamped to `[CURSOR_BLINK_INTERVAL_MIN, CURSOR_BLINK_INTERVAL_MAX]` by
     /// [`Options::clamp_cursor_blink_interval`]. Default:
@@ -242,6 +249,10 @@ fn default_cursor_blink() -> bool {
     CURSOR_BLINK_DEFAULT
 }
 
+fn default_editor_minimap_enabled() -> bool {
+    EDITOR_MINIMAP_ENABLED_DEFAULT
+}
+
 fn default_cursor_blink_interval() -> u32 {
     CURSOR_BLINK_INTERVAL_DEFAULT
 }
@@ -261,6 +272,7 @@ impl Default for Options {
             system_notifications_enabled: default_system_notifications_enabled(),
             agent_bar_mode: default_agent_bar_mode(),
             cursor_blink: default_cursor_blink(),
+            editor_minimap_enabled: default_editor_minimap_enabled(),
             cursor_blink_interval_ms: default_cursor_blink_interval(),
             font_family: None,
             font_size: None,
@@ -684,6 +696,15 @@ mod tests {
     fn missing_fields_fall_back_to_defaults() {
         let opts: Options = serde_json::from_str("{}").unwrap();
         assert_eq!(opts, Options::default());
+        assert!(opts.editor_minimap_enabled);
+    }
+
+    #[test]
+    fn editor_minimap_false_round_trips() {
+        let mut opts = Options::default();
+        opts.editor_minimap_enabled = false;
+        let back: Options = serde_json::from_str(&serde_json::to_string(&opts).unwrap()).unwrap();
+        assert!(!back.editor_minimap_enabled);
     }
 
     #[test]

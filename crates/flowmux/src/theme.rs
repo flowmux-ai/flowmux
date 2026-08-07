@@ -244,6 +244,7 @@ impl ResolvedTheme {
             cursor: rgba_hex(&self.cursor),
             selection_background: rgba_hex(&selection_bg),
             selection_foreground: rgba_hex(&selection_fg),
+            minimap_enabled: options.editor_minimap_enabled,
             font_family: font
                 .family()
                 .map(|family| family.to_string())
@@ -803,6 +804,7 @@ mod tests {
         assert_eq!(appearance.foreground, "#202020ff");
         assert_eq!(appearance.cursor, "#005fb8ff");
         assert_eq!(appearance.selection_background, "#4080c0ff");
+        assert!(appearance.minimap_enabled);
         assert_eq!(appearance.font_family, "다국어 Mono");
         assert_eq!(appearance.font_size, 14.0);
     }

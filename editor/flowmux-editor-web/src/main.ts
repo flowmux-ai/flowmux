@@ -169,7 +169,7 @@ let editorZoomPercent = 100;
 let maxDocumentBytes = 16 * 1024 * 1024;
 let zoomToastTimer: ReturnType<typeof setTimeout> | null = null;
 let wordWrapEnabled = false;
-let minimapEnabled = false;
+let minimapEnabled = true;
 let closeDialogDocumentId: string | null = null;
 let closeAfterSaveDocumentId: string | null = null;
 let saveAsDocumentId: string | null = null;
@@ -207,6 +207,7 @@ const DEFAULT_APPEARANCE: EditorAppearance = {
   cursor: "#72b7a8ff",
   selectionBackground: "#365c59a0",
   selectionForeground: "#e6e9efff",
+  minimapEnabled: true,
   fontFamily: "monospace",
   fontSize: 13,
 };
@@ -224,7 +225,7 @@ const editor = monaco.editor.create(editorContainer, {
   lineNumbers: "on",
   cursorBlinking: "blink",
   cursorSmoothCaretAnimation: "off",
-  minimap: { enabled: false },
+  minimap: { enabled: minimapEnabled },
   padding: { top: 10, bottom: 10 },
   renderLineHighlight: "line",
   renderWhitespace: "selection",
@@ -406,8 +407,7 @@ const editorActionRunners: Record<
     diffEditor?.updateOptions({ wordWrap });
   },
   toggleMinimap: () => {
-    minimapEnabled = !minimapEnabled;
-    editor.updateOptions({ minimap: { enabled: minimapEnabled } });
+    setMinimapEnabled(!minimapEnabled);
   },
   increaseFontSize: () => setEditorZoom(adjustedZoomPercent(editorZoomPercent, 1), true),
   decreaseFontSize: () => setEditorZoom(adjustedZoomPercent(editorZoomPercent, -1), true),
@@ -1046,7 +1046,7 @@ function showDiff(document: OpenDocument, diskContent: string): void {
       lineNumbers: "on",
       cursorBlinking: "blink",
       cursorSmoothCaretAnimation: "off",
-      minimap: { enabled: false },
+      minimap: { enabled: minimapEnabled },
       renderLineHighlight: "line",
       renderSideBySide: true,
       scrollBeyondLastLine: false,
@@ -1520,6 +1520,7 @@ function applyAppearance(appearance: EditorAppearance): void {
   editorFontSize = appearance.fontSize;
   editor.updateOptions({ fontFamily, fontSize: editorFontSize });
   diffEditor?.updateOptions({ fontFamily, fontSize: editorFontSize });
+  setMinimapEnabled(appearance.minimapEnabled);
 
   const root = document.documentElement;
   root.style.colorScheme = appearance.dark ? "dark" : "light";
@@ -1527,6 +1528,12 @@ function applyAppearance(appearance: EditorAppearance): void {
   root.style.setProperty("--text", appearance.foreground);
   root.style.setProperty("--accent", appearance.cursor);
   root.style.setProperty("--selection", appearance.selectionBackground);
+}
+
+function setMinimapEnabled(enabled: boolean): void {
+  minimapEnabled = enabled;
+  editor.updateOptions({ minimap: { enabled } });
+  diffEditor?.updateOptions({ minimap: { enabled } });
 }
 
 function editorFontFamily(primary: string): string {

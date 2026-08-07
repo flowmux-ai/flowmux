@@ -132,9 +132,10 @@ fn build_dialog(
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
     let default_shell_entry = build_default_shell_entry(current.default_shell.as_deref());
-    let system_notify_switch = build_system_notify_switch(current.system_notifications_enabled);
-    let agent_bar_switch = build_agent_bar_switch(current.agent_bar_mode);
-    let cursor_blink_switch = build_cursor_blink_switch(current.cursor_blink);
+    let system_notify_switch = build_toggle_switch(current.system_notifications_enabled);
+    let agent_bar_switch = build_toggle_switch(current.agent_bar_mode);
+    let editor_minimap_switch = build_toggle_switch(current.editor_minimap_enabled);
+    let cursor_blink_switch = build_toggle_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
 
     // General tab body — the original options dialog contents.
@@ -156,6 +157,7 @@ fn build_dialog(
     general.append(&row("Default shell", &default_shell_entry));
     general.append(&row("System notifications", &system_notify_switch));
     general.append(&row("Agents bar mode", &agent_bar_switch));
+    general.append(&row("Editor minimap", &editor_minimap_switch));
     general.append(&row("Cursor blink", &cursor_blink_switch));
     general.append(&row("Cursor blink interval (ms)", &blink_interval_spin));
 
@@ -199,6 +201,7 @@ fn build_dialog(
         let default_shell_entry = default_shell_entry.clone();
         let system_notify_switch = system_notify_switch.clone();
         let agent_bar_switch = agent_bar_switch.clone();
+        let editor_minimap_switch = editor_minimap_switch.clone();
         let cursor_blink_switch = cursor_blink_switch.clone();
         let blink_interval_spin = blink_interval_spin.clone();
         let family_drop = font_widgets.family_drop.clone();
@@ -229,6 +232,7 @@ fn build_dialog(
                 &default_shell_entry,
                 &system_notify_switch,
                 &agent_bar_switch,
+                &editor_minimap_switch,
                 &cursor_blink_switch,
                 &blink_interval_spin,
                 &family_drop,
@@ -279,6 +283,7 @@ fn build_dialog(
     }
     connect_active_notify(&system_notify_switch, apply_current.clone());
     connect_active_notify(&agent_bar_switch, apply_current.clone());
+    connect_active_notify(&editor_minimap_switch, apply_current.clone());
     connect_active_notify(&cursor_blink_switch, apply_current.clone());
     connect_value_changed(&blink_interval_spin, apply_current.clone());
     let update_tab = build_update_tab(
@@ -974,6 +979,7 @@ fn collect_options(
     default_shell_entry: &gtk::Entry,
     system_notify_switch: &gtk::Switch,
     agent_bar_switch: &gtk::Switch,
+    editor_minimap_switch: &gtk::Switch,
     cursor_blink_switch: &gtk::Switch,
     blink_interval_spin: &gtk::SpinButton,
     family_drop: &gtk::DropDown,
@@ -1022,6 +1028,7 @@ fn collect_options(
         )),
         system_notifications_enabled: system_notify_switch.is_active(),
         agent_bar_mode: agent_bar_switch.is_active(),
+        editor_minimap_enabled: editor_minimap_switch.is_active(),
         cursor_blink: cursor_blink_switch.is_active(),
         cursor_blink_interval_ms: Options::clamp_cursor_blink_interval(
             blink_interval_spin.value() as u32
@@ -1283,31 +1290,12 @@ fn build_default_shell_entry(initial: Option<&str>) -> gtk::Entry {
     entry
 }
 
-/// Toggle for [`Options::system_notifications_enabled`]. When off,
-/// notifications still land in the in-app bell list but no desktop toast is
-/// sent to the system notification service. Rendered as a switch so it reads
-/// as an on/off feature toggle rather than a multi-select option.
-fn build_system_notify_switch(initial: bool) -> gtk::Switch {
+/// Right-aligned on/off control shared by boolean options.
+fn build_toggle_switch(initial: bool) -> gtk::Switch {
     let toggle = gtk::Switch::new();
     toggle.set_active(initial);
     // The switch sits in a hexpand row; keep it natural-sized and right-aligned
     // so it lines up with the other right-hand value widgets.
-    toggle.set_halign(gtk::Align::End);
-    toggle.set_valign(gtk::Align::Center);
-    toggle
-}
-
-fn build_agent_bar_switch(initial: bool) -> gtk::Switch {
-    let toggle = gtk::Switch::new();
-    toggle.set_active(initial);
-    toggle.set_halign(gtk::Align::End);
-    toggle.set_valign(gtk::Align::Center);
-    toggle
-}
-
-fn build_cursor_blink_switch(initial: bool) -> gtk::Switch {
-    let toggle = gtk::Switch::new();
-    toggle.set_active(initial);
     toggle.set_halign(gtk::Align::End);
     toggle.set_valign(gtk::Align::Center);
     toggle
@@ -1425,6 +1413,22 @@ mod tests {
         font_size.set_value(14.0);
         assert_eq!(applied.borrow().len(), calls_before + 1);
         assert_eq!(applied.borrow().last().unwrap().font_size, Some(14.0));
+
+        let minimap_label = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<gtk::Label>().ok())
+            .find(|label| label.text() == "Editor minimap")
+            .unwrap();
+        let minimap = minimap_label
+            .parent()
+            .and_then(|row| row.last_child())
+            .and_then(|widget| widget.downcast::<gtk::Switch>().ok())
+            .unwrap();
+        assert!(minimap.is_active());
+        let calls_before = applied.borrow().len();
+        minimap.set_active(false);
+        assert_eq!(applied.borrow().len(), calls_before + 1);
+        assert!(!applied.borrow().last().unwrap().editor_minimap_enabled);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1628,9 +1632,10 @@ mod tests {
             0,
         );
         let kb = KeybindingOverrides::default();
-        let notify_on = build_system_notify_switch(true);
-        let agent_bar_on = build_agent_bar_switch(true);
-        let blink_on = build_cursor_blink_switch(true);
+        let notify_on = build_toggle_switch(true);
+        let agent_bar_on = build_toggle_switch(true);
+        let minimap_on = build_toggle_switch(true);
+        let blink_on = build_toggle_switch(true);
         let blink_interval = build_blink_interval_spin(300);
         let opts = collect_options(
             &zoom,
@@ -1644,6 +1649,7 @@ mod tests {
             &default_shell,
             &notify_on,
             &agent_bar_on,
+            &minimap_on,
             &blink_on,
             &blink_interval,
             &family_drop,
@@ -1655,6 +1661,7 @@ mod tests {
             &crate::ui::theme_tab::ThemeSelection::default(),
         );
         assert!(opts.agent_bar_mode);
+        assert!(opts.editor_minimap_enabled);
         assert!(opts.cursor_blink);
         assert_eq!(opts.cursor_blink_interval_ms, 300);
         assert_eq!(
@@ -1679,9 +1686,10 @@ mod tests {
         let persist_on = build_persist_check(true);
         let auto_resume_on = build_persist_check(true);
         let scrollback_off = build_persist_check(false);
-        let notify_off = build_system_notify_switch(false);
-        let agent_bar_off = build_agent_bar_switch(false);
-        let blink_off = build_cursor_blink_switch(false);
+        let notify_off = build_toggle_switch(false);
+        let agent_bar_off = build_toggle_switch(false);
+        let minimap_off = build_toggle_switch(false);
+        let blink_off = build_toggle_switch(false);
         let blink_interval = build_blink_interval_spin(800);
         zoom.drop
             .set_selected((zoom.values.borrow().len() - 1) as u32);
@@ -1698,6 +1706,7 @@ mod tests {
             &default_shell,
             &notify_off,
             &agent_bar_off,
+            &minimap_off,
             &blink_off,
             &blink_interval,
             &family_drop,
@@ -1719,6 +1728,7 @@ mod tests {
         assert!(!opts.restore_terminal_scrollback);
         assert!(!opts.system_notifications_enabled);
         assert!(!opts.agent_bar_mode);
+        assert!(!opts.editor_minimap_enabled);
         assert_eq!(opts.zoom_percent, 200);
         assert_eq!(opts.default_shell, None);
         assert_eq!(opts.font_family, Some("Fira Code".to_string()));

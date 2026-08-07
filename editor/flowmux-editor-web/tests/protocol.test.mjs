@@ -285,6 +285,7 @@ test("accepts bounded light and multilingual editor appearance", () => {
       cursor: "#005fb8ff",
       selectionBackground: "#005fb840",
       selectionForeground: "#202020ff",
+      minimapEnabled: true,
       fontFamily: "Noto Sans Mono CJK KR, 일본어 고정폭",
       fontSize: 13.5,
     },
@@ -300,6 +301,10 @@ test("accepts bounded light and multilingual editor appearance", () => {
   );
   assert.equal(
     isHostMessage({ ...message, appearance: { ...message.appearance, fontSize: Infinity } }),
+    false,
+  );
+  assert.equal(
+    isHostMessage({ ...message, appearance: { ...message.appearance, minimapEnabled: "yes" } }),
     false,
   );
 });

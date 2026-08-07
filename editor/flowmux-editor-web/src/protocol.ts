@@ -27,6 +27,7 @@ export interface EditorAppearance {
   cursor: string;
   selectionBackground: string;
   selectionForeground: string;
+  minimapEnabled: boolean;
   fontFamily: string;
   fontSize: number;
 }
@@ -462,6 +463,7 @@ function isEditorAppearance(value: unknown): value is EditorAppearance {
   ];
   return (
     typeof value.dark === "boolean" &&
+    typeof value.minimapEnabled === "boolean" &&
     colors.every(
       (color) => typeof color === "string" && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color),
     ) &&
