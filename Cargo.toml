@@ -37,7 +37,15 @@ serde_json = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `rustls-tls-native-roots` is what makes the usage fetch work behind a
+# TLS-inspecting corporate proxy: the bundled webpki roots alone reject the
+# proxy's private CA with `UnknownIssuer`. Both root sets are enabled so hosts
+# with no system trust store still validate public certificates.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+    "rustls-tls-native-roots",
+] }
 globset = "0.4"
 ignore = "0.4"
 regex = "1"
