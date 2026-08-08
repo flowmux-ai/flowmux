@@ -859,15 +859,11 @@ fn refresh_workspace_preview(
     row: &gtk::Widget,
     surface: &gtk::Widget,
 ) -> bool {
-    let Some(texture) = workspace_preview_texture(surface) else {
+    let Some((texture, preview_width, preview_height)) =
+        workspace_preview_texture(surface, overlay.width(), overlay.height())
+    else {
         return false;
     };
-    let (preview_width, preview_height) = workspace_preview_size(
-        surface.width(),
-        surface.height(),
-        overlay.width(),
-        overlay.height(),
-    );
     frame.set_size_request(preview_width, preview_height);
     let (x, y) = row
         .compute_bounds(overlay)
@@ -888,7 +884,11 @@ fn refresh_workspace_preview(
     true
 }
 
-fn workspace_preview_texture(surface: &gtk::Widget) -> Option<gtk::gdk::Texture> {
+fn workspace_preview_texture(
+    surface: &gtk::Widget,
+    window_width: i32,
+    window_height: i32,
+) -> Option<(gtk::gdk::Texture, i32, i32)> {
     let renderer = surface.native()?.renderer()?;
     let stack = surface.parent()?.downcast::<gtk::Stack>().ok()?;
     let was_child_visible = surface.is_child_visible();
@@ -896,14 +896,29 @@ fn workspace_preview_texture(surface: &gtk::Widget) -> Option<gtk::gdk::Texture>
         surface.set_child_visible(true);
         surface.allocate(stack.width(), stack.height(), -1, None);
     }
+    let (preview_width, preview_height) = workspace_preview_size(
+        surface.width(),
+        surface.height(),
+        window_width,
+        window_height,
+    );
     let snapshot = gtk::Snapshot::new();
+    snapshot.scale(
+        preview_width as f32 / surface.width().max(1) as f32,
+        preview_height as f32 / surface.height().max(1) as f32,
+    );
     stack.snapshot_child(surface, &snapshot);
     if !was_child_visible {
         surface.set_child_visible(false);
     }
-    snapshot
-        .to_node()
-        .map(|node| renderer.render_texture(&node, None))
+    let viewport = gtk::graphene::Rect::new(0.0, 0.0, preview_width as f32, preview_height as f32);
+    snapshot.to_node().map(|node| {
+        (
+            renderer.render_texture(&node, Some(&viewport)),
+            preview_width,
+            preview_height,
+        )
+    })
 }
 
 fn cancel_workspace_preview_refresh(refreshing: &RefCell<Option<glib::SourceId>>) {
@@ -3694,6 +3709,7 @@ mod tests {
         let preview = gtk::Fixed::new();
         preview.put(&frame, 0.0, 0.0);
         let overlay = gtk::Overlay::new();
+        overlay.add_overlay(&preview);
         let refreshing = Rc::new(RefCell::new(None));
         let shown_workspace = Rc::new(Cell::new(None));
         let first_workspace = WorkspaceId::new();
@@ -3706,10 +3722,11 @@ mod tests {
         stack.add_child(&second_surface);
         stack.add_child(&zoomed_surface);
         stack.set_visible_child(&zoomed_surface);
+        overlay.set_child(Some(&stack));
         let window = gtk::Window::builder()
             .default_width(400)
             .default_height(300)
-            .child(&stack)
+            .child(&overlay)
             .build();
         window.present();
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
@@ -3750,6 +3767,10 @@ mod tests {
             .unwrap()
             .downcast::<gtk::gdk::Texture>()
             .unwrap();
+        assert_eq!(texture.width(), frame.width_request());
+        assert_eq!(texture.height(), frame.height_request());
+        assert!(texture.width() <= 384);
+        assert!(texture.height() <= 240);
         let stride = texture.width() as usize * 4;
         let mut before = vec![0; stride * texture.height() as usize];
         gtk::gdk::prelude::TextureExtManual::download(&texture, &mut before, stride);

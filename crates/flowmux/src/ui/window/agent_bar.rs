@@ -73,7 +73,7 @@ impl WindowController {
         let tab_exists = workspace_state
             .surfaces
             .iter()
-            .any(|root| root.root_pane.find_surface(pane, surface).is_some());
+            .any(|root| root.root_pane.find_surface_ref(pane, surface).is_some());
         if tab_exists && self.pane_registry.borrow().has_pane(pane) {
             if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
                 self.activate_surface_now(pane, surface).await;

@@ -7,7 +7,10 @@
 //! lossless snapshot in state and translate it back to SGR when replaying into
 //! a new terminal widget.
 
-use flowmux_core::{bound_terminal_scrollback, TerminalScrollback, TerminalScrollbackFormat};
+use flowmux_core::{
+    bound_terminal_scrollback, bound_vte_html_scrollback, TerminalScrollback,
+    TerminalScrollbackFormat, TERMINAL_SCROLLBACK_MAX_BYTES,
+};
 use quick_xml::escape::resolve_xml_entity;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
@@ -90,6 +93,24 @@ pub(crate) fn snapshot_from_vte_html(html: &str) -> Result<TerminalScrollback, S
         .strip_prefix(PRE_OPEN)
         .and_then(|value| value.strip_suffix(PRE_CLOSE))
         .ok_or_else(|| "VTE HTML snapshot did not contain a single <pre> root".to_string())?;
+
+    if html.len() > TERMINAL_SCROLLBACK_MAX_BYTES {
+        let bounded_html = bound_vte_html_scrollback(html)
+            .ok_or_else(|| "VTE HTML final line exceeded the scrollback budget".to_string())?;
+        let tail = bounded_html
+            .strip_prefix(PRE_OPEN)
+            .and_then(|value| value.strip_suffix(PRE_CLOSE))
+            .expect("bounded VTE HTML retains its pre root");
+        let snapshot = snapshot_from_complete_vte_html(&bounded_html, tail)?;
+        return (!snapshot.content().is_empty())
+            .then_some(snapshot)
+            .ok_or_else(|| "bounded VTE HTML contained too little meaningful history".to_string());
+    }
+
+    snapshot_from_complete_vte_html(html, body)
+}
+
+fn snapshot_from_complete_vte_html(html: &str, body: &str) -> Result<TerminalScrollback, String> {
     let parsed = parse_vte_html(html)?;
     let plain = parsed.plain_text();
     let html_lines: Vec<_> = body.split('\n').collect();
@@ -446,6 +467,26 @@ mod tests {
             snapshot.content(),
             "<pre><b><font color=\"#112233\">colored &amp; bold</font></b>\nplain</pre>"
         );
+    }
+
+    #[test]
+    fn oversized_styled_snapshot_is_bounded_before_parsing() {
+        let old_line = format!("<b>{}</b>", "old".repeat(1024));
+        let html = format!(
+            "<pre>{}\nrecent\nprompt</pre>",
+            std::iter::repeat_n(old_line, 512)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let snapshot = snapshot_from_vte_html(&html).unwrap();
+        assert!(snapshot.content().len() <= TERMINAL_SCROLLBACK_MAX_BYTES);
+        assert!(snapshot.content().ends_with("recent\nprompt</pre>"));
+    }
+
+    #[test]
+    fn oversized_single_html_line_uses_plain_text_fallback() {
+        let html = format!("<pre>{}</pre>", "x".repeat(TERMINAL_SCROLLBACK_MAX_BYTES));
+        assert!(snapshot_from_vte_html(&html).is_err());
     }
 
     #[test]

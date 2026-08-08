@@ -3014,6 +3014,12 @@ fn styled_scrollback_is_bounded_on_complete_vte_html_lines() {
 }
 
 #[test]
+fn styled_scrollback_rejects_an_oversized_final_line() {
+    let html = format!("<pre>{}</pre>", "x".repeat(TERMINAL_SCROLLBACK_MAX_BYTES));
+    assert!(bound_vte_html_scrollback(&html).is_none());
+}
+
+#[test]
 fn workspace_ui_clone_omits_scrollback_and_keeps_live_agent_metadata() {
     let pane = PaneId::new();
     let mut terminal = PaneSurface::terminal("agent", Some(PathBuf::from("/tmp/project")));
@@ -3164,7 +3170,16 @@ fn editor_session_update_persists_view_and_tracks_active_title() {
     };
 
     assert!(pane.set_surface_editor_session(pane_id, editor_id, state.clone()));
-    assert!(!pane.set_surface_editor_session(pane_id, editor_id, state));
+    assert!(!pane.set_surface_editor_session(pane_id, editor_id, state.clone()));
+    let Pane::Leaf {
+        content: PaneContent::Tabs { surfaces, .. },
+        ..
+    } = &mut pane
+    else {
+        panic!("expected tabbed leaf");
+    };
+    surfaces[0].title = "stale-editor-name".into();
+    assert!(pane.set_surface_editor_session(pane_id, editor_id, state));
     let surface = pane.find_surface(pane_id, editor_id).unwrap();
     assert_eq!(surface.title, "문서-日本語.rs");
     let SurfaceKind::Editor { session, .. } = &surface.kind else {

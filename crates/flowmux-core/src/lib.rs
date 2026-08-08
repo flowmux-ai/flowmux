@@ -32,7 +32,9 @@ pub fn bound_terminal_scrollback(text: &str) -> String {
     text[start..].to_string()
 }
 
-fn bound_vte_html_scrollback(html: &str) -> Option<String> {
+/// Keep the newest complete VTE HTML lines that fit the persisted scrollback
+/// budget. Returns `None` when even the final line cannot fit intact.
+pub fn bound_vte_html_scrollback(html: &str) -> Option<String> {
     const OPEN: &str = "<pre>";
     const CLOSE: &str = "</pre>";
 
@@ -46,26 +48,28 @@ fn bound_vte_html_scrollback(html: &str) -> Option<String> {
     // applies this bound before state reaches core; this is the defensive
     // boundary for oversized or externally supplied snapshots.
     let budget = TERMINAL_SCROLLBACK_MAX_BYTES.saturating_sub(OPEN.len() + CLOSE.len());
-    let lines: Vec<_> = body.split('\n').collect();
-    let mut kept = Vec::new();
+    let mut cursor = body.len();
+    let mut start = body.len();
     let mut used = 0usize;
-    for line in lines.iter().rev() {
-        let separator = usize::from(!kept.is_empty());
-        let Some(next) = used
-            .checked_add(separator)
-            .and_then(|value| value.checked_add(line.len()))
-        else {
-            break;
-        };
+    let mut kept = false;
+    for line in body.rsplit('\n') {
+        let line_start = cursor.checked_sub(line.len())?;
+        let next = used
+            .checked_add(usize::from(kept))?
+            .checked_add(line.len())?;
         if next > budget {
             break;
         }
-        kept.push(*line);
+        start = line_start;
         used = next;
+        kept = true;
+        if line_start == 0 {
+            break;
+        }
+        cursor = line_start - 1;
     }
-    kept.reverse();
-    let body = kept.join("\n");
-    (!body.is_empty()).then(|| format!("{OPEN}{body}{CLOSE}"))
+    let tail = &body[start..];
+    (!tail.is_empty()).then(|| format!("{OPEN}{tail}{CLOSE}"))
 }
 
 pub fn terminal_tab_title_for_cwd(cwd: Option<&Path>) -> String {
@@ -1202,7 +1206,9 @@ impl Pane {
             return false;
         };
         let mut changed = *session != new_session;
-        *session = new_session;
+        if changed {
+            *session = new_session;
+        }
         if !surface.title_locked {
             let title = session
                 .active_file
@@ -1490,17 +1496,21 @@ impl Pane {
     /// matching `PaneSurface`. Returns `None` if the pane or surface is
     /// not found.
     pub fn find_surface(&self, target_pane: PaneId, target: SurfaceId) -> Option<PaneSurface> {
+        self.find_surface_ref(target_pane, target).cloned()
+    }
+
+    /// Borrow a matching surface without cloning its editor session or
+    /// scrollback payload.
+    pub fn find_surface_ref(&self, target_pane: PaneId, target: SurfaceId) -> Option<&PaneSurface> {
         match self {
             Pane::Leaf { id, content } if *id == target_pane => match content {
-                PaneContent::Tabs { surfaces, .. } => {
-                    surfaces.iter().find(|s| s.id == target).cloned()
-                }
+                PaneContent::Tabs { surfaces, .. } => surfaces.iter().find(|s| s.id == target),
                 PaneContent::Terminal { .. } | PaneContent::Browser { .. } => None,
             },
             Pane::Leaf { .. } => None,
             Pane::Split { first, second, .. } => first
-                .find_surface(target_pane, target)
-                .or_else(|| second.find_surface(target_pane, target)),
+                .find_surface_ref(target_pane, target)
+                .or_else(|| second.find_surface_ref(target_pane, target)),
         }
     }
 

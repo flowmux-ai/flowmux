@@ -804,7 +804,11 @@ impl StateStore {
         if src_pane == dst_pane {
             for ws in s.workspaces.iter_mut() {
                 for sf in ws.surfaces.iter_mut() {
-                    if sf.root_pane.find_surface(src_pane, surface_id).is_some() {
+                    if sf
+                        .root_pane
+                        .find_surface_ref(src_pane, surface_id)
+                        .is_some()
+                    {
                         let changed = sf.root_pane.reorder_surface_in_leaf(
                             src_pane,
                             surface_id,
@@ -2302,7 +2306,11 @@ fn update_surface_scrollback_in_state(
 ) -> Option<WorkspaceId> {
     for ws in state.workspaces.iter_mut() {
         for surface in ws.surfaces.iter_mut() {
-            if surface.root_pane.find_surface(pane, surface_id).is_some() {
+            if surface
+                .root_pane
+                .find_surface_ref(pane, surface_id)
+                .is_some()
+            {
                 return surface
                     .root_pane
                     .set_surface_scrollback_snapshot(pane, surface_id, snapshot)
@@ -2323,9 +2331,13 @@ fn update_editor_session_in_state(
         for surface in &mut workspace.surfaces {
             if surface
                 .root_pane
-                .set_surface_editor_session(pane, surface_id, session.clone())
+                .find_surface_ref(pane, surface_id)
+                .is_some()
             {
-                return Some(workspace.id);
+                return surface
+                    .root_pane
+                    .set_surface_editor_session(pane, surface_id, session)
+                    .then_some(workspace.id);
             }
         }
     }
