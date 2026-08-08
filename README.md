@@ -26,21 +26,6 @@ Supported on Ubuntu 24.04 and later.
 curl -fsSL https://flowmux.org/install.sh | sh
 ```
 
-The installer downloads the latest `.deb` from GitHub Releases, verifies its
-SHA-256 checksum, and installs it with `apt`. It sends no flowmux telemetry;
-GitHub provides the aggregate download count for each release asset.
-
-Rerun the same command to update to the latest release. To inspect the script
-before running it:
-
-```sh
-curl -fsSL https://flowmux.org/install.sh -o /tmp/flowmux-install.sh
-less /tmp/flowmux-install.sh
-sh /tmp/flowmux-install.sh
-```
-
-Uninstall the release package with `sudo apt remove flowmux`.
-  
 ## Control internal browser
 
 A WebKitGTK 6.0 browser tab lives next to terminal tabs in the same pane tree.
