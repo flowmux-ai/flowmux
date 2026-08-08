@@ -5612,6 +5612,67 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
+    async fn editor_session_refresh_updates_all_visible_names() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        assert_eq!(
+            polling::EDITOR_SESSION_REFRESH_INTERVAL,
+            Duration::from_millis(250)
+        );
+
+        let (controller, ws_id, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.EditorNameRefresh").await;
+        let file = controller
+            .store
+            .get_workspace(ws_id)
+            .await
+            .unwrap()
+            .root_dir
+            .join("live-editor.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        controller.focused_pane.set(Some(pane));
+        controller.open_file_in_editor(file, Some(pane)).await;
+        let surface = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+
+        controller.persist_editor_sessions().await;
+
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .surface_title_text(surface)
+                .as_deref(),
+            Some("live-editor.rs")
+        );
+        assert_eq!(
+            controller
+                .window
+                .title()
+                .map(|title| title.to_string())
+                .as_deref(),
+            Some("flowmux - live-editor.rs")
+        );
+        assert_eq!(
+            controller.store.get_workspace(ws_id).await.unwrap().name,
+            "live-editor.rs"
+        );
+        assert_eq!(
+            controller
+                .sidebar
+                .workspace_titles()
+                .borrow()
+                .iter()
+                .find(|(id, _)| *id == ws_id)
+                .map(|(_, title)| title.as_str()),
+            Some("live-editor.rs")
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     async fn file_browser_same_pane_root_refresh_does_not_rebuild_rows() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.FileBrowserRefreshNoop")

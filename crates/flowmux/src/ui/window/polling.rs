@@ -5,6 +5,8 @@
 
 use super::*;
 
+pub(super) const EDITOR_SESSION_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
@@ -94,33 +96,39 @@ impl WindowController {
 
     pub(super) fn install_editor_session_persistence(&self) {
         let controller = self.clone();
-        glib::timeout_add_local(Duration::from_secs(1), move || {
-            let snapshots = controller.pane_registry.borrow().editor_session_snapshots();
+        glib::timeout_add_local(EDITOR_SESSION_REFRESH_INTERVAL, move || {
             let controller = controller.clone();
             glib::MainContext::default().spawn_local(async move {
-                let mut updated = false;
-                for (pane, surface, session) in snapshots {
-                    if controller
-                        .store
-                        .update_editor_session(pane, surface, session)
-                        .await
-                        .is_some()
-                    {
-                        updated = true;
-                        if let Some(title) = controller.store.surface_title(pane, surface).await {
-                            controller
-                                .pane_registry
-                                .borrow()
-                                .set_surface_title(surface, &title);
-                        }
-                    }
-                }
-                if updated {
-                    controller.refresh_window_title().await;
-                }
+                controller.persist_editor_sessions().await;
             });
             glib::ControlFlow::Continue
         });
+    }
+
+    pub(super) async fn persist_editor_sessions(&self) {
+        let snapshots = self.pane_registry.borrow().editor_session_snapshots();
+        let mut changed_workspaces = std::collections::HashSet::new();
+        for (pane, surface, session) in snapshots {
+            if let Some(workspace) = self
+                .store
+                .update_editor_session(pane, surface, session)
+                .await
+            {
+                changed_workspaces.insert(workspace);
+                if let Some(title) = self.store.surface_title(pane, surface).await {
+                    self.pane_registry
+                        .borrow()
+                        .set_surface_title(surface, &title);
+                }
+            }
+        }
+        if changed_workspaces.is_empty() {
+            return;
+        }
+        self.refresh_window_title().await;
+        for workspace in changed_workspaces {
+            self.sync_workspace_label(workspace).await;
+        }
     }
 
     /// Capture terminal history periodically so a crash or power loss loses at
