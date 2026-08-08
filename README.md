@@ -26,19 +26,6 @@ Supported on Ubuntu 24.04 and later.
 curl -fsSL https://flowmux.org/install.sh | sh
 ```
 
-The installer downloads the latest `.deb` from GitHub Releases, verifies its
-SHA-256 checksum, and installs it with `apt`. It sends no flowmux telemetry;
-GitHub provides the aggregate download count for each release asset.
-
-Rerun the same command to update to the latest release. To inspect the script
-before running it:
-
-```sh
-curl -fsSL https://flowmux.org/install.sh -o /tmp/flowmux-install.sh
-less /tmp/flowmux-install.sh
-sh /tmp/flowmux-install.sh
-```
-
 Uninstall the release package with `sudo apt remove flowmux`.
   
 ## Control internal browser
@@ -148,53 +135,6 @@ token and activity totals without interrupting running sessions.
 See the [keyboard shortcut reference](docs/keybindings.md) and
 [configuration reference](docs/configuration.md).
 
-## Layout
-
-```
-flowmux/
-├── crates/
-│   ├── flowmux-core/       Domain types: Workspace, Surface, Pane, Notification
-│   ├── flowmux-config/     cmux.json + ~/.config/ghostty/config readers
-│   ├── flowmux-state/      Persistent workspace/session state on disk
-│   ├── flowmux-terminal/   VTE terminal integration + PTY env helpers
-│   ├── flowmux-browser/    WebKitGTK 6.0 browser surface + scriptable refs
-│   ├── flowmux-editor/     Safe UTF-8 document I/O, versioning, and atomic saves
-│   ├── flowmux-cookies/    Browser cookie/session import (libsecret + sqlite)
-│   ├── flowmux-notify/     OSC 9/99/777 parser + libnotify D-Bus sender
-│   ├── flowmux-ipc/        Unix-socket IPC (cmux socket-API compatible)
-│   ├── flowmux-daemon/     Background daemon orchestrating IPC and panes
-│   ├── flowmux-procmon/    PID-tree process / listening-port monitor
-│   ├── flowmux-vcs/        Git/PR sidebar integration
-│   ├── flowmux-cli/        `flowmuxctl` helper for CLI subcommands
-│   └── flowmux/            GTK4 + libadwaita main app and public `flowmux` binary
-├── editor/flowmux-editor-web/  Monaco editor source + committed web assets
-├── packaging/{debian,flatpak}/  Distro packaging metadata
-├── resources/             .desktop file, icons, screenshots, themes
-├── LICENSE                GPL-3.0-or-later (verbatim from gnu.org)
-├── THIRD_PARTY_LICENSES.md  Third-party dependency license inventory
-└── NOTICE                 Copyright + attribution
-```
-
-## Source-build prerequisites (Ubuntu 24.04 native)
-
-The repository's `./install.sh` is for building from source; it is separate
-from the release installer at `flowmux.org/install.sh`. It detects these
-packages and the Rust toolchain, asks before installing anything missing with
-`apt`/`rustup`, then builds and installs flowmux. Use `./install.sh --check`
-for a read-only prerequisite check or `./install.sh --yes` to accept
-dependency-install prompts non-interactively.
-
-For manual setup, install the same prerequisites with:
-
-```bash
-sudo apt install \
-    ca-certificates curl git build-essential pkg-config \
-    libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev \
-    libwebkitgtk-6.0-dev libssl-dev \
-    libdbus-1-dev libsecret-1-dev
-# rustup (Rust 1.93+) required.
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
 
 ### ThorVG (image viewer — optional)
 
@@ -325,28 +265,6 @@ Set `FLOWMUX_LOG=/path/to/flowmux.log` for a persistent diagnostic log.
 Crash diagnostics are stored under `$XDG_STATE_HOME/flowmux/crashes` (usually
 `~/.local/state/flowmux/crashes`). Start with `flowmux doctor`; it is read-only,
 while `flowmux fix` repairs marked integration entries.
-
-## WSL / WSLg
-
-Ubuntu 24.04 and 26.04 on WSLg can use the release installer at the top of this
-README, then start `flowmux` from the Linux side so GTK connects to WSLg's
-Wayland display. For a source build, follow the source-build prerequisites and
-run the repository's `./install.sh`. The runtime detects WSL and enables the
-terminal key/resize workarounds that differ from a regular GNOME session.
-
-To verify a real WSLg session end to end on 24.04 or 26.04:
-
-```bash
-scripts/check-wslg-runtime.sh
-```
-
-That script installs the native host build if needed, launches the GUI through
-WSLg, creates a workspace, and verifies `send-keys` / `read-screen` against the
-live terminal pane. It uses a temporary `FLOWMUX_RUNTIME_DIR` for the smoke
-run while leaving WSLg's `XDG_RUNTIME_DIR` alone, so it will not steal the
-socket from an existing flowmux session or hide the Wayland socket. Use
-`--no-install` to test an already-installed binary, or `--keep-open` to leave
-the smoke GUI running and print the matching env for manual CLI checks.
 
 ## License
 
