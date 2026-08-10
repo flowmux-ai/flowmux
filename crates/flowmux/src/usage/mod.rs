@@ -144,7 +144,20 @@ impl ProviderState {
                 });
                 self.limits_error = None;
             }
-            FieldRefresh::Failure(error) => self.limits_error = Some(error),
+            FieldRefresh::Failure(error) => {
+                self.limits_error = Some(error);
+                if let Some(limits) = &mut self.limits {
+                    for window in &mut limits.value {
+                        if window
+                            .resets_at
+                            .is_some_and(|reset| reset <= update.collected_at)
+                        {
+                            window.used_percent = 0.0;
+                            window.resets_at = None;
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -273,6 +286,35 @@ mod tests {
         );
         assert!(state.claude.token_error.is_some());
         assert!(state.claude.limits_error.is_some());
+    }
+
+    #[test]
+    fn failed_refresh_expires_usage_after_its_reset() {
+        let now = Utc::now();
+        let mut expired = window(300, 100.0);
+        expired.resets_at = Some(now + Duration::minutes(1));
+        let mut current = window(10_080, 42.0);
+        current.resets_at = Some(now + Duration::days(1));
+        let mut state = UsagePanelState::default();
+        state.apply(ProviderRefresh {
+            provider: Provider::Claude,
+            tokens: FieldRefresh::Success(TokenTotals::default()),
+            limits: FieldRefresh::Success(vec![expired, current]),
+            collected_at: now,
+        });
+
+        state.apply(ProviderRefresh {
+            provider: Provider::Claude,
+            tokens: FieldRefresh::Success(TokenTotals::default()),
+            limits: FieldRefresh::Failure(UsageError::network()),
+            collected_at: now + Duration::minutes(2),
+        });
+
+        let limits = &state.claude.limits.as_ref().unwrap().value;
+        assert_eq!(limits[0].used_percent, 0.0);
+        assert_eq!(limits[0].resets_at, None);
+        assert_eq!(limits[1].used_percent, 42.0);
+        assert!(limits[1].resets_at.is_some());
     }
 
     #[test]
