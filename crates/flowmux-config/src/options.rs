@@ -54,6 +54,12 @@ pub const SCROLLBACK_LINES_DEFAULT: u32 = 5_000;
 pub const SCROLLBACK_LINES_MIN: u32 = 1_000;
 pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 
+/// Show the bounded-memory terminal scrollback minimap by default.
+pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
+pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
+pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
+pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 24;
+
 /// Default for [`Options::system_notifications_enabled`]. Desktop toasts ship
 /// enabled so flowmux behaves like every other notifying app on first launch;
 /// the user can opt out to keep only the in-app bell list.
@@ -150,6 +156,13 @@ pub struct Options {
     /// the built-in 10,000-line default for older option files.
     #[serde(default)]
     pub scrollback_lines: Option<u32>,
+    /// Show a scrollback overview on terminal tabs. The map is hidden when the
+    /// terminal has no scrollback (including alternate-screen TUIs).
+    #[serde(default = "default_terminal_minimap_enabled")]
+    pub terminal_minimap_enabled: bool,
+    /// Terminal minimap width in pixels.
+    #[serde(default = "default_terminal_minimap_width")]
+    pub terminal_minimap_width: u16,
     /// Shell command used by newly created terminal tabs. `None` resolves from
     /// `$SHELL`; per-tab shell requests override this value.
     #[serde(default)]
@@ -237,6 +250,14 @@ fn default_restore_terminal_scrollback() -> bool {
     RESTORE_TERMINAL_SCROLLBACK_DEFAULT
 }
 
+fn default_terminal_minimap_enabled() -> bool {
+    TERMINAL_MINIMAP_ENABLED_DEFAULT
+}
+
+fn default_terminal_minimap_width() -> u16 {
+    TERMINAL_MINIMAP_WIDTH_DEFAULT
+}
+
 fn default_system_notifications_enabled() -> bool {
     SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT
 }
@@ -268,6 +289,8 @@ impl Default for Options {
             auto_resume_agent_sessions: default_auto_resume_agent_sessions(),
             restore_terminal_scrollback: default_restore_terminal_scrollback(),
             scrollback_lines: None,
+            terminal_minimap_enabled: default_terminal_minimap_enabled(),
+            terminal_minimap_width: default_terminal_minimap_width(),
             default_shell: None,
             system_notifications_enabled: default_system_notifications_enabled(),
             agent_bar_mode: default_agent_bar_mode(),
@@ -418,6 +441,10 @@ impl Options {
         self
     }
 
+    pub fn clamp_terminal_minimap_width(width: u16) -> u16 {
+        width.clamp(TERMINAL_MINIMAP_WIDTH_MIN, TERMINAL_MINIMAP_WIDTH_MAX)
+    }
+
     /// Trim a configured shell and map empty text to `$SHELL` behavior.
     pub fn normalize_default_shell(shell: Option<String>) -> Option<String> {
         shell
@@ -502,6 +529,7 @@ pub fn load() -> Options {
         focus_border_color,
         focus_border_opacity: Options::clamp_focus_border_opacity(opts.focus_border_opacity),
         scrollback_lines: opts.scrollback_lines.map(Options::clamp_scrollback_lines),
+        terminal_minimap_width: Options::clamp_terminal_minimap_width(opts.terminal_minimap_width),
         default_shell: Options::normalize_default_shell(opts.default_shell),
         ..opts
     }
@@ -953,6 +981,36 @@ mod tests {
             let back = load();
             assert_eq!(back.scrollback_lines, Some(42_000));
             assert_eq!(back.scrollback_lines_or_default(), 42_000);
+        });
+    }
+
+    #[test]
+    fn terminal_minimap_defaults_on_and_clamps_width() {
+        let old_file: Options = serde_json::from_str("{}").unwrap();
+        assert!(old_file.terminal_minimap_enabled);
+        assert_eq!(
+            old_file.terminal_minimap_width,
+            TERMINAL_MINIMAP_WIDTH_DEFAULT
+        );
+        assert_eq!(
+            Options::clamp_terminal_minimap_width(0),
+            TERMINAL_MINIMAP_WIDTH_MIN
+        );
+        assert_eq!(
+            Options::clamp_terminal_minimap_width(u16::MAX),
+            TERMINAL_MINIMAP_WIDTH_MAX
+        );
+
+        with_xdg(|_| {
+            let opts = Options {
+                terminal_minimap_enabled: false,
+                terminal_minimap_width: 48,
+                ..Options::default()
+            };
+            save(&opts).unwrap();
+            let back = load();
+            assert!(!back.terminal_minimap_enabled);
+            assert_eq!(back.terminal_minimap_width, 48);
         });
     }
 

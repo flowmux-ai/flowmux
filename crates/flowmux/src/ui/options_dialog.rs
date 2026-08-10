@@ -29,7 +29,7 @@ use flowmux_config::keybindings::KeybindingOverrides;
 use flowmux_config::options::{
     BrowserEngine, Options, CURSOR_BLINK_INTERVAL_MAX, CURSOR_BLINK_INTERVAL_MIN,
     FOCUS_BORDER_OPACITY_MAX, FOCUS_BORDER_OPACITY_MIN, SCROLLBACK_LINES_MAX, SCROLLBACK_LINES_MIN,
-    ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN,
+    TERMINAL_MINIMAP_WIDTH_MAX, TERMINAL_MINIMAP_WIDTH_MIN, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN,
 };
 use flowmux_core::AgentNotificationTarget;
 use std::cell::{Cell, RefCell};
@@ -131,6 +131,9 @@ fn build_dialog(
     let auto_resume_check = build_persist_check(current.auto_resume_agent_sessions);
     let scrollback_check = build_persist_check(current.restore_terminal_scrollback);
     let scrollback_lines_spin = build_scrollback_lines_spin(current.scrollback_lines_or_default());
+    let terminal_minimap_switch = build_toggle_switch(current.terminal_minimap_enabled);
+    let terminal_minimap_width_spin =
+        build_terminal_minimap_width_spin(current.terminal_minimap_width);
     let default_shell_entry = build_default_shell_entry(current.default_shell.as_deref());
     let system_notify_switch = build_toggle_switch(current.system_notifications_enabled);
     let agent_bar_switch = build_toggle_switch(current.agent_bar_mode);
@@ -154,6 +157,11 @@ fn build_dialog(
     general.append(&row("Resume agent sessions on reopen", &auto_resume_check));
     general.append(&row("Restore terminal scrollback", &scrollback_check));
     general.append(&row("Terminal scrollback lines", &scrollback_lines_spin));
+    general.append(&row("Terminal minimap", &terminal_minimap_switch));
+    general.append(&row(
+        "Terminal minimap width (px)",
+        &terminal_minimap_width_spin,
+    ));
     general.append(&row("Default shell", &default_shell_entry));
     general.append(&row("System notifications", &system_notify_switch));
     general.append(&row("Agents bar mode", &agent_bar_switch));
@@ -198,6 +206,8 @@ fn build_dialog(
         let auto_resume_check = auto_resume_check.clone();
         let scrollback_check = scrollback_check.clone();
         let scrollback_lines_spin = scrollback_lines_spin.clone();
+        let terminal_minimap_switch = terminal_minimap_switch.clone();
+        let terminal_minimap_width_spin = terminal_minimap_width_spin.clone();
         let default_shell_entry = default_shell_entry.clone();
         let system_notify_switch = system_notify_switch.clone();
         let agent_bar_switch = agent_bar_switch.clone();
@@ -229,6 +239,8 @@ fn build_dialog(
                 &auto_resume_check,
                 &scrollback_check,
                 &scrollback_lines_spin,
+                &terminal_minimap_switch,
+                &terminal_minimap_width_spin,
                 &default_shell_entry,
                 &system_notify_switch,
                 &agent_bar_switch,
@@ -277,6 +289,8 @@ fn build_dialog(
     connect_toggled(&auto_resume_check, apply_current.clone());
     connect_toggled(&scrollback_check, apply_current.clone());
     connect_value_changed(&scrollback_lines_spin, apply_current.clone());
+    connect_active_notify(&terminal_minimap_switch, apply_current.clone());
+    connect_value_changed(&terminal_minimap_width_spin, apply_current.clone());
     {
         let apply_current = apply_current.clone();
         default_shell_entry.connect_changed(move |_| apply_current());
@@ -976,6 +990,8 @@ fn collect_options(
     auto_resume_check: &gtk::CheckButton,
     scrollback_check: &gtk::CheckButton,
     scrollback_lines_spin: &gtk::SpinButton,
+    terminal_minimap_switch: &gtk::Switch,
+    terminal_minimap_width_spin: &gtk::SpinButton,
     default_shell_entry: &gtk::Entry,
     system_notify_switch: &gtk::Switch,
     agent_bar_switch: &gtk::Switch,
@@ -1023,6 +1039,10 @@ fn collect_options(
         scrollback_lines: Some(Options::clamp_scrollback_lines(
             scrollback_lines_spin.value_as_int().max(0) as u32,
         )),
+        terminal_minimap_enabled: terminal_minimap_switch.is_active(),
+        terminal_minimap_width: Options::clamp_terminal_minimap_width(
+            terminal_minimap_width_spin.value_as_int().max(0) as u16,
+        ),
         default_shell: Options::normalize_default_shell(Some(
             default_shell_entry.text().to_string(),
         )),
@@ -1279,6 +1299,24 @@ fn build_scrollback_lines_spin(initial: u32) -> gtk::SpinButton {
     spin.set_snap_to_ticks(true);
     spin.set_halign(gtk::Align::End);
     spin.set_tooltip_text(Some("Applies to new terminal tabs only"));
+    spin
+}
+
+fn build_terminal_minimap_width_spin(initial: u16) -> gtk::SpinButton {
+    let initial = Options::clamp_terminal_minimap_width(initial);
+    let adjustment = gtk::Adjustment::new(
+        f64::from(initial),
+        f64::from(TERMINAL_MINIMAP_WIDTH_MIN),
+        f64::from(TERMINAL_MINIMAP_WIDTH_MAX),
+        1.0,
+        4.0,
+        0.0,
+    );
+    let spin = gtk::SpinButton::new(Some(&adjustment), 1.0, 0);
+    spin.set_numeric(true);
+    spin.set_snap_to_ticks(true);
+    spin.set_halign(gtk::Align::End);
+    spin.set_width_chars(3);
     spin
 }
 
@@ -1622,6 +1660,8 @@ mod tests {
         let auto_resume_off = build_persist_check(false);
         let scrollback_on = build_persist_check(true);
         let scrollback_lines = build_scrollback_lines_spin(42_000);
+        let terminal_minimap_on = build_toggle_switch(true);
+        let terminal_minimap_width = build_terminal_minimap_width_spin(36);
         let default_shell = build_default_shell_entry(Some("/bin/dash"));
         // Two-entry font picker: index 0 = inherit, index 1 = a concrete family.
         let family_drop = gtk::DropDown::from_strings(&["System default", "Fira Code"]);
@@ -1646,6 +1686,8 @@ mod tests {
             &auto_resume_off,
             &scrollback_on,
             &scrollback_lines,
+            &terminal_minimap_on,
+            &terminal_minimap_width,
             &default_shell,
             &notify_on,
             &agent_bar_on,
@@ -1675,6 +1717,8 @@ mod tests {
         assert!(!opts.auto_resume_agent_sessions);
         assert!(opts.restore_terminal_scrollback);
         assert_eq!(opts.scrollback_lines, Some(42_000));
+        assert!(opts.terminal_minimap_enabled);
+        assert_eq!(opts.terminal_minimap_width, 36);
         assert_eq!(opts.default_shell.as_deref(), Some("/bin/dash"));
         // Index 0 selected + size left at the theme default → font inherits.
         assert_eq!(opts.font_family, None);
@@ -1686,6 +1730,8 @@ mod tests {
         let persist_on = build_persist_check(true);
         let auto_resume_on = build_persist_check(true);
         let scrollback_off = build_persist_check(false);
+        let terminal_minimap_off = build_toggle_switch(false);
+        terminal_minimap_width.set_value(48.0);
         let notify_off = build_toggle_switch(false);
         let agent_bar_off = build_toggle_switch(false);
         let minimap_off = build_toggle_switch(false);
@@ -1703,6 +1749,8 @@ mod tests {
             &auto_resume_on,
             &scrollback_off,
             &scrollback_lines,
+            &terminal_minimap_off,
+            &terminal_minimap_width,
             &default_shell,
             &notify_off,
             &agent_bar_off,
@@ -1726,6 +1774,8 @@ mod tests {
         assert!(opts.persist_browser_session);
         assert!(opts.auto_resume_agent_sessions);
         assert!(!opts.restore_terminal_scrollback);
+        assert!(!opts.terminal_minimap_enabled);
+        assert_eq!(opts.terminal_minimap_width, 48);
         assert!(!opts.system_notifications_enabled);
         assert!(!opts.agent_bar_mode);
         assert!(!opts.editor_minimap_enabled);

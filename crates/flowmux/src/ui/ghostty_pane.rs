@@ -14,6 +14,7 @@
 //! Add explicit parsing here if those OSC forms need GUI-native signals.
 
 use crate::ui::pane_terminal::PaneCallbacks;
+use crate::ui::terminal_minimap::TerminalMinimap;
 use crate::ui::terminal_scrollback::{
     normalize_plain_text_snapshot, replay_bytes, snapshot_from_vte_html,
 };
@@ -52,6 +53,9 @@ pub struct GhosttyPane {
     /// Set by VTE's `contents-changed` signal. Periodic persistence consumes
     /// the flag so unchanged terminal buffers are not extracted every cycle.
     scrollback_dirty: Rc<Cell<bool>>,
+    terminal_scrollbar: gtk::Scrollbar,
+    terminal_scrollbar_enabled: Rc<Cell<bool>>,
+    terminal_minimap: TerminalMinimap,
     /// Last non-empty text selection VTE reported. Agent TUIs (Claude Code,
     /// Codex) repaint constantly; VTE clears the drag-selection on the next
     /// output frame (`deselect_all` in `process_incoming`), so by the time the
@@ -391,6 +395,17 @@ impl GhosttyPane {
         });
     }
 
+    pub fn set_minimap(&self, enabled: bool, width: u16) {
+        self.terminal_minimap
+            .set_width(flowmux_config::options::Options::clamp_terminal_minimap_width(width));
+        self.terminal_minimap.set_enabled(enabled);
+        self.terminal_scrollbar_enabled.set(!enabled);
+        sync_terminal_scrollbar_visibility(
+            &self.terminal_scrollbar,
+            self.terminal_scrollbar_enabled.get(),
+        );
+    }
+
     /// Feed raw bytes to the child PTY (snapping the view to the bottom first).
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         scroll_terminal_to_bottom(&self.widget);
@@ -674,7 +689,14 @@ impl GhosttyPane {
         scrollbar.set_can_focus(false);
         scrollbar.set_width_request(12);
         container.add_overlay(&scrollbar);
-        install_terminal_scrollbar_adjustment_sync(&term, &scrollbar);
+        let terminal_scrollbar_enabled = Rc::new(Cell::new(true));
+        install_terminal_scrollbar_adjustment_sync(
+            &term,
+            &scrollbar,
+            terminal_scrollbar_enabled.clone(),
+        );
+        let terminal_minimap = TerminalMinimap::new(&term);
+        container.add_overlay(terminal_minimap.widget());
 
         // Make inline IME preedit (e.g. a composing Hangul syllable) visible
         // even when the foreground app has hidden the terminal cursor.
@@ -995,6 +1017,9 @@ impl GhosttyPane {
             pid,
             last_polled_cwd: Rc::new(RefCell::new(None)),
             scrollback_dirty,
+            terminal_scrollbar: scrollbar,
+            terminal_scrollbar_enabled,
+            terminal_minimap,
             last_selection,
             _pty: Rc::new(RefCell::new(Some(pty))),
         }
@@ -1849,14 +1874,15 @@ fn terminal_adjustment_has_scrollback(adj: &gtk::Adjustment) -> bool {
     adjustment_has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
 }
 
-fn sync_terminal_scrollbar_visibility(scrollbar: &gtk::Scrollbar) {
+fn sync_terminal_scrollbar_visibility(scrollbar: &gtk::Scrollbar, enabled: bool) {
     let adj = scrollbar.adjustment();
-    scrollbar.set_visible(terminal_adjustment_has_scrollback(&adj));
+    scrollbar.set_visible(enabled && terminal_adjustment_has_scrollback(&adj));
 }
 
 fn sync_terminal_scrollbar_adjustment(
     term: &vte::Terminal,
     scrollbar: &gtk::Scrollbar,
+    enabled: &Rc<Cell<bool>>,
     watched_adjustment: &Rc<RefCell<Option<gtk::Adjustment>>>,
 ) {
     if let Some(adj) = term.vadjustment() {
@@ -1871,31 +1897,50 @@ fn sync_terminal_scrollbar_adjustment(
                 .is_some_and(|watched| watched.as_ptr() == adj.as_ptr())
         };
         if !already_watching {
-            let scrollbar_for_changed = scrollbar.clone();
+            let scrollbar_for_changed = scrollbar.downgrade();
+            let enabled_for_changed = enabled.clone();
             adj.connect_changed(move |_| {
-                sync_terminal_scrollbar_visibility(&scrollbar_for_changed);
+                if let Some(scrollbar) = scrollbar_for_changed.upgrade() {
+                    sync_terminal_scrollbar_visibility(&scrollbar, enabled_for_changed.get());
+                }
             });
             *watched_adjustment.borrow_mut() = Some(adj);
         }
     }
 
-    sync_terminal_scrollbar_visibility(scrollbar);
+    sync_terminal_scrollbar_visibility(scrollbar, enabled.get());
 }
 
-fn install_terminal_scrollbar_adjustment_sync(term: &vte::Terminal, scrollbar: &gtk::Scrollbar) {
+fn install_terminal_scrollbar_adjustment_sync(
+    term: &vte::Terminal,
+    scrollbar: &gtk::Scrollbar,
+    enabled: Rc<Cell<bool>>,
+) {
     let watched_adjustment = Rc::new(RefCell::new(None::<gtk::Adjustment>));
-    sync_terminal_scrollbar_adjustment(term, scrollbar, &watched_adjustment);
+    sync_terminal_scrollbar_adjustment(term, scrollbar, &enabled, &watched_adjustment);
 
     let scrollbar_for_notify = scrollbar.clone();
+    let enabled_for_notify = enabled.clone();
     let watched_for_notify = watched_adjustment.clone();
     term.connect_vadjustment_notify(move |term| {
-        sync_terminal_scrollbar_adjustment(term, &scrollbar_for_notify, &watched_for_notify);
+        sync_terminal_scrollbar_adjustment(
+            term,
+            &scrollbar_for_notify,
+            &enabled_for_notify,
+            &watched_for_notify,
+        );
     });
 
     let scrollbar_for_realize = scrollbar.clone();
+    let enabled_for_realize = enabled.clone();
     let watched_for_realize = watched_adjustment.clone();
     term.connect_realize(move |term| {
-        sync_terminal_scrollbar_adjustment(term, &scrollbar_for_realize, &watched_for_realize);
+        sync_terminal_scrollbar_adjustment(
+            term,
+            &scrollbar_for_realize,
+            &enabled_for_realize,
+            &watched_for_realize,
+        );
     });
 
     let term_for_idle = term.clone();
@@ -1904,6 +1949,7 @@ fn install_terminal_scrollbar_adjustment_sync(term: &vte::Terminal, scrollbar: &
         sync_terminal_scrollbar_adjustment(
             &term_for_idle,
             &scrollbar_for_idle,
+            &enabled,
             &watched_adjustment,
         );
     });
@@ -3194,6 +3240,8 @@ mod tests {
         );
         let terminal = pane.widget.downgrade();
         let container = pane.container.downgrade();
+        pane.set_minimap(true, 24);
+        pane.show_message("minimap release check\n");
 
         pane.close_pty();
         drop(pane);
