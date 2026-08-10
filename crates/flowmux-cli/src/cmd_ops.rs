@@ -61,6 +61,14 @@ pub(crate) async fn run_session_name(client: &Client) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) async fn run_agents(client: &Client, json: bool) -> anyhow::Result<()> {
+    let Response::Tree { workspaces } = client.call(Request::WorkspaceTree).await? else {
+        anyhow::bail!("unexpected response to WorkspaceTree");
+    };
+    println!("{}", render_agents(&workspaces, json)?);
+    Ok(())
+}
+
 pub(crate) fn claude_session_name(
     workspace: &flowmux_ipc::protocol::TreeWorkspace,
     surface: SurfaceId,

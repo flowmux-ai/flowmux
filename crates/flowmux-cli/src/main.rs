@@ -119,6 +119,9 @@ enum Cmd {
     /// indented tree (or `--json` for scripts).
     Tree,
 
+    /// List live AI agents and their Claude Code messaging addresses.
+    Agents,
+
     /// Workspace operations.
     Workspace {
         #[command(subcommand)]
@@ -843,6 +846,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(exit_code);
     }
 
+    let json_mode = cli.json;
     let socket = cli
         .socket
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
@@ -863,7 +867,10 @@ async fn main() -> anyhow::Result<()> {
         return run_session_name(&client).await;
     }
 
-    let json_mode = cli.json;
+    if matches!(cmd, Cmd::Agents) {
+        return run_agents(&client, json_mode).await;
+    }
+
     let req = build_request(cmd)?;
     let resp = client.call(req).await?;
     print_response(&resp, json_mode)?;

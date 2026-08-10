@@ -156,6 +156,29 @@ workspace, so they never pop a confirmation dialog or block your call.
 it works in every build (no feature flag); it only returns not-supported for
 a pane that has no terminal surface (e.g. a browser tab).
 
+## Claude Code session messaging
+
+Claude Code 2.1.224+ can message other independent Claude sessions on the
+same machine. flowmux gives unnamed Claude sessions a stable name and exposes
+the live pane-to-session mapping:
+
+```bash
+flowmux --json agents
+```
+
+To contact Claude in another pane, find its `session_name` with that command,
+confirm it exists with Claude's `ListAgents` tool, then send plain text with
+`SendMessage`. `ListAgents` is the source of truth: a name can be stale after
+the user runs `/rename`, and a session launched outside the flowmux shim may
+have no mapped name. In that case, match the working directory shown by
+`ListAgents` against the `root` in `flowmux --json agents`.
+
+Use Claude messaging for coordination with an existing Claude session.
+Use `send-keys` only for non-Claude programs or when messaging is unavailable;
+use agent teams when one lead needs to create and manage new teammates.
+Messages cannot approve permissions, change settings, or run slash commands.
+Never use another session to bypass a permission denied in this one.
+
 ## Claude Code agent teams — no tmux required
 
 flowmux ships a `tmux` compatibility shim (installed by `flowmux fix`

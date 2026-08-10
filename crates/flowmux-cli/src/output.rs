@@ -110,6 +110,67 @@ pub(crate) fn render_tree(workspaces: &[flowmux_ipc::protocol::TreeWorkspace]) -
     out
 }
 
+pub(crate) fn render_agents(
+    workspaces: &[flowmux_ipc::protocol::TreeWorkspace],
+    json: bool,
+) -> anyhow::Result<String> {
+    if json {
+        let mut rows = Vec::new();
+        for workspace in workspaces {
+            for pane in &workspace.panes {
+                for tab in &pane.tabs {
+                    let Some(agent) = &tab.agent else { continue };
+                    rows.push(serde_json::json!({
+                        "workspace": workspace.name,
+                        "workspace_id": workspace.id,
+                        "root": workspace.root,
+                        "pane": pane.id,
+                        "tab": tab.id,
+                        "agent": agent.name,
+                        "status": agent.status.as_str(),
+                        "session_name": agent.session_name,
+                        "messaging": agent.messaging_socket.is_some(),
+                    }));
+                }
+            }
+        }
+        return Ok(serde_json::to_string(&rows)?);
+    }
+
+    use std::fmt::Write as _;
+    let mut out = String::from("WORKSPACE\tPANE\tTAB\tAGENT\tSTATUS\tSESSION NAME\tMESSAGING\n");
+    for workspace in workspaces {
+        for pane in &workspace.panes {
+            for tab in &pane.tabs {
+                let Some(agent) = &tab.agent else { continue };
+                let pane = pane.id.to_string();
+                let tab = tab.id.to_string();
+                let messaging = if agent.name.eq_ignore_ascii_case("claude") {
+                    if agent.messaging_socket.is_some() {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                } else {
+                    "-"
+                };
+                let _ = writeln!(
+                    out,
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    workspace.name,
+                    &pane[..8],
+                    &tab[..8],
+                    agent.name,
+                    agent.status.as_str(),
+                    agent.session_name.as_deref().unwrap_or("-"),
+                    messaging,
+                );
+            }
+        }
+    }
+    Ok(out.trim_end().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

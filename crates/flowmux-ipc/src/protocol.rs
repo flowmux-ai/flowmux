@@ -102,6 +102,10 @@ pub struct TreeAgent {
     pub custom_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_socket: Option<String>,
 }
 
 /// A leaf pane (one slot in the split grid) and its tabs.
@@ -150,6 +154,8 @@ fn collect_leaf_panes(pane: &Pane, out: &mut Vec<TreePane>) {
                             message: agent.message.clone(),
                             custom_status: agent.custom_status.clone(),
                             session_id: agent.session_id.clone(),
+                            session_name: agent.session_name.clone(),
+                            messaging_socket: agent.messaging_socket.clone(),
                         }),
                     })
                     .collect(),
@@ -525,6 +531,10 @@ pub enum Request {
         custom_status: Option<String>,
         #[serde(default)]
         session_id: Option<String>,
+        #[serde(default)]
+        session_name: Option<String>,
+        #[serde(default)]
+        messaging_socket: Option<String>,
     },
 
     /// `flowmux claude-teams [--count N] [-- args...]` — spin up a

@@ -1570,6 +1570,8 @@ fn agent_presence_ignores_stale_seq() {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         true,
     );
@@ -1595,6 +1597,8 @@ fn apply_report_screen_scan_keeps_proc_owned_identity() {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         true,
     );
@@ -1626,6 +1630,8 @@ fn working_to_idle_in_hidden_surface_becomes_done_until_seen() {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         false,
     );
@@ -1651,6 +1657,8 @@ fn hidden_blocked_alert_clears_on_workspace_acknowledgement_without_losing_statu
             message: Some("approval needed".into()),
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         false,
     );
@@ -1683,6 +1691,8 @@ fn initial_idle_agent_report_in_hidden_surface_stays_idle() {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         false,
     )
@@ -1712,6 +1722,8 @@ fn agent_presence_replaces_transient_message_metadata() {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         },
         true,
     );
@@ -1721,6 +1733,50 @@ fn agent_presence_replaces_transient_message_metadata() {
     assert_eq!(presence.message, None);
     assert_eq!(presence.custom_status, None);
     assert_eq!(presence.session_id.as_deref(), Some("session-1"));
+}
+
+#[test]
+fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
+    let mut presence = AgentPresence::new("claude", AgentActivity::Idle, Some(10));
+    presence.session_name = Some("demo-1234-abcd".into());
+    presence.messaging_socket = Some("/tmp/claude.sock".into());
+
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Working),
+            activity: Some(AgentActivity::Running),
+            pid: Some(10),
+            source: Some("flowmux:hook".into()),
+            seq: None,
+            message: None,
+            custom_status: None,
+            session_id: None,
+            session_name: None,
+            messaging_socket: None,
+        },
+        true,
+    ));
+    assert_eq!(presence.session_name.as_deref(), Some("demo-1234-abcd"));
+
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Idle),
+            activity: Some(AgentActivity::Idle),
+            pid: Some(11),
+            source: Some("flowmux:hook".into()),
+            seq: None,
+            message: None,
+            custom_status: None,
+            session_id: None,
+            session_name: None,
+            messaging_socket: None,
+        },
+        true,
+    ));
+    assert_eq!(presence.session_name, None);
+    assert_eq!(presence.messaging_socket, None);
 }
 
 #[test]
@@ -1748,6 +1804,8 @@ fn hook_report_uses_opencode_name_when_surface_title_has_oc_prefix() {
                 message: None,
                 custom_status: None,
                 session_id: Some("ses-opencode".into()),
+                session_name: None,
+                messaging_socket: None,
             },
             true,
         ),

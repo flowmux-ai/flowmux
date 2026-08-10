@@ -834,6 +834,8 @@ impl Pane {
                         .map(str::to_string)
                         .or_else(|| same_status.and_then(|agent| agent.custom_status.clone())),
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 };
                 match surface.agent.as_mut() {
                     Some(agent) => {
@@ -2224,6 +2226,8 @@ pub struct AgentStatusReport {
     pub message: Option<String>,
     pub custom_status: Option<String>,
     pub session_id: Option<String>,
+    pub session_name: Option<String>,
+    pub messaging_socket: Option<String>,
 }
 
 impl AgentStatusReport {
@@ -2242,6 +2246,8 @@ impl AgentStatusReport {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
         }
     }
 
@@ -2445,6 +2451,8 @@ fn reconcile_surface_process_agent(
             if reclaimable && existing.name != name {
                 existing.name = name.to_string();
                 existing.source = Some(AGENT_SOURCE_PROC.to_string());
+                existing.session_name = None;
+                existing.messaging_socket = None;
                 true
             } else {
                 false
@@ -2477,6 +2485,10 @@ pub struct AgentPresence {
     pub custom_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messaging_socket: Option<String>,
     #[serde(default = "agent_presence_seen_default")]
     pub seen: bool,
 }
@@ -2497,6 +2509,8 @@ impl AgentPresence {
             message: None,
             custom_status: None,
             session_id: None,
+            session_name: None,
+            messaging_socket: None,
             seen: true,
         }
     }
@@ -2510,6 +2524,8 @@ impl AgentPresence {
         presence.message = report.message;
         presence.custom_status = report.custom_status;
         presence.session_id = report.session_id;
+        presence.session_name = report.session_name;
+        presence.messaging_socket = report.messaging_socket;
         // Initial idle/unknown/working reports establish presence without an
         // alert. A blocking report is unacknowledged only when its source is not
         // actually visible.
@@ -2547,6 +2563,11 @@ impl AgentPresence {
         let next = report.effective_status().unwrap_or(self.status);
         let prev = self.status;
         let same_agent = self.name == report.name;
+        let same_session = same_agent && (report.pid.is_none() || self.pid == report.pid);
+        if !same_session {
+            self.session_name = None;
+            self.messaging_socket = None;
+        }
         // Process-tree truth owns *identity*: a screen-text scan must not rename
         // (or re-own) a proc-owned presence. Terminal scrollback routinely
         // *mentions* other agents — a log line, a file listing, or an AI chat
@@ -2591,6 +2612,12 @@ impl AgentPresence {
         self.custom_status = report.custom_status;
         if report.session_id.is_some() {
             self.session_id = report.session_id;
+        }
+        if report.session_name.is_some() {
+            self.session_name = report.session_name;
+        }
+        if report.messaging_socket.is_some() {
+            self.messaging_socket = report.messaging_socket;
         }
         let needs_acknowledgement = next == AgentStatus::Blocked
             || AgentStatus::should_mark_unseen_on_idle(prev, next)

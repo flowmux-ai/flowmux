@@ -549,6 +549,15 @@ fn tree_parses_and_maps_to_workspace_tree_request() {
 }
 
 #[test]
+fn agents_parses_and_maps_to_workspace_tree_request() {
+    let cli = Cli::try_parse_from(["flowmuxctl", "agents"]).unwrap();
+    assert!(matches!(
+        build_request(cli.cmd).unwrap(),
+        Request::WorkspaceTree
+    ));
+}
+
+#[test]
 fn session_name_is_stable_and_unique_per_tab() {
     use flowmux_ipc::protocol::TreeWorkspace;
 
@@ -595,7 +604,7 @@ fn render_tree_marks_active_tab_and_indents() {
                     kind: "terminal".into(),
                     active: false,
                     agent: Some(TreeAgent {
-                        name: "codex".into(),
+                        name: "claude".into(),
                         status: AgentStatus::Blocked,
                         activity: AgentActivity::NeedsInput,
                         source: Some("flowmux:hook".into()),
@@ -603,6 +612,8 @@ fn render_tree_marks_active_tab_and_indents() {
                         message: Some("approval needed".into()),
                         custom_status: None,
                         session_id: Some("session-1".into()),
+                        session_name: Some("demo-1234-abcd".into()),
+                        messaging_socket: Some("/tmp/claude.sock".into()),
                     }),
                 },
                 TreeTab {
@@ -622,9 +633,17 @@ fn render_tree_marks_active_tab_and_indents() {
     // Active tab marked with '*', inactive with a space.
     assert!(out.contains(&format!("* [browser] {t2} \"docs\"")));
     assert!(out.contains(&format!(
-        "  [terminal] {t1} \"shell\" agent=codex status=blocked"
+        "  [terminal] {t1} \"shell\" agent=claude status=blocked"
     )));
     assert_eq!(render_tree(&[]), "(no workspaces)\n");
+
+    let workspaces = [ws];
+    let agents = render_agents(&workspaces, false).unwrap();
+    assert!(agents.contains("demo-1234-abcd\tyes"));
+    let agents = render_agents(&workspaces, true).unwrap();
+    let rows: serde_json::Value = serde_json::from_str(&agents).unwrap();
+    assert_eq!(rows[0]["session_name"], "demo-1234-abcd");
+    assert_eq!(rows[0]["messaging"], true);
 }
 
 #[test]

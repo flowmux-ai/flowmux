@@ -760,6 +760,8 @@ impl GuiHandler {
                 message,
                 custom_status,
                 session_id,
+                session_name,
+                messaging_socket,
                 ..
             } => match surface {
                 Some(surface) => {
@@ -811,6 +813,8 @@ impl GuiHandler {
                             message,
                             custom_status,
                             session_id,
+                            session_name,
+                            messaging_socket,
                         };
                         if let Some((ws_id, _)) = self
                             .inner

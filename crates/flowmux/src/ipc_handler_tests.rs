@@ -532,6 +532,8 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
         message: None,
         custom_status: Some("Starting turn".into()),
         session_id: None,
+        session_name: None,
+        messaging_socket: None,
     });
     tokio::pin!(response);
 
@@ -597,6 +599,8 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
                 message: None,
                 custom_status: None,
                 session_id: None,
+                session_name: None,
+                messaging_socket: None,
             })
             .await,
         Response::Ok
@@ -652,6 +656,8 @@ async fn stale_and_screen_reports_do_not_emit_recent_activity() {
             message: None,
             custom_status: Some(custom_status.into()),
             session_id: Some("session-1".into()),
+            session_name: None,
+            messaging_socket: None,
         });
         tokio::pin!(response);
         let command = tokio::select! {
@@ -703,6 +709,8 @@ async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it()
         message: None,
         custom_status: None,
         session_id: Some("claude-session-1".into()),
+        session_name: Some("demo-1234-abcd".into()),
+        messaging_socket: Some("/tmp/claude.sock".into()),
     });
     tokio::pin!(response);
     let command = tokio::select! {
@@ -727,6 +735,18 @@ async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it()
         store.lookup("claude", surface).as_deref(),
         Some("claude-session-1")
     );
+    let Response::Tree { workspaces } = handler.handle(Request::WorkspaceTree).await else {
+        panic!("expected workspace tree");
+    };
+    let agent = workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.panes)
+        .flat_map(|pane| &pane.tabs)
+        .find(|tab| tab.id == surface)
+        .and_then(|tab| tab.agent.as_ref())
+        .expect("Claude presence should be exposed in the workspace tree");
+    assert_eq!(agent.session_name.as_deref(), Some("demo-1234-abcd"));
+    assert_eq!(agent.messaging_socket.as_deref(), Some("/tmp/claude.sock"));
 
     assert!(matches!(
         handler
@@ -742,6 +762,8 @@ async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it()
                 message: None,
                 custom_status: Some("Session ended".into()),
                 session_id: Some("stale-session".into()),
+                session_name: None,
+                messaging_socket: None,
             })
             .await,
         Response::Ok
@@ -775,6 +797,8 @@ async fn agent_activity_session_id_is_persisted_and_stale_end_cannot_forget_it()
                 message: None,
                 custom_status: Some("Session ended".into()),
                 session_id: Some("claude-session-1".into()),
+                session_name: None,
+                messaging_socket: None,
             })
             .await,
         Response::Ok

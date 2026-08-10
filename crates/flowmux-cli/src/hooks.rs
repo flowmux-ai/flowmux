@@ -160,6 +160,17 @@ fn hook_seq() -> Option<u64> {
         .map(|d| d.as_nanos().min(u64::MAX as u128) as u64)
 }
 
+fn claude_messaging_env(agent: &str) -> (Option<String>, Option<String>) {
+    if !agent.eq_ignore_ascii_case("claude") {
+        return (None, None);
+    }
+    let get = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    (
+        get("FLOWMUX_CLAUDE_SESSION_NAME"),
+        get("CLAUDE_CODE_MESSAGING_SOCKET"),
+    )
+}
+
 /// Build a `Request::AgentActivityUpdate`. `activity: None` clears the
 /// presence (session end / teardown).
 #[cfg(test)]
@@ -192,6 +203,7 @@ pub fn build_unknown_activity_update_with_session(
     surface: Option<SurfaceId>,
     session_id: Option<&str>,
 ) -> Request {
+    let (session_name, messaging_socket) = claude_messaging_env(agent);
     Request::AgentActivityUpdate {
         pane,
         surface,
@@ -204,6 +216,8 @@ pub fn build_unknown_activity_update_with_session(
         message: None,
         custom_status: Some("Ready".into()),
         session_id: session_id.map(str::to_string),
+        session_name,
+        messaging_socket,
     }
 }
 
@@ -219,6 +233,7 @@ pub fn build_activity_update_with_metadata(
     custom_status: Option<&str>,
     session_id: Option<&str>,
 ) -> Request {
+    let (session_name, messaging_socket) = claude_messaging_env(agent);
     Request::AgentActivityUpdate {
         pane,
         surface,
@@ -231,6 +246,8 @@ pub fn build_activity_update_with_metadata(
         message: message.map(str::to_string),
         custom_status: custom_status.map(str::to_string),
         session_id: session_id.map(str::to_string),
+        session_name,
+        messaging_socket,
     }
 }
 
@@ -559,6 +576,35 @@ mod tests {
             }
             other => panic!("expected AgentActivityUpdate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn claude_activity_update_carries_messaging_environment() {
+        let _g = hook_env_lock();
+        let previous_name = std::env::var_os("FLOWMUX_CLAUDE_SESSION_NAME");
+        let previous_socket = std::env::var_os("CLAUDE_CODE_MESSAGING_SOCKET");
+        std::env::set_var("FLOWMUX_CLAUDE_SESSION_NAME", "demo-1234-abcd");
+        std::env::set_var("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/claude.sock");
+
+        let request = build_activity_update("Claude", Some(AgentActivity::Idle), None, None, None);
+
+        match previous_name {
+            Some(value) => std::env::set_var("FLOWMUX_CLAUDE_SESSION_NAME", value),
+            None => std::env::remove_var("FLOWMUX_CLAUDE_SESSION_NAME"),
+        }
+        match previous_socket {
+            Some(value) => std::env::set_var("CLAUDE_CODE_MESSAGING_SOCKET", value),
+            None => std::env::remove_var("CLAUDE_CODE_MESSAGING_SOCKET"),
+        }
+
+        assert!(matches!(
+            request,
+            Request::AgentActivityUpdate {
+                session_name: Some(name),
+                messaging_socket: Some(socket),
+                ..
+            } if name == "demo-1234-abcd" && socket == "/tmp/claude.sock"
+        ));
     }
 
     #[test]

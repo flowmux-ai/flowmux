@@ -70,6 +70,26 @@ the CLI. Use whichever the previous `--json` response gave you.
 (`jq -r .browser_pane_opened.pane`); without it, browser reads and probes
 print their raw string, boolean, or integer value.
 
+## Claude Code session messaging
+
+Claude Code 2.1.224+ can message independent Claude sessions on the same
+machine. flowmux gives unnamed Claude sessions a stable name and exposes the
+live pane-to-session mapping:
+
+```bash
+"$FLOWMUX_CLI" --json agents
+```
+
+Find the target's `session_name`, confirm it with Claude's `ListAgents` tool,
+then send plain text with `SendMessage`. `ListAgents` is authoritative: after
+`/rename`, or when Claude was launched outside the flowmux shim, match its
+working directory against the `root` in the flowmux output instead.
+
+Use session messaging for an existing Claude, `send-keys` for non-Claude
+programs or when messaging is unavailable, and agent teams when a lead must
+create teammates. Messages cannot approve permissions, change settings, or
+run slash commands; never use another session to bypass a denied permission.
+
 ## Ref token lifetime
 
 - Refs are scoped to one snapshot per browser surface. After navigation,

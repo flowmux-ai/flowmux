@@ -2553,6 +2553,8 @@ mod tests {
             message: None,
             custom_status: None,
             session_id: Some(format!("{agent}-session")),
+            session_name: None,
+            messaging_socket: None,
         };
 
         store
@@ -2741,6 +2743,8 @@ mod tests {
                     message: None,
                     custom_status: None,
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -2776,6 +2780,8 @@ mod tests {
                     message: Some("approval needed".into()),
                     custom_status: None,
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -2836,6 +2842,8 @@ mod tests {
                     message: None,
                     custom_status: None,
                     session_id: Some("ses-opencode".into()),
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -2970,6 +2978,8 @@ mod tests {
                     message: None,
                     custom_status: None,
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -3185,6 +3195,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3238,6 +3250,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3287,6 +3301,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3306,6 +3322,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3341,6 +3359,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3414,6 +3434,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3451,6 +3473,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
@@ -3491,6 +3515,8 @@ Do you want to continue?";
                     message: None,
                     custom_status: Some("Starting turn".into()),
                     session_id: Some("session-new".into()),
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -3548,6 +3574,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: Some("Working".into()),
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await
@@ -3596,6 +3624,8 @@ Do you want to continue?";
                         message: None,
                         custom_status: None,
                         session_id: None,
+                        session_name: None,
+                        messaging_socket: None,
                     },
                 )
                 .await,
