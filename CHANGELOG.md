@@ -2,12 +2,40 @@
 
 # Changelog
 
-All notable changes are recorded here in release order. The next release line
-is 0.8.14; this document does not change the crate version by itself.
+All notable changes are recorded here in release order. This document does not
+change the crate version by itself.
 
 ## [Unreleased]
 
-- Documentation and release-preparation updates for 0.8.0.
+## [0.9.0] - 2026-08-10
+
+### Added
+
+- Added live workspace previews after a sustained sidebar hover, refreshed in
+  place without switching away from the active workspace.
+- Added a bounded terminal scrollback minimap with color sampling, viewport
+  navigation, clear-state preservation, and an `ALT` indicator that disables
+  unsafe history navigation while an alternate-screen application is active.
+- Added an optional editor minimap and live editor-name refresh.
+- Added stable naming and messaging discovery for plain Claude Code sessions.
+
+### Performance
+
+- Rendered workspace previews directly at their maximum `384x240` display size
+  instead of allocating full-workspace textures every 250 ms.
+- Bounded styled scrollback before XML parsing, removed avoidable editor and
+  surface clones, and kept minimap state fixed at 128 samples per pane.
+
+### Fixed
+
+- Stabilized pane splitting, tab drag reparenting, background workspace focus,
+  and keyboard focus/input in newly opened windows.
+- Preserved styled terminal scrollback across restarts and minimap colors after
+  clearing a terminal.
+- Avoided stale IBus fallback input and expired stale usage limits even when a
+  provider refresh fails.
+- Improved release-tarball installation, Linux dependency bootstrapping, and
+  ThorVG installation setup.
 
 ## [0.7.9] - 2026-07-17
 
