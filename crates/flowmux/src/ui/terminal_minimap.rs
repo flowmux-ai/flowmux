@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Bounded-memory overview of VTE scrollback.
+//! Bounded-memory overview of VTE terminal content.
 
+use crate::ui::terminal_scrollback::{
+    vte_html_row_appearance, vte_html_row_appearances, VteRowAppearance,
+};
 use gtk::glib;
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -16,10 +19,16 @@ const MIN_VIEWPORT_HEIGHT: f64 = 6.0;
 struct MinimapState {
     enabled: Cell<bool>,
     refresh_pending: Cell<bool>,
-    densities: RefCell<Vec<f32>>,
+    samples: RefCell<Vec<RowSample>>,
 }
 
-/// A transparent overlay that stores only a fixed-size row-density sample.
+#[derive(Clone, Copy, Default)]
+struct RowSample {
+    density: f32,
+    color: Option<[u8; 3]>,
+}
+
+/// A transparent overlay that stores only fixed-size row density/color samples.
 /// VTE remains the sole owner of terminal text and scrollback.
 #[derive(Clone)]
 pub(crate) struct TerminalMinimap {
@@ -65,7 +74,7 @@ impl TerminalMinimap {
             return;
         }
         if !enabled {
-            self.state.densities.borrow_mut().clear();
+            self.state.samples.borrow_mut().clear();
             self.area.set_visible(false);
             return;
         }
@@ -96,32 +105,46 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             background.red() as f64,
             background.green() as f64,
             background.blue() as f64,
-            0.92,
+            0.72,
         );
         let _ = cr.paint();
 
         let color = area.color();
-        let densities = state.densities.borrow();
-        if !densities.is_empty() {
-            let band = height as f64 / densities.len() as f64;
-            cr.set_source_rgba(
-                color.red() as f64,
-                color.green() as f64,
-                color.blue() as f64,
-                0.55,
-            );
-            for (index, density) in densities.iter().enumerate() {
-                let bar_width = (f64::from(width - 4) * f64::from(*density)).max(0.0);
+        let samples = state.samples.borrow();
+        if !samples.is_empty() {
+            let band = height as f64 / samples.len() as f64;
+            for (index, sample) in samples.iter().enumerate() {
+                let (red, green, blue) = sample.color.map_or_else(
+                    || {
+                        (
+                            color.red() as f64,
+                            color.green() as f64,
+                            color.blue() as f64,
+                        )
+                    },
+                    |[red, green, blue]| {
+                        (
+                            f64::from(red) / 255.0,
+                            f64::from(green) / 255.0,
+                            f64::from(blue) / 255.0,
+                        )
+                    },
+                );
+                cr.set_source_rgba(red, green, blue, 0.5);
+                let bar_width = (f64::from(width - 4) * f64::from(sample.density)).max(0.0);
                 if bar_width > 0.0 {
                     cr.rectangle(2.0, index as f64 * band, bar_width, band.max(1.0));
+                    let _ = cr.fill();
                 }
             }
-            let _ = cr.fill();
         }
 
         let Some(adj) = term.vadjustment() else {
             return;
         };
+        if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
+            return;
+        }
         let Some((top, viewport_height)) = viewport_geometry(
             adj.lower(),
             adj.upper(),
@@ -135,18 +158,10 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             color.red() as f64,
             color.green() as f64,
             color.blue() as f64,
-            0.18,
+            0.08,
         );
-        cr.rectangle(0.5, top + 0.5, f64::from(width - 1), viewport_height - 1.0);
-        let _ = cr.fill_preserve();
-        cr.set_source_rgba(
-            color.red() as f64,
-            color.green() as f64,
-            color.blue() as f64,
-            0.9,
-        );
-        cr.set_line_width(1.0);
-        let _ = cr.stroke();
+        cr.rectangle(0.0, top, f64::from(width), viewport_height);
+        let _ = cr.fill();
     });
 }
 
@@ -269,9 +284,7 @@ fn sync_visibility(
     state: &MinimapState,
     adjustment: Option<&gtk::Adjustment>,
 ) {
-    let visible = state.enabled.get()
-        && adjustment
-            .is_some_and(|adj| has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()));
+    let visible = state.enabled.get() && adjustment.is_some();
     area.set_visible(visible);
 }
 
@@ -297,26 +310,75 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     let Some(adj) = term.vadjustment() else {
         return;
     };
+
+    let columns = term.column_count().max(1) as usize;
     if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
-        state.densities.borrow_mut().clear();
-        area.set_visible(false);
+        refresh_visible_screen(term, area, state, columns);
         return;
     }
 
-    let columns = term.column_count().max(1) as usize;
     let last_column = columns.saturating_sub(1) as i64;
     let rows = sampled_rows(adj.lower(), adj.upper(), MAX_SAMPLES);
-    let mut densities = state.densities.borrow_mut();
-    densities.clear();
+    let mut samples = state.samples.borrow_mut();
+    samples.clear();
     for row in rows {
-        let (text, _) = term.text_range_format(vte::Format::Text, row, 0, row, last_column);
-        densities.push(
-            text.as_deref()
-                .map_or(0.0, |text| row_density(text, columns)),
-        );
+        let (html, _) = term.text_range_format(vte::Format::Html, row, 0, row, last_column);
+        let sample = html
+            .as_deref()
+            .and_then(|html| vte_html_row_appearance(html).ok())
+            .map_or_else(
+                || {
+                    let (text, _) =
+                        term.text_range_format(vte::Format::Text, row, 0, row, last_column);
+                    RowSample {
+                        density: text
+                            .as_deref()
+                            .map_or(0.0, |text| row_density(text, columns)),
+                        color: None,
+                    }
+                },
+                |appearance| sample_from_appearance(appearance, columns),
+            );
+        samples.push(sample);
     }
-    drop(densities);
+    drop(samples);
     area.queue_draw();
+}
+
+fn refresh_visible_screen(
+    term: &vte::Terminal,
+    area: &gtk::DrawingArea,
+    state: &MinimapState,
+    columns: usize,
+) {
+    let appearances = term
+        .text_format(vte::Format::Html)
+        .as_deref()
+        .and_then(|html| vte_html_row_appearances(html).ok());
+    let mut samples = state.samples.borrow_mut();
+    samples.clear();
+    if let Some(appearances) = appearances {
+        for index in sampled_rows(0.0, appearances.len() as f64, MAX_SAMPLES) {
+            samples.push(sample_from_appearance(appearances[index as usize], columns));
+        }
+    } else if let Some(text) = term.text_format(vte::Format::Text) {
+        let lines: Vec<_> = text.lines().collect();
+        for index in sampled_rows(0.0, lines.len() as f64, MAX_SAMPLES) {
+            samples.push(RowSample {
+                density: row_density(lines[index as usize], columns),
+                color: None,
+            });
+        }
+    }
+    drop(samples);
+    area.queue_draw();
+}
+
+fn sample_from_appearance(appearance: VteRowAppearance, columns: usize) -> RowSample {
+    RowSample {
+        density: (appearance.non_whitespace as f32 / columns as f32).clamp(0.0, 1.0),
+        color: appearance.color,
+    }
 }
 
 fn scroll_to_pointer(term: &vte::Terminal, y: f64, height: f64) {

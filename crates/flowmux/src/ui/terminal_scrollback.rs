@@ -53,6 +53,12 @@ struct ParsedSnapshot {
     runs: Vec<StyledRun>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct VteRowAppearance {
+    pub(crate) non_whitespace: usize,
+    pub(crate) color: Option<[u8; 3]>,
+}
+
 impl ParsedSnapshot {
     fn plain_text(&self) -> String {
         let capacity = self.runs.iter().map(|run| run.text.len()).sum();
@@ -170,6 +176,35 @@ pub(crate) fn replay_bytes(snapshot: &TerminalScrollback) -> Result<Option<Vec<u
         }
     };
     Ok((!replay.is_empty()).then(|| with_terminal_line_endings(&replay)))
+}
+
+/// Reduce one VTE HTML row to the only data the minimap retains.
+pub(crate) fn vte_html_row_appearance(html: &str) -> Result<VteRowAppearance, String> {
+    Ok(vte_html_row_appearances(html)?
+        .into_iter()
+        .next()
+        .unwrap_or_default())
+}
+
+/// Reduce VTE's visible-screen HTML to bounded row metadata without retaining text.
+pub(crate) fn vte_html_row_appearances(html: &str) -> Result<Vec<VteRowAppearance>, String> {
+    let parsed = parse_vte_html(html)?;
+    let mut rows = vec![VteRowAppearance::default()];
+    for run in parsed.runs {
+        for ch in run.text.chars() {
+            if ch == '\n' {
+                rows.push(VteRowAppearance::default());
+            } else if !ch.is_whitespace() {
+                let appearance = rows.last_mut().expect("rows always contains one entry");
+                appearance.non_whitespace += 1;
+                appearance.color = appearance
+                    .color
+                    .or(run.style.foreground)
+                    .or(run.style.background);
+            }
+        }
+    }
+    Ok(rows)
 }
 
 fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
@@ -467,6 +502,23 @@ mod tests {
             snapshot.content(),
             "<pre><b><font color=\"#112233\">colored &amp; bold</font></b>\nplain</pre>"
         );
+    }
+
+    #[test]
+    fn minimap_row_appearance_keeps_density_and_terminal_color() {
+        let appearance =
+            vte_html_row_appearance("<pre>  plain <font color=\"#112233\">color</font>   </pre>")
+                .unwrap();
+        assert_eq!(appearance.non_whitespace, 10);
+        assert_eq!(appearance.color, Some([0x11, 0x22, 0x33]));
+
+        let rows = vte_html_row_appearances(
+            "<pre><font color=\"#ff0000\">red</font>\n<font color=\"#00ff00\">green</font></pre>",
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].color, Some([0xff, 0, 0]));
+        assert_eq!(rows[1].color, Some([0, 0xff, 0]));
     }
 
     #[test]

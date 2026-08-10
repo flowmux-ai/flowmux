@@ -22,7 +22,7 @@ MVP의 동작 범위는 다음과 같다.
 |---|---|---|
 | 일반 shell/inline 출력 | VTE가 보관한 전체 scrollback | 클릭·드래그로 이동 가능 |
 | primary screen을 쓰는 Agent UI | VTE가 보관한 전체 scrollback | 클릭·드래그로 이동 가능 |
-| alternate-screen TUI | minimap 숨김 | 2단계 검토 대상 |
+| alternate-screen TUI | 현재 화면 cell만 표시 | 내부 history 탐색은 2단계 검토 대상 |
 
 TUI가 alternate screen에 들어가면 terminal emulator는 그 애플리케이션의 내부
 대화 목록이나 scroll offset을 소유하지 않는다. 화면에 현재 그려진 cell만 볼 수
@@ -85,21 +85,23 @@ widget과 결합하지 않는다.
 ### 4.1 기본 형태
 
 - 위치: terminal 오른쪽 `gtk::Overlay`
-- 초기 폭: 24px
+- 초기 폭: 50px
 - 표현: 각 표본 row의 non-whitespace 비율을 가로 막대 길이로 표시
 - 색상: terminal foreground/background에서 파생한 단색과 alpha
-- viewport: 최소 6px 높이의 outline/overlay
+- viewport: 테두리 없는 최소 6px 높이의 반투명 overlay
 - 동작: 왼쪽 클릭은 해당 위치를 viewport 중앙으로 이동, drag는 연속 이동
 - focus: minimap은 keyboard focus를 가져가지 않고 terminal focus를 유지
 
-실제 축소 글자를 그리지 않는 이유는 폭 24px에서 읽을 수 없고, Pango layout 수천
+실제 축소 글자를 그리지 않는 이유는 폭 50px에서도 읽을 수 없고, Pango layout 수천
 개를 유지하는 비용에 비해 정보 가치가 낮기 때문이다. 출력의 분포와 현재 위치만
 보여 주는 density map이 terminal navigation 목적에 충분하다.
 
 ### 4.2 history가 한 페이지뿐인 경우
 
-`upper - lower <= page_size`이면 minimap을 숨긴다. 빈 shell과 alternate-screen TUI를
-process 이름으로 추측하지 않고, 실제 VTE scrollback이 있을 때만 탐색 UI를 노출한다.
+`upper - lower <= page_size`이면 현재 화면의 density와 색상은 표시하되 viewport
+overlay와 pointer navigation은 생략한다. 따라서 `clear`가 scrollback을 지운 직후와
+alternate-screen TUI에서도 현재 VTE cell은 보이지만 존재하지 않는 history로 이동하지
+않는다.
 
 정확한 alternate-screen minimap이나 badge가
 필요해지면 `pty-tee`가 이미 추적하는 DECSET/DECRST 47, 1047, 1049 상태를 새 IPC
@@ -113,7 +115,7 @@ process인 GUI에 상태가 전달되지 않는다.
 - `terminal_minimap_enabled=false`: 현재 12px scrollbar 동작 유지
 - `terminal_minimap_enabled=true`: scrollbar를 숨기고 minimap overlay 표시
 
-기본값은 ON이고 초기 폭은 24px이다. 설정 UI와 `options.json`에서 ON/OFF 및
+기본값은 ON이고 초기 폭은 50px이다. 설정 UI와 `options.json`에서 ON/OFF 및
 12..=96px 폭을 바꿀 수 있으며 열린 terminal에도 즉시 반영한다.
 
 ## 5. 데이터 흐름과 구성 요소
@@ -123,8 +125,10 @@ PTY output
    -> VTE grid / scrollback
        -> contents-changed (최대 5Hz로 coalesce)
            -> TerminalMinimap sampler
-               -> text_range_format(Text, sampled row)
-               -> Vec<RowDensity> (원문은 보관하지 않음)
+               -> text_range_format(HTML, sampled history row)
+               -> text_format(HTML, current screen only)
+               -> 기존 VTE HTML parser
+               -> Vec<RowSample { density, color }> (원문은 보관하지 않음)
                -> DrawingArea::queue_draw()
 
 GtkAdjustment changed/value-changed
@@ -142,7 +146,7 @@ minimap click/drag
 
 - weak `vte::Terminal`
 - `gtk::DrawingArea`
-- 최대 128개의 `RowDensity`
+- 최대 128개의 `RowSample { density, color }`
 - 마지막으로 관찰한 adjustment bounds와 widget 크기
 - refresh pending flag
 
@@ -156,9 +160,14 @@ minimap click/drag
 1. `lower`, `upper`, `page_size`, terminal column 수를 읽는다.
 2. 전체 row 수가 128 이하이면 각 row를 읽는다.
 3. 128행보다 크면 범위 전체에서 균등하게 최대 128행만 선택한다.
-4. 각 row를 `text_range_format(Text, row, 0, row, last_column)`으로 읽는다.
-5. `non_whitespace_chars / column_count`를 `0.0..=1.0`으로 저장한다.
+4. 각 row를 `text_range_format(HTML, row, 0, row, last_column)`으로 읽는다.
+5. 기존 scrollback HTML parser로 대표 foreground/background 색상과
+   `non_whitespace_chars / column_count`를 추출한다.
 6. raw text는 즉시 버린다.
+
+한 페이지 이하에서는 VTE의 absolute history row와 `clear` 이후 현재 screen row의
+좌표가 달라질 수 있으므로 `text_format(HTML)`로 현재 화면만 한 번 읽는다. 이 경로도
+최종 cache는 최대 128개 sample이며 원문을 보관하지 않는다.
 
 Unicode display width와 foreground/background cell 색을 정확히 재현하지 않는 것은
 의도된 근사다. 장문 history에서도 호출 수, 저장량, 그리기 수가 일정하다는 장점이
@@ -243,7 +252,7 @@ MVP 목표값은 구현 후 benchmark로 조정한다.
 
 - refresh 빈도: sustained output에서 최대 5Hz
 - text extraction: refresh당 최대 128 row
-- 캐시: pane당 128 density value와 작은 widget state만 유지
+- 캐시: pane당 128 density/color sample과 작은 widget state만 유지
 - 원문 보관: 없음
 - draw: 최대 128 bar + viewport 1개
 - GTK main-thread stall: p95 8ms 미만, 단일 frame 16ms 초과 없음
@@ -260,17 +269,21 @@ MVP 목표값은 구현 후 benchmark로 조정한다.
 - 기존 `gtk::Overlay`에서 scrollbar와 상호 배타적으로 표시
 - content refresh 최대 5Hz, refresh당 최대 128행
 - 기본 ON, 폭 12..=96px, 열린 terminal 즉시 적용
-- one-page/alternate-screen 상태에서는 숨김
+- one-page/alternate-screen 상태에서는 현재 화면만 표시하고 history 탐색은 생략
 - 표본·viewport·pointer mapping 및 widget graph 해제 test
 
 실제 flowmux terminal에서 4,000행을 출력해 minimap 표시, 중간 클릭, 아래쪽
 drag를 검증했다. Options에서 ON/OFF와 폭 24→56px 변경은 열린 terminal에 즉시
-반영됐고, `less`의 alternate screen에서는 숨었다가 종료 후 복원됐다.
+반영됐다. 초기 구현에서는 `less`의 alternate screen에서 숨었다가 종료 후 복원됐다.
+
+후속 live 검증에서는 `clear` 직후 현재 화면에 6개 ANSI 색상 행을 출력해 density와
+색상 sample이 즉시 다시 나타나는지 확인했다. 이어 360행을 출력한 뒤 50px minimap의
+색상 구간, 무테 반투명 viewport, 중간 클릭 이동을 확인했다.
 
 메모리 smoke test는 동일 pane에 50,000행, 100,000행, 다시 100,000행을 출력했다.
 RSS는 각각 203,240KB(시작), 203,308KB, 203,584KB, 203,552KB였고 5,000행
 scrollback 상한 도달 뒤 계속 증가하지 않았다. minimap 자체는 pane당 최대 128개
-`f32` density만 보관하며 terminal 원문은 보관하지 않는다.
+density/color sample만 보관하며 terminal 원문은 보관하지 않는다.
 
 ### 2단계 — TUI 내부 history (보류)
 
@@ -305,8 +318,8 @@ MVP에서는 `flowmux-core`, IPC protocol, `pty-tee`, Agent session 저장 형�
 - 1,000,000행 설정에서도 UI가 멈추지 않고 고정된 표본 수만 읽는다.
 - terminal keyboard focus, selection, wheel, Agent mouse capture, IME가 회귀하지 않는다.
 - Codex `--no-alt-screen`에서는 이전 대화 위치로 실제 이동할 수 있다.
-- Claude/OpenCode alternate-screen에서는 minimap이 숨고, 존재하지 않는 terminal
-  history로 이동하는 것처럼 보이지 않는다.
+- Claude/OpenCode alternate-screen에서는 현재 화면만 표시하고, 존재하지 않는
+  terminal history로 이동하는 것처럼 보이지 않는다.
 - live flowmux에서 일반 shell과 inline Agent 시나리오를 검증하고 결과를 기록한다.
 
 ## 12. 후속 후보

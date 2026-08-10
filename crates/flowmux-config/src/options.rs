@@ -58,7 +58,7 @@ pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
 pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
 pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
-pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 24;
+pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 50;
 
 /// Default for [`Options::system_notifications_enabled`]. Desktop toasts ship
 /// enabled so flowmux behaves like every other notifying app on first launch;
@@ -156,8 +156,8 @@ pub struct Options {
     /// the built-in 10,000-line default for older option files.
     #[serde(default)]
     pub scrollback_lines: Option<u32>,
-    /// Show a scrollback overview on terminal tabs. The map is hidden when the
-    /// terminal has no scrollback (including alternate-screen TUIs).
+    /// Show a terminal overview on terminal tabs. A single-screen terminal is
+    /// still sampled, but only scrollback can be navigated.
     #[serde(default = "default_terminal_minimap_enabled")]
     pub terminal_minimap_enabled: bool,
     /// Terminal minimap width in pixels.
