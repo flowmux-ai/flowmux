@@ -127,7 +127,9 @@ impl PaneCallbackRouter {
             },
             on_split_right: {
                 let bridge = bridge.clone();
+                let focused = focused.clone();
                 Rc::new(RefCell::new(move |pane| {
+                    let pane = focused.get().unwrap_or(pane);
                     dispatch_with_ack(&bridge, move |ack| GtkCommand::SplitFocused {
                         pane,
                         direction: flowmux_core::SplitDirection::Vertical,
@@ -137,7 +139,9 @@ impl PaneCallbackRouter {
             },
             on_split_down: {
                 let bridge = bridge.clone();
+                let focused = focused.clone();
                 Rc::new(RefCell::new(move |pane| {
+                    let pane = focused.get().unwrap_or(pane);
                     dispatch_with_ack(&bridge, move |ack| GtkCommand::SplitFocused {
                         pane,
                         direction: flowmux_core::SplitDirection::Horizontal,
@@ -419,6 +423,43 @@ mod tests {
                 dir: FocusDir::Up,
             }) if actual_pane == pane
         ));
+    }
+
+    #[cfg_attr(target_os = "macos", test)]
+    #[cfg_attr(not(target_os = "macos"), gtk::test)]
+    fn split_icon_targets_the_focused_pane() {
+        let (bridge, command_rx) = Bridge::new();
+        let focused_pane = PaneId::new();
+        let icon_pane = PaneId::new();
+        let callbacks = PaneCallbackRouter::new(
+            Rc::new(Cell::new(Some(focused_pane))),
+            bridge,
+            Rc::new(RefCell::new(flowmux_config::options::Options::default())),
+            Rc::new(RefCell::new(PaneRegistry::default())),
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        )
+        .into_callbacks();
+
+        (callbacks.on_split_right.borrow_mut())(icon_pane);
+
+        let context = glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+        let command = command_rx.try_recv().expect("queued split command");
+        let GtkCommand::SplitFocused {
+            pane,
+            direction,
+            ack,
+        } = command
+        else {
+            panic!("expected split command");
+        };
+        assert_eq!(pane, focused_pane);
+        assert_eq!(direction, flowmux_core::SplitDirection::Vertical);
+        let _ = ack.send(Ok(PaneId::new()));
     }
 
     #[test]
