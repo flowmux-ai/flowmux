@@ -6950,6 +6950,8 @@ mod tests {
                     message: None,
                     custom_status: None,
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
@@ -7142,6 +7144,8 @@ mod tests {
                     message: None,
                     custom_status: None,
                     session_id: None,
+                    session_name: None,
+                    messaging_socket: None,
                 },
             )
             .await;
