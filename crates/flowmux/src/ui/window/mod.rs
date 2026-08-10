@@ -1443,6 +1443,7 @@ impl WindowController {
         self.css_provider.load_from_string(&resolved.css(
             opts.focus_border_color_or_default(),
             opts.focus_border_alpha(),
+            opts.zoom_percent,
         ));
     }
 

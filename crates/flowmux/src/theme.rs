@@ -258,11 +258,15 @@ impl ResolvedTheme {
     }
 
     /// CSS rules that paint the pane frame and tint the sidebar to match
-    /// the terminal background. `focus_border_color` is the hex color chosen
-    /// in options, and `focus_border_alpha` is the 0.0..=1.0 opacity from
-    /// the same options. The focused pane's 2px header accent is rendered as
-    /// `rgba(r,g,b,alpha)` so slider changes apply immediately.
-    pub fn css(&self, focus_border_color: &str, focus_border_alpha: f32) -> String {
+    /// the terminal background. The side panel uses `zoom_percent` so its
+    /// workspace and Agents lists follow the global zoom. The focused pane's
+    /// 2px header accent uses the configured color and opacity.
+    pub fn css(
+        &self,
+        focus_border_color: &str,
+        focus_border_alpha: f32,
+        zoom_percent: u16,
+    ) -> String {
         let bg_css = rgba_css(&self.bg);
         let focus_css = focus_border_rgba_css(focus_border_color, focus_border_alpha);
         // Active-workspace edge stripes always paint at full opacity,
@@ -288,6 +292,8 @@ impl ResolvedTheme {
             0.94,
         ));
         let toast_border_css = rgba_css(&blend_with_alpha(&self.fg, 0.18));
+        let sidebar_zoom =
+            flowmux_config::options::Options::clamp_zoom(zoom_percent) as f64 / 100.0;
         format!(
             r#"
 .flowmux-pane {{
@@ -389,6 +395,14 @@ paned > separator {{
 .flowmux-sidebar-shell {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
+}}
+.flowmux-sidebar-shell .heading,
+.flowmux-sidebar-shell .body {{
+    font-size: {sidebar_body_font:.2}pt;
+}}
+.flowmux-sidebar-shell .caption,
+.flowmux-sidebar-shell .caption-heading {{
+    font-size: {sidebar_caption_font:.2}pt;
 }}
 .flowmux-sidebar-shell headerbar {{
     background-color: @sidebar_bg_color;
@@ -675,6 +689,8 @@ paned > separator {{
             toast_bg = toast_bg_css,
             toast_border = toast_border_css,
             agent_item_min = AGENT_BAR_ITEM_MIN_WIDTH_PX,
+            sidebar_body_font = 11.0 * sidebar_zoom,
+            sidebar_caption_font = 9.0 * sidebar_zoom,
         )
     }
 }
@@ -764,7 +780,7 @@ mod tests {
     /// shipped fallback palette.
     fn sample_css() -> String {
         let cfg = flowmux_config::ghostty::GhosttyConfig::default();
-        ResolvedTheme::from_ghostty(&cfg).css("#fff4b3", 0.5)
+        ResolvedTheme::from_ghostty(&cfg).css("#fff4b3", 0.5, 100)
     }
 
     #[test]
@@ -1019,6 +1035,20 @@ mod tests {
                 && agents_divider_rule.contains("border-top: 1px solid"),
             "Agents split divider must paint only a thin line"
         );
+    }
+
+    #[test]
+    fn sidebar_font_follows_global_zoom() {
+        let cfg = flowmux_config::ghostty::GhosttyConfig::default();
+        let theme = ResolvedTheme::from_ghostty(&cfg);
+
+        let half = theme.css("#fff4b3", 0.5, 50);
+        assert!(half.contains("font-size: 5.50pt;"));
+        assert!(half.contains("font-size: 4.50pt;"));
+
+        let double = theme.css("#fff4b3", 0.5, 200);
+        assert!(double.contains("font-size: 22.00pt;"));
+        assert!(double.contains("font-size: 18.00pt;"));
     }
 
     /// Multi-tab panes paint a 2px top stripe on the active tab. The

@@ -362,6 +362,7 @@ fn main() -> anyhow::Result<()> {
         provider.load_from_string(&theme.css(
             initial_options.focus_border_color_or_default(),
             initial_options.focus_border_alpha(),
+            initial_options.zoom_percent,
         ));
         if let Some(display) = gtk::gdk::Display::default() {
             gtk::style_context_add_provider_for_display(
