@@ -1156,6 +1156,27 @@ pub enum IncrementalSplitOutcome {
     Failed,
 }
 
+/// Move GtkPaned's remembered focus to its other direct child before
+/// detaching `child`. GTK 4.14 warns when the focused direct child is removed.
+pub(crate) fn handoff_paned_focus_before_detach(paned: &gtk::Paned, child: &gtk::Widget) -> bool {
+    if paned.focus_child().as_ref() != Some(child) {
+        return false;
+    }
+    let other = if paned.start_child().as_ref() == Some(child) {
+        paned.end_child()
+    } else if paned.end_child().as_ref() == Some(child) {
+        paned.start_child()
+    } else {
+        None
+    };
+    if let Some(other) = other {
+        paned.set_focus_child(Some(&other));
+        true
+    } else {
+        false
+    }
+}
+
 /// Wrap only `target_pane` in a new split while preserving other panes in the
 /// same workspace. Semantics match flowmux-core::Pane::split_leaf: `target_pane`
 /// keeps its PaneId as the first child of the new split, and the sibling
@@ -1216,6 +1237,12 @@ pub fn split_pane_incremental(
         Slot::Stack(s) => s.visible_child().as_ref() == Some(&target_frame),
         _ => false,
     };
+    let restore_parent_focus = match &slot {
+        Slot::PanedStart(p) | Slot::PanedEnd(p) => {
+            handoff_paned_focus_before_detach(p, &target_frame)
+        }
+        Slot::Stack(_) => false,
+    };
 
     // Detach the target frame from its parent. set_*_child(None) automatically
     // unparents the previous child.
@@ -1267,10 +1294,16 @@ pub fn split_pane_incremental(
     match slot {
         Slot::PanedStart(p) => {
             p.set_start_child(Some(&paned_widget));
+            if restore_parent_focus {
+                p.set_focus_child(Some(&paned_widget));
+            }
             IncrementalSplitOutcome::SucceededNested
         }
         Slot::PanedEnd(p) => {
             p.set_end_child(Some(&paned_widget));
+            if restore_parent_focus {
+                p.set_focus_child(Some(&paned_widget));
+            }
             IncrementalSplitOutcome::SucceededNested
         }
         Slot::Stack(s) => {
@@ -1503,7 +1536,9 @@ fn build_leaf_pane(
     // The File browser toggle lives in the side-panel footer (next to the
     // Options button), not in the per-pane tool row.
 
-    stack.set_visible_child_name(&active.to_string());
+    if !empty {
+        stack.set_visible_child_name(&active.to_string());
+    }
     tabbar.append(&tabs);
     tabbar.append(&spacer);
     tabbar.append(&tools);
@@ -1552,7 +1587,9 @@ fn build_leaf_pane(
         r.pane_tab_containers.insert(pane_id, tabs);
         r.pane_zoom_buttons.insert(pane_id, zoom);
         r.pane_workspace.insert(pane_id, workspace);
-        r.activate_surface(pane_id, active);
+        if !empty {
+            r.activate_surface(pane_id, active);
+        }
         r.refresh_tab_multi_class(pane_id);
     }
 
@@ -2053,6 +2090,28 @@ mod tab_dnd_tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
+    fn pane_body_uses_a_synchronous_drop_target() {
+        let stack = gtk::Stack::new();
+        let callbacks = PaneCallbacks::noop_for_test();
+        attach_pane_body_dnd(
+            &stack,
+            PaneId::new(),
+            Rc::new(Cell::new(PaneDropZone::None)),
+            gtk::DrawingArea::new(),
+            &callbacks,
+        );
+        let controllers = stack.observe_controllers();
+
+        assert!((0..controllers.n_items()).any(|index| controllers
+            .item(index)
+            .is_some_and(|controller| controller.is::<gtk::DropTarget>())));
+        assert!(!(0..controllers.n_items()).any(|index| controllers
+            .item(index)
+            .is_some_and(|controller| controller.is::<gtk::DropTargetAsync>())));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     fn take_surface_for_tearoff_moves_widget_out_of_source_pane() {
         let pane = PaneId::new();
         let surface = SurfaceId::new();
@@ -2472,7 +2531,6 @@ fn attach_tab_dnd_handlers(
             (new_window_cb.borrow_mut())(pane_id, surface_id);
         }
         split_candidate_for_cancel.borrow_mut().take();
-        saw_target_for_cancel.set(false);
         native_views_suspend_for_cancel.borrow_mut().take();
         false
     });
@@ -2973,7 +3031,6 @@ fn attach_pane_body_dnd(
                 if zone.get().split_direction().is_some() {
                     saw_drop_target.set(true);
                 } else {
-                    saw_drop_target.set(false);
                     split_candidate.borrow_mut().take();
                 }
             }
@@ -2986,13 +3043,13 @@ fn attach_pane_body_dnd(
     widget.add_controller(motion);
 
     let drop_target =
-        gtk::DropTargetAsync::new(Some(tab_dnd_content_formats()), gtk::gdk::DragAction::MOVE);
+        gtk::DropTarget::new(gtk::glib::types::Type::STRING, gtk::gdk::DragAction::MOVE);
     drop_target.set_propagation_phase(gtk::PropagationPhase::Capture);
     drop_target.connect_accept(|target, drop| {
         if tab_dnd_formats_accept_payload(&drop.formats()) {
             true
         } else {
-            target.reject_drop(drop);
+            target.reject();
             false
         }
     });
@@ -3001,7 +3058,7 @@ fn attach_pane_body_dnd(
     let saw_drop_target = callbacks.tab_drag_drop_seen.clone();
     let committed_drop = callbacks.tab_drag_drop_committed.clone();
     let split_candidate = callbacks.tab_drag_split_candidate.clone();
-    drop_target.connect_drop(move |_, drop, x, y| {
+    drop_target.connect_drop(move |_, value, x, y| {
         let (w, h) = (frame.width() as f64, frame.height() as f64);
         let landed = landed_drop_zone(
             zone.get(),
@@ -3012,67 +3069,59 @@ fn attach_pane_body_dnd(
         zone.set(PaneDropZone::None);
         preview.queue_draw();
 
-        let drop = drop.clone();
-        let dispatch_tab_drop = dispatch_tab_drop.clone();
-        let saw_drop_target = saw_drop_target.clone();
-        let committed_drop = committed_drop.clone();
-        let split_candidate = split_candidate.clone();
-        gtk::glib::MainContext::default().spawn_local(async move {
-            let payload = match read_tab_dnd_payload_text(&drop).await.and_then(|payload| {
+        let payload = match value
+            .get::<String>()
+            .map_err(|error| format!("payload was not text: {error}"))
+            .and_then(|payload| {
                 parse_pane_dnd_payload(&payload)
                     .map_err(|error| format!("payload invalid: {error}"))
             }) {
-                Ok(payload) => payload,
-                Err(error) => {
-                    tracing::warn!(error = %error, "pane-body tab drop: failed to read payload");
-                    drop.finish(gtk::gdk::DragAction::empty());
-                    return;
+            Ok(payload) => payload,
+            Err(error) => {
+                tracing::warn!(%error, "pane-body tab drop: failed to read payload");
+                return false;
+            }
+        };
+        let (src_pane, src_surface, src_surface_model) = match payload {
+            PaneDndPayload::Tab(payload) => {
+                saw_drop_target.set(true);
+                if committed_drop.replace(true) {
+                    return false;
                 }
-            };
-            let (src_pane, src_surface, src_surface_model) = match payload {
-                PaneDndPayload::Tab(payload) => {
-                    saw_drop_target.set(true);
-                    if committed_drop.replace(true) {
-                        drop.finish(gtk::gdk::DragAction::empty());
-                        return;
-                    }
-                    (payload.src_pane, payload.src_surface, payload.surface)
-                }
-                PaneDndPayload::File(path) => {
-                    saw_drop_target.set(false);
-                    committed_drop.set(false);
-                    match file_drop_parts(&path) {
-                        Ok((pane, surface, model)) => (pane, surface, Some(model)),
-                        Err(error) => {
-                            tracing::warn!(%error, path = %path.display(), "file drop rejected");
-                            drop.finish(gtk::gdk::DragAction::empty());
-                            return;
-                        }
+                (payload.src_pane, payload.src_surface, payload.surface)
+            }
+            PaneDndPayload::File(path) => {
+                saw_drop_target.set(false);
+                committed_drop.set(false);
+                match file_drop_parts(&path) {
+                    Ok((pane, surface, model)) => (pane, surface, Some(model)),
+                    Err(error) => {
+                        tracing::warn!(%error, path = %path.display(), "file drop rejected");
+                        return false;
                     }
                 }
-            };
-            split_candidate.borrow_mut().take();
-            let command = tab_drop_command_for_pane_zone(
-                src_pane,
-                src_surface,
-                src_surface_model,
-                target_pane,
-                landed,
-            );
-            let Some(ack) = dispatch_tab_drop(command) else {
-                tracing::warn!("pane-body tab drop: command bridge is unavailable");
-                drop.finish(gtk::gdk::DragAction::empty());
-                return;
-            };
+            }
+        };
+        split_candidate.borrow_mut().take();
+        let command = tab_drop_command_for_pane_zone(
+            src_pane,
+            src_surface,
+            src_surface_model,
+            target_pane,
+            landed,
+        );
+        let Some(ack) = dispatch_tab_drop(command) else {
+            tracing::warn!("pane-body tab drop: command bridge is unavailable");
+            return false;
+        };
+        gtk::glib::MainContext::default().spawn_local(async move {
             match ack.await {
-                Ok(Ok(())) => drop.finish(gtk::gdk::DragAction::MOVE),
+                Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     tracing::warn!(%error, "pane-body tab drop: move rejected");
-                    drop.finish(gtk::gdk::DragAction::empty());
                 }
                 Err(error) => {
                     tracing::warn!(%error, "pane-body tab drop: move acknowledgement dropped");
-                    drop.finish(gtk::gdk::DragAction::empty());
                 }
             }
         });

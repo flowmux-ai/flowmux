@@ -18,8 +18,9 @@ use crate::ui::file_browser::{FileBrowserPaneState, FileBrowserPanel};
 use crate::ui::pane_terminal::PaneCallbacks;
 use crate::ui::sidebar::{Sidebar, WorkspaceRowAgentBlock, WorkspaceRowDetails};
 use crate::ui::workspace_view::{
-    attach_surface_to_pane, build_surface, build_surface_tab_widget, solo_workspace_pane,
-    split_pane_incremental, IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
+    attach_surface_to_pane, build_surface, build_surface_tab_widget,
+    handoff_paned_focus_before_detach, solo_workspace_pane, split_pane_incremental,
+    IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
 };
 use crate::ui::worktree_panel::WorktreePanel;
 use adw::prelude::*;
@@ -10282,6 +10283,19 @@ mod tests {
             .get(&moved)
             .map(|t| t.root_widget());
         assert!(before.is_some());
+
+        // Match the live DnD path: the pane being split is also the focused
+        // direct child of its parent GtkPaned.
+        let dst_frame = controller
+            .pane_registry
+            .borrow()
+            .pane_frame(dst)
+            .expect("destination pane is rendered");
+        let dst_parent = dst_frame
+            .parent()
+            .and_downcast::<gtk::Paned>()
+            .expect("destination pane is nested in a split");
+        dst_parent.set_focus_child(Some(&dst_frame));
 
         let (ack_tx, ack_rx) = oneshot::channel();
         controller

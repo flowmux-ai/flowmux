@@ -63,11 +63,31 @@ impl WindowController {
             return;
         };
 
-        // Detach both children from `paned`. After this `paned` has
-        // no children and `frame` / `sibling` have no parent; re-
-        // parenting `sibling` lower preserves its widget instance.
-        sibling.unparent();
-        frame.unparent();
+        let Some(grand) = paned.parent() else {
+            if let Some(ws) = self.store.get_workspace(ws_id).await {
+                self.rerender_workspace(&ws);
+            }
+            return;
+        };
+        let paned_widget: gtk::Widget = paned.clone().upcast();
+
+        // A nested focused paned cannot briefly have no focus child on GTK
+        // 4.14. Hand its outer paned a valid sibling while it is reparented.
+        let restore_nested_focus = grand
+            .downcast_ref::<gtk::Paned>()
+            .is_some_and(|grand_paned| {
+                handoff_paned_focus_before_detach(grand_paned, &paned_widget)
+            });
+
+        // Detach both children through `GtkPaned` so it can update its
+        // internal focus child before the widgets are reparented.
+        if paned.start_child().as_ref() == Some(&frame) {
+            paned.set_start_child(None::<&gtk::Widget>);
+            paned.set_end_child(None::<&gtk::Widget>);
+        } else {
+            paned.set_end_child(None::<&gtk::Widget>);
+            paned.set_start_child(None::<&gtk::Widget>);
+        }
 
         // Re-parent `sibling` into the slot `paned` occupied. Each
         // grand-parent kind needs its own removal API: a plain
@@ -78,14 +98,6 @@ impl WindowController {
         // `add_named` with the same name silently no-ops, and the
         // workspace renders blank — which the user reported as "the
         // right X-close drops every pane".
-        let Some(grand) = paned.parent() else {
-            paned.unparent();
-            if let Some(ws) = self.store.get_workspace(ws_id).await {
-                self.rerender_workspace(&ws);
-            }
-            return;
-        };
-
         if let Some(grand_paned) = grand.downcast_ref::<gtk::Paned>() {
             // Nested split: identify which slot of the outer paned holds
             // `paned` and replace it with `sibling`. Calling `set_*_child`
@@ -96,7 +108,6 @@ impl WindowController {
             // event-loop flush, which triggered the rerender fallback —
             // and that fallback rebuilt every other pane's terminal, killing
             // any agent (claude/codex/shell) running in those panes.
-            let paned_widget: gtk::Widget = paned.clone().upcast();
             if grand_paned.start_child().as_ref() == Some(&paned_widget) {
                 grand_paned.set_start_child(Some(&sibling));
             } else if grand_paned.end_child().as_ref() == Some(&paned_widget) {
@@ -110,6 +121,9 @@ impl WindowController {
                     self.rerender_workspace(&ws);
                 }
                 return;
+            }
+            if restore_nested_focus {
+                grand_paned.set_focus_child(Some(&sibling));
             }
         } else if let Some(stack) = grand.downcast_ref::<gtk::Stack>() {
             // Top-level workspace child of the GtkStack. Use
