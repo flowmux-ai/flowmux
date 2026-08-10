@@ -214,7 +214,9 @@ pub fn install_actions(
                 glib::MainContext::default().spawn_local(async move {
                     let root =
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                    let _ = bridge.tx.send(GtkCommand::NewWorkspace { root }).await;
+                    let _ = bridge
+                        .send_priority(GtkCommand::NewWorkspace { root })
+                        .await;
                 });
             })
             .build()

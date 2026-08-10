@@ -246,7 +246,9 @@ impl Sidebar {
             gtk::glib::MainContext::default().spawn_local(async move {
                 let root =
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                let _ = bridge.tx.send(GtkCommand::NewWorkspace { root }).await;
+                let _ = bridge
+                    .send_priority(GtkCommand::NewWorkspace { root })
+                    .await;
             });
         });
         let bell_button = gtk::MenuButton::new();
@@ -2293,6 +2295,39 @@ mod tests {
         let mut widgets = Vec::new();
         visit(widget.as_ref(), &mut widgets);
         widgets
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn new_workspace_button_bypasses_a_full_refresh_queue_without_dropping_updates() {
+        let (bridge, rx) = crate::bridge::Bridge::new();
+        let sidebar = Sidebar::new(
+            |_| {},
+            |_| {},
+            bridge.clone(),
+            NotificationStore::new(),
+            ActivityStore::new(),
+            None,
+            false,
+        );
+        let mut refresh_count = 0;
+        while bridge.tx.try_send(GtkCommand::RefreshWindowTitle).is_ok() {
+            refresh_count += 1;
+        }
+
+        descendant_widgets(&sidebar.header)
+            .into_iter()
+            .filter_map(|widget| widget.downcast::<gtk::Button>().ok())
+            .find(|button| button.tooltip_text().as_deref() == Some("New workspace (Ctrl+N)"))
+            .expect("sidebar header should contain the new workspace button")
+            .emit_clicked();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(1)).await;
+
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::NewWorkspace { .. }
+        ));
+        assert_eq!(bridge.tx.len(), refresh_count);
     }
 
     fn ws_with_active_terminal_cwd(cwd: Option<PathBuf>) -> Workspace {

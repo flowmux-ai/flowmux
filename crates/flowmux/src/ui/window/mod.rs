@@ -3484,7 +3484,7 @@ fn run_browser_screenshot(
     });
 }
 
-pub fn spawn_dispatch_loop(rx: async_channel::Receiver<GtkCommand>, controller: WindowController) {
+pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: WindowController) {
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
             controller.dispatch(cmd).await;

@@ -740,14 +740,62 @@ pub enum GtkCommand {
 #[derive(Clone)]
 pub struct Bridge {
     pub tx: async_channel::Sender<GtkCommand>,
+    priority_tx: async_channel::Sender<GtkCommand>,
 }
 
 const GTK_COMMAND_QUEUE_CAPACITY: usize = 64;
+const GTK_PRIORITY_QUEUE_CAPACITY: usize = 8;
+
+#[derive(Clone)]
+pub struct BridgeReceiver {
+    regular: async_channel::Receiver<GtkCommand>,
+    priority: async_channel::Receiver<GtkCommand>,
+}
+
+impl BridgeReceiver {
+    pub async fn recv(&self) -> Result<GtkCommand, async_channel::RecvError> {
+        loop {
+            if let Ok(command) = self.priority.try_recv() {
+                return Ok(command);
+            }
+            tokio::select! {
+                biased;
+                command = self.priority.recv(), if !self.priority.is_closed() => match command {
+                    Ok(command) => return Ok(command),
+                    Err(_) => continue,
+                },
+                command = self.regular.recv() => return command,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn try_recv(&self) -> Result<GtkCommand, async_channel::TryRecvError> {
+        match self.priority.try_recv() {
+            Ok(command) => Ok(command),
+            Err(_) => self.regular.try_recv(),
+        }
+    }
+}
 
 impl Bridge {
-    pub fn new() -> (Self, async_channel::Receiver<GtkCommand>) {
+    pub fn new() -> (Self, BridgeReceiver) {
         let (tx, rx) = async_channel::bounded(GTK_COMMAND_QUEUE_CAPACITY);
-        (Self { tx }, rx)
+        let (priority_tx, priority) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
+        (
+            Self { tx, priority_tx },
+            BridgeReceiver {
+                regular: rx,
+                priority,
+            },
+        )
+    }
+
+    pub async fn send_priority(
+        &self,
+        command: GtkCommand,
+    ) -> Result<(), async_channel::SendError<GtkCommand>> {
+        self.priority_tx.send(command).await
     }
 }
 
@@ -759,5 +807,9 @@ mod tests {
     fn command_queue_is_bounded() {
         let (bridge, _rx) = Bridge::new();
         assert_eq!(bridge.tx.capacity(), Some(GTK_COMMAND_QUEUE_CAPACITY));
+        assert_eq!(
+            bridge.priority_tx.capacity(),
+            Some(GTK_PRIORITY_QUEUE_CAPACITY)
+        );
     }
 }

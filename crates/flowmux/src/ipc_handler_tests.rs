@@ -15,12 +15,7 @@ use std::path::Path;
 /// tab). The bridge receiver is returned so the caller keeps it
 /// alive; the safety branches under test all return *before* sending
 /// a GtkCommand, so no GTK loop is needed to drive them.
-async fn single_pane_handler() -> (
-    GuiHandler,
-    async_channel::Receiver<GtkCommand>,
-    PaneId,
-    SurfaceId,
-) {
+async fn single_pane_handler() -> (GuiHandler, crate::bridge::BridgeReceiver, PaneId, SurfaceId) {
     // No agent-session store: tests must never write the developer's real
     // `$XDG_DATA_HOME/flowmux/agent-sessions/`.
     single_pane_handler_with_store(None).await
@@ -28,12 +23,7 @@ async fn single_pane_handler() -> (
 
 async fn single_pane_handler_with_store(
     session_store: Option<flowmux_state::AgentSessionStore>,
-) -> (
-    GuiHandler,
-    async_channel::Receiver<GtkCommand>,
-    PaneId,
-    SurfaceId,
-) {
+) -> (GuiHandler, crate::bridge::BridgeReceiver, PaneId, SurfaceId) {
     let store = StateStore::new_lazy(State::default());
     store
         .create_workspace(
@@ -1250,7 +1240,7 @@ async fn browser_open_reports_not_found_when_default_target_cannot_resolve() {
 
 async fn assert_browser_action_dispatches(
     handler: &GuiHandler,
-    rx: &async_channel::Receiver<GtkCommand>,
+    rx: &crate::bridge::BridgeReceiver,
     pane: PaneId,
     request: Request,
     assert_op: impl FnOnce(BrowserOp),
@@ -1946,7 +1936,7 @@ async fn browser_eval_reports_not_found_for_missing_browser_pane() {
 /// the final output.
 async fn run_tmux_compat(
     handler: &GuiHandler,
-    rx: &async_channel::Receiver<GtkCommand>,
+    rx: &crate::bridge::BridgeReceiver,
     args: &[&str],
     answer: impl Fn(GtkCommand) -> &'static str,
 ) -> (
