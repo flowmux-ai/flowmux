@@ -2563,7 +2563,9 @@ impl AgentPresence {
         let next = report.effective_status().unwrap_or(self.status);
         let prev = self.status;
         let same_agent = self.name == report.name;
-        let same_session = same_agent && (report.pid.is_none() || self.pid == report.pid);
+        let same_session = same_agent
+            && (report.pid.is_none() || self.pid == report.pid)
+            && (report.session_id.is_none() || self.session_id == report.session_id);
         if !same_session {
             self.session_name = None;
             self.messaging_socket = None;

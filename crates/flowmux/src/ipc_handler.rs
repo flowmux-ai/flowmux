@@ -320,7 +320,7 @@ impl GuiHandler {
                     None => Response::Error(RpcError::NotFound(pane.to_string())),
                     Some((ws_id, new_pane)) => {
                         let (tx, rx) = oneshot::channel();
-                        let _ = self
+                        if let Err(error) = self
                             .bridge
                             .tx
                             .send(GtkCommand::PaneSplitApplied {
@@ -330,9 +330,22 @@ impl GuiHandler {
                                 direction,
                                 ack: tx,
                             })
-                            .await;
-                        let _ = rx.await;
-                        Response::PaneSplitDone { new_pane }
+                            .await
+                        {
+                            let _ = self.inner.store().close_pane(new_pane).await;
+                            return Response::Error(RpcError::Internal(error.to_string()));
+                        }
+                        match rx.await {
+                            Ok(Ok(())) => Response::PaneSplitDone { new_pane },
+                            Ok(Err(error)) => {
+                                let _ = self.inner.store().close_pane(new_pane).await;
+                                Response::Error(RpcError::Internal(error))
+                            }
+                            Err(_) => {
+                                let _ = self.inner.store().close_pane(new_pane).await;
+                                Response::Error(RpcError::Internal("bridge closed".to_string()))
+                            }
+                        }
                     }
                 }
             }
@@ -372,12 +385,19 @@ impl GuiHandler {
                     Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                 }
             }
-            Request::TerminalOutput { surface } => {
+            Request::TerminalOutput {
+                surface,
+                alternate_screen,
+            } => {
                 let (tx, rx) = oneshot::channel();
                 if let Err(error) = self
                     .bridge
                     .tx
-                    .send(GtkCommand::TerminalOutputObserved { surface, ack: tx })
+                    .send(GtkCommand::TerminalOutputObserved {
+                        surface,
+                        alternate_screen,
+                        ack: tx,
+                    })
                     .await
                 {
                     return Response::Error(RpcError::Internal(error.to_string()));
@@ -666,11 +686,8 @@ impl GuiHandler {
                     };
                     if let Some((_, new_pane)) = store.split_pane(current, dir).await {
                         let source_pane = current;
-                        all_panes.push(new_pane);
-                        current = new_pane;
-
                         let (tx, rx) = oneshot::channel();
-                        let _ = self
+                        if let Err(error) = self
                             .bridge
                             .tx
                             .send(GtkCommand::PaneSplitApplied {
@@ -680,8 +697,27 @@ impl GuiHandler {
                                 direction: dir,
                                 ack: tx,
                             })
-                            .await;
-                        let _ = rx.await;
+                            .await
+                        {
+                            let _ = store.close_pane(new_pane).await;
+                            return Response::Error(RpcError::Internal(error.to_string()));
+                        }
+                        match rx.await {
+                            Ok(Ok(())) => {
+                                all_panes.push(new_pane);
+                                current = new_pane;
+                            }
+                            Ok(Err(error)) => {
+                                let _ = store.close_pane(new_pane).await;
+                                return Response::Error(RpcError::Internal(error));
+                            }
+                            Err(_) => {
+                                let _ = store.close_pane(new_pane).await;
+                                return Response::Error(RpcError::Internal(
+                                    "bridge closed".to_string(),
+                                ));
+                            }
+                        }
                     }
                 }
                 // Feed the `claude` invocation into each pane.
@@ -1085,7 +1121,7 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         pane: flowmux_core::PaneId,
         new_pane: flowmux_core::PaneId,
         direction: SplitDirection,
-    ) {
+    ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .bridge
@@ -1098,7 +1134,10 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
                 ack: tx,
             })
             .await;
-        let _ = rx.await;
+        match rx.await {
+            Ok(result) => result,
+            Err(_) => Err("bridge closed".to_string()),
+        }
     }
 
     async fn send_keys(&self, pane: flowmux_core::PaneId, keys: &str) -> Result<(), String> {

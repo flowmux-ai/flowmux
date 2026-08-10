@@ -235,41 +235,28 @@ impl WindowController {
     /// When possible, reuse `target_pane`'s existing `gtk::Frame` inside the new
     /// `gtk::Paned` so other panes in the same workspace, including shell
     /// sessions and browser navigation state, are not reset. If this fails,
-    /// for example because the target is missing from the registry or the
-    /// parent container is unexpected, safely fall back to [`Self::rerender_workspace`].
+    /// roll the store split back instead of rebuilding live panes.
     pub(super) async fn apply_split_incremental_or_rerender(
         &self,
         ws_id: WorkspaceId,
         target_pane: PaneId,
         new_pane: PaneId,
         direction: SplitDirection,
-    ) {
+    ) -> Result<(), String> {
         let Some(ws) = self.store.get_workspace(ws_id).await else {
-            return;
+            let _ = self.store.close_pane(new_pane).await;
+            return Err("split workspace vanished".to_string());
         };
 
-        // Find the new sibling pane's PaneContent / cwd in the post-split tree.
-        // daemon::StateStore::split_pane created it with a 0.5 ratio and
-        // tabbed_terminal, so mirror those values on the GTK side.
-        let new_content = ws
-            .surfaces
-            .iter()
-            .find_map(|s| s.root_pane.find_leaf_content(new_pane));
-        let Some(new_content) = new_content else {
-            self.rerender_workspace(&ws);
-            return;
-        };
-
-        // PaneId of the newly created Split node. The split containing the new
-        // sibling as a child is the split we need. Ratio save/restore keys on
-        // PaneId, so register the GTK widget with the same id.
-        let new_split_id = ws
-            .surfaces
-            .iter()
-            .find_map(|s| s.root_pane.parent_split_id(new_pane));
-        let Some(new_split_id) = new_split_id else {
-            self.rerender_workspace(&ws);
-            return;
+        let split = ws.surfaces.iter().find_map(|surface| {
+            Some((
+                surface.root_pane.find_leaf_content(new_pane)?,
+                surface.root_pane.parent_split_id(new_pane)?,
+            ))
+        });
+        let Some((new_content, new_split_id)) = split else {
+            let _ = self.store.close_pane(new_pane).await;
+            return Err("could not locate the new split".to_string());
         };
 
         // Fallback cwd for the new terminal. Surface content cwd wins; this
@@ -302,14 +289,17 @@ impl WindowController {
                 self.surfaces.borrow_mut().insert(ws.id, new_root);
                 self.refresh_workspace_solo(&ws);
                 self.refresh_window_title().await;
+                Ok(())
             }
             IncrementalSplitOutcome::SucceededNested => {
                 self.refresh_workspace_solo(&ws);
                 self.refresh_window_title().await;
+                Ok(())
             }
             IncrementalSplitOutcome::Failed => {
-                self.rerender_workspace(&ws);
+                let _ = self.store.close_pane(new_pane).await;
                 self.refresh_window_title().await;
+                Err("incremental split failed".to_string())
             }
         }
     }
@@ -934,6 +924,9 @@ impl WindowController {
         if !self.pane_registry.borrow().has_pane(dst_pane) {
             return Err("destination pane is not rendered".to_string());
         }
+        if !can_split_pane_incrementally(&self.pane_registry.borrow(), dst_pane) {
+            return Err("destination pane cannot be split incrementally".to_string());
+        }
 
         let Some((ws_id, new_pane, _surface_id)) = self
             .store
@@ -943,6 +936,7 @@ impl WindowController {
             return Err("destination pane no longer exists".to_string());
         };
         let Some(ws) = self.store.get_workspace(ws_id).await else {
+            let _ = self.store.close_pane(new_pane).await;
             return Err("destination workspace vanished".to_string());
         };
         let Some(new_split_id) = ws
@@ -950,6 +944,7 @@ impl WindowController {
             .iter()
             .find_map(|s| s.root_pane.parent_split_id(new_pane))
         else {
+            let _ = self.store.close_pane(new_pane).await;
             return Err("could not locate the new split node".to_string());
         };
         let Some(content) = ws
@@ -957,6 +952,7 @@ impl WindowController {
             .iter()
             .find_map(|s| s.root_pane.find_leaf_content(new_pane))
         else {
+            let _ = self.store.close_pane(new_pane).await;
             return Err("could not locate imported surface content".to_string());
         };
 
@@ -981,6 +977,7 @@ impl WindowController {
             }
             IncrementalSplitOutcome::SucceededNested => {}
             IncrementalSplitOutcome::Failed => {
+                let _ = self.store.close_pane(new_pane).await;
                 return Err("incremental split failed".to_string());
             }
         }
@@ -1003,6 +1000,9 @@ impl WindowController {
     ) -> Result<(), String> {
         if !self.pane_registry.borrow().has_pane(dst_pane) {
             return Err("destination pane is not rendered".to_string());
+        }
+        if !can_split_pane_incrementally(&self.pane_registry.borrow(), dst_pane) {
+            return Err("destination pane cannot be split incrementally".to_string());
         }
 
         if self.store.workspace_of_pane(dst_pane).await.is_none() {

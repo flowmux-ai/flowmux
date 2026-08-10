@@ -18,7 +18,7 @@ use crate::ui::file_browser::{FileBrowserPaneState, FileBrowserPanel};
 use crate::ui::pane_terminal::PaneCallbacks;
 use crate::ui::sidebar::{Sidebar, WorkspaceRowAgentBlock, WorkspaceRowDetails};
 use crate::ui::workspace_view::{
-    attach_surface_to_pane, build_surface, build_surface_tab_widget,
+    attach_surface_to_pane, build_surface, build_surface_tab_widget, can_split_pane_incrementally,
     handoff_paned_focus_before_detach, solo_workspace_pane, split_pane_incremental,
     IncrementalSplitOutcome, MovingSurface, PaneRegistry, TornOffSurface,
 };
@@ -6932,7 +6932,8 @@ mod tests {
         // collapse.
         controller
             .apply_split_incremental_or_rerender(ws_id, left, right, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
         let right_surface = store.get_workspace(ws_id).await.unwrap().surfaces[0]
             .root_pane
             .active_surface_id(right)
@@ -7328,7 +7329,8 @@ mod tests {
         assert_eq!(split_ws, ws_id);
         controller
             .apply_split_incremental_or_rerender(ws_id, original, sibling, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
 
         let original_terminal_after_split = controller
             .pane_registry
@@ -7440,7 +7442,7 @@ mod tests {
                 ack: ack_tx,
             })
             .await;
-        ack_rx.await.unwrap();
+        ack_rx.await.unwrap().unwrap();
 
         let registry = controller.pane_registry.borrow();
         let current_terminal = registry
@@ -7650,7 +7652,8 @@ mod tests {
             .expect("first split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_a, pane_b, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
 
         let b_terminal_initial = controller
             .pane_registry
@@ -7667,7 +7670,8 @@ mod tests {
             .expect("second split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_b, pane_c, SplitDirection::Horizontal)
-            .await;
+            .await
+            .unwrap();
 
         // Sanity: A and B widgets identity unchanged across both splits.
         let a_terminal_after_splits = controller
@@ -7810,7 +7814,8 @@ mod tests {
             .expect("first split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_a, pane_b, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
 
         // Second split: B / C (horizontal → top/bottom inside the right slot).
         // Tree shape: Split{ Leaf(A), Split{ Leaf(B), Leaf(C) } }. Closing C
@@ -7822,7 +7827,8 @@ mod tests {
             .expect("second split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_b, pane_c, SplitDirection::Horizontal)
-            .await;
+            .await
+            .unwrap();
 
         // Reproduce the user's focus history so MRU = [C, B, A] (C is current,
         // B was previous). Closing the focused pane C should hand focus back to B.
@@ -7912,14 +7918,16 @@ mod tests {
             .expect("first split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_a, pane_b, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
         let (_, pane_c) = store
             .split_pane(pane_b, SplitDirection::Horizontal)
             .await
             .expect("second split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_b, pane_c, SplitDirection::Horizontal)
-            .await;
+            .await
+            .unwrap();
 
         // Focus order: C → B → A, so MRU = [A, B, C] and the user is typing
         // in A. Closing the unfocused pane C must leave A still focused.
@@ -7999,14 +8007,16 @@ mod tests {
             .expect("first split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_a, pane_b, SplitDirection::Vertical)
-            .await;
+            .await
+            .unwrap();
         let (_, pane_c) = store
             .split_pane(pane_b, SplitDirection::Horizontal)
             .await
             .expect("second split should succeed");
         controller
             .apply_split_incremental_or_rerender(ws_id, pane_b, pane_c, SplitDirection::Horizontal)
-            .await;
+            .await
+            .unwrap();
 
         for p in [pane_a, pane_b, pane_c] {
             controller.focused_pane.set(Some(p));
@@ -8321,6 +8331,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::TerminalOutputObserved {
                 surface: background_surface,
+                alternate_screen: None,
                 ack,
             })
             .await;
@@ -8359,6 +8370,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::TerminalOutputObserved {
                 surface: background_surface,
+                alternate_screen: None,
                 ack,
             })
             .await;
@@ -8386,6 +8398,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::TerminalOutputObserved {
                 surface: background_surface,
+                alternate_screen: None,
                 ack,
             })
             .await;
@@ -10094,6 +10107,120 @@ mod tests {
             .root_pane
             .parent_split_id(split_pane)
             .is_some());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn failed_splits_leave_store_and_terminal_unchanged() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("split.rs");
+        std::fs::write(&file, "fn split() {}\n").unwrap();
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("ui".into()), root.path().to_path_buf())
+            .await;
+        let dst = store.get_workspace(ws_id).await.unwrap().surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        store
+            .split_pane(dst, flowmux_core::SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let ws = store.get_workspace(ws_id).await.unwrap();
+
+        let (bridge, _rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.ImportedSplitRecovery")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge,
+            gtk::CssProvider::new(),
+            None,
+        );
+        controller.render_workspace(&ws);
+
+        let terminal_before = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(dst)
+            .unwrap()
+            .root_widget();
+
+        // Force the incremental path to reject the destination before touching
+        // the store while leaving its live terminal mounted.
+        let frame = controller.pane_registry.borrow().pane_frame(dst).unwrap();
+        let parent = frame.parent().and_downcast::<gtk::Paned>().unwrap();
+        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        if parent.start_child().as_ref() == Some(&frame) {
+            parent.set_start_child(None::<&gtk::Widget>);
+            wrapper.append(&frame);
+            parent.set_start_child(Some(&wrapper));
+        } else {
+            parent.set_end_child(None::<&gtk::Widget>);
+            wrapper.append(&frame);
+            parent.set_end_child(Some(&wrapper));
+        }
+
+        let model = crate::ui::workspace_view::editor_surface_for_file_drop(&file).unwrap();
+        let result = controller
+            .split_imported_surface_into_pane(model, dst, flowmux_core::SplitDirection::Horizontal)
+            .await;
+        assert!(result.is_err(), "the forced incremental split should fail");
+
+        let ws_after = store.get_workspace(ws_id).await.unwrap();
+        let mut pane_count = 0;
+        ws_after.surfaces[0]
+            .root_pane
+            .for_each_leaf(|_| pane_count += 1);
+        assert_eq!(
+            pane_count, 2,
+            "rejected split must leave the store unchanged"
+        );
+        {
+            let registry = controller.pane_registry.borrow();
+            assert_eq!(registry.pane_ids_in_workspace(ws_id).count(), 2);
+            assert_eq!(
+                registry.active_terminal(dst).unwrap().root_widget(),
+                terminal_before
+            );
+            assert!(registry.editors.is_empty());
+        }
+
+        let (_, new_pane) = store
+            .split_pane(dst, flowmux_core::SplitDirection::Horizontal)
+            .await
+            .unwrap();
+        assert!(controller
+            .apply_split_incremental_or_rerender(
+                ws_id,
+                dst,
+                new_pane,
+                flowmux_core::SplitDirection::Horizontal,
+            )
+            .await
+            .is_err());
+
+        let ws_after = store.get_workspace(ws_id).await.unwrap();
+        let mut pane_count = 0;
+        ws_after.surfaces[0]
+            .root_pane
+            .for_each_leaf(|_| pane_count += 1);
+        assert_eq!(pane_count, 2, "failed GTK apply must roll the store back");
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .active_terminal(dst)
+                .unwrap()
+                .root_widget(),
+            terminal_before
+        );
     }
 
     /// Moving the only tab out of a pane collapses that pane but keeps the

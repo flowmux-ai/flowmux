@@ -16,7 +16,7 @@
 //!     terminal pane  <-->  outer PTY (stdin/stdout)  <-->  pty-tee  <-->  inner PTY  <-->  shell
 //!                                                  |
 //!                                                  +--> OscExtractor --> Request::Notify
-//!                                                  +--> output event --> Request::TerminalOutput
+//!                                                  +--> output/mode event --> Request::TerminalOutput
 //! ```
 //!
 //! Bytes flow verbatim except for cursor-key normalization while a
@@ -101,6 +101,7 @@ enum PtyEvent {
 struct OutputRefreshState {
     requested: AtomicBool,
     supported: AtomicBool,
+    alternate_screen: AtomicBool,
 }
 
 impl OutputRefreshState {
@@ -108,6 +109,7 @@ impl OutputRefreshState {
         Self {
             requested: AtomicBool::new(false),
             supported: AtomicBool::new(true),
+            alternate_screen: AtomicBool::new(false),
         }
     }
 }
@@ -295,8 +297,10 @@ fn run_pty_pump(
                     child_pid,
                     master_fd,
                     &mut extractor,
+                    &mut input_modes,
                     &pending,
                     &event_tx,
+                    &output_refresh,
                 );
                 break;
             }
@@ -309,8 +313,13 @@ fn run_pty_pump(
             // Reap the child non-blockingly. If it's gone we drain the
             // remaining inner-master bytes below and break.
             if let Some(code) = try_reap(child_pid) {
-                drain_inner(master_fd, &mut extractor);
+                let alternate_screen_exited =
+                    drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
                 flush_pending(&pending, &event_tx);
+                queue_output_refresh(&event_tx, &output_refresh);
+                if alternate_screen_exited {
+                    cwd_tracker.emit_shell_title(child_pid);
+                }
                 exit_code = code;
                 break;
             }
@@ -327,8 +336,10 @@ fn run_pty_pump(
                             child_pid,
                             master_fd,
                             &mut extractor,
+                            &mut input_modes,
                             &pending,
                             &event_tx,
+                            &output_refresh,
                         );
                         break;
                     }
@@ -339,8 +350,10 @@ fn run_pty_pump(
                         child_pid,
                         master_fd,
                         &mut extractor,
+                        &mut input_modes,
                         &pending,
                         &event_tx,
+                        &output_refresh,
                     );
                     break;
                 }
@@ -350,8 +363,15 @@ fn run_pty_pump(
             }
         }
         if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
-            exit_code =
-                terminate_inner_group(child_pid, master_fd, &mut extractor, &pending, &event_tx);
+            exit_code = terminate_inner_group(
+                child_pid,
+                master_fd,
+                &mut extractor,
+                &mut input_modes,
+                &pending,
+                &event_tx,
+                &output_refresh,
+            );
             break;
         }
 
@@ -359,8 +379,8 @@ fn run_pty_pump(
         if fds[1].revents & libc::POLLIN != 0 {
             match read_some(master_fd, &mut buf) {
                 ReadOutcome::Data(slice) => {
-                    input_modes.observe_output(slice);
-                    let alternate_screen_exited = input_modes.take_alternate_screen_exit();
+                    let alternate_screen_exited =
+                        observe_terminal_output(slice, &mut input_modes, &output_refresh);
                     extractor.feed(slice);
                     if let Err(e) = write_all(libc::STDOUT_FILENO, slice) {
                         tracing::warn!(error = %e, "write to outer stdout failed; exiting");
@@ -368,8 +388,10 @@ fn run_pty_pump(
                             child_pid,
                             master_fd,
                             &mut extractor,
+                            &mut input_modes,
                             &pending,
                             &event_tx,
+                            &output_refresh,
                         );
                         break;
                     }
@@ -389,8 +411,13 @@ fn run_pty_pump(
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
                     let code = wait_blocking(child_pid).unwrap_or(0);
-                    drain_inner(master_fd, &mut extractor);
+                    let alternate_screen_exited =
+                        drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
                     flush_pending(&pending, &event_tx);
+                    queue_output_refresh(&event_tx, &output_refresh);
+                    if alternate_screen_exited {
+                        cwd_tracker.emit_shell_title(child_pid);
+                    }
                     exit_code = code;
                     break;
                 }
@@ -399,8 +426,13 @@ fn run_pty_pump(
         if fds[1].revents & (libc::POLLHUP | libc::POLLERR) != 0
             && fds[1].revents & libc::POLLIN == 0
         {
-            drain_inner(master_fd, &mut extractor);
+            let alternate_screen_exited =
+                drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
             flush_pending(&pending, &event_tx);
+            queue_output_refresh(&event_tx, &output_refresh);
+            if alternate_screen_exited {
+                cwd_tracker.emit_shell_title(child_pid);
+            }
             let code = wait_blocking(child_pid).unwrap_or(0);
             exit_code = code;
             break;
@@ -419,8 +451,10 @@ fn terminate_inner_group<F: FnMut(&str)>(
     child_pid: Pid,
     master_fd: RawFd,
     extractor: &mut OscExtractor<F>,
+    input_modes: &mut TerminalInputModes,
     pending: &Rc<RefCell<Vec<String>>>,
     event_tx: &mpsc::SyncSender<PtyEvent>,
+    output_refresh: &OutputRefreshState,
 ) -> i32 {
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
@@ -442,8 +476,9 @@ fn terminate_inner_group<F: FnMut(&str)>(
         }
     }
 
-    drain_inner(master_fd, extractor);
+    drain_inner(master_fd, extractor, input_modes, output_refresh);
     flush_pending(pending, event_tx);
+    queue_output_refresh(event_tx, output_refresh);
     exit_code.unwrap_or(128 + libc::SIGKILL)
 }
 
@@ -614,7 +649,15 @@ fn ipc_worker(
                     output_refresh.supported.store(false, Ordering::Release);
                     continue;
                 };
-                match client.call(Request::TerminalOutput { surface }).await {
+                match client
+                    .call(Request::TerminalOutput {
+                        surface,
+                        alternate_screen: Some(
+                            output_refresh.alternate_screen.load(Ordering::Acquire),
+                        ),
+                    })
+                    .await
+                {
                     Ok(Response::Ok) => {}
                     Ok(response) => {
                         output_refresh.supported.store(false, Ordering::Release);
@@ -676,12 +719,32 @@ fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::SyncSender<PtyEv
     }
 }
 
-fn drain_inner<F: FnMut(&str)>(master_fd: RawFd, extractor: &mut OscExtractor<F>) {
+fn observe_terminal_output(
+    bytes: &[u8],
+    input_modes: &mut TerminalInputModes,
+    output_refresh: &OutputRefreshState,
+) -> bool {
+    input_modes.observe_output(bytes);
+    output_refresh
+        .alternate_screen
+        .store(input_modes.alternate_screen(), Ordering::Release);
+    input_modes.take_alternate_screen_exit()
+}
+
+fn drain_inner<F: FnMut(&str)>(
+    master_fd: RawFd,
+    extractor: &mut OscExtractor<F>,
+    input_modes: &mut TerminalInputModes,
+    output_refresh: &OutputRefreshState,
+) -> bool {
     let mut buf = [0u8; 4096];
+    let mut alternate_screen_exited = false;
     while let ReadOutcome::Data(slice) = read_some(master_fd, &mut buf) {
+        alternate_screen_exited |= observe_terminal_output(slice, input_modes, output_refresh);
         extractor.feed(slice);
         let _ = write_all(libc::STDOUT_FILENO, slice);
     }
+    alternate_screen_exited
 }
 
 enum ReadOutcome<'a> {
@@ -953,20 +1016,46 @@ mod tests {
     fn full_event_queue_keeps_the_final_output_refresh_pending() {
         let (tx, rx) = mpsc::sync_channel(1);
         let state = OutputRefreshState::new();
-        assert!(
-            tx.try_send(PtyEvent::Notify(NotifyEvent {
+        assert!(tx
+            .try_send(PtyEvent::Notify(NotifyEvent {
                 title: String::new(),
                 body: String::new(),
                 level: NotificationLevel::Info,
             }))
-            .is_ok()
-        );
+            .is_ok());
 
         queue_output_refresh(&tx, &state);
 
         assert!(matches!(rx.try_recv(), Ok(PtyEvent::Notify(_))));
         assert!(state.requested.swap(false, Ordering::AcqRel));
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn final_pty_drain_updates_alternate_screen_state() {
+        let state = OutputRefreshState::new();
+        let mut modes = TerminalInputModes::default();
+        assert!(!observe_terminal_output(
+            b"\x1b[?1049h\x1b[?1049",
+            &mut modes,
+            &state,
+        ));
+        assert!(state.alternate_screen.load(Ordering::Acquire));
+
+        let (pipe_r, pipe_w) = nix::unistd::pipe().expect("pipe");
+        let exit = b"l";
+        let written = unsafe { libc::write(pipe_w.as_raw_fd(), exit.as_ptr().cast(), exit.len()) };
+        assert_eq!(written, exit.len() as isize);
+        drop(pipe_w);
+
+        let mut extractor = OscExtractor::new(|_| {});
+        assert!(drain_inner(
+            pipe_r.as_raw_fd(),
+            &mut extractor,
+            &mut modes,
+            &state,
+        ));
+        assert!(!state.alternate_screen.load(Ordering::Acquire));
     }
 
     #[test]

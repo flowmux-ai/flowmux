@@ -295,7 +295,10 @@ async fn pane_read_screen_dispatches_terminal_command_and_waits_for_ack() {
 #[tokio::test]
 async fn terminal_output_dispatches_background_safe_refresh_and_waits_for_ack() {
     let (handler, rx, _pane, surface) = single_pane_handler().await;
-    let response = handler.handle(Request::TerminalOutput { surface });
+    let response = handler.handle(Request::TerminalOutput {
+        surface,
+        alternate_screen: Some(true),
+    });
     tokio::pin!(response);
 
     let command = tokio::select! {
@@ -304,12 +307,14 @@ async fn terminal_output_dispatches_background_safe_refresh_and_waits_for_ack() 
     };
     let GtkCommand::TerminalOutputObserved {
         surface: command_surface,
+        alternate_screen,
         ack,
     } = command
     else {
         panic!("expected TerminalOutputObserved command");
     };
     assert_eq!(command_surface, surface);
+    assert_eq!(alternate_screen, Some(true));
     ack.send(()).unwrap();
 
     assert!(matches!(response.await, Response::Ok));
@@ -848,12 +853,46 @@ async fn pane_split_dispatches_incremental_apply_command() {
     };
     assert_eq!(command_pane, pane);
     assert_eq!(direction, SplitDirection::Vertical);
-    ack.send(()).unwrap();
+    ack.send(Ok(())).unwrap();
 
     assert!(matches!(
         response.await,
         Response::PaneSplitDone { new_pane: response_pane } if response_pane == new_pane
     ));
+}
+
+#[tokio::test]
+async fn pane_split_reports_apply_failure_and_rolls_back() {
+    let (handler, rx, pane, _tab) = single_pane_handler().await;
+    let response = handler.handle(Request::PaneSplit {
+        pane,
+        direction: SplitDirection::Vertical,
+    });
+    tokio::pin!(response);
+
+    let command = tokio::select! {
+        response = &mut response => panic!("pane split completed before bridge ack: {response:?}"),
+        command = rx.recv() => command.expect("pane split should dispatch to GTK"),
+    };
+    let GtkCommand::PaneSplitApplied { new_pane, ack, .. } = command else {
+        panic!("expected PaneSplitApplied command");
+    };
+    ack.send(Err("incremental split failed".to_string()))
+        .unwrap();
+
+    assert!(matches!(response.await, Response::Error(_)));
+    assert!(handler
+        .inner
+        .store()
+        .workspace_of_pane(new_pane)
+        .await
+        .is_none());
+    assert!(handler
+        .inner
+        .store()
+        .workspace_of_pane(pane)
+        .await
+        .is_some());
 }
 
 #[tokio::test]
@@ -902,7 +941,7 @@ async fn claude_teams_uses_incremental_splits_after_initial_workspace_render() {
         }
         panes.push(new_pane);
         expected_source = Some(new_pane);
-        ack.send(()).unwrap();
+        ack.send(Ok(())).unwrap();
     }
 
     for expected_pane in panes {
@@ -1942,7 +1981,7 @@ fn ack_any(command: GtkCommand) -> &'static str {
             "workspace-created"
         }
         GtkCommand::PaneSplitApplied { ack, .. } => {
-            ack.send(()).unwrap();
+            ack.send(Ok(())).unwrap();
             "pane-split"
         }
         GtkCommand::PaneSendKeys { ack, .. } => {

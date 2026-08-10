@@ -1738,6 +1738,7 @@ fn agent_presence_replaces_transient_message_metadata() {
 #[test]
 fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
     let mut presence = AgentPresence::new("claude", AgentActivity::Idle, Some(10));
+    presence.session_id = Some("session-1".into());
     presence.session_name = Some("demo-1234-abcd".into());
     presence.messaging_socket = Some("/tmp/claude.sock".into());
 
@@ -1759,6 +1760,28 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
     ));
     assert_eq!(presence.session_name.as_deref(), Some("demo-1234-abcd"));
 
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Idle),
+            activity: Some(AgentActivity::Idle),
+            pid: Some(10),
+            source: Some("flowmux:hook".into()),
+            seq: None,
+            message: None,
+            custom_status: None,
+            session_id: Some("session-2".into()),
+            session_name: None,
+            messaging_socket: None,
+        },
+        true,
+    ));
+    assert_eq!(presence.session_id.as_deref(), Some("session-2"));
+    assert_eq!(presence.session_name, None);
+    assert_eq!(presence.messaging_socket, None);
+
+    presence.session_name = Some("demo-5678-efab".into());
+    presence.messaging_socket = Some("/tmp/claude-2.sock".into());
     assert!(presence.apply_report(
         AgentStatusReport {
             name: "claude".into(),

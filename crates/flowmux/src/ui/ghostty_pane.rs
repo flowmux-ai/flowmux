@@ -408,6 +408,10 @@ impl GhosttyPane {
         );
     }
 
+    pub fn set_alternate_screen(&self, active: bool) {
+        self.terminal_minimap.set_alternate_screen(active);
+    }
+
     /// Feed raw bytes to the child PTY (snapping the view to the bottom first).
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
         scroll_terminal_to_bottom(&self.widget);
@@ -3289,6 +3293,11 @@ mod tests {
         let container = pane.container.downgrade();
         pane.set_minimap(true, 24, 20);
         assert!((pane.terminal_minimap.widget().opacity() - 0.2).abs() < f64::EPSILON);
+        pane.set_alternate_screen(true);
+        assert_eq!(
+            pane.terminal_minimap.widget().tooltip_text().as_deref(),
+            Some("Alternate screen: minimap shows the current screen only")
+        );
         pane.show_message("minimap release check\n");
 
         pane.close_pty();

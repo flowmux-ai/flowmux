@@ -1156,6 +1156,37 @@ pub enum IncrementalSplitOutcome {
     Failed,
 }
 
+enum IncrementalSplitSlot {
+    PanedStart(gtk::Paned),
+    PanedEnd(gtk::Paned),
+    Stack(gtk::Stack),
+}
+
+fn incremental_split_slot(target: &gtk::Widget) -> Option<IncrementalSplitSlot> {
+    let parent = target.parent()?;
+    if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
+        if paned.start_child().as_ref() == Some(target) {
+            Some(IncrementalSplitSlot::PanedStart(paned.clone()))
+        } else if paned.end_child().as_ref() == Some(target) {
+            Some(IncrementalSplitSlot::PanedEnd(paned.clone()))
+        } else {
+            None
+        }
+    } else {
+        parent
+            .downcast_ref::<gtk::Stack>()
+            .map(|stack| IncrementalSplitSlot::Stack(stack.clone()))
+    }
+}
+
+pub(crate) fn can_split_pane_incrementally(registry: &PaneRegistry, pane: PaneId) -> bool {
+    registry
+        .pane_frame(pane)
+        .as_ref()
+        .and_then(incremental_split_slot)
+        .is_some()
+}
+
 /// Move GtkPaned's remembered focus to its other direct child before
 /// detaching `child`. GTK 4.14 warns when the focused direct child is removed.
 pub(crate) fn handoff_paned_focus_before_detach(paned: &gtk::Paned, child: &gtk::Widget) -> bool {
@@ -1210,46 +1241,26 @@ pub fn split_pane_incremental(
     let Some(target_frame) = registry.borrow().pane_frame(target_pane) else {
         return IncrementalSplitOutcome::Failed;
     };
-    let Some(parent) = target_frame.parent() else {
-        return IncrementalSplitOutcome::Failed;
-    };
-
-    // Record the parent container type and target slot before detach.
-    enum Slot {
-        PanedStart(gtk::Paned),
-        PanedEnd(gtk::Paned),
-        Stack(gtk::Stack),
-    }
-    let slot = if let Some(p) = parent.downcast_ref::<gtk::Paned>() {
-        if p.start_child().as_ref() == Some(&target_frame) {
-            Slot::PanedStart(p.clone())
-        } else if p.end_child().as_ref() == Some(&target_frame) {
-            Slot::PanedEnd(p.clone())
-        } else {
-            return IncrementalSplitOutcome::Failed;
-        }
-    } else if let Some(s) = parent.downcast_ref::<gtk::Stack>() {
-        Slot::Stack(s.clone())
-    } else {
+    let Some(slot) = incremental_split_slot(&target_frame) else {
         return IncrementalSplitOutcome::Failed;
     };
     let target_was_visible = match &slot {
-        Slot::Stack(s) => s.visible_child().as_ref() == Some(&target_frame),
+        IncrementalSplitSlot::Stack(s) => s.visible_child().as_ref() == Some(&target_frame),
         _ => false,
     };
     let restore_parent_focus = match &slot {
-        Slot::PanedStart(p) | Slot::PanedEnd(p) => {
+        IncrementalSplitSlot::PanedStart(p) | IncrementalSplitSlot::PanedEnd(p) => {
             handoff_paned_focus_before_detach(p, &target_frame)
         }
-        Slot::Stack(_) => false,
+        IncrementalSplitSlot::Stack(_) => false,
     };
 
     // Detach the target frame from its parent. set_*_child(None) automatically
     // unparents the previous child.
     match &slot {
-        Slot::PanedStart(p) => p.set_start_child(gtk::Widget::NONE),
-        Slot::PanedEnd(p) => p.set_end_child(gtk::Widget::NONE),
-        Slot::Stack(s) => s.remove(&target_frame),
+        IncrementalSplitSlot::PanedStart(p) => p.set_start_child(gtk::Widget::NONE),
+        IncrementalSplitSlot::PanedEnd(p) => p.set_end_child(gtk::Widget::NONE),
+        IncrementalSplitSlot::Stack(s) => s.remove(&target_frame),
     }
 
     // Build the new sibling pane widget. cwd / argv belong only to the sibling;
@@ -1292,21 +1303,21 @@ pub fn split_pane_incremental(
 
     // Insert the new Paned back into the vacated slot.
     match slot {
-        Slot::PanedStart(p) => {
+        IncrementalSplitSlot::PanedStart(p) => {
             p.set_start_child(Some(&paned_widget));
             if restore_parent_focus {
                 p.set_focus_child(Some(&paned_widget));
             }
             IncrementalSplitOutcome::SucceededNested
         }
-        Slot::PanedEnd(p) => {
+        IncrementalSplitSlot::PanedEnd(p) => {
             p.set_end_child(Some(&paned_widget));
             if restore_parent_focus {
                 p.set_focus_child(Some(&paned_widget));
             }
             IncrementalSplitOutcome::SucceededNested
         }
-        Slot::Stack(s) => {
+        IncrementalSplitSlot::Stack(s) => {
             s.add_named(&paned_widget, Some(parent_stack_name));
             if target_was_visible {
                 s.set_visible_child_name(parent_stack_name);

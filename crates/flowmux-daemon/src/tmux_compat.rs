@@ -41,7 +41,7 @@ pub trait TmuxCompatUi {
         pane: PaneId,
         new_pane: PaneId,
         direction: SplitDirection,
-    );
+    ) -> Result<(), String>;
     /// Type `keys` into the pane's PTY (runs the teammate command).
     async fn send_keys(&self, pane: PaneId, keys: &str) -> Result<(), String>;
     /// Rename the tab `surface` inside `pane` (store + widget).
@@ -79,8 +79,9 @@ impl TmuxCompatUi for HeadlessTmuxUi<'_> {
         pane: PaneId,
         new_pane: PaneId,
         direction: SplitDirection,
-    ) {
+    ) -> Result<(), String> {
         tracing::info!(%workspace, %pane, %new_pane, ?direction, "tmux-compat: pane split (headless)");
+        Ok(())
     }
 
     async fn send_keys(&self, pane: PaneId, keys: &str) -> Result<(), String> {
@@ -225,15 +226,22 @@ pub async fn execute(
             let split_from = *panes.last().unwrap_or(&first);
             match store.split_pane(split_from, direction).await {
                 Some((ws_id, new_pane)) => {
-                    ui.pane_split_applied(ws_id, split_from, new_pane, direction)
-                        .await;
-                    print_pane(
-                        print,
-                        format.as_deref(),
-                        new_pane,
-                        window_name.as_deref(),
-                        session_of(&target),
-                    )
+                    match ui
+                        .pane_split_applied(ws_id, split_from, new_pane, direction)
+                        .await
+                    {
+                        Ok(()) => print_pane(
+                            print,
+                            format.as_deref(),
+                            new_pane,
+                            window_name.as_deref(),
+                            session_of(&target),
+                        ),
+                        Err(error) => {
+                            let _ = store.close_pane(new_pane).await;
+                            TmuxCompatOutput::fail(1, format!("{error}\n"))
+                        }
+                    }
                 }
                 None => TmuxCompatOutput::fail(1, "new-window: split failed\n".to_string()),
             }
@@ -273,9 +281,16 @@ pub async fn execute(
             };
             match store.split_pane(pane, direction).await {
                 Some((ws_id, new_pane)) => {
-                    ui.pane_split_applied(ws_id, pane, new_pane, direction)
-                        .await;
-                    print_pane(print, format.as_deref(), new_pane, None, "")
+                    match ui
+                        .pane_split_applied(ws_id, pane, new_pane, direction)
+                        .await
+                    {
+                        Ok(()) => print_pane(print, format.as_deref(), new_pane, None, ""),
+                        Err(error) => {
+                            let _ = store.close_pane(new_pane).await;
+                            TmuxCompatOutput::fail(1, format!("{error}\n"))
+                        }
+                    }
                 }
                 None => TmuxCompatOutput::fail(1, no_such_pane(&target)),
             }

@@ -17,6 +17,10 @@ impl TerminalInputModes {
         self.application_cursor
     }
 
+    pub fn alternate_screen(&self) -> bool {
+        self.alternate_screen
+    }
+
     pub fn take_alternate_screen_exit(&mut self) -> bool {
         std::mem::take(&mut self.alternate_screen_exited)
     }
@@ -40,6 +44,14 @@ impl TerminalInputModes {
             }
 
             if self.output_escape == b"\x1b=" || self.output_escape == b"\x1b>" {
+                self.output_escape.clear();
+                continue;
+            }
+
+            if self.output_escape == b"\x1bc" {
+                self.application_cursor = false;
+                self.alternate_screen_exited |= self.alternate_screen;
+                self.alternate_screen = false;
                 self.output_escape.clear();
                 continue;
             }
@@ -191,12 +203,25 @@ mod tests {
         let mut modes = TerminalInputModes::default();
         modes.observe_output(b"\x1b[?10");
         modes.observe_output(b"49h");
-        assert!(modes.alternate_screen);
+        assert!(modes.alternate_screen());
         assert!(!modes.take_alternate_screen_exit());
 
         modes.observe_output(b"\x1b[?1049l");
-        assert!(!modes.alternate_screen);
+        assert!(!modes.alternate_screen());
         assert!(modes.take_alternate_screen_exit());
         assert!(!modes.take_alternate_screen_exit());
+    }
+
+    #[test]
+    fn full_reset_restores_initial_modes_and_reports_alternate_screen_exit() {
+        let mut modes = TerminalInputModes::default();
+        modes.observe_output(b"\x1b[?1h\x1b[?1049h");
+
+        modes.observe_output(b"\x1b");
+        modes.observe_output(b"c");
+
+        assert!(!modes.application_cursor());
+        assert!(!modes.alternate_screen());
+        assert!(modes.take_alternate_screen_exit());
     }
 }

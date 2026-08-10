@@ -4,7 +4,7 @@
 
 ## 문서 상태
 
-- 상태: 1단계 구현 및 live 검증 완료 (2026-08-10)
+- 상태: 1단계와 alternate-screen `ALT` badge 구현 및 live 검증 완료 (2026-08-10)
 - 대상: flowmux의 VTE terminal surface
 - 우선 검증 대상: 일반 shell, Claude Code, Codex CLI, OpenCode
 - 결론: 일반 scrollback minimap은 구현 가능하다. alternate-screen TUI의 내부
@@ -103,10 +103,10 @@ overlay와 pointer navigation은 생략한다. 따라서 `clear`가 scrollback�
 alternate-screen TUI에서도 현재 VTE cell은 보이지만 존재하지 않는 history로 이동하지
 않는다.
 
-정확한 alternate-screen minimap이나 badge가
-필요해지면 `pty-tee`가 이미 추적하는 DECSET/DECRST 47, 1047, 1049 상태를 새 IPC
-event로 GUI에 전달해야 한다. `TerminalInputModes` getter 하나만 추가해서는 별도
-process인 GUI에 상태가 전달되지 않는다.
+`pty-tee`가 이미 추적하는 DECSET/DECRST 47, 1047, 1049 상태는 기존
+`Request::TerminalOutput`의 호환 가능한 optional field로 GUI에 전달한다. 별도 IPC
+event나 parser는 추가하지 않는다. alternate screen에서는 `ALT` badge와 현재 화면만
+보인다는 tooltip을 표시하고 primary screen으로 복귀하면 제거한다.
 
 ### 4.3 기존 scrollbar와 설정
 
@@ -285,9 +285,14 @@ RSS는 각각 203,240KB(시작), 203,308KB, 203,584KB, 203,552KB였고 5,000행
 scrollback 상한 도달 뒤 계속 증가하지 않았다. minimap 자체는 pane당 최대 128개
 density/color sample만 보관하며 terminal 원문은 보관하지 않는다.
 
+후속 구현에서는 `pty-tee`의 기존 alternate-screen 추적 상태를
+`Request::TerminalOutput.alternate_screen`으로 전달해 minimap 오른쪽 상단에 `ALT`
+badge를 표시한다. 실제 flowmux terminal에서 DECSET 1049 진입 시 badge가 나타나고
+DECRST 1049로 primary screen에 복귀하면 사라지는 것을 live 검증했다.
+
 ### 2단계 — TUI 내부 history (보류)
 
-- DECSET/DECRST 47, 1047, 1049 상태를 GUI에 전달할지 검토
+- `ALT` badge를 넘어 TUI 내부 history와 terminal row를 연결할 공개 API 검토
 - Claude/Codex/OpenCode별 공개 session/scroll API 조사
 - terminal row와 TUI conversation item 사이의 안정적인 좌표계가 있을 때만 구현
 - PageUp/mouse event 주입이나 비공개 session 파일 결합은 사용하지 않음
@@ -308,8 +313,9 @@ MVP 본체는 다음 두 파일에 제한한다.
 - `crates/flowmux/src/ui/window/mod.rs`
 - `docs/configuration.md`
 
-MVP에서는 `flowmux-core`, IPC protocol, `pty-tee`, Agent session 저장 형식을 변경하지
-않는다.
+1단계 MVP에서는 `flowmux-core`, IPC protocol, `pty-tee`, Agent session 저장 형식을
+변경하지 않았다. 후속 `ALT` badge는 별도 event 없이 기존 IPC output 알림과
+`pty-tee`의 mode tracker만 확장한다.
 
 ## 11. 승인 기준
 
@@ -328,8 +334,7 @@ MVP에서는 `flowmux-core`, IPC protocol, `pty-tee`, Agent session 저장 형�
 
 1. OSC 133/633/1337 command/error marker
 2. search result marker
-3. 정확한 alternate-screen IPC 상태와 badge
-4. Agent 공개 session API가 생긴 경우 별도의 semantic conversation outline
+3. Agent 공개 session API가 생긴 경우 별도의 semantic conversation outline
 
 Agent transcript 기반 outline은 terminal scroll 위치와 공통 좌표계가 생기기 전까지
 minimap에 섞지 않는다.

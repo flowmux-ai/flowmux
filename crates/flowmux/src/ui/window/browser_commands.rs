@@ -362,14 +362,16 @@ impl WindowController {
                         // (including the terminal we are called from)
                         // keep their state. Same regression as above
                         // applied to the split path.
-                        self.apply_split_incremental_or_rerender(
-                            workspace, target, new_pane, direction,
-                        )
-                        .await;
-                        let _ = ack.send(Ok(BrowserOpenOutcome {
-                            pane: new_pane,
-                            placement_strategy: PlacementStrategy::SplitRight,
-                        }));
+                        let result = self
+                            .apply_split_incremental_or_rerender(
+                                workspace, target, new_pane, direction,
+                            )
+                            .await
+                            .map(|()| BrowserOpenOutcome {
+                                pane: new_pane,
+                                placement_strategy: PlacementStrategy::SplitRight,
+                            });
+                        let _ = ack.send(result);
                     }
                 }
             }

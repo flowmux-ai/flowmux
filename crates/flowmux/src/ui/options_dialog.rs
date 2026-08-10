@@ -204,7 +204,7 @@ fn build_dialog(
         overrides: current.theme_overrides.clone(),
     }));
     let on_apply = Rc::new(on_apply);
-    let apply_current: Rc<dyn Fn()> = {
+    let apply_options: Rc<dyn Fn()> = {
         let zoom_picker = zoom_picker.clone();
         let engine_drop = engine_drop.clone();
         let focus_color_btn = focus_color_btn.clone();
@@ -266,6 +266,24 @@ fn build_dialog(
             ));
         })
     };
+    let apply_slot = Rc::new(RefCell::new(Some(apply_options)));
+    let apply_current: Rc<dyn Fn()> = {
+        let apply_slot = Rc::downgrade(&apply_slot);
+        Rc::new(move || {
+            if let Some(apply_slot) = apply_slot.upgrade() {
+                if let Some(apply) = apply_slot.borrow().as_ref() {
+                    apply();
+                }
+            }
+        })
+    };
+    {
+        let apply_slot = apply_slot.clone();
+        dialog.connect_close_request(move |_| {
+            apply_slot.borrow_mut().take();
+            gtk::glib::Propagation::Proceed
+        });
+    }
     let keybindings_tab =
         crate::ui::keybindings_panel::build(kb_state.clone(), apply_current.clone());
     let theme_tab = crate::ui::theme_tab::build(theme_state.clone(), apply_current.clone());
@@ -386,27 +404,33 @@ fn build_dialog(
     dialog.set_content(Some(&outer));
 
     {
-        let dialog = dialog.clone();
+        let dialog = dialog.downgrade();
         close_btn.connect_clicked(move |_| {
-            let dialog = dialog.clone();
-            defer_widget_action(move || dialog.close());
+            if let Some(dialog) = dialog.upgrade() {
+                defer_widget_action(move || dialog.close());
+            }
         });
     }
     {
-        let dialog = dialog.clone();
+        let dialog = dialog.downgrade();
         let on_apply = on_apply.clone();
         reset_btn.connect_clicked(move |_| {
-            let dialog = dialog.clone();
-            let on_apply = on_apply.clone();
-            defer_widget_action(move || {
-                (on_apply)(Options::default());
-                dialog.close();
-            });
+            if let Some(dialog) = dialog.upgrade() {
+                let on_apply = on_apply.clone();
+                defer_widget_action(move || {
+                    (on_apply)(Options::default());
+                    dialog.close();
+                });
+            }
         });
     }
     {
-        let dialog = dialog.clone();
-        about_btn.connect_clicked(move |_| show_about_popup(&dialog));
+        let dialog = dialog.downgrade();
+        about_btn.connect_clicked(move |_| {
+            if let Some(dialog) = dialog.upgrade() {
+                show_about_popup(&dialog);
+            }
+        });
     }
 
     dialog
@@ -633,11 +657,13 @@ fn build_update_tab(
     {
         let on_check = on_check.clone();
         let state = state.clone();
-        let status_row = status_row.clone();
-        let check_button = check_button.clone();
+        let status_row = status_row.downgrade();
         let update_button = update_button.clone();
         let spinner = spinner.clone();
-        check_button.clone().connect_clicked(move |_| {
+        check_button.connect_clicked(move |check_button| {
+            let Some(status_row) = status_row.upgrade() else {
+                return;
+            };
             check_button.set_sensitive(false);
             update_button.set_sensitive(false);
             status_row.set_subtitle("Checking for updates…");
@@ -684,7 +710,7 @@ fn build_update_tab(
                     &state.borrow(),
                     install_origin,
                     &status_row,
-                    &check_button,
+                    check_button,
                     &update_button,
                 );
                 status_row.set_subtitle("Update checks are unavailable in this session.");
@@ -693,13 +719,18 @@ fn build_update_tab(
     }
 
     {
-        let parent = parent.clone();
+        let parent = parent.downgrade();
         let state = state.clone();
-        let status_row = status_row.clone();
-        let check_button = check_button.clone();
-        let update_button = update_button.clone();
+        let status_row = status_row.downgrade();
+        let check_button = check_button.downgrade();
         let spinner = spinner.clone();
-        update_button.clone().connect_clicked(move |_| {
+        update_button.connect_clicked(move |update_button| {
+            let Some(status_row) = status_row.upgrade() else {
+                return;
+            };
+            let Some(check_button) = check_button.upgrade() else {
+                return;
+            };
             let selected = {
                 let current = state.borrow();
                 update_tab_props(&current, install_origin).update_version
@@ -760,6 +791,9 @@ fn build_update_tab(
                                 on_update_for_result.as_ref(),
                             ),
                             PreinstallDecision::ConfirmNewer { selected, latest } => {
+                                let Some(parent_for_result) = parent_for_result.upgrade() else {
+                                    return;
+                                };
                                 let state_for_choice = state_for_result.clone();
                                 let status_for_choice = status_for_result.clone();
                                 let check_for_choice = check_for_result.clone();
@@ -814,7 +848,7 @@ fn build_update_tab(
                     install_origin,
                     &status_row,
                     &check_button,
-                    &update_button,
+                    update_button,
                 );
                 status_row.set_subtitle("Update checks are unavailable in this session.");
             }
@@ -1499,6 +1533,48 @@ mod tests {
         minimap.set_active(false);
         assert_eq!(applied.borrow().len(), calls_before + 1);
         assert!(!applied.borrow().last().unwrap().editor_minimap_enabled);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn closing_dialog_releases_widget_graph() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.OptionsRelease")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let parent = adw::ApplicationWindow::builder().application(&app).build();
+        let dialog = build_dialog(
+            &parent,
+            &Options::default(),
+            "monospace".into(),
+            12.0,
+            |_| {},
+            InstallOrigin::Source,
+            BannerState::Hidden,
+            |_| false,
+            |_| false,
+        );
+        let widgets: Vec<_> = widget_tree(dialog.upcast_ref())
+            .into_iter()
+            .map(|widget| widget.downgrade())
+            .collect();
+
+        dialog.present();
+        let context = gtk::glib::MainContext::default();
+        while context.pending() {
+            context.iteration(false);
+        }
+        dialog.close();
+        drop(dialog);
+        while context.pending() {
+            context.iteration(false);
+        }
+
+        assert!(widgets.iter().all(|widget| widget.upgrade().is_none()));
     }
 
     #[cfg(not(target_os = "macos"))]

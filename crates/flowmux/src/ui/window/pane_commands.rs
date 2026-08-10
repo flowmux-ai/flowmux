@@ -34,9 +34,10 @@ impl WindowController {
                 direction,
                 ack,
             } => {
-                self.apply_split_incremental_or_rerender(id, pane, new_pane, direction)
+                let result = self
+                    .apply_split_incremental_or_rerender(id, pane, new_pane, direction)
                     .await;
-                let _ = ack.send(());
+                let _ = ack.send(result);
             }
             GtkCommand::SplitFocused {
                 pane,
@@ -45,11 +46,15 @@ impl WindowController {
             } => {
                 match self.store.split_pane(pane, direction).await {
                     Some((ws_id, new_pane)) => {
-                        self.apply_split_incremental_or_rerender(ws_id, pane, new_pane, direction)
-                            .await;
-                        // Move keyboard focus to the new pane for both the
-                        // incremental path and rerender fallback. Also handle
-                        // browser splits from BrowserOpenSplit so web_view receives focus.
+                        if let Err(error) = self
+                            .apply_split_incremental_or_rerender(ws_id, pane, new_pane, direction)
+                            .await
+                        {
+                            let _ = ack.send(Err(error));
+                            return;
+                        }
+                        // Move keyboard focus to the new pane. Also handle browser splits
+                        // from BrowserOpenSplit so web_view receives focus.
                         let registry = self.pane_registry.clone();
                         glib::idle_add_local_once(move || {
                             let r = registry.borrow();
@@ -508,17 +513,21 @@ impl WindowController {
             GtkCommand::TerminalContentsChanged { surface } => {
                 self.refresh_agent_screen_status(surface, None).await;
             }
-            GtkCommand::TerminalOutputObserved { surface, ack } => {
+            GtkCommand::TerminalOutputObserved {
+                surface,
+                alternate_screen,
+                ack,
+            } => {
                 // Mapped VTE widgets already report their grid changes through
                 // TerminalContentsChanged. The PTY-side signal exists for
                 // hidden tabs/workspaces; skipping it here avoids extracting
                 // and scanning the same visible screen twice.
-                let terminal_is_mapped = self
-                    .pane_registry
-                    .borrow()
-                    .terminals
-                    .get(&surface)
-                    .is_some_and(|terminal| terminal.container.is_mapped());
+                let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
+                if let (Some(terminal), Some(active)) = (&terminal, alternate_screen) {
+                    terminal.set_alternate_screen(active);
+                }
+                let terminal_is_mapped =
+                    terminal.is_some_and(|terminal| terminal.container.is_mapped());
                 if !terminal_is_mapped {
                     self.refresh_agent_screen_status(surface, None).await;
                 }

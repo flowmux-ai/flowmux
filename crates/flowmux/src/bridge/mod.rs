@@ -222,7 +222,7 @@ pub enum GtkCommand {
         pane: PaneId,
         new_pane: PaneId,
         direction: SplitDirection,
-        ack: oneshot::Sender<()>,
+        ack: oneshot::Sender<Result<(), String>>,
     },
     /// Send keystrokes to a pane.
     PaneSendKeys {
@@ -252,7 +252,7 @@ pub enum GtkCommand {
         ratio: f32,
         ack: oneshot::Sender<Result<(), String>>,
     },
-    /// Split the focused pane and re-render its workspace. Used by
+    /// Split the focused pane without rebuilding its live siblings. Used by
     /// keyboard shortcuts (the IPC verb path goes through the daemon
     /// directly via `Request::PaneSplit`).
     SplitFocused {
@@ -472,6 +472,7 @@ pub enum GtkCommand {
     /// the GTK state and both side-panel views have caught up.
     TerminalOutputObserved {
         surface: SurfaceId,
+        alternate_screen: Option<bool>,
         ack: oneshot::Sender<()>,
     },
     /// Recompute the window title as "flowmux - {focused tab name}".

@@ -18,6 +18,7 @@ const MIN_VIEWPORT_HEIGHT: f64 = 6.0;
 #[derive(Default)]
 struct MinimapState {
     enabled: Cell<bool>,
+    alternate_screen: Cell<bool>,
     refresh_pending: Cell<bool>,
     samples: RefCell<Vec<RowSample>>,
 }
@@ -55,7 +56,7 @@ impl TerminalMinimap {
 
         let state = Rc::new(MinimapState::default());
         install_drawing(term, &area, state.clone());
-        install_pointer_navigation(term, &area);
+        install_pointer_navigation(term, &area, state.clone());
         install_refresh(term, &area, state.clone());
 
         Self {
@@ -91,6 +92,23 @@ impl TerminalMinimap {
 
     pub(crate) fn set_opacity(&self, opacity: u8) {
         self.area.set_opacity(f64::from(opacity) / 100.0);
+    }
+
+    pub(crate) fn set_alternate_screen(&self, active: bool) {
+        if self.state.alternate_screen.replace(active) == active {
+            return;
+        }
+        let label = if active {
+            "Alternate screen: minimap shows the current screen only"
+        } else {
+            "Terminal scrollback minimap"
+        };
+        self.area.set_tooltip_text(Some(label));
+        self.area
+            .update_property(&[gtk::accessible::Property::Label(label)]);
+        if let Some(term) = self.terminal.upgrade() {
+            refresh_now(&term, &self.area, &self.state);
+        }
     }
 }
 
@@ -148,6 +166,39 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             }
         }
 
+        if state.alternate_screen.get() {
+            let badge_height = f64::from(height.min(14));
+            cr.set_source_rgba(
+                color.red() as f64,
+                color.green() as f64,
+                color.blue() as f64,
+                0.9,
+            );
+            cr.rectangle(
+                2.0,
+                2.0,
+                f64::from((width - 4).max(1)),
+                (badge_height - 2.0).max(1.0),
+            );
+            let _ = cr.fill();
+            if width >= 24 && height >= 14 {
+                cr.set_source_rgb(
+                    background.red() as f64,
+                    background.green() as f64,
+                    background.blue() as f64,
+                );
+                cr.select_font_face(
+                    "Sans",
+                    gtk::cairo::FontSlant::Normal,
+                    gtk::cairo::FontWeight::Bold,
+                );
+                cr.set_font_size(8.0);
+                cr.move_to(4.0, 11.0);
+                let _ = cr.show_text("ALT");
+            }
+            return;
+        }
+
         let Some(adj) = term.vadjustment() else {
             return;
         };
@@ -174,16 +225,22 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
     });
 }
 
-fn install_pointer_navigation(term: &vte::Terminal, area: &gtk::DrawingArea) {
+fn install_pointer_navigation(
+    term: &vte::Terminal,
+    area: &gtk::DrawingArea,
+    state: Rc<MinimapState>,
+) {
     let click = gtk::GestureClick::new();
     click.set_button(gtk::gdk::BUTTON_PRIMARY);
     {
         let term = term.downgrade();
         let area = area.downgrade();
+        let state = state.clone();
         click.connect_pressed(move |_, _, _, y| {
             if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
-                scroll_to_pointer(&term, y, f64::from(area.height()));
-                term.grab_focus();
+                if scroll_to_pointer(&term, &state, y, f64::from(area.height())) {
+                    term.grab_focus();
+                }
             }
         });
     }
@@ -201,7 +258,12 @@ fn install_pointer_navigation(term: &vte::Terminal, area: &gtk::DrawingArea) {
         let area = area.downgrade();
         drag.connect_drag_update(move |_, _, offset_y| {
             if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
-                scroll_to_pointer(&term, origin_y.get() + offset_y, f64::from(area.height()));
+                scroll_to_pointer(
+                    &term,
+                    &state,
+                    origin_y.get() + offset_y,
+                    f64::from(area.height()),
+                );
             }
         });
     }
@@ -321,7 +383,9 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     };
 
     let columns = term.column_count().max(1) as usize;
-    if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
+    if state.alternate_screen.get()
+        || !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
+    {
         refresh_visible_screen(term, area, state, columns);
         return;
     }
@@ -397,13 +461,17 @@ fn sample_from_appearance(appearance: VteRowAppearance, columns: usize) -> RowSa
     }
 }
 
-fn scroll_to_pointer(term: &vte::Terminal, y: f64, height: f64) {
+fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height: f64) -> bool {
+    if state.alternate_screen.get() {
+        return false;
+    }
     let Some(adj) = term.vadjustment() else {
-        return;
+        return true;
     };
     if let Some(target) = pointer_target(adj.lower(), adj.upper(), adj.page_size(), y, height) {
         adj.set_value(target);
     }
+    true
 }
 
 fn has_scrollable_range(lower: f64, upper: f64, page_size: f64) -> bool {
@@ -517,6 +585,34 @@ mod tests {
             nonempty > MAX_SAMPLES / 2,
             "scrollback sampling returned {nonempty} nonempty rows after clearing history",
         );
+        window.close();
+    }
+
+    #[gtk::test]
+    async fn alternate_screen_samples_only_the_screen_and_blocks_navigation() {
+        let term = vte::Terminal::new();
+        term.set_scrollback_lines(5_000);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        term.feed("history\r\n".repeat(600).as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        let adjustment = term.vadjustment().unwrap();
+        adjustment.set_value(adjustment.lower());
+        let before = adjustment.value();
+
+        minimap.set_alternate_screen(true);
+        assert!(minimap.state.samples.borrow().len() < MAX_SAMPLES);
+        scroll_to_pointer(&term, &minimap.state, 600.0, 600.0);
+        assert_eq!(adjustment.value(), before);
         window.close();
     }
 

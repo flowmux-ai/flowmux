@@ -271,9 +271,12 @@ pub enum Request {
     /// the child PTY to this terminal surface. VTE does not emit its
     /// `contents-changed` signal while a tab or workspace is unmapped, so the
     /// GUI uses this renderer-independent event to refresh Agent and workspace
-    /// items for background surfaces too.
+    /// items for background surfaces too. The optional alternate-screen state
+    /// keeps older pty-tee clients wire-compatible.
     TerminalOutput {
         surface: SurfaceId,
+        #[serde(default)]
+        alternate_screen: Option<bool>,
     },
 
     /// `flowmux focus-pane <pane>` — grab keyboard focus for a pane.
@@ -1065,8 +1068,17 @@ mod tests {
     #[test]
     fn terminal_output_event_roundtrips_with_surface_identity() {
         let surface = SurfaceId::new();
-        match roundtrip_request(Request::TerminalOutput { surface }) {
-            Request::TerminalOutput { surface: decoded } => assert_eq!(decoded, surface),
+        match roundtrip_request(Request::TerminalOutput {
+            surface,
+            alternate_screen: Some(true),
+        }) {
+            Request::TerminalOutput {
+                surface: decoded,
+                alternate_screen,
+            } => {
+                assert_eq!(decoded, surface);
+                assert_eq!(alternate_screen, Some(true));
+            }
             other => panic!("wrong variant: {other:?}"),
         }
     }

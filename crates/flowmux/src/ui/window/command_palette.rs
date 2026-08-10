@@ -875,8 +875,9 @@ impl WindowController {
                 };
                 let (ws_id, new_pane) = self.store.split_pane(pane, direction).await?;
                 self.apply_split_incremental_or_rerender(ws_id, pane, new_pane, direction)
-                    .await;
-                Some(new_pane)
+                    .await
+                    .ok()
+                    .map(|()| new_pane)
             }
         }
     }
