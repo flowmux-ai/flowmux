@@ -549,6 +549,33 @@ fn tree_parses_and_maps_to_workspace_tree_request() {
 }
 
 #[test]
+fn session_name_is_stable_and_unique_per_tab() {
+    use flowmux_ipc::protocol::TreeWorkspace;
+
+    let workspace = TreeWorkspace {
+        id: "12345678-0000-0000-0000-000000000000".parse().unwrap(),
+        name: "changing title".into(),
+        root: "/tmp/My Feature".into(),
+        panes: vec![],
+    };
+    let surface: SurfaceId = "abcdef12-0000-0000-0000-000000000000".parse().unwrap();
+
+    assert_eq!(
+        claude_session_name(&workspace, surface),
+        "my-feature-1234-abcd"
+    );
+    assert!(matches!(
+        build_request(
+            Cli::try_parse_from(["flowmuxctl", "session-name"])
+                .unwrap()
+                .cmd
+        )
+        .unwrap(),
+        Request::WorkspaceTree
+    ));
+}
+
+#[test]
 fn render_tree_marks_active_tab_and_indents() {
     use flowmux_core::{AgentActivity, AgentStatus};
     use flowmux_ipc::protocol::{TreeAgent, TreePane, TreeTab, TreeWorkspace};

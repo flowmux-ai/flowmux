@@ -341,14 +341,60 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 /// these scripts first. They export `FLOWMUX_AGENT_PID=$$` and the canonical
 /// agent name (read by the hooks), then `exec` the real binary, so they are
 /// otherwise fully transparent.
-const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "cline"];
+pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "cline"];
 
 /// Body of a wrapper shim for `agent`. Skips flowmux-managed shims when
 /// resolving the real binary so it never re-execs itself or another copy. The shim
 /// registers a best-effort SessionStart itself because not every agent
 /// exposes a startup hook; the daemon still clears dead sessions through
 /// the PID liveness sweep when the agent exits without SessionEnd.
-fn shim_script(agent: &str) -> String {
+pub(crate) fn shim_script(agent: &str) -> String {
+    let claude_session_name = if agent == "claude" {
+        r#"
+if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
+  inject_name=1
+  expect_name=0
+  for arg in "$@"; do
+    if [ "$expect_name" = 1 ]; then
+      export FLOWMUX_CLAUDE_SESSION_NAME="$arg"
+      expect_name=0
+      continue
+    fi
+    case "$arg" in
+      -n|--name) inject_name=0; expect_name=1 ;;
+      --name=*) inject_name=0; export FLOWMUX_CLAUDE_SESSION_NAME="${arg#--name=}" ;;
+      -n?*) inject_name=0; export FLOWMUX_CLAUDE_SESSION_NAME="${arg#-n}" ;;
+      --bare|-h|--help|-v|--version) inject_name=0 ;;
+    esac
+  done
+  case "${1:-}" in
+    agents|auth|auto-mode|doctor|gateway|import|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade)
+      inject_name=0 ;;
+  esac
+  if [ "$inject_name" = 1 ]; then
+    version=$("$real" --version 2>/dev/null) || version=""
+    version=${version%% *}
+    IFS=. read -r major minor patch <<< "$version"
+    if [[ ${major:-} =~ ^[0-9]+$ && ${minor:-} =~ ^[0-9]+$ && ${patch:-} =~ ^[0-9]+$ ]] &&
+       (( major > 2 || (major == 2 && (minor > 1 || (minor == 1 && patch >= 224))) )); then
+      if [ -n "${FLOWMUX_BUNDLED_CLI_PATH:-}" ] && [ -x "$FLOWMUX_BUNDLED_CLI_PATH" ]; then
+        session_name=$("$FLOWMUX_BUNDLED_CLI_PATH" session-name 2>/dev/null) || session_name=""
+      elif command -v flowmuxctl >/dev/null 2>&1; then
+        session_name=$(flowmuxctl session-name 2>/dev/null) || session_name=""
+      elif command -v flowmux >/dev/null 2>&1; then
+        session_name=$(flowmux session-name 2>/dev/null) || session_name=""
+      fi
+      if [ -n "${session_name:-}" ]; then
+        export FLOWMUX_CLAUDE_SESSION_NAME="$session_name"
+        set -- --name "$session_name" "$@"
+      fi
+    fi
+  fi
+fi
+"#
+    } else {
+        ""
+    };
     format!(
         r#"#!/usr/bin/env bash
 # flowmux agent wrapper shim (managed by `flowmux fix`).
@@ -357,11 +403,6 @@ fn shim_script(agent: &str) -> String {
 if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
   export FLOWMUX_AGENT_NAME={agent}
-  if command -v flowmuxctl >/dev/null 2>&1; then
-    flowmuxctl hooks {agent} session-start >/dev/null 2>&1 </dev/null &
-  elif command -v flowmux >/dev/null 2>&1; then
-    flowmux hooks {agent} session-start >/dev/null 2>&1 </dev/null &
-  fi
 fi
 self_dir=$(cd "$(dirname "$0")" && pwd)
 is_flowmux_shim() {{
@@ -382,6 +423,14 @@ IFS=$saved_ifs
 if [ -z "$real" ]; then
   echo "flowmux shim: {agent} not found on PATH" >&2
   exit 127
+fi
+{claude_session_name}
+if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
+  if command -v flowmuxctl >/dev/null 2>&1; then
+    flowmuxctl hooks {agent} session-start >/dev/null 2>&1 </dev/null &
+  elif command -v flowmux >/dev/null 2>&1; then
+    flowmux hooks {agent} session-start >/dev/null 2>&1 </dev/null &
+  fi
 fi
 exec "$real" "$@"
 "#
@@ -1691,12 +1740,75 @@ mod tests {
         // Registers presence even for agents without their own startup hook.
         assert!(body.contains("flowmuxctl hooks claude session-start"));
         assert!(body.contains("flowmux hooks claude session-start"));
+        assert!(body.contains("FLOWMUX_CLAUDE_SESSION_NAME"));
+        assert!(body.contains("session-name"));
+        assert!(body.contains("patch >= 224"));
         // Skips its own dir, skips other flowmux shims, and exec's the resolved real binary.
         assert!(body.contains("[ \"$d\" = \"$self_dir\" ] && continue"));
         assert!(body.contains("is_flowmux_shim \"$candidate\" && continue"));
         assert!(body.contains("exec \"$real\" \"$@\""));
         // Agent name is substituted into the lookup.
         assert!(body.contains("$d/claude"));
+    }
+
+    #[test]
+    fn claude_shim_injects_supported_auto_name_and_preserves_user_args() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let dir = tmp();
+        let shim_dir = dir.path().join("shims");
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&bin_dir).unwrap();
+        let log = dir.path().join("claude.log");
+        let shim = shim_dir.join("claude");
+        fs::write(&shim, shim_script("claude")).unwrap();
+        fs::write(
+            bin_dir.join("claude"),
+            format!(
+                "#!/bin/bash\nif [ \"$1\" = --version ]; then echo \"${{FAKE_VERSION}} (Claude Code)\"; exit; fi\nprintf '%s|%s\\n' \"${{FLOWMUX_CLAUDE_SESSION_NAME:-}}\" \"$*\" > '{}'\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            bin_dir.join("flowmuxctl"),
+            "#!/bin/bash\n[ \"$1\" = session-name ] && echo demo-1234-abcd\n",
+        )
+        .unwrap();
+        for path in [
+            shim.clone(),
+            bin_dir.join("claude"),
+            bin_dir.join("flowmuxctl"),
+        ] {
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).unwrap();
+        }
+        let run = |args: &[&str], version: &str| {
+            let status = Command::new(&shim)
+                .args(args)
+                .env_clear()
+                .env(
+                    "PATH",
+                    format!("{}:{}:/usr/bin:/bin", shim_dir.display(), bin_dir.display()),
+                )
+                .env("FLOWMUX_SURFACE_ID", "surface")
+                .env("FAKE_VERSION", version)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            fs::read_to_string(&log).unwrap()
+        };
+
+        assert_eq!(
+            run(&[], "2.1.226"),
+            "demo-1234-abcd|--name demo-1234-abcd\n"
+        );
+        assert_eq!(run(&["--name", "mine"], "2.1.226"), "mine|--name mine\n");
+        assert_eq!(run(&[], "2.1.223"), "|\n");
+        assert_eq!(run(&["--bare"], "2.1.226"), "|--bare\n");
     }
 
     #[test]

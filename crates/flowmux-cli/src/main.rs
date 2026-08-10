@@ -112,6 +112,9 @@ enum Cmd {
     /// and the explicitly-unsupported (CDP-only) features.
     Capabilities,
 
+    /// Print the stable Claude Code session name for the calling tab.
+    SessionName,
+
     /// Inspect the live workspace → pane → tab structure. Prints an
     /// indented tree (or `--json` for scripts).
     Tree,
@@ -854,6 +857,10 @@ async fn main() -> anyhow::Result<()> {
 
     if let Cmd::TmuxCompat { args } = cmd {
         return tmux_compat_cmd(&client, args).await;
+    }
+
+    if matches!(cmd, Cmd::SessionName) {
+        return run_session_name(&client).await;
     }
 
     let json_mode = cli.json;

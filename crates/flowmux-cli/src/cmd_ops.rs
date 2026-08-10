@@ -44,6 +44,50 @@ pub(crate) fn run_capabilities(json: bool) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+pub(crate) async fn run_session_name(client: &Client) -> anyhow::Result<()> {
+    let workspace =
+        workspace_from_env().ok_or_else(|| anyhow::anyhow!("FLOWMUX_WORKSPACE_ID is not set"))?;
+    let surface = hooks::surface_from_env()
+        .ok_or_else(|| anyhow::anyhow!("FLOWMUX_SURFACE_ID is not set"))?;
+    let Response::Tree { workspaces } = client.call(Request::WorkspaceTree).await? else {
+        anyhow::bail!("unexpected response to WorkspaceTree");
+    };
+    let workspace = workspaces
+        .iter()
+        .find(|candidate| candidate.id == workspace)
+        .ok_or_else(|| anyhow::anyhow!("calling workspace is not in the live tree"))?;
+    println!("{}", claude_session_name(workspace, surface));
+    Ok(())
+}
+
+pub(crate) fn claude_session_name(
+    workspace: &flowmux_ipc::protocol::TreeWorkspace,
+    surface: SurfaceId,
+) -> String {
+    let base = workspace
+        .root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("workspace");
+    let mut slug = String::new();
+    for ch in base.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_matches('-');
+    let slug = if slug.is_empty() { "workspace" } else { slug };
+    format!(
+        "{}-{}-{}",
+        slug.chars().take(40).collect::<String>(),
+        &workspace.id.to_string()[..4],
+        &surface.to_string()[..4],
+    )
+}
+
 pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
     let home = agent::resolved_home()?;
     let codex_home = agent::resolved_codex_home();

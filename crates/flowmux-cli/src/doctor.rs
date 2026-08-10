@@ -317,15 +317,57 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
         }
         entries.push(hook_entry);
     }
-    entries.push(tmux_shim_entry(agent_is_installed(
-        agent::Target::ClaudeCode,
-        home,
-        codex_home,
-    )));
+    let claude_present = agent_is_installed(agent::Target::ClaudeCode, home, codex_home);
+    let any_agent_present = agent::Target::ALL
+        .iter()
+        .any(|target| agent_is_installed(*target, home, codex_home));
+    entries.push(agent_shims_entry(any_agent_present));
+    entries.push(tmux_shim_entry(claude_present));
 
     Section {
         title: "AI agents".into(),
         entries,
+    }
+}
+
+fn agent_shims_entry(any_agent_present: bool) -> Entry {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(dir) = flowmux_config::paths::agent_shim_dir() else {
+        return Entry {
+            name: "agent shims".into(),
+            status: Status::Error,
+            detail: "cannot resolve flowmux data directory".into(),
+        };
+    };
+    let stale = hook_install::SHIM_AGENTS
+        .iter()
+        .filter_map(|agent| {
+            let path = dir.join(agent);
+            let current = std::fs::read_to_string(&path).ok();
+            let expected = hook_install::shim_script(agent);
+            let executable = std::fs::metadata(&path)
+                .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 == 0o111);
+            (current.as_deref() != Some(expected.as_str()) || !executable)
+                .then(|| path.display().to_string())
+        })
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        Entry {
+            name: "agent shims".into(),
+            status: Status::Ok,
+            detail: dir.display().to_string(),
+        }
+    } else {
+        Entry {
+            name: "agent shims".into(),
+            status: if any_agent_present {
+                Status::NeedsFix
+            } else {
+                Status::Warn
+            },
+            detail: format!("{} (`flowmux fix` repairs them)", stale.join(", ")),
+        }
     }
 }
 

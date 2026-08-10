@@ -130,7 +130,7 @@ pub(crate) fn browser_wait_condition(
 pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
     Ok(match cmd {
         Cmd::Ping => Request::Ping,
-        Cmd::Tree => Request::WorkspaceTree,
+        Cmd::Tree | Cmd::SessionName => Request::WorkspaceTree,
         Cmd::Workspace {
             op: WorkspaceOp::New { name, root },
         } => Request::WorkspaceCreate {

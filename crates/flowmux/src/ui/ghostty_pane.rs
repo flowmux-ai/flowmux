@@ -2371,6 +2371,7 @@ fn prepare_terminal_child_env(extra_env: &mut Vec<(String, String)>) {
     #[cfg(target_os = "macos")]
     add_macos_gui_env_fallbacks(extra_env);
     prepend_agent_shim_dir(extra_env);
+    add_bash_agent_path_guard(extra_env);
     #[cfg(target_os = "macos")]
     add_macos_zsh_agent_path_guard(extra_env);
 }
@@ -2420,6 +2421,32 @@ fn prepend_path_entry(dir: &std::path::Path, base: &str) -> String {
     } else {
         format!("{dir}:{base}")
     }
+}
+
+fn add_bash_agent_path_guard(extra_env: &mut Vec<(String, String)>) {
+    if std::env::var_os("SHELL")
+        .as_deref()
+        .and_then(|shell| std::path::Path::new(shell).file_name())
+        .is_none_or(|name| name != "bash")
+    {
+        return;
+    }
+    let Some(shim) = flowmux_config::paths::agent_shim_dir().filter(|path| path.is_dir()) else {
+        return;
+    };
+    extra_env.push((
+        "FLOWMUX_AGENT_SHIM_DIR".to_string(),
+        shim.to_string_lossy().into_owned(),
+    ));
+    let guard = r#"case "$PATH" in "$FLOWMUX_AGENT_SHIM_DIR":*) ;; *) export PATH="$FLOWMUX_AGENT_SHIM_DIR:$PATH" ;; esac"#;
+    let existing = last_env_value(extra_env, "PROMPT_COMMAND")
+        .map(str::to_string)
+        .or_else(|| std::env::var("PROMPT_COMMAND").ok())
+        .filter(|value| !value.is_empty());
+    extra_env.push((
+        "PROMPT_COMMAND".to_string(),
+        existing.map_or_else(|| guard.to_string(), |value| format!("{guard};{value}")),
+    ));
 }
 
 #[cfg(target_os = "macos")]
@@ -3002,6 +3029,24 @@ mod tests {
         assert_eq!(
             prepend_path_entry(std::path::Path::new("/tmp/flowmux-shims"), ""),
             "/tmp/flowmux-shims"
+        );
+    }
+
+    #[test]
+    fn bash_path_guard_reprepends_without_growing_path() {
+        let guard = r#"case "$PATH" in "$FLOWMUX_AGENT_SHIM_DIR":*) ;; *) export PATH="$FLOWMUX_AGENT_SHIM_DIR:$PATH" ;; esac"#;
+        let output = std::process::Command::new("bash")
+            .args([
+                "-c",
+                &format!(
+                    "FLOWMUX_AGENT_SHIM_DIR=/tmp/shims; PATH=/usr/bin:/tmp/shims; {guard}; {guard}; printf %s \"$PATH\""
+                ),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "/tmp/shims:/usr/bin:/tmp/shims"
         );
     }
 
