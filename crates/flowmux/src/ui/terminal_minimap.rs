@@ -2,7 +2,7 @@
 //! Bounded-memory overview of VTE terminal content.
 
 use crate::ui::terminal_scrollback::{
-    vte_html_row_appearance, vte_html_row_appearances, VteRowAppearance,
+    terminal_cell_width, vte_html_row_appearance, vte_html_row_appearances, VteRowAppearance,
 };
 use gtk::glib;
 use gtk::prelude::*;
@@ -88,6 +88,10 @@ impl TerminalMinimap {
     pub(crate) fn set_width(&self, width: u16) {
         self.area.set_width_request(i32::from(width));
     }
+
+    pub(crate) fn set_opacity(&self, opacity: u8) {
+        self.area.set_opacity(f64::from(opacity) / 100.0);
+    }
 }
 
 fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<MinimapState>) {
@@ -133,7 +137,12 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
                 cr.set_source_rgba(red, green, blue, 0.5);
                 let bar_width = (f64::from(width - 4) * f64::from(sample.density)).max(0.0);
                 if bar_width > 0.0 {
-                    cr.rectangle(2.0, index as f64 * band, bar_width, band.max(1.0));
+                    cr.rectangle(
+                        2.0,
+                        index as f64 * band,
+                        bar_width,
+                        (band - 1.0).max(1.0).min(band),
+                    );
                     let _ = cr.fill();
                 }
             }
@@ -158,7 +167,7 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             color.red() as f64,
             color.green() as f64,
             color.blue() as f64,
-            0.08,
+            0.18,
         );
         cr.rectangle(0.0, top, f64::from(width), viewport_height);
         let _ = cr.fill();
@@ -318,7 +327,14 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     }
 
     let last_column = columns.saturating_sub(1) as i64;
-    let rows = sampled_rows(adj.lower(), adj.upper(), MAX_SAMPLES);
+    let mut rows = sampled_rows(adj.lower(), adj.upper(), MAX_SAMPLES);
+    // CSI 3 J rebases the adjustment, while VTE text-range rows remain absolute.
+    if let Some(last) = rows.last().copied() {
+        let offset = term.cursor_position().1.saturating_sub(last);
+        for row in &mut rows {
+            *row = row.saturating_add(offset);
+        }
+    }
     let mut samples = state.samples.borrow_mut();
     samples.clear();
     for row in rows {
@@ -376,7 +392,7 @@ fn refresh_visible_screen(
 
 fn sample_from_appearance(appearance: VteRowAppearance, columns: usize) -> RowSample {
     RowSample {
-        density: (appearance.non_whitespace as f32 / columns as f32).clamp(0.0, 1.0),
+        density: (appearance.occupied_cells as f32 / columns as f32).clamp(0.0, 1.0),
         color: appearance.color,
     }
 }
@@ -421,7 +437,7 @@ fn row_density(text: &str, columns: usize) -> f32 {
     if columns == 0 {
         return 0.0;
     }
-    (text.chars().filter(|ch| !ch.is_whitespace()).count() as f32 / columns as f32).clamp(0.0, 1.0)
+    (text.chars().map(terminal_cell_width).sum::<usize>() as f32 / columns as f32).clamp(0.0, 1.0)
 }
 
 fn viewport_geometry(
@@ -460,6 +476,50 @@ fn pointer_target(lower: f64, upper: f64, page_size: f64, y: f64, height: f64) -
 mod tests {
     use super::*;
 
+    #[gtk::test]
+    async fn sampling_survives_clear_scrollback_and_resize() {
+        let term = vte::Terminal::new();
+        term.set_scrollback_lines(5_000);
+        let adjustment = gtk::Adjustment::new(0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        term.set_property("vadjustment", &adjustment);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        let old_output = "old scrollback\r\n".repeat(600);
+        term.feed(old_output.as_bytes());
+        term.feed(b"\x1b[3J");
+        let mut output = String::new();
+        for index in 0..600 {
+            output.push_str(&"x".repeat(index % 60 + 1));
+            output.push_str("\r\n");
+        }
+        term.feed(output.as_bytes());
+        window.set_default_size(400, 600);
+        gtk::glib::timeout_future(Duration::from_millis(250)).await;
+        refresh_now(&term, minimap.widget(), &minimap.state);
+
+        let nonempty = minimap
+            .state
+            .samples
+            .borrow()
+            .iter()
+            .filter(|sample| sample.density > 0.0)
+            .count();
+        assert!(
+            nonempty > MAX_SAMPLES / 2,
+            "scrollback sampling returned {nonempty} nonempty rows after clearing history",
+        );
+        window.close();
+    }
+
     #[test]
     fn sampling_is_bounded_and_covers_history_endpoints() {
         let rows = sampled_rows(-999_976.0, 24.0, MAX_SAMPLES);
@@ -472,6 +532,8 @@ mod tests {
     #[test]
     fn row_density_ignores_whitespace_and_clamps() {
         assert_eq!(row_density("ab  \n", 4), 0.5);
+        assert_eq!(row_density("한글", 4), 1.0);
+        assert_eq!(row_density("a\u{301}", 4), 0.25);
         assert_eq!(row_density("abcdefgh", 4), 1.0);
         assert_eq!(row_density("anything", 0), 0.0);
     }

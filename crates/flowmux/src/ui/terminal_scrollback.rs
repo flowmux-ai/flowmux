@@ -11,6 +11,7 @@ use flowmux_core::{
     bound_terminal_scrollback, bound_vte_html_scrollback, TerminalScrollback,
     TerminalScrollbackFormat, TERMINAL_SCROLLBACK_MAX_BYTES,
 };
+use gtk::glib::Unichar;
 use quick_xml::escape::resolve_xml_entity;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
@@ -55,7 +56,7 @@ struct ParsedSnapshot {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct VteRowAppearance {
-    pub(crate) non_whitespace: usize,
+    pub(crate) occupied_cells: usize,
     pub(crate) color: Option<[u8; 3]>,
 }
 
@@ -194,17 +195,30 @@ pub(crate) fn vte_html_row_appearances(html: &str) -> Result<Vec<VteRowAppearanc
         for ch in run.text.chars() {
             if ch == '\n' {
                 rows.push(VteRowAppearance::default());
-            } else if !ch.is_whitespace() {
-                let appearance = rows.last_mut().expect("rows always contains one entry");
-                appearance.non_whitespace += 1;
-                appearance.color = appearance
-                    .color
-                    .or(run.style.foreground)
-                    .or(run.style.background);
+            } else {
+                let width = terminal_cell_width(ch);
+                if width > 0 {
+                    let appearance = rows.last_mut().expect("rows always contains one entry");
+                    appearance.occupied_cells += width;
+                    appearance.color = appearance
+                        .color
+                        .or(run.style.foreground)
+                        .or(run.style.background);
+                }
             }
         }
     }
     Ok(rows)
+}
+
+pub(crate) fn terminal_cell_width(ch: char) -> usize {
+    if ch.is_whitespace() || ch.is_zero_width() {
+        0
+    } else if ch.is_wide() {
+        2
+    } else {
+        1
+    }
 }
 
 fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
@@ -509,7 +523,7 @@ mod tests {
         let appearance =
             vte_html_row_appearance("<pre>  plain <font color=\"#112233\">color</font>   </pre>")
                 .unwrap();
-        assert_eq!(appearance.non_whitespace, 10);
+        assert_eq!(appearance.occupied_cells, 10);
         assert_eq!(appearance.color, Some([0x11, 0x22, 0x33]));
 
         let rows = vte_html_row_appearances(

@@ -11,7 +11,7 @@ the built-in defaults.
 `zoom_percent`, `default_browser_engine`, `focus_border_color`,
 `focus_border_opacity`, `persist_browser_session`, `auto_resume_agent_sessions`,
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
-`terminal_minimap_enabled`, `terminal_minimap_width`,
+`terminal_minimap_enabled`, `terminal_minimap_width`, `terminal_minimap_opacity`,
 `system_notifications_enabled`, `agent_bar_mode`, `cursor_blink`,
 `cursor_blink_interval_ms`, `font_family`, `font_size`,
 `agent_notification_target`, `theme`, `theme_overrides`, and `keybindings`.
@@ -23,7 +23,8 @@ area to the compact bottom bar.
 `terminal_minimap_enabled` defaults to `true`. It includes the current screen
 after commands such as `clear`; setting it to `false` restores the standard
 scrollbar. `terminal_minimap_width` defaults to `50` pixels and is clamped to
-`12..=96`. Both settings apply to open and new tabs.
+`12..=96`. `terminal_minimap_opacity` defaults to `20` percent and is clamped
+to `0..=100`. All three settings apply to open and new tabs.
 
 `zoom_percent` applies to terminal and browser surfaces. Terminal zoom is
 rounded to a whole-point font size instead of using VTE's fractional font

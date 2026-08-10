@@ -59,6 +59,9 @@ pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
 pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
 pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
 pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 50;
+pub const TERMINAL_MINIMAP_OPACITY_MIN: u8 = 0;
+pub const TERMINAL_MINIMAP_OPACITY_MAX: u8 = 100;
+pub const TERMINAL_MINIMAP_OPACITY_DEFAULT: u8 = 20;
 
 /// Default for [`Options::system_notifications_enabled`]. Desktop toasts ship
 /// enabled so flowmux behaves like every other notifying app on first launch;
@@ -163,6 +166,9 @@ pub struct Options {
     /// Terminal minimap width in pixels.
     #[serde(default = "default_terminal_minimap_width")]
     pub terminal_minimap_width: u16,
+    /// Terminal minimap opacity as a percentage.
+    #[serde(default = "default_terminal_minimap_opacity")]
+    pub terminal_minimap_opacity: u8,
     /// Shell command used by newly created terminal tabs. `None` resolves from
     /// `$SHELL`; per-tab shell requests override this value.
     #[serde(default)]
@@ -258,6 +264,10 @@ fn default_terminal_minimap_width() -> u16 {
     TERMINAL_MINIMAP_WIDTH_DEFAULT
 }
 
+fn default_terminal_minimap_opacity() -> u8 {
+    TERMINAL_MINIMAP_OPACITY_DEFAULT
+}
+
 fn default_system_notifications_enabled() -> bool {
     SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT
 }
@@ -291,6 +301,7 @@ impl Default for Options {
             scrollback_lines: None,
             terminal_minimap_enabled: default_terminal_minimap_enabled(),
             terminal_minimap_width: default_terminal_minimap_width(),
+            terminal_minimap_opacity: default_terminal_minimap_opacity(),
             default_shell: None,
             system_notifications_enabled: default_system_notifications_enabled(),
             agent_bar_mode: default_agent_bar_mode(),
@@ -445,6 +456,10 @@ impl Options {
         width.clamp(TERMINAL_MINIMAP_WIDTH_MIN, TERMINAL_MINIMAP_WIDTH_MAX)
     }
 
+    pub fn clamp_terminal_minimap_opacity(opacity: u8) -> u8 {
+        opacity.clamp(TERMINAL_MINIMAP_OPACITY_MIN, TERMINAL_MINIMAP_OPACITY_MAX)
+    }
+
     /// Trim a configured shell and map empty text to `$SHELL` behavior.
     pub fn normalize_default_shell(shell: Option<String>) -> Option<String> {
         shell
@@ -530,6 +545,9 @@ pub fn load() -> Options {
         focus_border_opacity: Options::clamp_focus_border_opacity(opts.focus_border_opacity),
         scrollback_lines: opts.scrollback_lines.map(Options::clamp_scrollback_lines),
         terminal_minimap_width: Options::clamp_terminal_minimap_width(opts.terminal_minimap_width),
+        terminal_minimap_opacity: Options::clamp_terminal_minimap_opacity(
+            opts.terminal_minimap_opacity,
+        ),
         default_shell: Options::normalize_default_shell(opts.default_shell),
         ..opts
     }
@@ -985,12 +1003,16 @@ mod tests {
     }
 
     #[test]
-    fn terminal_minimap_defaults_on_and_clamps_width() {
+    fn terminal_minimap_defaults_and_clamps_visual_options() {
         let old_file: Options = serde_json::from_str("{}").unwrap();
         assert!(old_file.terminal_minimap_enabled);
         assert_eq!(
             old_file.terminal_minimap_width,
             TERMINAL_MINIMAP_WIDTH_DEFAULT
+        );
+        assert_eq!(
+            old_file.terminal_minimap_opacity,
+            TERMINAL_MINIMAP_OPACITY_DEFAULT
         );
         assert_eq!(
             Options::clamp_terminal_minimap_width(0),
@@ -1000,17 +1022,23 @@ mod tests {
             Options::clamp_terminal_minimap_width(u16::MAX),
             TERMINAL_MINIMAP_WIDTH_MAX
         );
+        assert_eq!(
+            Options::clamp_terminal_minimap_opacity(u8::MAX),
+            TERMINAL_MINIMAP_OPACITY_MAX
+        );
 
         with_xdg(|_| {
             let opts = Options {
                 terminal_minimap_enabled: false,
                 terminal_minimap_width: 48,
+                terminal_minimap_opacity: 65,
                 ..Options::default()
             };
             save(&opts).unwrap();
             let back = load();
             assert!(!back.terminal_minimap_enabled);
             assert_eq!(back.terminal_minimap_width, 48);
+            assert_eq!(back.terminal_minimap_opacity, 65);
         });
     }
 

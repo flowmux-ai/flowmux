@@ -3430,7 +3430,11 @@ fn build_panel(
             theme.apply_to_ghostty(&pane);
             pane.set_font(&font);
             pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
-            pane.set_minimap(opts.terminal_minimap_enabled, opts.terminal_minimap_width);
+            pane.set_minimap(
+                opts.terminal_minimap_enabled,
+                opts.terminal_minimap_width,
+                opts.terminal_minimap_opacity,
+            );
             if let Some(scrollback) = scrollback_to_restore(
                 opts.restore_terminal_scrollback,
                 is_resuming_agent,

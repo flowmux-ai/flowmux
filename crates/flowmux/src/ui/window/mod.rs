@@ -1433,7 +1433,11 @@ impl WindowController {
         for terminal in registry.terminals.values() {
             resolved.apply_to_ghostty(terminal);
             terminal.set_font(&font);
-            terminal.set_minimap(opts.terminal_minimap_enabled, opts.terminal_minimap_width);
+            terminal.set_minimap(
+                opts.terminal_minimap_enabled,
+                opts.terminal_minimap_width,
+                opts.terminal_minimap_opacity,
+            );
         }
         let editor_appearance = resolved.editor_appearance(opts);
         for editor in registry.editors.values() {
