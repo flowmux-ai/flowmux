@@ -11,10 +11,10 @@
 
 ## 개선 동작
 
-minimap은 전체 history를 고정 높이에 비례 압축하는 scrollbar가 아니다. 터미널 한
-cell을 이미지 한 pixel로 그리는 지역 history 창이다.
+minimap은 전체 history를 고정 높이에 비례 압축하는 scrollbar가 아니다. 연속된 최대
+128행을 표시하는 지역 history 창이다.
 
-- 한 terminal row는 minimap의 세로 1px이다.
+- 최대 128개의 terminal row를 minimap 높이에 맞춰 그린다.
 - glyph가 있는 cell은 foreground, background가 있는 cell은 background 색으로 그린다.
 - minimap wheel은 25행씩 지역 history 창만 이동한다.
 - click과 drag는 그 지역 좌표를 terminal viewport 위치로 바꾼다.
@@ -30,20 +30,19 @@ flowmux는 VTE grid 좌표와 GTK `DrawingArea`를 사용해 이 동작을 구�
 - weak `vte::Terminal`
 - `gtk::DrawingArea`
 - 현재 지역 창의 시작 row와 아래쪽 기준 offset
-- 화면 높이 이내의 `Vec<Vec<VtePixelRun>>`
+- 최대 128행의 `Vec<Vec<VtePixelRun>>`
 - refresh pending flag
 
 정상 scrollback의 한 번의 갱신은 다음 순서다.
 
-1. `GtkAdjustment`의 `lower`, `upper`와 drawing area 높이로 지역 창을 계산한다.
+1. `GtkAdjustment`의 `lower`, `upper`로 최대 128행의 지역 창을 계산한다.
 2. `text_range_format(HTML)`을 한 번 호출해 그 row 범위를 읽는다.
 3. 기존 VTE HTML parser로 cell column, 길이, 색상 run만 남긴다.
 4. Cairo에서 terminal column을 minimap 폭에 맞춰 cell pixel을 그린다.
 5. terminal viewport가 지역 창 밖이면 indicator를 위나 아래에 고정하고 흐리게 한다.
 
 원문, 별도 terminal parser, worker thread, service, 새 dependency는 추가하지 않는다.
-지역 창의 메모리와 draw 비용은 전체 scrollback 길이가 아니라 pane pixel 높이에
-비례한다.
+지역 창의 메모리와 draw 비용은 전체 scrollback 길이와 무관하게 최대 128행이다.
 
 ## 배치와 입력
 
@@ -55,6 +54,7 @@ minimum-size를 깨뜨렸던 `gtk::Box` wrapper도 다시 도입하지 않는다
 - minimap OFF: VTE margin을 0으로 되돌리고 표준 scrollbar를 표시한다.
 - wheel over minimap: preview offset만 변경하고 event propagation을 중단한다.
 - click/drag: 지역 row 좌표에서 clamped adjustment 값을 계산한다.
+- terminal scroll: viewport가 지역 창 경계를 넘으면 preview offset도 함께 이동한다.
 - focus: 입력 뒤 terminal이 focus를 유지한다.
 
 폭은 `12..=96px`, opacity는 `0..=100%`이며 열린 terminal에도 즉시 적용된다.

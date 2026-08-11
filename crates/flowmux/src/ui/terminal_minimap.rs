@@ -10,6 +10,7 @@ use std::time::Duration;
 use vte::prelude::*;
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const MAX_PREVIEW_ROWS: usize = 128;
 const PREVIEW_SCROLL_ROWS: i64 = 25;
 
 #[derive(Default)]
@@ -19,11 +20,12 @@ struct MinimapState {
     refresh_pending: Cell<bool>,
     preview_offset: Cell<i64>,
     preview_top: Cell<i64>,
+    preview_rows: Cell<usize>,
     columns: Cell<usize>,
     pixel_rows: RefCell<Vec<Vec<VtePixelRun>>>,
 }
 
-/// A one-cell-per-pixel preview of a movable VTE scrollback window.
+/// A cell-level preview of a movable VTE scrollback window.
 #[derive(Clone)]
 pub(crate) struct TerminalMinimap {
     area: gtk::DrawingArea,
@@ -70,6 +72,7 @@ impl TerminalMinimap {
         if !enabled {
             self.state.pixel_rows.borrow_mut().clear();
             self.state.preview_offset.set(0);
+            self.state.preview_rows.set(0);
             self.area.set_visible(false);
             return;
         }
@@ -129,12 +132,13 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         let color = area.color();
         let columns = state.columns.get().max(1);
         let cell_width = f64::from(width) / columns as f64;
+        let row_height = f64::from(height) / state.preview_rows.get().max(1) as f64;
         cr.set_antialias(gtk::cairo::Antialias::None);
         for (row, runs) in state
             .pixel_rows
             .borrow()
             .iter()
-            .take(height as usize)
+            .take(state.preview_rows.get())
             .enumerate()
         {
             for run in runs {
@@ -162,9 +166,9 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
                 cr.set_source_rgb(red, green, blue);
                 cr.rectangle(
                     start as f64 * cell_width,
-                    row as f64,
+                    row as f64 * row_height,
                     (end - start) as f64 * cell_width,
-                    1.0,
+                    row_height,
                 );
                 let _ = cr.fill();
             }
@@ -211,6 +215,7 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         }
         let Some((top, viewport_height, out_of_bounds)) = viewport_geometry(
             state.preview_top.get(),
+            state.preview_rows.get(),
             adj.page_size(),
             adj.value(),
             f64::from(height),
@@ -368,9 +373,15 @@ fn sync_adjustment(
         }
         {
             let area = area.downgrade();
+            let term = term.downgrade();
+            let state = state.clone();
             adj.connect_value_changed(move |_| {
-                if let Some(area) = area.upgrade() {
-                    area.queue_draw();
+                if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
+                    if sync_preview_to_viewport(&term, &state) {
+                        refresh_now(&term, &area, &state);
+                    } else {
+                        area.queue_draw();
+                    }
                 }
             });
         }
@@ -411,7 +422,6 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     let Some(adj) = term.vadjustment() else {
         return;
     };
-
     let columns = term.column_count().max(1) as usize;
     if state.alternate_screen.get()
         || !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
@@ -423,13 +433,14 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     let Some(window) = preview_window(
         adj.lower(),
         adj.upper(),
-        area.height().max(1) as usize,
+        MAX_PREVIEW_ROWS,
         state.preview_offset.get(),
     ) else {
         return;
     };
     state.preview_offset.set(window.offset);
     state.preview_top.set(window.top);
+    state.preview_rows.set(window.rows);
     state.columns.set(columns);
 
     let last_column = columns.saturating_sub(1) as i64;
@@ -469,6 +480,8 @@ fn refresh_visible_screen(
             .map_or(0, |adj| adj.lower().floor() as i64),
     );
     state.columns.set(columns);
+    let limit = (term.row_count().max(1) as usize).min(MAX_PREVIEW_ROWS);
+    state.preview_rows.set(limit);
     let rows = term
         .text_format(vte::Format::Html)
         .as_deref()
@@ -479,7 +492,7 @@ fn refresh_visible_screen(
                 .map(plain_text_pixel_rows)
         })
         .unwrap_or_default();
-    replace_pixel_rows(state, rows, area.height().max(1) as usize);
+    replace_pixel_rows(state, rows, limit);
     area.queue_draw();
 }
 
@@ -500,6 +513,7 @@ fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height:
         adj.upper(),
         adj.page_size(),
         state.preview_top.get(),
+        state.preview_rows.get(),
         y,
         height,
     ) {
@@ -523,7 +537,7 @@ fn scroll_preview(
     let Some(window) = preview_window(
         adj.lower(),
         adj.upper(),
-        area.height().max(1) as usize,
+        MAX_PREVIEW_ROWS,
         state.preview_offset.get(),
     ) else {
         return true;
@@ -540,6 +554,26 @@ fn has_scrollable_range(lower: f64, upper: f64, page_size: f64) -> bool {
     upper > lower + page_size.max(1.0)
 }
 
+fn sync_preview_to_viewport(term: &vte::Terminal, state: &MinimapState) -> bool {
+    if !state.enabled.get() || state.alternate_screen.get() {
+        return false;
+    }
+    let Some(adj) = term.vadjustment() else {
+        return false;
+    };
+    let Some(offset) = preview_offset_for_viewport(
+        adj.lower(),
+        adj.upper(),
+        adj.page_size(),
+        adj.value(),
+        MAX_PREVIEW_ROWS,
+        state.preview_offset.get(),
+    ) else {
+        return false;
+    };
+    offset != state.preview_offset.replace(offset)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PreviewWindow {
     top: i64,
@@ -549,14 +583,14 @@ struct PreviewWindow {
     max_offset: i64,
 }
 
-fn preview_window(lower: f64, upper: f64, height: usize, offset: i64) -> Option<PreviewWindow> {
-    if !lower.is_finite() || !upper.is_finite() || upper <= lower || height == 0 {
+fn preview_window(lower: f64, upper: f64, limit: usize, offset: i64) -> Option<PreviewWindow> {
+    if !lower.is_finite() || !upper.is_finite() || upper <= lower || limit == 0 {
         return None;
     }
     let lower = lower.floor() as i64;
     let upper = upper.ceil() as i64;
     let total = upper.saturating_sub(lower);
-    let rows = total.min(height as i64).max(1) as usize;
+    let rows = total.min(limit as i64).max(1) as usize;
     let max_offset = total.saturating_sub(rows as i64);
     let offset = offset.clamp(0, max_offset);
     Some(PreviewWindow {
@@ -566,6 +600,33 @@ fn preview_window(lower: f64, upper: f64, height: usize, offset: i64) -> Option<
         offset,
         max_offset,
     })
+}
+
+fn preview_offset_for_viewport(
+    lower: f64,
+    upper: f64,
+    page_size: f64,
+    value: f64,
+    limit: usize,
+    offset: i64,
+) -> Option<i64> {
+    if !page_size.is_finite() || !value.is_finite() {
+        return None;
+    }
+    let window = preview_window(lower, upper, limit, offset)?;
+    let viewport_top = value.floor() as i64;
+    let viewport_bottom = (value + page_size.max(1.0)).ceil() as i64;
+    let preview_bottom = window.top.saturating_add(window.rows as i64);
+    let top = if viewport_top < window.top {
+        viewport_top
+    } else if viewport_bottom > preview_bottom {
+        viewport_bottom.saturating_sub(window.rows as i64)
+    } else {
+        window.top
+    };
+    let max_top = window.upper.saturating_sub(window.rows as i64);
+    let top = top.clamp(lower.floor() as i64, max_top);
+    Some(max_top.saturating_sub(top))
 }
 
 fn plain_text_pixel_rows(text: &str) -> Vec<Vec<VtePixelRun>> {
@@ -601,15 +662,17 @@ fn plain_text_pixel_rows(text: &str) -> Vec<Vec<VtePixelRun>> {
 
 fn viewport_geometry(
     preview_top: i64,
+    preview_rows: usize,
     page_size: f64,
     value: f64,
     height: f64,
 ) -> Option<(f64, f64, bool)> {
-    if !page_size.is_finite() || !value.is_finite() || height <= 0.0 {
+    if preview_rows == 0 || !page_size.is_finite() || !value.is_finite() || height <= 0.0 {
         return None;
     }
-    let viewport_height = page_size.max(1.0).min(height);
-    let raw_top = value - preview_top as f64;
+    let row_height = height / preview_rows as f64;
+    let viewport_height = (page_size.max(1.0) * row_height).min(height);
+    let raw_top = (value - preview_top as f64) * row_height;
     let out_of_bounds = raw_top < 0.0 || raw_top + viewport_height > height;
     Some((
         raw_top.clamp(0.0, height - viewport_height),
@@ -623,15 +686,17 @@ fn pointer_target(
     upper: f64,
     page_size: f64,
     preview_top: i64,
+    preview_rows: usize,
     y: f64,
     height: f64,
 ) -> Option<f64> {
     let total = upper - lower;
-    if total <= page_size.max(0.0) || height <= 0.0 {
+    if total <= page_size.max(0.0) || preview_rows == 0 || height <= 0.0 {
         return None;
     }
     let max_value = (upper - page_size).max(lower);
-    Some((preview_top as f64 + y.clamp(0.0, height) - page_size / 2.0).clamp(lower, max_value))
+    let row = y.clamp(0.0, height) * preview_rows as f64 / height;
+    Some((preview_top as f64 + row - page_size / 2.0).clamp(lower, max_value))
 }
 
 #[cfg(test)]
@@ -676,9 +741,10 @@ mod tests {
             .filter(|row| !row.is_empty())
             .count();
         assert!(
-            nonempty > 300,
+            nonempty > 64,
             "scrollback preview returned {nonempty} nonempty rows after clearing history",
         );
+        assert!(minimap.state.pixel_rows.borrow().len() <= MAX_PREVIEW_ROWS);
         let adjustment = term.vadjustment().unwrap();
         let terminal_position = adjustment.value();
         assert!(scroll_preview(
@@ -714,7 +780,7 @@ mod tests {
         let before = adjustment.value();
 
         minimap.set_alternate_screen(true);
-        assert!(minimap.state.pixel_rows.borrow().len() <= minimap.widget().height() as usize);
+        assert!(minimap.state.pixel_rows.borrow().len() <= MAX_PREVIEW_ROWS);
         scroll_to_pointer(&term, &minimap.state, 600.0, 600.0);
         assert_eq!(adjustment.value(), before);
         window.close();
@@ -723,19 +789,42 @@ mod tests {
     #[test]
     fn preview_window_follows_the_bottom_and_scrolls_locally() {
         assert_eq!(
-            preview_window(-1_000.0, 24.0, 600, 0),
+            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 0),
             Some(PreviewWindow {
-                top: -576,
+                top: -104,
                 upper: 24,
-                rows: 600,
+                rows: 128,
                 offset: 0,
-                max_offset: 424,
+                max_offset: 896,
             })
         );
-        assert_eq!(preview_window(-1_000.0, 24.0, 600, 25).unwrap().top, -601);
         assert_eq!(
-            preview_window(-1_000.0, 24.0, 600, 999).unwrap().top,
+            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 25)
+                .unwrap()
+                .top,
+            -129
+        );
+        assert_eq!(
+            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 999)
+                .unwrap()
+                .top,
             -1_000
+        );
+    }
+
+    #[test]
+    fn terminal_viewport_moves_the_preview_only_at_its_bounds() {
+        assert_eq!(
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -80.0, MAX_PREVIEW_ROWS, 0),
+            Some(0)
+        );
+        assert_eq!(
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -400.0, MAX_PREVIEW_ROWS, 0),
+            Some(296)
+        );
+        assert_eq!(
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, 0.0, MAX_PREVIEW_ROWS, 796,),
+            Some(0)
         );
     }
 
@@ -768,25 +857,25 @@ mod tests {
     #[test]
     fn viewport_and_pointer_mapping_are_clamped() {
         assert_eq!(
-            viewport_geometry(-576, 24.0, -576.0, 600.0),
-            Some((0.0, 24.0, false))
+            viewport_geometry(-104, 128, 24.0, -104.0, 600.0),
+            Some((0.0, 112.5, false))
         );
         assert_eq!(
-            viewport_geometry(-576, 24.0, 0.0, 600.0),
-            Some((576.0, 24.0, false))
+            viewport_geometry(-104, 128, 24.0, 0.0, 600.0),
+            Some((487.5, 112.5, false))
         );
         assert_eq!(
-            viewport_geometry(-601, 24.0, 0.0, 600.0),
-            Some((576.0, 24.0, true))
+            viewport_geometry(-129, 128, 24.0, 0.0, 600.0),
+            Some((487.5, 112.5, true))
         );
         assert_eq!(
-            pointer_target(-1_000.0, 24.0, 24.0, -601, 0.0, 600.0),
-            Some(-613.0)
+            pointer_target(-1_000.0, 24.0, 24.0, -129, 128, 0.0, 600.0),
+            Some(-141.0)
         );
         assert_eq!(
-            pointer_target(-1_000.0, 24.0, 24.0, -601, 600.0, 600.0),
+            pointer_target(-1_000.0, 24.0, 24.0, -129, 128, 600.0, 600.0),
             Some(-13.0)
         );
-        assert_eq!(pointer_target(0.0, 20.0, 20.0, 0, 10.0, 200.0), None);
+        assert_eq!(pointer_target(0.0, 20.0, 20.0, 0, 128, 10.0, 200.0), None);
     }
 }
