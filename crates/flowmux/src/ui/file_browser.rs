@@ -2569,10 +2569,11 @@ fn is_markdown_file(path: &Path) -> bool {
 }
 
 pub(crate) fn launch_markdown_viewer(path: &Path) -> io::Result<()> {
-    Command::new(markdown_viewer_binary())
-        .arg(path)
-        .spawn()
-        .map(|_| ())
+    let mut child = Command::new(markdown_viewer_binary()).arg(path).spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 fn markdown_viewer_binary() -> PathBuf {
@@ -2818,6 +2819,33 @@ mod tests {
                 "{name} should not be Markdown"
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_viewer_child_is_reaped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TestDir::new("markdown-viewer-reap");
+        let viewer = tmp.path.join("viewer");
+        let pid_file = tmp.path.join("pid");
+        fs::write(&viewer, "#!/bin/sh\nprintf '%s' \"$$\" > \"$1\"\n").unwrap();
+        fs::set_permissions(&viewer, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let previous = std::env::var_os("FLOWMUX_MD_VIEWER");
+        std::env::set_var("FLOWMUX_MD_VIEWER", &viewer);
+        let launched = launch_markdown_viewer(&pid_file);
+        match previous {
+            Some(value) => std::env::set_var("FLOWMUX_MD_VIEWER", value),
+            None => std::env::remove_var("FLOWMUX_MD_VIEWER"),
+        }
+        launched.unwrap();
+
+        wait_until(|| {
+            fs::read_to_string(&pid_file).is_ok_and(|pid| pid.trim().parse::<u32>().is_ok())
+        });
+        let pid = fs::read_to_string(&pid_file).unwrap();
+        wait_until(|| !Path::new(&format!("/proc/{}", pid.trim())).exists());
     }
 
     struct TestDir {
