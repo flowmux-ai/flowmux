@@ -58,10 +58,10 @@ pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
 pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
 pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
-pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 50;
+pub const TERMINAL_MINIMAP_WIDTH_DEFAULT: u16 = 40;
 pub const TERMINAL_MINIMAP_OPACITY_MIN: u8 = 0;
 pub const TERMINAL_MINIMAP_OPACITY_MAX: u8 = 100;
-pub const TERMINAL_MINIMAP_OPACITY_DEFAULT: u8 = 20;
+pub const TERMINAL_MINIMAP_OPACITY_DEFAULT: u8 = 50;
 
 /// Default for [`Options::system_notifications_enabled`]. Desktop toasts ship
 /// enabled so flowmux behaves like every other notifying app on first launch;

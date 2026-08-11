@@ -434,14 +434,16 @@ fn build_application() -> adw::Application {
         .build()
 }
 
-/// GTK's GPU renderer keeps several full-window surfaces alive while a terminal
-/// TUI repaints. Cairo uses one software-backed surface and keeps the footprint
-/// stable; an explicit user choice still wins.
+/// macOS keeps several full-window GPU surfaces alive while a terminal repaints.
+#[cfg(target_os = "macos")]
 fn install_memory_efficient_renderer() {
     if std::env::var_os("GSK_RENDERER").is_none() {
         std::env::set_var("GSK_RENDERER", "cairo");
     }
 }
+
+#[cfg(not(target_os = "macos"))]
+fn install_memory_efficient_renderer() {}
 
 fn should_present_existing_main_window(active_window_is_active: bool) -> bool {
     !active_window_is_active

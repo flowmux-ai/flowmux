@@ -25,8 +25,9 @@ draws terminal cells as pixels without covering terminal text. Scrolling over
 the minimap moves its local history window without moving the terminal;
 clicking or dragging moves the terminal viewport. It includes the current
 screen after commands such as `clear`; setting it to `false` restores the
-standard scrollbar. `terminal_minimap_width` defaults to `50` pixels and is
-clamped to `12..=96`. `terminal_minimap_opacity` defaults to `20` percent and
+standard scrollbar. Alternate-screen TUIs always hide the minimap and use the
+standard scrollbar. `terminal_minimap_width` defaults to `40` pixels and is
+clamped to `12..=96`. `terminal_minimap_opacity` defaults to `50` percent and
 is clamped to `0..=100`. All three settings apply to open and new tabs.
 
 `zoom_percent` applies to terminal and browser surfaces. Terminal zoom is

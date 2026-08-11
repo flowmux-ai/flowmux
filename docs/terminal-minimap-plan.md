@@ -11,10 +11,10 @@
 
 ## 개선 동작
 
-minimap은 전체 history를 고정 높이에 비례 압축하는 scrollbar가 아니다. 연속된 최대
-128행을 표시하는 지역 history 창이다.
+minimap은 전체 history를 고정 높이에 비례 압축하는 scrollbar가 아니다. minimap의
+실제 픽셀 높이만큼 연속된 행을 표시하는 지역 history 창이다.
 
-- 최대 128개의 terminal row를 minimap 높이에 맞춰 그린다.
+- terminal row 하나를 높이 1px로 간격 없이 그린다.
 - glyph가 있는 cell은 foreground, background가 있는 cell은 background 색으로 그린다.
 - minimap wheel은 25행씩 지역 history 창만 이동한다.
 - click과 drag는 그 지역 좌표를 terminal viewport 위치로 바꾼다.
@@ -30,19 +30,19 @@ flowmux는 VTE grid 좌표와 GTK `DrawingArea`를 사용해 이 동작을 구�
 - weak `vte::Terminal`
 - `gtk::DrawingArea`
 - 현재 지역 창의 시작 row와 아래쪽 기준 offset
-- 최대 128행의 `Vec<Vec<VtePixelRun>>`
-- refresh pending flag
+- minimap 픽셀 높이만큼의 `Vec<Vec<VtePixelRun>>`
+- refresh timeout source
 
 정상 scrollback의 한 번의 갱신은 다음 순서다.
 
-1. `GtkAdjustment`의 `lower`, `upper`로 최대 128행의 지역 창을 계산한다.
+1. `GtkAdjustment`의 `lower`, `upper`로 minimap 높이만큼의 지역 창을 계산한다.
 2. `text_range_format(HTML)`을 한 번 호출해 그 row 범위를 읽는다.
 3. 기존 VTE HTML parser로 cell column, 길이, 색상 run만 남긴다.
 4. Cairo에서 terminal column을 minimap 폭에 맞춰 cell pixel을 그린다.
 5. terminal viewport가 지역 창 밖이면 indicator를 위나 아래에 고정하고 흐리게 한다.
 
 원문, 별도 terminal parser, worker thread, service, 새 dependency는 추가하지 않는다.
-지역 창의 메모리와 draw 비용은 전체 scrollback 길이와 무관하게 최대 128행이다.
+지역 창의 메모리와 draw 비용은 전체 scrollback 길이와 무관하게 minimap 높이로 제한된다.
 
 ## 배치와 입력
 
@@ -52,6 +52,7 @@ minimum-size를 깨뜨렸던 `gtk::Box` wrapper도 다시 도입하지 않는다
 
 - minimap ON: 표준 scrollbar를 숨기고 VTE 오른쪽 gutter에 minimap을 표시한다.
 - minimap OFF: VTE margin을 0으로 되돌리고 표준 scrollbar를 표시한다.
+- alternate screen: minimap과 gutter를 숨기고 표준 scrollbar를 표시한다.
 - wheel over minimap: preview offset만 변경하고 event propagation을 중단한다.
 - click/drag: 지역 row 좌표에서 clamped adjustment 값을 계산한다.
 - terminal scroll: viewport가 지역 창 경계를 넘으면 preview offset도 함께 이동한다.
@@ -62,9 +63,8 @@ minimum-size를 깨뜨렸던 `gtk::Box` wrapper도 다시 도입하지 않는다
 ## alternate screen
 
 `pty-tee`가 전달하는 DECSET/DECRST 47, 1047, 1049 상태를 사용한다.
-alternate screen에서는 `text_format(HTML)`로 현재 화면만 그리고 `ALT` badge를
-표시하며 click/drag와 minimap history scroll을 막는다. Agent별 비공개 transcript나
-PageUp/mouse event 주입은 사용하지 않는다.
+alternate screen에서는 minimap을 숨기고 표준 scrollbar를 표시한다. Agent별 비공개
+transcript나 PageUp/mouse event 주입은 사용하지 않는다.
 
 ## 검증 기준
 
@@ -73,7 +73,7 @@ PageUp/mouse event 주입은 사용하지 않는다.
 - minimap wheel은 terminal `GtkAdjustment::value`를 변경하지 않는다.
 - click/drag target과 preview offset은 각 범위를 벗어나지 않는다.
 - minimap ON/OFF와 폭 변경 시 VTE gutter가 함께 바뀐다.
-- alternate screen에서 현재 화면만 보이고 terminal navigation이 발생하지 않는다.
+- alternate screen에서 minimap 대신 표준 scrollbar가 보인다.
 - keyboard input, selection, terminal wheel, Agent mouse capture, IME, split layout이
   기존처럼 동작한다.
 - runtime/UI 변경은 실제 flowmux pane에서 출력, wheel, click/drag, ON/OFF를 재현한다.

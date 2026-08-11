@@ -56,6 +56,7 @@ pub struct GhosttyPane {
     scrollback_dirty: Rc<Cell<bool>>,
     terminal_scrollbar: gtk::Scrollbar,
     terminal_scrollbar_enabled: Rc<Cell<bool>>,
+    terminal_alternate_screen: Rc<Cell<bool>>,
     terminal_minimap: TerminalMinimap,
     /// Last non-empty text selection VTE reported. Agent TUIs (Claude Code,
     /// Codex) repaint constantly; VTE clears the drag-selection on the next
@@ -402,17 +403,34 @@ impl GhosttyPane {
         self.terminal_minimap
             .set_opacity(flowmux_config::options::Options::clamp_terminal_minimap_opacity(opacity));
         self.widget
-            .set_margin_end(if enabled { i32::from(width) } else { 0 });
+            .set_margin_end(if enabled && !self.terminal_alternate_screen.get() {
+                i32::from(width)
+            } else {
+                0
+            });
         self.terminal_minimap.set_enabled(enabled);
         self.terminal_scrollbar_enabled.set(!enabled);
         sync_terminal_scrollbar_visibility(
             &self.terminal_scrollbar,
             self.terminal_scrollbar_enabled.get(),
+            self.terminal_alternate_screen.get(),
         );
     }
 
     pub fn set_alternate_screen(&self, active: bool) {
+        self.terminal_alternate_screen.set(active);
         self.terminal_minimap.set_alternate_screen(active);
+        self.widget
+            .set_margin_end(if !active && self.terminal_minimap.is_enabled() {
+                self.terminal_minimap.widget().width_request().max(0)
+            } else {
+                0
+            });
+        sync_terminal_scrollbar_visibility(
+            &self.terminal_scrollbar,
+            self.terminal_scrollbar_enabled.get(),
+            active,
+        );
     }
 
     /// Feed raw bytes to the child PTY (snapping the view to the bottom first).
@@ -690,19 +708,20 @@ impl GhosttyPane {
         let scrollbar = gtk::Scrollbar::new(gtk::Orientation::Vertical, Some(&scroll_adjustment));
         scrollbar.set_halign(gtk::Align::End);
         scrollbar.set_valign(gtk::Align::Fill);
-        // Keep a real standalone scrollbar for the 22.04 path, but only show it
-        // when VTE reports scrollback. Full-screen TUIs such as claude handle
-        // wheel scrolling inside the alternate screen; VTE's adjustment then
-        // stays at one page, which would otherwise draw a full-height thumb.
+        // Keep a real standalone scrollbar for the 22.04 path. Normal shells
+        // show it only for scrollback; alternate-screen TUIs use it instead of
+        // the minimap even when VTE reports a one-page adjustment.
         scrollbar.set_visible(false);
         scrollbar.set_can_focus(false);
         scrollbar.set_width_request(12);
         container.add_overlay(&scrollbar);
         let terminal_scrollbar_enabled = Rc::new(Cell::new(true));
+        let terminal_alternate_screen = Rc::new(Cell::new(false));
         install_terminal_scrollbar_adjustment_sync(
             &term,
             &scrollbar,
             terminal_scrollbar_enabled.clone(),
+            terminal_alternate_screen.clone(),
         );
         let terminal_minimap = TerminalMinimap::new(&term);
         container.add_overlay(terminal_minimap.widget());
@@ -1028,6 +1047,7 @@ impl GhosttyPane {
             scrollback_dirty,
             terminal_scrollbar: scrollbar,
             terminal_scrollbar_enabled,
+            terminal_alternate_screen,
             terminal_minimap,
             last_selection,
             _pty: Rc::new(RefCell::new(Some(pty))),
@@ -1883,15 +1903,20 @@ fn terminal_adjustment_has_scrollback(adj: &gtk::Adjustment) -> bool {
     adjustment_has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
 }
 
-fn sync_terminal_scrollbar_visibility(scrollbar: &gtk::Scrollbar, enabled: bool) {
+fn sync_terminal_scrollbar_visibility(
+    scrollbar: &gtk::Scrollbar,
+    enabled: bool,
+    force_visible: bool,
+) {
     let adj = scrollbar.adjustment();
-    scrollbar.set_visible(enabled && terminal_adjustment_has_scrollback(&adj));
+    scrollbar.set_visible(force_visible || (enabled && terminal_adjustment_has_scrollback(&adj)));
 }
 
 fn sync_terminal_scrollbar_adjustment(
     term: &vte::Terminal,
     scrollbar: &gtk::Scrollbar,
     enabled: &Rc<Cell<bool>>,
+    force_visible: &Rc<Cell<bool>>,
     watched_adjustment: &Rc<RefCell<Option<gtk::Adjustment>>>,
 ) {
     if let Some(adj) = term.vadjustment() {
@@ -1908,46 +1933,62 @@ fn sync_terminal_scrollbar_adjustment(
         if !already_watching {
             let scrollbar_for_changed = scrollbar.downgrade();
             let enabled_for_changed = enabled.clone();
+            let force_visible_for_changed = force_visible.clone();
             adj.connect_changed(move |_| {
                 if let Some(scrollbar) = scrollbar_for_changed.upgrade() {
-                    sync_terminal_scrollbar_visibility(&scrollbar, enabled_for_changed.get());
+                    sync_terminal_scrollbar_visibility(
+                        &scrollbar,
+                        enabled_for_changed.get(),
+                        force_visible_for_changed.get(),
+                    );
                 }
             });
             *watched_adjustment.borrow_mut() = Some(adj);
         }
     }
 
-    sync_terminal_scrollbar_visibility(scrollbar, enabled.get());
+    sync_terminal_scrollbar_visibility(scrollbar, enabled.get(), force_visible.get());
 }
 
 fn install_terminal_scrollbar_adjustment_sync(
     term: &vte::Terminal,
     scrollbar: &gtk::Scrollbar,
     enabled: Rc<Cell<bool>>,
+    force_visible: Rc<Cell<bool>>,
 ) {
     let watched_adjustment = Rc::new(RefCell::new(None::<gtk::Adjustment>));
-    sync_terminal_scrollbar_adjustment(term, scrollbar, &enabled, &watched_adjustment);
+    sync_terminal_scrollbar_adjustment(
+        term,
+        scrollbar,
+        &enabled,
+        &force_visible,
+        &watched_adjustment,
+    );
 
     let scrollbar_for_notify = scrollbar.clone();
     let enabled_for_notify = enabled.clone();
+    let force_visible_for_notify = force_visible.clone();
     let watched_for_notify = watched_adjustment.clone();
     term.connect_vadjustment_notify(move |term| {
         sync_terminal_scrollbar_adjustment(
             term,
             &scrollbar_for_notify,
             &enabled_for_notify,
+            &force_visible_for_notify,
             &watched_for_notify,
         );
     });
 
     let scrollbar_for_realize = scrollbar.clone();
     let enabled_for_realize = enabled.clone();
+    let force_visible_for_realize = force_visible.clone();
     let watched_for_realize = watched_adjustment.clone();
     term.connect_realize(move |term| {
         sync_terminal_scrollbar_adjustment(
             term,
             &scrollbar_for_realize,
             &enabled_for_realize,
+            &force_visible_for_realize,
             &watched_for_realize,
         );
     });
@@ -1959,6 +2000,7 @@ fn install_terminal_scrollbar_adjustment_sync(
             &term_for_idle,
             &scrollbar_for_idle,
             &enabled,
+            &force_visible,
             &watched_adjustment,
         );
     });
@@ -3301,10 +3343,13 @@ mod tests {
         assert_eq!(pane.widget.margin_end(), 0);
         pane.set_minimap(true, 24, 20);
         pane.set_alternate_screen(true);
-        assert_eq!(
-            pane.terminal_minimap.widget().tooltip_text().as_deref(),
-            Some("Alternate screen: minimap shows the current screen only")
-        );
+        assert!(!pane.terminal_minimap.widget().is_visible());
+        assert!(pane.terminal_scrollbar.is_visible());
+        assert_eq!(pane.widget.margin_end(), 0);
+        pane.set_alternate_screen(false);
+        assert!(pane.terminal_minimap.widget().is_visible());
+        assert!(!pane.terminal_scrollbar.is_visible());
+        assert_eq!(pane.widget.margin_end(), 24);
         pane.show_message("minimap release check\n");
 
         pane.close_pty();

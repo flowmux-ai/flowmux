@@ -10,14 +10,13 @@ use std::time::Duration;
 use vte::prelude::*;
 
 const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
-const MAX_PREVIEW_ROWS: usize = 128;
 const PREVIEW_SCROLL_ROWS: i64 = 25;
 
 #[derive(Default)]
 struct MinimapState {
     enabled: Cell<bool>,
     alternate_screen: Cell<bool>,
-    refresh_pending: Cell<bool>,
+    refresh_source: RefCell<Option<glib::SourceId>>,
     preview_offset: Cell<i64>,
     preview_top: Cell<i64>,
     preview_rows: Cell<usize>,
@@ -70,6 +69,9 @@ impl TerminalMinimap {
             return;
         }
         if !enabled {
+            if let Some(source) = self.state.refresh_source.borrow_mut().take() {
+                source.remove();
+            }
             self.state.pixel_rows.borrow_mut().clear();
             self.state.preview_offset.set(0);
             self.state.preview_rows.set(0);
@@ -81,6 +83,10 @@ impl TerminalMinimap {
             sync_visibility(&self.area, &self.state, term.vadjustment().as_ref());
             refresh_now(&term, &self.area, &self.state);
         }
+    }
+
+    pub(crate) fn is_enabled(&self) -> bool {
+        self.state.enabled.get()
     }
 
     pub(crate) fn set_width(&self, width: u16) {
@@ -96,15 +102,15 @@ impl TerminalMinimap {
             return;
         }
         self.state.preview_offset.set(0);
-        let label = if active {
-            "Alternate screen: minimap shows the current screen only"
-        } else {
-            "Terminal scrollback minimap"
-        };
-        self.area.set_tooltip_text(Some(label));
-        self.area
-            .update_property(&[gtk::accessible::Property::Label(label)]);
+        if active {
+            if let Some(source) = self.state.refresh_source.borrow_mut().take() {
+                source.remove();
+            }
+            self.area.set_visible(false);
+            return;
+        }
         if let Some(term) = self.terminal.upgrade() {
+            sync_visibility(&self.area, &self.state, term.vadjustment().as_ref());
             refresh_now(&term, &self.area, &self.state);
         }
     }
@@ -132,7 +138,6 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         let color = area.color();
         let columns = state.columns.get().max(1);
         let cell_width = f64::from(width) / columns as f64;
-        let row_height = f64::from(height) / state.preview_rows.get().max(1) as f64;
         cr.set_antialias(gtk::cairo::Antialias::None);
         for (row, runs) in state
             .pixel_rows
@@ -166,45 +171,12 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
                 cr.set_source_rgb(red, green, blue);
                 cr.rectangle(
                     start as f64 * cell_width,
-                    row as f64 * row_height,
+                    row as f64,
                     (end - start) as f64 * cell_width,
-                    row_height,
+                    1.0,
                 );
                 let _ = cr.fill();
             }
-        }
-
-        if state.alternate_screen.get() {
-            let badge_height = f64::from(height.min(14));
-            cr.set_source_rgba(
-                color.red() as f64,
-                color.green() as f64,
-                color.blue() as f64,
-                0.9,
-            );
-            cr.rectangle(
-                2.0,
-                2.0,
-                f64::from((width - 4).max(1)),
-                (badge_height - 2.0).max(1.0),
-            );
-            let _ = cr.fill();
-            if width >= 24 && height >= 14 {
-                cr.set_source_rgb(
-                    background.red() as f64,
-                    background.green() as f64,
-                    background.blue() as f64,
-                );
-                cr.select_font_face(
-                    "Sans",
-                    gtk::cairo::FontSlant::Normal,
-                    gtk::cairo::FontWeight::Bold,
-                );
-                cr.set_font_size(8.0);
-                cr.move_to(4.0, 11.0);
-                let _ = cr.show_text("ALT");
-            }
-            return;
         }
 
         let Some(adj) = term.vadjustment() else {
@@ -377,8 +349,8 @@ fn sync_adjustment(
             let state = state.clone();
             adj.connect_value_changed(move |_| {
                 if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
-                    if sync_preview_to_viewport(&term, &state) {
-                        refresh_now(&term, &area, &state);
+                    if sync_preview_to_viewport(&term, &state, area.height().max(1) as usize) {
+                        schedule_refresh(&term, &area, state.clone());
                     } else {
                         area.queue_draw();
                     }
@@ -396,36 +368,39 @@ fn sync_visibility(
     state: &MinimapState,
     adjustment: Option<&gtk::Adjustment>,
 ) {
-    let visible = state.enabled.get() && adjustment.is_some();
+    let visible = state.enabled.get() && !state.alternate_screen.get() && adjustment.is_some();
     area.set_visible(visible);
 }
 
 fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<MinimapState>) {
-    if !state.enabled.get() || state.refresh_pending.replace(true) {
+    if !state.enabled.get() || state.alternate_screen.get() {
         return;
+    }
+    if let Some(source) = state.refresh_source.borrow_mut().take() {
+        source.remove();
     }
 
     let term = term.downgrade();
     let area = area.downgrade();
-    glib::timeout_add_local_once(REFRESH_INTERVAL, move || {
-        state.refresh_pending.set(false);
+    let refresh_state = state.clone();
+    let source = glib::timeout_add_local_once(REFRESH_INTERVAL, move || {
+        refresh_state.refresh_source.borrow_mut().take();
         if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
-            refresh_now(&term, &area, &state);
+            refresh_now(&term, &area, &refresh_state);
         }
     });
+    *state.refresh_source.borrow_mut() = Some(source);
 }
 
 fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapState) {
-    if !state.enabled.get() {
+    if !state.enabled.get() || state.alternate_screen.get() {
         return;
     }
     let Some(adj) = term.vadjustment() else {
         return;
     };
     let columns = term.column_count().max(1) as usize;
-    if state.alternate_screen.get()
-        || !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
-    {
+    if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
         refresh_visible_screen(term, area, state, columns);
         return;
     }
@@ -433,7 +408,7 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     let Some(window) = preview_window(
         adj.lower(),
         adj.upper(),
-        MAX_PREVIEW_ROWS,
+        area.height().max(1) as usize,
         state.preview_offset.get(),
     ) else {
         return;
@@ -480,7 +455,7 @@ fn refresh_visible_screen(
             .map_or(0, |adj| adj.lower().floor() as i64),
     );
     state.columns.set(columns);
-    let limit = (term.row_count().max(1) as usize).min(MAX_PREVIEW_ROWS);
+    let limit = (term.row_count().max(1) as usize).min(area.height().max(1) as usize);
     state.preview_rows.set(limit);
     let rows = term
         .text_format(vte::Format::Html)
@@ -537,7 +512,7 @@ fn scroll_preview(
     let Some(window) = preview_window(
         adj.lower(),
         adj.upper(),
-        MAX_PREVIEW_ROWS,
+        area.height().max(1) as usize,
         state.preview_offset.get(),
     ) else {
         return true;
@@ -554,7 +529,7 @@ fn has_scrollable_range(lower: f64, upper: f64, page_size: f64) -> bool {
     upper > lower + page_size.max(1.0)
 }
 
-fn sync_preview_to_viewport(term: &vte::Terminal, state: &MinimapState) -> bool {
+fn sync_preview_to_viewport(term: &vte::Terminal, state: &MinimapState, limit: usize) -> bool {
     if !state.enabled.get() || state.alternate_screen.get() {
         return false;
     }
@@ -566,7 +541,7 @@ fn sync_preview_to_viewport(term: &vte::Terminal, state: &MinimapState) -> bool 
         adj.upper(),
         adj.page_size(),
         adj.value(),
-        MAX_PREVIEW_ROWS,
+        limit,
         state.preview_offset.get(),
     ) else {
         return false;
@@ -670,12 +645,12 @@ fn viewport_geometry(
     if preview_rows == 0 || !page_size.is_finite() || !value.is_finite() || height <= 0.0 {
         return None;
     }
-    let row_height = height / preview_rows as f64;
-    let viewport_height = (page_size.max(1.0) * row_height).min(height);
-    let raw_top = (value - preview_top as f64) * row_height;
-    let out_of_bounds = raw_top < 0.0 || raw_top + viewport_height > height;
+    let preview_height = (preview_rows as f64).min(height);
+    let viewport_height = page_size.max(1.0).min(preview_height);
+    let raw_top = value - preview_top as f64;
+    let out_of_bounds = raw_top < 0.0 || raw_top + viewport_height > preview_height;
     Some((
-        raw_top.clamp(0.0, height - viewport_height),
+        raw_top.clamp(0.0, preview_height - viewport_height),
         viewport_height,
         out_of_bounds,
     ))
@@ -695,13 +670,42 @@ fn pointer_target(
         return None;
     }
     let max_value = (upper - page_size).max(lower);
-    let row = y.clamp(0.0, height) * preview_rows as f64 / height;
+    let row = y.clamp(0.0, (preview_rows as f64).min(height));
     Some((preview_top as f64 + row - page_size / 2.0).clamp(lower, max_value))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    async fn refresh_waits_for_a_quiet_period() {
+        let term = vte::Terminal::new();
+        let area = gtk::DrawingArea::new();
+        let state = Rc::new(MinimapState::default());
+        state.enabled.set(true);
+
+        schedule_refresh(&term, &area, state.clone());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        schedule_refresh(&term, &area, state.clone());
+        gtk::glib::timeout_future(Duration::from_millis(75)).await;
+        assert!(state.refresh_source.borrow().is_some());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert!(state.refresh_source.borrow().is_none());
+    }
+
+    #[gtk::test]
+    async fn viewport_shift_uses_debounced_refresh() {
+        let term = vte::Terminal::new();
+        let adjustment = gtk::Adjustment::new(0.0, -1_000.0, 24.0, 1.0, 24.0, 24.0);
+        term.set_property("vadjustment", &adjustment);
+        let minimap = TerminalMinimap::new(&term);
+        minimap.set_enabled(true);
+
+        adjustment.set_value(-400.0);
+        assert!(minimap.state.refresh_source.borrow().is_some());
+        minimap.set_enabled(false);
+    }
 
     #[gtk::test]
     async fn pixel_preview_survives_clear_scrollback_and_resize() {
@@ -744,7 +748,7 @@ mod tests {
             nonempty > 64,
             "scrollback preview returned {nonempty} nonempty rows after clearing history",
         );
-        assert!(minimap.state.pixel_rows.borrow().len() <= MAX_PREVIEW_ROWS);
+        assert!(minimap.state.pixel_rows.borrow().len() <= minimap.widget().height() as usize);
         let adjustment = term.vadjustment().unwrap();
         let terminal_position = adjustment.value();
         assert!(scroll_preview(
@@ -759,7 +763,7 @@ mod tests {
     }
 
     #[gtk::test]
-    async fn alternate_screen_previews_only_the_screen_and_blocks_navigation() {
+    async fn alternate_screen_hides_minimap_and_blocks_navigation() {
         let term = vte::Terminal::new();
         term.set_scrollback_lines(5_000);
         let overlay = gtk::Overlay::new();
@@ -780,34 +784,29 @@ mod tests {
         let before = adjustment.value();
 
         minimap.set_alternate_screen(true);
-        assert!(minimap.state.pixel_rows.borrow().len() <= MAX_PREVIEW_ROWS);
+        assert!(!minimap.widget().is_visible());
         scroll_to_pointer(&term, &minimap.state, 600.0, 600.0);
         assert_eq!(adjustment.value(), before);
+        minimap.set_alternate_screen(false);
+        assert!(minimap.widget().is_visible());
         window.close();
     }
 
     #[test]
     fn preview_window_follows_the_bottom_and_scrolls_locally() {
         assert_eq!(
-            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 0),
+            preview_window(-1_000.0, 24.0, 600, 0),
             Some(PreviewWindow {
-                top: -104,
+                top: -576,
                 upper: 24,
-                rows: 128,
+                rows: 600,
                 offset: 0,
-                max_offset: 896,
+                max_offset: 424,
             })
         );
+        assert_eq!(preview_window(-1_000.0, 24.0, 600, 25).unwrap().top, -601);
         assert_eq!(
-            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 25)
-                .unwrap()
-                .top,
-            -129
-        );
-        assert_eq!(
-            preview_window(-1_000.0, 24.0, MAX_PREVIEW_ROWS, 999)
-                .unwrap()
-                .top,
+            preview_window(-1_000.0, 24.0, 600, 999).unwrap().top,
             -1_000
         );
     }
@@ -815,15 +814,15 @@ mod tests {
     #[test]
     fn terminal_viewport_moves_the_preview_only_at_its_bounds() {
         assert_eq!(
-            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -80.0, MAX_PREVIEW_ROWS, 0),
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -80.0, 600, 0),
             Some(0)
         );
         assert_eq!(
-            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -400.0, MAX_PREVIEW_ROWS, 0),
-            Some(296)
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, -800.0, 600, 0),
+            Some(224)
         );
         assert_eq!(
-            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, 0.0, MAX_PREVIEW_ROWS, 796,),
+            preview_offset_for_viewport(-1_000.0, 24.0, 24.0, 0.0, 600, 796,),
             Some(0)
         );
     }
@@ -858,15 +857,15 @@ mod tests {
     fn viewport_and_pointer_mapping_are_clamped() {
         assert_eq!(
             viewport_geometry(-104, 128, 24.0, -104.0, 600.0),
-            Some((0.0, 112.5, false))
+            Some((0.0, 24.0, false))
         );
         assert_eq!(
             viewport_geometry(-104, 128, 24.0, 0.0, 600.0),
-            Some((487.5, 112.5, false))
+            Some((104.0, 24.0, false))
         );
         assert_eq!(
             viewport_geometry(-129, 128, 24.0, 0.0, 600.0),
-            Some((487.5, 112.5, true))
+            Some((104.0, 24.0, true))
         );
         assert_eq!(
             pointer_target(-1_000.0, 24.0, 24.0, -129, 128, 0.0, 600.0),
