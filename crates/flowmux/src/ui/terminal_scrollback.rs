@@ -54,9 +54,10 @@ struct ParsedSnapshot {
     runs: Vec<StyledRun>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct VteRowAppearance {
-    pub(crate) occupied_cells: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VtePixelRun {
+    pub(crate) column: usize,
+    pub(crate) len: usize,
     pub(crate) color: Option<[u8; 3]>,
 }
 
@@ -179,32 +180,42 @@ pub(crate) fn replay_bytes(snapshot: &TerminalScrollback) -> Result<Option<Vec<u
     Ok((!replay.is_empty()).then(|| with_terminal_line_endings(&replay)))
 }
 
-/// Reduce one VTE HTML row to the only data the minimap retains.
-pub(crate) fn vte_html_row_appearance(html: &str) -> Result<VteRowAppearance, String> {
-    Ok(vte_html_row_appearances(html)?
-        .into_iter()
-        .next()
-        .unwrap_or_default())
-}
-
-/// Reduce VTE's visible-screen HTML to bounded row metadata without retaining text.
-pub(crate) fn vte_html_row_appearances(html: &str) -> Result<Vec<VteRowAppearance>, String> {
+/// Convert VTE's styled text into the occupied cell runs used by the minimap.
+/// Explicit backgrounds win over glyph colors, matching the terminal cell view.
+pub(crate) fn vte_html_pixel_rows(html: &str) -> Result<Vec<Vec<VtePixelRun>>, String> {
     let parsed = parse_vte_html(html)?;
-    let mut rows = vec![VteRowAppearance::default()];
+    let mut rows: Vec<Vec<VtePixelRun>> = vec![Vec::new()];
+    let mut column = 0;
     for run in parsed.runs {
         for ch in run.text.chars() {
             if ch == '\n' {
-                rows.push(VteRowAppearance::default());
+                rows.push(Vec::new());
+                column = 0;
             } else {
                 let width = terminal_cell_width(ch);
-                if width > 0 {
-                    let appearance = rows.last_mut().expect("rows always contains one entry");
-                    appearance.occupied_cells += width;
-                    appearance.color = appearance
-                        .color
-                        .or(run.style.foreground)
-                        .or(run.style.background);
+                if width == 0 {
+                    continue;
                 }
+                let color = run.style.background.or_else(|| {
+                    (!ch.is_whitespace())
+                        .then_some(run.style.foreground)
+                        .flatten()
+                });
+                if color.is_some() || !ch.is_whitespace() {
+                    let row = rows.last_mut().expect("rows always contains one entry");
+                    if row.last().is_some_and(|previous| {
+                        previous.column + previous.len == column && previous.color == color
+                    }) {
+                        row.last_mut().unwrap().len += width;
+                    } else {
+                        row.push(VtePixelRun {
+                            column,
+                            len: width,
+                            color,
+                        });
+                    }
+                }
+                column += width;
             }
         }
     }
@@ -212,7 +223,7 @@ pub(crate) fn vte_html_row_appearances(html: &str) -> Result<Vec<VteRowAppearanc
 }
 
 pub(crate) fn terminal_cell_width(ch: char) -> usize {
-    if ch.is_whitespace() || ch.is_zero_width() {
+    if ch.is_zero_width() {
         0
     } else if ch.is_wide() {
         2
@@ -519,20 +530,42 @@ mod tests {
     }
 
     #[test]
-    fn minimap_row_appearance_keeps_density_and_terminal_color() {
-        let appearance =
-            vte_html_row_appearance("<pre>  plain <font color=\"#112233\">color</font>   </pre>")
-                .unwrap();
-        assert_eq!(appearance.occupied_cells, 10);
-        assert_eq!(appearance.color, Some([0x11, 0x22, 0x33]));
-
-        let rows = vte_html_row_appearances(
-            "<pre><font color=\"#ff0000\">red</font>\n<font color=\"#00ff00\">green</font></pre>",
+    fn minimap_pixels_keep_cell_position_and_terminal_color() {
+        let rows = vte_html_pixel_rows(
+            "<pre>  plain <font color=\"#112233\">color</font>   \n<span style=\"background-color:#445566\">  bg</span>한</pre>",
         )
         .unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].color, Some([0xff, 0, 0]));
-        assert_eq!(rows[1].color, Some([0, 0xff, 0]));
+        assert_eq!(
+            rows[0],
+            vec![
+                VtePixelRun {
+                    column: 2,
+                    len: 5,
+                    color: None,
+                },
+                VtePixelRun {
+                    column: 8,
+                    len: 5,
+                    color: Some([0x11, 0x22, 0x33]),
+                },
+            ]
+        );
+        assert_eq!(
+            rows[1],
+            vec![
+                VtePixelRun {
+                    column: 0,
+                    len: 4,
+                    color: Some([0x44, 0x55, 0x66]),
+                },
+                VtePixelRun {
+                    column: 4,
+                    len: 2,
+                    color: None,
+                },
+            ]
+        );
     }
 
     #[test]

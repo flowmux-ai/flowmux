@@ -37,8 +37,9 @@ pub struct GhosttyPane {
     pub widget: vte::Terminal,
     /// Root container exposed to the pane tree. A `gtk::Overlay` whose
     /// main child is `widget` (so the VTE keeps its natural-size
-    /// propagation) plus an overlaid `gtk::Scrollbar` on the right edge
-    /// bound to the VTE's vadjustment. The Overlay deliberately does
+    /// propagation) plus a scrollbar or minimap on the right edge. The
+    /// minimap reserves an equal VTE end margin so it never covers text.
+    /// The Overlay deliberately does
     /// **not** wrap the VTE in a `gtk::Box` — the latter approach
     /// (commit eb2d176, reverted) broke `gtk::Paned` minimum-size
     /// propagation and clipped tig / vim / htop in nested splits.
@@ -396,10 +397,12 @@ impl GhosttyPane {
     }
 
     pub fn set_minimap(&self, enabled: bool, width: u16, opacity: u8) {
-        self.terminal_minimap
-            .set_width(flowmux_config::options::Options::clamp_terminal_minimap_width(width));
+        let width = flowmux_config::options::Options::clamp_terminal_minimap_width(width);
+        self.terminal_minimap.set_width(width);
         self.terminal_minimap
             .set_opacity(flowmux_config::options::Options::clamp_terminal_minimap_opacity(opacity));
+        self.widget
+            .set_margin_end(if enabled { i32::from(width) } else { 0 });
         self.terminal_minimap.set_enabled(enabled);
         self.terminal_scrollbar_enabled.set(!enabled);
         sync_terminal_scrollbar_visibility(
@@ -3292,7 +3295,11 @@ mod tests {
         let terminal = pane.widget.downgrade();
         let container = pane.container.downgrade();
         pane.set_minimap(true, 24, 20);
+        assert_eq!(pane.widget.margin_end(), 24);
         assert!((pane.terminal_minimap.widget().opacity() - 0.2).abs() < f64::EPSILON);
+        pane.set_minimap(false, 24, 20);
+        assert_eq!(pane.widget.margin_end(), 0);
+        pane.set_minimap(true, 24, 20);
         pane.set_alternate_screen(true);
         assert_eq!(
             pane.terminal_minimap.widget().tooltip_text().as_deref(),

@@ -20,11 +20,14 @@ precedence, then `$SHELL` is used. Invalid commands fall back safely.
 `agent_bar_mode` switches Agent Activity from the resizable lower side-panel
 area to the compact bottom bar.
 
-`terminal_minimap_enabled` defaults to `true`. It includes the current screen
-after commands such as `clear`; setting it to `false` restores the standard
-scrollbar. `terminal_minimap_width` defaults to `50` pixels and is clamped to
-`12..=96`. `terminal_minimap_opacity` defaults to `20` percent and is clamped
-to `0..=100`. All three settings apply to open and new tabs.
+`terminal_minimap_enabled` defaults to `true`. It reserves a right gutter and
+draws terminal cells as pixels without covering terminal text. Scrolling over
+the minimap moves its local history window without moving the terminal;
+clicking or dragging moves the terminal viewport. It includes the current
+screen after commands such as `clear`; setting it to `false` restores the
+standard scrollbar. `terminal_minimap_width` defaults to `50` pixels and is
+clamped to `12..=96`. `terminal_minimap_opacity` defaults to `20` percent and
+is clamped to `0..=100`. All three settings apply to open and new tabs.
 
 `zoom_percent` applies to terminal and browser surfaces. Terminal zoom is
 rounded to a whole-point font size instead of using VTE's fractional font

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded-memory overview of VTE terminal content.
 
-use crate::ui::terminal_scrollback::{
-    terminal_cell_width, vte_html_row_appearance, vte_html_row_appearances, VteRowAppearance,
-};
+use crate::ui::terminal_scrollback::{terminal_cell_width, vte_html_pixel_rows, VtePixelRun};
 use gtk::glib;
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -11,26 +9,21 @@ use std::rc::Rc;
 use std::time::Duration;
 use vte::prelude::*;
 
-const MAX_SAMPLES: usize = 128;
-const REFRESH_INTERVAL: Duration = Duration::from_millis(200);
-const MIN_VIEWPORT_HEIGHT: f64 = 6.0;
+const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const PREVIEW_SCROLL_ROWS: i64 = 25;
 
 #[derive(Default)]
 struct MinimapState {
     enabled: Cell<bool>,
     alternate_screen: Cell<bool>,
     refresh_pending: Cell<bool>,
-    samples: RefCell<Vec<RowSample>>,
+    preview_offset: Cell<i64>,
+    preview_top: Cell<i64>,
+    columns: Cell<usize>,
+    pixel_rows: RefCell<Vec<Vec<VtePixelRun>>>,
 }
 
-#[derive(Clone, Copy, Default)]
-struct RowSample {
-    density: f32,
-    color: Option<[u8; 3]>,
-}
-
-/// A transparent overlay that stores only fixed-size row density/color samples.
-/// VTE remains the sole owner of terminal text and scrollback.
+/// A one-cell-per-pixel preview of a movable VTE scrollback window.
 #[derive(Clone)]
 pub(crate) struct TerminalMinimap {
     area: gtk::DrawingArea,
@@ -75,7 +68,8 @@ impl TerminalMinimap {
             return;
         }
         if !enabled {
-            self.state.samples.borrow_mut().clear();
+            self.state.pixel_rows.borrow_mut().clear();
+            self.state.preview_offset.set(0);
             self.area.set_visible(false);
             return;
         }
@@ -98,6 +92,7 @@ impl TerminalMinimap {
         if self.state.alternate_screen.replace(active) == active {
             return;
         }
+        self.state.preview_offset.set(0);
         let label = if active {
             "Alternate screen: minimap shows the current screen only"
         } else {
@@ -132,11 +127,23 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         let _ = cr.paint();
 
         let color = area.color();
-        let samples = state.samples.borrow();
-        if !samples.is_empty() {
-            let band = height as f64 / samples.len() as f64;
-            for (index, sample) in samples.iter().enumerate() {
-                let (red, green, blue) = sample.color.map_or_else(
+        let columns = state.columns.get().max(1);
+        let cell_width = f64::from(width) / columns as f64;
+        cr.set_antialias(gtk::cairo::Antialias::None);
+        for (row, runs) in state
+            .pixel_rows
+            .borrow()
+            .iter()
+            .take(height as usize)
+            .enumerate()
+        {
+            for run in runs {
+                let start = run.column.min(columns);
+                let end = run.column.saturating_add(run.len).min(columns);
+                if start == end {
+                    continue;
+                }
+                let (red, green, blue) = run.color.map_or_else(
                     || {
                         (
                             color.red() as f64,
@@ -152,17 +159,14 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
                         )
                     },
                 );
-                cr.set_source_rgba(red, green, blue, 0.5);
-                let bar_width = (f64::from(width - 4) * f64::from(sample.density)).max(0.0);
-                if bar_width > 0.0 {
-                    cr.rectangle(
-                        2.0,
-                        index as f64 * band,
-                        bar_width,
-                        (band - 1.0).max(1.0).min(band),
-                    );
-                    let _ = cr.fill();
-                }
+                cr.set_source_rgb(red, green, blue);
+                cr.rectangle(
+                    start as f64 * cell_width,
+                    row as f64,
+                    (end - start) as f64 * cell_width,
+                    1.0,
+                );
+                let _ = cr.fill();
             }
         }
 
@@ -205,9 +209,8 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
             return;
         }
-        let Some((top, viewport_height)) = viewport_geometry(
-            adj.lower(),
-            adj.upper(),
+        let Some((top, viewport_height, out_of_bounds)) = viewport_geometry(
+            state.preview_top.get(),
             adj.page_size(),
             adj.value(),
             f64::from(height),
@@ -218,7 +221,7 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             color.red() as f64,
             color.green() as f64,
             color.blue() as f64,
-            0.18,
+            if out_of_bounds { 0.08 } else { 0.24 },
         );
         cr.rectangle(0.0, top, f64::from(width), viewport_height);
         let _ = cr.fill();
@@ -256,6 +259,7 @@ fn install_pointer_navigation(
     {
         let term = term.downgrade();
         let area = area.downgrade();
+        let state = state.clone();
         drag.connect_drag_update(move |_, _, offset_y| {
             if let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) {
                 scroll_to_pointer(
@@ -268,6 +272,23 @@ fn install_pointer_navigation(
         });
     }
     area.add_controller(drag);
+
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    {
+        let term = term.downgrade();
+        let area = area.downgrade();
+        scroll.connect_scroll(move |_, _, delta_y| {
+            let (Some(term), Some(area)) = (term.upgrade(), area.upgrade()) else {
+                return glib::Propagation::Proceed;
+            };
+            if scroll_preview(&term, &area, &state, delta_y) {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    area.add_controller(scroll);
 }
 
 fn install_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<MinimapState>) {
@@ -301,6 +322,15 @@ fn install_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         term.connect_realize(move |term| {
             if let Some(area) = area.upgrade() {
                 sync_adjustment(term, &area, &state, &watched);
+            }
+        });
+    }
+    {
+        let term = term.downgrade();
+        let state = state.clone();
+        area.connect_resize(move |area, _, _| {
+            if let Some(term) = term.upgrade() {
+                schedule_refresh(&term, area, state.clone());
             }
         });
     }
@@ -390,38 +420,39 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
         return;
     }
 
+    let Some(window) = preview_window(
+        adj.lower(),
+        adj.upper(),
+        area.height().max(1) as usize,
+        state.preview_offset.get(),
+    ) else {
+        return;
+    };
+    state.preview_offset.set(window.offset);
+    state.preview_top.set(window.top);
+    state.columns.set(columns);
+
     let last_column = columns.saturating_sub(1) as i64;
-    let mut rows = sampled_rows(adj.lower(), adj.upper(), MAX_SAMPLES);
     // CSI 3 J rebases the adjustment, while VTE text-range rows remain absolute.
-    if let Some(last) = rows.last().copied() {
-        let offset = term.cursor_position().1.saturating_sub(last);
-        for row in &mut rows {
-            *row = row.saturating_add(offset);
-        }
-    }
-    let mut samples = state.samples.borrow_mut();
-    samples.clear();
-    for row in rows {
-        let (html, _) = term.text_range_format(vte::Format::Html, row, 0, row, last_column);
-        let sample = html
-            .as_deref()
-            .and_then(|html| vte_html_row_appearance(html).ok())
-            .map_or_else(
-                || {
-                    let (text, _) =
-                        term.text_range_format(vte::Format::Text, row, 0, row, last_column);
-                    RowSample {
-                        density: text
-                            .as_deref()
-                            .map_or(0.0, |text| row_density(text, columns)),
-                        color: None,
-                    }
-                },
-                |appearance| sample_from_appearance(appearance, columns),
-            );
-        samples.push(sample);
-    }
-    drop(samples);
+    let offset = term
+        .cursor_position()
+        .1
+        .saturating_sub(window.upper.saturating_sub(1));
+    let first = window.top.saturating_add(offset);
+    let last = window
+        .top
+        .saturating_add(window.rows as i64 - 1)
+        .saturating_add(offset);
+    let (html, _) = term.text_range_format(vte::Format::Html, first, 0, last, last_column);
+    let rows = html
+        .as_deref()
+        .and_then(|html| vte_html_pixel_rows(html).ok())
+        .or_else(|| {
+            let (text, _) = term.text_range_format(vte::Format::Text, first, 0, last, last_column);
+            text.as_deref().map(plain_text_pixel_rows)
+        })
+        .unwrap_or_default();
+    replace_pixel_rows(state, rows, window.rows);
     area.queue_draw();
 }
 
@@ -431,34 +462,30 @@ fn refresh_visible_screen(
     state: &MinimapState,
     columns: usize,
 ) {
-    let appearances = term
+    state.preview_offset.set(0);
+    state.preview_top.set(
+        term.vadjustment()
+            .as_ref()
+            .map_or(0, |adj| adj.lower().floor() as i64),
+    );
+    state.columns.set(columns);
+    let rows = term
         .text_format(vte::Format::Html)
         .as_deref()
-        .and_then(|html| vte_html_row_appearances(html).ok());
-    let mut samples = state.samples.borrow_mut();
-    samples.clear();
-    if let Some(appearances) = appearances {
-        for index in sampled_rows(0.0, appearances.len() as f64, MAX_SAMPLES) {
-            samples.push(sample_from_appearance(appearances[index as usize], columns));
-        }
-    } else if let Some(text) = term.text_format(vte::Format::Text) {
-        let lines: Vec<_> = text.lines().collect();
-        for index in sampled_rows(0.0, lines.len() as f64, MAX_SAMPLES) {
-            samples.push(RowSample {
-                density: row_density(lines[index as usize], columns),
-                color: None,
-            });
-        }
-    }
-    drop(samples);
+        .and_then(|html| vte_html_pixel_rows(html).ok())
+        .or_else(|| {
+            term.text_format(vte::Format::Text)
+                .as_deref()
+                .map(plain_text_pixel_rows)
+        })
+        .unwrap_or_default();
+    replace_pixel_rows(state, rows, area.height().max(1) as usize);
     area.queue_draw();
 }
 
-fn sample_from_appearance(appearance: VteRowAppearance, columns: usize) -> RowSample {
-    RowSample {
-        density: (appearance.occupied_cells as f32 / columns as f32).clamp(0.0, 1.0),
-        color: appearance.color,
-    }
+fn replace_pixel_rows(state: &MinimapState, mut rows: Vec<Vec<VtePixelRun>>, limit: usize) {
+    rows.truncate(limit);
+    *state.pixel_rows.borrow_mut() = rows;
 }
 
 fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height: f64) -> bool {
@@ -468,8 +495,43 @@ fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height:
     let Some(adj) = term.vadjustment() else {
         return true;
     };
-    if let Some(target) = pointer_target(adj.lower(), adj.upper(), adj.page_size(), y, height) {
+    if let Some(target) = pointer_target(
+        adj.lower(),
+        adj.upper(),
+        adj.page_size(),
+        state.preview_top.get(),
+        y,
+        height,
+    ) {
         adj.set_value(target);
+    }
+    true
+}
+
+fn scroll_preview(
+    term: &vte::Terminal,
+    area: &gtk::DrawingArea,
+    state: &MinimapState,
+    delta_y: f64,
+) -> bool {
+    if state.alternate_screen.get() || delta_y == 0.0 {
+        return false;
+    }
+    let Some(adj) = term.vadjustment() else {
+        return true;
+    };
+    let Some(window) = preview_window(
+        adj.lower(),
+        adj.upper(),
+        area.height().max(1) as usize,
+        state.preview_offset.get(),
+    ) else {
+        return true;
+    };
+    let offset =
+        (window.offset - delta_y.signum() as i64 * PREVIEW_SCROLL_ROWS).clamp(0, window.max_offset);
+    if offset != state.preview_offset.replace(offset) {
+        refresh_now(term, area, state);
     }
     true
 }
@@ -478,66 +540,98 @@ fn has_scrollable_range(lower: f64, upper: f64, page_size: f64) -> bool {
     upper > lower + page_size.max(1.0)
 }
 
-fn sampled_rows(lower: f64, upper: f64, limit: usize) -> Vec<i64> {
-    if !lower.is_finite() || !upper.is_finite() || upper <= lower || limit == 0 {
-        return Vec::new();
-    }
-    let first = lower.floor() as i64;
-    let last = upper.ceil() as i64 - 1;
-    let count = last.saturating_sub(first).saturating_add(1) as usize;
-    if count <= limit {
-        return (first..=last).collect();
-    }
-    if limit == 1 {
-        return vec![first];
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreviewWindow {
+    top: i64,
+    upper: i64,
+    rows: usize,
+    offset: i64,
+    max_offset: i64,
+}
 
-    (0..limit)
-        .map(|index| {
-            let offset = i64::try_from((count - 1) as u128 * index as u128 / (limit - 1) as u128)
-                .unwrap_or(i64::MAX);
-            first.saturating_add(offset)
+fn preview_window(lower: f64, upper: f64, height: usize, offset: i64) -> Option<PreviewWindow> {
+    if !lower.is_finite() || !upper.is_finite() || upper <= lower || height == 0 {
+        return None;
+    }
+    let lower = lower.floor() as i64;
+    let upper = upper.ceil() as i64;
+    let total = upper.saturating_sub(lower);
+    let rows = total.min(height as i64).max(1) as usize;
+    let max_offset = total.saturating_sub(rows as i64);
+    let offset = offset.clamp(0, max_offset);
+    Some(PreviewWindow {
+        top: upper.saturating_sub(rows as i64).saturating_sub(offset),
+        upper,
+        rows,
+        offset,
+        max_offset,
+    })
+}
+
+fn plain_text_pixel_rows(text: &str) -> Vec<Vec<VtePixelRun>> {
+    text.split('\n')
+        .map(|line| {
+            let mut column = 0;
+            let mut runs: Vec<VtePixelRun> = Vec::new();
+            for ch in line.chars() {
+                let width = terminal_cell_width(ch);
+                if width == 0 {
+                    continue;
+                }
+                if !ch.is_whitespace() {
+                    if runs
+                        .last()
+                        .is_some_and(|previous| previous.column + previous.len == column)
+                    {
+                        runs.last_mut().unwrap().len += width;
+                    } else {
+                        runs.push(VtePixelRun {
+                            column,
+                            len: width,
+                            color: None,
+                        });
+                    }
+                }
+                column += width;
+            }
+            runs
         })
         .collect()
 }
 
-fn row_density(text: &str, columns: usize) -> f32 {
-    if columns == 0 {
-        return 0.0;
-    }
-    (text.chars().map(terminal_cell_width).sum::<usize>() as f32 / columns as f32).clamp(0.0, 1.0)
-}
-
 fn viewport_geometry(
-    lower: f64,
-    upper: f64,
+    preview_top: i64,
     page_size: f64,
     value: f64,
     height: f64,
-) -> Option<(f64, f64)> {
-    let total = upper - lower;
-    if total <= 0.0 || height <= 0.0 {
+) -> Option<(f64, f64, bool)> {
+    if !page_size.is_finite() || !value.is_finite() || height <= 0.0 {
         return None;
     }
-    let viewport_height =
-        (height * page_size.max(0.0) / total).clamp(MIN_VIEWPORT_HEIGHT.min(height), height);
-    let available = height - viewport_height;
-    let max_value = (upper - page_size).max(lower);
-    let progress = if max_value > lower {
-        ((value - lower) / (max_value - lower)).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    Some((available * progress, viewport_height))
+    let viewport_height = page_size.max(1.0).min(height);
+    let raw_top = value - preview_top as f64;
+    let out_of_bounds = raw_top < 0.0 || raw_top + viewport_height > height;
+    Some((
+        raw_top.clamp(0.0, height - viewport_height),
+        viewport_height,
+        out_of_bounds,
+    ))
 }
 
-fn pointer_target(lower: f64, upper: f64, page_size: f64, y: f64, height: f64) -> Option<f64> {
+fn pointer_target(
+    lower: f64,
+    upper: f64,
+    page_size: f64,
+    preview_top: i64,
+    y: f64,
+    height: f64,
+) -> Option<f64> {
     let total = upper - lower;
     if total <= page_size.max(0.0) || height <= 0.0 {
         return None;
     }
     let max_value = (upper - page_size).max(lower);
-    Some((lower + y.clamp(0.0, height) / height * total - page_size / 2.0).clamp(lower, max_value))
+    Some((preview_top as f64 + y.clamp(0.0, height) - page_size / 2.0).clamp(lower, max_value))
 }
 
 #[cfg(test)]
@@ -545,7 +639,7 @@ mod tests {
     use super::*;
 
     #[gtk::test]
-    async fn sampling_survives_clear_scrollback_and_resize() {
+    async fn pixel_preview_survives_clear_scrollback_and_resize() {
         let term = vte::Terminal::new();
         term.set_scrollback_lines(5_000);
         let adjustment = gtk::Adjustment::new(0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
@@ -565,7 +659,7 @@ mod tests {
         term.feed(old_output.as_bytes());
         term.feed(b"\x1b[3J");
         let mut output = String::new();
-        for index in 0..600 {
+        for index in 0..1_200 {
             output.push_str(&"x".repeat(index % 60 + 1));
             output.push_str("\r\n");
         }
@@ -576,20 +670,30 @@ mod tests {
 
         let nonempty = minimap
             .state
-            .samples
+            .pixel_rows
             .borrow()
             .iter()
-            .filter(|sample| sample.density > 0.0)
+            .filter(|row| !row.is_empty())
             .count();
         assert!(
-            nonempty > MAX_SAMPLES / 2,
-            "scrollback sampling returned {nonempty} nonempty rows after clearing history",
+            nonempty > 300,
+            "scrollback preview returned {nonempty} nonempty rows after clearing history",
         );
+        let adjustment = term.vadjustment().unwrap();
+        let terminal_position = adjustment.value();
+        assert!(scroll_preview(
+            &term,
+            minimap.widget(),
+            &minimap.state,
+            -1.0
+        ));
+        assert_eq!(adjustment.value(), terminal_position);
+        assert_eq!(minimap.state.preview_offset.get(), PREVIEW_SCROLL_ROWS);
         window.close();
     }
 
     #[gtk::test]
-    async fn alternate_screen_samples_only_the_screen_and_blocks_navigation() {
+    async fn alternate_screen_previews_only_the_screen_and_blocks_navigation() {
         let term = vte::Terminal::new();
         term.set_scrollback_lines(5_000);
         let overlay = gtk::Overlay::new();
@@ -610,42 +714,79 @@ mod tests {
         let before = adjustment.value();
 
         minimap.set_alternate_screen(true);
-        assert!(minimap.state.samples.borrow().len() < MAX_SAMPLES);
+        assert!(minimap.state.pixel_rows.borrow().len() <= minimap.widget().height() as usize);
         scroll_to_pointer(&term, &minimap.state, 600.0, 600.0);
         assert_eq!(adjustment.value(), before);
         window.close();
     }
 
     #[test]
-    fn sampling_is_bounded_and_covers_history_endpoints() {
-        let rows = sampled_rows(-999_976.0, 24.0, MAX_SAMPLES);
-        assert_eq!(rows.len(), MAX_SAMPLES);
-        assert_eq!(rows.first(), Some(&-999_976));
-        assert_eq!(rows.last(), Some(&23));
-        assert!(rows.windows(2).all(|pair| pair[0] < pair[1]));
+    fn preview_window_follows_the_bottom_and_scrolls_locally() {
+        assert_eq!(
+            preview_window(-1_000.0, 24.0, 600, 0),
+            Some(PreviewWindow {
+                top: -576,
+                upper: 24,
+                rows: 600,
+                offset: 0,
+                max_offset: 424,
+            })
+        );
+        assert_eq!(preview_window(-1_000.0, 24.0, 600, 25).unwrap().top, -601);
+        assert_eq!(
+            preview_window(-1_000.0, 24.0, 600, 999).unwrap().top,
+            -1_000
+        );
     }
 
     #[test]
-    fn row_density_ignores_whitespace_and_clamps() {
-        assert_eq!(row_density("ab  \n", 4), 0.5);
-        assert_eq!(row_density("한글", 4), 1.0);
-        assert_eq!(row_density("a\u{301}", 4), 0.25);
-        assert_eq!(row_density("abcdefgh", 4), 1.0);
-        assert_eq!(row_density("anything", 0), 0.0);
+    fn plain_text_pixels_keep_spacing_and_wide_cells() {
+        assert_eq!(
+            plain_text_pixel_rows("  ab 한\n x"),
+            vec![
+                vec![
+                    VtePixelRun {
+                        column: 2,
+                        len: 2,
+                        color: None,
+                    },
+                    VtePixelRun {
+                        column: 5,
+                        len: 2,
+                        color: None,
+                    },
+                ],
+                vec![VtePixelRun {
+                    column: 1,
+                    len: 1,
+                    color: None,
+                }],
+            ]
+        );
     }
 
     #[test]
     fn viewport_and_pointer_mapping_are_clamped() {
         assert_eq!(
-            viewport_geometry(0.0, 100.0, 20.0, 0.0, 200.0),
-            Some((0.0, 40.0))
+            viewport_geometry(-576, 24.0, -576.0, 600.0),
+            Some((0.0, 24.0, false))
         );
         assert_eq!(
-            viewport_geometry(0.0, 100.0, 20.0, 80.0, 200.0),
-            Some((160.0, 40.0))
+            viewport_geometry(-576, 24.0, 0.0, 600.0),
+            Some((576.0, 24.0, false))
         );
-        assert_eq!(pointer_target(0.0, 100.0, 20.0, -1.0, 200.0), Some(0.0));
-        assert_eq!(pointer_target(0.0, 100.0, 20.0, 201.0, 200.0), Some(80.0));
-        assert_eq!(pointer_target(0.0, 20.0, 20.0, 10.0, 200.0), None);
+        assert_eq!(
+            viewport_geometry(-601, 24.0, 0.0, 600.0),
+            Some((576.0, 24.0, true))
+        );
+        assert_eq!(
+            pointer_target(-1_000.0, 24.0, 24.0, -601, 0.0, 600.0),
+            Some(-613.0)
+        );
+        assert_eq!(
+            pointer_target(-1_000.0, 24.0, 24.0, -601, 600.0, 600.0),
+            Some(-13.0)
+        );
+        assert_eq!(pointer_target(0.0, 20.0, 20.0, 0, 10.0, 200.0), None);
     }
 }
