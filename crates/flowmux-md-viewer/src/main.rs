@@ -468,6 +468,7 @@ fn markdown_web_view(options: &RenderOptions) -> webkit6::WebView {
     if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web_view) {
         settings.set_enable_javascript(false);
         settings.set_enable_javascript_markup(false);
+        settings.set_enable_smooth_scrolling(false);
         settings.set_allow_file_access_from_file_urls(true);
         settings.set_allow_universal_access_from_file_urls(false);
         settings.set_enable_developer_extras(false);
