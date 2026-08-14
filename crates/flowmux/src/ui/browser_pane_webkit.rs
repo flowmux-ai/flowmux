@@ -159,11 +159,10 @@ impl BrowserPane {
             // HTML5 storage is true by default, but make it explicit for site compatibility.
             settings.set_enable_html5_local_storage(true);
             settings.set_enable_html5_database(true);
-            // Keep GPU acceleration for all pages. The shutdown race around
-            // missing `eglDestroySync` / `corrupted size vs. prev_size` is
-            // blocked in main.rs by disabling the DMA-BUF renderer. webkit6
-            // 0.4 exposes only Always / Never, not ON_DEMAND, and Never would
-            // also lose video acceleration.
+            // Keep GPU acceleration for all pages. webkit6 0.4 exposes only
+            // Always / Never, not ON_DEMAND, and Never would also lose video
+            // acceleration. Hosts with a broken DMA-BUF/EGL stack can set
+            // `WEBKIT_DISABLE_DMABUF_RENDERER=1` before launch.
             //
             // Escape hatch: on hosts where WebKit's web process aborts with
             // `Could not create default EGL display: EGL_BAD_PARAMETER`

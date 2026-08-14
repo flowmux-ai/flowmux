@@ -611,16 +611,14 @@ fn section_browser_offline() -> Section {
     }
 }
 
-/// The GUI binary auto-sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS`
-/// and `WEBKIT_DISABLE_DMABUF_RENDERER` at startup unless the user
-/// pre-set them. The CLI process doesn't share those env vars, so the
-/// most useful thing we can report is "the GUI applies safe defaults
-/// — here's the override the user set, if any".
+/// The GUI binary auto-sets `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS`, while
+/// DMA-BUF follows WebKitGTK's accelerated default unless the user overrides
+/// it. The CLI process doesn't share the GUI's startup-only sandbox variable.
 fn webkit_env_entry() -> Entry {
     let sandbox = std::env::var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS").ok();
     let dmabuf = std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").ok();
     let detail = match (sandbox, dmabuf) {
-        (None, None) => "no overrides; flowmux GUI applies safe defaults at startup".into(),
+        (None, None) => "no overrides; DMA-BUF renderer enabled by default".into(),
         (s, d) => format!(
             "user override: SANDBOX={} DMABUF={}",
             s.as_deref().unwrap_or("<unset>"),

@@ -100,15 +100,10 @@ fn main() -> anyhow::Result<()> {
         std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
     }
 
-    // WebKitGTK 6.0's DMA-BUF renderer has a known shutdown race on some
-    // Mesa Wayland setups: missing `eglDestroySync` can lead to a later
-    // `corrupted size vs. prev_size` glibc abort when libepoxy cannot find
-    // EGL 1.5 or EGL_KHR_fence_sync. Unless the user has chosen otherwise,
-    // disabling the DMA-BUF renderer is the safest default and only
-    // simplifies shutdown cleanup.
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    // Keep WebKitGTK's DMA-BUF renderer enabled by default. Its SHM fallback
+    // makes Monaco cursor repaints several times slower on scaled displays.
+    // Hosts with a broken DMA-BUF/EGL stack can still opt out before launch
+    // with `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
     // CJK preedit — the "composing" text shown while a Hangul / Kana /
     // Pinyin syllable is still being assembled — is drawn by VTE's own
