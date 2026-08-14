@@ -323,6 +323,20 @@ impl EditorPane {
         perform_native_edit(&self.web_view, EditorNativeEditAction::Paste, None);
     }
 
+    pub fn select_word_left(&self) {
+        evaluate_script(
+            &self.web_view,
+            "window.flowmuxEditorKeyboard?.('cursorWordLeftSelect')",
+        );
+    }
+
+    pub fn select_word_right(&self) {
+        evaluate_script(
+            &self.web_view,
+            "window.flowmuxEditorKeyboard?.('cursorWordEndRightSelect')",
+        );
+    }
+
     pub fn show_workspace_search(&self) {
         if let Err(error) = self.send(HostMessage::ShowWorkspaceSearch) {
             tracing::warn!(%error, "failed to show editor workspace search");

@@ -22,8 +22,6 @@
 use crate::bridge::{Bridge, FocusDir, GtkCommand, WsNav};
 #[cfg(target_os = "macos")]
 use crate::ui::editor_pane::EditorNavigationKey;
-use crate::ui::pane_terminal::PaneTerminal;
-use crate::ui::pane_terminal::INSERT_NEWLINE_BYTES;
 use crate::ui::window::ClipboardToast;
 use adw::prelude::*;
 use flowmux_config::keybindings::ActionId;
@@ -55,10 +53,14 @@ type SavedUsagePopoverFocus = Rc<UsagePopoverFocus>;
 /// but `flowmux_config::keybindings::ActionId::as_str` returns the bare
 /// form (`copy`), so callers prepend this constant.
 const ACTION_GROUP: &str = "win.";
-const INSERT_NEWLINE_ACTION: &str = "insert-newline";
-const INSERT_NEWLINE_FULL_ACTION: &str = "win.insert-newline";
-const INSERT_NEWLINE_ACCELS: &[&str] = &["<Shift>Return", "<Shift>KP_Enter", "<Shift>ISO_Enter"];
 const TOGGLE_USAGE_POPOVER_FULL_ACTION: &str = "win.toggle-usage-popover";
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinuxEditorKeyAction {
+    SelectWordLeft,
+    SelectWordRight,
+}
 
 #[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,7 +139,6 @@ pub fn install_accels(app: &adw::Application, options: &Options) {
         let accel_refs: Vec<&str> = valid.iter().map(|s| s.as_str()).collect();
         app.set_accels_for_action(&full_action_name(*action), &accel_refs);
     }
-    app.set_accels_for_action(INSERT_NEWLINE_FULL_ACTION, INSERT_NEWLINE_ACCELS);
 }
 
 /// Test helper for resolving one action without the GTK install path.
@@ -164,6 +165,8 @@ pub fn install_actions(
     clipboard_toast: ClipboardToast,
     usage_button: gtk::MenuButton,
 ) {
+    #[cfg(target_os = "linux")]
+    install_linux_editor_key_capture(window, focused.clone(), registry.clone());
     #[cfg(target_os = "macos")]
     install_macos_editor_key_capture(window, focused.clone(), registry.clone());
 
@@ -361,8 +364,6 @@ pub fn install_actions(
         clipboard_toast.clone(),
     );
     let paste = make_paste_action(window.clone(), focused.clone(), registry.clone());
-    let insert_newline =
-        make_insert_newline_action(window.clone(), focused.clone(), registry.clone());
 
     // Single-chord copy: pressing the configured accel (default
     // `Ctrl+Shift+K`) writes the focused pane's cwd to the clipboard
@@ -465,12 +466,60 @@ pub fn install_actions(
         w8,
         copy,
         paste,
-        insert_newline,
         copy_pane_path,
         toggle_worktree_panel,
         toggle_file_browser,
         toggle_usage_popover,
     ]);
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_editor_key_capture(
+    window: &adw::ApplicationWindow,
+    focused: FocusedPane,
+    registry: TerminalRegistry,
+) {
+    let controller = gtk::EventControllerKey::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let window_for_key = window.clone();
+    controller.connect_key_pressed(move |_, keyval, _, state| {
+        let Some(action) = linux_editor_key_action(keyval, state) else {
+            return glib::Propagation::Proceed;
+        };
+        let Some(pane) = focused.get() else {
+            return glib::Propagation::Proceed;
+        };
+        let registry = registry.borrow();
+        let Some(editor) = registry.active_editor(pane) else {
+            return glib::Propagation::Proceed;
+        };
+        if !window_focus_is_widget(&window_for_key, &editor.root.clone().upcast()) {
+            return glib::Propagation::Proceed;
+        }
+        match action {
+            LinuxEditorKeyAction::SelectWordLeft => editor.select_word_left(),
+            LinuxEditorKeyAction::SelectWordRight => editor.select_word_right(),
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(controller);
+}
+
+#[cfg(target_os = "linux")]
+fn linux_editor_key_action(
+    keyval: gtk::gdk::Key,
+    state: gtk::gdk::ModifierType,
+) -> Option<LinuxEditorKeyAction> {
+    use gtk::gdk::ModifierType;
+
+    if state & accelerator_mod_mask() != ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK {
+        return None;
+    }
+    match keyval {
+        gtk::gdk::Key::Left => Some(LinuxEditorKeyAction::SelectWordLeft),
+        gtk::gdk::Key::Right => Some(LinuxEditorKeyAction::SelectWordRight),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1005,30 +1054,6 @@ fn make_copy_action(
         .build()
 }
 
-fn make_insert_newline_action(
-    window: adw::ApplicationWindow,
-    focused: FocusedPane,
-    registry: TerminalRegistry,
-) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
-    gtk::gio::ActionEntry::builder(INSERT_NEWLINE_ACTION)
-        .activate(move |_, _, _| {
-            let Some(pane) = focused.get() else { return };
-            let r = registry.borrow();
-            let Some(term) = r.active_terminal(pane) else {
-                return;
-            };
-            if !window_focus_is_terminal(&window, term) {
-                return;
-            }
-            term.feed_after_preedit_commit(INSERT_NEWLINE_BYTES);
-        })
-        .build()
-}
-
-fn window_focus_is_terminal(window: &adw::ApplicationWindow, term: &PaneTerminal) -> bool {
-    window_focus_is_widget(window, &term.root_widget())
-}
-
 /// True when the window's focused widget is `root` or lives inside it.
 fn window_focus_is_widget(window: &adw::ApplicationWindow, root: &gtk::Widget) -> bool {
     let Some(focus) = gtk::prelude::GtkWindowExt::focus(window) else {
@@ -1064,6 +1089,30 @@ fn make_paste_action(
 mod tests {
     use super::*;
     use flowmux_config::keybindings::default_accels;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_editor_keeps_ctrl_shift_word_selection() {
+        use gtk::gdk::ModifierType;
+
+        let word_select = ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK;
+        assert_eq!(
+            linux_editor_key_action(gtk::gdk::Key::Left, word_select),
+            Some(LinuxEditorKeyAction::SelectWordLeft)
+        );
+        assert_eq!(
+            linux_editor_key_action(gtk::gdk::Key::Right, word_select),
+            Some(LinuxEditorKeyAction::SelectWordRight)
+        );
+        assert_eq!(
+            linux_editor_key_action(gtk::gdk::Key::Up, word_select),
+            None
+        );
+        assert_eq!(
+            linux_editor_key_action(gtk::gdk::Key::Left, ModifierType::CONTROL_MASK),
+            None
+        );
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -1212,22 +1261,6 @@ mod tests {
                     panic!("{accel} bound to both {other:?} and {action:?}");
                 }
             }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn insert_newline_accels_cover_enter_variants() {
-        adw::init().expect("libadwaita should initialize in GTK test");
-        assert_eq!(
-            INSERT_NEWLINE_ACCELS,
-            &["<Shift>Return", "<Shift>KP_Enter", "<Shift>ISO_Enter"]
-        );
-        for accel in INSERT_NEWLINE_ACCELS {
-            assert!(
-                gtk::accelerator_parse(*accel).is_some(),
-                "{accel} must be valid GTK accelerator syntax"
-            );
         }
     }
 
@@ -1815,38 +1848,6 @@ mod tests {
         assert!(
             fired.get(),
             "activating win.copy-pane-path must call its handler exactly once"
-        );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn insert_newline_action_is_registered_on_application_window() {
-        adw::init().expect("libadwaita should initialize in GTK test");
-        let app = adw::Application::builder()
-            .application_id("com.flowmux.App.UiTest.InsertNewlineRegistered")
-            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
-            .build();
-        app.register(None::<&gtk::gio::Cancellable>).unwrap();
-        let window = adw::ApplicationWindow::builder()
-            .application(&app)
-            .default_width(320)
-            .default_height(240)
-            .build();
-
-        let fired = Rc::new(Cell::new(false));
-        let fired_for_action = fired.clone();
-        let entry = gtk::gio::ActionEntry::builder(INSERT_NEWLINE_ACTION)
-            .activate(move |_, _, _| {
-                fired_for_action.set(true);
-            })
-            .build();
-        window.add_action_entries([entry]);
-
-        gtk::prelude::WidgetExt::activate_action(&window, INSERT_NEWLINE_FULL_ACTION, None)
-            .expect("win.insert-newline action should be registered on the window");
-        assert!(
-            fired.get(),
-            "activating win.insert-newline must call its handler exactly once"
         );
     }
 

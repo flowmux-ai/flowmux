@@ -37,7 +37,8 @@ Ctrl/Cmd+W closes the current document. Standard editing chords —
 Ctrl/Cmd+C/X/V copy/cut/paste, Ctrl/Cmd+A select all, Ctrl/Cmd+Z undo —
 work natively inside the editor, and the terminal-style Ctrl+Shift+C/V
 copy/paste also routes to the focused editor. flowmux surface shortcuts
-such as Alt+W remain global.
+such as Alt+W remain global. On Linux, Ctrl+Shift+Left/Right stays local to
+the editor for word selection instead of switching tabs.
 
 ## Context behavior
 

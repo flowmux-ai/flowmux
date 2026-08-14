@@ -18,10 +18,6 @@ use crate::ui::ghostty_pane::GhosttyPane;
 /// The terminal pane type used throughout the GUI.
 pub type PaneTerminal = GhosttyPane;
 
-/// Shift+Enter input sequence: insert a literal newline at the prompt without
-/// submitting, after committing any in-progress IME text.
-pub use crate::ui::ghostty_pane::INSERT_NEWLINE_BYTES;
-
 #[derive(Debug, Clone)]
 pub enum TabDropCommand {
     MoveToPane {

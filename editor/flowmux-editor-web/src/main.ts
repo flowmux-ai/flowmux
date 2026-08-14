@@ -53,6 +53,8 @@ type NativeEditorAction =
   | "cursorPageDownSelect"
   | "cursorHomeSelect"
   | "cursorEndSelect"
+  | "cursorWordLeftSelect"
+  | "cursorWordEndRightSelect"
   | "copy"
   | "paste"
   | "find"
@@ -286,6 +288,8 @@ function runNativeEditorAction(
     case "cursorPageDownSelect":
     case "cursorHomeSelect":
     case "cursorEndSelect":
+    case "cursorWordLeftSelect":
+    case "cursorWordEndRightSelect":
     case "undo":
     case "redo":
       target.trigger("keyboard", action, null);

@@ -74,7 +74,7 @@ pub struct GhosttyPane {
 
 /// Shift+Enter input sequence: VTE-era agent TUIs treat ESC+CR as "insert a
 /// literal newline" at the prompt without submitting.
-pub const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
+const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
 
 const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const TERMINAL_SELECTION_CACHE_MAX_BYTES: usize = 256 * 1024;
@@ -728,7 +728,7 @@ impl GhosttyPane {
 
         // Make inline IME preedit (e.g. a composing Hangul syllable) visible
         // even when the foreground app has hidden the terminal cursor.
-        install_preedit_redraw_on_keystroke(&container, &term);
+        install_terminal_key_capture(&container, &term);
 
         let pid: Rc<Cell<Option<i32>>> = Rc::new(Cell::new(None));
 
@@ -1089,70 +1089,6 @@ impl GhosttyPane {
             self.scrollback_dirty.set(true);
         }
         snapshot
-    }
-
-    /// Feed `bytes` to the child, but only *after* any IME syllable still
-    /// in preedit (e.g. a composing Hangul block) has been committed —
-    /// otherwise the bytes overtake ibus's asynchronous commit and the
-    /// last syllable lands behind them. This is the Shift+Enter ("insert
-    /// newline" in agent TUIs) counterpart to the plain-Enter ordering in
-    /// [`install_enter_preedit_commit_ordering`]: typing "안녕하세요" and
-    /// pressing Shift+Enter while "요" is still composing must produce
-    /// "안녕하세요\n", not "안녕하세\n요".
-    ///
-    /// Shift+Enter reaches the child through a window accelerator
-    /// (`win.insert-newline`), so unlike plain Enter the keypress never
-    /// touches the VTE / IME path — the composing syllable is not
-    /// committed by it. This is needed for the asynchronous ibus path and
-    /// for GTK's macOS IM path, where the native Korean IME can otherwise
-    /// commit the last syllable after the injected Shift+Enter bytes. We
-    /// force the commit with a focus-cycle flush, feed
-    /// `bytes` from VTE's `commit` signal on an idle tick (VTE writes the
-    /// committed bytes during that emission, so an idle feed always lands
-    /// behind them), and fall back to a direct feed when nothing is
-    /// composing (no commit fires). The `commit` handler is one-shot:
-    /// armed per call and disconnected on the first commit or the
-    /// fallback, so it never disturbs ordinary typing.
-    pub fn feed_after_preedit_commit(&self, bytes: &'static [u8]) {
-        scroll_terminal_to_bottom(&self.widget);
-        if !insert_newline_needs_preedit_commit_ordering() {
-            self.widget.feed_child(bytes);
-            return;
-        }
-
-        let widget = self.widget.clone();
-        let done = Rc::new(Cell::new(false));
-        let handler_id: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
-
-        {
-            let done = done.clone();
-            let hid = handler_id.clone();
-            let id = self.widget.connect_commit(move |t, _text, _size| {
-                if done.replace(true) {
-                    return;
-                }
-                let t2 = t.clone();
-                glib::idle_add_local_once(move || t2.feed_child(bytes));
-                if let Some(id) = hid.borrow_mut().take() {
-                    t.disconnect(id);
-                }
-            });
-            *handler_id.borrow_mut() = Some(id);
-        }
-
-        flush_pending_preedit(&widget);
-
-        let done_fb = done.clone();
-        let hid_fb = handler_id.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(20), move || {
-            if done_fb.replace(true) {
-                return;
-            }
-            widget.feed_child(bytes);
-            if let Some(id) = hid_fb.borrow_mut().take() {
-                widget.disconnect(id);
-            }
-        });
     }
 
     pub fn add_controller(&self, controller: impl IsA<gtk::EventController>) {
@@ -1621,8 +1557,10 @@ fn install_url_link_handling(
 /// Fix: attach a capture-phase `EventControllerKey` to the Overlay (an
 /// ancestor of the VTE widget). Capture phase visits ancestors before the
 /// focused VTE consumes the key, so it observes every key — including the
-/// letter / jamo / Backspace keys IBus swallows for composition — and returns
-/// `Proceed`, never touching the event, so VTE's IM path is unchanged. The
+/// letter / jamo / Backspace keys IBus swallows for composition. It returns
+/// `Proceed` for those keys so VTE's IM path is unchanged; only Shift+Enter is
+/// consumed here because that terminal-only sequence must not become a global
+/// app accelerator that steals the same chord from editors and browser tabs. The
 /// immediate `queue_draw` covers the synchronous IBus path
 /// (`IBUS_ENABLE_SYNC_MODE=1`, enabled by default outside WSL); a short
 /// follow-up redraw covers async input methods (fcitx, IBus without sync) whose
@@ -1630,11 +1568,15 @@ fn install_url_link_handling(
 /// visible (a normal shell, Codex, vim) the redraw is redundant with VTE's
 /// own invalidation and harmless — it is paced by human keystrokes, not
 /// terminal output.
-fn install_preedit_redraw_on_keystroke(container: &gtk::Overlay, term: &vte::Terminal) {
+fn install_terminal_key_capture(container: &gtk::Overlay, term: &vte::Terminal) {
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     let term_widget = term.clone();
-    key.connect_key_pressed(move |_, _keyval, _keycode, _state| {
+    key.connect_key_pressed(move |_, keyval, _keycode, state| {
+        if term_widget.has_focus() && is_shift_enter(keyval, state) {
+            feed_after_preedit_commit(&term_widget, INSERT_NEWLINE_BYTES);
+            return glib::Propagation::Stop;
+        }
         term_widget.queue_draw();
         let term_follow = term_widget.clone();
         glib::timeout_add_local_once(std::time::Duration::from_millis(16), move || {
@@ -1643,6 +1585,66 @@ fn install_preedit_redraw_on_keystroke(container: &gtk::Overlay, term: &vte::Ter
         glib::Propagation::Proceed
     });
     container.add_controller(key);
+}
+
+fn is_shift_enter(keyval: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::ModifierType;
+
+    let modifiers = state
+        & (ModifierType::SHIFT_MASK
+            | ModifierType::CONTROL_MASK
+            | ModifierType::ALT_MASK
+            | ModifierType::SUPER_MASK
+            | ModifierType::META_MASK);
+    modifiers == ModifierType::SHIFT_MASK
+        && matches!(
+            keyval,
+            gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter | gtk::gdk::Key::ISO_Enter
+        )
+}
+
+/// Feed `bytes` after committing any active IME preedit, preserving the order
+/// of a composing CJK syllable followed by Shift+Enter.
+fn feed_after_preedit_commit(term: &vte::Terminal, bytes: &'static [u8]) {
+    scroll_terminal_to_bottom(term);
+    if !insert_newline_needs_preedit_commit_ordering() {
+        term.feed_child(bytes);
+        return;
+    }
+
+    let widget = term.clone();
+    let done = Rc::new(Cell::new(false));
+    let handler_id: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+
+    {
+        let done = done.clone();
+        let hid = handler_id.clone();
+        let id = term.connect_commit(move |term, _text, _size| {
+            if done.replace(true) {
+                return;
+            }
+            let term_after_commit = term.clone();
+            glib::idle_add_local_once(move || term_after_commit.feed_child(bytes));
+            if let Some(id) = hid.borrow_mut().take() {
+                term.disconnect(id);
+            }
+        });
+        *handler_id.borrow_mut() = Some(id);
+    }
+
+    flush_pending_preedit(&widget);
+
+    let done_fallback = done.clone();
+    let handler_fallback = handler_id.clone();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(20), move || {
+        if done_fallback.replace(true) {
+            return;
+        }
+        widget.feed_child(bytes);
+        if let Some(id) = handler_fallback.borrow_mut().take() {
+            widget.disconnect(id);
+        }
+    });
 }
 
 /// WSLg can lose plain Ctrl+C before VTE turns it into the terminal VINTR byte.
@@ -1689,7 +1691,7 @@ fn is_plain_ctrl_c(keyval: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool
 /// synchronously-forwarded event never reaches the PTY.
 ///
 /// Fix: at the container capture phase — the same safe vantage point as
-/// [`install_preedit_redraw_on_keystroke`], never a capture controller
+/// [`install_terminal_key_capture`], never a capture controller
 /// directly on VTE (which would suppress inline Hangul preedit) — feed
 /// the layout-resolved character straight to the PTY, committing any
 /// pending preedit first so a half-composed syllable lands before the
@@ -2147,7 +2149,7 @@ fn install_smart_page_keys(term: &vte::Terminal) {
 /// (and drop) anyway, so it does not starve composition: letters,
 /// digits, punctuation and Space still reach IBus and compose normally,
 /// and the inline preedit stays visible (drawn by
-/// `install_preedit_redraw_on_keystroke`). An earlier attempt to gate
+/// `install_terminal_key_capture`). An earlier attempt to gate
 /// this whole bypass behind `FLOWMUX_ENABLE_IBUS_NAV_WORKAROUND=1` and
 /// rely on `IBUS_ENABLE_SYNC_MODE=1` instead regressed every edit/nav
 /// key on the 22.04 host, because sync mode never fixed the drop
@@ -3043,6 +3045,27 @@ mod tests {
         // newline". Lock the wire format so a future refactor does not turn
         // Shift+Enter into a literal newline submission again.
         assert_eq!(INSERT_NEWLINE_BYTES, b"\x1b\r");
+    }
+
+    #[test]
+    fn shift_enter_capture_is_terminal_only_and_exact() {
+        use gtk::gdk::ModifierType;
+
+        for key in [
+            gtk::gdk::Key::Return,
+            gtk::gdk::Key::KP_Enter,
+            gtk::gdk::Key::ISO_Enter,
+        ] {
+            assert!(is_shift_enter(key, ModifierType::SHIFT_MASK));
+        }
+        assert!(!is_shift_enter(
+            gtk::gdk::Key::Return,
+            ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK
+        ));
+        assert!(!is_shift_enter(
+            gtk::gdk::Key::Return,
+            ModifierType::empty()
+        ));
     }
 
     #[test]
