@@ -737,13 +737,8 @@ impl GhosttyPane {
         }
 
         // On the ibus path, recover Shift+symbol keys (notably `?`) that
-        // get swallowed while a Korean input mode is active. macOS has the
-        // mirror-image bug: GTK's quartz immodule keeps one insert-text slot
-        // per key event, so when the native Korean IME commits the composing
-        // syllable and inserts `!` in the same keystroke the syllable is
-        // overwritten ("안녕하세요!" arrives as "안녕하세!"). Same fix: commit
-        // the preedit first, then feed the symbol ourselves.
-        if ibus_im_module_active() || cfg!(target_os = "macos") {
+        // get swallowed while a Korean input mode is active.
+        if ibus_im_module_active() {
             install_ibus_shifted_symbol_passthrough(&container, &term);
         }
 

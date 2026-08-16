@@ -294,6 +294,12 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
+    // GTK's quartz immodule drops a committed CJK syllable when the IME
+    // commits it together with the next key; patch its insert-text staging
+    // before the first key event can hit it.
+    #[cfg(target_os = "macos")]
+    ui::macos_ime::install_insert_text_accumulation();
+
     // GTK runs on the main thread.
     let app = build_application();
     let store_for_activate = store.clone();

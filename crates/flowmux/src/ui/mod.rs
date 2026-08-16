@@ -8,6 +8,8 @@ pub mod file_browser;
 pub mod ghostty_pane;
 pub mod image_viewer;
 pub mod keybindings_panel;
+#[cfg(target_os = "macos")]
+pub mod macos_ime;
 pub mod options_dialog;
 pub mod overlay_menu;
 pub mod pane_terminal;
