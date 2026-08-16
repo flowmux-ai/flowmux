@@ -135,7 +135,11 @@ fn main() -> anyhow::Result<()> {
     // input method so it cannot auto-select a stale IBus address.
     let ibus_reachable = flowmux_config::paths::is_flatpak_sandbox() || ibus_daemon_available();
     let gtk_im_module = std::env::var("GTK_IM_MODULE").ok();
-    if should_force_simple_im_module(gtk_im_module.as_deref(), ibus_reachable) {
+    if should_force_simple_im_module(
+        gtk_im_module.as_deref(),
+        ibus_reachable,
+        cfg!(target_os = "macos"),
+    ) {
         std::env::set_var("GTK_IM_MODULE", "simple");
     } else if should_force_ibus_im_module(gtk_im_module.as_deref(), ibus_reachable) {
         std::env::set_var("GTK_IM_MODULE", "ibus");
@@ -726,8 +730,10 @@ fn should_force_ibus_im_module(current: Option<&str>, ibus_reachable: bool) -> b
     }
 }
 
-fn should_force_simple_im_module(current: Option<&str>, ibus_reachable: bool) -> bool {
-    !ibus_reachable && matches!(current.map(str::trim), None | Some("" | "ibus"))
+/// Never on macOS: there GTK's `quartz` immodule drives the native IME, and
+/// forcing `simple` disables Hangul / CJK composition entirely.
+fn should_force_simple_im_module(current: Option<&str>, ibus_reachable: bool, macos: bool) -> bool {
+    !macos && !ibus_reachable && matches!(current.map(str::trim), None | Some("" | "ibus"))
 }
 
 fn gtk_im_module_is_ibus(current: Option<&str>) -> bool {
@@ -928,11 +934,12 @@ mod tests {
         assert!(!should_force_ibus_im_module(Some("fcitx5"), true));
         assert!(!should_force_ibus_im_module(None, false));
         assert!(!should_force_ibus_im_module(Some("wayland"), false));
-        assert!(should_force_simple_im_module(None, false));
-        assert!(should_force_simple_im_module(Some(""), false));
-        assert!(should_force_simple_im_module(Some("ibus"), false));
-        assert!(!should_force_simple_im_module(Some("ibus"), true));
-        assert!(!should_force_simple_im_module(Some("fcitx"), false));
+        assert!(should_force_simple_im_module(None, false, false));
+        assert!(should_force_simple_im_module(Some(""), false, false));
+        assert!(should_force_simple_im_module(Some("ibus"), false, false));
+        assert!(!should_force_simple_im_module(Some("ibus"), true, false));
+        assert!(!should_force_simple_im_module(Some("fcitx"), false, false));
+        assert!(!should_force_simple_im_module(None, false, true));
     }
 
     #[test]
