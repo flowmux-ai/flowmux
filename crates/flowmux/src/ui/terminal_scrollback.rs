@@ -182,10 +182,14 @@ pub(crate) fn replay_bytes(snapshot: &TerminalScrollback) -> Result<Option<Vec<u
 
 /// Convert VTE's styled text into the occupied cell runs used by the minimap.
 /// Explicit backgrounds win over glyph colors, matching the terminal cell view.
-pub(crate) fn vte_html_pixel_rows(html: &str) -> Result<Vec<Vec<VtePixelRun>>, String> {
+pub(crate) fn vte_html_pixel_rows(
+    html: &str,
+    columns: usize,
+) -> Result<Vec<Vec<VtePixelRun>>, String> {
     let parsed = parse_vte_html(html)?;
+    let columns = columns.max(1);
     let mut rows: Vec<Vec<VtePixelRun>> = vec![Vec::new()];
-    let mut column = 0;
+    let mut column: usize = 0;
     for run in parsed.runs {
         for ch in run.text.chars() {
             if ch == '\n' {
@@ -195,6 +199,10 @@ pub(crate) fn vte_html_pixel_rows(html: &str) -> Result<Vec<Vec<VtePixelRun>>, S
                 let width = terminal_cell_width(ch);
                 if width == 0 {
                     continue;
+                }
+                if column.saturating_add(width) > columns {
+                    rows.push(Vec::new());
+                    column = 0;
                 }
                 let color = run.style.background.or_else(|| {
                     (!ch.is_whitespace())
@@ -533,6 +541,7 @@ mod tests {
     fn minimap_pixels_keep_cell_position_and_terminal_color() {
         let rows = vte_html_pixel_rows(
             "<pre>  plain <font color=\"#112233\">color</font>   \n<span style=\"background-color:#445566\">  bg</span>한</pre>",
+            80,
         )
         .unwrap();
         assert_eq!(rows.len(), 2);

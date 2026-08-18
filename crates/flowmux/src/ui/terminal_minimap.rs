@@ -432,10 +432,11 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     let (html, _) = term.text_range_format(vte::Format::Html, first, 0, last, last_column);
     let rows = html
         .as_deref()
-        .and_then(|html| vte_html_pixel_rows(html).ok())
+        .and_then(|html| vte_html_pixel_rows(html, columns).ok())
         .or_else(|| {
             let (text, _) = term.text_range_format(vte::Format::Text, first, 0, last, last_column);
-            text.as_deref().map(plain_text_pixel_rows)
+            text.as_deref()
+                .map(|text| plain_text_pixel_rows(text, columns))
         })
         .unwrap_or_default();
     replace_pixel_rows(state, rows, window.rows);
@@ -460,11 +461,11 @@ fn refresh_visible_screen(
     let rows = term
         .text_format(vte::Format::Html)
         .as_deref()
-        .and_then(|html| vte_html_pixel_rows(html).ok())
+        .and_then(|html| vte_html_pixel_rows(html, columns).ok())
         .or_else(|| {
             term.text_format(vte::Format::Text)
                 .as_deref()
-                .map(plain_text_pixel_rows)
+                .map(|text| plain_text_pixel_rows(text, columns))
         })
         .unwrap_or_default();
     replace_pixel_rows(state, rows, limit);
@@ -604,35 +605,42 @@ fn preview_offset_for_viewport(
     Some(max_top.saturating_sub(top))
 }
 
-fn plain_text_pixel_rows(text: &str) -> Vec<Vec<VtePixelRun>> {
-    text.split('\n')
-        .map(|line| {
-            let mut column = 0;
-            let mut runs: Vec<VtePixelRun> = Vec::new();
-            for ch in line.chars() {
-                let width = terminal_cell_width(ch);
-                if width == 0 {
-                    continue;
-                }
-                if !ch.is_whitespace() {
-                    if runs
-                        .last()
-                        .is_some_and(|previous| previous.column + previous.len == column)
-                    {
-                        runs.last_mut().unwrap().len += width;
-                    } else {
-                        runs.push(VtePixelRun {
-                            column,
-                            len: width,
-                            color: None,
-                        });
-                    }
-                }
-                column += width;
+fn plain_text_pixel_rows(text: &str, columns: usize) -> Vec<Vec<VtePixelRun>> {
+    let columns = columns.max(1);
+    let mut rows: Vec<Vec<VtePixelRun>> = vec![Vec::new()];
+    let mut column: usize = 0;
+    for ch in text.chars() {
+        if ch == '\n' {
+            rows.push(Vec::new());
+            column = 0;
+            continue;
+        }
+        let width = terminal_cell_width(ch);
+        if width == 0 {
+            continue;
+        }
+        if column.saturating_add(width) > columns {
+            rows.push(Vec::new());
+            column = 0;
+        }
+        if !ch.is_whitespace() {
+            let row = rows.last_mut().expect("rows always contains one entry");
+            if row
+                .last()
+                .is_some_and(|previous| previous.column + previous.len == column)
+            {
+                row.last_mut().unwrap().len += width;
+            } else {
+                row.push(VtePixelRun {
+                    column,
+                    len: width,
+                    color: None,
+                });
             }
-            runs
-        })
-        .collect()
+        }
+        column += width;
+    }
+    rows
 }
 
 fn viewport_geometry(
@@ -705,6 +713,38 @@ mod tests {
         adjustment.set_value(-400.0);
         assert!(minimap.state.refresh_source.borrow().is_some());
         minimap.set_enabled(false);
+    }
+
+    #[gtk::test]
+    async fn wrapped_output_uses_one_minimap_row_per_terminal_row() {
+        let term = vte::Terminal::new();
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        let columns = term.column_count().max(1) as usize;
+        term.feed("x".repeat(columns * 3 + 1).as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        refresh_now(&term, minimap.widget(), &minimap.state);
+
+        assert_eq!(
+            minimap
+                .state
+                .pixel_rows
+                .borrow()
+                .iter()
+                .filter(|row| !row.is_empty())
+                .count(),
+            4
+        );
+        window.close();
     }
 
     #[gtk::test]
@@ -830,7 +870,7 @@ mod tests {
     #[test]
     fn plain_text_pixels_keep_spacing_and_wide_cells() {
         assert_eq!(
-            plain_text_pixel_rows("  ab 한\n x"),
+            plain_text_pixel_rows("  ab 한\n x", 80),
             vec![
                 vec![
                     VtePixelRun {
