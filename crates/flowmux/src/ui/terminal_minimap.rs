@@ -21,6 +21,7 @@ struct MinimapState {
     preview_top: Cell<i64>,
     preview_rows: Cell<usize>,
     columns: Cell<usize>,
+    text_row_offset: Cell<i64>,
     pixel_rows: RefCell<Vec<Vec<VtePixelRun>>>,
 }
 
@@ -420,10 +421,14 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
 
     let last_column = columns.saturating_sub(1) as i64;
     // CSI 3 J rebases the adjustment, while VTE text-range rows remain absolute.
-    let offset = term
-        .cursor_position()
-        .1
-        .saturating_sub(window.upper.saturating_sub(1));
+    // Keep the translation monotonic so normal cursor-up repaint sequences do
+    // not shift the entire minimap back and forth.
+    let offset = advance_text_row_offset(
+        state.text_row_offset.get(),
+        term.cursor_position().1,
+        window.upper,
+    );
+    state.text_row_offset.set(offset);
     let first = window.top.saturating_add(offset);
     let last = window
         .top
@@ -528,6 +533,10 @@ fn scroll_preview(
 
 fn has_scrollable_range(lower: f64, upper: f64, page_size: f64) -> bool {
     upper > lower + page_size.max(1.0)
+}
+
+fn advance_text_row_offset(previous: i64, cursor_row: i64, adjustment_upper: i64) -> i64 {
+    previous.max(cursor_row.saturating_sub(adjustment_upper.saturating_sub(1)))
 }
 
 fn sync_preview_to_viewport(term: &vte::Terminal, state: &MinimapState, limit: usize) -> bool {
@@ -865,6 +874,14 @@ mod tests {
             preview_offset_for_viewport(-1_000.0, 24.0, 24.0, 0.0, 600, 796,),
             Some(0)
         );
+    }
+
+    #[test]
+    fn cursor_repaints_do_not_shift_the_text_range() {
+        assert_eq!(advance_text_row_offset(0, 1_023, 24), 1_000);
+        assert_eq!(advance_text_row_offset(100, 115, 24), 100);
+        assert_eq!(advance_text_row_offset(100, 123, 24), 100);
+        assert_eq!(advance_text_row_offset(100, 124, 24), 101);
     }
 
     #[test]
