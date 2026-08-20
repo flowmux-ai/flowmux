@@ -8,6 +8,7 @@ use super::origin::{self, InstallOrigin, UpdateGate};
 use super::{Event, Stage};
 use anyhow::Context;
 use sha2::{Digest, Sha256};
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,6 +23,7 @@ const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/flowmux-ai/flowmu
 const RELEASE_DOWNLOAD_URL: &str = "https://github.com/flowmux-ai/flowmux/releases/download";
 const LINUX_RELEASE_TARGET: &str = "x86_64-unknown-linux-gnu";
 const RELEASE_BINARIES: [&str; 3] = ["flowmux", "flowmuxctl", "flowmux-md-viewer"];
+const RELEASE_TRANSACTION_FILE: &str = ".release-install";
 const CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone)]
@@ -397,38 +399,207 @@ async fn run_release_tarball(
         .parent()
         .context("running flowmux has no parent directory")?
         .to_path_buf();
+    let install_dirs = release_install_dirs(
+        &install_dir,
+        std::env::var_os("HOME").as_deref().map(Path::new),
+    );
+    let transaction = cache_dir.join(RELEASE_TRANSACTION_FILE);
     let staged = extract_dir.clone();
-    let destination = install_dir.clone();
-    tokio::task::spawn_blocking(move || install_release_binaries(&staged, &destination))
-        .await
-        .context("join release install task")??;
-    writeln!(log, "installed_release_to={}", install_dir.display()).context("write install log")?;
+    let destinations = install_dirs.clone();
+    tokio::task::spawn_blocking(move || {
+        install_release_binaries(&staged, &destinations, &transaction)
+    })
+    .await
+    .context("join release install task")??;
+    for install_dir in install_dirs {
+        writeln!(log, "installed_release_to={}", install_dir.display())
+            .context("write install log")?;
+    }
     installing.report(100);
     let _ = std::fs::remove_dir_all(work_dir);
     Ok(())
 }
 
-fn install_release_binaries(extracted: &Path, install_dir: &Path) -> anyhow::Result<()> {
-    let mut staged = Vec::new();
+fn release_install_dirs(current: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = vec![current.to_path_buf()];
+    if let Some(home) = home {
+        for dir in [home.join(".local/bin"), home.join(".cargo/bin")] {
+            if !dirs.contains(&dir)
+                && RELEASE_BINARIES
+                    .iter()
+                    .all(|binary| dir.join(binary).is_file())
+            {
+                dirs.push(dir);
+            }
+        }
+    }
+    dirs
+}
+
+fn pending_path(dir: &Path, binary: &str) -> PathBuf {
+    dir.join(format!(".{binary}.flowmux-update-new"))
+}
+
+fn backup_path(dir: &Path, binary: &str) -> PathBuf {
+    dir.join(format!(".{binary}.flowmux-update-old"))
+}
+
+fn remove_if_exists(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn sync_dirs(dirs: &[PathBuf]) -> anyhow::Result<()> {
+    for dir in dirs {
+        File::open(dir)
+            .and_then(|file| file.sync_all())
+            .with_context(|| format!("sync {}", dir.display()))?;
+    }
+    Ok(())
+}
+
+fn restore_release_binaries(install_dirs: &[PathBuf]) -> anyhow::Result<()> {
+    for install_dir in install_dirs {
+        for binary in RELEASE_BINARIES {
+            let backup = backup_path(install_dir, binary);
+            if backup.exists() {
+                std::fs::rename(&backup, install_dir.join(binary))
+                    .with_context(|| format!("restore {binary} in {}", install_dir.display()))?;
+            }
+            remove_if_exists(&pending_path(install_dir, binary))
+                .with_context(|| format!("clear staged {binary} in {}", install_dir.display()))?;
+        }
+    }
+    sync_dirs(install_dirs)
+}
+
+fn recover_release_install(
+    transaction_path: &Path,
+    install_dirs: &[PathBuf],
+) -> anyhow::Result<()> {
+    let transaction = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(transaction_path)
+        .with_context(|| format!("open update transaction {}", transaction_path.display()))?;
+    transaction.lock().context("lock update transaction")?;
+    if transaction.metadata()?.len() == 0 {
+        return Ok(());
+    }
+    restore_release_binaries(install_dirs)?;
+    transaction.set_len(0).context("complete update recovery")?;
+    transaction.sync_all().context("sync update recovery")
+}
+
+/// Restore the previous complete binary set after an interrupted release swap.
+pub(crate) fn recover_interrupted_release_install() -> anyhow::Result<()> {
+    let Some(cache_dir) = flowmux_config::paths::host_visible_cache_dir() else {
+        return Ok(());
+    };
+    let transaction = cache_dir.join(RELEASE_TRANSACTION_FILE);
+    if !transaction.exists() {
+        return Ok(());
+    }
+    let install_dir = std::env::current_exe()
+        .context("locate running flowmux during update recovery")?
+        .parent()
+        .context("running flowmux has no parent directory")?
+        .to_path_buf();
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Ok(());
+    };
+    if install_dir != home.join(".local/bin") && install_dir != home.join(".cargo/bin") {
+        return Ok(());
+    }
+    let install_dirs = release_install_dirs(&install_dir, Some(&home));
+    recover_release_install(&transaction, &install_dirs)
+}
+
+fn install_release_binaries(
+    extracted: &Path,
+    install_dirs: &[PathBuf],
+    transaction_path: &Path,
+) -> anyhow::Result<()> {
     for binary in RELEASE_BINARIES {
-        let source = extracted.join(binary);
-        if !source.is_file() {
+        if !extracted.join(binary).is_file() {
             anyhow::bail!("release is missing {binary}");
         }
-        let pending = install_dir.join(format!(".{binary}.pending.{}", std::process::id()));
-        let _ = std::fs::remove_file(&pending);
-        std::fs::copy(&source, &pending).with_context(|| format!("stage {}", pending.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o755))
-                .with_context(|| format!("set permissions on {}", pending.display()))?;
+        for install_dir in install_dirs {
+            if !install_dir.join(binary).is_file() {
+                anyhow::bail!(
+                    "existing install is missing {binary} in {}",
+                    install_dir.display()
+                );
+            }
         }
-        staged.push((pending, install_dir.join(binary)));
     }
-    for (pending, destination) in staged {
-        std::fs::rename(&pending, &destination)
-            .with_context(|| format!("replace {}", destination.display()))?;
+
+    let mut transaction = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(transaction_path)
+        .with_context(|| format!("open update transaction {}", transaction_path.display()))?;
+    transaction.lock().context("lock update transaction")?;
+    if transaction.metadata()?.len() != 0 {
+        restore_release_binaries(install_dirs)?;
+        transaction.set_len(0)?;
+        transaction.sync_all()?;
+    }
+
+    for install_dir in install_dirs {
+        for binary in RELEASE_BINARIES {
+            let pending = pending_path(install_dir, binary);
+            let backup = backup_path(install_dir, binary);
+            remove_if_exists(&pending)?;
+            remove_if_exists(&backup)?;
+            std::fs::copy(extracted.join(binary), &pending)
+                .with_context(|| format!("stage {}", pending.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&pending, std::fs::Permissions::from_mode(0o755))
+                    .with_context(|| format!("set permissions on {}", pending.display()))?;
+            }
+            std::fs::hard_link(install_dir.join(binary), &backup)
+                .with_context(|| format!("back up {binary} in {}", install_dir.display()))?;
+        }
+    }
+    sync_dirs(install_dirs)?;
+    transaction.write_all(b"installing\n")?;
+    transaction.sync_all()?;
+    if let Some(parent) = transaction_path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
+
+    let replace = (|| {
+        for install_dir in install_dirs {
+            for binary in RELEASE_BINARIES {
+                std::fs::rename(pending_path(install_dir, binary), install_dir.join(binary))
+                    .with_context(|| format!("replace {binary} in {}", install_dir.display()))?;
+            }
+        }
+        sync_dirs(install_dirs)
+    })();
+    if let Err(error) = replace {
+        restore_release_binaries(install_dirs).context("roll back interrupted update")?;
+        transaction.set_len(0)?;
+        transaction.sync_all()?;
+        return Err(error);
+    }
+
+    transaction
+        .set_len(0)
+        .context("commit update transaction")?;
+    transaction.sync_all().context("sync update transaction")?;
+    for install_dir in install_dirs {
+        for binary in RELEASE_BINARIES {
+            let _ = remove_if_exists(&backup_path(install_dir, binary));
+        }
     }
     Ok(())
 }
@@ -635,8 +806,9 @@ async fn run_logged(
 #[cfg(all(test, unix))]
 mod tests {
     use super::{
-        check_prerequisites, expected_sha256, install_release_binaries, manual_install_guidance,
-        output_progress, prerequisite_error, prerequisite_packages, RELEASE_BINARIES,
+        backup_path, check_prerequisites, expected_sha256, install_release_binaries,
+        manual_install_guidance, output_progress, pending_path, prerequisite_error,
+        prerequisite_packages, recover_release_install, release_install_dirs, RELEASE_BINARIES,
     };
     use crate::update::Stage;
     use std::ffi::OsStr;
@@ -673,6 +845,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let extracted = temp.path().join("extracted");
         let installed = temp.path().join("bin");
+        let transaction = temp.path().join("transaction");
         std::fs::create_dir_all(&extracted).unwrap();
         std::fs::create_dir_all(&installed).unwrap();
         for binary in RELEASE_BINARIES {
@@ -680,7 +853,8 @@ mod tests {
             std::fs::write(installed.join(binary), format!("old-{binary}")).unwrap();
         }
 
-        install_release_binaries(&extracted, &installed).unwrap();
+        install_release_binaries(&extracted, std::slice::from_ref(&installed), &transaction)
+            .unwrap();
 
         for binary in RELEASE_BINARIES {
             assert_eq!(
@@ -695,6 +869,63 @@ mod tests {
                     & 0o777,
                 0o755
             );
+        }
+    }
+
+    #[test]
+    fn release_install_updates_both_script_destinations() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let extracted = home.join("extracted");
+        let local = home.join(".local/bin");
+        let cargo = home.join(".cargo/bin");
+        for dir in [&extracted, &local, &cargo] {
+            std::fs::create_dir_all(dir).unwrap();
+            for binary in RELEASE_BINARIES {
+                std::fs::write(
+                    dir.join(binary),
+                    if dir == &extracted { "new" } else { "old" },
+                )
+                .unwrap();
+            }
+        }
+
+        let install_dirs = release_install_dirs(&local, Some(home));
+        install_release_binaries(&extracted, &install_dirs, &home.join("update-transaction"))
+            .unwrap();
+
+        assert_eq!(install_dirs, vec![local.clone(), cargo.clone()]);
+        for dir in [local, cargo] {
+            for binary in RELEASE_BINARIES {
+                assert_eq!(std::fs::read_to_string(dir.join(binary)).unwrap(), "new");
+            }
+        }
+    }
+
+    #[test]
+    fn interrupted_release_install_restores_the_complete_old_set() {
+        let temp = tempfile::tempdir().unwrap();
+        let transaction = temp.path().join("transaction");
+        let install_dirs = [temp.path().join("local"), temp.path().join("cargo")];
+        std::fs::write(&transaction, "installing\n").unwrap();
+        for dir in &install_dirs {
+            std::fs::create_dir_all(dir).unwrap();
+            for binary in RELEASE_BINARIES {
+                std::fs::write(dir.join(binary), "new").unwrap();
+                std::fs::write(backup_path(dir, binary), "old").unwrap();
+                std::fs::write(pending_path(dir, binary), "staged").unwrap();
+            }
+        }
+
+        recover_release_install(&transaction, &install_dirs).unwrap();
+
+        assert_eq!(std::fs::metadata(&transaction).unwrap().len(), 0);
+        for dir in install_dirs {
+            for binary in RELEASE_BINARIES {
+                assert_eq!(std::fs::read_to_string(dir.join(binary)).unwrap(), "old");
+                assert!(!backup_path(&dir, binary).exists());
+                assert!(!pending_path(&dir, binary).exists());
+            }
         }
     }
 

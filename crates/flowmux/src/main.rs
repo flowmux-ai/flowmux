@@ -76,6 +76,8 @@ fn main() -> anyhow::Result<()> {
         panic!("FLOWMUX_DEBUG_PANIC requested");
     }
 
+    update::install::recover_interrupted_release_install()?;
+
     if delegate_to_cli_if_needed()? {
         return Ok(());
     }
