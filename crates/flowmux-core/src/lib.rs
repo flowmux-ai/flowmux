@@ -800,7 +800,8 @@ impl Pane {
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.name == "claude"
                             && agent.source.as_deref() == Some("flowmux:hook")
-                            && (agent.status != status || status_text.is_none())
+                            && (status_text.is_none()
+                                || (agent.status != status && status != AgentStatus::Blocked))
                     })
                 {
                     return Some(false);
@@ -2672,6 +2673,9 @@ pub fn detect_agent_status_from_signals(
             .filter(|line| !line.trim().is_empty())
             .take(12)
     };
+    if detect_agent_usage_limit_text(screen_text).is_some() {
+        return Some(AgentStatus::Blocked);
+    }
     if recent().any(is_agent_idle_prompt_line) {
         return Some(AgentStatus::Idle);
     }
@@ -2732,6 +2736,21 @@ pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
         .find_map(|line| {
             let line = trim_agent_status_prefix(line);
             is_agent_working_status_line(line).then_some(line)
+        })
+}
+
+pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> {
+    screen_text?
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+        .find_map(|line| {
+            let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
+            ["usage limit reached", "you've hit your session limit"]
+                .into_iter()
+                .any(|text| strip_ascii_prefix_case_insensitive(line, text).is_some())
+                .then_some(line)
         })
 }
 

@@ -9,10 +9,10 @@
 use flowmux_core::{
     agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_idle_name_from_signals,
     detect_agent_name_from_signals, detect_agent_progress_text, detect_agent_status_from_signals,
-    terminal_tab_title_for_cwd, AgentBarModel, AgentPresence, AgentStatus, AgentStatusReport,
-    CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome,
-    SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace,
-    WorkspaceAgentBlock, WorkspaceId,
+    detect_agent_usage_limit_text, terminal_tab_title_for_cwd, AgentBarModel, AgentPresence,
+    AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent,
+    PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind,
+    TerminalScrollback, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -1280,9 +1280,11 @@ impl StateStore {
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
-        let progress_text = matches!(detected_status, Some(AgentStatus::Working))
-            .then(|| detect_agent_progress_text(screen_text))
-            .flatten();
+        let status_text = match detected_status {
+            Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
+            Some(AgentStatus::Blocked) => detect_agent_usage_limit_text(screen_text),
+            _ => None,
+        };
         let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
             detect_agent_idle_name_from_signals(screen_text, osc_title)
         } else {
@@ -1318,7 +1320,7 @@ impl StateStore {
                     status,
                     "flowmux:screen",
                     agent_name,
-                    progress_text,
+                    status_text,
                     surface_visible,
                 ) {
                     found = true;
@@ -2877,6 +2879,73 @@ mod tests {
         assert_eq!(agent.name, "codex");
         assert_eq!(agent.status, AgentStatus::Blocked);
         assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+    }
+
+    #[tokio::test]
+    async fn claude_usage_limit_screen_replaces_stale_working_hook_status() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        let mut report = AgentStatusReport::from_activity(
+            "claude",
+            Some(flowmux_core::AgentActivity::Running),
+            Some(42),
+        );
+        report.source = Some("flowmux:hook".into());
+        report.seq = Some(1);
+        report.custom_status = Some("Using Bash".into());
+        store.report_agent_status(surface, report).await;
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some(
+                        "⎿ You've hit your session limit · resets 10:20pm\n\
+                         ❯\u{a0}\n\
+                         ⚠ Usage limit reached · continuing automatically at 10:20pm",
+                    ),
+                    Some("flutter-tizen"),
+                )
+                .await,
+            Some((ws_id, Some(AgentStatus::Blocked)))
+        );
+
+        let agent = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(agent.status, AgentStatus::Blocked);
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(
+            agent.status_text(),
+            Some("Usage limit reached · continuing automatically at 10:20pm")
+        );
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("$ printf 'Usage limit reached'"),
+                    Some("flutter-tizen"),
+                )
+                .await,
+            None
+        );
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Blocked
+        );
     }
 
     #[tokio::test]
