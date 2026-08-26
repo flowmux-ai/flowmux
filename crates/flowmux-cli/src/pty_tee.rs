@@ -68,7 +68,7 @@ use std::time::{Duration, Instant};
 /// `poll` with arbitrary signals on stable Rust.
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
-const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const EVENT_QUEUE_CAPACITY: usize = 16;
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
@@ -623,6 +623,7 @@ fn ipc_worker(
             }
         };
 
+        let mut next_output_refresh = None;
         loop {
             match rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(PtyEvent::Notify(ev)) => {
@@ -642,9 +643,9 @@ fn ipc_worker(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
             if output_refresh.requested.swap(false, Ordering::AcqRel) {
-                // Give the outer VTE time to consume the bytes that pty-tee
-                // just wrote, while rate-limiting screen scans for busy TUIs.
-                tokio::time::sleep(OUTPUT_REFRESH_INTERVAL).await;
+                if let Some(delay) = output_refresh_delay(next_output_refresh, Instant::now()) {
+                    tokio::time::sleep(delay).await;
+                }
                 let Some(surface) = surface else {
                     output_refresh.supported.store(false, Ordering::Release);
                     continue;
@@ -671,6 +672,7 @@ fn ipc_worker(
                         tracing::warn!(%error, "ipc worker: terminal output call failed");
                     }
                 }
+                next_output_refresh = Some(Instant::now() + OUTPUT_REFRESH_INTERVAL);
             }
         }
     });
@@ -703,6 +705,12 @@ fn queue_output_refresh(tx: &mpsc::SyncSender<PtyEvent>, state: &OutputRefreshSt
     ) {
         state.requested.store(false, Ordering::Release);
     }
+}
+
+fn output_refresh_delay(next_allowed: Option<Instant>, now: Instant) -> Option<Duration> {
+    next_allowed
+        .and_then(|deadline| deadline.checked_duration_since(now))
+        .filter(|delay| !delay.is_zero())
 }
 
 fn flush_pending(pending: &Rc<RefCell<Vec<String>>>, tx: &mpsc::SyncSender<PtyEvent>) {
@@ -1010,6 +1018,19 @@ mod tests {
         state.requested.store(false, Ordering::Release);
         queue_output_refresh(&tx, &state);
         assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn output_refresh_is_immediate_then_limited_to_twice_per_second() {
+        let first = Instant::now();
+        assert_eq!(output_refresh_delay(None, first), None);
+
+        let next_allowed = first + OUTPUT_REFRESH_INTERVAL;
+        assert_eq!(
+            output_refresh_delay(Some(next_allowed), first),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(output_refresh_delay(Some(next_allowed), next_allowed), None);
     }
 
     #[test]

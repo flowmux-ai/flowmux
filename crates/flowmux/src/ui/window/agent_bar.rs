@@ -180,7 +180,7 @@ impl WindowController {
             let screen = registry
                 .terminals
                 .get(&surface)
-                .and_then(|terminal| terminal.screen_text());
+                .and_then(|terminal| terminal.agent_status_text());
             let title = title.or_else(|| registry.surface_title_text(surface));
             (screen, title)
         };

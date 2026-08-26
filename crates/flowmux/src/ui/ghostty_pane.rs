@@ -76,7 +76,8 @@ pub struct GhosttyPane {
 /// literal newline" at the prompt without submitting.
 const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
 
-const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const AGENT_STATUS_TEXT_ROWS: i64 = 80;
 const TERMINAL_SELECTION_CACHE_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Default)]
@@ -1061,6 +1062,22 @@ impl GhosttyPane {
         self.widget
             .text_format(vte::Format::Text)
             .map(|g| g.to_string())
+    }
+
+    /// Recent live terminal rows used only for Agent status detection.
+    pub fn agent_status_text(&self) -> Option<String> {
+        let (_, cursor_row) = self.widget.cursor_position();
+        let last_row = self
+            .widget
+            .vadjustment()
+            .map(|adjustment| (adjustment.upper().ceil() as i64).saturating_sub(1))
+            .map_or(cursor_row, |row| row.max(cursor_row));
+        let first_row = last_row.saturating_sub(AGENT_STATUS_TEXT_ROWS - 1);
+        let last_column = self.widget.column_count().max(1) - 1;
+        self.widget
+            .text_range_format(vte::Format::Text, first_row, 0, last_row, last_column)
+            .0
+            .map(|text| text.to_string())
     }
 
     /// Styled terminal history for persistence. VTE exposes cell attributes
@@ -3513,6 +3530,40 @@ mod tests {
             calls.get() > 0,
             "real PTY output must request an Agent content refresh"
         );
+        pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_status_text_keeps_only_the_latest_80_rows() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        );
+        let lines = (0..100)
+            .map(|index| format!("agent-row-{index:03}"))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        pane.widget.feed(format!("\x1b[2J\x1b[H{lines}").as_bytes());
+
+        for _ in 0..20 {
+            if pane
+                .agent_status_text()
+                .is_some_and(|text| text.contains("agent-row-099"))
+            {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        let text = pane.agent_status_text().expect("recent terminal text");
+        assert!(text.contains("agent-row-099"));
+        assert!(!text.contains("agent-row-000"));
+        assert!(text.lines().count() <= AGENT_STATUS_TEXT_ROWS as usize);
         pane.close_pty();
     }
 }
