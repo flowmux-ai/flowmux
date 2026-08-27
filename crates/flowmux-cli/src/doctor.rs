@@ -332,10 +332,7 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
         }
     }
     let claude_present = agent_is_installed(agent::Target::ClaudeCode, home, codex_home);
-    let any_agent_present = agent::Target::ALL
-        .iter()
-        .any(|target| agent_is_installed(*target, home, codex_home));
-    entries.push(agent_shims_entry(any_agent_present));
+    entries.push(agent_shims_entry());
     entries.push(tmux_shim_entry(claude_present));
 
     Section {
@@ -344,7 +341,7 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
     }
 }
 
-fn agent_shims_entry(any_agent_present: bool) -> Entry {
+fn agent_shims_entry() -> Entry {
     use std::os::unix::fs::PermissionsExt;
 
     let Some(dir) = flowmux_config::paths::agent_shim_dir() else {
@@ -362,8 +359,10 @@ fn agent_shims_entry(any_agent_present: bool) -> Entry {
             let expected = hook_install::shim_script(agent);
             let executable = std::fs::metadata(&path)
                 .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 == 0o111);
-            (current.as_deref() != Some(expected.as_str()) || !executable)
-                .then(|| path.display().to_string())
+            let real = hook_install::agent_has_real_binary(agent);
+            ((real && (current.as_deref() != Some(expected.as_str()) || !executable))
+                || (!real && current.is_some()))
+            .then(|| path.display().to_string())
         })
         .collect::<Vec<_>>();
     stale.extend(
@@ -380,11 +379,7 @@ fn agent_shims_entry(any_agent_present: bool) -> Entry {
     } else {
         Entry {
             name: "agent shims".into(),
-            status: if any_agent_present {
-                Status::NeedsFix
-            } else {
-                Status::Warn
-            },
+            status: Status::NeedsFix,
             detail: format!("{} (`flowmux fix` repairs them)", stale.join(", ")),
         }
     }

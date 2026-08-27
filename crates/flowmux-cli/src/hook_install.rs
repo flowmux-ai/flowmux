@@ -445,6 +445,13 @@ pub fn install_agent_shims() -> Result<Vec<PathBuf>> {
     let mut written = remove_legacy_local_agent_shims()?;
     for agent in SHIM_AGENTS {
         let path = dir.join(agent);
+        if !agent_has_real_binary(agent) {
+            if is_legacy_local_agent_shim(&path) {
+                fs::remove_file(&path)?;
+                written.push(path);
+            }
+            continue;
+        }
         let body = shim_script(agent);
         let up_to_date = fs::read_to_string(&path)
             .map(|c| c == body)
@@ -592,6 +599,23 @@ pub fn legacy_local_agent_shims() -> Vec<PathBuf> {
         .flat_map(|dir| SHIM_AGENTS.iter().map(move |agent| dir.join(agent)))
         .filter(|path| is_legacy_local_agent_shim(path))
         .collect()
+}
+
+pub fn agent_has_real_binary(agent: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| agent_has_real_binary_on_path(agent, path.as_os_str()))
+}
+
+fn agent_has_real_binary_on_path(agent: &str, path: &std::ffi::OsStr) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::env::split_paths(path).any(|dir| {
+        let candidate = dir.join(agent);
+        std::fs::metadata(&candidate)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            && !fs::read_to_string(candidate)
+                .is_ok_and(|source| source.contains("flowmux agent wrapper shim"))
+    })
 }
 
 fn is_legacy_local_agent_shim(path: &Path) -> bool {
@@ -1675,6 +1699,31 @@ mod tests {
         assert!(!is_legacy_local_agent_shim(&path));
         fs::write(&path, shim_script("codex")).unwrap();
         assert!(is_legacy_local_agent_shim(&path));
+    }
+
+    #[test]
+    fn agent_binary_detection_skips_shims() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tmp();
+        let shim_dir = dir.path().join("shims");
+        let real_dir = dir.path().join("real");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::write(shim_dir.join("cline"), shim_script("cline")).unwrap();
+        let mut permissions = fs::metadata(shim_dir.join("cline")).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(shim_dir.join("cline"), permissions).unwrap();
+
+        let shim_only = std::env::join_paths([&shim_dir]).unwrap();
+        assert!(!agent_has_real_binary_on_path("cline", &shim_only));
+
+        fs::write(real_dir.join("cline"), "#!/bin/sh\n").unwrap();
+        let mut permissions = fs::metadata(real_dir.join("cline")).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(real_dir.join("cline"), permissions).unwrap();
+        let with_real = std::env::join_paths([&shim_dir, &real_dir]).unwrap();
+        assert!(agent_has_real_binary_on_path("cline", &with_real));
     }
 
     #[test]
