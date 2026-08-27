@@ -1748,6 +1748,13 @@ mod tests {
         install_usage_popover_accel_capture(&window, &usage_button, saved_focus.clone());
         app.set_accels_for_action(TOGGLE_USAGE_POPOVER_FULL_ACTION, &["<Ctrl><Alt>u"]);
         window.present();
+        for _ in 0..100 {
+            if window.is_mapped() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(window.is_mapped(), "test window should finish opening");
         gtk::prelude::GtkWindowExt::set_focus(&window, Some(&terminal));
         let terminal_focus = gtk::prelude::GtkWindowExt::focus(&window).unwrap();
 
