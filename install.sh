@@ -257,4 +257,7 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -qtf "$DATA_DIR/icons/hicolor" 2>/dev/null || true
 fi
 
+echo "==> syncing agent integrations"
+"$PRIMARY_BIN_DIR/flowmuxctl" fix
+
 echo "==> done. Fully restart the running flowmux GUI to pick up the new binary."

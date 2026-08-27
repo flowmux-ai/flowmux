@@ -39,7 +39,8 @@ no separate driver.
 
 ## AI Agent notification (Claude, Codex, OpenCode)
 
-flowmux installs lifecycle hooks into Claude Code, Codex, and OpenCode so
+The installer (or `flowmux fix`) adds lifecycle hooks to Claude Code, Codex,
+and OpenCode so
 *task complete*, *needs approval*, and *error* events surface as native
 desktop notifications — routed to the workspace that fired them, suppressed
 while that surface is focused, and isolated per window.
@@ -111,7 +112,7 @@ token and activity totals without interrupting running sessions.
 - **Notifications** — terminal "task complete" / "needs attention" signals
   become desktop notifications, routed to the firing workspace and quiet while
   focused. Bell popover **All Clear** clears all entries and toasts at once.
-- **AI agent integration** — Claude Code, Codex, OpenCode work out of the box;
+- **AI agent integration** — Claude Code, Codex, OpenCode are wired by the installer;
   sessions persist across restarts. `claude-teams` opens a workspace pre-split
   into per-Claude panes. `flowmux doctor` / `fix` audit and repair wiring.
 - **Agent CLI** — scripts and agents drive flowmux over its socket:
@@ -239,6 +240,8 @@ It uses the `fast` profile (release optimization without LTO) and the system
 VTE library; no Zig toolchain or vendored terminal backend is required.
 ThorVG (image viewer) is optional and loaded at runtime, so the build does not
 depend on it; `install.sh` only prints a note if it is missing.
+The installer finishes by running `flowmux fix` to sync integrations for
+agents already present on the host.
 
 After installing, fully restart any running flowmux GUI to pick up the new
 binary.
@@ -255,9 +258,10 @@ flowmux fix      # re-install / refresh what doctor flagged
 
 `doctor` prints one row per check with a status badge (`ok` / `fix` / `warn` /
 `info`); `NO_COLOR=1` or piping disables colour. Run it after a flowmux
-install/upgrade and after installing a new agent. `fix` is idempotent and
-never clobbers hand-edited entries lacking the flowmux marker. Add `--json` to
-either for machine-readable output.
+install/upgrade and after installing a new agent. `fix` is idempotent: hook
+config entries without a flowmux marker are preserved, while flowmux-managed
+SKILL copies are re-synced to the version embedded in the binary. Add `--json`
+to either command for machine-readable output.
 
 ### Troubleshooting
 
