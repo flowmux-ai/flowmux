@@ -43,9 +43,9 @@ modules:
       - install -Dm755 target/release/flowmuxctl /app/lib/flowmux/flowmuxctl
       # Expose flowmuxctl on /app/bin so `flatpak run --command=flowmuxctl
       # com.flowmux.App …` resolves without typing the full /app/lib path.
-      # The hook installer (`flowmux hooks setup`, run inside the sandbox)
-      # writes plugin entries with exactly this short name so the host-side
-      # OpenCode / Claude / Codex spawn lines stay concise.
+      # An explicit `flatpak run --command=flowmuxctl com.flowmux.App fix`
+      # writes integrations with this short name so host-side agent spawn
+      # lines stay concise without package installation changing user config.
       - install -d /app/bin
       - ln -sf /app/lib/flowmux/flowmuxctl /app/bin/flowmuxctl
       - install -Dm644 resources/desktop/com.flowmux.App.desktop /app/share/applications/com.flowmux.App.desktop

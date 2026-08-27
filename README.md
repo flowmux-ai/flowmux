@@ -39,8 +39,7 @@ no separate driver.
 
 ## AI Agent notification (Claude, Codex, OpenCode)
 
-The installer (or `flowmux fix`) adds lifecycle hooks to Claude Code, Codex,
-and OpenCode so
+`flowmux fix` adds lifecycle hooks to Claude Code, Codex, and OpenCode so
 *task complete*, *needs approval*, and *error* events surface as native
 desktop notifications — routed to the workspace that fired them, suppressed
 while that surface is focused, and isolated per window.
@@ -112,7 +111,7 @@ token and activity totals without interrupting running sessions.
 - **Notifications** — terminal "task complete" / "needs attention" signals
   become desktop notifications, routed to the firing workspace and quiet while
   focused. Bell popover **All Clear** clears all entries and toasts at once.
-- **AI agent integration** — Claude Code, Codex, OpenCode are wired by the installer;
+- **AI agent integration** — Claude Code, Codex, OpenCode are wired by `flowmux fix`;
   sessions persist across restarts. `claude-teams` opens a workspace pre-split
   into per-Claude panes. `flowmux doctor` / `fix` audit and repair wiring.
 - **Agent CLI** — scripts and agents drive flowmux over its socket:
@@ -241,8 +240,8 @@ It uses the `fast` profile (release optimization without LTO) and the system
 VTE library; no Zig toolchain or vendored terminal backend is required.
 ThorVG (image viewer) is optional and loaded at runtime, so the build does not
 depend on it; `install.sh` only prints a note if it is missing.
-The installer finishes by running `flowmux fix` to sync integrations for
-agents already present on the host.
+The installer leaves agent settings unchanged, including integrations removed
+by the user. Run `flowmux fix` explicitly to enable or refresh them.
 
 After installing, fully restart any running flowmux GUI to pick up the new
 binary.

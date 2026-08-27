@@ -322,6 +322,9 @@ fi
 install -m755 "$REPO_ROOT/target/$target_subdir/flowmux" "$BIN_DIR/flowmux"
 install -m755 "$REPO_ROOT/target/$target_subdir/flowmuxctl" "$BIN_DIR/flowmuxctl"
 
+echo "==> agent integrations unchanged"
+echo "    Run '$BIN_DIR/flowmuxctl fix' to enable or refresh them."
+
 if [ -n "$running_pid" ]; then
     echo "==> staged app update: $bundle_pending"
     echo "==> installed CLI:"
