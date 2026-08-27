@@ -62,6 +62,9 @@ pub(crate) fn print_response(r: &Response, json_mode: bool) -> anyhow::Result<()
         serde_json::to_string_pretty(r)?
     };
     println!("{s}");
+    if let Response::Error(error) = r {
+        anyhow::bail!("{error:?}");
+    }
     Ok(())
 }
 
@@ -191,5 +194,14 @@ mod tests {
             plain_browser_response(&Response::BrowserOk),
             Some("ok".into())
         );
+    }
+
+    #[test]
+    fn rpc_errors_return_failure() {
+        assert!(print_response(
+            &Response::Error(flowmux_ipc::protocol::RpcError::NotFound("missing".into())),
+            true,
+        )
+        .is_err());
     }
 }
