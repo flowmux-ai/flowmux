@@ -695,11 +695,11 @@ fn install_claude(flowmux_bin: &str) -> Result<HookInstallReport> {
         arr.push(claude_hook_entry(flowmux_bin, *event));
     }
 
-    write_json(&path, &root)?;
+    let changed = write_json(&path, &root)?;
     Ok(HookInstallReport {
         target: HookTarget::Claude,
         status: HookInstallStatus::Installed,
-        touched_paths: vec![path],
+        touched_paths: changed.then_some(path).into_iter().collect(),
     })
 }
 
@@ -720,11 +720,11 @@ fn uninstall_claude() -> Result<HookInstallReport> {
             }
         }
     }
-    write_json(&path, &root)?;
+    let changed = write_json(&path, &root)?;
     Ok(HookInstallReport {
         target: HookTarget::Claude,
         status: HookInstallStatus::Installed,
-        touched_paths: vec![path],
+        touched_paths: changed.then_some(path).into_iter().collect(),
     })
 }
 
@@ -859,13 +859,16 @@ fn install_codex(flowmux_bin: &str) -> Result<HookInstallReport> {
         _ => return Ok(skipped(HookTarget::Codex)),
     };
     let config_path = home.join("config.toml");
+    let mut touched_paths = Vec::new();
 
     // Codex 0.130's nested `hooks.json` schema is unstable across
     // releases; even when we wrote it the engine silently ignored
     // `Stop` entries. The legacy `notify` config in `config.toml` is
     // the documented and stable way to surface "agent-turn-complete"
     // events to an external process — cmux's parity path uses it.
-    set_codex_notify(&config_path, flowmux_bin)?;
+    if set_codex_notify(&config_path, flowmux_bin)? {
+        touched_paths.push(config_path.clone());
+    }
 
     // We no longer write hooks.json. Clean up any flowmux entry from a
     // previous setup so the file stays consistent with what we own.
@@ -887,16 +890,18 @@ fn install_codex(flowmux_bin: &str) -> Result<HookInstallReport> {
         }
         let is_empty = root.as_object().map(|o| o.is_empty()).unwrap_or(false);
         if is_empty {
-            let _ = fs::remove_file(&hooks_path);
-        } else {
-            write_json(&hooks_path, &root)?;
+            fs::remove_file(&hooks_path)
+                .with_context(|| format!("remove {}", hooks_path.display()))?;
+            touched_paths.push(hooks_path);
+        } else if write_json(&hooks_path, &root)? {
+            touched_paths.push(hooks_path);
         }
     }
 
     Ok(HookInstallReport {
         target: HookTarget::Codex,
         status: HookInstallStatus::Installed,
-        touched_paths: vec![config_path],
+        touched_paths,
     })
 }
 
@@ -908,6 +913,7 @@ fn uninstall_codex() -> Result<HookInstallReport> {
         _ => return Ok(skipped(HookTarget::Codex)),
     };
     let config_path = home.join("config.toml");
+    let mut touched_paths = Vec::new();
     if config_path.exists() {
         let original = fs::read_to_string(&config_path)?;
         let mut doc: DocumentMut = original.parse()?;
@@ -918,8 +924,8 @@ fn uninstall_codex() -> Result<HookInstallReport> {
         if was_flowmux {
             doc.as_table_mut().remove("notify");
             let new_text = doc.to_string();
-            if new_text != original {
-                write_atomic(&config_path, new_text.as_bytes())?;
+            if write_atomic(&config_path, new_text.as_bytes())? {
+                touched_paths.push(config_path.clone());
             }
         }
     }
@@ -935,12 +941,14 @@ fn uninstall_codex() -> Result<HookInstallReport> {
         {
             prune_flowmux_claude_entries(stop);
         }
-        write_json(&hooks_path, &root)?;
+        if write_json(&hooks_path, &root)? {
+            touched_paths.push(hooks_path);
+        }
     }
     Ok(HookInstallReport {
         target: HookTarget::Codex,
         status: HookInstallStatus::Installed,
-        touched_paths: vec![config_path],
+        touched_paths,
     })
 }
 
@@ -949,7 +957,7 @@ fn uninstall_codex() -> Result<HookInstallReport> {
 /// a turn ("agent-turn-complete"). Preserves existing keys; removes
 /// the no-longer-needed `[features].hooks` / `codex_hooks` entries
 /// from earlier flowmux setups so a re-run quiets the warning.
-fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<()> {
+fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<bool> {
     use toml_edit::{value, Array, DocumentMut};
 
     let original = match fs::read_to_string(config_path) {
@@ -1005,10 +1013,7 @@ fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<()> {
     }
 
     let new_text = doc.to_string();
-    if new_text != original {
-        write_atomic(config_path, new_text.as_bytes())?;
-    }
-    Ok(())
+    write_atomic(config_path, new_text.as_bytes())
 }
 
 fn codex_notify_is_flowmux_owned(item: &toml_edit::Item) -> bool {
@@ -1518,7 +1523,7 @@ fn read_json_or_empty_object(path: &Path) -> Result<Value> {
     }
 }
 
-fn write_json(path: &Path, value: &Value) -> Result<()> {
+fn write_json(path: &Path, value: &Value) -> Result<bool> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
@@ -1527,10 +1532,10 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     write_atomic(path, body.as_bytes())
 }
 
-fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
+fn write_atomic(path: &Path, body: &[u8]) -> Result<bool> {
     // Keep idempotent setup from changing user config mtimes.
     if fs::read(path).is_ok_and(|current| current == body) {
-        return Ok(());
+        return Ok(false);
     }
     let parent = path
         .parent()
@@ -1543,7 +1548,7 @@ fn write_atomic(path: &Path, body: &[u8]) -> Result<()> {
     fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
     fs::rename(&tmp, path)
         .with_context(|| format!("rename {} → {}", tmp.display(), path.display()))?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -2297,8 +2302,9 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
     fn write_atomic_replaces_target_via_rename() {
         let dir = tmp();
         let path = dir.path().join("a/b/c.txt");
-        write_atomic(&path, b"first").unwrap();
-        write_atomic(&path, b"second").unwrap();
+        assert!(write_atomic(&path, b"first").unwrap());
+        assert!(write_atomic(&path, b"second").unwrap());
+        assert!(!write_atomic(&path, b"second").unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
     }
 
