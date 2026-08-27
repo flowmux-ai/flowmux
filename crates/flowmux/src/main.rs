@@ -206,8 +206,6 @@ fn main() -> anyhow::Result<()> {
     // to scope to the right window.
     refresh_runtime_socket_pointer(&socket);
 
-    spawn_agent_hook_repair();
-
     // Tokio runtime hosts the IPC server, the state store, and any
     // async desktop-bus interactions.
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -634,42 +632,6 @@ fn flowmuxctl_program() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("flowmuxctl"))
 }
 
-/// Re-run the hook-only repair (`flowmuxctl hooks setup`) in the background
-/// on every boot. Agent auto-resume depends on hooks living in files other
-/// tools rewrite (`~/.claude/settings.json`, `~/.codex/config.toml`); when
-/// another installer drops our entries, session ids stop being recorded
-/// and resume silently dies until the user happens to repair the hooks.
-/// The repair is idempotent and skips writes when nothing drifted.
-///
-/// Keep this scoped to hooks. The broader `flowmuxctl fix` also manages the
-/// desktop entry and refreshes launcher caches; doing that during GUI startup
-/// can make GNOME replace the ShellApp while an older flowmux window is alive.
-fn agent_hook_repair_command(program: &Path) -> Command {
-    let mut command = Command::new(program);
-    command
-        .args(["hooks", "setup"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command
-}
-
-fn spawn_agent_hook_repair() {
-    let program = flowmuxctl_program();
-    match agent_hook_repair_command(&program).spawn() {
-        Ok(mut child) => {
-            info!("agent hook self-repair started (flowmuxctl hooks setup)");
-            // Reap the child so it never lingers as a zombie.
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-        }
-        Err(error) => {
-            tracing::warn!(%error, program = %program.display(), "could not start agent hook self-repair");
-        }
-    }
-}
-
 fn delegate_to_cli_if_needed() -> anyhow::Result<bool> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if args.is_empty() {
@@ -990,16 +952,5 @@ mod tests {
         assert_eq!(pid_from_runtime_socket_name("flowmux.sock"), None);
         assert_eq!(pid_from_runtime_socket_name("flowmux-current.sock"), None);
         assert_eq!(pid_from_runtime_socket_name("flowmux-abc.sock"), None);
-    }
-
-    #[test]
-    fn startup_self_repair_is_scoped_to_hooks() {
-        let command = agent_hook_repair_command(Path::new("/opt/flowmuxctl"));
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(args, ["hooks", "setup"]);
-        assert!(!args.iter().any(|arg| arg == "fix"));
     }
 }
