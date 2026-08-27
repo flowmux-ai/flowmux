@@ -1241,14 +1241,11 @@ mod tests {
 
     /// Doctor on a totally empty fake HOME: every skill row is Warn
     /// ("agent not installed") and every hook row is Warn (NoAgentHome).
-    /// The agent-driven half of the report must be problem-free because
-    /// nothing is actionable — the user simply hasn't installed the
-    /// agents yet. The Desktop section is excluded from the assertion
-    /// because it is *expected* to flag NeedsFix on a fresh per-user
-    /// install (the launcher entry + icons are not yet in
-    /// `$XDG_DATA_HOME`), which `flowmux fix` resolves.
+    /// Agent shims are excluded because they intentionally follow the
+    /// host PATH, not HOME. The Desktop section is also expected to flag
+    /// NeedsFix on a fresh per-user install.
     #[test]
-    fn doctor_on_empty_home_reports_warn_not_needsfix() {
+    fn doctor_on_empty_home_marks_agent_configs_nonactionable() {
         let _lock = home_env_lock();
         let home = fake_home();
         let _h = HomeOverride::set(home.path());
@@ -1258,7 +1255,7 @@ mod tests {
             .iter()
             .find(|s| s.title == "AI agents")
             .unwrap();
-        for entry in &agents.entries {
+        for entry in agents.entries.iter().filter(|e| e.name != "agent shims") {
             assert!(
                 matches!(entry.status, Status::Warn | Status::Info | Status::Ok),
                 "{:?} {}: status={:?}",
@@ -1272,6 +1269,7 @@ mod tests {
             .iter()
             .filter(|s| s.title != "Desktop")
             .flat_map(|s| &s.entries)
+            .filter(|e| e.name != "agent shims")
             .any(|e| matches!(e.status, Status::NeedsFix | Status::Error));
         assert!(
             !agent_driven_problem,
