@@ -416,7 +416,7 @@ enum Cmd {
     /// `flowmux hooks setup` registers entries with each supported
     /// agent so its lifecycle events route into flowmux. The other
     /// subcommands are invoked by the agents themselves at runtime
-    /// (Claude Code's `Stop` hook, Codex's `hooks.json` `Stop`, etc).
+    /// (Claude Code's `Stop` hook, Codex's `notify` command, etc).
     Hooks {
         #[command(subcommand)]
         op: HooksOp,
@@ -424,8 +424,8 @@ enum Cmd {
 
     /// Audit every flowmux ↔ host integration in one place: AI-agent
     /// SKILL files, AI-agent lifecycle hooks (Claude / Codex /
-    /// OpenCode / Cline), the in-app browser data dir, host browsers visible
-    /// to the cookie importer, and the daemon socket. Read-only — use
+    /// OpenCode), the in-app browser data dir, host browsers visible to
+    /// the cookie importer, and the daemon socket. Read-only — use
     /// `flowmux fix` to repair the rows tagged `fix`.
     Doctor,
 

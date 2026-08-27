@@ -4,6 +4,33 @@
 use super::*;
 
 #[test]
+fn integration_help_matches_current_hook_support() {
+    use clap::CommandFactory;
+
+    let mut command = Cli::command();
+    let hooks = command.find_subcommand_mut("hooks").unwrap();
+    let hooks_help = hooks
+        .render_long_help()
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(hooks_help.contains("Codex's `notify` command"));
+    assert!(!hooks_help.contains("hooks.json"));
+
+    let mut command = Cli::command();
+    let doctor = command.find_subcommand_mut("doctor").unwrap();
+    let doctor_help = doctor
+        .render_long_help()
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(doctor_help.contains("lifecycle hooks (Claude / Codex / OpenCode)"));
+    assert!(!doctor_help.contains("OpenCode / Cline"));
+}
+
+#[test]
 fn maps_notify_level_strings_to_core_levels() {
     assert_eq!(parse_level("info"), NotificationLevel::Info);
     assert_eq!(parse_level("complete"), NotificationLevel::TurnCompleted);
