@@ -48,7 +48,8 @@ pub const BROWSER_VERBS: &[&str] = &[
 pub const UNSUPPORTED_FEATURES: &[&str] = &["viewport", "network-mock", "screencast"];
 
 /// Host browsers whose cookies flowmux can currently import.
-pub const COOKIE_IMPORT_BROWSERS: &[&str] = &["firefox"];
+pub const COOKIE_IMPORT_BROWSERS: &[&str] =
+    &["firefox", "chrome", "chromium", "brave", "edge", "arc"];
 
 /// Static description of what this flowmux build can and cannot do,
 /// returned by `flowmux capabilities`. Lets an agent probe the browser
@@ -889,7 +890,7 @@ mod tests {
         for v in &caps.browser_verbs {
             assert!(!caps.unsupported.contains(v), "{v} is both supported+not");
         }
-        assert_eq!(caps.cookie_import_browsers, ["firefox"]);
+        assert_eq!(caps.cookie_import_browsers, COOKIE_IMPORT_BROWSERS);
         let json = serde_json::to_string(&caps).unwrap();
         assert_eq!(serde_json::from_str::<Capabilities>(&json).unwrap(), caps);
     }
