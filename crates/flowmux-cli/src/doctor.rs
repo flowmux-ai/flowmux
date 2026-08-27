@@ -340,7 +340,7 @@ fn agent_shims_entry(any_agent_present: bool) -> Entry {
             detail: "cannot resolve flowmux data directory".into(),
         };
     };
-    let stale = hook_install::SHIM_AGENTS
+    let mut stale = hook_install::SHIM_AGENTS
         .iter()
         .filter_map(|agent| {
             let path = dir.join(agent);
@@ -352,6 +352,11 @@ fn agent_shims_entry(any_agent_present: bool) -> Entry {
                 .then(|| path.display().to_string())
         })
         .collect::<Vec<_>>();
+    stale.extend(
+        hook_install::legacy_local_agent_shims()
+            .into_iter()
+            .map(|path| path.display().to_string()),
+    );
     if stale.is_empty() {
         Entry {
             name: "agent shims".into(),
@@ -1050,7 +1055,7 @@ pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> Fix
             area: "agent shims".into(),
             status: Status::Ok,
             detail: format!(
-                "wrote {}",
+                "updated {}",
                 paths
                     .iter()
                     .map(|p| p.display().to_string())

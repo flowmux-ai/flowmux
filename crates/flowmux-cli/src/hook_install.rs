@@ -447,7 +447,7 @@ pub fn install_agent_shims() -> Result<Vec<PathBuf>> {
         None => return Ok(vec![]),
     };
     fs::create_dir_all(&dir)?;
-    let mut written = Vec::new();
+    let mut written = remove_legacy_local_agent_shims()?;
     for agent in SHIM_AGENTS {
         let path = dir.join(agent);
         let body = shim_script(agent);
@@ -466,17 +466,6 @@ pub fn install_agent_shims() -> Result<Vec<PathBuf>> {
             fs::set_permissions(&path, perms)?;
             if !written.contains(&path) {
                 written.push(path.clone());
-            }
-        }
-        if let Some(local_bin) = user_local_bin_dir() {
-            fs::create_dir_all(&local_bin)?;
-            let local_path = local_bin.join(agent);
-            if should_write_local_agent_shim(&local_path, &body) {
-                fs::write(&local_path, &body)?;
-                let mut perms = fs::metadata(&local_path)?.permissions();
-                perms.set_mode(0o755);
-                fs::set_permissions(&local_path, perms)?;
-                written.push(local_path);
             }
         }
     }
@@ -602,12 +591,24 @@ fn user_local_bin_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("bin"))
 }
 
-fn should_write_local_agent_shim(path: &Path, body: &str) -> bool {
-    match fs::read_to_string(path) {
-        Ok(existing) => existing.contains("flowmux agent wrapper shim") && existing != body,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-        Err(_) => false,
+pub fn legacy_local_agent_shims() -> Vec<PathBuf> {
+    user_local_bin_dir()
+        .into_iter()
+        .flat_map(|dir| SHIM_AGENTS.iter().map(move |agent| dir.join(agent)))
+        .filter(|path| is_legacy_local_agent_shim(path))
+        .collect()
+}
+
+fn is_legacy_local_agent_shim(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|source| source.contains("flowmux agent wrapper shim"))
+}
+
+fn remove_legacy_local_agent_shims() -> Result<Vec<PathBuf>> {
+    let paths = legacy_local_agent_shims();
+    for path in &paths {
+        fs::remove_file(path).with_context(|| format!("remove {}", path.display()))?;
     }
+    Ok(paths)
 }
 
 // ---- Claude Code ----------------------------------------------------
@@ -1802,20 +1803,15 @@ mod tests {
     }
 
     #[test]
-    fn local_agent_shim_write_policy_preserves_existing_real_binary() {
+    fn legacy_local_shim_detection_preserves_real_binary() {
         let dir = tmp();
         let path = dir.path().join("codex");
-        let body = shim_script("codex");
 
-        assert!(should_write_local_agent_shim(&path, &body));
+        assert!(!is_legacy_local_agent_shim(&path));
         fs::write(&path, "#!/bin/sh\necho real codex\n").unwrap();
-        assert!(!should_write_local_agent_shim(&path, &body));
-        fs::write(
-            &path,
-            shim_script("codex").replace("exec \"$real\"", "exec \"$real\" "),
-        )
-        .unwrap();
-        assert!(should_write_local_agent_shim(&path, &body));
+        assert!(!is_legacy_local_agent_shim(&path));
+        fs::write(&path, shim_script("codex")).unwrap();
+        assert!(is_legacy_local_agent_shim(&path));
     }
 
     #[test]
