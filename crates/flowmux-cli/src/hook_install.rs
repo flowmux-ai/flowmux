@@ -157,7 +157,7 @@ fn check_claude() -> HookCheckEntry {
             .and_then(|h| h.get(event.name))
             .and_then(|v| v.as_array());
         if let Some(arr) = arr {
-            if arr.iter().any(claude_entry_is_flowmux_owned) {
+            if arr.iter().any(|entry| claude_entry_matches(entry, *event)) {
                 owned_events += 1;
             }
         }
@@ -695,6 +695,11 @@ const CLAUDE_EVENTS: &[ClaudeEvent] = &[
         timeout_secs: 10,
     },
     ClaudeEvent {
+        name: "StopFailure",
+        subcommand: "stop-failure",
+        timeout_secs: 10,
+    },
+    ClaudeEvent {
         name: "Notification",
         subcommand: "notification",
         timeout_secs: 10,
@@ -735,7 +740,11 @@ fn claude_hook_entry(flowmux_bin: &str, event: ClaudeEvent) -> Value {
         marker = FLOWMUX_HOOK_MARKER
     );
     json!({
-        "matcher": "",
+        "matcher": if event.name == "Notification" {
+            "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input|quota_auto_resume_stale"
+        } else {
+            ""
+        },
         "hooks": [{
             "type": "command",
             "command": cmd,
@@ -761,6 +770,29 @@ fn claude_entry_is_flowmux_owned(entry: &Value) -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+fn claude_entry_matches(entry: &Value, event: ClaudeEvent) -> bool {
+    let expected = claude_hook_entry("flowmux", event);
+    entry.get("matcher") == expected.get("matcher")
+        && entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .is_some_and(|hooks| {
+                hooks.iter().any(|hook| {
+                    hook.get("type").and_then(Value::as_str) == Some("command")
+                        && hook
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|command| {
+                                command.contains(FLOWMUX_HOOK_MARKER)
+                                    && command
+                                        .contains(&format!("hooks claude {}", event.subcommand))
+                            })
+                        && hook.get("timeout").and_then(Value::as_u64)
+                            == Some(event.timeout_secs.into())
+                })
+            })
 }
 
 // ---- Codex CLI ------------------------------------------------------
@@ -2047,6 +2079,32 @@ mod tests {
         // flowmux entry has the marker.
         let cmd = stop[1]["hooks"][0]["command"].as_str().unwrap();
         assert!(cmd.contains(FLOWMUX_HOOK_MARKER));
+    }
+
+    #[test]
+    fn claude_hooks_cover_api_failures_and_attention_only() {
+        let failure = CLAUDE_EVENTS
+            .iter()
+            .find(|event| event.name == "StopFailure")
+            .copied()
+            .unwrap();
+        assert!(claude_entry_matches(
+            &claude_hook_entry("flowmux", failure),
+            failure
+        ));
+
+        let notification = CLAUDE_EVENTS
+            .iter()
+            .find(|event| event.name == "Notification")
+            .copied()
+            .unwrap();
+        let entry = claude_hook_entry("flowmux", notification);
+        let matcher = entry["matcher"].as_str().unwrap();
+        assert!(matcher.contains("permission_prompt"));
+        assert!(!matcher.contains("idle_prompt"));
+        let mut stale = entry;
+        stale["matcher"] = json!("");
+        assert!(!claude_entry_matches(&stale, notification));
     }
 
     fn upsert_claude_for_test(root: &mut Value, bin: &str) {

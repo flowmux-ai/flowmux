@@ -688,6 +688,8 @@ enum HooksOp {
 enum ClaudeHookEvent {
     /// Claude has finished a turn / its agent loop is idle.
     Stop,
+    /// Claude's turn ended because an API request failed.
+    StopFailure,
     /// Claude needs the user (permission prompt, plan summary, …).
     Notification,
     /// New session started — registers the agent's presence (and PID

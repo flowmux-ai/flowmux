@@ -331,7 +331,36 @@ pub(crate) async fn run_claude_hook_event(
                 surface,
             ));
         }
+        ClaudeHookEvent::StopFailure => {
+            let message = normalized_activity_text(input.last_assistant_message.as_deref())
+                .or_else(|| {
+                    input
+                        .error
+                        .as_deref()
+                        .map(|error| format!("API error: {error}"))
+                });
+            let status_text = message.as_deref().unwrap_or("API request failed");
+            reqs.push(build_activity_update_with_metadata(
+                &agent,
+                Some(NeedsInput),
+                pid,
+                pane,
+                surface,
+                message.as_deref(),
+                Some(status_text),
+                input.session_id.as_deref(),
+            ));
+            reqs.push(build_failure_notify(
+                agent_display_name,
+                message.as_deref(),
+                pane,
+                surface,
+            ));
+        }
         ClaudeHookEvent::Notification => {
+            if !claude_notification_needs_input(input.notification_type.as_deref()) {
+                return Ok(());
+            }
             let msg = normalized_activity_text(input.message.as_deref());
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(

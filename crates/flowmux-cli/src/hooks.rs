@@ -51,6 +51,13 @@ pub struct ClaudeHookInput {
     /// Set when `Notification` fires for permission/info popups.
     #[serde(default)]
     pub message: Option<String>,
+    /// Claude notification category used to distinguish input prompts from
+    /// informational notices.
+    #[serde(default)]
+    pub notification_type: Option<String>,
+    /// Claude `StopFailure` error category, such as `rate_limit`.
+    #[serde(default)]
+    pub error: Option<String>,
     /// `Stop` payload sometimes carries the trailing assistant text
     /// (Claude). Codex's `notify` payload calls the same thing
     /// `last-assistant-message`. We accept both spellings.
@@ -331,6 +338,34 @@ pub fn build_notification_notify(
     }
 }
 
+pub fn build_failure_notify(
+    agent: &str,
+    message: Option<&str>,
+    pane: Option<PaneId>,
+    surface: Option<SurfaceId>,
+) -> Request {
+    Request::Notify {
+        pane,
+        surface,
+        title: format!("{agent} stopped"),
+        body: normalized_activity_text(message).unwrap_or_else(|| "API request failed".into()),
+        level: NotificationLevel::Error,
+    }
+}
+
+pub fn claude_notification_needs_input(notification_type: Option<&str>) -> bool {
+    matches!(
+        notification_type,
+        None | Some(
+            "permission_prompt"
+                | "elicitation_dialog"
+                | "elicitation_url_dialog"
+                | "agent_needs_input"
+                | "quota_auto_resume_stale"
+        )
+    )
+}
+
 /// Send a request and ignore non-fatal errors. Hooks must not fail
 /// loudly — Claude/OpenCode/Codex propagate non-zero exits to the
 /// agent and surface them to the user as a hook error.
@@ -551,6 +586,24 @@ mod tests {
     fn read_hook_input_parses_stdin_payloads_for_claude_style_hooks() {
         let parsed = read_hook_input(r#"{ "message": "approval needed" }"#.as_bytes());
         assert_eq!(parsed.message.as_deref(), Some("approval needed"));
+    }
+
+    #[test]
+    fn claude_notification_types_only_flag_input_prompts() {
+        assert!(claude_notification_needs_input(Some("permission_prompt")));
+        assert!(claude_notification_needs_input(Some("agent_needs_input")));
+        assert!(!claude_notification_needs_input(Some("idle_prompt")));
+        assert!(!claude_notification_needs_input(Some("auth_success")));
+        assert!(claude_notification_needs_input(None));
+    }
+
+    #[test]
+    fn claude_stop_failure_fields_are_parsed() {
+        let parsed: ClaudeHookInput =
+            parse_hook_payload(r#"{"error":"rate_limit","last_assistant_message":"API Error"}"#)
+                .unwrap();
+        assert_eq!(parsed.error.as_deref(), Some("rate_limit"));
+        assert_eq!(parsed.last_assistant_message.as_deref(), Some("API Error"));
     }
 
     #[test]
