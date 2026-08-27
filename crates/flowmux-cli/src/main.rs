@@ -638,7 +638,7 @@ enum HooksOp {
     /// upgrades. Skips agents whose home directory is missing.
     Setup {
         /// Limit installation to specific agents. Omit to do all.
-        #[arg(long, value_parser = ["claude", "codex", "opencode", "cline"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
         agent: Vec<String>,
         /// Path of the `flowmux` binary that the installed hook
         /// commands should invoke. Defaults to the current `flowmux`
@@ -648,7 +648,7 @@ enum HooksOp {
     },
     /// Remove flowmux's hook entries from every supported agent.
     Uninstall {
-        #[arg(long, value_parser = ["claude", "codex", "opencode", "cline"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
         agent: Vec<String>,
     },
     /// Print which agent config files flowmux currently owns hook
@@ -678,6 +678,7 @@ enum HooksOp {
     },
     /// Cline lifecycle hook handler. Uses the same generic event
     /// shape as Codex/OpenCode when a caller wires Cline to flowmux.
+    #[command(hide = true)]
     Cline {
         #[command(subcommand)]
         event: AgentHookEvent,

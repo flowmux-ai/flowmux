@@ -278,22 +278,12 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
             .iter()
             .find(|e| e.target == *target)
             .expect("doctor_all returns one entry per target");
-        let hook_target = hook_target_for(*target);
-        let hook = hook_report
-            .iter()
-            .find(|e| e.target == hook_target)
-            .expect("check_all returns one entry per target");
         let agent_present = agent_is_installed(*target, home, codex_home);
 
         let skill_entry = Entry {
             name: format!("{} skill", target.slug()),
             status: skill_status(&skill.status, agent_present),
             detail: skill_detail(&skill.status, &skill.path, agent_present),
-        };
-        let hook_entry = Entry {
-            name: format!("{} hooks", target.slug()),
-            status: hook_status(&hook.status),
-            detail: hook_detail(&hook.status, &hook.paths),
         };
         entries.push(skill_entry);
         // Legacy Codex sibling file (`$CODEX_HOME/flowmux-browser.md`)
@@ -315,7 +305,17 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
                 });
             }
         }
-        entries.push(hook_entry);
+        if let Some(hook_target) = hook_target_for(*target) {
+            let hook = hook_report
+                .iter()
+                .find(|entry| entry.target == hook_target)
+                .expect("check_all returns every supported hook target");
+            entries.push(Entry {
+                name: format!("{} hooks", target.slug()),
+                status: hook_status(&hook.status),
+                detail: hook_detail(&hook.status, &hook.paths),
+            });
+        }
     }
     let claude_present = agent_is_installed(agent::Target::ClaudeCode, home, codex_home);
     let any_agent_present = agent::Target::ALL
@@ -472,12 +472,12 @@ fn codex_legacy_entry(home: &Path, codex_home: Option<&Path>) -> Option<Entry> {
     })
 }
 
-fn hook_target_for(t: agent::Target) -> hook_install::HookTarget {
+fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
     match t {
-        agent::Target::ClaudeCode => hook_install::HookTarget::Claude,
-        agent::Target::OpenCode => hook_install::HookTarget::OpenCode,
-        agent::Target::Codex => hook_install::HookTarget::Codex,
-        agent::Target::Cline => hook_install::HookTarget::Cline,
+        agent::Target::ClaudeCode => Some(hook_install::HookTarget::Claude),
+        agent::Target::OpenCode => Some(hook_install::HookTarget::OpenCode),
+        agent::Target::Codex => Some(hook_install::HookTarget::Codex),
+        agent::Target::Cline => None,
     }
 }
 
@@ -1042,6 +1042,30 @@ pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> Fix
         }
     }
 
+    match hook_install::uninstall(hook_install::HookTarget::Cline) {
+        Ok(cleanup) if !cleanup.touched_paths.is_empty() => {
+            outcomes.push(FixOutcome {
+                area: "cline legacy hooks".into(),
+                status: Status::Ok,
+                detail: format!(
+                    "removed {}",
+                    cleanup
+                        .touched_paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+        }
+        Ok(_) => {}
+        Err(error) => outcomes.push(FixOutcome {
+            area: "cline legacy hooks".into(),
+            status: Status::Error,
+            detail: error.to_string(),
+        }),
+    }
+
     // Agent wrapper shims — let the daemon's liveness sweep see a
     // hard-killed agent's PID. Independent of any agent being installed;
     // the GUI only prepends the dir to PATH if it exists.
@@ -1306,19 +1330,26 @@ mod tests {
     }
 
     #[test]
-    fn cline_fix_installs_skill_and_hooks_then_becomes_idempotent() {
+    fn cline_fix_installs_skill_and_removes_legacy_hooks() {
         let _lock = home_env_lock();
         let home = fake_home();
-        fs::create_dir_all(home.path().join(".cline")).unwrap();
+        let hooks = home.path().join(".cline/hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(
+            hooks.join("TaskComplete"),
+            "#!/bin/sh\n# flowmux-hook obsolete\n",
+        )
+        .unwrap();
         let _h = HomeOverride::set(home.path());
 
         let first = run_fix(home.path(), None, "flowmux");
-        let hook = first
+        let cleanup = first
             .outcomes
             .iter()
-            .find(|outcome| outcome.area == "cline hooks")
+            .find(|outcome| outcome.area == "cline legacy hooks")
             .unwrap();
-        assert_eq!(hook.status, Status::Ok, "{}", hook.detail);
+        assert_eq!(cleanup.status, Status::Ok, "{}", cleanup.detail);
+        assert!(!hooks.join("TaskComplete").exists());
 
         let report = collect_offline(home.path(), None);
         let agents = report
@@ -1326,23 +1357,22 @@ mod tests {
             .iter()
             .find(|section| section.title == "AI agents")
             .unwrap();
-        for name in ["cline skill", "cline hooks"] {
-            let entry = agents
-                .entries
-                .iter()
-                .find(|entry| entry.name == name)
-                .unwrap();
-            assert_eq!(entry.status, Status::Ok, "{}", entry.detail);
-        }
+        let skill = agents
+            .entries
+            .iter()
+            .find(|entry| entry.name == "cline skill")
+            .unwrap();
+        assert_eq!(skill.status, Status::Ok, "{}", skill.detail);
+        assert!(agents
+            .entries
+            .iter()
+            .all(|entry| entry.name != "cline hooks"));
 
         let second = run_fix(home.path(), None, "flowmux");
-        let hook = second
+        assert!(second
             .outcomes
             .iter()
-            .find(|outcome| outcome.area == "cline hooks")
-            .unwrap();
-        assert_eq!(hook.status, Status::Ok);
-        assert_eq!(hook.detail, "no changes");
+            .all(|outcome| outcome.area != "cline legacy hooks"));
     }
 
     #[test]

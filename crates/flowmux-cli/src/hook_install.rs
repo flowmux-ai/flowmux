@@ -14,8 +14,7 @@
 //! - **Codex CLI**   — top-level `notify` in `~/.codex/config.toml`;
 //!   flowmux-owned entries in the legacy `hooks.json` are removed.
 //! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.mjs`.
-//! - **Cline**       — executable lifecycle scripts under `~/.cline/hooks/`
-//!   (plus its existing legacy global hooks directory when present).
+//! - **Cline**       — skill only; obsolete file hooks are removed on repair.
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
@@ -45,12 +44,8 @@ pub enum HookTarget {
 }
 
 impl HookTarget {
-    pub const ALL: &'static [HookTarget] = &[
-        HookTarget::Claude,
-        HookTarget::Codex,
-        HookTarget::OpenCode,
-        HookTarget::Cline,
-    ];
+    pub const ALL: &'static [HookTarget] =
+        &[HookTarget::Claude, HookTarget::Codex, HookTarget::OpenCode];
 
     pub fn slug(self) -> &'static str {
         match self {
@@ -319,7 +314,7 @@ pub fn install(target: HookTarget, flowmux_bin: &str) -> Result<HookInstallRepor
         HookTarget::Claude => install_claude(flowmux_bin),
         HookTarget::Codex => install_codex(flowmux_bin),
         HookTarget::OpenCode => install_opencode(flowmux_bin),
-        HookTarget::Cline => install_cline(flowmux_bin),
+        HookTarget::Cline => uninstall_cline(),
     }
 }
 
@@ -958,31 +953,11 @@ fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<()> {
 
 // ---- Cline ----------------------------------------------------------
 
-#[derive(Debug, Clone, Copy)]
-struct ClineEvent {
-    /// Extensionless executable filename used by Cline.
-    name: &'static str,
-    /// Generic flowmux hook event invoked by the script.
-    subcommand: &'static str,
-}
-
-const CLINE_EVENTS: &[ClineEvent] = &[
-    ClineEvent {
-        name: "TaskStart",
-        subcommand: "session-start",
-    },
-    ClineEvent {
-        name: "TaskResume",
-        subcommand: "session-start",
-    },
-    ClineEvent {
-        name: "UserPromptSubmit",
-        subcommand: "running",
-    },
-    ClineEvent {
-        name: "TaskComplete",
-        subcommand: "stop",
-    },
+const CLINE_EVENTS: &[&str] = &[
+    "TaskStart",
+    "TaskResume",
+    "UserPromptSubmit",
+    "TaskComplete",
 ];
 
 /// Cline's current global hook directory plus its legacy global directory when
@@ -1026,17 +1001,13 @@ fn check_cline() -> HookCheckEntry {
 
 fn check_cline_in_dirs(dirs: &[PathBuf]) -> HookCheckEntry {
     let mut paths = Vec::with_capacity(dirs.len() * CLINE_EVENTS.len());
-    let mut installed = 0usize;
-    let mut present = 0usize;
+    let mut legacy_owned = false;
     for dir in dirs {
         for event in CLINE_EVENTS {
-            let path = dir.join(event.name);
+            let path = dir.join(event);
             paths.push(path.clone());
             let body = match fs::read(&path) {
-                Ok(body) => {
-                    present += 1;
-                    body
-                }
+                Ok(body) => body,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => {
                     return entry(
@@ -1046,77 +1017,15 @@ fn check_cline_in_dirs(dirs: &[PathBuf]) -> HookCheckEntry {
                     )
                 }
             };
-            let command = format!("hooks cline {}", event.subcommand);
-            if bytes_contain(&body, FLOWMUX_HOOK_MARKER.as_bytes())
-                && bytes_contain(&body, command.as_bytes())
-                && is_executable(&path)
-            {
-                installed += 1;
-            }
+            legacy_owned |= bytes_contain(&body, FLOWMUX_HOOK_MARKER.as_bytes());
         }
     }
-    let expected = dirs.len() * CLINE_EVENTS.len();
-    let status = if installed == expected {
-        HookCheckStatus::Installed
-    } else if present == 0 {
-        HookCheckStatus::Missing
-    } else {
+    let status = if legacy_owned {
         HookCheckStatus::Drift
+    } else {
+        HookCheckStatus::NoAgentHome
     };
     entry(HookTarget::Cline, status, paths)
-}
-
-fn install_cline(flowmux_bin: &str) -> Result<HookInstallReport> {
-    let dirs = cline_hook_dirs();
-    if dirs.is_empty() {
-        return Ok(skipped(HookTarget::Cline));
-    }
-    install_cline_in_dirs(&dirs, flowmux_bin)
-}
-
-fn install_cline_in_dirs(dirs: &[PathBuf], flowmux_bin: &str) -> Result<HookInstallReport> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut touched_paths = Vec::new();
-    for dir in dirs {
-        fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-        for event in CLINE_EVENTS {
-            let path = dir.join(event.name);
-            let desired = cline_hook_script(flowmux_bin, *event);
-            let existing = match fs::read(&path) {
-                Ok(body) => Some(body),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => {
-                    return Err(anyhow::Error::from(error))
-                        .with_context(|| format!("read {}", path.display()))
-                }
-            };
-            if existing
-                .as_deref()
-                .is_some_and(|body| !bytes_contain(body, FLOWMUX_HOOK_MARKER.as_bytes()))
-            {
-                continue;
-            }
-            let needs_write = existing.as_deref() != Some(desired.as_bytes());
-            if needs_write {
-                write_atomic(&path, desired.as_bytes())?;
-            }
-            let mut permissions = fs::metadata(&path)?.permissions();
-            let needs_exec = permissions.mode() & 0o111 != 0o111;
-            if needs_exec {
-                permissions.set_mode(0o755);
-                fs::set_permissions(&path, permissions)?;
-            }
-            if needs_write || needs_exec {
-                touched_paths.push(path);
-            }
-        }
-    }
-    Ok(HookInstallReport {
-        target: HookTarget::Cline,
-        status: HookInstallStatus::Installed,
-        touched_paths,
-    })
 }
 
 fn uninstall_cline() -> Result<HookInstallReport> {
@@ -1131,7 +1040,7 @@ fn uninstall_cline_in_dirs(dirs: &[PathBuf]) -> Result<HookInstallReport> {
     let mut touched_paths = Vec::new();
     for dir in dirs {
         for event in CLINE_EVENTS {
-            let path = dir.join(event.name);
+            let path = dir.join(event);
             let body = match fs::read(&path) {
                 Ok(body) => body,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -1153,35 +1062,11 @@ fn uninstall_cline_in_dirs(dirs: &[PathBuf]) -> Result<HookInstallReport> {
     })
 }
 
-fn cline_hook_script(flowmux_bin: &str, event: ClineEvent) -> String {
-    let prefix = host_invocation_shell_command(flowmux_bin);
-    format!(
-        r#"#!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-or-later
-# {marker} managed Cline {event_name} hook
-payload=$(cat)
-{prefix} hooks cline {subcommand} -- "$payload" >/dev/null 2>&1 </dev/null
-printf '%s\n' '{{"cancel":false}}'
-"#,
-        marker = FLOWMUX_HOOK_MARKER,
-        event_name = event.name,
-        subcommand = event.subcommand,
-    )
-}
-
 fn bytes_contain(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
-}
-
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::metadata(path)
-        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
 }
 
 // ---- OpenCode -------------------------------------------------------
@@ -1603,34 +1488,7 @@ mod tests {
     }
 
     #[test]
-    fn cline_install_is_idempotent_and_doctor_reports_installed() {
-        let dir = tmp();
-        let hooks_dir = dir.path().join(".cline/hooks");
-        let dirs = vec![hooks_dir.clone()];
-
-        let first = install_cline_in_dirs(&dirs, "/usr/local/bin/flowmux").unwrap();
-        assert_eq!(first.touched_paths.len(), CLINE_EVENTS.len());
-        assert_eq!(
-            check_cline_in_dirs(&dirs).status,
-            HookCheckStatus::Installed
-        );
-
-        for event in CLINE_EVENTS {
-            let path = hooks_dir.join(event.name);
-            let body = fs::read_to_string(&path).unwrap();
-            assert!(body.starts_with("#!/usr/bin/env bash\n"));
-            assert!(body.contains(FLOWMUX_HOOK_MARKER));
-            assert!(body.contains(&format!("hooks cline {}", event.subcommand)));
-            assert!(body.contains("{\"cancel\":false}"));
-            assert!(is_executable(&path));
-        }
-
-        let second = install_cline_in_dirs(&dirs, "/usr/local/bin/flowmux").unwrap();
-        assert!(second.touched_paths.is_empty());
-    }
-
-    #[test]
-    fn cline_install_and_uninstall_preserve_unmarked_user_hook() {
+    fn cline_cleanup_removes_managed_and_preserves_user_hook() {
         let dir = tmp();
         let hooks_dir = dir.path().join(".cline/hooks");
         fs::create_dir_all(&hooks_dir).unwrap();
@@ -1638,11 +1496,16 @@ mod tests {
         fs::write(&manual, "#!/bin/sh\nprintf manual\\n\n").unwrap();
         let dirs = vec![hooks_dir.clone()];
 
-        install_cline_in_dirs(&dirs, "flowmux").unwrap();
-        assert_eq!(
-            fs::read_to_string(&manual).unwrap(),
-            "#!/bin/sh\nprintf manual\\n\n"
-        );
+        for event in CLINE_EVENTS
+            .iter()
+            .filter(|event| **event != "TaskComplete")
+        {
+            fs::write(
+                hooks_dir.join(event),
+                "#!/bin/sh\n# flowmux-hook obsolete\n",
+            )
+            .unwrap();
+        }
         assert_eq!(check_cline_in_dirs(&dirs).status, HookCheckStatus::Drift);
 
         let report = uninstall_cline_in_dirs(&dirs).unwrap();
