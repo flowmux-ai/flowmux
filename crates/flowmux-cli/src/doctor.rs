@@ -217,12 +217,26 @@ fn install_locations_entry_for(paths: &[PathBuf]) -> Entry {
             status: Status::Ok,
             detail,
         },
+        _ if identical_files(paths) => Entry {
+            name: "flowmux on PATH".into(),
+            status: Status::Ok,
+            detail: format!("identical copies: {detail}"),
+        },
         _ => Entry {
             name: "flowmux on PATH".into(),
             status: Status::Warn,
             detail: format!("multiple installations: {detail}"),
         },
     }
+}
+
+fn identical_files(paths: &[PathBuf]) -> bool {
+    let Ok(reference) = std::fs::read(&paths[0]) else {
+        return false;
+    };
+    paths[1..]
+        .iter()
+        .all(|path| std::fs::read(path).is_ok_and(|bytes| bytes == reference))
 }
 
 fn log_directory_entry() -> Entry {
@@ -677,17 +691,17 @@ fn browser_data_dir_entry() -> Entry {
     }
 }
 
-fn is_writable(p: &Path) -> bool {
-    use std::fs::OpenOptions;
-    let probe = p.join(".flowmux-doctor-write-probe");
-    let ok = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&probe)
-        .is_ok();
-    let _ = std::fs::remove_file(&probe);
-    ok
+#[cfg(unix)]
+fn is_writable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    std::ffi::CString::new(path.as_os_str().as_bytes())
+        .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 })
+}
+
+#[cfg(not(unix))]
+fn is_writable(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| !metadata.permissions().readonly())
 }
 
 /// One row per known host browser, summarising whether the cookie
@@ -1206,6 +1220,28 @@ mod tests {
         assert_eq!(entry.status, Status::Warn);
         assert!(entry.detail.contains("/usr/bin/flowmux"));
         assert!(entry.detail.contains("/home/alice/.local/bin/flowmux"));
+    }
+
+    #[test]
+    fn doctor_accepts_identical_binary_mirrors() {
+        let root = TempDir::new().unwrap();
+        let first = root.path().join("local/flowmux");
+        let second = root.path().join("cargo/flowmux");
+        fs::create_dir_all(first.parent().unwrap()).unwrap();
+        fs::create_dir_all(second.parent().unwrap()).unwrap();
+        fs::write(&first, b"same binary").unwrap();
+        fs::write(&second, b"same binary").unwrap();
+
+        let entry = install_locations_entry_for(&[first, second]);
+        assert_eq!(entry.status, Status::Ok);
+        assert!(entry.detail.starts_with("identical copies:"));
+    }
+
+    #[test]
+    fn writable_check_is_read_only() {
+        let root = TempDir::new().unwrap();
+        assert!(is_writable(root.path()));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
     }
 
     /// Doctor on a totally empty fake HOME: every skill row is Warn
