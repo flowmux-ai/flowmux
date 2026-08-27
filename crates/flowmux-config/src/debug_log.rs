@@ -19,9 +19,8 @@
 //! truncate each other. Log writes never fail loudly — a notify hook
 //! must not error just because the cache dir is read-only.
 //!
-//! Always-on by default so a single repro reveals all state. Set
-//! `FLOWMUX_NOTIFY_DEBUG=0` to silence it on hosts where the I/O
-//! cost is unwanted.
+//! Disabled by default because hook diagnostics can describe private
+//! agent activity. Set `FLOWMUX_NOTIFY_DEBUG=1` for a short-lived trace.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -36,10 +35,10 @@ pub fn log_path() -> Option<PathBuf> {
     crate::paths::host_visible_cache_dir().map(|d| d.join("notify-debug.log"))
 }
 
-fn enabled() -> bool {
-    !matches!(
+pub fn enabled() -> bool {
+    matches!(
         std::env::var("FLOWMUX_NOTIFY_DEBUG").ok().as_deref(),
-        Some("0") | Some("false") | Some("off")
+        Some("1") | Some("true") | Some("on")
     )
 }
 
@@ -70,11 +69,19 @@ pub fn append(component: &str, message: &str) {
         .unwrap_or_else(|| "?".into());
     let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let line = format!("{ts}  pid={pid}  bin={bin:<14}  [{component}] {message}\n");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut f) = options.open(&path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+        }
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -98,7 +105,7 @@ mod tests {
         let prev_home = std::env::var_os("HOME");
         let prev_flag = std::env::var_os("FLOWMUX_NOTIFY_DEBUG");
         std::env::set_var("HOME", tmp.path());
-        std::env::remove_var("FLOWMUX_NOTIFY_DEBUG");
+        std::env::set_var("FLOWMUX_NOTIFY_DEBUG", "1");
 
         append("test", "hello world");
 
@@ -117,20 +124,17 @@ mod tests {
     }
 
     #[test]
-    fn append_is_silent_when_disabled() {
+    fn append_is_silent_by_default() {
         let _g = crate::test_env::env_lock().lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let prev_home = std::env::var_os("HOME");
         let prev_flag = std::env::var_os("FLOWMUX_NOTIFY_DEBUG");
         std::env::set_var("HOME", tmp.path());
-        std::env::set_var("FLOWMUX_NOTIFY_DEBUG", "0");
+        std::env::remove_var("FLOWMUX_NOTIFY_DEBUG");
 
         append("test", "should not appear");
         let path = log_path().unwrap();
-        assert!(
-            !path.exists(),
-            "disabling FLOWMUX_NOTIFY_DEBUG must skip the write entirely"
-        );
+        assert!(!path.exists(), "FLOWMUX_NOTIFY_DEBUG must be opt-in");
 
         match prev_home {
             Some(v) => std::env::set_var("HOME", v),
@@ -149,7 +153,7 @@ mod tests {
         let prev_home = std::env::var_os("HOME");
         let prev_flag = std::env::var_os("FLOWMUX_NOTIFY_DEBUG");
         std::env::set_var("HOME", tmp.path());
-        std::env::remove_var("FLOWMUX_NOTIFY_DEBUG");
+        std::env::set_var("FLOWMUX_NOTIFY_DEBUG", "1");
 
         let path = log_path().unwrap();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -171,6 +175,38 @@ mod tests {
         }
         if let Some(v) = prev_flag {
             std::env::set_var("FLOWMUX_NOTIFY_DEBUG", v);
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn append_restricts_log_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _g = crate::test_env::env_lock().lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev_home = std::env::var_os("HOME");
+        let prev_flag = std::env::var_os("FLOWMUX_NOTIFY_DEBUG");
+        std::env::set_var("HOME", tmp.path());
+        std::env::set_var("FLOWMUX_NOTIFY_DEBUG", "1");
+
+        let path = log_path().unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        append("test", "private");
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match prev_flag {
+            Some(v) => std::env::set_var("FLOWMUX_NOTIFY_DEBUG", v),
+            None => std::env::remove_var("FLOWMUX_NOTIFY_DEBUG"),
         }
     }
 }

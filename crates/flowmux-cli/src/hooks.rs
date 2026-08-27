@@ -339,18 +339,7 @@ pub async fn send_best_effort(client: &Client, req: Request) {
 }
 
 async fn send_best_effort_with_timeout(client: &Client, req: Request, timeout: Duration) {
-    let summary = match &req {
-        Request::Notify {
-            pane,
-            surface,
-            title,
-            level,
-            ..
-        } => {
-            format!("Notify(title={title:?}, pane={pane:?}, surface={surface:?}, level={level:?})")
-        }
-        other => format!("{other:?}"),
-    };
+    let summary = hook_request_summary(&req);
     flowmux_config::notify_debug!("cli/hook", "sending {summary}");
     match tokio::time::timeout(timeout, client.call(req)).await {
         Ok(Ok(Response::Error(e))) => {
@@ -368,6 +357,32 @@ async fn send_best_effort_with_timeout(client: &Client, req: Request, timeout: D
             tracing::debug!(?timeout, "hook notify timed out");
             flowmux_config::notify_debug!("cli/hook", "rpc timed out after {timeout:?}");
         }
+    }
+}
+
+fn hook_request_summary(req: &Request) -> String {
+    match req {
+        Request::Notify {
+            pane,
+            surface,
+            title,
+            level,
+            ..
+        } => {
+            format!("Notify(title={title:?}, pane={pane:?}, surface={surface:?}, level={level:?})")
+        }
+        Request::AgentActivityUpdate {
+            pane,
+            surface,
+            agent,
+            status,
+            activity,
+            pid,
+            ..
+        } => format!(
+            "AgentActivityUpdate(agent={agent:?}, status={status:?}, activity={activity:?}, pid={pid:?}, pane={pane:?}, surface={surface:?})"
+        ),
+        other => format!("{other:?}"),
     }
 }
 
@@ -500,6 +515,23 @@ mod tests {
         assert!(text.starts_with("Completed: done "));
         assert!(!text.contains('\n'));
         assert_eq!(text.chars().count(), "Completed: ".chars().count() + 161);
+    }
+
+    #[test]
+    fn hook_debug_summary_redacts_agent_content() {
+        let request = build_activity_update_with_metadata(
+            "Claude",
+            Some(AgentActivity::Idle),
+            Some(42),
+            None,
+            None,
+            Some("private answer"),
+            Some("Completed: private answer"),
+            Some("private-session"),
+        );
+        let summary = hook_request_summary(&request);
+        assert!(summary.contains("AgentActivityUpdate"));
+        assert!(!summary.contains("private"));
     }
 
     #[test]

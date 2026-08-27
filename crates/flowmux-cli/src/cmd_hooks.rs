@@ -135,7 +135,7 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
 }
 /// Full diagnostic dump that one command captures: sandbox state,
 /// resolved socket + connect outcome, per-agent install status, hook
-/// plugin checksums, and the tail of `notify-debug.log`. The single
+/// plugin checksums, and the opt-in tail of `notify-debug.log`. The single
 /// goal is "run this once on the failing host and paste the output."
 pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
     use hook_install::HookTarget;
@@ -231,6 +231,10 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
     // 4. Tail the unified debug log
     println!();
     println!("--- notify-debug.log (last 60 lines) ---");
+    if !flowmux_config::debug_log::enabled() {
+        println!("  (disabled; set FLOWMUX_NOTIFY_DEBUG=1 for a temporary trace)");
+        return;
+    }
     if let Some(log_path) = flowmux_config::debug_log::log_path() {
         println!("path: {log_path:?}");
         match std::fs::read_to_string(&log_path) {
@@ -444,9 +448,15 @@ pub(crate) async fn run_generic_agent_hook_event(
     };
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
+    let event_name = match event {
+        AgentHookEvent::Stop { .. } => "stop",
+        AgentHookEvent::Notification { .. } => "notification",
+        AgentHookEvent::Running { .. } => "running",
+        AgentHookEvent::SessionStart { .. } => "session-start",
+    };
     flowmux_config::notify_debug!(
         "cli/hook",
-        "entry reported_agent={reported_agent:?} resolved_agent={agent:?} event={event:?} cli_pane={cli_pane:?} cli_surface={cli_surface:?} env_pane={env_pane:?} env_surface={env_surface:?} resolved_pane={pane:?} resolved_surface={surface:?} socket_arg={socket:?}"
+        "entry reported_agent={reported_agent:?} resolved_agent={agent:?} event={event_name} cli_pane={cli_pane:?} cli_surface={cli_surface:?} env_pane={env_pane:?} env_surface={env_surface:?} resolved_pane={pane:?} resolved_surface={surface:?} socket_arg={socket:?}"
     );
     let mut reqs: Vec<_> = Vec::new();
     match event {
