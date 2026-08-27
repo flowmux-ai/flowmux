@@ -630,6 +630,35 @@ fn remove_legacy_local_agent_shims() -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+pub fn uninstall_agent_shim(agent: &str) -> Result<Vec<PathBuf>> {
+    let mut removed = Vec::new();
+    let paths = [
+        flowmux_config::paths::agent_shim_dir().map(|dir| dir.join(agent)),
+        user_local_bin_dir().map(|dir| dir.join(agent)),
+    ];
+    for path in paths.into_iter().flatten() {
+        if remove_owned_shim(&path, "flowmux agent wrapper shim")? {
+            removed.push(path);
+        }
+    }
+    Ok(removed)
+}
+
+pub fn uninstall_tmux_shim() -> Result<Option<PathBuf>> {
+    let Some(path) = flowmux_config::paths::agent_shim_dir().map(|dir| dir.join("tmux")) else {
+        return Ok(None);
+    };
+    remove_owned_shim(&path, "flowmux tmux compat shim").map(|removed| removed.then_some(path))
+}
+
+fn remove_owned_shim(path: &Path, marker: &str) -> Result<bool> {
+    if !fs::read_to_string(path).is_ok_and(|source| source.contains(marker)) {
+        return Ok(false);
+    }
+    fs::remove_file(path).with_context(|| format!("remove {}", path.display()))?;
+    Ok(true)
+}
+
 // ---- Claude Code ----------------------------------------------------
 
 fn claude_settings_path() -> Option<PathBuf> {
@@ -1724,6 +1753,19 @@ mod tests {
         fs::set_permissions(real_dir.join("cline"), permissions).unwrap();
         let with_real = std::env::join_paths([&shim_dir, &real_dir]).unwrap();
         assert!(agent_has_real_binary_on_path("cline", &with_real));
+    }
+
+    #[test]
+    fn shim_uninstall_preserves_unmanaged_files() {
+        let dir = tmp();
+        let path = dir.path().join("codex");
+        fs::write(&path, "real codex").unwrap();
+        assert!(!remove_owned_shim(&path, "flowmux agent wrapper shim").unwrap());
+        assert!(path.exists());
+
+        fs::write(&path, shim_script("codex")).unwrap();
+        assert!(remove_owned_shim(&path, "flowmux agent wrapper shim").unwrap());
+        assert!(!path.exists());
     }
 
     #[test]

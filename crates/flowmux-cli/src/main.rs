@@ -606,9 +606,8 @@ enum AgentOp {
         #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline"])]
         agent: Vec<String>,
     },
-    /// Remove the flowmux-browser SKILL files from each agent's
-    /// user-level location. The agent's top-level dir is left
-    /// untouched.
+    /// Remove flowmux's SKILL and wrapper shim for each agent. The agent's
+    /// own files are left untouched.
     Uninstall {
         #[arg(long, value_parser = ["claude-code", "opencode", "codex", "cline"])]
         agent: Vec<String>,

@@ -200,6 +200,7 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
         }
         AgentOp::Uninstall { agent: slugs } => {
             let targets = parse_targets(slugs)?;
+            let remove_tmux = targets.contains(&agent::Target::ClaudeCode);
             for t in targets {
                 let path = t.resolved_install_path(&home, codex_home.as_deref());
                 let outcome = agent::uninstall_one(&path)?;
@@ -208,6 +209,20 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                     agent::UninstallOutcome::AlreadyAbsent => "absent ",
                 };
                 println!("{label}  {:12}  {}", t.slug(), path.display());
+                let shim = match t {
+                    agent::Target::ClaudeCode => "claude",
+                    agent::Target::OpenCode => "opencode",
+                    agent::Target::Codex => "codex",
+                    agent::Target::Cline => "cline",
+                };
+                for path in hook_install::uninstall_agent_shim(shim)? {
+                    println!("removed  {shim:12}  {}", path.display());
+                }
+            }
+            if remove_tmux {
+                if let Some(path) = hook_install::uninstall_tmux_shim()? {
+                    println!("removed  {:12}  {}", "tmux", path.display());
+                }
             }
             Ok(())
         }
