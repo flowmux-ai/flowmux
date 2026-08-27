@@ -5,7 +5,7 @@
 //!
 //! Strategy: every supported agent has a documented user-level skills
 //! directory under `$HOME` (`~/.claude/skills/`, `~/.config/opencode/skills/`,
-//! `$CODEX_HOME/skills/`, `~/.cline/skills/`). We mirror our embedded `SKILL.md` into each
+//! `~/.agents/skills/`, `~/.cline/skills/`). We mirror our embedded `SKILL.md` into each
 //! one idempotently so the same SKILL.md auto-loads as a real skill in
 //! every agent. `doctor` walks the same paths and reports presence /
 //! content drift so the user can verify a fresh install or update
@@ -36,11 +36,10 @@ pub enum Target {
     /// follows the same skill convention as Claude Code (see
     /// <https://opencode.ai/docs/skills>).
     OpenCode,
-    /// `$CODEX_HOME/skills/flowmux-browser/SKILL.md` (default
-    /// `~/.codex/skills/...`). Codex CLI auto-discovers every
+    /// `~/.agents/skills/flowmux-browser/SKILL.md`. Codex CLI auto-discovers every
     /// `SKILL.md` under its skills dir — same shape as Claude / OpenCode
     /// — so the user does not have to import anything by hand. See
-    /// <https://developers.openai.com/codex/skills>.
+    /// <https://learn.chatgpt.com/docs/build-skills>.
     Codex,
     /// `~/.cline/skills/flowmux-browser/SKILL.md`. Cline discovers
     /// user-level skills from `~/.cline/skills/`.
@@ -76,10 +75,8 @@ impl Target {
     }
 
     /// Path the install writes to. `home` is the resolved
-    /// `$HOME` (callers usually pass `dirs::home_dir()`). For Codex
-    /// we honour `$CODEX_HOME` if set, matching the upstream
-    /// convention.
-    pub fn resolved_install_path(self, home: &Path, codex_home: Option<&Path>) -> PathBuf {
+    /// `$HOME` (callers usually pass `dirs::home_dir()`).
+    pub fn resolved_install_path(self, home: &Path, _codex_home: Option<&Path>) -> PathBuf {
         match self {
             Target::ClaudeCode => home
                 .join(".claude")
@@ -92,9 +89,8 @@ impl Target {
                 .join("skills")
                 .join("flowmux-browser")
                 .join("SKILL.md"),
-            Target::Codex => codex_home
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| home.join(".codex"))
+            Target::Codex => home
+                .join(".agents")
                 .join("skills")
                 .join("flowmux-browser")
                 .join("SKILL.md"),
@@ -193,18 +189,19 @@ pub fn resolved_codex_home() -> Option<PathBuf> {
     std::env::var_os("CODEX_HOME").map(PathBuf::from)
 }
 
-/// Existing shared skill copies that Codex may discover in addition to the
-/// flowmux-managed `$CODEX_HOME/skills` copy. These are user-owned, so doctor
+/// Existing legacy skill copies that Codex may discover in addition to the
+/// flowmux-managed `~/.agents/skills` copy. These are user-owned, so doctor
 /// reports them but install/fix never overwrites or removes them.
 pub fn codex_unmanaged_skill_paths(home: &Path, codex_home: Option<&Path>) -> Vec<PathBuf> {
     let managed = Target::Codex.resolved_install_path(home, codex_home);
-    let shared = home
-        .join(".agents")
+    let legacy = codex_home
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| home.join(".codex"))
         .join("skills")
         .join("flowmux-browser")
         .join("SKILL.md");
-    if shared != managed && shared.exists() {
-        vec![shared]
+    if legacy != managed && legacy.exists() {
+        vec![legacy]
     } else {
         Vec::new()
     }
@@ -342,18 +339,19 @@ mod tests {
 
         assert!(claude.ends_with(".claude/skills/flowmux-browser/SKILL.md"));
         assert!(opencode.ends_with(".config/opencode/skills/flowmux-browser/SKILL.md"));
-        assert!(codex.ends_with(".codex/skills/flowmux-browser/SKILL.md"));
+        assert!(codex.ends_with(".agents/skills/flowmux-browser/SKILL.md"));
         assert!(cline.ends_with(".cline/skills/flowmux-browser/SKILL.md"));
     }
 
     #[test]
-    fn codex_home_env_overrides_default_dir() {
+    fn codex_home_does_not_override_shared_skill_dir() {
         let home = fake_home();
         let codex_home = home.path().join("custom-codex");
         let path = Target::Codex.resolved_install_path(home.path(), Some(&codex_home));
         assert_eq!(
             path,
-            codex_home
+            home.path()
+                .join(".agents")
                 .join("skills")
                 .join("flowmux-browser")
                 .join("SKILL.md"),
@@ -361,24 +359,23 @@ mod tests {
     }
 
     #[test]
-    fn codex_unmanaged_skill_paths_reports_shared_copy() {
+    fn codex_unmanaged_skill_paths_reports_legacy_copy() {
         let home = fake_home();
-        let shared = home.path().join(".agents/skills/flowmux-browser/SKILL.md");
-        fs::create_dir_all(shared.parent().unwrap()).unwrap();
-        fs::write(&shared, SKILL_BODY).unwrap();
+        let legacy = home.path().join(".codex/skills/flowmux-browser/SKILL.md");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, SKILL_BODY).unwrap();
 
-        assert_eq!(codex_unmanaged_skill_paths(home.path(), None), vec![shared]);
+        assert_eq!(codex_unmanaged_skill_paths(home.path(), None), vec![legacy]);
     }
 
     #[test]
-    fn codex_unmanaged_skill_paths_ignores_managed_shared_root() {
+    fn codex_unmanaged_skill_paths_ignores_absent_legacy_copy() {
         let home = fake_home();
-        let codex_home = home.path().join(".agents");
-        let managed = Target::Codex.resolved_install_path(home.path(), Some(&codex_home));
+        let managed = Target::Codex.resolved_install_path(home.path(), None);
         fs::create_dir_all(managed.parent().unwrap()).unwrap();
         fs::write(&managed, SKILL_BODY).unwrap();
 
-        assert!(codex_unmanaged_skill_paths(home.path(), Some(&codex_home)).is_empty());
+        assert!(codex_unmanaged_skill_paths(home.path(), None).is_empty());
     }
 
     #[test]

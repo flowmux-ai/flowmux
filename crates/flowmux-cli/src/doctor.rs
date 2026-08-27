@@ -297,7 +297,7 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
         };
         entries.push(skill_entry);
         // Legacy Codex sibling file (`$CODEX_HOME/flowmux-browser.md`)
-        // from before we moved to `$CODEX_HOME/skills/...`. The file is
+        // from before Codex standardized on `~/.agents/skills/...`. The file is
         // harmless but no longer referenced; if any survived an upgrade,
         // surface a row so the user knows `flowmux fix` will clean it.
         if matches!(target, agent::Target::Codex) {
@@ -1353,7 +1353,7 @@ mod tests {
     #[test]
     fn doctor_warns_about_unmanaged_codex_skill_copy() {
         let home = fake_home();
-        let duplicate = home.path().join(".agents/skills/flowmux-browser/SKILL.md");
+        let duplicate = home.path().join(".codex/skills/flowmux-browser/SKILL.md");
         fs::create_dir_all(duplicate.parent().unwrap()).unwrap();
         fs::write(&duplicate, agent::SKILL_BODY).unwrap();
 
