@@ -99,23 +99,33 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
                 .or_else(resolve_self_bin)
                 .unwrap_or_else(|| "flowmux".to_string());
             let targets = parse_hook_targets(agent)?;
+            let mut errors = Vec::new();
             for t in targets {
                 match hook_install::install(t, &bin) {
                     Ok(report) => print_hook_report(&report),
-                    Err(e) => println!("{:8}  error: {e:#}", t.slug()),
+                    Err(e) => errors.push(format!("{:8}  error: {e:#}", t.slug())),
                 }
             }
-            Ok(())
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(errors.join("\n")))
+            }
         }
         HooksOp::Uninstall { agent } => {
             let targets = parse_hook_targets(agent)?;
+            let mut errors = Vec::new();
             for t in targets {
                 match hook_install::uninstall(t) {
                     Ok(report) => print_hook_report(&report),
-                    Err(e) => println!("{:8}  error: {e:#}", t.slug()),
+                    Err(e) => errors.push(format!("{:8}  error: {e:#}", t.slug())),
                 }
             }
-            Ok(())
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(errors.join("\n")))
+            }
         }
         HooksOp::Doctor => {
             run_hooks_doctor(socket.clone()).await;
