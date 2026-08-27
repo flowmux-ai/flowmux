@@ -63,10 +63,11 @@ PANE=$("$FLOWMUX_CLI" --json browser open https://example.com \
 
 ## Identifiers
 
-`pane:<uuid>`, `surface:<uuid>`, and bare uuids are interchangeable on
-the CLI. Use whichever the previous `--json` response gave you.
+Browser commands take the pane id returned by `browser open`. Pass it as
+`pane:<uuid>` or as the same bare pane UUID. A surface UUID identifies a tab
+inside a pane and is only valid for tab-level commands such as `focus-tab`.
 
-`--json` toggles single-line JSON output for easy parsing
+Browser `--json` responses are single-line for easy parsing
 (`jq -r .browser_pane_opened.pane`); without it, browser reads and probes
 print their raw string, boolean, or integer value.
 

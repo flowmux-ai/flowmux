@@ -218,11 +218,11 @@ Notes:
   DOM. flowmux's snapshot intentionally keeps the page untouched —
   ref tokens are resolved server-side.
 - Do not assume ref tokens survive across snapshots or page
-  navigation. After a navigate / reload / `--snapshot-after` action
+  navigation. After a navigate / reload action
   call, take a fresh snapshot before the next ref-based action.
 
 ## Reference
 
-- Skill: `.claude/skills/flowmux-browser/SKILL.md` (this same workflow,
+- Skill: `.agents/skills/flowmux-browser/SKILL.md` (this same workflow,
   Claude Code's local format).
 - Project rules: [`CLAUDE.md`](CLAUDE.md).

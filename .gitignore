@@ -29,3 +29,8 @@ Thumbs.db
 /scripts/sync-upstream.sh
 /docs/upstream-mapping/
 .tokensave
+
+# Local agent state
+/.claude/.headroom_wrap_marker.json
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock

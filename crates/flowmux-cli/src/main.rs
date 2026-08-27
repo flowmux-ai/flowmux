@@ -87,9 +87,7 @@ struct Cli {
     #[arg(long, env = "FLOWMUX_SOCKET_PATH")]
     socket: Option<PathBuf>,
 
-    /// Print responses as a single-line JSON object instead of the
-    /// default human-readable indented form. Mirrors cmux's `--json`
-    /// flag — easier to parse from agent scripts.
+    /// Print structured JSON instead of the default human-readable form.
     #[arg(long, global = true)]
     json: bool,
 
@@ -441,8 +439,7 @@ enum Cmd {
 
 /// `flowmux browser <op>` — the documented agent-facing browser surface.
 ///
-/// Every pane argument accepts `pane:<uuid>`, `surface:<uuid>`, or a bare
-/// `<uuid>` (handled by `PaneId`'s `FromStr`). Refs (`eN`) come from the
+/// Every pane argument accepts `pane:<uuid>` or a bare pane UUID. Refs (`eN`) come from the
 /// most recent `browser snapshot` of the same pane and are resolved
 /// server-side via the daemon's `RefStore`.
 #[derive(Subcommand)]

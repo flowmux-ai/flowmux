@@ -21,8 +21,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// SKILL body embedded into the binary at compile time. Lives at
-/// `<repo>/.claude/skills/flowmux-browser/SKILL.md`.
-pub const SKILL_BODY: &str = include_str!("../../../.claude/skills/flowmux-browser/SKILL.md");
+/// `<repo>/.agents/skills/flowmux-browser/SKILL.md`.
+pub const SKILL_BODY: &str = include_str!("../../../.agents/skills/flowmux-browser/SKILL.md");
 
 /// One agent we know how to wire up. The `Target` enum stays small —
 /// adding a new agent means adding a variant + its
