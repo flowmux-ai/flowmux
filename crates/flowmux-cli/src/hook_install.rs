@@ -913,11 +913,7 @@ fn uninstall_codex() -> Result<HookInstallReport> {
         let mut doc: DocumentMut = original.parse()?;
         let was_flowmux = doc
             .get("notify")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .any(|v| v.as_str().map(|s| s.contains("flowmux")).unwrap_or(false))
-            })
+            .map(codex_notify_is_flowmux_owned)
             .unwrap_or(false);
         if was_flowmux {
             doc.as_table_mut().remove("notify");
@@ -967,6 +963,17 @@ fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<()> {
         .parse()
         .with_context(|| format!("parse {}", config_path.display()))?;
 
+    if doc
+        .get("notify")
+        .map(|notify| !codex_notify_is_flowmux_owned(notify))
+        .unwrap_or(false)
+    {
+        return Err(anyhow!(
+            "{} already defines a non-flowmux notify command; leaving it unchanged",
+            config_path.display()
+        ));
+    }
+
     // notify = ["<flowmux-bin>", "hooks", "codex", "stop"]
     // Outside Flatpak the prefix is just [flowmux_bin]; inside Flatpak
     // it becomes ["flatpak", "run", "--command=flowmuxctl",
@@ -1002,6 +1009,17 @@ fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<()> {
         write_atomic(config_path, new_text.as_bytes())?;
     }
     Ok(())
+}
+
+fn codex_notify_is_flowmux_owned(item: &toml_edit::Item) -> bool {
+    let Some(array) = item.as_array() else {
+        return false;
+    };
+    let len = array.len();
+    len >= 3
+        && array.get(len - 3).and_then(|value| value.as_str()) == Some("hooks")
+        && array.get(len - 2).and_then(|value| value.as_str()) == Some("codex")
+        && array.get(len - 1).and_then(|value| value.as_str()) == Some("stop")
 }
 
 // ---- Cline ----------------------------------------------------------
@@ -2117,6 +2135,34 @@ hooks = true
         set_codex_notify(&path, "flowmux").unwrap();
         let after_second = fs::read_to_string(&path).unwrap();
         assert_eq!(after_first, after_second);
+    }
+
+    #[test]
+    fn codex_set_notify_preserves_existing_notifier() {
+        let dir = tmp();
+        let path = dir.path().join("config.toml");
+        let original = r#"model = "gpt-x"
+notify = ["/usr/local/bin/user-notifier", "--keep"]
+"#;
+        fs::write(&path, original).unwrap();
+
+        let error = set_codex_notify(&path, "flowmux").unwrap_err();
+
+        assert!(error.to_string().contains("non-flowmux notify"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn codex_notify_ownership_requires_hook_suffix() {
+        use toml_edit::DocumentMut;
+
+        let custom: DocumentMut =
+            r#"notify = ["/usr/local/bin/flowmux-notifier"]"#.parse().unwrap();
+        let owned: DocumentMut =
+            r#"notify = ["flowmux", "hooks", "codex", "stop"]"#.parse().unwrap();
+
+        assert!(!codex_notify_is_flowmux_owned(&custom["notify"]));
+        assert!(codex_notify_is_flowmux_owned(&owned["notify"]));
     }
 
     #[test]
