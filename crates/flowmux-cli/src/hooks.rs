@@ -20,7 +20,7 @@ use flowmux_ipc::{
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::io::{IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -426,7 +426,7 @@ async fn connect_daemon_with_timeout(socket: Option<PathBuf>, timeout: Duration)
     None
 }
 
-async fn try_connect(socket: &PathBuf, timeout: Duration) -> Option<Client> {
+async fn try_connect(socket: &Path, timeout: Duration) -> Option<Client> {
     match tokio::time::timeout(timeout, Client::connect(socket)).await {
         Ok(Ok(c)) => Some(c),
         Ok(Err(e)) => {
