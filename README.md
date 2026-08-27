@@ -122,7 +122,8 @@ token and activity totals without interrupting running sessions.
   `workspace current|focus`, `focus-pane|close-pane`, `focus-tab|close-tab`,
   `send-keys`, and `read-screen` (terminal buffer dump). Pane args accept
   `pane:<uuid>` or fall back to
-  `$FLOWMUX_PANE_ID`; `--json` everywhere. Full contract in
+  `$FLOWMUX_PANE_ID`; supported commands accept `--json` for machine-readable
+  output. Full contract in
   [`AGENTS.md`](AGENTS.md).
 - **Customizable keybindings** — Options → **Keybindings** rebinds any shortcut
   (applies on OK, no restart), saved to
