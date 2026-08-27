@@ -374,57 +374,24 @@ pub async fn send_best_effort(client: &Client, req: Request) {
 }
 
 async fn send_best_effort_with_timeout(client: &Client, req: Request, timeout: Duration) {
-    let summary = hook_request_summary(&req);
-    flowmux_config::notify_debug!("cli/hook", "sending {summary}");
     match tokio::time::timeout(timeout, client.call(req)).await {
         Ok(Ok(Response::Error(e))) => {
             tracing::debug!(?e, "hook notify rejected by daemon");
-            flowmux_config::notify_debug!("cli/hook", "daemon rejected: {e:?}");
         }
-        Ok(Ok(resp)) => {
-            flowmux_config::notify_debug!("cli/hook", "daemon replied: {resp:?}");
-        }
+        Ok(Ok(_)) => {}
         Ok(Err(e)) => {
             tracing::debug!(error = %e, "hook notify failed");
-            flowmux_config::notify_debug!("cli/hook", "rpc transport error: {e}");
         }
         Err(_) => {
             tracing::debug!(?timeout, "hook notify timed out");
-            flowmux_config::notify_debug!("cli/hook", "rpc timed out after {timeout:?}");
         }
-    }
-}
-
-fn hook_request_summary(req: &Request) -> String {
-    match req {
-        Request::Notify {
-            pane,
-            surface,
-            title,
-            level,
-            ..
-        } => {
-            format!("Notify(title={title:?}, pane={pane:?}, surface={surface:?}, level={level:?})")
-        }
-        Request::AgentActivityUpdate {
-            pane,
-            surface,
-            agent,
-            status,
-            activity,
-            pid,
-            ..
-        } => format!(
-            "AgentActivityUpdate(agent={agent:?}, status={status:?}, activity={activity:?}, pid={pid:?}, pane={pane:?}, surface={surface:?})"
-        ),
-        other => format!("{other:?}"),
     }
 }
 
 /// Connect to the daemon socket using the same fallback chain as
-/// `Cli::socket`. Returns `None` (with a debug log) when the daemon is
-/// unreachable so a hook on a host without flowmux running is a
-/// silent no-op rather than a visible error.
+/// `Cli::socket`. Returns `None` when the daemon is unreachable so a
+/// hook on a host without flowmux running is a silent no-op rather
+/// than a visible error.
 pub async fn connect_daemon(socket: Option<PathBuf>) -> Option<Client> {
     connect_daemon_with_timeout(socket, HOOK_CONNECT_TIMEOUT).await
 }
@@ -433,17 +400,7 @@ async fn connect_daemon_with_timeout(socket: Option<PathBuf>, timeout: Duration)
     let env_socket = socket
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from))
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from));
-    let env_source = env_socket
-        .as_ref()
-        .map(|_| "FLOWMUX_SOCKET_PATH/env")
-        .unwrap_or("runtime_socket fallback");
     let primary = env_socket.unwrap_or_else(flowmux_config::paths::runtime_socket);
-    flowmux_config::notify_debug!(
-        "cli/hook",
-        "connect_daemon: primary={primary:?} source={env_source} flatpak={} HOME={:?}",
-        flowmux_config::paths::is_flatpak_sandbox(),
-        std::env::var_os("HOME")
-    );
 
     if let Some(client) = try_connect(&primary, timeout).await {
         return Some(client);
@@ -457,20 +414,11 @@ async fn connect_daemon_with_timeout(socket: Option<PathBuf>, timeout: Duration)
     // the same dir is still safe to scan (it is created on demand);
     // it is just empty by default so the fallback is a no-op.
     if let Some(candidates) = scan_pid_sockets() {
-        flowmux_config::notify_debug!(
-            "cli/hook",
-            "primary unreachable; scanning {} per-PID candidates",
-            candidates.len()
-        );
         for path in candidates {
             if path == primary {
                 continue;
             }
             if let Some(client) = try_connect(&path, timeout).await {
-                flowmux_config::notify_debug!(
-                    "cli/hook",
-                    "fallback connected via per-PID socket {path:?}"
-                );
                 return Some(client);
             }
         }
@@ -479,23 +427,16 @@ async fn connect_daemon_with_timeout(socket: Option<PathBuf>, timeout: Duration)
 }
 
 async fn try_connect(socket: &PathBuf, timeout: Duration) -> Option<Client> {
-    let exists = socket.exists();
-    flowmux_config::notify_debug!("cli/hook", "try_connect path={socket:?} exists={exists}");
     match tokio::time::timeout(timeout, Client::connect(socket)).await {
-        Ok(Ok(c)) => {
-            flowmux_config::notify_debug!("cli/hook", "connected to {socket:?}");
-            Some(c)
-        }
+        Ok(Ok(c)) => Some(c),
         Ok(Err(e)) => {
             let e = e.context(format!("connect daemon at {}", socket.display()));
             tracing::debug!(error = %e, "hook: daemon not reachable, skipping notify");
-            flowmux_config::notify_debug!("cli/hook", "connect error {socket:?}: {e}");
             None
         }
         Err(e) => {
             let e = anyhow::anyhow!("timed out after {:?}", e);
             tracing::debug!(error = %e, "hook: daemon not reachable, skipping notify");
-            flowmux_config::notify_debug!("cli/hook", "connect timeout {socket:?}: {e}");
             None
         }
     }
@@ -550,23 +491,6 @@ mod tests {
         assert!(text.starts_with("Completed: done "));
         assert!(!text.contains('\n'));
         assert_eq!(text.chars().count(), "Completed: ".chars().count() + 161);
-    }
-
-    #[test]
-    fn hook_debug_summary_redacts_agent_content() {
-        let request = build_activity_update_with_metadata(
-            "Claude",
-            Some(AgentActivity::Idle),
-            Some(42),
-            None,
-            None,
-            Some("private answer"),
-            Some("Completed: private answer"),
-            Some("private-session"),
-        );
-        let summary = hook_request_summary(&request);
-        assert!(summary.contains("AgentActivityUpdate"));
-        assert!(!summary.contains("private"));
     }
 
     #[test]

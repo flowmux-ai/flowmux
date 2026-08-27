@@ -89,27 +89,12 @@ impl DaemonHandler {
                 match notifier.send(&n).await {
                     Ok(id) => {
                         desktop_id = Some(id.clone());
-                        flowmux_config::notify_debug!(
-                            "daemon/notify",
-                            "desktop toast sent ok desktop_id={id}"
-                        );
                     }
                     Err(e) => {
                         warn!(error = %e, "desktop notification failed");
-                        flowmux_config::notify_debug!("daemon/notify", "desktop toast FAILED: {e}");
                     }
                 }
-            } else {
-                flowmux_config::notify_debug!(
-                    "daemon/notify",
-                    "notifier guard present but inner None — D-Bus init never succeeded"
-                );
             }
-        } else {
-            flowmux_config::notify_debug!(
-                "daemon/notify",
-                "ensure_notifier() returned None — no D-Bus session?"
-            );
         }
         Response::Notified { desktop_id }
     }
@@ -157,10 +142,6 @@ impl Handler for DaemonHandler {
                     body,
                     level,
                 } => {
-                    flowmux_config::notify_debug!(
-                        "daemon/notify",
-                        "Notify reached daemon handler pane={pane:?} title={title:?} level={level:?}"
-                    );
                     self.send_notification(NotificationId::new(), pane, title, body, level)
                         .await
                 }

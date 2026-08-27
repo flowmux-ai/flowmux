@@ -956,10 +956,6 @@ impl GuiHandler {
                     ?level,
                     "Notify request received — routing to GTK"
                 );
-                flowmux_config::notify_debug!(
-                        "gui/ipc",
-                        "Notify received pane_in={pane:?} surface_in={surface:?} resolved_pane={resolved_pane:?} resolved_surface={resolved_surface:?} fallback_used={fallback_used} workspace={workspace:?} title={title:?} level={level:?}"
-                    );
                 let pane = resolved_pane;
                 let surface = resolved_surface;
                 // Ask the GTK side to record the entry. The ack

@@ -187,7 +187,6 @@ impl WindowController {
                 }
             }
             GtkCommand::CopyFocusedPaneText { workspace } => {
-                flowmux_config::notify_debug!("gui/dispatch", "CopyFocusedPaneText ws={workspace}");
                 let ws = self.store.get_workspace(workspace).await;
                 let Some(ws) = ws else {
                     tracing::info!(%workspace, "copy-focused-pane-text: workspace not found");
@@ -221,10 +220,6 @@ impl WindowController {
                     .show_with_message(&format!("Copied {}: {}", text.kind, text.value));
             }
             GtkCommand::ShowFocusedPaneFolder { workspace } => {
-                flowmux_config::notify_debug!(
-                    "gui/dispatch",
-                    "ShowFocusedPaneFolder ws={workspace}"
-                );
                 // Resolution order:
                 //   1. Globally focused pane, if it belongs to this workspace —
                 //      its active terminal's cwd.

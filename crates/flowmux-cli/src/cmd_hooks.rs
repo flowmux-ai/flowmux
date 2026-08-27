@@ -135,8 +135,8 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
 }
 /// Full diagnostic dump that one command captures: sandbox state,
 /// resolved socket + connect outcome, per-agent install status, hook
-/// plugin checksums, and the opt-in tail of `notify-debug.log`. The single
-/// goal is "run this once on the failing host and paste the output."
+/// plugin checksums. The single goal is "run this once on the failing host
+/// and paste the output."
 pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
     use hook_install::HookTarget;
 
@@ -202,7 +202,7 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
             Ok(resp) => println!("  -> ok ({resp:?})"),
             Err(e) => println!("  -> connected but rpc failed: {e}"),
         },
-        None => println!("  -> UNREACHABLE (see notify-debug.log tail)"),
+        None => println!("  -> UNREACHABLE"),
     }
 
     // 3. Per-agent install state
@@ -226,29 +226,6 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
             };
             println!("           {p:?} ({info})");
         }
-    }
-
-    // 4. Tail the unified debug log
-    println!();
-    println!("--- notify-debug.log (last 60 lines) ---");
-    if !flowmux_config::debug_log::enabled() {
-        println!("  (disabled; set FLOWMUX_NOTIFY_DEBUG=1 for a temporary trace)");
-        return;
-    }
-    if let Some(log_path) = flowmux_config::debug_log::log_path() {
-        println!("path: {log_path:?}");
-        match std::fs::read_to_string(&log_path) {
-            Ok(body) => {
-                let lines: Vec<&str> = body.lines().collect();
-                let start = lines.len().saturating_sub(60);
-                for line in &lines[start..] {
-                    println!("  {line}");
-                }
-            }
-            Err(e) => println!("  (could not read: {e})"),
-        }
-    } else {
-        println!("  (no HOME — debug log disabled)");
     }
 }
 pub(crate) fn parse_hook_targets(
@@ -477,16 +454,6 @@ pub(crate) async fn run_generic_agent_hook_event(
     };
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
-    let event_name = match event {
-        AgentHookEvent::Stop { .. } => "stop",
-        AgentHookEvent::Notification { .. } => "notification",
-        AgentHookEvent::Running { .. } => "running",
-        AgentHookEvent::SessionStart { .. } => "session-start",
-    };
-    flowmux_config::notify_debug!(
-        "cli/hook",
-        "entry reported_agent={reported_agent:?} resolved_agent={agent:?} event={event_name} cli_pane={cli_pane:?} cli_surface={cli_surface:?} env_pane={env_pane:?} env_surface={env_surface:?} resolved_pane={pane:?} resolved_surface={surface:?} socket_arg={socket:?}"
-    );
     let mut reqs: Vec<_> = Vec::new();
     match event {
         AgentHookEvent::Stop { args, .. } => {
@@ -564,14 +531,9 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
     };
-    match hooks::connect_daemon(socket).await {
-        Some(client) => {
-            for req in reqs {
-                hooks::send_best_effort(&client, req).await;
-            }
-        }
-        None => {
-            flowmux_config::notify_debug!("cli/hook", "daemon not reachable — request dropped");
+    if let Some(client) = hooks::connect_daemon(socket).await {
+        for req in reqs {
+            hooks::send_best_effort(&client, req).await;
         }
     }
     Ok(())

@@ -1733,14 +1733,12 @@ fn row_widget(
         // Claim the sequence up front so the row's primary-click gesture
         // and the ListBox don't also act on this press.
         gesture.set_state(gtk::EventSequenceState::Claimed);
-        flowmux_config::notify_debug!("sidebar/ctxmenu", "menu opened ws={id}");
         use crate::ui::overlay_menu::MenuItem;
 
         let bridge_for_rename = bridge.clone();
         let rename = MenuItem::Action {
             label: "Change tab name",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click rename ws={id}");
                 let bridge = bridge_for_rename.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
                     let _ = bridge.tx.send(GtkCommand::ShowRenameDialog { id }).await;
@@ -1752,7 +1750,6 @@ fn row_widget(
         let color = MenuItem::Action {
             label: "Change color…",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click color ws={id}");
                 let bridge = bridge_for_color.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
                     let _ = bridge.tx.send(GtkCommand::ShowColorDialog { id }).await;
@@ -1764,7 +1761,6 @@ fn row_widget(
         let close = MenuItem::Action {
             label: "Close tab",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click close-tab ws={id}");
                 on_close_clone(id);
             }),
         };
@@ -1775,7 +1771,6 @@ fn row_widget(
         let close_all = MenuItem::Action {
             label: "Close all tabs",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click close-all ws={id}");
                 let bridge = bridge_for_close_all.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
                     let (ack, rx) = tokio::sync::oneshot::channel();
@@ -1796,7 +1791,6 @@ fn row_widget(
         let show_folder = MenuItem::Action {
             label: "Show in folder",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click show-folder ws={id}");
                 let bridge = bridge_for_show.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
                     let _ = bridge
@@ -1815,7 +1809,6 @@ fn row_widget(
         let copy_path = MenuItem::Action {
             label: "Copy path",
             activate: Box::new(move || {
-                flowmux_config::notify_debug!("sidebar/ctxmenu", "click copy-path ws={id}");
                 let bridge = bridge_for_copy.clone();
                 gtk::glib::MainContext::default().spawn_local(async move {
                     let _ = bridge

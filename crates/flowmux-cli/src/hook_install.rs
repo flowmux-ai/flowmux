@@ -1473,7 +1473,6 @@ fn opencode_plugin_is_current(source: &str) -> bool {
         && source.contains("permission.asked")
         && source.contains("permission.replied")
         && !source.contains("permission.updated")
-        && !source.contains("notify-debug.log")
 }
 
 fn opencode_plugin_is_owned(source: &str) -> bool {
@@ -2178,8 +2177,6 @@ hooks = true
         assert!(src.contains("FLOWMUX_SURFACE_ID"));
         assert!(src.contains("\"--pane\""));
         assert!(src.contains("\"--surface\""));
-        assert!(!src.contains("notify-debug.log"));
-        assert!(!src.contains("appendFileSync"));
         // The legacy `--env=` forwarding is removed; the argv path is
         // the single source of truth across the flatpak boundary.
         assert!(!src.contains("--env="));

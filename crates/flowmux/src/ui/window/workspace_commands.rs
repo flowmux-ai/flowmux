@@ -36,7 +36,6 @@ impl WindowController {
                 }
             }
             GtkCommand::RemoveWorkspace { id, confirm, ack } => {
-                flowmux_config::notify_debug!("gui/dispatch", "RemoveWorkspace id={id}");
                 if confirm && !self.confirm_close_workspace(id).await {
                     let _ = ack.send(());
                     return;
@@ -53,7 +52,6 @@ impl WindowController {
                 let _ = ack.send(());
             }
             GtkCommand::RemoveAllWorkspaces { ack } => {
-                flowmux_config::notify_debug!("gui/dispatch", "RemoveAllWorkspaces");
                 if !self.confirm_close_all_workspaces().await {
                     let _ = ack.send(());
                     return;
@@ -105,7 +103,6 @@ impl WindowController {
                 }
             }
             GtkCommand::ShowRenameDialog { id } => {
-                flowmux_config::notify_debug!("gui/dispatch", "ShowRenameDialog id={id}");
                 if let Some(ws) = self.store.get_workspace(id).await {
                     // Match cmux prefill behavior: start from custom_title when
                     // present so the user can edit it, otherwise show the current
@@ -115,7 +112,6 @@ impl WindowController {
                 }
             }
             GtkCommand::ShowColorDialog { id } => {
-                flowmux_config::notify_debug!("gui/dispatch", "ShowColorDialog id={id}");
                 let current = self.store.get_workspace(id).await.and_then(|w| w.color);
                 show_color_dialog(&self.window, id, current.as_deref(), self.bridge.clone());
             }

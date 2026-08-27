@@ -69,15 +69,7 @@ impl WindowController {
                     suppress,
                     "AddNotification: suppress decision"
                 );
-                flowmux_config::notify_debug!(
-                    "gui/add",
-                    "AddNotification pane={pane:?} surface={surface:?} workspace={workspace:?} level={level:?} focused={focused:?} window_active={window_active} pierces_focus={pierces_focus} suppress={suppress}"
-                );
                 if suppress {
-                    flowmux_config::notify_debug!(
-                        "gui/add",
-                        "SUPPRESSED — sending ack=None (skips both in-app push and desktop toast)"
-                    );
                     let _ = ack.send(None);
                     return;
                 }
@@ -95,10 +87,6 @@ impl WindowController {
                         ?surface,
                         ?level,
                         "AddNotification: deduplicated against recent entry — skipping both in-app and desktop"
-                    );
-                    flowmux_config::notify_debug!(
-                        "gui/add",
-                        "DEDUP HIT — pane={pane:?} surface={surface:?} same source within DUP_WINDOW, ack=None"
                     );
                     let _ = ack.send(None);
                     return;
@@ -129,11 +117,6 @@ impl WindowController {
                     workspace_known = workspace.is_some(),
                     "AddNotification: in-app entry stored, badges updated"
                 );
-                flowmux_config::notify_debug!(
-                    "gui/add",
-                    "PUSHED entry_id={entry_id:?} marked_attention={marked_attention} workspace_known={} — ack=Some, daemon will now fire desktop toast",
-                    workspace.is_some()
-                );
                 self.refresh_launcher_badge();
                 // System-notification toggle: when disabled, the in-app bell
                 // entry above stays (and badges update), but ack=None tells the
@@ -142,10 +125,6 @@ impl WindowController {
                 let system_notifications_enabled =
                     self.options.borrow().system_notifications_enabled;
                 if !system_notifications_enabled {
-                    flowmux_config::notify_debug!(
-                        "gui/add",
-                        "system notifications disabled — kept in-app entry={entry_id:?}, ack=None (no desktop toast)"
-                    );
                     let _ = ack.send(None);
                     return;
                 }
