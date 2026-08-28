@@ -2452,7 +2452,7 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
 }
 
 #[test]
-fn idle_screen_prompt_settles_hook_working_status() {
+fn idle_screen_prompt_does_not_settle_claude_hook_working_status() {
     let mut surface = PaneSurface::terminal("agent", None);
     let surface_id = surface.id;
     let mut presence = AgentPresence::new("claude", AgentActivity::Running, Some(42));
@@ -2475,10 +2475,10 @@ fn idle_screen_prompt_settles_hook_working_status() {
             None,
             true,
         ),
-        Some(true)
+        Some(false)
     );
     let agent = pane.agent_presence_for_surface(surface_id).unwrap();
-    assert_eq!(agent.status, AgentStatus::Idle);
+    assert_eq!(agent.status, AgentStatus::Working);
     assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
 }
 

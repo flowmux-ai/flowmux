@@ -796,7 +796,6 @@ impl Pane {
                     .is_some_and(|name| existing_agent.is_some_and(|agent| agent.name != name));
                 if source == "flowmux:screen"
                     && !incoming_is_different_agent
-                    && status != AgentStatus::Idle
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.name == "claude"
                             && agent.source.as_deref() == Some("flowmux:hook")
