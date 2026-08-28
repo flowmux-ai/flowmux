@@ -80,6 +80,9 @@ impl WindowController {
             GtkCommand::ShowCommandPalette => {
                 self.show_command_palette().await;
             }
+            GtkCommand::ToggleWorkspaceOverview => {
+                self.toggle_workspace_overview();
+            }
 
             GtkCommand::FileBrowserFocusOut { dir } => {
                 self.focus_out_of_file_browser(dir);

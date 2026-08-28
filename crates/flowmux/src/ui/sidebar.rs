@@ -351,6 +351,23 @@ impl Sidebar {
         footer.append(usage.button());
         let usage_button = usage.button().clone();
 
+        let workspace_overview_btn = gtk::Button::from_icon_name("view-grid-symbolic");
+        workspace_overview_btn.add_css_class("flat");
+        workspace_overview_btn.add_css_class("flowmux-sidebar-options");
+        workspace_overview_btn.set_tooltip_text(Some("Workspace overview (Ctrl+Alt+K)"));
+        workspace_overview_btn
+            .update_property(&[gtk::accessible::Property::Label("Workspace overview")]);
+        workspace_overview_btn.set_focus_on_click(false);
+        workspace_overview_btn.set_widget_name("flowmux-workspace-overview-button");
+        let bridge_for_overview = bridge.clone();
+        workspace_overview_btn.connect_clicked(move |_| {
+            let bridge = bridge_for_overview.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::ToggleWorkspaceOverview).await;
+            });
+        });
+        footer.append(&workspace_overview_btn);
+
         let worktree_btn = gtk::Button::from_icon_name("vcs-branch-symbolic");
         worktree_btn.add_css_class("flat");
         worktree_btn.set_tooltip_text(Some("Worktrees (Ctrl+Alt+W)"));
@@ -3020,11 +3037,11 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn footer_orders_agents_bar_before_usage_worktrees_and_file_browser_buttons() {
+    async fn footer_orders_agents_bar_before_usage_overview_worktrees_and_file_browser_buttons() {
         if gtk::init().is_err() {
             return;
         }
-        let bridge = crate::bridge::Bridge::new().0;
+        let (bridge, rx) = crate::bridge::Bridge::new();
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
@@ -3064,6 +3081,26 @@ mod tests {
             sidebar.usage_button().tooltip_text().as_deref(),
             Some("AI usage (Ctrl+Alt+U)")
         );
+        let overview = names
+            .iter()
+            .position(|name| name == "flowmux-workspace-overview-button")
+            .expect("workspace overview button must exist");
+        assert_eq!(usage + 1, overview);
+        let overview_button =
+            std::iter::successors(footer.first_child(), |widget| widget.next_sibling())
+                .find(|widget| widget.widget_name() == "flowmux-workspace-overview-button")
+                .unwrap()
+                .downcast::<gtk::Button>()
+                .unwrap();
+        assert_eq!(
+            overview_button.tooltip_text().as_deref(),
+            Some("Workspace overview (Ctrl+Alt+K)")
+        );
+        overview_button.emit_clicked();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::ToggleWorkspaceOverview
+        ));
         let worktrees = names
             .iter()
             .position(|name| name == "flowmux-worktree-button")
@@ -3072,7 +3109,7 @@ mod tests {
             .iter()
             .position(|name| name == "flowmux-file-browser-button")
             .expect("file browser button must exist");
-        assert_eq!(usage + 1, worktrees);
+        assert_eq!(overview + 1, worktrees);
         assert_eq!(worktrees + 1, folder);
     }
 

@@ -283,6 +283,7 @@ pub fn install_actions(
             }
         }),
     );
+    let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
     let new_surface = make_pane_action(
         "new-surface",
         focused.clone(),
@@ -454,6 +455,7 @@ pub fn install_actions(
         command_palette,
         terminal_search,
         toggle_pane_zoom,
+        toggle_workspace_overview,
         next_workspace,
         prev_workspace,
         w1,
@@ -471,6 +473,19 @@ pub fn install_actions(
         toggle_file_browser,
         toggle_usage_popover,
     ]);
+}
+
+fn make_toggle_workspace_overview_action(
+    bridge: Bridge,
+) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
+    gtk::gio::ActionEntry::builder("toggle-workspace-overview")
+        .activate(move |_, _, _| {
+            let bridge = bridge.clone();
+            glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::ToggleWorkspaceOverview).await;
+            });
+        })
+        .build()
 }
 
 #[cfg(target_os = "linux")]
@@ -1231,6 +1246,47 @@ mod tests {
     fn ctrl_alt_m_toggles_focused_pane_zoom() {
         assert_eq!(default_for(ActionId::TogglePaneZoom), vec!["<Ctrl><Alt>m"]);
         assert!(ActionId::TogglePaneZoom.is_user_editable());
+    }
+
+    #[test]
+    fn ctrl_alt_k_toggles_workspace_overview() {
+        assert_eq!(
+            default_for(ActionId::ToggleWorkspaceOverview),
+            vec!["<Ctrl><Alt>k"]
+        );
+        assert!(ActionId::ToggleWorkspaceOverview.is_user_editable());
+        assert_eq!(
+            ActionId::from_wire("toggle-workspace-overview"),
+            Some(ActionId::ToggleWorkspaceOverview)
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn workspace_overview_action_is_registered_and_dispatches_toggle_command() {
+        use gtk::gio::prelude::ActionGroupExt;
+
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.WorkspaceOverviewAction")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let window = adw::ApplicationWindow::builder()
+            .application(&app)
+            .default_width(320)
+            .default_height(240)
+            .build();
+        let (bridge, rx) = Bridge::new();
+        window.add_action_entries([make_toggle_workspace_overview_action(bridge)]);
+
+        assert!(window.has_action("toggle-workspace-overview"));
+        gtk::prelude::WidgetExt::activate_action(&window, "win.toggle-workspace-overview", None)
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::ToggleWorkspaceOverview
+        ));
     }
 
     #[test]

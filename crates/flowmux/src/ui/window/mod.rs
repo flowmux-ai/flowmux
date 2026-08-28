@@ -65,6 +65,55 @@ fn should_suppress_notification(
         )
 }
 
+fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
+    matches!(
+        command,
+        GtkCommand::WorkspaceCreated { .. }
+            | GtkCommand::NewWorkspace { .. }
+            | GtkCommand::RemoveWorkspace { .. }
+            | GtkCommand::RemoveAllWorkspaces { .. }
+            | GtkCommand::RenameWorkspace { .. }
+            | GtkCommand::SetWorkspaceColor { .. }
+            | GtkCommand::ReorderWorkspace { .. }
+            | GtkCommand::ShowRenameDialog { .. }
+            | GtkCommand::ShowColorDialog { .. }
+            | GtkCommand::FocusWorkspaceDir { .. }
+            | GtkCommand::FocusWorkspaceAt { .. }
+            | GtkCommand::ActivateWorkspace { .. }
+            | GtkCommand::PaneSplitApplied { .. }
+            | GtkCommand::SplitFocused { .. }
+            | GtkCommand::CloseFocused { .. }
+            | GtkCommand::NewSurface { .. }
+            | GtkCommand::OpenTig { .. }
+            | GtkCommand::CreateSurface { .. }
+            | GtkCommand::NewBrowserSurface { .. }
+            | GtkCommand::ActivateSurface { .. }
+            | GtkCommand::CloseSurface { .. }
+            | GtkCommand::RenameSurface { .. }
+            | GtkCommand::ShowRenameSurfaceDialog { .. }
+            | GtkCommand::ReorderSurface { .. }
+            | GtkCommand::TearOffSurface { .. }
+            | GtkCommand::MoveSurfaceToPane { .. }
+            | GtkCommand::MoveSurfaceToWorkspace { .. }
+            | GtkCommand::SplitSurfaceIntoPane { .. }
+            | GtkCommand::FocusPane { .. }
+            | GtkCommand::TogglePaneZoom { .. }
+            | GtkCommand::ResizePane { .. }
+            | GtkCommand::BrowserOpenSplit { .. }
+            | GtkCommand::OpenUrlInBrowserTab { .. }
+            | GtkCommand::ShowOptionsDialog
+            | GtkCommand::ShowCommandPalette
+            | GtkCommand::ToggleWorktreePanel { .. }
+            | GtkCommand::ToggleFileBrowser { .. }
+            | GtkCommand::OpenFileInEditor { .. }
+            | GtkCommand::OpenActivityTarget { .. }
+            | GtkCommand::OpenAgentBarItem { .. }
+            | GtkCommand::OpenNotification { .. }
+            | GtkCommand::OpenNotificationWithAck { .. }
+            | GtkCommand::OpenOldestUnreadNotification { .. }
+    )
+}
+
 fn agent_surface_is_visible(
     window_active: bool,
     focused_pane: Option<PaneId>,
@@ -293,17 +342,17 @@ struct WorktreePanelState {
 }
 
 const PANE_ZOOM_PAGE: &str = "__pane_zoom";
-const PANE_ZOOM_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const WINDOW_MOVE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct PaneZoomRect {
+struct WindowMoveRect {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
 }
 
-impl PaneZoomRect {
+impl WindowMoveRect {
     fn from_bounds(bounds: gtk::graphene::Rect) -> Option<Self> {
         (bounds.width() > 0.0 && bounds.height() > 0.0).then_some(Self {
             x: bounds.x(),
@@ -337,7 +386,7 @@ struct ActivePaneZoom {
     workspace: WorkspaceId,
     frame: gtk::Widget,
     origin: PaneZoomOrigin,
-    source: PaneZoomRect,
+    source: WindowMoveRect,
 }
 
 enum PaneZoomOrigin {
@@ -367,7 +416,7 @@ impl PaneZoomTransition {
 
 struct PendingPaneZoomTransition {
     overlay: gtk::Fixed,
-    source: PaneZoomRect,
+    source: WindowMoveRect,
     generation: u64,
     _native_views_suspend: crate::ui::browser_pane::NativeBrowserViewsSuspend,
 }
@@ -506,6 +555,7 @@ pub struct WindowController {
     file_browser: FileBrowserState,
     agent_bar: AgentBarState,
     pane_zoom: PaneZoomState,
+    workspace_overview: workspace_overview::WorkspaceOverviewState,
     content_overlay: gtk::Overlay,
     callbacks: PaneCallbacks,
     bridge: Bridge,
@@ -616,11 +666,11 @@ fn grab_registered_pane_focus(registry: Rc<RefCell<PaneRegistry>>, pane: PaneId)
     });
 }
 
-fn set_pane_zoom_widget_rect(
+fn set_window_move_widget_rect(
     overlay: &gtk::Fixed,
     widget: &gtk::Widget,
-    base: PaneZoomRect,
-    rect: PaneZoomRect,
+    base: WindowMoveRect,
+    rect: WindowMoveRect,
 ) {
     let transform = gtk::gsk::Transform::new()
         .translate(&gtk::graphene::Point::new(rect.x, rect.y))
@@ -1121,6 +1171,7 @@ mod polling;
 mod surface_ops;
 mod window_chrome_commands;
 mod workspace_commands;
+mod workspace_overview;
 mod workspace_presenter;
 mod worktrees;
 
@@ -1158,7 +1209,7 @@ impl WindowController {
     fn prepare_pane_zoom_transition(
         &self,
         frame: &gtk::Widget,
-        source: PaneZoomRect,
+        source: WindowMoveRect,
     ) -> Option<PendingPaneZoomTransition> {
         if !adw::is_animations_enabled(frame) {
             return None;
@@ -1188,7 +1239,7 @@ impl WindowController {
         &self,
         pending: Option<PendingPaneZoomTransition>,
         frame: &gtk::Widget,
-        destination: PaneZoomRect,
+        destination: WindowMoveRect,
         finalize: F,
     ) where
         F: FnOnce(bool) + 'static,
@@ -1205,7 +1256,7 @@ impl WindowController {
         }
         self.stack.remove(frame);
 
-        let base = PaneZoomRect {
+        let base = WindowMoveRect {
             x: 0.0,
             y: 0.0,
             width: pending.source.width.max(destination.width),
@@ -1220,7 +1271,7 @@ impl WindowController {
         frame.set_size_request(base.width.round() as i32, base.height.round() as i32);
         self.content_overlay.add_overlay(&pending.overlay);
         pending.overlay.put(frame, 0.0, 0.0);
-        set_pane_zoom_widget_rect(&pending.overlay, frame, base, pending.source);
+        set_window_move_widget_rect(&pending.overlay, frame, base, pending.source);
 
         let content_overlay = self.content_overlay.clone();
         let transition = self.pane_zoom.transition.clone();
@@ -1250,7 +1301,7 @@ impl WindowController {
         });
         let primed = Cell::new(false);
         let started_at = Cell::new(None::<i64>);
-        let duration_micros = PANE_ZOOM_ANIMATION_DURATION.as_micros() as f32;
+        let duration_micros = WINDOW_MOVE_ANIMATION_DURATION.as_micros() as f32;
 
         pending.overlay.add_tick_callback(move |overlay, clock| {
             let _ = &pending._native_views_suspend;
@@ -1268,7 +1319,7 @@ impl WindowController {
             let elapsed = clock.frame_time().saturating_sub(start) as f32;
             let progress = (elapsed / duration_micros).clamp(0.0, 1.0);
             let rect = pending.source.interpolate(destination, progress);
-            set_pane_zoom_widget_rect(overlay, &frame, base, rect);
+            set_window_move_widget_rect(overlay, &frame, base, rect);
 
             if progress < 1.0 {
                 return glib::ControlFlow::Continue;
@@ -1294,7 +1345,7 @@ impl WindowController {
             let source = active
                 .frame
                 .compute_bounds(&self.content_overlay)
-                .and_then(PaneZoomRect::from_bounds)
+                .and_then(WindowMoveRect::from_bounds)
                 .unwrap_or(active.source);
             let pending = self.prepare_pane_zoom_transition(&active.frame, source);
             let frame = active.frame.clone();
@@ -1343,14 +1394,14 @@ impl WindowController {
         }
         let Some(source) = frame
             .compute_bounds(&self.content_overlay)
-            .and_then(PaneZoomRect::from_bounds)
+            .and_then(WindowMoveRect::from_bounds)
         else {
             return;
         };
         let Some(destination) = self
             .stack
             .compute_bounds(&self.content_overlay)
-            .and_then(PaneZoomRect::from_bounds)
+            .and_then(WindowMoveRect::from_bounds)
         else {
             return;
         };
@@ -1763,6 +1814,7 @@ impl WindowController {
                 attentions: agent_bar_attentions,
             },
             pane_zoom: PaneZoomState::default(),
+            workspace_overview: workspace_overview::WorkspaceOverviewState::default(),
             content_overlay,
             callbacks,
             bridge,
@@ -2503,6 +2555,9 @@ impl WindowController {
     }
 
     pub async fn dispatch(&self, cmd: GtkCommand) {
+        if self.workspace_overview.is_active() && command_dismisses_workspace_overview(&cmd) {
+            self.dismiss_workspace_overview_immediately();
+        }
         if matches!(&cmd, GtkCommand::BrowserOpenSplit { .. }) {
             self.clear_pane_zoom();
         }
@@ -2582,6 +2637,7 @@ impl WindowController {
             }
             command @ (GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
+            | GtkCommand::ToggleWorkspaceOverview
             | GtkCommand::FileBrowserFocusOut { .. }
             | GtkCommand::FileBrowserCloseAndRestoreFocus
             | GtkCommand::OpenFileInEditor { .. }
@@ -3643,15 +3699,15 @@ mod tests {
 
     #[test]
     fn pane_zoom_animation_stays_below_half_a_second_and_reaches_both_rects() {
-        assert!(PANE_ZOOM_ANIMATION_DURATION <= Duration::from_millis(500));
+        assert!(WINDOW_MOVE_ANIMATION_DURATION <= Duration::from_millis(500));
 
-        let source = PaneZoomRect {
+        let source = WindowMoveRect {
             x: 40.0,
             y: 80.0,
             width: 320.0,
             height: 240.0,
         };
-        let target = PaneZoomRect {
+        let target = WindowMoveRect {
             x: 0.0,
             y: 0.0,
             width: 1280.0,
@@ -3662,7 +3718,7 @@ mod tests {
         assert_eq!(source.interpolate(target, 1.0), target);
         assert_eq!(
             source.interpolate(target, 0.5),
-            PaneZoomRect {
+            WindowMoveRect {
                 x: 20.0,
                 y: 40.0,
                 width: 800.0,
@@ -3676,20 +3732,20 @@ mod tests {
         let overlay = gtk::Fixed::new();
         let picture = gtk::Picture::new();
         overlay.put(&picture, 0.0, 0.0);
-        let source = PaneZoomRect {
+        let source = WindowMoveRect {
             x: 0.0,
             y: 0.0,
             width: 320.0,
             height: 240.0,
         };
-        let rect = PaneZoomRect {
+        let rect = WindowMoveRect {
             x: 24.0,
             y: 36.0,
             width: 640.0,
             height: 480.0,
         };
 
-        set_pane_zoom_widget_rect(&overlay, picture.upcast_ref(), source, rect);
+        set_window_move_widget_rect(&overlay, picture.upcast_ref(), source, rect);
 
         let transform = overlay.child_transform(&picture).unwrap();
         let position = transform.transform_point(&gtk::graphene::Point::new(0.0, 0.0));

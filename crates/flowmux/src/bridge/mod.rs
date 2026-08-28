@@ -247,6 +247,8 @@ pub enum GtkCommand {
     TogglePaneZoom {
         pane: PaneId,
     },
+    /// Toggle the full-window workspace overview.
+    ToggleWorkspaceOverview,
     ResizePane {
         pane: PaneId,
         ratio: f32,

@@ -674,6 +674,42 @@ paned > separator {{
     border-radius: 8px;
     padding: 4px 0;
 }}
+.flowmux-workspace-overview {{
+    background-color: {bg};
+    color: {fg};
+    padding: 14px 28px 28px 28px;
+}}
+.flowmux-workspace-overview-title {{
+    padding: 0 0 8px 0;
+}}
+.flowmux-workspace-overview-grid {{
+    background: transparent;
+    padding: 4px 12px 20px 12px;
+}}
+.flowmux-workspace-overview-card {{
+    background-color: transparent;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    padding: 6px;
+}}
+.flowmux-workspace-overview-card:hover,
+.flowmux-workspace-overview-card:focus-visible {{
+    background-color: {control_hover};
+}}
+.flowmux-workspace-overview-card.active {{
+    border-color: {focus_full};
+}}
+.flowmux-workspace-overview-picture {{
+    background-color: {tabbar};
+    border: 1px solid {border};
+    border-radius: 9px;
+}}
+.flowmux-workspace-overview-name {{
+    color: {subdued_fg};
+}}
+.flowmux-workspace-overview-card.active .flowmux-workspace-overview-name {{
+    color: {fg};
+}}
 "#,
             bg = bg_css,
             fg = rgba_css(&self.fg),
@@ -981,6 +1017,21 @@ mod tests {
             .next()
             .unwrap();
         assert!(rule.contains("box-shadow: inset 0 0 0 2px"));
+    }
+
+    #[test]
+    fn workspace_overview_cards_keep_active_and_keyboard_focus_cues() {
+        let css = sample_css();
+        assert!(css.contains(".flowmux-workspace-overview {"));
+        assert!(css.contains(".flowmux-workspace-overview-card:focus-visible {"));
+        let active_rule = css
+            .split(".flowmux-workspace-overview-card.active {")
+            .nth(1)
+            .expect("active workspace overview card rule missing")
+            .split('}')
+            .next()
+            .unwrap();
+        assert!(active_rule.contains("border-color: rgba("));
     }
 
     #[test]
