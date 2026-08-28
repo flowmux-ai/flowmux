@@ -17,6 +17,8 @@ struct ActiveWorkspaceOverview {
     root: gtk::Overlay,
     chrome: gtk::Box,
     transition_layer: gtk::Fixed,
+    title: gtk::Label,
+    flow: gtk::FlowBox,
     cards: Vec<WorkspaceOverviewCard>,
     active_workspace: Option<WorkspaceId>,
     saved_focus: Option<glib::WeakRef<gtk::Widget>>,
@@ -27,6 +29,7 @@ struct ActiveWorkspaceOverview {
 #[derive(Clone)]
 struct WorkspaceOverviewCard {
     workspace: WorkspaceId,
+    root: gtk::Overlay,
     button: gtk::Button,
     picture: gtk::Picture,
     texture: Option<gtk::gdk::Texture>,
@@ -42,6 +45,8 @@ struct WorkspaceOverviewView {
     root: gtk::Overlay,
     chrome: gtk::Box,
     transition_layer: gtk::Fixed,
+    title: gtk::Label,
+    flow: gtk::FlowBox,
     cards: Vec<WorkspaceOverviewCard>,
 }
 
@@ -102,10 +107,20 @@ impl WindowController {
         let activate = Rc::new(move |workspace| {
             controller_for_activate.select_workspace_from_overview(workspace);
         });
+        let controller_for_close = self.clone();
+        let close = Rc::new(move |workspace| {
+            controller_for_close.close_workspace_from_overview(workspace);
+        });
         let controller_for_dismiss = self.clone();
         let dismiss = Rc::new(move || controller_for_dismiss.close_workspace_overview(None));
-        let view =
-            build_workspace_overview_view(entries, active_workspace, top_margin, activate, dismiss);
+        let view = build_workspace_overview_view(
+            entries,
+            active_workspace,
+            top_margin,
+            activate,
+            close,
+            dismiss,
+        );
         let saved_focus =
             gtk::prelude::GtkWindowExt::focus(&self.window).map(|widget| widget.downgrade());
         let saved_window_title = self.window.title().map(|title| title.to_string());
@@ -121,6 +136,8 @@ impl WindowController {
                 root: view.root.clone(),
                 chrome: view.chrome.clone(),
                 transition_layer: view.transition_layer,
+                title: view.title,
+                flow: view.flow,
                 cards: view.cards,
                 active_workspace,
                 saved_focus,
@@ -320,6 +337,81 @@ impl WindowController {
         });
     }
 
+    fn close_workspace_from_overview(&self, workspace: WorkspaceId) {
+        if self.workspace_overview.transitioning.get()
+            || !self.surfaces.borrow().contains_key(&workspace)
+        {
+            return;
+        }
+        self.workspace_overview.transitioning.set(true);
+        let controller = self.clone();
+        glib::MainContext::default().spawn_local(async move {
+            if !controller.confirm_close_workspace(workspace).await {
+                controller.workspace_overview.transitioning.set(false);
+                return;
+            }
+            let (ack, _rx) = oneshot::channel();
+            controller
+                .dispatch_workspace_command(GtkCommand::RemoveWorkspace {
+                    id: workspace,
+                    confirm: false,
+                    ack,
+                })
+                .await;
+            controller.workspace_overview.transitioning.set(false);
+            if !controller.surfaces.borrow().contains_key(&workspace) {
+                controller.remove_workspace_overview_card(workspace);
+            }
+        });
+    }
+
+    fn remove_workspace_overview_card(&self, workspace: WorkspaceId) {
+        let (focus, empty) = {
+            let mut overview = self.workspace_overview.active.borrow_mut();
+            let Some(active) = overview.as_mut() else {
+                return;
+            };
+            let Some(index) = active
+                .cards
+                .iter()
+                .position(|card| card.workspace == workspace)
+            else {
+                return;
+            };
+            let removed = active.cards.remove(index);
+            active.flow.remove(&removed.root);
+            active
+                .title
+                .set_text(&workspace_count_label(active.cards.len()));
+            active.active_workspace = self.sidebar.selected_workspace();
+            for card in &active.cards {
+                if Some(card.workspace) == active.active_workspace {
+                    card.button.add_css_class("active");
+                } else {
+                    card.button.remove_css_class("active");
+                }
+            }
+            let focus = active
+                .active_workspace
+                .and_then(|selected| active.cards.iter().find(|card| card.workspace == selected))
+                .or_else(|| {
+                    active
+                        .cards
+                        .get(index.min(active.cards.len().saturating_sub(1)))
+                })
+                .map(|card| card.button.clone());
+            (focus, active.cards.is_empty())
+        };
+        if empty {
+            self.dismiss_workspace_overview_immediately();
+            let controller = self.clone();
+            glib::MainContext::default()
+                .spawn_local(async move { controller.refresh_window_title().await });
+        } else if let Some(focus) = focus {
+            focus.grab_focus();
+        }
+    }
+
     fn finish_workspace_overview_close(&self, selected_workspace: Option<WorkspaceId>) {
         let saved_focus = self.remove_workspace_overview();
         if let Some(workspace) = selected_workspace {
@@ -358,6 +450,7 @@ fn build_workspace_overview_view(
     active_workspace: Option<WorkspaceId>,
     top_margin: i32,
     activate: Rc<dyn Fn(WorkspaceId)>,
+    close: Rc<dyn Fn(WorkspaceId)>,
     dismiss: Rc<dyn Fn()>,
 ) -> WorkspaceOverviewView {
     let root = gtk::Overlay::new();
@@ -433,9 +526,34 @@ fn build_workspace_overview_view(
         let workspace = entry.workspace;
         let activate_workspace = activate.clone();
         button.connect_clicked(move |_| activate_workspace(workspace));
-        flow.append(&button);
+
+        let close_button = gtk::Button::from_icon_name("window-close-symbolic");
+        close_button.add_css_class("flat");
+        close_button.add_css_class("circular");
+        close_button.add_css_class("flowmux-workspace-overview-close");
+        close_button.set_tooltip_text(Some(&format!("Close workspace {}", entry.name)));
+        close_button.update_property(&[gtk::accessible::Property::Label(&format!(
+            "Close workspace {}",
+            entry.name
+        ))]);
+        close_button.set_halign(gtk::Align::End);
+        close_button.set_valign(gtk::Align::Start);
+        close_button.set_margin_top(12);
+        close_button.set_margin_end(12);
+        close_button.set_focusable(false);
+        let close_workspace = close.clone();
+        close_button.connect_clicked(move |_| close_workspace(workspace));
+
+        let card_root = gtk::Overlay::new();
+        card_root.set_child(Some(&button));
+        card_root.add_overlay(&close_button);
+        flow.append(&card_root);
+        if let Some(child) = card_root.parent() {
+            child.set_focusable(false);
+        }
         cards.push(WorkspaceOverviewCard {
             workspace,
+            root: card_root,
             button,
             picture,
             texture: entry.texture,
@@ -484,6 +602,8 @@ fn build_workspace_overview_view(
         root,
         chrome,
         transition_layer,
+        title,
+        flow,
         cards,
     }
 }
@@ -739,6 +859,8 @@ mod tests {
         let second = WorkspaceId::new();
         let activated = Rc::new(Cell::new(None));
         let activated_for_click = activated.clone();
+        let closed = Rc::new(Cell::new(None));
+        let closed_for_click = closed.clone();
         let view = build_workspace_overview_view(
             vec![
                 WorkspaceOverviewEntry {
@@ -755,6 +877,7 @@ mod tests {
             Some(second),
             0,
             Rc::new(move |workspace| activated_for_click.set(Some(workspace))),
+            Rc::new(move |workspace| closed_for_click.set(Some(workspace))),
             Rc::new(|| {}),
         );
 
@@ -773,6 +896,21 @@ mod tests {
         );
         view.cards[0].button.emit_clicked();
         assert_eq!(activated.get(), Some(first));
+        let close_button = view.cards[1]
+            .root
+            .last_child()
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap();
+        assert!(close_button.has_css_class("flowmux-workspace-overview-close"));
+        assert_eq!(close_button.halign(), gtk::Align::End);
+        assert_eq!(close_button.valign(), gtk::Align::Start);
+        assert_eq!(
+            close_button.tooltip_text().as_deref(),
+            Some("Close workspace second")
+        );
+        close_button.emit_clicked();
+        assert_eq!(closed.get(), Some(second));
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -925,6 +1063,13 @@ mod tests {
             Some(buttons[1].upcast_ref()),
             "directional focus must stay on the edge card"
         );
+        handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Left, &|| {});
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
+            Some(buttons[0].upcast_ref()),
+            "left must return focus to the previous card"
+        );
+        handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Right, &|| {});
         assert_eq!(
             handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Return, &|| {}),
             glib::Propagation::Stop
@@ -974,6 +1119,21 @@ mod tests {
         assert_eq!(
             controller.window.title().as_deref(),
             Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
+        );
+        controller.remove_workspace_overview_card(first);
+        let surviving_button = {
+            let active = controller.workspace_overview.active.borrow();
+            let active = active.as_ref().unwrap();
+            assert_eq!(active.cards.len(), 1);
+            assert_eq!(active.cards[0].workspace, second);
+            assert_eq!(active.title.text().as_str(), "1 Workspace");
+            assert_eq!(active.flow.child_at_index(1), None);
+            active.cards[0].button.clone()
+        };
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
+            Some(surviving_button.upcast_ref()),
+            "closing a card keeps overview focus on the surviving workspace"
         );
         controller
             .dispatch(GtkCommand::ActivateWorkspace { id: second })

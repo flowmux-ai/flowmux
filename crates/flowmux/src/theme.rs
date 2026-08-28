@@ -699,6 +699,16 @@ paned > separator {{
 .flowmux-workspace-overview-card.active {{
     border-color: {focus_full};
 }}
+.flowmux-workspace-overview-close {{
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+    background-color: {toast_bg};
+    border: 1px solid {toast_border};
+}}
+.flowmux-workspace-overview-close:hover {{
+    background-color: {control_hover};
+}}
 .flowmux-workspace-overview-picture {{
     background-color: {tabbar};
     border: 1px solid {border};
@@ -1024,6 +1034,7 @@ mod tests {
         let css = sample_css();
         assert!(css.contains(".flowmux-workspace-overview {"));
         assert!(css.contains(".flowmux-workspace-overview-card:focus-visible {"));
+        assert!(css.contains(".flowmux-workspace-overview-close {"));
         let active_rule = css
             .split(".flowmux-workspace-overview-card.active {")
             .nth(1)
