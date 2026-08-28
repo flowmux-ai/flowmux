@@ -906,9 +906,11 @@ impl Pane {
     /// process subtree, or `None` when no agent process is present. This is the
     /// authoritative *existence* signal: it creates an idle, process-owned
     /// presence the moment an agent process appears (independent of TUI text,
-    /// OSC title, or hooks) and drops PID-less presence when the process exits
-    /// back to a plain shell. PID-backed hook presence remains owned by the
-    /// liveness sweep.
+    /// OSC title, or hooks) and drops PID-less proc/hook presence when the
+    /// process exits back to a plain shell. PID-backed hook presence remains
+    /// owned by the liveness sweep, and screen-owned presence by the screen
+    /// scan — process truth is blind to agents behind a container / ssh
+    /// boundary, so it never removes what it did not observe.
     /// Returns `Some(true)` when the presence changed, `Some(false)` when
     /// unchanged, `None` when the surface is not in this pane tree.
     pub fn reconcile_process_agent(
@@ -2431,7 +2433,16 @@ fn reconcile_surface_process_agent(
             true
         }
         (Some(existing), None) => {
-            if existing.pid.is_none() {
+            // Screen-owned presence keeps its own lifecycle in
+            // [`Pane::settle_screen_idle`]: the scan removes it as soon as the
+            // pane falls back to a plain shell prompt. Process truth must not
+            // pre-empt that, because it cannot see an agent running behind a
+            // container / ssh / tmux boundary — there "absent from this pane's
+            // subtree" is not evidence the agent exited, and dropping the
+            // presence every sweep leaves the Agent Bar empty for exactly the
+            // agents only the screen scan can find.
+            let screen_owned = existing.source.as_deref() == Some("flowmux:screen");
+            if existing.pid.is_none() && !screen_owned {
                 *slot = None;
                 true
             } else {

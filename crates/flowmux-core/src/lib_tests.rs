@@ -2389,6 +2389,19 @@ fn reconcile_drops_pidless_hook_presence_when_process_absent() {
 }
 
 #[test]
+fn reconcile_keeps_screen_presence_when_process_absent() {
+    // An agent running behind a container / ssh boundary never shows up in the
+    // pane's process subtree, so only the screen scan can see it. The sweep
+    // must leave that presence alone; `settle_screen_idle` removes it when the
+    // pane really does fall back to a shell prompt.
+    let mut p = AgentPresence::new("claude", AgentActivity::Idle, None);
+    p.source = Some("flowmux:screen".into());
+    let mut slot = Some(p);
+    assert!(!reconcile_surface_process_agent(&mut slot, None));
+    assert_eq!(slot.as_ref().unwrap().name, "claude");
+}
+
+#[test]
 fn reconcile_follows_agent_swap_for_proc_owned_presence() {
     let mut p = AgentPresence::new("codex", AgentActivity::Idle, None);
     p.source = Some(AGENT_SOURCE_PROC.to_string());

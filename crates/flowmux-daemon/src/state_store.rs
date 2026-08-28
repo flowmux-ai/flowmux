@@ -3061,6 +3061,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconcile_process_agents_keeps_screen_presence_for_out_of_tree_agent() {
+        // Regression: an agent inside a container / ssh session is invisible to
+        // the process sweep, so the sweep kept deleting the presence the screen
+        // scan had just created and the Agent Bar never showed it.
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some("❯ Welcome to Claude Code"), None)
+                .await,
+            Some((ws_id, Some(AgentStatus::Idle)))
+        );
+
+        assert_eq!(
+            store.reconcile_process_agents(&[(surface, None)]).await,
+            vec![]
+        );
+        let agent = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(agent.name, "claude");
+        assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+    }
+
+    #[tokio::test]
     async fn report_agent_screen_signals_restores_idle_presence_from_agent_name() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
