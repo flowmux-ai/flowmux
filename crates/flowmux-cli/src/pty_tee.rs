@@ -68,7 +68,7 @@ use std::time::{Duration, Instant};
 /// `poll` with arbitrary signals on stable Rust.
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
-const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const EVENT_QUEUE_CAPACITY: usize = 16;
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
@@ -1021,14 +1021,14 @@ mod tests {
     }
 
     #[test]
-    fn output_refresh_is_immediate_then_limited_to_twice_per_second() {
+    fn output_refresh_is_immediate_then_limited_to_ten_times_per_second() {
         let first = Instant::now();
         assert_eq!(output_refresh_delay(None, first), None);
 
         let next_allowed = first + OUTPUT_REFRESH_INTERVAL;
         assert_eq!(
             output_refresh_delay(Some(next_allowed), first),
-            Some(Duration::from_millis(500))
+            Some(Duration::from_millis(100))
         );
         assert_eq!(output_refresh_delay(Some(next_allowed), next_allowed), None);
     }

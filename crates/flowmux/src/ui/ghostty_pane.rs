@@ -76,7 +76,7 @@ pub struct GhosttyPane {
 /// literal newline" at the prompt without submitting.
 const INSERT_NEWLINE_BYTES: &[u8] = b"\x1b\r";
 
-const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const AGENT_STATUS_TEXT_ROWS: i64 = 80;
 const TERMINAL_SELECTION_CACHE_MAX_BYTES: usize = 256 * 1024;
 
@@ -3479,6 +3479,25 @@ mod tests {
             2,
             "the latest repaint must receive one trailing refresh"
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn trailing_agent_content_refresh_stays_responsive() {
+        let calls = Rc::new(Cell::new(0));
+        let refresh: Rc<RefCell<dyn FnMut(SurfaceId)>> = {
+            let calls = calls.clone();
+            Rc::new(RefCell::new(move |_| calls.set(calls.get() + 1)))
+        };
+        let throttle = Rc::new(AgentContentRefreshThrottle::default());
+        let surface = SurfaceId::new();
+
+        schedule_agent_content_refresh(throttle.clone(), refresh.clone(), surface);
+        wait_for_idle_cycle().await;
+        schedule_agent_content_refresh(throttle, refresh, surface);
+        glib::timeout_future(Duration::from_millis(150)).await;
+
+        assert_eq!(calls.get(), 2, "working status must refresh within 150 ms");
     }
 
     #[cfg(not(target_os = "macos"))]
