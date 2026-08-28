@@ -2450,20 +2450,23 @@ fn reconcile_surface_process_agent(
             }
         }
         (Some(existing), Some(name)) => {
-            // Process truth is authoritative on *identity*. Correct a proc-owned
-            // presence whose agent swapped, and reclaim one a screen-text scan
-            // mislabeled — terminal scrollback that merely *mentions* another
-            // agent must not leave the pane renamed. Hook-owned presences are
-            // left to the hook's own lifecycle.
+            // Process truth is authoritative on *identity and ownership*.
+            // Reclaim screen-owned presence even when its name was right so a
+            // later process exit can remove it. Hook-owned presence remains
+            // under the hook's lifecycle.
             let reclaimable = matches!(
                 existing.source.as_deref(),
                 Some(AGENT_SOURCE_PROC) | Some("flowmux:screen")
             );
-            if reclaimable && existing.name != name {
+            let screen_owned = existing.source.as_deref() == Some("flowmux:screen");
+            let identity_changed = existing.name != name;
+            if reclaimable && (screen_owned || identity_changed) {
                 existing.name = name.to_string();
                 existing.source = Some(AGENT_SOURCE_PROC.to_string());
-                existing.session_name = None;
-                existing.messaging_socket = None;
+                if identity_changed {
+                    existing.session_name = None;
+                    existing.messaging_socket = None;
+                }
                 true
             } else {
                 false

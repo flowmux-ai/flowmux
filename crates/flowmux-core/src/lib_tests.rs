@@ -2424,12 +2424,18 @@ fn reconcile_reclaims_screen_owned_presence_mislabeled_by_scrollback() {
 }
 
 #[test]
-fn reconcile_is_noop_for_running_screen_owned_presence() {
+fn reconcile_promotes_visible_screen_presence_to_proc_ownership() {
     let mut p = AgentPresence::new("codex", AgentActivity::Running, None);
     p.source = Some("flowmux:screen".into());
     let mut slot = Some(p);
-    assert!(!reconcile_surface_process_agent(&mut slot, Some("codex")));
-    assert_eq!(slot.as_ref().unwrap().name, "codex");
+    assert!(reconcile_surface_process_agent(&mut slot, Some("codex")));
+    let agent = slot.as_ref().unwrap();
+    assert_eq!(agent.name, "codex");
+    assert_eq!(agent.status, AgentStatus::Working);
+    assert_eq!(agent.source.as_deref(), Some(AGENT_SOURCE_PROC));
+
+    assert!(reconcile_surface_process_agent(&mut slot, None));
+    assert!(slot.is_none());
 }
 
 #[test]
