@@ -20,6 +20,7 @@ struct ActiveWorkspaceOverview {
     cards: Vec<WorkspaceOverviewCard>,
     active_workspace: Option<WorkspaceId>,
     saved_focus: Option<glib::WeakRef<gtk::Widget>>,
+    saved_window_title: Option<String>,
     _native_views_suspend: crate::ui::browser_pane::NativeBrowserViewsSuspend,
 }
 
@@ -90,19 +91,29 @@ impl WindowController {
                 .collect::<Vec<_>>()
         };
 
+        let top_margin = self
+            .sidebar
+            .header
+            .compute_bounds(&self.content_overlay)
+            .map(|bounds| (bounds.y() + bounds.height()).ceil() as i32)
+            .unwrap_or_else(|| self.sidebar.header.height())
+            .max(0);
         let controller_for_activate = self.clone();
         let activate = Rc::new(move |workspace| {
-            controller_for_activate.close_workspace_overview(Some(workspace));
+            controller_for_activate.select_workspace_from_overview(workspace);
         });
         let controller_for_dismiss = self.clone();
         let dismiss = Rc::new(move || controller_for_dismiss.close_workspace_overview(None));
-        let view = build_workspace_overview_view(entries, active_workspace, activate, dismiss);
+        let view =
+            build_workspace_overview_view(entries, active_workspace, top_margin, activate, dismiss);
         let saved_focus =
             gtk::prelude::GtkWindowExt::focus(&self.window).map(|widget| widget.downgrade());
+        let saved_window_title = self.window.title().map(|title| title.to_string());
         let native_views_suspend = crate::ui::browser_pane::suspend_native_browser_views_for_window(
             self.window.upcast_ref(),
         );
 
+        self.window.set_title(Some(WORKSPACE_OVERVIEW_WINDOW_TITLE));
         self.content_overlay.add_overlay(&view.root);
         self.workspace_overview
             .active
@@ -113,6 +124,7 @@ impl WindowController {
                 cards: view.cards,
                 active_workspace,
                 saved_focus,
+                saved_window_title,
                 _native_views_suspend: native_views_suspend,
             }));
 
@@ -291,12 +303,32 @@ impl WindowController {
         );
     }
 
+    fn select_workspace_from_overview(&self, workspace: WorkspaceId) {
+        if self.workspace_overview.transitioning.get()
+            || !self.surfaces.borrow().contains_key(&workspace)
+        {
+            return;
+        }
+        self.workspace_overview.transitioning.set(true);
+        let controller = self.clone();
+        glib::MainContext::default().spawn_local(async move {
+            controller.activate_workspace(workspace).await;
+            controller.workspace_overview.transitioning.set(false);
+            if controller.workspace_overview.is_active() {
+                controller.close_workspace_overview(Some(workspace));
+            }
+        });
+    }
+
     fn finish_workspace_overview_close(&self, selected_workspace: Option<WorkspaceId>) {
         let saved_focus = self.remove_workspace_overview();
         if let Some(workspace) = selected_workspace {
             let controller = self.clone();
             glib::MainContext::default().spawn_local(async move {
-                controller.activate_workspace(workspace).await;
+                if controller.sidebar.selected_workspace() != Some(workspace) {
+                    controller.activate_workspace(workspace).await;
+                }
+                controller.refresh_window_title().await;
             });
         } else if let Some(saved_focus) = saved_focus.and_then(|focus| focus.upgrade()) {
             glib::idle_add_local_once(move || {
@@ -316,6 +348,7 @@ impl WindowController {
         if active.root.parent().as_ref() == Some(self.content_overlay.upcast_ref()) {
             self.content_overlay.remove_overlay(&active.root);
         }
+        self.window.set_title(active.saved_window_title.as_deref());
         active.saved_focus
     }
 }
@@ -323,6 +356,7 @@ impl WindowController {
 fn build_workspace_overview_view(
     entries: Vec<WorkspaceOverviewEntry>,
     active_workspace: Option<WorkspaceId>,
+    top_margin: i32,
     activate: Rc<dyn Fn(WorkspaceId)>,
     dismiss: Rc<dyn Fn()>,
 ) -> WorkspaceOverviewView {
@@ -331,6 +365,7 @@ fn build_workspace_overview_view(
     root.set_valign(gtk::Align::Fill);
     root.set_hexpand(true);
     root.set_vexpand(true);
+    root.set_margin_top(top_margin);
 
     let chrome = gtk::Box::new(gtk::Orientation::Vertical, 20);
     chrome.add_css_class("flowmux-workspace-overview");
@@ -424,15 +459,15 @@ fn build_workspace_overview_view(
         chrome.append(&scroll);
     }
 
+    let buttons = cards
+        .iter()
+        .map(|card| card.button.clone())
+        .collect::<Vec<_>>();
+    let root_for_key = root.clone();
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     key.connect_key_pressed(move |_, keyval, _, _| {
-        if workspace_overview_dismisses_for_key(keyval) {
-            dismiss();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
+        handle_workspace_overview_key(&root_for_key, &buttons, keyval, dismiss.as_ref())
     });
     root.add_controller(key);
     root.set_child(Some(&chrome));
@@ -455,6 +490,68 @@ fn build_workspace_overview_view(
 
 fn workspace_overview_dismisses_for_key(keyval: gtk::gdk::Key) -> bool {
     keyval == gtk::gdk::Key::Escape
+}
+
+fn workspace_overview_direction(keyval: gtk::gdk::Key) -> Option<gtk::DirectionType> {
+    match keyval {
+        gtk::gdk::Key::Left | gtk::gdk::Key::KP_Left => Some(gtk::DirectionType::Left),
+        gtk::gdk::Key::Right | gtk::gdk::Key::KP_Right => Some(gtk::DirectionType::Right),
+        gtk::gdk::Key::Up | gtk::gdk::Key::KP_Up => Some(gtk::DirectionType::Up),
+        gtk::gdk::Key::Down | gtk::gdk::Key::KP_Down => Some(gtk::DirectionType::Down),
+        _ => None,
+    }
+}
+
+fn workspace_overview_activates_for_key(keyval: gtk::gdk::Key) -> bool {
+    matches!(
+        keyval,
+        gtk::gdk::Key::Return | gtk::gdk::Key::ISO_Enter | gtk::gdk::Key::KP_Enter
+    )
+}
+
+fn handle_workspace_overview_key(
+    root: &gtk::Overlay,
+    buttons: &[gtk::Button],
+    keyval: gtk::gdk::Key,
+    dismiss: &dyn Fn(),
+) -> glib::Propagation {
+    if workspace_overview_dismisses_for_key(keyval) {
+        dismiss();
+        return glib::Propagation::Stop;
+    }
+    if workspace_overview_activates_for_key(keyval) {
+        if let Some(button) = focused_workspace_button(root, buttons) {
+            button.emit_clicked();
+        }
+        return glib::Propagation::Stop;
+    }
+    let Some(direction) = workspace_overview_direction(keyval) else {
+        return glib::Propagation::Proceed;
+    };
+    let had_card_focus = focused_workspace_button(root, buttons).is_some();
+    if root.child_focus(direction) {
+        if let Some(button) = focused_workspace_button(root, buttons) {
+            button.grab_focus();
+        }
+    } else if !had_card_focus {
+        if let Some(first) = buttons.first() {
+            first.grab_focus();
+        }
+    }
+    glib::Propagation::Stop
+}
+
+fn focused_workspace_button(root: &gtk::Overlay, buttons: &[gtk::Button]) -> Option<gtk::Button> {
+    let window = root.root()?.downcast::<gtk::Window>().ok()?;
+    let focus = gtk::prelude::GtkWindowExt::focus(&window)?;
+    buttons
+        .iter()
+        .find(|button| {
+            button.upcast_ref::<gtk::Widget>() == &focus
+                || button.is_ancestor(&focus)
+                || focus.is_ancestor(button.upcast_ref::<gtk::Widget>())
+        })
+        .cloned()
 }
 
 fn workspace_thumbnail_size(width: i32, height: i32) -> (i32, i32) {
@@ -562,7 +659,12 @@ mod tests {
     ) {
         let renderer = root.native().unwrap().renderer().unwrap();
         let snapshot = gtk::Snapshot::new();
-        content_overlay.snapshot_child(root, &snapshot);
+        let paintable = gtk::WidgetPaintable::new(Some(content_overlay));
+        paintable.snapshot(
+            &snapshot,
+            f64::from(content_overlay.width()),
+            f64::from(content_overlay.height()),
+        );
         let node = snapshot.to_node().unwrap();
         let viewport = gtk::graphene::Rect::new(
             0.0,
@@ -588,6 +690,18 @@ mod tests {
         assert!(workspace_overview_dismisses_for_key(gtk::gdk::Key::Escape));
         assert!(!workspace_overview_dismisses_for_key(gtk::gdk::Key::Return));
         assert!(!workspace_overview_dismisses_for_key(gtk::gdk::Key::k));
+        assert!(workspace_overview_activates_for_key(gtk::gdk::Key::Return));
+        assert!(workspace_overview_activates_for_key(
+            gtk::gdk::Key::KP_Enter
+        ));
+        assert_eq!(
+            workspace_overview_direction(gtk::gdk::Key::Left),
+            Some(gtk::DirectionType::Left)
+        );
+        assert_eq!(
+            workspace_overview_direction(gtk::gdk::Key::Down),
+            Some(gtk::DirectionType::Down)
+        );
     }
 
     #[test]
@@ -639,6 +753,7 @@ mod tests {
                 },
             ],
             Some(second),
+            0,
             Rc::new(move |workspace| activated_for_click.set(Some(workspace))),
             Rc::new(|| {}),
         );
@@ -704,6 +819,10 @@ mod tests {
             .dispatch(GtkCommand::ToggleWorkspaceOverview)
             .await;
         assert!(controller.workspace_overview.is_active());
+        assert_eq!(
+            controller.window.title().as_deref(),
+            Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
+        );
         let animations_enabled = adw::is_animations_enabled(&controller.content_overlay);
         assert_eq!(
             controller.workspace_overview.transitioning.get(),
@@ -711,7 +830,7 @@ mod tests {
         );
         glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(150)).await;
 
-        let (ids, active_classes, tooltips, textures_present, first_button, second_button, root) = {
+        let (ids, active_classes, tooltips, textures_present, buttons, root) = {
             let active = controller.workspace_overview.active.borrow();
             let active = active.as_ref().expect("overview should stay open");
             (
@@ -735,14 +854,11 @@ mod tests {
                     .iter()
                     .map(|card| card.texture.is_some())
                     .collect::<Vec<_>>(),
-                active.cards[0].button.clone(),
                 active
                     .cards
                     .iter()
-                    .find(|card| card.workspace == second)
-                    .unwrap()
-                    .button
-                    .clone(),
+                    .map(|card| card.button.clone())
+                    .collect::<Vec<_>>(),
                 active.root.clone(),
             )
         };
@@ -762,12 +878,31 @@ mod tests {
         assert!(!controller.workspace_overview.transitioning.get());
         assert_eq!(
             gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
-            Some(first_button.upcast_ref())
+            Some(buttons[0].upcast_ref())
         );
         assert_eq!(
             root.parent().as_ref(),
             Some(controller.content_overlay.upcast_ref())
         );
+        let header_bounds = controller
+            .sidebar
+            .header
+            .compute_bounds(&controller.content_overlay)
+            .unwrap();
+        let root_bounds = root.compute_bounds(&controller.content_overlay).unwrap();
+        let chrome_bounds = root
+            .child()
+            .unwrap()
+            .compute_bounds(&controller.content_overlay)
+            .unwrap();
+        assert!(
+            (root_bounds.y() - (header_bounds.y() + header_bounds.height())).abs() < 1.0,
+            "overview must start below the retained window bar"
+        );
+        assert!(root_bounds.x().abs() < 1.0);
+        assert!((root_bounds.width() - controller.content_overlay.width() as f32).abs() < 1.0);
+        assert!((chrome_bounds.x() - root_bounds.x()).abs() < 1.0);
+        assert!((chrome_bounds.width() - root_bounds.width()).abs() < 1.0);
         if let Some(path) = std::env::var_os("FLOWMUX_TEST_OVERVIEW_SCREENSHOT") {
             save_overview_snapshot(
                 &controller.content_overlay,
@@ -776,10 +911,40 @@ mod tests {
             );
         }
 
-        second_button.emit_clicked();
+        assert_eq!(
+            handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Right, &|| {}),
+            glib::Propagation::Stop
+        );
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
+            Some(buttons[1].upcast_ref())
+        );
+        handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Right, &|| {});
+        assert_eq!(
+            gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
+            Some(buttons[1].upcast_ref()),
+            "directional focus must stay on the edge card"
+        );
+        assert_eq!(
+            handle_workspace_overview_key(&root, &buttons, gtk::gdk::Key::Return, &|| {}),
+            glib::Propagation::Stop
+        );
         if animations_enabled {
             assert!(controller.workspace_overview.is_active());
             assert!(controller.workspace_overview.transitioning.get());
+        }
+        glib::timeout_future(Duration::from_millis(20)).await;
+        if animations_enabled {
+            assert!(controller.workspace_overview.is_active());
+            assert_eq!(
+                controller.stack.visible_child_name().as_deref(),
+                Some(second.to_string().as_str()),
+                "the selected workspace must be underneath the closing animation"
+            );
+            assert_eq!(
+                controller.window.title().as_deref(),
+                Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
+            );
         }
         glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(200)).await;
         assert!(!controller.workspace_overview.is_active());
@@ -790,7 +955,12 @@ mod tests {
             Some(second.to_string().as_str())
         );
         assert_eq!(controller.focused_pane.get(), Some(second_pane));
+        assert_ne!(
+            controller.window.title().as_deref(),
+            Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
+        );
 
+        let title_before_second_overview = controller.window.title().map(|title| title.to_string());
         controller
             .dispatch(GtkCommand::ToggleWorkspaceOverview)
             .await;
@@ -801,10 +971,18 @@ mod tests {
             controller.workspace_overview.is_active(),
             "background display updates must not dismiss the overview"
         );
+        assert_eq!(
+            controller.window.title().as_deref(),
+            Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
+        );
         controller
             .dispatch(GtkCommand::ActivateWorkspace { id: second })
             .await;
         assert!(!controller.workspace_overview.is_active());
         assert_eq!(store.snapshot().await.active_workspace, Some(second));
+        assert_eq!(
+            controller.window.title().map(|title| title.to_string()),
+            title_before_second_overview
+        );
     }
 }

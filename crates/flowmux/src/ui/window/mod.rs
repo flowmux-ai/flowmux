@@ -343,6 +343,7 @@ struct WorktreePanelState {
 
 const PANE_ZOOM_PAGE: &str = "__pane_zoom";
 const WINDOW_MOVE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const WORKSPACE_OVERVIEW_WINDOW_TITLE: &str = "Workspace overview mode";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct WindowMoveRect {
@@ -2069,6 +2070,10 @@ impl WindowController {
     /// Fall back to "flowmux" when no pane is focused or the focused pane has no
     /// active surface.
     async fn refresh_window_title(&self) {
+        if self.workspace_overview.is_active() {
+            self.window.set_title(Some(WORKSPACE_OVERVIEW_WINDOW_TITLE));
+            return;
+        }
         let focused = self.focused_pane.get();
         let title = match focused {
             None => None,
