@@ -942,9 +942,10 @@ fn workspace_preview_texture(
     window_height: i32,
 ) -> Option<(gtk::gdk::Texture, i32, i32)> {
     let renderer = surface.native()?.renderer()?;
-    let stack = surface.parent()?.downcast::<gtk::Stack>().ok()?;
+    let parent = surface.parent()?;
     let was_child_visible = surface.is_child_visible();
     if !was_child_visible {
+        let stack = parent.downcast_ref::<gtk::Stack>()?;
         surface.set_child_visible(true);
         surface.allocate(stack.width(), stack.height(), -1, None);
     }
@@ -959,7 +960,7 @@ fn workspace_preview_texture(
         preview_width as f32 / surface.width().max(1) as f32,
         preview_height as f32 / surface.height().max(1) as f32,
     );
-    stack.snapshot_child(surface, &snapshot);
+    parent.snapshot_child(surface, &snapshot);
     if !was_child_visible {
         surface.set_child_visible(false);
     }

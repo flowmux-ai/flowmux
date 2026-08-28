@@ -75,12 +75,15 @@ impl WindowController {
     }
 
     fn open_workspace_overview(&self) {
-        self.clear_pane_zoom();
-
         let active_workspace = self.sidebar.selected_workspace();
         let titles = self.sidebar.workspace_titles().borrow().clone();
         let (window_width, window_height) =
             (self.content_overlay.width(), self.content_overlay.height());
+        let zoomed_preview = self.pane_zoom.active.borrow().as_ref().and_then(|zoom| {
+            workspace_preview_texture(&zoom.frame, window_width, window_height)
+                .map(|(texture, _, _)| (zoom.workspace, texture))
+        });
+        self.clear_pane_zoom();
         let entries = {
             let surfaces = self.surfaces.borrow();
             titles
@@ -88,10 +91,16 @@ impl WindowController {
                 .map(|(workspace, name)| WorkspaceOverviewEntry {
                     workspace,
                     name,
-                    texture: surfaces.get(&workspace).and_then(|surface| {
-                        workspace_preview_texture(surface, window_width, window_height)
-                            .map(|(texture, _, _)| texture)
-                    }),
+                    texture: zoomed_preview
+                        .as_ref()
+                        .filter(|(zoomed_workspace, _)| *zoomed_workspace == workspace)
+                        .map(|(_, texture)| texture.clone())
+                        .or_else(|| {
+                            surfaces.get(&workspace).and_then(|surface| {
+                                workspace_preview_texture(surface, window_width, window_height)
+                                    .map(|(texture, _, _)| texture)
+                            })
+                        }),
                 })
                 .collect::<Vec<_>>()
         };
@@ -772,6 +781,13 @@ mod tests {
     use super::*;
     use flowmux_state::State;
 
+    fn texture_bytes(texture: &gtk::gdk::Texture) -> Vec<u8> {
+        let stride = texture.width() as usize * 4;
+        let mut bytes = vec![0; stride * texture.height() as usize];
+        gtk::gdk::prelude::TextureExtManual::download(texture, &mut bytes, stride);
+        bytes
+    }
+
     fn save_overview_snapshot(
         content_overlay: &gtk::Overlay,
         root: &gtk::Overlay,
@@ -926,6 +942,14 @@ mod tests {
         let first = store
             .create_workspace(Some("first".into()), PathBuf::from("/tmp"))
             .await;
+        let first_pane = store.get_workspace(first).await.unwrap().surfaces[0]
+            .root_pane
+            .first_leaf_id()
+            .unwrap();
+        store
+            .split_pane(first_pane, SplitDirection::Vertical)
+            .await
+            .expect("the first workspace should split");
         let second = store
             .create_workspace(Some("second".into()), PathBuf::from("/tmp"))
             .await;
@@ -952,6 +976,20 @@ mod tests {
         controller.activate_workspace(first).await;
         controller.window.present();
         glib::timeout_future(Duration::from_millis(100)).await;
+
+        controller.toggle_pane_zoom(first_pane);
+        glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(100)).await;
+        let zoomed_texture = {
+            let zoom = controller.pane_zoom.active.borrow();
+            let frame = &zoom.as_ref().expect("pane should be zoomed").frame;
+            workspace_preview_texture(
+                frame,
+                controller.content_overlay.width(),
+                controller.content_overlay.height(),
+            )
+            .expect("the zoomed pane should be capturable")
+            .0
+        };
 
         controller
             .dispatch(GtkCommand::ToggleWorkspaceOverview)
@@ -1013,6 +1051,19 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(textures_present, vec![true, true]);
+        let overview_texture = {
+            let active = controller.workspace_overview.active.borrow();
+            active.as_ref().unwrap().cards[0].texture.clone().unwrap()
+        };
+        assert_eq!(
+            texture_bytes(&overview_texture),
+            texture_bytes(&zoomed_texture),
+            "the zoomed pane must remain visible in its overview card"
+        );
+        assert!(
+            controller.pane_zoom.active.borrow().is_none(),
+            "opening overview should leave the workspace unzoomed underneath"
+        );
         assert!(!controller.workspace_overview.transitioning.get());
         assert_eq!(
             gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
