@@ -54,6 +54,12 @@ keyboard.
 
 ![split](resources/screenshot/view_split.gif)
 
+## Overview mode
+
+See every active workspace at a glance and jump directly to the one you need.
+
+![overview mode](resources/screenshot/overview_mode.gif)
+
 ## File and worktree views
 
 Open the **Files** and **Worktrees** sidebars to browse the current repository,
