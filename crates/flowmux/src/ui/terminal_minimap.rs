@@ -73,7 +73,7 @@ impl TerminalMinimap {
             if let Some(source) = self.state.refresh_source.borrow_mut().take() {
                 source.remove();
             }
-            self.state.pixel_rows.borrow_mut().clear();
+            *self.state.pixel_rows.borrow_mut() = Vec::new();
             self.state.preview_offset.set(0);
             self.state.preview_rows.set(0);
             self.area.set_visible(false);
@@ -82,7 +82,9 @@ impl TerminalMinimap {
 
         if let Some(term) = self.terminal.upgrade() {
             sync_visibility(&self.area, &self.state, term.vadjustment().as_ref());
-            refresh_now(&term, &self.area, &self.state);
+            if self.area.is_mapped() {
+                refresh_now(&term, &self.area, &self.state);
+            }
         }
     }
 
@@ -112,7 +114,9 @@ impl TerminalMinimap {
         }
         if let Some(term) = self.terminal.upgrade() {
             sync_visibility(&self.area, &self.state, term.vadjustment().as_ref());
-            refresh_now(&term, &self.area, &self.state);
+            if self.area.is_mapped() {
+                refresh_now(&term, &self.area, &self.state);
+            }
         }
     }
 }
@@ -312,6 +316,25 @@ fn install_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
             }
         });
     }
+    {
+        let term = term.downgrade();
+        let state = state.clone();
+        area.connect_map(move |area| {
+            if let Some(term) = term.upgrade() {
+                refresh_now(&term, area, &state);
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        area.connect_unmap(move |_| {
+            if let Some(source) = state.refresh_source.borrow_mut().take() {
+                source.remove();
+            }
+            *state.pixel_rows.borrow_mut() = Vec::new();
+            state.preview_rows.set(0);
+        });
+    }
 }
 
 fn sync_adjustment(
@@ -374,7 +397,7 @@ fn sync_visibility(
 }
 
 fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<MinimapState>) {
-    if !state.enabled.get() || state.alternate_screen.get() {
+    if !state.enabled.get() || state.alternate_screen.get() || !area.is_mapped() {
         return;
     }
     if let Some(source) = state.refresh_source.borrow_mut().take() {
@@ -701,6 +724,10 @@ mod tests {
         let area = gtk::DrawingArea::new();
         let state = Rc::new(MinimapState::default());
         state.enabled.set(true);
+        let window = gtk::Window::new();
+        window.set_child(Some(&area));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
 
         schedule_refresh(&term, &area, state.clone());
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
@@ -709,6 +736,7 @@ mod tests {
         assert!(state.refresh_source.borrow().is_some());
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
         assert!(state.refresh_source.borrow().is_none());
+        window.close();
     }
 
     #[gtk::test]
@@ -716,12 +744,47 @@ mod tests {
         let term = vte::Terminal::new();
         let adjustment = gtk::Adjustment::new(0.0, -1_000.0, 24.0, 1.0, 24.0, 24.0);
         term.set_property("vadjustment", &adjustment);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
         let minimap = TerminalMinimap::new(&term);
+        overlay.add_overlay(minimap.widget());
         minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
 
         adjustment.set_value(-400.0);
         assert!(minimap.state.refresh_source.borrow().is_some());
         minimap.set_enabled(false);
+        window.close();
+    }
+
+    #[gtk::test]
+    async fn hidden_minimap_defers_work_until_mapped() {
+        let term = vte::Terminal::new();
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+
+        term.feed(b"hidden output\n");
+        gtk::glib::timeout_future(Duration::from_millis(150)).await;
+        assert!(minimap.state.refresh_source.borrow().is_none());
+        assert!(minimap.state.pixel_rows.borrow().is_empty());
+
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+
+        assert!(minimap.widget().is_mapped());
+        assert!(!minimap.state.pixel_rows.borrow().is_empty());
+        window.close();
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        assert!(minimap.state.pixel_rows.borrow().is_empty());
     }
 
     #[gtk::test]

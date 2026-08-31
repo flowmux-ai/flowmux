@@ -651,8 +651,21 @@ impl GhosttyPane {
             let dirty = scrollback_dirty.clone();
             let refresh_throttle = Rc::new(AgentContentRefreshThrottle::default());
             let refresh = callbacks.on_terminal_contents_changed.clone();
-            term.connect_contents_changed(move |_| {
+            let throttle_for_content = refresh_throttle.clone();
+            let refresh_for_content = refresh.clone();
+            term.connect_contents_changed(move |term| {
                 dirty.set(true);
+                // pty-tee reports output for hidden tabs. Scanning here as
+                // well would extract and classify the same VTE grid twice.
+                if term.is_mapped() {
+                    schedule_agent_content_refresh(
+                        throttle_for_content.clone(),
+                        refresh_for_content.clone(),
+                        surface,
+                    );
+                }
+            });
+            term.connect_map(move |_| {
                 schedule_agent_content_refresh(refresh_throttle.clone(), refresh.clone(), surface);
             });
         }
@@ -3518,6 +3531,11 @@ mod tests {
             5_000,
             callbacks,
         );
+        let window = gtk::Window::new();
+        window.set_child(Some(&pane.container));
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert!(pane.widget.is_mapped(), "test terminal must be visible");
         pane.write_input(b"printf 'flowmux-ready\\n'\n").unwrap();
         for _ in 0..20 {
             if pane
@@ -3549,6 +3567,39 @@ mod tests {
             calls.get() > 0,
             "real PTY output must request an Agent content refresh"
         );
+        pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn hidden_terminal_output_skips_duplicate_vte_agent_refresh() {
+        let calls = Rc::new(Cell::new(0));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        callbacks.on_terminal_contents_changed = {
+            let calls = calls.clone();
+            Rc::new(RefCell::new(move |_| calls.set(calls.get() + 1)))
+        };
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sh".into()],
+            None,
+            Vec::new(),
+            5_000,
+            callbacks,
+        );
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        calls.set(0);
+
+        pane.widget.feed(b"codex working\n");
+        gtk::glib::timeout_future(std::time::Duration::from_millis(150)).await;
+
+        assert_eq!(calls.get(), 0, "pty-tee owns hidden terminal refreshes");
+        let window = gtk::Window::new();
+        window.set_child(Some(&pane.container));
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        assert_eq!(calls.get(), 1, "mapping catches up the visible Agent state");
         pane.close_pty();
     }
 
