@@ -3598,7 +3598,12 @@ mod tests {
         let window = gtk::Window::new();
         window.set_child(Some(&pane.container));
         window.present();
-        gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        for _ in 0..20 {
+            if calls.get() > 0 {
+                break;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(50)).await;
+        }
         assert_eq!(calls.get(), 1, "mapping catches up the visible Agent state");
         pane.close_pty();
     }
