@@ -82,6 +82,8 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    #[cfg(target_os = "linux")]
+    install_gtk_wayland_surface_workaround();
     install_memory_efficient_renderer();
 
     let previous_crash = match flowmux_config::diagnostics::take_unreported_crash() {
@@ -426,6 +428,37 @@ fn build_application() -> adw::Application {
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build()
+}
+
+/// GTK 4.12+ can abort when Wayland delivers a frame callback after its surface
+/// was destroyed (GNOME/gtk#5880). Prefer advertised XWayland, while retaining
+/// Wayland as a startup fallback; an explicit `GDK_BACKEND` remains authoritative.
+#[cfg(target_os = "linux")]
+fn install_gtk_wayland_surface_workaround() {
+    let gtk_version = (
+        gtk::major_version(),
+        gtk::minor_version(),
+        gtk::micro_version(),
+    );
+    if needs_x11_workaround(
+        gtk_version,
+        std::env::var_os("GDK_BACKEND").is_some_and(|value| !value.is_empty()),
+        std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()),
+        std::env::var_os("DISPLAY").is_some_and(|value| !value.is_empty()),
+    ) {
+        gtk::gdk::set_allowed_backends("x11,wayland");
+        tracing::warn!("GTK Wayland surface crash workaround requested; preferring X11");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn needs_x11_workaround(
+    gtk_version: (u32, u32, u32),
+    backend_overridden: bool,
+    wayland_available: bool,
+    x11_available: bool,
+) -> bool {
+    matches!(gtk_version, (4, 12.., _)) && !backend_overridden && wayland_available && x11_available
 }
 
 /// macOS keeps several full-window GPU surfaces alive while a terminal repaints.
@@ -779,6 +812,15 @@ mod tests {
              assume this); got flags = {:?}",
             app.flags()
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gtk_wayland_surface_workaround_is_scoped_and_overrideable() {
+        assert!(needs_x11_workaround((4, 12, 0), false, true, true));
+        assert!(!needs_x11_workaround((4, 14, 5), true, true, true));
+        assert!(!needs_x11_workaround((4, 10, 5), false, true, true));
+        assert!(!needs_x11_workaround((4, 14, 5), false, true, false));
     }
 
     #[test]
