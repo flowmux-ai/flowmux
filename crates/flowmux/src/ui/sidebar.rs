@@ -1722,16 +1722,22 @@ fn row_widget(
         }
     });
     let btn_leave = close_btn.clone();
+    let hover_leave = workspace_hover_handler.clone();
     motion.connect_leave(move |motion| {
         btn_leave.set_opacity(0.0);
         btn_leave.set_can_target(false);
-        if let (Some(handler), Some(row)) =
-            (workspace_hover_handler.borrow().clone(), motion.widget())
-        {
+        if let (Some(handler), Some(row)) = (hover_leave.borrow().clone(), motion.widget()) {
             handler(id, &row, false);
         }
     });
     row.add_controller(motion);
+    row.connect_unmap(move |row| {
+        close_btn.set_opacity(0.0);
+        close_btn.set_can_target(false);
+        if let Some(handler) = workspace_hover_handler.borrow().clone() {
+            handler(id, row.upcast_ref(), false);
+        }
+    });
 
     // Right-click context menu. Not a Popover: popup-surface input
     // grabs proved unreliable on X11 hosts (items intermittently dead
@@ -2890,6 +2896,37 @@ mod tests {
         let four = vec!["a".into(), "b".into(), "c".into(), "d-overflow".into()];
         let details = WorkspaceRowDetails::path_only(&four);
         let _ = row_widget(&ws, &details, on_close, bridge, on_hover);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn unmapping_workspace_row_clears_hover() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/flowmux")));
+        let hovered = Rc::new(Cell::new(true));
+        let hovered_for_handler = hovered.clone();
+        let on_hover: WorkspaceHoverHandler = Rc::new(move |_, _, value| {
+            hovered_for_handler.set(value);
+        });
+        let row = row_widget(
+            &ws,
+            &WorkspaceRowDetails::default(),
+            Rc::new(|_| {}),
+            crate::bridge::Bridge::new().0,
+            Rc::new(RefCell::new(Some(on_hover))),
+        );
+        let window = gtk::Window::builder().child(&row.root).build();
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        assert!(row.root.is_mapped());
+
+        window.set_child(gtk::Widget::NONE);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+
+        assert!(!hovered.get(), "unmapped row retained stale hover state");
+        window.close();
     }
 
     #[cfg(not(target_os = "macos"))]
