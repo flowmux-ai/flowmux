@@ -424,6 +424,10 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
         return;
     };
     let columns = term.column_count().max(1) as usize;
+    if state.columns.replace(columns) != columns {
+        // VTE reflows absolute text rows when a split changes the width.
+        state.text_row_offset.set(0);
+    }
     if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
         refresh_visible_screen(term, area, state, columns);
         return;
@@ -440,7 +444,6 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
     state.preview_offset.set(window.offset);
     state.preview_top.set(window.top);
     state.preview_rows.set(window.rows);
-    state.columns.set(columns);
 
     let last_column = columns.saturating_sub(1) as i64;
     // CSI 3 J rebases the adjustment, while VTE text-range rows remain absolute.
@@ -838,15 +841,24 @@ mod tests {
 
         let old_output = "old scrollback\r\n".repeat(600);
         term.feed(old_output.as_bytes());
-        term.feed(b"\x1b[3J");
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        refresh_now(&term, minimap.widget(), &minimap.state);
+        term.feed(b"\x1b[H\x1b[2J\x1b[3J");
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        refresh_now(&term, minimap.widget(), &minimap.state);
         let mut output = String::new();
         for index in 0..1_200 {
             output.push_str(&"x".repeat(index % 60 + 1));
             output.push_str("\r\n");
         }
         term.feed(output.as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(50)).await;
+        refresh_now(&term, minimap.widget(), &minimap.state);
+        assert!(minimap.state.text_row_offset.get() > 0);
+        let old_columns = term.column_count();
         window.set_default_size(400, 600);
         gtk::glib::timeout_future(Duration::from_millis(250)).await;
+        assert!(term.column_count() < old_columns);
         refresh_now(&term, minimap.widget(), &minimap.state);
 
         let nonempty = minimap
