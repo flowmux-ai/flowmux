@@ -89,7 +89,7 @@ pub(crate) fn generic_resume_return_forget_request(
 
 /// Dispatch every `flowmux hooks <op>` invocation. Setup/Doctor/Uninstall
 /// only touch user config files and never need the daemon. The runtime
-/// hook events (Claude/Codex/OpenCode/Cline) talk to the daemon themselves.
+/// hook events (Claude/Codex/OpenCode/Gemini/Cline) talk to the daemon themselves.
 pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyhow::Result<()> {
     use hook_install::HookInstallStatus;
     match op {
@@ -140,6 +140,7 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
         HooksOp::Opencode { event } => {
             run_generic_agent_hook_event("OpenCode", event, socket).await
         }
+        HooksOp::Gemini { event } => run_generic_agent_hook_event("Gemini", event, socket).await,
         HooksOp::Cline { event } => run_generic_agent_hook_event("Cline", event, socket).await,
     }
 }
@@ -223,6 +224,7 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
             HookTarget::Claude => "claude",
             HookTarget::Codex => "codex",
             HookTarget::OpenCode => "opencode",
+            HookTarget::Gemini => "gemini",
             HookTarget::Cline => "cline",
         };
         let entry = hook_install::check(*t);
@@ -444,11 +446,32 @@ pub(crate) async fn run_generic_agent_hook_event(
     use hooks::*;
     let env_pane = pane_from_env();
     let env_surface = surface_from_env();
-    let (cli_pane, cli_surface) = match event {
-        AgentHookEvent::Stop { pane, surface, .. } => (*pane, *surface),
-        AgentHookEvent::Notification { pane, surface, .. } => (*pane, *surface),
-        AgentHookEvent::Running { pane, surface, .. } => (*pane, *surface),
-        AgentHookEvent::SessionStart { pane, surface, .. } => (*pane, *surface),
+    let (cli_pane, cli_surface, args) = match event {
+        AgentHookEvent::Stop {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::Notification {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::Running {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::SessionStart {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::SessionEnd {
+            pane,
+            surface,
+            args,
+        } => (*pane, *surface, args),
     };
     // CLI flags win over env so the OpenCode Flatpak plugin (which
     // passes them explicitly across the sandbox boundary) is the
@@ -462,12 +485,18 @@ pub(crate) async fn run_generic_agent_hook_event(
         AgentHookEvent::SessionStart { .. } => hooks::pid_from_env_or_parent(),
         _ => hooks::pid_from_env(),
     };
+    // Gemini's official hooks deliver JSON on stdin. Codex and the generated
+    // OpenCode plugin pass it as an argument; never probe their attached PTY.
+    let input = if reported_agent.eq_ignore_ascii_case("gemini") {
+        read_claude_hook_input()
+    } else {
+        read_codex_hook_input(args)
+    };
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
     let mut reqs: Vec<_> = Vec::new();
     match event {
-        AgentHookEvent::Stop { args, .. } => {
-            let input = read_codex_hook_input(args);
+        AgentHookEvent::Stop { .. } => {
             if let Some(request) =
                 generic_resume_return_forget_request(&agent, input.reason.as_deref(), surface)
             {
@@ -493,8 +522,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 ));
             }
         }
-        AgentHookEvent::Notification { args, .. } => {
-            let input = read_codex_hook_input(args);
+        AgentHookEvent::Notification { .. } => {
             let msg = normalized_activity_text(input.message.as_deref());
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
             reqs.push(build_activity_update_with_metadata(
@@ -514,8 +542,7 @@ pub(crate) async fn run_generic_agent_hook_event(
                 surface,
             ));
         }
-        AgentHookEvent::Running { args, .. } => {
-            let input = read_codex_hook_input(args);
+        AgentHookEvent::Running { .. } => {
             reqs.push(build_activity_update_with_metadata(
                 &agent,
                 Some(Running),
@@ -530,13 +557,24 @@ pub(crate) async fn run_generic_agent_hook_event(
         // Codex / OpenCode register presence on session start without claiming
         // a turn is idle. The wrapper PID, when available, lets the liveness
         // sweep clear sessions that have no SessionEnd hook.
-        AgentHookEvent::SessionStart { args, .. } => {
-            let input = read_codex_hook_input(args);
+        AgentHookEvent::SessionStart { .. } => {
             reqs.push(build_unknown_activity_update_with_session(
                 &agent,
                 pid,
                 pane,
                 surface,
+                input.session_id.as_deref(),
+            ));
+        }
+        AgentHookEvent::SessionEnd { .. } => {
+            reqs.push(build_activity_update_with_metadata(
+                &agent,
+                None,
+                pid,
+                pane,
+                surface,
+                None,
+                Some("Session ended"),
                 input.session_id.as_deref(),
             ));
         }

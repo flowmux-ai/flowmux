@@ -795,10 +795,22 @@ impl Pane {
                     .as_deref()
                     .is_some_and(|name| existing_agent.is_some_and(|agent| agent.name != name));
                 if source == "flowmux:screen"
+                    && status == AgentStatus::Idle
+                    && !incoming_is_different_agent
+                    && surface.agent.as_ref().is_some_and(|agent| {
+                        agent.source.as_deref() == Some("flowmux:hook")
+                            && matches!(agent.status, AgentStatus::Working | AgentStatus::Blocked)
+                            && agent.screen_working_base.is_none()
+                    })
+                {
+                    return Some(false);
+                }
+                if source == "flowmux:screen"
                     && !incoming_is_different_agent
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.name == "claude"
                             && agent.source.as_deref() == Some("flowmux:hook")
+                            && agent.screen_working_base.is_none()
                             && (status_text.is_none()
                                 || (agent.status != status && status != AgentStatus::Blocked))
                     })
@@ -816,6 +828,18 @@ impl Pane {
                     return Some(true);
                 }
 
+                let screen_base = if source == "flowmux:screen"
+                    && status == AgentStatus::Idle
+                    && !incoming_is_different_agent
+                {
+                    surface
+                        .agent
+                        .as_ref()
+                        .and_then(|agent| agent.screen_working_base)
+                } else {
+                    None
+                };
+                let status = screen_base.map(|(status, _)| status).unwrap_or(status);
                 let name = incoming_name
                     .or_else(|| surface.agent.as_ref().map(|agent| agent.name.clone()))?;
                 let same_status = surface
@@ -841,6 +865,24 @@ impl Pane {
                     Some(agent) => {
                         let before = agent.clone();
                         let accepted = agent.apply_report(report, visible);
+                        if accepted && source == "flowmux:screen" {
+                            if agent.source.as_deref() == Some("flowmux:screen") {
+                                agent.screen_working_base = None;
+                            } else if agent.status == AgentStatus::Working
+                                && before.status != AgentStatus::Working
+                            {
+                                agent
+                                    .screen_working_base
+                                    .get_or_insert((before.status, before.seen));
+                            } else if agent.status != AgentStatus::Working
+                                && before.status == AgentStatus::Working
+                            {
+                                if let Some((AgentStatus::Blocked, seen)) = screen_base {
+                                    agent.seen = seen || visible;
+                                }
+                                agent.screen_working_base = None;
+                            }
+                        }
                         Some(accepted && *agent != before)
                     }
                     None => {
@@ -939,8 +981,9 @@ impl Pane {
     /// Screen scan saw the surface but detected no active status. Clear a
     /// screen-owned presence (screen is the sole owner of what it created), but
     /// for a process-owned presence only settle it back to Idle — the agent is
-    /// still running, it simply finished its turn. Hook-owned presences are
-    /// authoritative and left untouched.
+    /// still running, it simply finished its turn. A stronger owner is restored
+    /// only when the disappearing Working status was screen-derived;
+    /// native lifecycle status remains authoritative.
     pub fn settle_screen_idle(
         &mut self,
         surface_id: SurfaceId,
@@ -960,20 +1003,30 @@ impl Pane {
                         surface.agent = None;
                         Some(true)
                     }
-                    Some(AGENT_SOURCE_PROC) if agent.status != AgentStatus::Idle => {
+                    source => {
+                        let screen_base = agent.screen_working_base.take();
+                        let next = screen_base.map(|(status, _)| status).or_else(|| {
+                            (source == Some(AGENT_SOURCE_PROC) && agent.status != AgentStatus::Idle)
+                                .then_some(AgentStatus::Idle)
+                        });
+                        let Some(next) = next else {
+                            return Some(false);
+                        };
                         let prev = agent.status;
-                        agent.status = AgentStatus::Idle;
-                        agent.activity = AgentActivity::Idle;
+                        agent.status = next;
+                        agent.activity = next.to_activity();
                         agent.message = None;
                         agent.custom_status = None;
-                        if AgentStatus::should_mark_unseen_on_idle(prev, AgentStatus::Idle) {
+                        if next == AgentStatus::Blocked {
+                            agent.seen =
+                                screen_base.is_none_or(|(_, seen)| seen) || surface_visible;
+                        } else if AgentStatus::should_mark_unseen_on_idle(prev, next) {
                             agent.seen = surface_visible;
                         } else if surface_visible {
                             agent.seen = true;
                         }
                         Some(true)
                     }
-                    _ => Some(false),
                 }
             }
             Pane::Leaf { .. } => None,
@@ -2182,7 +2235,7 @@ impl AgentStatus {
 }
 
 /// Live activity state of an AI coding agent (Claude Code, Codex,
-/// OpenCode) running inside a surface. Driven by the agent's lifecycle
+/// OpenCode, Gemini CLI) running inside a surface. Driven by the agent's lifecycle
 /// hooks. Runtime-only — never persisted (see [`PaneSurface::agent`]).
 ///
 /// State machine mirrors cmux: `UserPromptSubmit` → [`Running`], `Stop`
@@ -2481,7 +2534,7 @@ fn reconcile_surface_process_agent(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentPresence {
     /// Agent identity as reported by its hook (`claude`, `codex`,
-    /// `opencode`). Lowercase CLI name.
+    /// `opencode`, `gemini`). Lowercase CLI name.
     pub name: String,
     pub activity: AgentActivity,
     pub status: AgentStatus,
@@ -2491,6 +2544,11 @@ pub struct AgentPresence {
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Lifecycle status hidden by the current screen-derived Working state.
+    /// Internal only: ownership/status provenance must not leak into the IPC
+    /// model or persisted state.
+    #[serde(skip)]
+    screen_working_base: Option<(AgentStatus, bool)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2519,6 +2577,7 @@ impl AgentPresence {
             status: activity.status(),
             pid,
             source: None,
+            screen_working_base: None,
             seq: None,
             message: None,
             custom_status: None,
@@ -2574,6 +2633,7 @@ impl AgentPresence {
                 return false;
             }
         }
+        let from_screen = report.source.as_deref() == Some("flowmux:screen");
         let next = report.effective_status().unwrap_or(self.status);
         let prev = self.status;
         let same_agent = self.name == report.name;
@@ -2635,6 +2695,9 @@ impl AgentPresence {
         if report.messaging_socket.is_some() {
             self.messaging_socket = report.messaging_socket;
         }
+        if !from_screen {
+            self.screen_working_base = None;
+        }
         let needs_acknowledgement = next == AgentStatus::Blocked
             || AgentStatus::should_mark_unseen_on_idle(prev, next)
             || (next == AgentStatus::Idle && prev == AgentStatus::Idle && !self.seen);
@@ -2689,9 +2752,6 @@ pub fn detect_agent_status_from_signals(
     if detect_agent_usage_limit_text(screen_text).is_some() {
         return Some(AgentStatus::Blocked);
     }
-    if recent().any(is_agent_idle_prompt_line) {
-        return Some(AgentStatus::Idle);
-    }
     if recent().any(|line| {
         [
             "do you want to",
@@ -2717,6 +2777,9 @@ pub fn detect_agent_status_from_signals(
     if recent().any(is_agent_working_status_line) {
         return Some(AgentStatus::Working);
     }
+    if recent().any(is_agent_idle_prompt_line) {
+        return Some(AgentStatus::Idle);
+    }
     None
 }
 
@@ -2733,11 +2796,25 @@ fn is_agent_working_status_line(line: &str) -> bool {
     .into_iter()
     .any(|status| {
         strip_ascii_prefix_case_insensitive(line, status).is_some_and(|rest| {
-            rest.trim_start().starts_with('(')
-                || contains_ascii_case_insensitive(rest, "esc to interrupt")
+            contains_ascii_case_insensitive(rest, "esc to interrupt")
                 || contains_ascii_case_insensitive(rest, "ctrl+c to stop")
+                || starts_with_elapsed_duration(rest)
         })
     })
+}
+
+fn starts_with_elapsed_duration(text: &str) -> bool {
+    let Some(token) = text
+        .trim_start()
+        .strip_prefix('(')
+        .and_then(|text| text.split_whitespace().next())
+    else {
+        return false;
+    };
+    let bytes = token.trim_end_matches(')').as_bytes();
+    bytes.len() > 1
+        && matches!(bytes.last().copied(), Some(b's' | b'm' | b'h'))
+        && bytes[..bytes.len() - 1].iter().all(u8::is_ascii_digit)
 }
 
 pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {

@@ -331,6 +331,16 @@ fn section_agents(home: &Path, codex_home: Option<&Path>) -> Section {
             });
         }
     }
+    if let Some(hook) = hook_report
+        .iter()
+        .find(|entry| entry.target == hook_install::HookTarget::Gemini)
+    {
+        entries.push(Entry {
+            name: "gemini hooks".into(),
+            status: hook_status(&hook.status),
+            detail: hook_detail(&hook.status, &hook.paths),
+        });
+    }
     let claude_present = agent_is_installed(agent::Target::ClaudeCode, home, codex_home);
     entries.push(agent_shims_entry());
     entries.push(tmux_shim_entry(claude_present));

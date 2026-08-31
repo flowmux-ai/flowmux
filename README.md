@@ -37,9 +37,9 @@ no separate driver.
 
 ![video](resources/screenshot/video_control_browser.gif)
 
-## AI Agent notification (Claude, Codex, OpenCode)
+## AI Agent notification (Claude, Codex, OpenCode, Gemini)
 
-`flowmux fix` adds lifecycle hooks to Claude Code, Codex, and OpenCode so
+`flowmux fix` adds lifecycle hooks to Claude Code, Codex, OpenCode, and Gemini so
 *task complete*, *needs approval*, and *error* events surface as native
 desktop notifications — routed to the workspace that fired them, suppressed
 while that surface is focused, and isolated per window.
@@ -117,7 +117,7 @@ token and activity totals without interrupting running sessions.
 - **Notifications** — terminal "task complete" / "needs attention" signals
   become desktop notifications, routed to the firing workspace and quiet while
   focused. Bell popover **All Clear** clears all entries and toasts at once.
-- **AI agent integration** — Claude Code, Codex, OpenCode are wired by `flowmux fix`;
+- **AI agent integration** — Claude Code, Codex, OpenCode, and Gemini are wired by `flowmux fix`;
   sessions persist across restarts. `claude-teams` opens a workspace pre-split
   into per-Claude panes. `flowmux doctor` / `fix` audit and repair wiring.
 - **Agent CLI** — scripts and agents drive flowmux over its socket:

@@ -14,6 +14,7 @@
 //! - **Codex CLI**   — top-level `notify` in `~/.codex/config.toml`;
 //!   flowmux-owned entries in the legacy `hooks.json` are removed.
 //! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.mjs`.
+//! - **Gemini CLI**  — `~/.gemini/settings.json` lifecycle hooks.
 //! - **Cline**       — skill only; obsolete file hooks are removed on repair.
 
 use anyhow::{anyhow, Context, Result};
@@ -40,18 +41,24 @@ pub enum HookTarget {
     Claude,
     Codex,
     OpenCode,
+    Gemini,
     Cline,
 }
 
 impl HookTarget {
-    pub const ALL: &'static [HookTarget] =
-        &[HookTarget::Claude, HookTarget::Codex, HookTarget::OpenCode];
+    pub const ALL: &'static [HookTarget] = &[
+        HookTarget::Claude,
+        HookTarget::Codex,
+        HookTarget::OpenCode,
+        HookTarget::Gemini,
+    ];
 
     pub fn slug(self) -> &'static str {
         match self {
             HookTarget::Claude => "claude",
             HookTarget::Codex => "codex",
             HookTarget::OpenCode => "opencode",
+            HookTarget::Gemini => "gemini",
             HookTarget::Cline => "cline",
         }
     }
@@ -119,6 +126,7 @@ pub fn check(target: HookTarget) -> HookCheckEntry {
         HookTarget::Claude => check_claude(),
         HookTarget::Codex => check_codex(),
         HookTarget::OpenCode => check_opencode(),
+        HookTarget::Gemini => check_gemini(),
         HookTarget::Cline => check_cline(),
     }
 }
@@ -298,6 +306,49 @@ fn check_opencode() -> HookCheckEntry {
     entry(HookTarget::OpenCode, status, all_paths)
 }
 
+fn check_gemini() -> HookCheckEntry {
+    let path = match gemini_settings_path() {
+        Some(path) => path,
+        None => return entry(HookTarget::Gemini, HookCheckStatus::NoAgentHome, vec![]),
+    };
+    if !path.parent().is_some_and(|parent| parent.exists()) {
+        return entry(HookTarget::Gemini, HookCheckStatus::NoAgentHome, vec![path]);
+    }
+    if !path.exists() {
+        return entry(HookTarget::Gemini, HookCheckStatus::Missing, vec![path]);
+    }
+    let root = match read_json_or_empty_object(&path) {
+        Ok(root) => root,
+        Err(error) => {
+            return entry(
+                HookTarget::Gemini,
+                HookCheckStatus::Error(error.to_string()),
+                vec![path],
+            )
+        }
+    };
+    let hooks = root.get("hooks").and_then(Value::as_object);
+    let installed = GEMINI_EVENTS
+        .iter()
+        .filter(|event| {
+            hooks
+                .and_then(|hooks| hooks.get(event.name))
+                .and_then(Value::as_array)
+                .is_some_and(|entries| {
+                    entries
+                        .iter()
+                        .any(|entry| gemini_entry_matches(entry, **event))
+                })
+        })
+        .count();
+    let status = match installed {
+        0 => HookCheckStatus::Missing,
+        count if count == GEMINI_EVENTS.len() => HookCheckStatus::Installed,
+        _ => HookCheckStatus::Drift,
+    };
+    entry(HookTarget::Gemini, status, vec![path])
+}
+
 fn entry(target: HookTarget, status: HookCheckStatus, paths: Vec<PathBuf>) -> HookCheckEntry {
     HookCheckEntry {
         target,
@@ -314,6 +365,7 @@ pub fn install(target: HookTarget, flowmux_bin: &str) -> Result<HookInstallRepor
         HookTarget::Claude => install_claude(flowmux_bin),
         HookTarget::Codex => install_codex(flowmux_bin),
         HookTarget::OpenCode => install_opencode(flowmux_bin),
+        HookTarget::Gemini => install_gemini(flowmux_bin),
         HookTarget::Cline => uninstall_cline(),
     }
 }
@@ -325,6 +377,7 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
         HookTarget::Claude => uninstall_claude(),
         HookTarget::Codex => uninstall_codex(),
         HookTarget::OpenCode => uninstall_opencode(),
+        HookTarget::Gemini => uninstall_gemini(),
         HookTarget::Cline => uninstall_cline(),
     }
 }
@@ -336,7 +389,7 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 /// these scripts first. They export `FLOWMUX_AGENT_PID=$$` and the canonical
 /// agent name (read by the hooks), then `exec` the real binary, so they are
 /// otherwise fully transparent.
-pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "cline"];
+pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini", "cline"];
 
 /// Body of a wrapper shim for `agent`. Skips flowmux-managed shims when
 /// resolving the real binary so it never re-execs itself or another copy. The shim
@@ -1502,6 +1555,159 @@ fn opencode_plugin_is_owned(source: &str) -> bool {
     source.contains(FLOWMUX_OPENCODE_PLUGIN_MARKER_PREFIX)
 }
 
+// ---- Gemini CLI ----------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+struct GeminiEvent {
+    name: &'static str,
+    subcommand: &'static str,
+}
+
+const GEMINI_EVENTS: &[GeminiEvent] = &[
+    GeminiEvent {
+        name: "SessionStart",
+        subcommand: "session-start",
+    },
+    GeminiEvent {
+        name: "BeforeAgent",
+        subcommand: "running",
+    },
+    GeminiEvent {
+        name: "AfterAgent",
+        subcommand: "stop",
+    },
+    GeminiEvent {
+        name: "SessionEnd",
+        subcommand: "session-end",
+    },
+    GeminiEvent {
+        name: "Notification",
+        subcommand: "notification",
+    },
+];
+
+fn gemini_settings_path() -> Option<PathBuf> {
+    host_home_dir().map(|home| home.join(".gemini").join("settings.json"))
+}
+
+fn gemini_hook_entry(flowmux_bin: &str, event: GeminiEvent) -> Value {
+    let command = format!(
+        "{} hooks gemini {} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}}  # {}",
+        host_invocation_shell_command(flowmux_bin),
+        event.subcommand,
+        FLOWMUX_HOOK_MARKER,
+    );
+    json!({
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "timeout": 5000,
+        }]
+    })
+}
+
+fn gemini_entry_matches(entry: &Value, event: GeminiEvent) -> bool {
+    entry.get("matcher").and_then(Value::as_str) == Some("")
+        && entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .is_some_and(|hooks| {
+                hooks.iter().any(|hook| {
+                    hook.get("type").and_then(Value::as_str) == Some("command")
+                        && hook
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|command| {
+                                command.contains(FLOWMUX_HOOK_MARKER)
+                                    && command
+                                        .contains(&format!("hooks gemini {}", event.subcommand))
+                            })
+                        && hook.get("timeout").and_then(Value::as_u64) == Some(5000)
+                })
+            })
+}
+
+fn upsert_gemini_hooks(root: &mut Value, flowmux_bin: &str) -> Result<()> {
+    let hooks = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Gemini settings root is not a JSON object"))?
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Gemini hooks field is not a JSON object"))?;
+    for event in GEMINI_EVENTS {
+        let entries = hooks
+            .entry(event.name)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| anyhow!("Gemini hook {} is not an array", event.name))?;
+        prune_gemini_entries(entries);
+        entries.push(gemini_hook_entry(flowmux_bin, *event));
+    }
+    Ok(())
+}
+
+fn prune_gemini_hooks(root: &mut Value) {
+    let Some(hooks) = root
+        .as_object_mut()
+        .and_then(|root| root.get_mut("hooks"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    for event in GEMINI_EVENTS {
+        if let Some(entries) = hooks.get_mut(event.name).and_then(Value::as_array_mut) {
+            prune_gemini_entries(entries);
+        }
+    }
+}
+
+fn prune_gemini_entries(entries: &mut Vec<Value>) {
+    entries.retain_mut(|entry| {
+        let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+        hooks.retain(|hook| {
+            !hook
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| command.contains(FLOWMUX_HOOK_MARKER))
+        });
+        !hooks.is_empty()
+    });
+}
+
+fn install_gemini(flowmux_bin: &str) -> Result<HookInstallReport> {
+    let path = match gemini_settings_path() {
+        Some(path) if path.parent().is_some_and(|parent| parent.exists()) => path,
+        _ => return Ok(skipped(HookTarget::Gemini)),
+    };
+    let mut root = read_json_or_empty_object(&path)?;
+    upsert_gemini_hooks(&mut root, flowmux_bin)?;
+    let changed = write_json(&path, &root)?;
+    Ok(HookInstallReport {
+        target: HookTarget::Gemini,
+        status: HookInstallStatus::Installed,
+        touched_paths: changed.then_some(path).into_iter().collect(),
+    })
+}
+
+fn uninstall_gemini() -> Result<HookInstallReport> {
+    let path = match gemini_settings_path() {
+        Some(path) if path.exists() => path,
+        _ => return Ok(skipped(HookTarget::Gemini)),
+    };
+    let mut root = read_json_or_empty_object(&path)?;
+    prune_gemini_hooks(&mut root);
+    let changed = write_json(&path, &root)?;
+    Ok(HookInstallReport {
+        target: HookTarget::Gemini,
+        status: HookInstallStatus::Installed,
+        touched_paths: changed.then_some(path).into_iter().collect(),
+    })
+}
+
 // ---- shared helpers -------------------------------------------------
 
 fn skipped(target: HookTarget) -> HookInstallReport {
@@ -1515,7 +1721,8 @@ fn skipped(target: HookTarget) -> HookInstallReport {
 fn read_json_or_empty_object(path: &Path) -> Result<Value> {
     match fs::read_to_string(path) {
         Ok(s) if !s.trim().is_empty() => {
-            serde_json::from_str(&s).with_context(|| format!("parse JSON: {}", path.display()))
+            serde_json::from_str(&flowmux_config::cmux_json::strip_jsonc_comments(&s))
+                .with_context(|| format!("parse JSON: {}", path.display()))
         }
         Ok(_) => Ok(json!({})),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
@@ -2168,6 +2375,112 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
 
         assert!(!codex_notify_is_flowmux_owned(&custom["notify"]));
         assert!(codex_notify_is_flowmux_owned(&owned["notify"]));
+    }
+
+    #[test]
+    fn gemini_hook_entries_follow_the_official_schema_and_event_mapping() {
+        let expected = [
+            ("SessionStart", "session-start"),
+            ("BeforeAgent", "running"),
+            ("AfterAgent", "stop"),
+            ("SessionEnd", "session-end"),
+            ("Notification", "notification"),
+        ];
+
+        assert_eq!(GEMINI_EVENTS.len(), expected.len());
+        for (event, (name, subcommand)) in GEMINI_EVENTS.iter().zip(expected) {
+            assert_eq!((event.name, event.subcommand), (name, subcommand));
+            assert_eq!(
+                gemini_hook_entry("flowmux", *event),
+                json!({
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": format!(
+                            "flowmux hooks gemini {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}}  # {FLOWMUX_HOOK_MARKER}"
+                        ),
+                        "timeout": 5000,
+                    }]
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn gemini_upsert_is_idempotent_and_uninstall_preserves_user_settings() {
+        let user_hook = json!({
+            "type": "command",
+            "command": "/usr/local/bin/user-hook",
+            "timeout": 3000,
+        });
+        let grouped_hooks = json!({
+            "matcher": "",
+            "hooks": [user_hook.clone(), {
+                "type": "command",
+                "command": format!("old-flowmux hooks gemini stop # {FLOWMUX_HOOK_MARKER}"),
+                "timeout": 5000,
+            }]
+        });
+        let mut root = json!({
+            "theme": "user-theme",
+            "hooks": { "AfterAgent": [grouped_hooks.clone()] }
+        });
+
+        upsert_gemini_hooks(&mut root, "flowmux").unwrap();
+        upsert_gemini_hooks(&mut root, "flowmux").unwrap();
+
+        assert_eq!(root["theme"], "user-theme");
+        for event in GEMINI_EVENTS {
+            let entries = root["hooks"][event.name].as_array().unwrap();
+            assert_eq!(
+                entries
+                    .iter()
+                    .filter(|entry| claude_entry_is_flowmux_owned(entry))
+                    .count(),
+                1,
+                "duplicate or missing flowmux entry for {}: {entries:?}",
+                event.name
+            );
+            assert!(entries
+                .iter()
+                .any(|entry| gemini_entry_matches(entry, *event)));
+        }
+        assert_eq!(root["hooks"]["AfterAgent"][0]["hooks"], json!([user_hook]));
+
+        prune_gemini_hooks(&mut root);
+        assert_eq!(
+            root["hooks"]["AfterAgent"],
+            json!([{
+                "matcher": "",
+                "hooks": [user_hook],
+            }])
+        );
+        for event in GEMINI_EVENTS
+            .iter()
+            .filter(|event| event.name != "AfterAgent")
+        {
+            assert_eq!(root["hooks"][event.name], json!([]));
+        }
+    }
+
+    #[test]
+    fn hook_settings_accept_jsonc_comments() {
+        let dir = tmp();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+                // Gemini CLI accepts JSONC settings.
+                "theme": "literal // text",
+                /* Preserve all semantic settings. */
+                "hooks": {}
+            }"#,
+        )
+        .unwrap();
+
+        let root = read_json_or_empty_object(&path).unwrap();
+        assert_eq!(root["theme"], "literal // text");
+        assert_eq!(root["hooks"], json!({}));
     }
 
     #[test]

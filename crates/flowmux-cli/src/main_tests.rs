@@ -26,7 +26,7 @@ fn integration_help_matches_current_hook_support() {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(doctor_help.contains("lifecycle hooks (Claude / Codex / OpenCode)"));
+    assert!(doctor_help.contains("lifecycle hooks (Claude / Codex / OpenCode / Gemini)"));
     assert!(!doctor_help.contains("OpenCode / Cline"));
 }
 
@@ -1535,6 +1535,36 @@ fn hooks_codex_stop_inherits_the_same_pane_flag_surface() {
         panic!("expected hooks codex stop variant");
     };
     assert_eq!(got_pane, Some(pane));
+}
+
+#[test]
+fn hooks_gemini_exposes_every_installed_lifecycle_subcommand() {
+    let parse = |subcommand: &str| {
+        let cli = Cli::try_parse_from(["flowmuxctl", "hooks", "gemini", subcommand])
+            .unwrap_or_else(|error| panic!("gemini {subcommand} must parse: {error}"));
+        let Cmd::Hooks {
+            op: HooksOp::Gemini { event },
+        } = cli.cmd
+        else {
+            panic!("expected hooks gemini {subcommand}");
+        };
+        event
+    };
+
+    assert!(matches!(
+        parse("session-start"),
+        AgentHookEvent::SessionStart { .. }
+    ));
+    assert!(matches!(parse("running"), AgentHookEvent::Running { .. }));
+    assert!(matches!(parse("stop"), AgentHookEvent::Stop { .. }));
+    assert!(matches!(
+        parse("session-end"),
+        AgentHookEvent::SessionEnd { .. }
+    ));
+    assert!(matches!(
+        parse("notification"),
+        AgentHookEvent::Notification { .. }
+    ));
 }
 
 #[test]

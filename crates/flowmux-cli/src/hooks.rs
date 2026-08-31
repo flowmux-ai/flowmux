@@ -60,8 +60,9 @@ pub struct ClaudeHookInput {
     pub error: Option<String>,
     /// `Stop` payload sometimes carries the trailing assistant text
     /// (Claude). Codex's `notify` payload calls the same thing
-    /// `last-assistant-message`. We accept both spellings.
-    #[serde(default, alias = "last-assistant-message")]
+    /// `last-assistant-message`; Gemini's `AfterAgent` calls it
+    /// `prompt_response`. We accept all three spellings.
+    #[serde(default, alias = "last-assistant-message", alias = "prompt_response")]
     pub last_assistant_message: Option<String>,
     /// Claude `PreToolUse` tool identifier. The hook deliberately does not
     /// deserialize `tool_input`, which may contain prompts, paths, or commands.
@@ -716,6 +717,58 @@ mod tests {
         assert!(parsed.session_id.is_none());
         assert!(parsed.message.is_none());
         assert!(parsed.last_assistant_message.is_none());
+    }
+
+    #[test]
+    fn read_hook_input_accepts_official_gemini_stdin_payloads() {
+        let before = read_hook_input(std::io::Cursor::new(
+            r#"{
+                "session_id":"gemini-session",
+                "hook_event_name":"BeforeAgent",
+                "prompt":"do not retain this prompt"
+            }"#,
+        ));
+        assert_eq!(before.session_id.as_deref(), Some("gemini-session"));
+
+        let after = read_hook_input(std::io::Cursor::new(
+            r#"{
+                "session_id":"gemini-session",
+                "hook_event_name":"AfterAgent",
+                "prompt_response":"changed two files",
+                "stop_hook_active":false
+            }"#,
+        ));
+        assert_eq!(
+            after.last_assistant_message.as_deref(),
+            Some("changed two files")
+        );
+
+        let notification = read_hook_input(std::io::Cursor::new(
+            r#"{
+                "session_id":"gemini-session",
+                "hook_event_name":"Notification",
+                "notification_type":"ToolPermission",
+                "message":"Approve shell command?",
+                "details":{"tool_name":"run_shell_command"}
+            }"#,
+        ));
+        assert_eq!(
+            notification.notification_type.as_deref(),
+            Some("ToolPermission")
+        );
+        assert_eq!(
+            notification.message.as_deref(),
+            Some("Approve shell command?")
+        );
+
+        let session_end = read_hook_input(std::io::Cursor::new(
+            r#"{
+                "session_id":"gemini-session",
+                "hook_event_name":"SessionEnd",
+                "reason":"exit"
+            }"#,
+        ));
+        assert_eq!(session_end.reason.as_deref(), Some("exit"));
     }
 
     #[test]

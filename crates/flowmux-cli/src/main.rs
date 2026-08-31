@@ -143,7 +143,7 @@ enum Cmd {
     },
 
     /// Friendly helper for AI-agent hooks (Claude Code, OpenCode,
-    /// Codex, Cline). Fires a `TurnCompleted` toast titled with the agent
+    /// Codex, Gemini, Cline). Fires a `TurnCompleted` toast titled with the agent
     /// name so flowmux's bell popover and the OS notification both say
     /// "Claude is ready" without the caller having to spell every flag.
     /// Like `Notify`, falls back to `FLOWMUX_PANE_ID` when `--pane` is
@@ -424,7 +424,7 @@ enum Cmd {
 
     /// Audit every flowmux ↔ host integration in one place: AI-agent
     /// SKILL files, AI-agent lifecycle hooks (Claude / Codex /
-    /// OpenCode), the in-app browser data dir, host browsers visible to
+    /// OpenCode / Gemini), the in-app browser data dir, host browsers visible to
     /// the cookie importer, and the daemon socket. Read-only — use
     /// `flowmux fix` to repair the rows tagged `fix`.
     Doctor,
@@ -432,7 +432,7 @@ enum Cmd {
     /// Re-install / refresh every flowmux-managed integration the
     /// `doctor` would flag. Idempotent: a row that's already correct
     /// is a no-op. Skips agents whose home directory is missing, so
-    /// it's safe to re-run after installing Claude / Codex / OpenCode / Cline
+    /// it's safe to re-run after installing Claude / Codex / OpenCode / Gemini / Cline
     /// for the first time.
     Fix,
 }
@@ -634,7 +634,7 @@ enum HooksOp {
     /// upgrades. Skips agents whose home directory is missing.
     Setup {
         /// Limit installation to specific agents. Omit to do all.
-        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini"])]
         agent: Vec<String>,
         /// Path of the `flowmux` binary that the installed hook
         /// commands should invoke. Defaults to the current `flowmux`
@@ -644,7 +644,7 @@ enum HooksOp {
     },
     /// Remove flowmux's hook entries from every supported agent.
     Uninstall {
-        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini"])]
         agent: Vec<String>,
     },
     /// Print which agent config files flowmux currently owns hook
@@ -669,6 +669,12 @@ enum HooksOp {
     /// OpenCode lifecycle hook handler. Invoked by the OpenCode
     /// `flowmux-session` plugin after `flowmux hooks setup`.
     Opencode {
+        #[command(subcommand)]
+        event: AgentHookEvent,
+    },
+    /// Gemini CLI lifecycle hook handler. Invoked from the official
+    /// `~/.gemini/settings.json` hooks installed by flowmux.
+    Gemini {
         #[command(subcommand)]
         event: AgentHookEvent,
     },
@@ -748,6 +754,15 @@ enum AgentHookEvent {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Session ended; clears this agent's presence.
+    SessionEnd {
+        #[arg(long)]
+        pane: Option<PaneId>,
+        #[arg(long)]
+        surface: Option<SurfaceId>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -809,7 +824,7 @@ async fn main() -> anyhow::Result<()> {
         // is up and from inside `flatpak run` sandboxes.
         Cmd::Identify => return run_identify(cli.json),
         Cmd::Capabilities => return run_capabilities(cli.json),
-        // `Hooks` runtime handlers (Claude / Codex / Opencode events)
+        // `Hooks` runtime handlers (Claude / Codex / OpenCode / Gemini events)
         // talk to the daemon themselves; `Hooks::Setup`, `Uninstall`,
         // and `Doctor` are pure file edits with no daemon round-trip.
         Cmd::Hooks { op } => return run_hooks_op(op, cli.socket.clone()).await,

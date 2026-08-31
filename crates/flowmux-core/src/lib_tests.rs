@@ -2471,10 +2471,76 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
 }
 
 #[test]
-fn idle_screen_prompt_does_not_settle_claude_hook_working_status() {
+fn screen_working_settles_only_when_it_overrode_a_lifecycle_status() {
+    for (name, lifecycle_status) in [
+        ("codex", AgentStatus::Idle),
+        ("opencode", AgentStatus::Idle),
+        ("gemini", AgentStatus::Idle),
+        ("claude", AgentStatus::Working),
+        ("codex", AgentStatus::Working),
+        ("opencode", AgentStatus::Working),
+        ("gemini", AgentStatus::Working),
+    ] {
+        let mut surface = PaneSurface::terminal("agent", None);
+        let surface_id = surface.id;
+        let mut presence = AgentPresence::new(name, lifecycle_status.to_activity(), Some(42));
+        presence.status = lifecycle_status;
+        presence.source = Some("flowmux:hook".into());
+        surface.agent = Some(presence);
+        let mut pane = Pane::Leaf {
+            id: PaneId::new(),
+            content: PaneContent::Tabs {
+                active: surface_id,
+                surfaces: vec![surface],
+            },
+        };
+
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Working,
+            "flowmux:screen",
+            Some(name),
+            Some("Working (1s • esc to interrupt)"),
+            true,
+        );
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Working,
+            "flowmux:screen",
+            Some(name),
+            Some("Working (2s • esc to interrupt)"),
+            true,
+        );
+        if lifecycle_status == AgentStatus::Working {
+            assert_eq!(
+                pane.report_surface_agent_signal(
+                    surface_id,
+                    AgentStatus::Idle,
+                    "flowmux:screen",
+                    Some(name),
+                    None,
+                    true,
+                ),
+                Some(false),
+                "{name}: a composer must not override lifecycle Working"
+            );
+        }
+        assert_eq!(
+            pane.settle_screen_idle(surface_id, true),
+            Some(lifecycle_status == AgentStatus::Idle),
+            "{name}: screen-derived Working should settle, lifecycle Working should not"
+        );
+        let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+        assert_eq!(agent.status, lifecycle_status, "{name}");
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"), "{name}");
+    }
+}
+
+#[test]
+fn screen_idle_restores_hidden_screen_working_as_done() {
     let mut surface = PaneSurface::terminal("agent", None);
     let surface_id = surface.id;
-    let mut presence = AgentPresence::new("claude", AgentActivity::Running, Some(42));
+    let mut presence = AgentPresence::new("opencode", AgentActivity::Idle, Some(42));
     presence.source = Some("flowmux:hook".into());
     surface.agent = Some(presence);
     let mut pane = Pane::Leaf {
@@ -2485,20 +2551,82 @@ fn idle_screen_prompt_does_not_settle_claude_hook_working_status() {
         },
     };
 
+    pane.report_surface_agent_signal(
+        surface_id,
+        AgentStatus::Working,
+        "flowmux:screen",
+        Some("opencode"),
+        None,
+        false,
+    );
     assert_eq!(
         pane.report_surface_agent_signal(
             surface_id,
             AgentStatus::Idle,
             "flowmux:screen",
-            Some("claude"),
+            Some("opencode"),
             None,
-            true,
+            false,
         ),
-        Some(false)
+        Some(true)
     );
-    let agent = pane.agent_presence_for_surface(surface_id).unwrap();
-    assert_eq!(agent.status, AgentStatus::Working);
-    assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+    assert_eq!(pane.agent_status_rollup(), Some(AgentStatus::Done));
+    assert_eq!(pane.settle_screen_idle(surface_id, false), Some(false));
+}
+
+#[test]
+fn screen_working_restores_blocked_acknowledgement_state() {
+    for (seen, final_status, expected_seen) in [
+        (false, None, false),
+        (true, None, true),
+        (false, Some(AgentStatus::Idle), false),
+        (true, Some(AgentStatus::Idle), true),
+        (true, Some(AgentStatus::Blocked), false),
+    ] {
+        let mut surface = PaneSurface::terminal("agent", None);
+        let surface_id = surface.id;
+        let mut presence = AgentPresence::new("gemini", AgentActivity::NeedsInput, Some(42));
+        presence.source = Some("flowmux:hook".into());
+        presence.seen = seen;
+        surface.agent = Some(presence);
+        let mut pane = Pane::Leaf {
+            id: PaneId::new(),
+            content: PaneContent::Tabs {
+                active: surface_id,
+                surfaces: vec![surface],
+            },
+        };
+
+        assert_eq!(
+            pane.report_surface_agent_signal(
+                surface_id,
+                AgentStatus::Working,
+                "flowmux:screen",
+                Some("gemini"),
+                Some("Working (1s)"),
+                false,
+            ),
+            Some(true)
+        );
+        if let Some(final_status) = final_status {
+            assert_eq!(
+                pane.report_surface_agent_signal(
+                    surface_id,
+                    final_status,
+                    "flowmux:screen",
+                    Some("gemini"),
+                    None,
+                    false,
+                ),
+                Some(true)
+            );
+        } else {
+            assert_eq!(pane.settle_screen_idle(surface_id, false), Some(true));
+        }
+        let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+        assert_eq!(agent.status, AgentStatus::Blocked);
+        assert_eq!(agent.seen, expected_seen);
+    }
 }
 
 #[test]
@@ -2832,6 +2960,13 @@ fn detector_reads_strong_osc_and_screen_signals() {
         Some(AgentStatus::Idle)
     );
     assert_eq!(
+        detect_agent_status_from_signals(
+            Some("• Working (1s • esc to interrupt)\n» Ready for another task"),
+            Some("scratchpad"),
+        ),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
         detect_agent_status_from_signals(Some("why is the working status stale?"), None),
         None
     );
@@ -2839,6 +2974,37 @@ fn detector_reads_strong_osc_and_screen_signals() {
         detect_agent_status_from_signals(None, Some("working-notes")),
         None
     );
+}
+
+#[test]
+fn detector_prefers_working_signals_over_persistent_composers() {
+    for screen in [
+        "✶ Processing… (1s · esc to interrupt)\n❯",
+        "• Working (1s • esc to interrupt)\n» Ask Codex to do anything",
+        "• Working (1s • esc to interrupt)\nAsk anything...",
+        "• Working (1s • esc to interrupt)\n> Type your message or @path/to/file",
+        "Thinking (12s)\nAsk anything...",
+    ] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(screen), None),
+            Some(AgentStatus::Working),
+            "{screen}"
+        );
+    }
+}
+
+#[test]
+fn detector_ignores_completion_text_that_only_looks_like_progress() {
+    for screen in [
+        "Processing (10/10)\nAsk anything...",
+        "Working (draft complete)\nAsk anything...",
+    ] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(screen), None),
+            Some(AgentStatus::Idle),
+            "{screen}"
+        );
+    }
 }
 
 #[test]

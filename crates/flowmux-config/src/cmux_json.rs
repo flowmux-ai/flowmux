@@ -78,7 +78,7 @@ pub fn parse_str(text: &str) -> Result<CmuxJson, LoadError> {
     Ok(serde_json::from_str(&strip_jsonc_comments(text))?)
 }
 
-fn strip_jsonc_comments(input: &str) -> String {
+pub fn strip_jsonc_comments(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     let mut in_string = false;

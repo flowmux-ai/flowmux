@@ -3274,7 +3274,7 @@ Do you want to continue?";
     }
 
     #[tokio::test]
-    async fn screen_clear_does_not_remove_matching_hook_presence() {
+    async fn screen_clear_restores_hook_status_after_screen_working_signal() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -3313,14 +3313,14 @@ Do you want to continue?";
             store
                 .report_agent_screen_signals(surface, Some("$ echo shell ready"), Some("demo"))
                 .await,
-            None
+            Some((ws_id, Some(AgentStatus::Idle)))
         );
 
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         let agent = tree[0].panes[0].tabs[0].agent.as_ref().unwrap();
         assert_eq!(agent.name, "codex");
-        assert_eq!(agent.status, AgentStatus::Working);
+        assert_eq!(agent.status, AgentStatus::Idle);
         assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
         assert_eq!(
             store.live_agent_presences().await,
