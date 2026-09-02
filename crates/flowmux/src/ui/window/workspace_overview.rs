@@ -788,6 +788,18 @@ mod tests {
         bytes
     }
 
+    #[cfg(not(target_os = "macos"))]
+    async fn wait_for_overview_transition(controller: &WindowController) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while controller.workspace_overview.transitioning.get() {
+            assert!(
+                Instant::now() < deadline,
+                "workspace overview transition timed out"
+            );
+            glib::timeout_future(Duration::from_millis(5)).await;
+        }
+    }
+
     fn save_overview_snapshot(
         content_overlay: &gtk::Overlay,
         root: &gtk::Overlay,
@@ -1004,7 +1016,7 @@ mod tests {
             controller.workspace_overview.transitioning.get(),
             animations_enabled
         );
-        glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(150)).await;
+        wait_for_overview_transition(&controller).await;
 
         let (ids, active_classes, tooltips, textures_present, buttons, root) = {
             let active = controller.workspace_overview.active.borrow();
@@ -1142,7 +1154,7 @@ mod tests {
                 Some(WORKSPACE_OVERVIEW_WINDOW_TITLE)
             );
         }
-        glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(200)).await;
+        wait_for_overview_transition(&controller).await;
         assert!(!controller.workspace_overview.is_active());
         assert_eq!(store.snapshot().await.active_workspace, Some(second));
         assert_eq!(controller.sidebar.selected_workspace(), Some(second));
@@ -1160,7 +1172,7 @@ mod tests {
         controller
             .dispatch(GtkCommand::ToggleWorkspaceOverview)
             .await;
-        glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(150)).await;
+        wait_for_overview_transition(&controller).await;
         assert!(controller.workspace_overview.is_active());
         controller.dispatch(GtkCommand::RefreshWindowTitle).await;
         assert!(
