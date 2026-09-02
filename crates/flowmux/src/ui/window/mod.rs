@@ -8399,12 +8399,25 @@ mod tests {
                 .is_some_and(|text| text.contains("Working (0s")),
             "hidden terminal text must be readable before refreshing Agent state"
         );
-        // Seed process truth only after VTE has consumed the fixture. The
-        // controller's real 2s process poll runs during GTK tests and would
-        // correctly remove an earlier fake presence because no Codex child is
-        // actually running under this test terminal.
+        // Use a live PID-backed hook presence so the controller's real 2s
+        // process poll cannot race this fixture and remove it.
         store
-            .reconcile_process_agents(&[(background_surface, Some("codex"))])
+            .report_agent_status(
+                background_surface,
+                flowmux_core::AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(flowmux_core::AgentStatus::Idle),
+                    activity: Some(flowmux_core::AgentActivity::Idle),
+                    pid: Some(std::process::id()),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: None,
+                    session_id: Some("ui-test-session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+            )
             .await;
         assert_eq!(
             store.workspace_agent_status(background_workspace).await,

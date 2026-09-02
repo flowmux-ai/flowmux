@@ -3333,24 +3333,72 @@ Do you want to continue?";
     }
 
     #[tokio::test]
-    async fn interrupted_claude_turn_settles_immediately_without_a_stop_hook() {
+    async fn claude_lifecycle_tracks_stop_interrupt_restart_and_session_end() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
             .await;
         let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
-        let mut working = AgentStatusReport::from_activity(
-            "claude",
-            Some(flowmux_core::AgentActivity::Running),
-            Some(42),
+        let session_id = "claude-session";
+        let report =
+            |activity: flowmux_core::AgentActivity, seq, custom_status: &str| AgentStatusReport {
+                name: "claude".into(),
+                status: Some(activity.status()),
+                activity: Some(activity),
+                pid: Some(std::process::id()),
+                source: Some("flowmux:hook".into()),
+                seq: Some(seq),
+                message: None,
+                custom_status: Some(custom_status.into()),
+                session_id: Some(session_id.into()),
+                session_name: None,
+                messaging_socket: None,
+            };
+
+        store
+            .report_agent_status(
+                surface,
+                report(flowmux_core::AgentActivity::Idle, 1, "Ready"),
+            )
+            .await;
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle),
+            "SessionStart must register Claude as idle"
         );
-        working.source = Some("flowmux:hook".into());
-        working.custom_status = Some("Working".into());
 
         assert_eq!(
-            store.report_agent_status(surface, working.clone()).await,
-            Some((ws_id, Some(AgentStatus::Working)))
+            store
+                .report_agent_status(
+                    surface,
+                    report(flowmux_core::AgentActivity::Running, 2, "Starting turn",),
+                )
+                .await,
+            Some((ws_id, Some(AgentStatus::Working))),
+            "PromptSubmit must mark Claude working"
         );
+        assert!(
+            store
+                .reconcile_process_agents(&[(surface, None)])
+                .await
+                .is_empty(),
+            "process polling must not remove a PID-backed hook presence"
+        );
+
+        store
+            .report_agent_status(
+                surface,
+                report(flowmux_core::AgentActivity::Idle, 3, "Completed"),
+            )
+            .await;
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle),
+            "Stop must settle Claude to idle"
+        );
+
+        let working = report(flowmux_core::AgentActivity::Running, 4, "Starting turn");
+        store.report_agent_status(surface, working).await;
         let interrupted_screen = "⎿ Interrupted · What should Claude do instead?\n❯";
         assert_eq!(
             store
@@ -3367,7 +3415,12 @@ Do you want to continue?";
         assert_eq!(interrupted.custom_status.as_deref(), Some("Interrupted"));
         assert_eq!(interrupted.source.as_deref(), Some("flowmux:hook"));
 
-        store.report_agent_status(surface, working).await;
+        store
+            .report_agent_status(
+                surface,
+                report(flowmux_core::AgentActivity::Running, 5, "Starting turn"),
+            )
+            .await;
         assert_eq!(
             store
                 .report_agent_screen_signals(
@@ -3388,6 +3441,15 @@ Do you want to continue?";
                 .status,
             AgentStatus::Working
         );
+
+        assert!(
+            store
+                .end_agent_session(surface, "claude", Some(6), Some(session_id))
+                .await
+                .is_some(),
+            "SessionEnd must remove the current Claude session"
+        );
+        assert!(store.located_agent_presence(surface).await.is_none());
     }
 
     #[tokio::test]
