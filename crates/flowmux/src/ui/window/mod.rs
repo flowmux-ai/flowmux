@@ -869,7 +869,8 @@ fn show_workspace_preview(
     preview.set_visible(false);
     picture.set_paintable(gtk::gdk::Paintable::NONE);
     shown_workspace.set(None);
-    if workspace_preview_row_is_selected(&row)
+    if !workspace_preview_row_is_hovered(&row)
+        || workspace_preview_row_is_selected(&row)
         || stack.visible_child().as_ref() == Some(&surface)
         || !refresh_workspace_preview(&preview, &picture, &frame, &overlay, &row, &surface)
     {
@@ -880,6 +881,7 @@ fn show_workspace_preview(
     let refreshing_for_timeout = refreshing.clone();
     let source = glib::timeout_add_local(WORKSPACE_PREVIEW_REFRESH, move || {
         if shown_workspace.get() != Some(workspace)
+            || !workspace_preview_row_is_hovered(&row)
             || workspace_preview_row_is_selected(&row)
             || stack.visible_child().as_ref() == Some(&surface)
         {
@@ -895,6 +897,10 @@ fn show_workspace_preview(
         glib::ControlFlow::Continue
     });
     refreshing.replace(Some(source));
+}
+
+fn workspace_preview_row_is_hovered(row: &gtk::Widget) -> bool {
+    row.state_flags().contains(gtk::StateFlags::PRELIGHT)
 }
 
 fn workspace_preview_row_is_selected(row: &gtk::Widget) -> bool {
@@ -3816,19 +3822,28 @@ mod tests {
         assert!(picture.paintable().is_none());
         assert!(refreshing.borrow().is_none());
 
+        let show_second_preview = || {
+            show_workspace_preview(
+                preview.clone(),
+                picture.clone(),
+                frame.clone(),
+                overlay.clone(),
+                stack.clone(),
+                refreshing.clone(),
+                shown_workspace.clone(),
+                second_workspace,
+                second_row.clone().upcast(),
+                second_surface.clone().upcast(),
+            );
+        };
         stack.set_visible_child(&first_surface);
-        show_workspace_preview(
-            preview.clone(),
-            picture.clone(),
-            frame.clone(),
-            overlay.clone(),
-            stack.clone(),
-            refreshing.clone(),
-            shown_workspace.clone(),
-            second_workspace,
-            second_row.clone().upcast(),
-            second_surface.clone().upcast(),
-        );
+        show_second_preview();
+        assert!(!preview.is_visible());
+        assert!(picture.paintable().is_none());
+        assert!(refreshing.borrow().is_none());
+
+        second_row.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+        show_second_preview();
         assert!(preview.is_visible());
         assert_eq!(shown_workspace.get(), Some(second_workspace));
         let texture = picture
@@ -3855,6 +3870,16 @@ mod tests {
         let mut after = vec![0; stride * texture.height() as usize];
         gtk::gdk::prelude::TextureExtManual::download(&texture, &mut after, stride);
         assert_ne!(before, after);
+
+        second_row.unset_state_flags(gtk::StateFlags::PRELIGHT);
+        gtk::glib::timeout_future(WORKSPACE_PREVIEW_REFRESH + Duration::from_millis(50)).await;
+        assert!(!preview.is_visible());
+        assert!(picture.paintable().is_none());
+        assert!(refreshing.borrow().is_none());
+
+        second_row.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+        show_second_preview();
+        assert!(preview.is_visible());
 
         list.select_row(Some(&second_list_row));
         stack.set_visible_child(&second_surface);
