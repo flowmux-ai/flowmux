@@ -89,12 +89,12 @@ Bar에만 배치하면 Agent가 종료된 후 작업 내역을 다시 열 수 �
 
 | 표시 상태 | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Session started | SessionStart hook + wrapper shim | wrapper shim | wrapper shim |
-| Turn started | UserPromptSubmit | 없음 | `session.status`(busy) |
-| Working (tool) | PreToolUse | 없음 | 없음 |
-| Waiting for input | Notification | Phase 0에서 확인 | `permission.asked`, `session.error` |
-| Turn completed | Stop | `notify`(agent-turn-complete) | `session.idle` |
-| Session ended | SessionEnd hook | PID sweep | PID sweep |
+| Session started | SessionStart | SessionStart | `session.created` |
+| Turn started | UserPromptSubmit | UserPromptSubmit | `session.status`(busy) |
+| Working (tool) | PreToolUse, PostToolUse/Failure, PostToolBatch | PreToolUse, PostToolUse, SubagentStart/Stop | `session.status`(busy) |
+| Waiting for input | PermissionRequest, input tools, selected Notification, StopFailure | PermissionRequest | `permission.asked`, `session.error` |
+| Turn completed | Stop | Stop; Interrupt는 알림 없는 종료 | `session.status`(idle) |
+| Session ended | SessionEnd | SessionEnd | PID sweep |
 
 이 표에서 나오는 결론:
 
@@ -104,16 +104,40 @@ Bar에만 배치하면 Agent가 종료된 후 작업 내역을 다시 열 수 �
   error를 Waiting for input과 같은 attention 상태로 표시하고 summary
   텍스트로 구분한다. 별도 Error 상태는 `AgentStatus` enum, rollup,
   직렬화까지 건드리는 큰 변경이므로 실사용 요구가 확인된 뒤로 미룬다.
-- `Session ended`는 Claude만 hook으로 알 수 있다. Codex/OpenCode는
-  daemon의 PID liveness sweep이 presence를 제거하는 시점을 session
-  종료로 기록한다.
-- Codex에는 신뢰할 수 있는 hook 기반 turn 시작 신호가 없다. `NOW`는
-  기존 screen heuristic이 spinner/title을 감지하면 `Working`으로
-  보완할 수 있지만, 이 추정 신호는 `RECENT`에는 기록하지 않는다.
+- `Stop`은 turn 완료이고 `SessionEnd`는 실제 session 종료다. 둘을 같은
+  이벤트로 접지 않는다. Claude Stop에 background task/session cron이
+  남아 있으면 완료로 바꾸지 않고 pending work로 유지한다.
+- Codex는 현재 공식 `hooks.json`의 lifecycle 이벤트를 사용한다. 예전
+  `config.toml`의 `notify`는 turn 완료만 전달하므로 FlowMux가 직접 소유한
+  legacy notify만 migration 때 제거한다.
+- hook이 없거나 신뢰되지 않은 경우 process sweep은 identity/liveness를,
+  screen heuristic은 activity를 보완한다. 이 추정 신호가 hook이 보고한
+  agent identity를 덮어쓰면 안 된다.
+- Claude PermissionRequest에는 `tool_use_id`가 없다. 따라서 model-call의
+  permission wait는 batch marker로 유지하고, 모든 병렬 tool이 끝난 뒤 한 번
+  오는 PostToolBatch에서만 해제한다. AskUserQuestion/ExitPlanMode처럼
+  `tool_use_id`가 실제로 있는 input tool wait만 개별 연결한다. sandbox
+  network prompt처럼 PermissionRequest가 생략되는 경우 Notification을 보조
+  신호로 유지한다.
+- Codex root Stop에는 background 목록이 없다. 같은 session에서 관측된
+  SubagentStart/Stop을 daemon runtime ledger에 기록하고, active child가 남은
+  root Stop은 완료 알림 없이 Working으로 유지한다. root/child `turn_id`는
+  서로 다르므로 session 전체 child 집합을 기준으로 판단한다. 단,
+  PermissionRequest에는 call identity나 resolution 이벤트가 없으므로 root /
+  child turn scope로 보수적으로 유지하며 PostToolUse로 추정 해제하지 않는다.
+  재사용 child의 후속 turn은 SubagentStart가 다시 오지 않을 수 있고 다른
+  handler가 Stop/SubagentStop을 차단할 수도 있으므로, 이 ledger는 관측 범위의
+  보수적 근사이지 전체 background 작업의 진실이 아니다. Stop 직후 child
+  spawn과 hook 전달 순서에도 공식 upper bound가 없어 짧은 ingress grace는
+  흔한 race를 줄일 뿐 완전한 증명이 아니다. 두 제품 모두 모든 handler가
+  stop을 받아들였다는 사후 이벤트를 제공하지 않는다. Codex의
+  `stop_hook_active`는 이전 중지 시도가 차단되었다는 신호로만 사용해 같은
+  turn을 중복 알림 없이 다시 정산하며, 현재 재시도가 승인되었다는 증거로는
+  취급하지 않는다.
 
-tool 이름은 Claude PreToolUse payload의 `tool_name`에서만 얻을 수
-있다. 현재 `ClaudeHookInput`은 이 필드를 파싱하지 않으므로 serde 필드
-추가가 필요하다. `tool_input`은 파싱하지 않는다(개인정보 경계).
+tool 이름은 Claude PreToolUse payload의 `tool_name`에서만 표시한다.
+`ClaudeHookInput`은 이 필드만 파싱하고 `tool_input`은 파싱하지 않는다
+(개인정보 경계).
 정보가 없으면 추측하지 않고 공통 상태로 fallback한다.
 
 ## 5. 화면 구성
@@ -327,12 +351,13 @@ Git 변경은 동시에 사용자나 다른 Agent가 만들 수 있으므로 MVP
 예상: 1일
 
 이벤트 wiring 자체는 코드에서 이미 확인되어 4절 표로 정리했다. Phase
-0은 wiring 조사가 아니라 **실제 payload 내용 검증**이다. Claude Code,
-Codex, OpenCode hook payload fixture를 확보하고 다음을 정리한다.
+0은 wiring 조사가 아니라 **실제 payload 내용 재검증**이다. Claude Code,
+Codex, OpenCode hook payload fixture를 버전별로 유지하고 다음을 확인한다.
 
-- Codex `notify`가 approval 요청 이벤트를 전달하는지 (버전별 확인 —
-  4절 표의 유일한 미확인 칸)
+- Codex PermissionRequest 이후 제공되지 않는 resolution identity와
+  root/child turn boundary 순서
 - Claude PreToolUse payload의 `tool_name` 값 형태와 안전한 표시 범위
+- Claude Stop의 `background_tasks` / `session_crons` 배열
 - 완료 메시지(`last_assistant_message`) 품질과 길이 분포
 - session ID와 surface 연결 정확도
 - 민감 정보 포함 여부
@@ -362,9 +387,12 @@ Codex/OpenCode는 4절 커버리지 표의 이벤트만 발생하므로, generic
 |---|---|
 | SessionStart | Ready |
 | PromptSubmit | Starting turn |
-| PreToolUse | Working 또는 안전한 tool 이름 (NOW에만 반영) |
-| Notification | Waiting for input |
-| Stop | Completed: `<summary>` |
+| PreToolUse | Working, 또는 사용자 입력 tool이면 Waiting for input |
+| PermissionRequest | Waiting for approval |
+| PostToolUse / Failure / PermissionDenied | input tool의 같은 `tool_use_id` wait만 해제; batch permission marker는 유지 |
+| PostToolBatch | batch permission marker 해제; 다른 session/input wait가 남으면 Blocked 유지 |
+| 선택된 Notification | Waiting for input |
+| Stop | Completed: `<summary>`; Claude pending work 또는 Codex active child가 있으면 Working 유지 |
 | SessionEnd | Session ended |
 
 작업:
@@ -437,8 +465,8 @@ Agent Bar 자체의 높이와 구조는 변경하지 않는다.
 1. 서로 다른 workspace에서 Agent 3개 실행
 2. Agent가 장시간 작업
 3. background tab에서 승인 요청
-4. 완료 후 Agent 프로세스 종료 (Claude는 SessionEnd hook,
-   Codex/OpenCode는 PID sweep 경로 각각 확인)
+4. 완료 후 Agent 프로세스 종료 (Claude/Codex는 SessionEnd hook,
+   OpenCode는 PID sweep 경로 확인)
 5. 완료된 Agent 기록 다시 열기
 6. 같은 상태가 hook과 screen 텍스트 스캔에서 중복 관측
 7. 오래된 이벤트가 늦게 도착

@@ -353,14 +353,41 @@ fn child_pids(pid: u32) -> Vec<u32> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_TREE_NODE_CAP: usize = 512;
 
-/// Detect which AI coding agent, if any, is running anywhere in the process
-/// tree rooted at `root` (inclusive). The pane's root PID is the pty-tee /
-/// shell wrapper; the real agent (e.g. `codex`, `claude`) is a descendant, so
-/// the whole subtree's `comm` values are checked. Returns the canonical agent
-/// name from [`KNOWN_AGENT_COMMS`]. This is the process-truth source for Agent
-/// Bar presence: independent of the agent's TUI text, OSC title, or hooks, so
-/// it detects idle agents that emit no recognizable screen signal (notably
-/// Codex, whose title is `<spinner> <cwd>`).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AgentTreeMatch {
+    name: &'static str,
+    pid: u32,
+    depth: usize,
+}
+
+/// Rank process matches from the pane's innermost agent to its outermost
+/// agent. A lower PID breaks same-depth ties so a stable process tree always
+/// produces the same result. Repeated instances of one agent collapse to one
+/// canonical name; callers only need to know whether an identity appears
+/// anywhere in the tree.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rank_agent_tree_matches(mut matches: Vec<AgentTreeMatch>) -> Vec<&'static str> {
+    matches.sort_unstable_by(|left, right| {
+        right
+            .depth
+            .cmp(&left.depth)
+            .then_with(|| left.pid.cmp(&right.pid))
+            .then_with(|| left.name.cmp(right.name))
+    });
+
+    let mut seen = HashSet::new();
+    matches
+        .into_iter()
+        .filter_map(|candidate| seen.insert(candidate.name).then_some(candidate.name))
+        .collect()
+}
+
+/// Detect every AI coding agent running in the process tree rooted at `root`
+/// (inclusive). Names are unique and ordered deepest-first; a lower PID breaks
+/// same-depth ties. Returning all identities lets lifecycle reconciliation
+/// preserve a hook-confirmed nested agent even while its parent agent remains
+/// alive in the same pane.
 ///
 /// Cost: walks only `root`'s own subtree (typically 2–6 processes) via the
 /// kernel `children` file, so a poll's cost is proportional to the pane's
@@ -368,50 +395,93 @@ const AGENT_TREE_NODE_CAP: usize = 512;
 /// multiplied when several panes are polled. Falls back to a full `/proc`
 /// parent-map scan only on kernels without `CONFIG_PROC_CHILDREN`.
 #[cfg(target_os = "linux")]
-pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
+pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
     if read_children(root).is_none() {
         // Feature unavailable: one full scan, matching the old behaviour.
-        let mut pids: Vec<u32> = descendants(root).ok()?.into_iter().collect();
+        let Ok(descendants) = descendants(root) else {
+            return Vec::new();
+        };
+        let mut pids: Vec<u32> = descendants.into_iter().collect();
         pids.sort_unstable();
-        return pids.iter().copied().find_map(agent_name_for_pid);
+        let matches = pids
+            .into_iter()
+            .filter_map(|pid| {
+                let name = agent_name_for_pid(pid)?;
+                let depth = process_depth_from_root(root, pid)?;
+                Some(AgentTreeMatch { name, pid, depth })
+            })
+            .collect();
+        return rank_agent_tree_matches(matches);
     }
-    let mut stack = vec![root];
+    let mut stack = vec![(root, 0)];
     let mut seen = HashSet::new();
-    while let Some(pid) = stack.pop() {
+    let mut matches = Vec::new();
+    while let Some((pid, depth)) = stack.pop() {
         if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
             continue;
         }
         if let Some(name) = agent_name_for_pid(pid) {
-            return Some(name);
+            matches.push(AgentTreeMatch { name, pid, depth });
         }
-        stack.extend(read_children(pid).unwrap_or_default());
+        let mut children = read_children(pid).unwrap_or_default();
+        children.sort_unstable_by(|left, right| right.cmp(left));
+        stack.extend(children.into_iter().map(|child| (child, depth + 1)));
     }
-    None
+    rank_agent_tree_matches(matches)
 }
 
 #[cfg(target_os = "macos")]
-pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
-    let mut stack = vec![root];
+pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
+    let mut stack = vec![(root, 0)];
     let mut seen = HashSet::new();
-    while let Some(pid) = stack.pop() {
+    let mut matches = Vec::new();
+    while let Some((pid, depth)) = stack.pop() {
         if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
             continue;
         }
         if let Some(name) = agent_name_for_pid(pid) {
-            return Some(name);
+            matches.push(AgentTreeMatch { name, pid, depth });
         }
-        stack.extend(child_pids(pid));
+        let mut children = child_pids(pid);
+        children.sort_unstable_by(|left, right| right.cmp(left));
+        stack.extend(children.into_iter().map(|child| (child, depth + 1)));
     }
-    None
+    rank_agent_tree_matches(matches)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
-    descendants(root)
-        .ok()?
+pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
+    let Ok(descendants) = descendants(root) else {
+        return Vec::new();
+    };
+    let mut names: Vec<_> = descendants
         .into_iter()
         .filter_map(comm_of)
-        .find_map(|comm| match_agent_comm(&comm))
+        .filter_map(|comm| match_agent_comm(&comm))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Detect the preferred process-derived agent identity in `root`'s subtree.
+/// This compatibility helper returns the deepest candidate from
+/// [`agent_names_in_tree`]. Callers reconciling an existing hook identity
+/// should use the full candidate list instead.
+pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
+    agent_names_in_tree(root).into_iter().next()
+}
+
+#[cfg(target_os = "linux")]
+fn process_depth_from_root(root: u32, pid: u32) -> Option<usize> {
+    let mut current = pid;
+    for depth in 0..=AGENT_TREE_NODE_CAP {
+        if current == root {
+            return Some(depth);
+        }
+        current = read_ppid(current)?;
+    }
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -531,6 +601,35 @@ mod tests {
         assert_eq!(match_agent_comm("node"), None);
         assert_eq!(match_agent_comm("bash"), None);
         assert_eq!(match_agent_comm("python"), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn agent_tree_candidates_prefer_deepest_then_stable_pid_and_dedupe() {
+        let ranked = rank_agent_tree_matches(vec![
+            AgentTreeMatch {
+                name: "claude",
+                pid: 20,
+                depth: 1,
+            },
+            AgentTreeMatch {
+                name: "codex",
+                pid: 40,
+                depth: 2,
+            },
+            AgentTreeMatch {
+                name: "aider",
+                pid: 35,
+                depth: 2,
+            },
+            AgentTreeMatch {
+                name: "codex",
+                pid: 50,
+                depth: 3,
+            },
+        ]);
+
+        assert_eq!(ranked, ["codex", "aider", "claude"]);
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

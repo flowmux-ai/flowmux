@@ -15,8 +15,7 @@ fn integration_help_matches_current_hook_support() {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(hooks_help.contains("Codex's `notify` command"));
-    assert!(!hooks_help.contains("hooks.json"));
+    assert!(hooks_help.contains("Codex's `hooks.json`"));
 
     let mut command = Cli::command();
     let doctor = command.find_subcommand_mut("doctor").unwrap();
@@ -1346,6 +1345,36 @@ fn notify_complete_handles_empty_agent_string_without_panic() {
 // These tests pin the clap surface that path depends on.
 
 #[test]
+fn hooks_claude_post_tool_batch_accepts_explicit_context() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "hooks",
+        "claude",
+        "post-tool-batch",
+        "--pane",
+        &pane.to_string(),
+        "--surface",
+        &surface.to_string(),
+    ])
+    .expect("Claude hook context flags must parse after the subcommand");
+    let Cmd::Hooks {
+        op:
+            HooksOp::Claude {
+                pane: got_pane,
+                surface: got_surface,
+                event: ClaudeHookEvent::PostToolBatch,
+            },
+    } = cli.cmd
+    else {
+        panic!("expected hooks claude post-tool-batch variant");
+    };
+    assert_eq!(got_pane, Some(pane));
+    assert_eq!(got_surface, Some(surface));
+}
+
+#[test]
 fn hooks_opencode_stop_accepts_pane_and_surface_flags() {
     let pane = PaneId::new();
     let surface = SurfaceId::new();
@@ -1512,9 +1541,8 @@ fn hooks_opencode_stop_with_no_flags_parses_empty() {
 
 #[test]
 fn hooks_codex_stop_inherits_the_same_pane_flag_surface() {
-    // AgentHookEvent is shared with Codex's `notify` config path;
-    // the parser surface must be symmetric so a future Codex-side
-    // sandbox forwarding patch can reuse the same flag.
+    // AgentHookEvent is shared with Codex's native hook path, which
+    // forwards explicit context across a sandbox boundary.
     let pane = PaneId::new();
     let cli = Cli::try_parse_from([
         "flowmuxctl",
@@ -1535,6 +1563,52 @@ fn hooks_codex_stop_inherits_the_same_pane_flag_surface() {
         panic!("expected hooks codex stop variant");
     };
     assert_eq!(got_pane, Some(pane));
+}
+
+#[test]
+fn hooks_codex_exposes_every_installed_lifecycle_subcommand() {
+    let parse = |subcommand: &str| {
+        let cli = Cli::try_parse_from(["flowmuxctl", "hooks", "codex", subcommand])
+            .unwrap_or_else(|error| panic!("codex {subcommand} must parse: {error}"));
+        let Cmd::Hooks {
+            op: HooksOp::Codex { event },
+        } = cli.cmd
+        else {
+            panic!("expected hooks codex {subcommand}");
+        };
+        event
+    };
+
+    assert!(matches!(
+        parse("session-start"),
+        AgentHookEvent::SessionStart { .. }
+    ));
+    assert!(matches!(parse("running"), AgentHookEvent::Running { .. }));
+    assert!(matches!(
+        parse("turn-start"),
+        AgentHookEvent::TurnStart { .. }
+    ));
+    assert!(matches!(
+        parse("subagent-start"),
+        AgentHookEvent::SubagentStart { .. }
+    ));
+    assert!(matches!(
+        parse("subagent-stop"),
+        AgentHookEvent::SubagentStop { .. }
+    ));
+    assert!(matches!(
+        parse("notification"),
+        AgentHookEvent::Notification { .. }
+    ));
+    assert!(matches!(parse("stop"), AgentHookEvent::Stop { .. }));
+    assert!(matches!(
+        parse("interrupt"),
+        AgentHookEvent::Interrupt { .. }
+    ));
+    assert!(matches!(
+        parse("session-end"),
+        AgentHookEvent::SessionEnd { .. }
+    ));
 }
 
 #[test]
@@ -1637,21 +1711,247 @@ fn claude_session_end_only_forgets_deliberate_termination() {
 }
 
 #[test]
-fn hook_agent_identity_prefers_wrapper_then_process_truth() {
+fn claude_notification_toasts_match_attention_and_informational_semantics() {
+    use crate::cmd_hooks::build_claude_notification_toast;
+
+    for (notification_type, expected_title) in [
+        ("quota_auto_resume_fired", "Claude resumed"),
+        ("quota_auto_resume_disabled", "Claude auto-resume stopped"),
+        ("agent_completed", "Claude background agent finished"),
+    ] {
+        assert!(matches!(
+            build_claude_notification_toast(
+                "Claude",
+                Some(notification_type),
+                Some("details"),
+                None,
+                None,
+            ),
+            Some(Request::Notify {
+                title,
+                body,
+                level: NotificationLevel::Info,
+                ..
+            }) if title == expected_title && body == "details"
+        ));
+    }
+
+    assert!(matches!(
+        build_claude_notification_toast(
+            "Claude",
+            Some("agent_needs_input"),
+            Some("answer needed"),
+            None,
+            None,
+        ),
+        Some(Request::Notify {
+            title,
+            body,
+            level: NotificationLevel::NeedsInput,
+            ..
+        }) if title == "Claude needs your input" && body == "answer needed"
+    ));
+}
+
+#[test]
+fn hook_agent_identity_prefers_native_route_over_inherited_wrapper_env() {
     use crate::cmd_hooks::select_hook_agent_name;
 
     assert_eq!(
         select_hook_agent_name("claude", Some("codex"), Some("claude")),
-        "codex"
+        "claude"
     );
     assert_eq!(
         select_hook_agent_name("claude", None, Some("codex")),
-        "codex"
+        "claude"
     );
     assert_eq!(
         select_hook_agent_name("OpenCode", Some("unknown"), None),
         "opencode"
     );
+}
+
+#[tokio::test]
+async fn codex_child_prompt_reactivates_the_observed_child_turn() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("flowmux.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read, mut write) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(read);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+        assert!(matches!(
+            envelope.payload,
+            Payload::Request(Request::AgentLifecycleUpdate {
+                surface: got_surface,
+                agent,
+                session_id,
+                lifecycle: AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id,
+                    turn_id,
+                },
+                ..
+            }) if got_surface == surface
+                && agent == "codex"
+                && session_id == "session-1"
+                && agent_id == "child-1"
+                && turn_id == "child-turn-2"
+        ));
+        let response = Envelope {
+            id: envelope.id,
+            payload: Payload::Response(Response::Ok),
+        };
+        let mut encoded = serde_json::to_string(&response).unwrap();
+        encoded.push('\n');
+        write.write_all(encoded.as_bytes()).await.unwrap();
+    });
+
+    run_generic_agent_hook_event(
+        "Codex",
+        &AgentHookEvent::TurnStart {
+            pane: Some(pane),
+            surface: Some(surface),
+            args: vec![
+                r#"{"session_id":"session-1","agent_id":"child-1","turn_id":"child-turn-2"}"#
+                    .into(),
+            ],
+        },
+        Some(socket),
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn codex_child_tool_progress_keeps_child_identity() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("flowmux.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read, mut write) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(read);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+        assert!(matches!(
+            envelope.payload,
+            Payload::Request(Request::AgentLifecycleUpdate {
+                surface: got_surface,
+                agent,
+                session_id,
+                lifecycle: AgentLifecycleEvent::CodexChildProgressObserved {
+                    agent_id,
+                    turn_id,
+                },
+                ..
+            }) if got_surface == surface
+                && agent == "codex"
+                && session_id == "session-1"
+                && agent_id == "child-1"
+                && turn_id == "child-turn-1"
+        ));
+        let response = Envelope {
+            id: envelope.id,
+            payload: Payload::Response(Response::Ok),
+        };
+        let mut encoded = serde_json::to_string(&response).unwrap();
+        encoded.push('\n');
+        write.write_all(encoded.as_bytes()).await.unwrap();
+    });
+
+    run_generic_agent_hook_event(
+        "Codex",
+        &AgentHookEvent::Running {
+            pane: Some(pane),
+            surface: Some(surface),
+            args: vec![
+                r#"{"session_id":"session-1","agent_id":"child-1","turn_id":"child-turn-1","tool_use_id":"call-1"}"#
+                    .into(),
+            ],
+        },
+        Some(socket),
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn codex_root_tool_progress_keeps_root_turn_identity() {
+    use crate::cmd_hooks::run_generic_agent_hook_event;
+    use flowmux_ipc::protocol::{AgentLifecycleEvent, Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("flowmux.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (read, mut write) = stream.into_split();
+        let mut reader = tokio::io::BufReader::new(read);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let envelope: Envelope = serde_json::from_str(line.trim_end()).unwrap();
+        assert!(matches!(
+            envelope.payload,
+            Payload::Request(Request::AgentLifecycleUpdate {
+                surface: got_surface,
+                agent,
+                session_id,
+                lifecycle: AgentLifecycleEvent::CodexRootProgressObserved {
+                    turn_id,
+                    status_text,
+                },
+                ..
+            }) if got_surface == surface
+                && agent == "codex"
+                && session_id == "session-1"
+                && turn_id == "root-turn-2"
+                && status_text == "Working"
+        ));
+        let response = Envelope {
+            id: envelope.id,
+            payload: Payload::Response(Response::Ok),
+        };
+        let mut encoded = serde_json::to_string(&response).unwrap();
+        encoded.push('\n');
+        write.write_all(encoded.as_bytes()).await.unwrap();
+    });
+
+    run_generic_agent_hook_event(
+        "Codex",
+        &AgentHookEvent::Running {
+            pane: Some(pane),
+            surface: Some(surface),
+            args: vec![r#"{"session_id":"session-1","turn_id":"root-turn-2"}"#.into()],
+        },
+        Some(socket),
+    )
+    .await
+    .unwrap();
+    server.await.unwrap();
 }
 
 #[test]

@@ -1580,6 +1580,99 @@ fn agent_presence_ignores_stale_seq() {
 }
 
 #[test]
+fn repeated_session_start_does_not_regress_active_hook_lifecycle() {
+    let mut presence = AgentPresence::new("codex", AgentActivity::Running, Some(7));
+    presence.source = Some("flowmux:hook".into());
+    presence.seq = Some(20);
+    presence.custom_status = Some("Running tool".into());
+    presence.session_id = Some("session-1".into());
+
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "codex".into(),
+            status: Some(AgentStatus::Unknown),
+            activity: None,
+            pid: Some(7),
+            source: Some("flowmux:hook".into()),
+            seq: Some(21),
+            message: None,
+            custom_status: Some("Ready".into()),
+            session_id: None,
+            session_name: None,
+            messaging_socket: None,
+        },
+        true,
+    ));
+
+    assert_eq!(presence.status, AgentStatus::Working);
+    assert_eq!(presence.custom_status.as_deref(), Some("Running tool"));
+    assert_eq!(presence.seq, Some(21));
+    assert_eq!(presence.session_id.as_deref(), Some("session-1"));
+}
+
+#[test]
+fn native_session_start_resets_completed_same_session_to_ready() {
+    let mut presence = AgentPresence::new("codex", AgentActivity::Idle, Some(7));
+    presence.source = Some("flowmux:hook".into());
+    presence.seq = Some(20);
+    presence.seen = false;
+    presence.custom_status = Some("Completed".into());
+    presence.session_id = Some("session-1".into());
+
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "codex".into(),
+            status: Some(AgentStatus::Unknown),
+            activity: None,
+            pid: Some(7),
+            source: Some("flowmux:hook".into()),
+            seq: Some(21),
+            message: None,
+            custom_status: Some("Ready".into()),
+            session_id: Some("session-1".into()),
+            session_name: None,
+            messaging_socket: None,
+        },
+        false,
+    ));
+
+    assert_eq!(presence.public_status(), AgentStatus::Unknown);
+    assert_eq!(presence.custom_status.as_deref(), Some("Ready"));
+    assert!(presence.seen);
+}
+
+#[test]
+fn native_session_start_resets_blocked_same_session_to_ready() {
+    let mut presence = AgentPresence::new("claude", AgentActivity::NeedsInput, Some(7));
+    presence.source = Some("flowmux:hook".into());
+    presence.seq = Some(20);
+    presence.seen = false;
+    presence.custom_status = Some("Waiting for approval".into());
+    presence.session_id = Some("session-1".into());
+
+    assert!(presence.apply_report(
+        AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Unknown),
+            activity: None,
+            pid: Some(7),
+            source: Some("flowmux:hook".into()),
+            seq: Some(21),
+            message: None,
+            custom_status: Some("Ready".into()),
+            session_id: Some("session-1".into()),
+            session_name: None,
+            messaging_socket: None,
+        },
+        false,
+    ));
+
+    assert_eq!(presence.public_status(), AgentStatus::Unknown);
+    assert_eq!(presence.custom_status.as_deref(), Some("Ready"));
+    assert!(presence.seen);
+}
+
+#[test]
 fn apply_report_screen_scan_keeps_proc_owned_identity() {
     // Regression: a `claude` pane whose scrollback mentions another agent
     // (e.g. an AI chat *about* `cline`) must not be relabeled. Process truth
@@ -1803,8 +1896,8 @@ fn agent_presence_keeps_messaging_metadata_until_the_session_changes() {
 }
 
 #[test]
-fn hook_report_uses_opencode_name_when_surface_title_has_oc_prefix() {
-    let surface = PaneSurface::terminal("OC | greeting", None);
+fn hook_report_identity_wins_over_stale_surface_title() {
+    let surface = PaneSurface::terminal("Claude", None);
     let surface_id = surface.id;
     let mut pane = Pane::Leaf {
         id: PaneId::new(),
@@ -1818,7 +1911,7 @@ fn hook_report_uses_opencode_name_when_surface_title_has_oc_prefix() {
         pane.report_surface_agent(
             surface_id,
             AgentStatusReport {
-                name: "claude".into(),
+                name: "codex".into(),
                 status: Some(AgentStatus::Idle),
                 activity: Some(AgentActivity::Idle),
                 pid: None,
@@ -1826,7 +1919,7 @@ fn hook_report_uses_opencode_name_when_surface_title_has_oc_prefix() {
                 seq: Some(1),
                 message: None,
                 custom_status: None,
-                session_id: Some("ses-opencode".into()),
+                session_id: Some("ses-codex".into()),
                 session_name: None,
                 messaging_socket: None,
             },
@@ -1842,7 +1935,7 @@ fn hook_report_uses_opencode_name_when_surface_title_has_oc_prefix() {
         panic!("expected leaf pane");
     };
     let agent = surfaces[0].agent.as_ref().unwrap();
-    assert_eq!(agent.name, "opencode");
+    assert_eq!(agent.name, "codex");
     assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
 }
 
@@ -2411,6 +2504,76 @@ fn reconcile_follows_agent_swap_for_proc_owned_presence() {
 }
 
 #[test]
+fn reconcile_process_identity_replaces_stale_hook_session() {
+    let mut p = AgentPresence::new("claude", AgentActivity::Running, Some(42));
+    p.source = Some("flowmux:hook".into());
+    p.seq = Some(99);
+    p.message = Some("old turn".into());
+    p.custom_status = Some("Working".into());
+    p.session_id = Some("old-session".into());
+    p.session_name = Some("old-name".into());
+    p.messaging_socket = Some("/tmp/old.sock".into());
+    p.seen = false;
+    let mut slot = Some(p);
+
+    assert!(reconcile_surface_process_agent(&mut slot, Some("codex")));
+    let agent = slot.as_ref().unwrap();
+    assert_eq!(agent.name, "codex");
+    assert_eq!(agent.status, AgentStatus::Idle);
+    assert_eq!(agent.source.as_deref(), Some(AGENT_SOURCE_PROC));
+    assert_eq!(agent.pid, None);
+    assert_eq!(agent.seq, None);
+    assert_eq!(agent.message, None);
+    assert_eq!(agent.custom_status, None);
+    assert_eq!(agent.session_id, None);
+    assert_eq!(agent.session_name, None);
+    assert_eq!(agent.messaging_socket, None);
+    assert!(agent.seen);
+}
+
+#[test]
+fn reconcile_same_process_identity_preserves_hook_lifecycle() {
+    let mut p = AgentPresence::new("claude", AgentActivity::NeedsInput, Some(42));
+    p.source = Some("flowmux:hook".into());
+    p.session_id = Some("session-1".into());
+    let mut slot = Some(p.clone());
+
+    assert!(!reconcile_surface_process_agent(&mut slot, Some("claude")));
+    assert_eq!(slot, Some(p));
+}
+
+#[test]
+fn process_candidates_preserve_matching_nested_hook_identity() {
+    let mut presence = AgentPresence::new("codex", AgentActivity::NeedsInput, None);
+    presence.source = Some("flowmux:hook".into());
+    presence.session_id = Some("codex-session".into());
+    let original = presence.clone();
+    let mut slot = Some(presence);
+
+    // Even if an outer Claude process was enumerated first, the native Codex
+    // hook remains authoritative because Codex is also alive in the subtree.
+    let detected = select_process_agent_candidate(slot.as_ref(), &["claude", "codex"]);
+    assert_eq!(detected, Some("codex"));
+    assert!(!reconcile_surface_process_agent(&mut slot, detected));
+    assert_eq!(slot, Some(original));
+}
+
+#[test]
+fn process_candidates_choose_deepest_without_hook_identity() {
+    let candidates = ["codex", "claude"];
+    let detected = select_process_agent_candidate(None, &candidates);
+    assert_eq!(detected, Some("codex"));
+
+    let mut slot = None;
+    assert!(reconcile_surface_process_agent(&mut slot, detected));
+    assert_eq!(slot.as_ref().unwrap().name, "codex");
+    assert_eq!(
+        slot.as_ref().unwrap().source.as_deref(),
+        Some(AGENT_SOURCE_PROC)
+    );
+}
+
+#[test]
 fn reconcile_reclaims_screen_owned_presence_mislabeled_by_scrollback() {
     // A screen scan mislabeled a pane because its scrollback *mentioned*
     // another agent; the process sweep reclaims the true identity.
@@ -2799,7 +2962,7 @@ fn screen_fallback_does_not_take_ownership_from_matching_hook_presence() {
 }
 
 #[test]
-fn screen_fallback_replaces_stale_claude_name_when_agent_signal_differs() {
+fn screen_signal_cannot_replace_hook_owned_identity() {
     for detected_agent in ["codex", "opencode", "cline"] {
         let mut surface = PaneSurface::terminal("agent", None);
         let surface_id = surface.id;
@@ -2824,8 +2987,8 @@ fn screen_fallback_replaces_stale_claude_name_when_agent_signal_differs() {
                 None,
                 true,
             ),
-            Some(true),
-            "{detected_agent} should replace stale claude presence"
+            Some(false),
+            "{detected_agent} screen state is ambiguous against hook identity"
         );
         let Pane::Leaf {
             content: PaneContent::Tabs { surfaces, .. },
@@ -2835,14 +2998,48 @@ fn screen_fallback_replaces_stale_claude_name_when_agent_signal_differs() {
             panic!("expected leaf pane");
         };
         let agent = surfaces[0].agent.as_ref().unwrap();
-        assert_eq!(agent.name, detected_agent);
-        assert_eq!(agent.status, AgentStatus::Blocked);
-        assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+        assert_eq!(agent.name, "claude");
+        assert_eq!(agent.status, AgentStatus::Idle);
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
     }
 }
 
 #[test]
-fn screen_fallback_uses_opencode_title_before_claude_screen_text() {
+fn mismatched_screen_idle_cannot_create_a_sticky_false_completion() {
+    let mut surface = PaneSurface::terminal("agent", None);
+    let surface_id = surface.id;
+    let mut presence = AgentPresence::new("claude", AgentActivity::Running, Some(42));
+    presence.source = Some("flowmux:hook".into());
+    presence.seq = Some(1);
+    surface.agent = Some(presence);
+    let mut pane = Pane::Leaf {
+        id: PaneId::new(),
+        content: PaneContent::Tabs {
+            active: surface_id,
+            surfaces: vec![surface],
+        },
+    };
+
+    assert_eq!(
+        pane.report_surface_agent_signal(
+            surface_id,
+            AgentStatus::Idle,
+            "flowmux:screen",
+            Some("codex"),
+            Some("Codex idle"),
+            false,
+        ),
+        Some(false)
+    );
+    let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+    assert_eq!(agent.name, "claude");
+    assert_eq!(agent.status, AgentStatus::Working);
+    assert_eq!(agent.public_status(), AgentStatus::Working);
+    assert_eq!(pane.settle_screen_idle(surface_id, false), Some(false));
+}
+
+#[test]
+fn screen_title_cannot_rename_hook_owned_claude_presence() {
     let mut surface = PaneSurface::terminal("OC | greeting", None);
     let surface_id = surface.id;
     let mut presence = AgentPresence::new("claude", AgentActivity::Idle, None);
@@ -2866,7 +3063,7 @@ fn screen_fallback_uses_opencode_title_before_claude_screen_text() {
             None,
             true,
         ),
-        Some(true)
+        Some(false)
     );
     let Pane::Leaf {
         content: PaneContent::Tabs { surfaces, .. },
@@ -2876,9 +3073,9 @@ fn screen_fallback_uses_opencode_title_before_claude_screen_text() {
         panic!("expected leaf pane");
     };
     let agent = surfaces[0].agent.as_ref().unwrap();
-    assert_eq!(agent.name, "opencode");
-    assert_eq!(agent.status, AgentStatus::Blocked);
-    assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+    assert_eq!(agent.name, "claude");
+    assert_eq!(agent.status, AgentStatus::Idle);
+    assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
 }
 
 #[test]
@@ -2969,6 +3166,20 @@ fn detector_reads_strong_osc_and_screen_signals() {
     assert_eq!(
         detect_agent_status_from_signals(Some("why is the working status stale?"), None),
         None
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(
+            Some("Do you want to continue?\n• Working (1s • esc to interrupt)"),
+            None,
+        ),
+        Some(AgentStatus::Working)
+    );
+    assert_eq!(
+        detect_agent_status_from_signals(
+            Some("• Working (1s • esc to interrupt)\nDo you want to continue?"),
+            None,
+        ),
+        Some(AgentStatus::Blocked)
     );
     assert_eq!(
         detect_agent_status_from_signals(None, Some("working-notes")),

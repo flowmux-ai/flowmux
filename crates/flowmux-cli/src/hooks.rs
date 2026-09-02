@@ -3,8 +3,8 @@
 //! OpenCode, and Codex CLI when an agent crosses a lifecycle boundary
 //! (Stop / Notification / SessionStart / …).
 //!
-//! Each handler reads a small JSON payload from stdin (the agent's hook
-//! input format), distills it into a one-line summary, and forwards it
+//! Each handler reads a small JSON payload from the agent's hook input,
+//! distills it into a one-line summary, and forwards it
 //! to the daemon via `Request::Notify`. The daemon's GTK side then
 //! shows the system toast and adds it to the bell popover with click
 //! routing back to the originating pane.
@@ -16,9 +16,10 @@
 use flowmux_core::{AgentActivity, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{
     client::Client,
-    protocol::{Request, Response},
+    protocol::{AgentLifecycleEvent, Request, Response},
 };
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::de::{IgnoredAny, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -43,6 +44,8 @@ pub struct ClaudeHookInput {
         alias = "taskId"
     )]
     pub session_id: Option<String>,
+    #[serde(default, alias = "turn-id")]
+    pub turn_id: Option<String>,
     /// Claude `SessionEnd` reason. Intentional exits such as Ctrl+C at the
     /// prompt use `prompt_input_exit`; the non-specific `other` reason remains
     /// resumable so an ambiguous teardown cannot discard recovery state.
@@ -59,7 +62,7 @@ pub struct ClaudeHookInput {
     #[serde(default)]
     pub error: Option<String>,
     /// `Stop` payload sometimes carries the trailing assistant text
-    /// (Claude). Codex's `notify` payload calls the same thing
+    /// (Claude). Legacy Codex `notify` payloads called the same thing
     /// `last-assistant-message`; Gemini's `AfterAgent` calls it
     /// `prompt_response`. We accept all three spellings.
     #[serde(default, alias = "last-assistant-message", alias = "prompt_response")]
@@ -68,11 +71,68 @@ pub struct ClaudeHookInput {
     /// deserialize `tool_input`, which may contain prompts, paths, or commands.
     #[serde(default)]
     pub tool_name: Option<String>,
+    /// Stable tool-call identity present on pre/post events (but notably not
+    /// on Claude or Codex `PermissionRequest`).
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+    /// Codex child-thread identity carried by SubagentStart/SubagentStop.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Claude/Codex permission mode. Only the bypass mode needs a PreToolUse
+    /// fallback toast because it skips the normal PermissionRequest event.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    /// True when a Stop hook is running again because an earlier Stop handler
+    /// blocked completion and forced the same turn to continue.
+    #[serde(default)]
+    pub stop_hook_active: bool,
+    /// Claude Stop includes tasks that can wake the same turn again. Consume
+    /// these arrays without materializing their potentially sensitive values;
+    /// FlowMux retains only whether each array was empty.
+    #[serde(default, deserialize_with = "deserialize_nonempty_array")]
+    pub background_tasks: bool,
+    #[serde(default, deserialize_with = "deserialize_nonempty_array")]
+    pub session_crons: bool,
 }
 
-/// Read up to 1 MiB of JSON from stdin and parse as a hook payload.
-/// Empty stdin / parse failures degrade to a default payload so the
-/// user still gets a generic toast even when the hook glue is broken.
+impl ClaudeHookInput {
+    pub fn has_pending_work(&self) -> bool {
+        self.background_tasks || self.session_crons
+    }
+}
+
+fn deserialize_nonempty_array<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct NonEmptyArrayVisitor;
+
+    impl<'de> Visitor<'de> for NonEmptyArrayVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an array")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut nonempty = false;
+            while sequence.next_element::<IgnoredAny>()?.is_some() {
+                nonempty = true;
+            }
+            Ok(nonempty)
+        }
+    }
+
+    deserializer.deserialize_seq(NonEmptyArrayVisitor)
+}
+
+/// Stream JSON from stdin and retain only the small fields FlowMux uses.
+/// This matters for Claude `PostToolBatch`, whose ignored tool responses may
+/// be much larger than a fixed read cap. Empty stdin / parse failures degrade
+/// to a default payload so the user still gets a generic toast.
 pub fn read_claude_hook_input() -> ClaudeHookInput {
     let stdin = std::io::stdin();
     if stdin.is_terminal() {
@@ -82,29 +142,52 @@ pub fn read_claude_hook_input() -> ClaudeHookInput {
 }
 
 fn read_hook_input<R: Read>(reader: R) -> ClaudeHookInput {
-    let mut buf = String::new();
-    let _ = reader.take(1024 * 1024).read_to_string(&mut buf);
-    parse_hook_payload(&buf).unwrap_or_default()
+    parse_agent_hook_reader(reader).unwrap_or_default()
 }
 
-fn parse_hook_payload<T: DeserializeOwned>(payload: &str) -> Option<T> {
+fn parse_agent_hook_payload(payload: &str) -> Option<ClaudeHookInput> {
+    if payload.trim().is_empty() {
+        return None;
+    }
+    parse_agent_hook_reader(payload.as_bytes())
+}
+
+fn parse_agent_hook_reader<R: Read>(reader: R) -> Option<ClaudeHookInput> {
+    serde_json::from_reader(reader).ok()
+}
+
+#[cfg(test)]
+fn parse_hook_payload<T: serde::de::DeserializeOwned>(payload: &str) -> Option<T> {
     if payload.trim().is_empty() {
         return None;
     }
     serde_json::from_str(payload).ok()
 }
 
-/// Codex's `notify` config spawns the program with the JSON event
-/// payload as the LAST positional argument. Do not fall back to stdin:
-/// Codex can invoke `notify` with the terminal attached, and blocking
-/// on that PTY makes Codex report "timeout waiting for child process to exit".
+/// Native Codex hooks pass JSON on stdin. The last positional argument remains
+/// supported while an in-flight legacy `notify` invocation finishes upgrading.
+/// Never read an attached terminal: old notify children inherited the PTY and
+/// would otherwise wait forever for EOF.
 pub fn read_codex_hook_input(extra_args: &[String]) -> ClaudeHookInput {
-    if let Some(payload) = extra_args.last() {
-        if let Some(parsed) = parse_hook_payload(payload) {
-            return parsed;
-        }
+    if let Some(parsed) = parse_codex_hook_arg(extra_args) {
+        return parsed;
     }
-    ClaudeHookInput::default()
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return ClaudeHookInput::default();
+    }
+    read_hook_input(stdin.lock())
+}
+
+fn parse_codex_hook_arg(extra_args: &[String]) -> Option<ClaudeHookInput> {
+    extra_args
+        .last()
+        .and_then(|payload| parse_agent_hook_payload(payload))
+}
+
+#[cfg(test)]
+fn read_codex_hook_input_from<R: Read>(extra_args: &[String], reader: R) -> ClaudeHookInput {
+    parse_codex_hook_arg(extra_args).unwrap_or_else(|| read_hook_input(reader))
 }
 
 /// Resolve `FLOWMUX_PANE_ID` from the env (set by `flowmux` at PTY
@@ -136,10 +219,23 @@ pub fn pid_from_env() -> Option<u32> {
 }
 
 /// Resolve a PID for initial session registration. Prefer the wrapper shim's
-/// `FLOWMUX_AGENT_PID`; when shell startup bypassed the shim, fall back to this
-/// hook process's parent PID. This fallback is only safe for SessionStart.
+/// `FLOWMUX_AGENT_PID`; when shell startup bypassed the shim, use this hook
+/// process's direct parent only when process inspection positively identifies
+/// it as an agent. Native hook runners commonly insert a short-lived shell as
+/// the direct parent; recording that PID would tombstone the real session as
+/// soon as the hook command exits.
 pub fn pid_from_env_or_parent() -> Option<u32> {
-    pid_from_env_var().or_else(|| surface_from_env().and_then(|_| parent_process_pid()))
+    pid_from_env_var().or_else(|| {
+        surface_from_env().and_then(|_| {
+            let parent = parent_process_pid();
+            let agent = parent.and_then(flowmux_procmon::agent_name_for_pid);
+            identified_agent_parent_pid(parent, agent)
+        })
+    })
+}
+
+fn identified_agent_parent_pid(parent: Option<u32>, agent: Option<&str>) -> Option<u32> {
+    agent.and(parent)
 }
 
 fn pid_from_env_var() -> Option<u32> {
@@ -259,6 +355,26 @@ pub fn build_activity_update_with_metadata(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn build_agent_lifecycle_update(
+    agent: &str,
+    pid: Option<u32>,
+    pane: Option<PaneId>,
+    surface: SurfaceId,
+    session_id: &str,
+    lifecycle: AgentLifecycleEvent,
+) -> Request {
+    Request::AgentLifecycleUpdate {
+        pane,
+        surface,
+        agent: agent.to_ascii_lowercase(),
+        pid,
+        seq: hook_seq(),
+        session_id: session_id.to_string(),
+        lifecycle,
+    }
+}
+
 /// Trim a body string down to a single notification-friendly line.
 pub fn shorten_body(s: &str, max: usize) -> String {
     let one_line: String = s
@@ -296,6 +412,12 @@ pub fn tool_activity_text(tool_name: Option<&str>) -> String {
         return "Working".into();
     };
     format!("Using {tool_name}")
+}
+
+pub fn claude_tool_needs_input(tool_name: Option<&str>) -> bool {
+    tool_name.is_some_and(|name| {
+        name.eq_ignore_ascii_case("AskUserQuestion") || name.eq_ignore_ascii_case("ExitPlanMode")
+    })
 }
 
 /// Build a `Request::Notify` for an agent stop event.
@@ -514,6 +636,34 @@ mod tests {
     }
 
     #[test]
+    fn codex_permission_input_has_no_stable_call_identity() {
+        let permission = read_hook_input(
+            r#"{
+                "hook_event_name":"PermissionRequest",
+                "tool_name":"Bash",
+                "tool_input":{"description":"build","command":"cargo test"}
+            }"#
+            .as_bytes(),
+        );
+        assert!(permission.tool_use_id.is_none());
+        assert_eq!(permission.tool_name.as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn post_tool_batch_streams_past_large_ignored_tool_responses() {
+        let response = "x".repeat(1024 * 1024 + 64);
+        let payload = format!(
+            r#"{{
+                "session_id":"session-large",
+                "hook_event_name":"PostToolBatch",
+                "tool_calls":[{{"tool_response":"{response}"}}]
+            }}"#
+        );
+        let parsed = read_hook_input(std::io::Cursor::new(payload));
+        assert_eq!(parsed.session_id.as_deref(), Some("session-large"));
+    }
+
+    #[test]
     fn claude_notification_types_only_flag_input_prompts() {
         assert!(claude_notification_needs_input(Some("permission_prompt")));
         assert!(claude_notification_needs_input(Some("agent_needs_input")));
@@ -529,6 +679,24 @@ mod tests {
                 .unwrap();
         assert_eq!(parsed.error.as_deref(), Some("rate_limit"));
         assert_eq!(parsed.last_assistant_message.as_deref(), Some("API Error"));
+    }
+
+    #[test]
+    fn claude_stop_pending_work_and_input_tools_are_distinguished() {
+        let pending: ClaudeHookInput = parse_hook_payload(
+            r#"{
+                "background_tasks":[{"id":"task-1"}],
+                "session_crons":[]
+            }"#,
+        )
+        .unwrap();
+        assert!(pending.has_pending_work());
+        assert!(!ClaudeHookInput::default().has_pending_work());
+
+        assert!(claude_tool_needs_input(Some("AskUserQuestion")));
+        assert!(claude_tool_needs_input(Some("ExitPlanMode")));
+        assert!(!claude_tool_needs_input(Some("Bash")));
+        assert!(!claude_tool_needs_input(None));
     }
 
     #[test]
@@ -686,7 +854,12 @@ mod tests {
         );
 
         assert_eq!(pid_from_env(), None);
-        assert!(pid_from_env_or_parent().is_some());
+        let parent = parent_process_pid();
+        let expected = identified_agent_parent_pid(
+            parent,
+            parent.and_then(flowmux_procmon::agent_name_for_pid),
+        );
+        assert_eq!(pid_from_env_or_parent(), expected);
 
         match prev_pid {
             Some(v) => std::env::set_var("FLOWMUX_AGENT_PID", v),
@@ -696,6 +869,15 @@ mod tests {
             Some(v) => std::env::set_var("FLOWMUX_SURFACE_ID", v),
             None => std::env::remove_var("FLOWMUX_SURFACE_ID"),
         }
+    }
+
+    #[test]
+    fn session_start_parent_fallback_rejects_shell_and_accepts_direct_agent() {
+        assert_eq!(identified_agent_parent_pid(Some(42), None), None);
+        assert_eq!(
+            identified_agent_parent_pid(Some(42), Some("codex")),
+            Some(42)
+        );
     }
 
     #[test]
@@ -712,11 +894,83 @@ mod tests {
     }
 
     #[test]
-    fn read_codex_hook_input_defaults_without_stdin_fallback() {
-        let parsed = read_codex_hook_input(&[]);
-        assert!(parsed.session_id.is_none());
-        assert!(parsed.message.is_none());
-        assert!(parsed.last_assistant_message.is_none());
+    fn read_codex_hook_input_parses_legacy_turn_identity() {
+        let args = vec![
+            r#"{"type":"agent-turn-complete","thread-id":"session-1","turn-id":"turn-1"}"#
+                .to_string(),
+        ];
+        let parsed = read_codex_hook_input(&args);
+        assert_eq!(parsed.session_id.as_deref(), Some("session-1"));
+        assert_eq!(parsed.turn_id.as_deref(), Some("turn-1"));
+    }
+
+    #[test]
+    fn read_codex_hook_input_reads_native_stdin_and_legacy_argv_wins() {
+        let native = read_codex_hook_input_from(
+            &[],
+            r#"{"session_id":"native-session","tool_name":"shell"}"#.as_bytes(),
+        );
+        assert_eq!(native.session_id.as_deref(), Some("native-session"));
+        assert_eq!(native.tool_name.as_deref(), Some("shell"));
+
+        let args = vec![r#"{"session_id":"legacy-session"}"#.to_string()];
+        let legacy =
+            read_codex_hook_input_from(&args, r#"{"session_id":"native-session"}"#.as_bytes());
+        assert_eq!(legacy.session_id.as_deref(), Some("legacy-session"));
+    }
+
+    #[test]
+    fn codex_and_claude_lifecycle_identities_are_parsed() {
+        let parsed: ClaudeHookInput = serde_json::from_str(
+            r#"{
+                "session_id":"session-1",
+                "turn_id":"turn-1",
+                "tool_use_id":"tool-1",
+                "agent_id":"child-1",
+                "permission_mode":"bypassPermissions",
+                "stop_hook_active":true
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.turn_id.as_deref(), Some("turn-1"));
+        assert_eq!(parsed.tool_use_id.as_deref(), Some("tool-1"));
+        assert_eq!(parsed.agent_id.as_deref(), Some("child-1"));
+        assert_eq!(parsed.permission_mode.as_deref(), Some("bypassPermissions"));
+        assert!(parsed.stop_hook_active);
+    }
+
+    #[test]
+    fn lifecycle_update_carries_surface_session_and_correlation() {
+        let pane = PaneId::new();
+        let surface = SurfaceId::new();
+        let request = build_agent_lifecycle_update(
+            "Codex",
+            Some(42),
+            Some(pane),
+            surface,
+            "session-1",
+            AgentLifecycleEvent::CodexSubagentStarted {
+                agent_id: "child-1".into(),
+                turn_id: "child-turn-1".into(),
+            },
+        );
+        assert!(matches!(
+            request,
+            Request::AgentLifecycleUpdate {
+                pane: Some(got_pane),
+                surface: got_surface,
+                agent,
+                pid: Some(42),
+                session_id,
+                lifecycle: AgentLifecycleEvent::CodexSubagentStarted { agent_id, turn_id },
+                ..
+            } if got_pane == pane
+                && got_surface == surface
+                && agent == "codex"
+                && session_id == "session-1"
+                && agent_id == "child-1"
+                && turn_id == "child-turn-1"
+        ));
     }
 
     #[test]
