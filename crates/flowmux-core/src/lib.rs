@@ -794,8 +794,12 @@ impl Pane {
                 let incoming_is_different_agent = incoming_name
                     .as_deref()
                     .is_some_and(|name| existing_agent.is_some_and(|agent| agent.name != name));
+                let explicit_screen_idle = source == "flowmux:screen"
+                    && status == AgentStatus::Idle
+                    && status_text.is_some();
                 if source == "flowmux:screen"
                     && status == AgentStatus::Idle
+                    && !explicit_screen_idle
                     && !incoming_is_different_agent
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.source.as_deref() == Some("flowmux:hook")
@@ -806,6 +810,7 @@ impl Pane {
                     return Some(false);
                 }
                 if source == "flowmux:screen"
+                    && !explicit_screen_idle
                     && !incoming_is_different_agent
                     && surface.agent.as_ref().is_some_and(|agent| {
                         agent.name == "claude"
@@ -2777,6 +2782,9 @@ pub fn detect_agent_status_from_signals(
     if recent().any(is_agent_working_status_line) {
         return Some(AgentStatus::Working);
     }
+    if detect_agent_interruption(screen_text) {
+        return Some(AgentStatus::Idle);
+    }
     if recent().any(is_agent_idle_prompt_line) {
         return Some(AgentStatus::Idle);
     }
@@ -2960,6 +2968,30 @@ fn is_agent_idle_prompt_line(line: &str) -> bool {
             || contains_ascii_case_insensitive(line, "type /")
             || contains_ascii_case_insensitive(line, "ask anything")
             || contains_ascii_case_insensitive(line, "ask me anything"))
+}
+
+/// Claude does not emit its `Stop` hook when the user interrupts a turn.
+/// Accept the visible interruption only until a newer prompt is submitted.
+pub fn detect_agent_interruption(screen_text: Option<&str>) -> bool {
+    for line in screen_text
+        .unwrap_or_default()
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+    {
+        let line = line.trim();
+        if line
+            .strip_prefix('❯')
+            .is_some_and(|prompt| !prompt.trim().is_empty())
+        {
+            return false;
+        }
+        if contains_ascii_case_insensitive(line, "interrupted · what should claude do instead?") {
+            return true;
+        }
+    }
+    false
 }
 
 fn normalize_agent_report_name_for_surface_title(report: &mut AgentStatusReport, title: &str) {

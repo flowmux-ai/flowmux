@@ -8,11 +8,12 @@
 
 use flowmux_core::{
     agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_idle_name_from_signals,
-    detect_agent_name_from_signals, detect_agent_progress_text, detect_agent_status_from_signals,
-    detect_agent_usage_limit_text, terminal_tab_title_for_cwd, AgentBarModel, AgentPresence,
-    AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent,
-    PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind,
-    TerminalScrollback, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
+    detect_agent_status_from_signals, detect_agent_usage_limit_text, terminal_tab_title_for_cwd,
+    AgentBarModel, AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome,
+    EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
+    Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceAgentBlock,
+    WorkspaceId,
 };
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet};
@@ -1283,6 +1284,9 @@ impl StateStore {
         let status_text = match detected_status {
             Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
             Some(AgentStatus::Blocked) => detect_agent_usage_limit_text(screen_text),
+            Some(AgentStatus::Idle) if detect_agent_interruption(screen_text) => {
+                Some("Interrupted")
+            }
             _ => None,
         };
         let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
@@ -3325,6 +3329,64 @@ Do you want to continue?";
         assert_eq!(
             store.live_agent_presences().await,
             vec![(ws_id, surface, 42)]
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_claude_turn_settles_immediately_without_a_stop_hook() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let mut working = AgentStatusReport::from_activity(
+            "claude",
+            Some(flowmux_core::AgentActivity::Running),
+            Some(42),
+        );
+        working.source = Some("flowmux:hook".into());
+        working.custom_status = Some("Working".into());
+
+        assert_eq!(
+            store.report_agent_status(surface, working.clone()).await,
+            Some((ws_id, Some(AgentStatus::Working)))
+        );
+        let interrupted_screen = "⎿ Interrupted · What should Claude do instead?\n❯";
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some(interrupted_screen), Some("demo"))
+                .await,
+            Some((ws_id, Some(AgentStatus::Idle)))
+        );
+        let interrupted = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(interrupted.status, AgentStatus::Idle);
+        assert_eq!(interrupted.custom_status.as_deref(), Some("Interrupted"));
+        assert_eq!(interrupted.source.as_deref(), Some("flowmux:hook"));
+
+        store.report_agent_status(surface, working).await;
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("⎿ Interrupted · What should Claude do instead?\n❯ do the next task\n❯"),
+                    Some("demo"),
+                )
+                .await,
+            None,
+            "an older interruption must not stop a newly submitted turn"
+        );
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
         );
     }
 
