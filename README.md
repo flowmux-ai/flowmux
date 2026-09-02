@@ -39,10 +39,28 @@ no separate driver.
 
 ## AI Agent notification (Claude, Codex, OpenCode, Gemini)
 
-`flowmux fix` adds lifecycle hooks to Claude Code, Codex, OpenCode, and Gemini so
-*task complete*, *needs approval*, and *error* events surface as native
-desktop notifications — routed to the workspace that fired them, suppressed
-while that surface is focused, and isolated per window.
+`flowmux fix` adds lifecycle hooks to Claude Code, Codex, OpenCode, and Gemini.
+FlowMux keeps session start/end separate from turn working/waiting/completion,
+then surfaces attention and completion as native desktop notifications — routed
+to the workspace that fired them, suppressed while that surface is focused,
+and isolated per window.
+
+Claude's `PermissionRequest` has no tool-use ID, so FlowMux keeps a conservative
+permission marker for the whole model-call batch and clears it at the matching
+`PostToolBatch` boundary. Explicit input tools are still correlated by their
+tool-use IDs. Codex permission waits are scoped to the reported root or child
+turn and are cleared only by an authoritative turn boundary. Observed
+`SubagentStart`/`SubagentStop` events keep a stopped parent turn in Working
+until its last known child stops; internal or reused-child work that Codex does
+not expose still falls back to process and terminal signals.
+
+Both Claude Code and Codex run `Stop`/`SubagentStop` hooks before all handlers
+have agreed to stop. If another third-party handler blocks that same stop, the
+completion or child removal FlowMux saw is provisional until a later activity
+event corrects it; neither hook API currently exposes a final stop-accepted
+event. On a retry, FlowMux uses `stop_hook_active` to re-settle the same Codex
+turn without issuing a duplicate completion notification, but the retry is
+still provisional for the same reason.
 
 ![video2](resources/screenshot/claude_notification.gif)
 
@@ -268,6 +286,13 @@ install/upgrade and after installing a new agent. `fix` is idempotent: hook
 config entries without a flowmux marker are preserved, while flowmux-managed
 SKILL copies are re-synced to the version embedded in the binary. Add `--json`
 to either command for machine-readable output.
+
+Restart running agent sessions after `flowmux fix` so they reload their hook
+configuration. Codex asks you to review changed user hooks in `/hooks`; FlowMux
+does not bypass that trust decision. A doctor status of `Installed` verifies the
+managed JSON/config shape, not that Codex has approved a changed command. Codex
+configurations with `allow_managed_hooks_only = true` cannot load these user
+hooks; `doctor`/`fix` reports that policy instead of silently claiming coverage.
 
 ### Troubleshooting
 

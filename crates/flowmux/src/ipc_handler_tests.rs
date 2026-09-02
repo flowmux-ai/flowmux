@@ -7,6 +7,7 @@ use flowmux_core::{
     WorkspaceId,
 };
 use flowmux_daemon::StateStore;
+use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
 use rusqlite::Connection;
 use std::path::Path;
@@ -628,6 +629,359 @@ async fn agent_activity_update_refreshes_store_and_sidebar() {
             .await
             .is_empty(),
         "clearing activity must remove the runtime presence from the store"
+    );
+}
+
+#[tokio::test]
+async fn agent_activity_visibility_query_is_bounded_when_gtk_does_not_ack() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let response = handler.handle(Request::AgentActivityUpdate {
+        pane: Some(pane),
+        surface: Some(surface),
+        agent: "claude".into(),
+        status: None,
+        activity: Some(AgentActivity::Running),
+        pid: Some(1234),
+        source: Some("flowmux:hook".into()),
+        seq: Some(1),
+        message: None,
+        custom_status: Some("Starting turn".into()),
+        session_id: Some("session-1".into()),
+        session_name: None,
+        messaging_socket: None,
+    });
+    tokio::pin!(response);
+
+    let command = tokio::select! {
+        response = &mut response => panic!("activity update returned before visibility query: {response:?}"),
+        command = rx.recv() => command.expect("activity update should query GTK visibility"),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected QueryAgentSurfaceVisible");
+    };
+    let _withheld_ack = ack;
+
+    let response = tokio::time::timeout(std::time::Duration::from_millis(500), response)
+        .await
+        .expect("a stalled GTK visibility query must not stall a hook request");
+    assert!(matches!(response, Response::Ok));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::SetAgentStatus { .. }
+    ));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::AddActivity { .. }
+    ));
+}
+
+#[tokio::test]
+async fn codex_stop_settlement_rechecks_visibility_after_ingress_grace() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let response = handler.handle(Request::AgentLifecycleUpdate {
+        pane: Some(pane),
+        surface,
+        agent: "codex".into(),
+        pid: Some(42),
+        seq: Some(1),
+        session_id: "session-1".into(),
+        lifecycle: AgentLifecycleEvent::CodexTurnStopped {
+            turn_id: "turn-1".into(),
+            message: Some("done".into()),
+            status_text: "Completed: done".into(),
+            stop_hook_active: false,
+        },
+    });
+    tokio::pin!(response);
+
+    let command = tokio::select! {
+        response = &mut response => panic!("lifecycle update completed before initial visibility ack: {response:?}"),
+        command = rx.recv() => command.expect("lifecycle update should query initial visibility"),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected initial QueryAgentSurfaceVisible");
+    };
+    ack.send(false).unwrap();
+
+    let command = tokio::select! {
+        response = &mut response => panic!("lifecycle update completed during ingress grace: {response:?}"),
+        command = rx.recv() => command.expect("settlement should re-query visibility after ingress grace"),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected post-grace QueryAgentSurfaceVisible");
+    };
+    ack.send(true).unwrap();
+
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned before sidebar refresh: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    assert!(matches!(command, GtkCommand::SetAgentStatus { .. }));
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned before activity log: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    assert!(matches!(command, GtkCommand::AddActivity { .. }));
+    let GtkCommand::AddNotification {
+        title,
+        body,
+        level,
+        ack,
+        ..
+    } = (tokio::select! {
+        response = &mut response => panic!("completion returned before notification ack: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    })
+    else {
+        panic!("expected completion notification");
+    };
+    assert_eq!(title, "Codex ready");
+    assert_eq!(body, "done");
+    assert_eq!(level, NotificationLevel::TurnCompleted);
+    ack.send(None).unwrap();
+    assert!(matches!(response.await, Response::Ok));
+
+    let presence = handler
+        .inner
+        .store()
+        .located_agent_presence(surface)
+        .await
+        .expect("Codex presence should remain after turn settlement");
+    assert_eq!(presence.presence.status, AgentStatus::Idle);
+    assert!(
+        presence.presence.seen,
+        "post-grace visibility must mark the completed turn as seen"
+    );
+}
+
+#[tokio::test]
+async fn codex_lifecycle_notifies_only_after_the_last_observed_subagent_stops() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+
+    for (seq, lifecycle) in [
+        (
+            1,
+            AgentLifecycleEvent::CodexSubagentStarted {
+                agent_id: "child-1".into(),
+                turn_id: "child-turn-1".into(),
+            },
+        ),
+        (
+            2,
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id: "root-turn-1".into(),
+                message: Some("parent result".into()),
+                status_text: "Completed: parent result".into(),
+                stop_hook_active: false,
+            },
+        ),
+    ] {
+        let response = handler.handle(Request::AgentLifecycleUpdate {
+            pane: Some(pane),
+            surface,
+            agent: "codex".into(),
+            pid: Some(42),
+            seq: Some(seq),
+            session_id: "session-1".into(),
+            lifecycle,
+        });
+        tokio::pin!(response);
+        let command = tokio::select! {
+            response = &mut response => panic!("lifecycle update completed before visibility ack: {response:?}"),
+            command = rx.recv() => command.unwrap(),
+        };
+        let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+            panic!("expected visibility query");
+        };
+        ack.send(false).unwrap();
+        assert!(matches!(response.await, Response::Ok));
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::SetAgentStatus { .. }
+        ));
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::AddActivity { .. }
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "parent Stop must not notify while the child is active"
+        );
+    }
+
+    let response = handler.handle(Request::AgentLifecycleUpdate {
+        pane: Some(pane),
+        surface,
+        agent: "codex".into(),
+        pid: Some(42),
+        seq: Some(3),
+        session_id: "session-1".into(),
+        lifecycle: AgentLifecycleEvent::CodexSubagentStopped {
+            agent_id: "child-1".into(),
+            turn_id: "child-turn-1".into(),
+        },
+    });
+    tokio::pin!(response);
+    let command = tokio::select! {
+        response = &mut response => panic!("lifecycle update completed before visibility ack: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected visibility query");
+    };
+    ack.send(false).unwrap();
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned during child-stop ingress grace: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected post-grace visibility query");
+    };
+    ack.send(false).unwrap();
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned before sidebar refresh: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    assert!(matches!(command, GtkCommand::SetAgentStatus { .. }));
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned before activity log: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    assert!(matches!(command, GtkCommand::AddActivity { .. }));
+    let command = tokio::select! {
+        response = &mut response => panic!("completion returned before notification ack: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::AddNotification {
+        pane: notified_pane,
+        surface: notified_surface,
+        title,
+        body,
+        level,
+        ack,
+        ..
+    } = command
+    else {
+        panic!("expected completion notification");
+    };
+    assert_eq!(notified_pane, Some(pane));
+    assert_eq!(notified_surface, Some(surface));
+    assert_eq!(title, "Codex ready");
+    assert_eq!(body, "parent result");
+    assert_eq!(level, NotificationLevel::TurnCompleted);
+    ack.send(None).unwrap();
+    assert!(matches!(response.await, Response::Ok));
+}
+
+#[tokio::test]
+async fn delayed_new_root_during_last_child_grace_suppresses_completion_notification() {
+    let (handler, rx, pane, surface) = single_pane_handler().await;
+    let store = handler.inner.store();
+    let session_id = "session-1";
+
+    for (seq, lifecycle) in [
+        (
+            1,
+            AgentLifecycleEvent::CodexSubagentStarted {
+                agent_id: "child-1".into(),
+                turn_id: "child-turn-1".into(),
+            },
+        ),
+        (
+            2,
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id: "root-turn-1".into(),
+                message: Some("obsolete result".into()),
+                status_text: "Completed: obsolete result".into(),
+                stop_hook_active: false,
+            },
+        ),
+    ] {
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(seq),
+                session_id,
+                lifecycle,
+                false,
+            )
+            .await;
+    }
+
+    // The last child Stop arrived after a newer root turn was generated, but
+    // before that root hook reached the daemon. It must begin grace without
+    // consuming the parent Stop or publishing completion.
+    let child_response = handler.handle(Request::AgentLifecycleUpdate {
+        pane: Some(pane),
+        surface,
+        agent: "codex".into(),
+        pid: Some(42),
+        seq: Some(4),
+        session_id: session_id.into(),
+        lifecycle: AgentLifecycleEvent::CodexSubagentStopped {
+            agent_id: "child-1".into(),
+            turn_id: "child-turn-1".into(),
+        },
+    });
+    tokio::pin!(child_response);
+    let command = tokio::select! {
+        response = &mut child_response => panic!("child Stop completed before initial visibility query: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected child Stop visibility query");
+    };
+    ack.send(false).unwrap();
+    tokio::select! {
+        response = &mut child_response => panic!("child Stop completed instead of entering grace: {response:?}"),
+        _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+    }
+
+    let root_response = handler.handle(Request::AgentLifecycleUpdate {
+        pane: Some(pane),
+        surface,
+        agent: "codex".into(),
+        pid: Some(42),
+        seq: Some(3),
+        session_id: session_id.into(),
+        lifecycle: AgentLifecycleEvent::TurnStarted {
+            turn_id: Some("root-turn-2".into()),
+            status_text: "Starting root turn 2".into(),
+        },
+    });
+    tokio::pin!(root_response);
+    let command = tokio::select! {
+        response = &mut root_response => panic!("root turn completed before visibility query: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected root turn visibility query");
+    };
+    ack.send(false).unwrap();
+    assert!(matches!(root_response.await, Response::Ok));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::SetAgentStatus { .. }
+    ));
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        GtkCommand::AddActivity { .. }
+    ));
+
+    let command = tokio::select! {
+        response = &mut child_response => panic!("child Stop completed without post-grace visibility query: {response:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::QueryAgentSurfaceVisible { ack, .. } = command else {
+        panic!("expected post-grace visibility query");
+    };
+    ack.send(false).unwrap();
+    assert!(matches!(child_response.await, Response::Ok));
+    assert!(
+        rx.try_recv().is_err(),
+        "canceled parent Stop must not emit status, activity, or completion notification"
     );
 }
 

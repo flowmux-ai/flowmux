@@ -15,8 +15,31 @@ use flowmux_ipc::protocol::{Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tracing::warn;
+
+const AGENT_VISIBILITY_QUERY_TIMEOUT: Duration = Duration::from_millis(100);
+const CODEX_STOP_INGRESS_GRACE: Duration = Duration::from_millis(250);
+
+async fn query_agent_surface_visible(bridge: &Bridge, surface: flowmux_core::SurfaceId) -> bool {
+    tokio::time::timeout(AGENT_VISIBILITY_QUERY_TIMEOUT, async {
+        let (visibility_tx, visibility_rx) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::QueryAgentSurfaceVisible {
+                surface,
+                ack: visibility_tx,
+            })
+            .await
+            .ok()?;
+        visibility_rx.await.ok()
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
 
 fn browser_error_response(error: String) -> Response {
     if error.starts_with("browser pane not found:")
@@ -198,7 +221,8 @@ impl Handler for GuiHandler {
                 | Request::AgentSessionUpdate { .. }
                 | Request::AgentSessionGet { .. }
                 | Request::AgentSessionForget { .. }
-                | Request::AgentActivityUpdate { .. } => self.handle_agent_verb(req).await,
+                | Request::AgentActivityUpdate { .. }
+                | Request::AgentLifecycleUpdate { .. } => self.handle_agent_verb(req).await,
                 Request::Notify { .. }
                 | Request::NotificationsList { .. }
                 | Request::NotificationOpen { .. }
@@ -782,6 +806,88 @@ impl GuiHandler {
                 }
             }
 
+            Request::AgentLifecycleUpdate {
+                pane,
+                surface,
+                agent,
+                pid,
+                seq,
+                session_id,
+                lifecycle,
+            } => {
+                let surface_visible = query_agent_surface_visible(&self.bridge, surface).await;
+                let mut outcome = self
+                    .inner
+                    .store()
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        &agent,
+                        pid,
+                        seq,
+                        &session_id,
+                        lifecycle,
+                        surface_visible,
+                    )
+                    .await;
+                if let Some(settlement) = outcome.settle_codex_after_grace.take() {
+                    tokio::time::sleep(CODEX_STOP_INGRESS_GRACE).await;
+                    let surface_visible = query_agent_surface_visible(&self.bridge, surface).await;
+                    outcome = self
+                        .inner
+                        .store()
+                        .settle_codex_turn_after_grace(
+                            surface,
+                            pid,
+                            settlement.stop_seq,
+                            &session_id,
+                            &settlement.turn_id,
+                            surface_visible,
+                        )
+                        .await;
+                }
+                if let Some(ws_id) = outcome.workspace {
+                    if let Some(store) = self.session_store.as_ref() {
+                        if let Err(error) = store.record(&agent, surface, &session_id) {
+                            warn!(%surface, %agent, %error, "failed to persist agent session");
+                        }
+                    }
+                    let _ = self
+                        .bridge
+                        .tx
+                        .send(GtkCommand::SetAgentStatus { workspace: ws_id })
+                        .await;
+                    if let Some(located) = self.inner.store().located_agent_presence(surface).await
+                    {
+                        if let Some(entry) = ActivityEntry::from_hook_presence(located) {
+                            let _ = self.bridge.tx.send(GtkCommand::AddActivity { entry }).await;
+                        }
+                    }
+                }
+                if outcome.completed {
+                    let display_agent = if agent.eq_ignore_ascii_case("codex") {
+                        "Codex"
+                    } else if agent.eq_ignore_ascii_case("claude") {
+                        "Claude"
+                    } else {
+                        agent.as_str()
+                    };
+                    let body = outcome
+                        .completion_message
+                        .filter(|message| !message.trim().is_empty())
+                        .unwrap_or_else(|| "task complete".into());
+                    let _ = self
+                        .handle_notification_verb(Request::Notify {
+                            pane,
+                            surface: Some(surface),
+                            title: format!("{display_agent} ready"),
+                            body,
+                            level: flowmux_core::NotificationLevel::TurnCompleted,
+                        })
+                        .await;
+                }
+                Response::Ok
+            }
+
             // ---- Live agent activity (Running / NeedsInput / Idle).
             // Hooks pass FLOWMUX_SURFACE_ID, so a surface is expected;
             // without one we can't route the presence to a tab.
@@ -805,7 +911,7 @@ impl GuiHandler {
                         if let Some(removed) = self
                             .inner
                             .store()
-                            .end_agent_session(surface, &agent, seq, session_id.as_deref())
+                            .end_agent_session(surface, &agent, seq, session_id.as_deref(), pid)
                             .await
                         {
                             let ws_id = removed.workspace;
@@ -826,16 +932,8 @@ impl GuiHandler {
                                 .await;
                         }
                     } else {
-                        let (visibility_tx, visibility_rx) = oneshot::channel();
-                        let _ = self
-                            .bridge
-                            .tx
-                            .send(GtkCommand::QueryAgentSurfaceVisible {
-                                surface,
-                                ack: visibility_tx,
-                            })
-                            .await;
-                        let surface_visible = visibility_rx.await.unwrap_or(false);
+                        let surface_visible =
+                            query_agent_surface_visible(&self.bridge, surface).await;
                         let record_activity = source.as_deref() == Some("flowmux:hook");
                         let session_binding = session_id.clone();
                         let session_agent = agent.clone();

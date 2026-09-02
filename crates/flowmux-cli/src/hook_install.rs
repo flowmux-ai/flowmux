@@ -5,14 +5,13 @@
 //! popover notifications.
 //!
 //! Idempotent: every entry we own carries a `flowmux-hook` marker
-//! string in its `command`, so a re-run prunes our previous insertions
-//! before re-inserting them. Other entries the user added by hand are
-//! preserved verbatim.
+//! string in its `command`, so a re-run refreshes it in place and removes
+//! duplicates. Other handlers and their array positions are preserved; Codex
+//! uses those positions when tracking hook trust.
 //!
 //! Supported targets (mirroring cmux):
-//! - **Claude Code** — `~/.claude/settings.json` `hooks.{Stop,Notification}`.
-//! - **Codex CLI**   — top-level `notify` in `~/.codex/config.toml`;
-//!   flowmux-owned entries in the legacy `hooks.json` are removed.
+//! - **Claude Code** — native lifecycle hooks in `~/.claude/settings.json`.
+//! - **Codex CLI**   — native lifecycle hooks in `~/.codex/hooks.json`.
 //! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.mjs`.
 //! - **Gemini CLI**  — `~/.gemini/settings.json` lifecycle hooks.
 //! - **Cline**       — skill only; obsolete file hooks are removed on repair.
@@ -20,6 +19,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Marker the hook installer drops into every command line we generate
@@ -178,66 +178,78 @@ fn check_codex() -> HookCheckEntry {
         Some(h) => h,
         None => return entry(HookTarget::Codex, HookCheckStatus::NoAgentHome, vec![]),
     };
+    let hooks_path = home.join("hooks.json");
+    let config_path = home.join("config.toml");
     if !home.exists() {
         return entry(
             HookTarget::Codex,
             HookCheckStatus::NoAgentHome,
-            vec![home.join("config.toml")],
+            vec![hooks_path, config_path],
         );
     }
-    let config_path = home.join("config.toml");
-    if !config_path.exists() {
+    let root = match read_json_or_empty_object(&hooks_path) {
+        Ok(root) => root,
+        Err(error) => {
+            return entry(
+                HookTarget::Codex,
+                HookCheckStatus::Error(error.to_string()),
+                vec![hooks_path, config_path],
+            )
+        }
+    };
+    if let Err(error) = validate_codex_hooks_shape(&root) {
         return entry(
             HookTarget::Codex,
-            HookCheckStatus::Missing,
-            vec![config_path],
+            HookCheckStatus::Error(error.to_string()),
+            vec![hooks_path, config_path],
         );
     }
-    let raw = match fs::read_to_string(&config_path) {
-        Ok(s) => s,
-        Err(e) => {
+    let legacy_notify = match codex_config_has_owned_notify(&config_path) {
+        Ok(owned) => owned,
+        Err(error) => {
             return entry(
                 HookTarget::Codex,
-                HookCheckStatus::Error(e.to_string()),
-                vec![config_path],
+                HookCheckStatus::Error(error.to_string()),
+                vec![hooks_path, config_path],
             )
         }
     };
-    let doc: toml_edit::DocumentMut = match raw.parse() {
-        Ok(d) => d,
-        Err(e) => {
+    match codex_config_hooks_disabled(&config_path) {
+        Ok(true) => {
             return entry(
                 HookTarget::Codex,
-                HookCheckStatus::Error(e.to_string()),
-                vec![config_path],
+                HookCheckStatus::Error(
+                    "Codex user hooks are explicitly disabled in config.toml".into(),
+                ),
+                vec![hooks_path, config_path],
             )
         }
-    };
-    let notify = doc.get("notify").and_then(|v| v.as_array());
-    let status = match notify {
-        None => HookCheckStatus::Missing,
-        Some(arr) => {
-            let strs: Vec<String> = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            // Canonical install: ["<bin>", "hooks", "codex", "stop"].
-            // We only require that flowmux's verb chain is in the array
-            // — the bin path may differ between installs.
-            let has_flowmux = strs.iter().any(|s| s.contains("flowmux"));
-            let has_verbs = strs.windows(3).any(|w| {
-                w == ["hooks", "codex", "stop"] || w == ["hooks", "codex", "notification"]
-            });
-            if has_flowmux && has_verbs {
-                HookCheckStatus::Installed
-            } else if has_flowmux || has_verbs {
-                HookCheckStatus::Drift
-            } else {
-                HookCheckStatus::Missing
-            }
+        Ok(false) => {}
+        Err(error) => {
+            return entry(
+                HookTarget::Codex,
+                HookCheckStatus::Error(error.to_string()),
+                vec![hooks_path, config_path],
+            )
         }
-    };
-    entry(HookTarget::Codex, status, vec![config_path])
+    }
+    let status = codex_check_status(&root, legacy_notify);
+    entry(HookTarget::Codex, status, vec![hooks_path, config_path])
+}
+
+fn codex_check_status(root: &Value, legacy_notify: bool) -> HookCheckStatus {
+    let installed = CODEX_EVENTS
+        .iter()
+        .filter(|event| codex_matching_entry_count(root, **event) == 1)
+        .count();
+    let owned = codex_owned_hook_count(root);
+    match (installed, owned, legacy_notify) {
+        (count, owned, false) if count == CODEX_EVENTS.len() && owned == count => {
+            HookCheckStatus::Installed
+        }
+        (0, 0, false) => HookCheckStatus::Missing,
+        _ => HookCheckStatus::Drift,
+    }
 }
 
 fn check_opencode() -> HookCheckEntry {
@@ -388,14 +400,13 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 /// shim dir to a PTY's `PATH`, so typing `claude` / `codex` resolves to
 /// these scripts first. They export `FLOWMUX_AGENT_PID=$$` and the canonical
 /// agent name (read by the hooks), then `exec` the real binary, so they are
-/// otherwise fully transparent.
+/// otherwise fully transparent. Lifecycle presence comes from each agent's
+/// native hook (or the process-tree fallback), so the shim never emits a
+/// competing synthetic SessionStart.
 pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini", "cline"];
 
 /// Body of a wrapper shim for `agent`. Skips flowmux-managed shims when
-/// resolving the real binary so it never re-execs itself or another copy. The shim
-/// registers a best-effort SessionStart itself because not every agent
-/// exposes a startup hook; the daemon still clears dead sessions through
-/// the PID liveness sweep when the agent exits without SessionEnd.
+/// resolving the real binary so it never re-execs itself or another copy.
 pub(crate) fn shim_script(agent: &str) -> String {
     let claude_session_name = if agent == "claude" {
         r#"
@@ -446,8 +457,8 @@ fi
     format!(
         r#"#!/usr/bin/env bash
 # flowmux agent wrapper shim (managed by `flowmux fix`).
-# Records the real {agent} PID, registers a best-effort flowmux presence,
-# then transparently exec's the real binary. Safe to run outside flowmux.
+# Records the real {agent} PID and transparently exec's the real binary.
+# Native hooks report lifecycle state; process scanning is the fallback.
 if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
   export FLOWMUX_AGENT_NAME={agent}
@@ -473,13 +484,6 @@ if [ -z "$real" ]; then
   exit 127
 fi
 {claude_session_name}
-if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
-  if command -v flowmuxctl >/dev/null 2>&1; then
-    flowmuxctl hooks {agent} session-start >/dev/null 2>&1 </dev/null &
-  elif command -v flowmux >/dev/null 2>&1; then
-    flowmux hooks {agent} session-start >/dev/null 2>&1 </dev/null &
-  fi
-fi
 exec "$real" "$@"
 "#
     )
@@ -727,7 +731,11 @@ fn install_claude(flowmux_bin: &str) -> Result<HookInstallReport> {
         return Ok(skipped(HookTarget::Claude));
     }
 
-    let mut root: Value = read_json_or_empty_object(&path)?;
+    install_claude_in(&path, flowmux_bin)
+}
+
+fn install_claude_in(path: &Path, flowmux_bin: &str) -> Result<HookInstallReport> {
+    let mut root: Value = read_json_or_empty_object(path)?;
     let hooks = root
         .as_object_mut()
         .ok_or_else(|| anyhow!("{} is not a JSON object", path.display()))?
@@ -737,22 +745,25 @@ fn install_claude(flowmux_bin: &str) -> Result<HookInstallReport> {
         .ok_or_else(|| anyhow!("hooks field is not a JSON object in {}", path.display()))?;
 
     for event in CLAUDE_EVENTS {
-        let entry = hooks
+        let arr = hooks
             .entry(event.name.to_string())
-            .or_insert_with(|| json!([]));
-        if !entry.is_array() {
-            *entry = json!([]);
-        }
-        let arr = entry.as_array_mut().unwrap();
-        prune_flowmux_claude_entries(arr);
-        arr.push(claude_hook_entry(flowmux_bin, *event));
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Claude hook {} is not an array in {}",
+                    event.name,
+                    path.display()
+                )
+            })?;
+        upsert_flowmux_hook_entry(arr, claude_hook_entry(flowmux_bin, *event));
     }
 
-    let changed = write_json(&path, &root)?;
+    let changed = write_json(path, &root)?;
     Ok(HookInstallReport {
         target: HookTarget::Claude,
         status: HookInstallStatus::Installed,
-        touched_paths: changed.then_some(path).into_iter().collect(),
+        touched_paths: changed.then(|| path.to_path_buf()).into_iter().collect(),
     })
 }
 
@@ -806,10 +817,15 @@ const CLAUDE_EVENTS: &[ClaudeEvent] = &[
         subcommand: "notification",
         timeout_secs: 10,
     },
+    ClaudeEvent {
+        name: "PermissionRequest",
+        subcommand: "permission-request",
+        timeout_secs: 10,
+    },
     // Live agent-activity tracking. SessionStart registers the agent's
     // presence/PID; UserPromptSubmit + PreToolUse mark it Running;
-    // SessionEnd clears it. SessionEnd uses a tight timeout because it
-    // fires on the exit path and must not stall the shell.
+    // SessionEnd clears it. Its handler may send both clear and binding-forget
+    // requests, so leave enough room for both bounded IPC operations.
     ClaudeEvent {
         name: "SessionStart",
         subcommand: "session-start",
@@ -826,9 +842,29 @@ const CLAUDE_EVENTS: &[ClaudeEvent] = &[
         timeout_secs: 5,
     },
     ClaudeEvent {
+        name: "PostToolUse",
+        subcommand: "post-tool-use",
+        timeout_secs: 5,
+    },
+    ClaudeEvent {
+        name: "PostToolBatch",
+        subcommand: "post-tool-batch",
+        timeout_secs: 5,
+    },
+    ClaudeEvent {
+        name: "PostToolUseFailure",
+        subcommand: "post-tool-use-failure",
+        timeout_secs: 5,
+    },
+    ClaudeEvent {
+        name: "PermissionDenied",
+        subcommand: "permission-denied",
+        timeout_secs: 5,
+    },
+    ClaudeEvent {
         name: "SessionEnd",
         subcommand: "session-end",
-        timeout_secs: 1,
+        timeout_secs: 3,
     },
 ];
 
@@ -837,15 +873,17 @@ fn claude_hook_entry(flowmux_bin: &str, event: ClaudeEvent) -> Value {
     let cmd = format!(
         // Marker `flowmux-hook` lets us identify our own entry on
         // re-install. Whitespace before/after is intentional.
-        "{prefix} hooks claude {subcommand}  # {marker}",
+        "{prefix} hooks claude {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}}  # {marker}",
         subcommand = event.subcommand,
         marker = FLOWMUX_HOOK_MARKER
     );
     json!({
-        "matcher": if event.name == "Notification" {
-            "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input|quota_auto_resume_stale"
-        } else {
-            ""
+        "matcher": match event.name {
+            "Notification" => "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input|agent_completed|quota_auto_resume_stale|quota_auto_resume_fired|quota_auto_resume_disabled",
+            // SessionStart also fires for mid-turn compaction. A compaction is
+            // not a new lifecycle epoch and must not reset waits or children.
+            "SessionStart" => "^(startup|resume|clear|fork)$",
+            _ => "",
         },
         "hooks": [{
             "type": "command",
@@ -855,22 +893,167 @@ fn claude_hook_entry(flowmux_bin: &str, event: ClaudeEvent) -> Value {
     })
 }
 
-fn prune_flowmux_claude_entries(arr: &mut Vec<Value>) {
-    arr.retain(|entry| !claude_entry_is_flowmux_owned(entry));
+fn hook_is_flowmux_owned(hook: &Value) -> bool {
+    hook.get("command")
+        .and_then(Value::as_str)
+        .is_some_and(|command| command.contains(FLOWMUX_HOOK_MARKER))
 }
 
+/// Remove only FlowMux-owned nested handlers. Matcher groups can be shared by
+/// multiple integrations, so deleting the whole group would also delete user
+/// hooks that happen to sit beside ours.
+fn prune_flowmux_claude_entries(arr: &mut Vec<Value>) -> bool {
+    prune_flowmux_hook_handlers(arr)
+}
+
+fn prune_flowmux_hook_handlers(entries: &mut Vec<Value>) -> bool {
+    let mut removed_any = false;
+    entries.retain_mut(|entry| {
+        let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|hook| !hook_is_flowmux_owned(hook));
+        let removed = hooks.len() != before;
+        removed_any |= removed;
+        // Preserve unrelated groups that were already empty. Only discard a
+        // group when removing our handler made it empty.
+        !(removed && hooks.is_empty())
+    });
+    removed_any
+}
+
+/// Refresh the first canonical FlowMux handler in place and remove duplicates.
+/// Codex persists hook trust by array position, so retaining the surrounding
+/// group and handler index avoids invalidating unrelated user approvals.
+fn upsert_flowmux_hook_entry(entries: &mut Vec<Value>, replacement: Value) {
+    let replacement_matcher = replacement.get("matcher").cloned();
+    let mut replacement_hook = replacement
+        .get("hooks")
+        .and_then(Value::as_array)
+        .and_then(|hooks| hooks.first())
+        .cloned()
+        .expect("FlowMux hook entries always contain one handler");
+    let mut replacement_with_extensions = replacement;
+    for entry in entries.iter() {
+        let Some(hooks) = entry.get("hooks").and_then(Value::as_array) else {
+            continue;
+        };
+        for hook in hooks.iter().filter(|hook| hook_is_flowmux_owned(hook)) {
+            preserve_unknown_hook_handler_fields(&mut replacement_hook, hook);
+        }
+        if !hooks.is_empty() && hooks.iter().all(hook_is_flowmux_owned) {
+            preserve_unknown_object_fields(
+                &mut replacement_with_extensions,
+                entry,
+                &["matcher", "hooks"],
+            );
+        }
+    }
+    replacement_with_extensions["hooks"][0] = replacement_hook.clone();
+    let mut replaced = false;
+
+    entries.retain_mut(|entry| {
+        let matcher_matches = entry.get("matcher").cloned() == replacement_matcher;
+        let owned_count = entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .map(|hooks| {
+                hooks
+                    .iter()
+                    .filter(|hook| hook_is_flowmux_owned(hook))
+                    .count()
+            })
+            .unwrap_or(0);
+        if owned_count == 0 {
+            return true;
+        }
+        let original_entry = entry.clone();
+        let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+
+        // A group containing only our handlers is safe to migrate in place,
+        // even when an older release omitted or used a different matcher.
+        // Keeping the group slot avoids shifting unrelated Codex trust indexes.
+        if !replaced && !matcher_matches && owned_count == hooks.len() {
+            let mut refreshed = replacement_with_extensions.clone();
+            preserve_unknown_object_fields(&mut refreshed, &original_entry, &["matcher", "hooks"]);
+            *entry = refreshed;
+            replaced = true;
+            return true;
+        }
+
+        let before = hooks.len();
+        let mut refreshed_here = false;
+        hooks.retain_mut(|hook| {
+            if !hook_is_flowmux_owned(hook) {
+                return true;
+            }
+            if !replaced && matcher_matches {
+                *hook = replacement_hook.clone();
+                replaced = true;
+                refreshed_here = true;
+                true
+            } else {
+                false
+            }
+        });
+        let keep = !(hooks.is_empty() && hooks.len() != before);
+        if refreshed_here {
+            preserve_unknown_object_fields(
+                entry,
+                &replacement_with_extensions,
+                &["matcher", "hooks"],
+            );
+        }
+        keep
+    });
+
+    if !replaced {
+        entries.push(replacement_with_extensions);
+    }
+}
+
+fn preserve_unknown_hook_handler_fields(target: &mut Value, source: &Value) {
+    preserve_unknown_object_fields(
+        target,
+        source,
+        &[
+            "type",
+            "if",
+            "command",
+            "commandWindows",
+            "command_windows",
+            "args",
+            "timeout",
+            "async",
+            "asyncRewake",
+            "shell",
+            "statusMessage",
+            "once",
+            "additionalContextLimit",
+        ],
+    );
+}
+
+fn preserve_unknown_object_fields(target: &mut Value, source: &Value, known: &[&str]) {
+    let (Some(target), Some(source)) = (target.as_object_mut(), source.as_object()) else {
+        return;
+    };
+    for (field, value) in source {
+        if !known.contains(&field.as_str()) && !target.contains_key(field) {
+            target.insert(field.clone(), value.clone());
+        }
+    }
+}
+
+#[cfg(test)]
 fn claude_entry_is_flowmux_owned(entry: &Value) -> bool {
     entry
         .get("hooks")
         .and_then(|v| v.as_array())
-        .map(|inner| {
-            inner.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|c| c.contains(FLOWMUX_HOOK_MARKER))
-                    .unwrap_or(false)
-            })
-        })
+        .map(|inner| inner.iter().any(hook_is_flowmux_owned))
         .unwrap_or(false)
 }
 
@@ -890,6 +1073,11 @@ fn claude_entry_matches(entry: &Value, event: ClaudeEvent) -> bool {
                                 command.contains(FLOWMUX_HOOK_MARKER)
                                     && command
                                         .contains(&format!("hooks claude {}", event.subcommand))
+                                    && command
+                                        .contains("${FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}")
+                                    && command.contains(
+                                        "${FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}",
+                                    )
                             })
                         && hook.get("timeout").and_then(Value::as_u64)
                             == Some(event.timeout_secs.into())
@@ -898,6 +1086,82 @@ fn claude_entry_matches(entry: &Value, event: ClaudeEvent) -> bool {
 }
 
 // ---- Codex CLI ------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+struct CodexEvent {
+    name: &'static str,
+    subcommand: &'static str,
+    matcher: &'static str,
+    timeout_secs: u32,
+}
+
+const CODEX_EVENTS: &[CodexEvent] = &[
+    // Codex also emits SessionStart during mid-turn compaction. Excluding that
+    // source keeps a presence event from masquerading as a turn transition.
+    CodexEvent {
+        name: "SessionStart",
+        subcommand: "session-start",
+        matcher: "^(startup|resume|clear)$",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "UserPromptSubmit",
+        subcommand: "turn-start",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "PreToolUse",
+        subcommand: "running",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "PermissionRequest",
+        subcommand: "notification",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    // PermissionRequest has no call identity or separate resolution hook.
+    // PostToolUse confirms progress but cannot identify which parallel request
+    // resolved, so the daemon keeps a conservative turn-scoped wait marker.
+    CodexEvent {
+        name: "PostToolUse",
+        subcommand: "running",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "SubagentStart",
+        subcommand: "subagent-start",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "SubagentStop",
+        subcommand: "subagent-stop",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "Stop",
+        subcommand: "stop",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "Interrupt",
+        subcommand: "interrupt",
+        matcher: "",
+        timeout_secs: 5,
+    },
+    CodexEvent {
+        name: "SessionEnd",
+        subcommand: "session-end",
+        matcher: "",
+        timeout_secs: 3,
+    },
+];
 
 fn codex_home() -> Option<PathBuf> {
     if let Some(env) = std::env::var_os("CODEX_HOME") {
@@ -911,44 +1175,30 @@ fn install_codex(flowmux_bin: &str) -> Result<HookInstallReport> {
         Some(h) if h.exists() => h,
         _ => return Ok(skipped(HookTarget::Codex)),
     };
-    let config_path = home.join("config.toml");
-    let mut touched_paths = Vec::new();
+    install_codex_in(&home, flowmux_bin)
+}
 
-    // Codex 0.130's nested `hooks.json` schema is unstable across
-    // releases; even when we wrote it the engine silently ignored
-    // `Stop` entries. The legacy `notify` config in `config.toml` is
-    // the documented and stable way to surface "agent-turn-complete"
-    // events to an external process — cmux's parity path uses it.
-    if set_codex_notify(&config_path, flowmux_bin)? {
-        touched_paths.push(config_path.clone());
-    }
-
-    // We no longer write hooks.json. Clean up any flowmux entry from a
-    // previous setup so the file stays consistent with what we own.
+fn install_codex_in(home: &Path, flowmux_bin: &str) -> Result<HookInstallReport> {
     let hooks_path = home.join("hooks.json");
-    if hooks_path.exists() {
-        let mut root: Value = read_json_or_empty_object(&hooks_path)?;
-        if let Some(stop) = root
-            .as_object_mut()
-            .and_then(|o| o.get_mut("Stop"))
-            .and_then(|v| v.as_array_mut())
-        {
-            prune_flowmux_claude_entries(stop);
-            // If this leaves the file empty, delete it; otherwise rewrite.
-            if stop.is_empty() {
-                if let Some(obj) = root.as_object_mut() {
-                    obj.remove("Stop");
-                }
-            }
-        }
-        let is_empty = root.as_object().map(|o| o.is_empty()).unwrap_or(false);
-        if is_empty {
-            fs::remove_file(&hooks_path)
-                .with_context(|| format!("remove {}", hooks_path.display()))?;
-            touched_paths.push(hooks_path);
-        } else if write_json(&hooks_path, &root)? {
-            touched_paths.push(hooks_path);
-        }
+    let config_path = home.join("config.toml");
+    // Parse every file before the first write. A malformed legacy config must
+    // not leave hooks.json half-migrated when setup reports an error.
+    let legacy_notify = codex_config_has_owned_notify(&config_path)?;
+    if codex_config_hooks_disabled(&config_path)? {
+        return Err(anyhow!(
+            "Codex user hooks are explicitly disabled in {}",
+            config_path.display()
+        ));
+    }
+    let mut root = read_json_or_empty_object(&hooks_path)?;
+    validate_codex_hooks_shape(&root)?;
+    upsert_codex_hooks(&mut root, flowmux_bin)?;
+    let mut touched_paths = Vec::new();
+    if write_json(&hooks_path, &root)? {
+        touched_paths.push(hooks_path);
+    }
+    if legacy_notify && remove_owned_codex_notify(&config_path)? {
+        touched_paths.push(config_path);
     }
 
     Ok(HookInstallReport {
@@ -959,44 +1209,39 @@ fn install_codex(flowmux_bin: &str) -> Result<HookInstallReport> {
 }
 
 fn uninstall_codex() -> Result<HookInstallReport> {
-    use toml_edit::DocumentMut;
-
     let home = match codex_home() {
         Some(h) if h.exists() => h,
         _ => return Ok(skipped(HookTarget::Codex)),
     };
-    let config_path = home.join("config.toml");
-    let mut touched_paths = Vec::new();
-    if config_path.exists() {
-        let original = fs::read_to_string(&config_path)?;
-        let mut doc: DocumentMut = original.parse()?;
-        let was_flowmux = doc
-            .get("notify")
-            .map(codex_notify_is_flowmux_owned)
-            .unwrap_or(false);
-        if was_flowmux {
-            doc.as_table_mut().remove("notify");
-            let new_text = doc.to_string();
-            if write_atomic(&config_path, new_text.as_bytes())? {
-                touched_paths.push(config_path.clone());
-            }
-        }
-    }
+    uninstall_codex_in(&home)
+}
 
-    // Old hook artifacts from previous flowmux installs.
+fn uninstall_codex_in(home: &Path) -> Result<HookInstallReport> {
+    let mut touched_paths = Vec::new();
     let hooks_path = home.join("hooks.json");
     if hooks_path.exists() {
         let mut root: Value = read_json_or_empty_object(&hooks_path)?;
-        if let Some(stop) = root
-            .as_object_mut()
-            .and_then(|o| o.get_mut("Stop"))
-            .and_then(|v| v.as_array_mut())
-        {
-            prune_flowmux_claude_entries(stop);
-        }
-        if write_json(&hooks_path, &root)? {
+        let before = root.clone();
+        prune_codex_hooks(&mut root);
+        if root != before {
+            if root.as_object().is_some_and(|object| object.is_empty()) {
+                let is_symlink = fs::symlink_metadata(&hooks_path)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink());
+                if is_symlink {
+                    write_json(&hooks_path, &root)?;
+                } else {
+                    fs::remove_file(&hooks_path)
+                        .with_context(|| format!("remove {}", hooks_path.display()))?;
+                }
+            } else {
+                write_json(&hooks_path, &root)?;
+            }
             touched_paths.push(hooks_path);
         }
+    }
+    let config_path = home.join("config.toml");
+    if remove_owned_codex_notify(&config_path)? {
+        touched_paths.push(config_path);
     }
     Ok(HookInstallReport {
         target: HookTarget::Codex,
@@ -1005,79 +1250,704 @@ fn uninstall_codex() -> Result<HookInstallReport> {
     })
 }
 
-/// Set the top-level `notify = [...]` array in `~/.codex/config.toml`
-/// so Codex spawns flowmux's hook handler whenever the agent finishes
-/// a turn ("agent-turn-complete"). Preserves existing keys; removes
-/// the no-longer-needed `[features].hooks` / `codex_hooks` entries
-/// from earlier flowmux setups so a re-run quiets the warning.
-fn set_codex_notify(config_path: &Path, flowmux_bin: &str) -> Result<bool> {
-    use toml_edit::{value, Array, DocumentMut};
+fn codex_hook_entry(flowmux_bin: &str, event: CodexEvent) -> Value {
+    let command = format!(
+        "{} hooks codex {} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}}  # {}",
+        host_invocation_shell_command(flowmux_bin),
+        event.subcommand,
+        FLOWMUX_HOOK_MARKER,
+    );
+    json!({
+        "matcher": event.matcher,
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "timeout": event.timeout_secs,
+        }]
+    })
+}
+
+fn codex_entry_matches(entry: &Value, event: CodexEvent) -> bool {
+    entry.get("matcher").and_then(Value::as_str) == Some(event.matcher)
+        && entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .is_some_and(|hooks| {
+                hooks.iter().any(|hook| {
+                    hook.get("type").and_then(Value::as_str) == Some("command")
+                        && hook
+                            .get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|command| {
+                                command.contains(FLOWMUX_HOOK_MARKER)
+                                    && command
+                                        .contains(&format!("hooks codex {}", event.subcommand))
+                                    && codex_direct_executable_available(command, event)
+                                    && command
+                                        .contains("${FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}")
+                                    && command.contains(
+                                        "${FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}",
+                                    )
+                            })
+                        && hook.get("timeout").and_then(Value::as_u64)
+                            == Some(event.timeout_secs.into())
+                        && hook.get("async").and_then(Value::as_bool) != Some(true)
+                })
+            })
+}
+
+/// A direct absolute binary can be checked locally. Relative commands depend
+/// on the agent's PATH, while Flatpak commands contain multiple argv words and
+/// resolve inside the sandbox; keep those compatible and validate their shape
+/// only. FlowMux quotes paths as one POSIX single-quoted word, including the
+/// standard `'\''` spelling for an embedded quote.
+fn codex_direct_executable_available(command: &str, event: CodexEvent) -> bool {
+    let separator = format!(" hooks codex {}", event.subcommand);
+    let Some((prefix, _)) = command.rsplit_once(&separator) else {
+        return true;
+    };
+    let Some(argv) = parse_generated_shell_words(prefix) else {
+        return false;
+    };
+    match argv.as_slice() {
+        [executable] => {
+            let executable = Path::new(executable);
+            if executable.is_absolute() {
+                executable_path_is_runnable(executable)
+            } else {
+                // A single component is resolved through PATH by the hook
+                // shell. Relative paths containing a separator depend on
+                // whichever project directory Codex is running in.
+                executable.components().count() == 1
+            }
+        }
+        [flatpak, run, command, app_id]
+            if flatpak == "flatpak"
+                && run == "run"
+                && command == "--command=flowmuxctl"
+                && !app_id.is_empty() =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Parse exactly the conservative word form emitted by [`shell_quote`]. This
+/// is deliberately not a general shell parser: operators, backslash escapes,
+/// unbalanced quotes, and arbitrary multi-command prefixes are rejected.
+fn parse_generated_shell_words(mut input: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    input = input.trim();
+    while !input.is_empty() {
+        if let Some(mut quoted) = input.strip_prefix('\'') {
+            let mut word = String::new();
+            loop {
+                let close = quoted.find('\'')?;
+                word.push_str(&quoted[..close]);
+                quoted = &quoted[close + 1..];
+                if let Some(reopened) = quoted.strip_prefix(r"\''") {
+                    word.push('\'');
+                    quoted = reopened;
+                    continue;
+                }
+                if !quoted.is_empty() && !quoted.chars().next().is_some_and(char::is_whitespace) {
+                    return None;
+                }
+                words.push(word);
+                input = quoted.trim_start();
+                break;
+            }
+        } else {
+            let end = input.find(char::is_whitespace).unwrap_or(input.len());
+            let word = &input[..end];
+            if word.is_empty()
+                || !word.chars().all(|character| {
+                    character.is_ascii_alphanumeric()
+                        || matches!(character, '/' | '.' | '_' | '-' | '=' | ':')
+                })
+            {
+                return None;
+            }
+            words.push(word.to_string());
+            input = input[end..].trim_start();
+        }
+    }
+    (!words.is_empty()).then_some(words)
+}
+
+fn executable_path_is_runnable(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn codex_matching_entry_count(root: &Value, event: CodexEvent) -> usize {
+    root.get("hooks")
+        .and_then(Value::as_object)
+        .and_then(|hooks| hooks.get(event.name))
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|entry| codex_entry_matches(entry, event))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn codex_owned_hook_count(root: &Value) -> usize {
+    fn owned_in_entries(entries: &[Value]) -> usize {
+        entries
+            .iter()
+            .filter_map(|entry| entry.get("hooks").and_then(Value::as_array))
+            .flatten()
+            .filter(|hook| {
+                hook.get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| command.contains(FLOWMUX_HOOK_MARKER))
+            })
+            .count()
+    }
+
+    let Some(root) = root.as_object() else {
+        return 0;
+    };
+    root.iter()
+        .map(|(name, value)| {
+            if name == "hooks" {
+                value
+                    .as_object()
+                    .map(|hooks| {
+                        hooks
+                            .values()
+                            .filter_map(Value::as_array)
+                            .map(|entries| owned_in_entries(entries))
+                            .sum()
+                    })
+                    .unwrap_or(0)
+            } else {
+                value
+                    .as_array()
+                    .map(|entries| owned_in_entries(entries))
+                    .unwrap_or(0)
+            }
+        })
+        .sum()
+}
+
+fn upsert_codex_hooks(root: &mut Value, flowmux_bin: &str) -> Result<()> {
+    validate_codex_hooks_shape(root)?;
+    prune_obsolete_codex_hooks(root);
+    let hooks = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Codex hooks root is not a JSON object"))?
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Codex hooks field is not a JSON object"))?;
+    for event in CODEX_EVENTS {
+        let entries = hooks
+            .entry(event.name)
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| anyhow!("Codex hook {} is not an array", event.name))?;
+        upsert_flowmux_hook_entry(entries, codex_hook_entry(flowmux_bin, *event));
+    }
+    Ok(())
+}
+
+fn validate_codex_hooks_shape(root: &Value) -> Result<()> {
+    let root = root
+        .as_object()
+        .ok_or_else(|| anyhow!("Codex hooks root is not a JSON object"))?;
+
+    for (field, value) in root {
+        match field.as_str() {
+            "description" => {
+                if !value.is_null() && !value.is_string() {
+                    return Err(anyhow!("Codex hooks description is not a string"));
+                }
+            }
+            "hooks" => {
+                let hooks = value
+                    .as_object()
+                    .ok_or_else(|| anyhow!("Codex hooks field is not a JSON object"))?;
+                for (event, entries) in hooks {
+                    validate_codex_matcher_groups(event, entries)?;
+                }
+            }
+            legacy_event if CODEX_EVENTS.iter().any(|event| event.name == legacy_event) => {
+                validate_codex_matcher_groups(legacy_event, value)?;
+                if !legacy_codex_entries_are_owned(value) {
+                    return Err(anyhow!(
+                        "Codex hooks root contains unsupported field {legacy_event}"
+                    ));
+                }
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Codex hooks root contains unsupported field {field}"
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_codex_matcher_groups(event: &str, entries: &Value) -> Result<()> {
+    let entries = entries
+        .as_array()
+        .ok_or_else(|| anyhow!("Codex hook {event} is not an array"))?;
+    for (group_index, entry) in entries.iter().enumerate() {
+        let entry = entry.as_object().ok_or_else(|| {
+            anyhow!("Codex hook {event} matcher group {group_index} is not an object")
+        })?;
+        if entry
+            .get("matcher")
+            .is_some_and(|matcher| !matcher.is_null() && !matcher.is_string())
+        {
+            return Err(anyhow!(
+                "Codex hook {event} matcher group {group_index} has a non-string matcher"
+            ));
+        }
+        let Some(handlers) = entry.get("hooks") else {
+            continue;
+        };
+        let handlers = handlers.as_array().ok_or_else(|| {
+            anyhow!("Codex hook {event} matcher group {group_index} hooks is not an array")
+        })?;
+        for (handler_index, handler) in handlers.iter().enumerate() {
+            validate_codex_handler(event, group_index, handler_index, handler)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_codex_handler(
+    event: &str,
+    group_index: usize,
+    handler_index: usize,
+    handler: &Value,
+) -> Result<()> {
+    let context = || format!("Codex hook {event} handler {group_index}:{handler_index}");
+    let handler = handler
+        .as_object()
+        .ok_or_else(|| anyhow!("{} is not an object", context()))?;
+    let handler_type = handler
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("{} has no string type", context()))?;
+
+    if handler
+        .get("timeout")
+        .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
+    {
+        return Err(anyhow!("{} has an invalid timeout", context()));
+    }
+    if handler
+        .get("statusMessage")
+        .is_some_and(|value| !value.is_null() && !value.is_string())
+    {
+        return Err(anyhow!("{} has an invalid statusMessage", context()));
+    }
+
+    match handler_type {
+        "command" => {
+            if !handler.get("command").is_some_and(Value::is_string) {
+                return Err(anyhow!("{} has no string command", context()));
+            }
+            if handler.contains_key("commandWindows") && handler.contains_key("command_windows") {
+                return Err(anyhow!(
+                    "{} has duplicate commandWindows aliases",
+                    context()
+                ));
+            }
+            for field in ["commandWindows", "command_windows"] {
+                if handler
+                    .get(field)
+                    .is_some_and(|value| !value.is_null() && !value.is_string())
+                {
+                    return Err(anyhow!("{} has an invalid {field}", context()));
+                }
+            }
+            if handler
+                .get("async")
+                .is_some_and(|value| !value.is_boolean())
+            {
+                return Err(anyhow!("{} has an invalid async flag", context()));
+            }
+            if handler.get("additionalContextLimit").is_some_and(|value| {
+                !value.is_null()
+                    && value
+                        .as_u64()
+                        .and_then(|limit| usize::try_from(limit).ok())
+                        .is_none()
+            }) {
+                return Err(anyhow!(
+                    "{} has an invalid additionalContextLimit",
+                    context()
+                ));
+            }
+        }
+        "mcp_tool" => {
+            for field in ["server", "tool"] {
+                if !handler.get(field).is_some_and(Value::is_string) {
+                    return Err(anyhow!("{} has no string {field}", context()));
+                }
+            }
+            if let Some(input) = handler.get("input") {
+                let input = input
+                    .as_object()
+                    .ok_or_else(|| anyhow!("{} has a non-object input", context()))?;
+                if input
+                    .values()
+                    .any(|value| !codex_mcp_input_value_is_valid(value))
+                {
+                    return Err(anyhow!(
+                        "{} has input that cannot be represented as TOML",
+                        context()
+                    ));
+                }
+            }
+        }
+        "prompt" | "agent" => {}
+        _ => return Err(anyhow!("{} has unknown type {handler_type}", context())),
+    }
+    Ok(())
+}
+
+fn codex_mcp_input_value_is_valid(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::String(_) => true,
+        Value::Number(number) => !number.is_u64() || number.as_u64() <= Some(i64::MAX as u64),
+        Value::Array(values) => values.iter().all(codex_mcp_input_value_is_valid),
+        Value::Object(values) => values.values().all(codex_mcp_input_value_is_valid),
+    }
+}
+
+fn legacy_codex_entries_are_owned(entries: &Value) -> bool {
+    entries.as_array().is_some_and(|entries| {
+        !entries.is_empty()
+            && entries.iter().all(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .is_some_and(|hooks| {
+                        !hooks.is_empty()
+                            && hooks.iter().all(|hook| {
+                                hook.get("type").and_then(Value::as_str) == Some("command")
+                                    && hook_is_flowmux_owned(hook)
+                            })
+                    })
+            })
+    })
+}
+
+/// Remove marked handlers for events no longer installed, plus the obsolete
+/// root-level schema, while leaving current event entries in place for their
+/// trust-preserving upsert.
+fn prune_obsolete_codex_hooks(root: &mut Value) {
+    let Some(root) = root.as_object_mut() else {
+        return;
+    };
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        let event_names: Vec<String> = hooks.keys().cloned().collect();
+        for event_name in event_names {
+            if CODEX_EVENTS.iter().any(|event| event.name == event_name) {
+                continue;
+            }
+            let Some(entries) = hooks.get_mut(&event_name).and_then(Value::as_array_mut) else {
+                continue;
+            };
+            let removed = prune_codex_entries(entries);
+            if removed && entries.is_empty() {
+                hooks.remove(&event_name);
+            }
+        }
+    }
+
+    let root_names: Vec<String> = root
+        .keys()
+        .filter(|name| name.as_str() != "hooks")
+        .cloned()
+        .collect();
+    for name in root_names {
+        let Some(entries) = root.get_mut(&name).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let removed = prune_codex_entries(entries);
+        if removed && entries.is_empty() {
+            root.remove(&name);
+        }
+    }
+}
+
+fn prune_codex_hooks(root: &mut Value) {
+    let Some(root) = root.as_object_mut() else {
+        return;
+    };
+    let mut removed_from_hooks = false;
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        let event_names: Vec<String> = hooks.keys().cloned().collect();
+        for event_name in event_names {
+            let Some(entries) = hooks.get_mut(&event_name).and_then(Value::as_array_mut) else {
+                continue;
+            };
+            let removed = prune_codex_entries(entries);
+            removed_from_hooks |= removed;
+            if removed && entries.is_empty() {
+                hooks.remove(&event_name);
+            }
+        }
+        if removed_from_hooks && hooks.is_empty() {
+            root.remove("hooks");
+        }
+    }
+
+    // Codex briefly accepted event arrays at the JSON root. Remove only our
+    // marked handlers from that obsolete shape during upgrade/uninstall.
+    let root_names: Vec<String> = root
+        .keys()
+        .filter(|name| name.as_str() != "hooks")
+        .cloned()
+        .collect();
+    for name in root_names {
+        let Some(entries) = root.get_mut(&name).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let removed = prune_codex_entries(entries);
+        if removed && entries.is_empty() {
+            root.remove(&name);
+        }
+    }
+}
+
+fn prune_codex_entries(entries: &mut Vec<Value>) -> bool {
+    prune_flowmux_hook_handlers(entries)
+}
+
+fn codex_config_has_owned_notify(config_path: &Path) -> Result<bool> {
+    use toml_edit::DocumentMut;
 
     let original = match fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => {
-            return Err(anyhow::Error::from(e)).context(format!("read {}", config_path.display()))
+        Ok(original) => original,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(anyhow::Error::from(error))
+                .context(format!("read {}", config_path.display()))
+        }
+    };
+    let doc: DocumentMut = original
+        .parse()
+        .with_context(|| format!("parse {}", config_path.display()))?;
+    Ok(doc
+        .get("notify")
+        .is_some_and(codex_notify_contains_flowmux_owned))
+}
+
+fn codex_config_hooks_disabled(config_path: &Path) -> Result<bool> {
+    use toml_edit::DocumentMut;
+
+    let original = match fs::read_to_string(config_path) {
+        Ok(original) => original,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(anyhow::Error::from(error))
+                .context(format!("read {}", config_path.display()))
+        }
+    };
+    let doc: DocumentMut = original
+        .parse()
+        .with_context(|| format!("parse {}", config_path.display()))?;
+    if doc
+        .get("allow_managed_hooks_only")
+        .and_then(toml_edit::Item::as_bool)
+        == Some(true)
+    {
+        return Ok(true);
+    }
+    let features = doc.get("features").and_then(toml_edit::Item::as_table_like);
+    Ok(["hooks", "codex_hooks"].into_iter().any(|name| {
+        features
+            .and_then(|features| features.get(name))
+            .and_then(toml_edit::Item::as_bool)
+            == Some(false)
+    }))
+}
+
+/// Remove only FlowMux's old direct `notify` command. Native hooks coexist
+/// with unrelated user notification commands and explicit feature settings.
+fn remove_owned_codex_notify(config_path: &Path) -> Result<bool> {
+    use toml_edit::DocumentMut;
+
+    let original = match fs::read_to_string(config_path) {
+        Ok(original) => original,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(anyhow::Error::from(error))
+                .context(format!("read {}", config_path.display()))
         }
     };
     let mut doc: DocumentMut = original
         .parse()
         .with_context(|| format!("parse {}", config_path.display()))?;
-
-    if doc
-        .get("notify")
-        .map(|notify| !codex_notify_is_flowmux_owned(notify))
-        .unwrap_or(false)
-    {
-        return Err(anyhow!(
-            "{} already defines a non-flowmux notify command; leaving it unchanged",
-            config_path.display()
-        ));
+    let Some(notify) = doc.get_mut("notify") else {
+        return Ok(false);
+    };
+    if codex_notify_is_flowmux_owned(notify) {
+        doc.as_table_mut().remove("notify");
+    } else if !prune_nested_flowmux_notify(notify) {
+        return Ok(false);
     }
-
-    // notify = ["<flowmux-bin>", "hooks", "codex", "stop"]
-    // Outside Flatpak the prefix is just [flowmux_bin]; inside Flatpak
-    // it becomes ["flatpak", "run", "--command=flowmuxctl",
-    // "com.flowmux.App"] so the host-side Codex process spawns
-    // through the runtime instead of touching the sandbox-only binary
-    // path directly.
-    let prefix = host_invocation_argv(flowmux_bin);
-    let mut arr = Array::new();
-    for p in &prefix {
-        arr.push(p.as_str());
-    }
-    arr.push("hooks");
-    arr.push("codex");
-    arr.push("stop");
-    doc["notify"] = value(arr);
-
-    // Roll back the old [features] flips — they're no-ops for Codex
-    // 0.130+ and the deprecated key triggers a startup warning.
-    if let Some(features) = doc
-        .as_table_mut()
-        .get_mut("features")
-        .and_then(|i| i.as_table_mut())
-    {
-        features.remove("codex_hooks");
-        features.remove("hooks");
-        if features.is_empty() {
-            doc.as_table_mut().remove("features");
-        }
-    }
-
-    let new_text = doc.to_string();
-    write_atomic(config_path, new_text.as_bytes())
+    write_atomic(config_path, doc.to_string().as_bytes())
 }
 
 fn codex_notify_is_flowmux_owned(item: &toml_edit::Item) -> bool {
     let Some(array) = item.as_array() else {
         return false;
     };
-    let len = array.len();
-    len >= 3
-        && array.get(len - 3).and_then(|value| value.as_str()) == Some("hooks")
-        && array.get(len - 2).and_then(|value| value.as_str()) == Some("codex")
-        && array.get(len - 1).and_then(|value| value.as_str()) == Some("stop")
+    let args: Vec<&str> = array.iter().filter_map(|value| value.as_str()).collect();
+    if args.len() != array.len() {
+        return false;
+    }
+    codex_notify_argv_is_flowmux_owned(&args)
+}
+
+fn codex_notify_argv_is_flowmux_owned(args: &[&str]) -> bool {
+    let direct = args.len() == 4
+        && Path::new(args[0])
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| matches!(name, "flowmux" | "flowmuxctl"))
+        && args[1..] == ["hooks", "codex", "stop"];
+    let flatpak = args.len() == 7
+        && Path::new(args[0])
+            .file_name()
+            .and_then(|name| name.to_str())
+            == Some("flatpak")
+        && args[1] == "run"
+        && args[2] == "--command=flowmuxctl"
+        && args[3] == "com.flowmux.App"
+        && args[4..] == ["hooks", "codex", "stop"];
+    direct || flatpak
+}
+
+fn codex_notify_contains_flowmux_owned(item: &toml_edit::Item) -> bool {
+    let Some(array) = item.as_array() else {
+        return false;
+    };
+    let args: Vec<&str> = array.iter().filter_map(|value| value.as_str()).collect();
+    args.len() == array.len() && notify_args_contain_flowmux_owned(&args)
+}
+
+fn json_notify_contains_flowmux_owned(value: &Value) -> bool {
+    let Some(array) = value.as_array() else {
+        return false;
+    };
+    let args: Vec<&str> = array.iter().filter_map(Value::as_str).collect();
+    if args.len() != array.len() {
+        return false;
+    }
+    notify_args_contain_flowmux_owned(&args)
+}
+
+fn notify_args_contain_flowmux_owned(args: &[&str]) -> bool {
+    codex_notify_argv_is_flowmux_owned(args)
+        || args.windows(2).any(|pair| {
+            pair[0] == "--previous-notify"
+                && serde_json::from_str::<Value>(pair[1])
+                    .ok()
+                    .is_some_and(|nested| json_notify_contains_flowmux_owned(&nested))
+        })
+}
+
+/// Remove a FlowMux callback nested behind a wrapper's `--previous-notify`
+/// argument while preserving the wrapper itself and all of its other flags.
+fn prune_nested_flowmux_notify(item: &mut toml_edit::Item) -> bool {
+    let Some(array) = item.as_array_mut() else {
+        return false;
+    };
+    let Some(mut args) = array
+        .iter()
+        .map(|value| value.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let changed = prune_nested_flowmux_notify_args(&mut args);
+    if !changed {
+        return false;
+    }
+    while !array.is_empty() {
+        array.remove(array.len() - 1);
+    }
+    for arg in args {
+        array.push(arg);
+    }
+    true
+}
+
+fn prune_nested_flowmux_notify_args(args: &mut Vec<String>) -> bool {
+    let mut changed = false;
+    let mut index = 0;
+    while index + 1 < args.len() {
+        if args[index] != "--previous-notify" {
+            index += 1;
+            continue;
+        }
+        let Ok(mut nested) = serde_json::from_str::<Value>(&args[index + 1]) else {
+            index += 2;
+            continue;
+        };
+        let direct_owned = nested.as_array().is_some_and(|array| {
+            let nested_args: Vec<&str> = array.iter().filter_map(Value::as_str).collect();
+            nested_args.len() == array.len() && codex_notify_argv_is_flowmux_owned(&nested_args)
+        });
+        if direct_owned {
+            args.drain(index..=index + 1);
+            changed = true;
+            continue;
+        }
+        if prune_nested_flowmux_notify_json(&mut nested) {
+            args[index + 1] = serde_json::to_string(&nested)
+                .expect("a parsed Codex notify argv always serializes");
+            changed = true;
+        }
+        index += 2;
+    }
+    changed
+}
+
+fn prune_nested_flowmux_notify_json(value: &mut Value) -> bool {
+    let Some(array) = value.as_array_mut() else {
+        return false;
+    };
+    let Some(mut args) = array
+        .iter()
+        .map(|value| value.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let changed = prune_nested_flowmux_notify_args(&mut args);
+    if changed {
+        *array = args.into_iter().map(Value::String).collect();
+    }
+    changed
 }
 
 // ---- Cline ----------------------------------------------------------
@@ -1740,21 +2610,70 @@ fn write_json(path: &Path, value: &Value) -> Result<bool> {
 }
 
 fn write_atomic(path: &Path, body: &[u8]) -> Result<bool> {
+    // Preserve a user-managed final-component symlink. Renaming directly onto
+    // it would replace the link itself and leave its real config unchanged.
+    // `canonicalize` also rejects dangling and looping links instead of
+    // silently converting them into regular files.
+    let write_path = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path)
+            .with_context(|| format!("resolve config symlink {}", path.display()))?,
+        Ok(_) => path.to_path_buf(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(error) => {
+            return Err(anyhow::Error::from(error)).context(format!("inspect {}", path.display()))
+        }
+    };
     // Keep idempotent setup from changing user config mtimes.
-    if fs::read(path).is_ok_and(|current| current == body) {
+    if fs::read(&write_path).is_ok_and(|current| current == body) {
         return Ok(false);
     }
-    let parent = path
+    #[cfg(unix)]
+    let target_mode = {
+        use std::os::unix::fs::PermissionsExt;
+        match fs::metadata(&write_path) {
+            Ok(metadata) => metadata.permissions().mode(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0o600,
+            Err(error) => {
+                return Err(anyhow::Error::from(error))
+                    .context(format!("inspect {}", write_path.display()))
+            }
+        }
+    };
+    let parent = write_path
         .parent()
-        .ok_or_else(|| anyhow!("path has no parent: {}", path.display()))?;
+        .ok_or_else(|| anyhow!("path has no parent: {}", write_path.display()))?;
     fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     let tmp = parent.join(format!(
         ".{}.flowmux-tmp",
-        path.file_name().and_then(|s| s.to_str()).unwrap_or("hook")
+        write_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("hook")
     ));
-    fs::write(&tmp, body).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .with_context(|| format!("rename {} → {}", tmp.display(), path.display()))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&tmp)
+        .with_context(|| format!("write {}", tmp.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // The predictable temp may survive an interrupted earlier write. Apply
+        // the target's exact mode (or private-by-default mode for a new file)
+        // before placing any agent configuration in it.
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(target_mode))
+            .with_context(|| format!("set permissions on {}", tmp.display()))?;
+    }
+    file.write_all(body)
+        .with_context(|| format!("write {}", tmp.display()))?;
+    drop(file);
+    fs::rename(&tmp, &write_path)
+        .with_context(|| format!("rename {} → {}", tmp.display(), write_path.display()))?;
     Ok(true)
 }
 
@@ -1835,8 +2754,7 @@ mod tests {
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
                 .unwrap();
-            prune_flowmux_claude_entries(arr);
-            arr.push(claude_hook_entry("flowmux", *event));
+            upsert_flowmux_hook_entry(arr, claude_hook_entry("flowmux", *event));
         }
         write_json(&path, &root).unwrap();
 
@@ -1853,6 +2771,11 @@ mod tests {
             ("SessionStart", "session-start"),
             ("UserPromptSubmit", "prompt-submit"),
             ("PreToolUse", "pre-tool-use"),
+            ("PermissionRequest", "permission-request"),
+            ("PostToolUse", "post-tool-use"),
+            ("PostToolBatch", "post-tool-batch"),
+            ("PostToolUseFailure", "post-tool-use-failure"),
+            ("PermissionDenied", "permission-denied"),
             ("SessionEnd", "session-end"),
         ] {
             let cmd = written["hooks"][name][0]["hooks"][0]["command"]
@@ -1862,7 +2785,13 @@ mod tests {
                 cmd.contains(&format!("flowmux hooks claude {subcommand}")),
                 "event {name} should invoke `{subcommand}`, got: {cmd}"
             );
+            assert!(cmd.contains("${FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}"));
+            assert!(cmd.contains("${FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}"));
         }
+        assert_eq!(
+            written["hooks"]["SessionStart"][0]["matcher"],
+            "^(startup|resume|clear|fork)$"
+        );
     }
 
     #[test]
@@ -1873,9 +2802,8 @@ mod tests {
         assert!(body.contains("export FLOWMUX_AGENT_NAME=claude"));
         // Only when inside flowmux, so it stays transparent elsewhere.
         assert!(body.contains("FLOWMUX_SURFACE_ID"));
-        // Registers presence even for agents without their own startup hook.
-        assert!(body.contains("flowmuxctl hooks claude session-start"));
-        assert!(body.contains("flowmux hooks claude session-start"));
+        // Native hooks own lifecycle ordering; the shim must not race them.
+        assert!(!body.contains("hooks claude session-start"));
         assert!(body.contains("FLOWMUX_CLAUDE_SESSION_NAME"));
         assert!(body.contains("session-name"));
         assert!(body.contains("patch >= 224"));
@@ -2222,7 +3150,25 @@ mod tests {
     }
 
     #[test]
-    fn claude_hooks_cover_api_failures_and_attention_only() {
+    fn claude_install_rejects_malformed_hook_shapes_without_rewriting() {
+        let dir = tmp();
+        let cases: [(&str, &[u8]); 3] = [
+            ("root-array.json", b"[]\n"),
+            ("hooks-array.json", b"{\"hooks\":[]}\n"),
+            ("event-object.json", b"{\"hooks\":{\"SessionEnd\":{}}}\n"),
+        ];
+
+        for (name, original) in cases {
+            let path = dir.path().join(name);
+            fs::write(&path, original).unwrap();
+
+            assert!(install_claude_in(&path, "flowmux").is_err());
+            assert_eq!(fs::read(&path).unwrap(), original.to_vec());
+        }
+    }
+
+    #[test]
+    fn claude_hooks_cover_api_failures_and_immediate_attention() {
         let failure = CLAUDE_EVENTS
             .iter()
             .find(|event| event.name == "StopFailure")
@@ -2245,6 +3191,27 @@ mod tests {
         let mut stale = entry;
         stale["matcher"] = json!("");
         assert!(!claude_entry_matches(&stale, notification));
+
+        let permission = CLAUDE_EVENTS
+            .iter()
+            .find(|event| event.name == "PermissionRequest")
+            .copied()
+            .unwrap();
+        assert!(claude_entry_matches(
+            &claude_hook_entry("flowmux", permission),
+            permission
+        ));
+        for name in ["PostToolBatch", "PostToolUseFailure", "PermissionDenied"] {
+            let event = CLAUDE_EVENTS
+                .iter()
+                .find(|event| event.name == name)
+                .copied()
+                .unwrap();
+            assert!(claude_entry_matches(
+                &claude_hook_entry("flowmux", event),
+                event
+            ));
+        }
     }
 
     fn upsert_claude_for_test(root: &mut Value, bin: &str) {
@@ -2261,8 +3228,7 @@ mod tests {
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
                 .unwrap();
-            prune_flowmux_claude_entries(arr);
-            arr.push(claude_hook_entry(bin, *event));
+            upsert_flowmux_hook_entry(arr, claude_hook_entry(bin, *event));
         }
     }
 
@@ -2291,90 +3257,724 @@ mod tests {
     }
 
     #[test]
-    fn codex_set_notify_writes_array_without_clobbering_other_keys() {
-        let dir = tmp();
-        let path = dir.path().join("config.toml");
-        fs::write(
-            &path,
-            r#"model = "gpt-x"
+    fn claude_shared_matcher_group_preserves_user_handler() {
+        let user_hook = json!({
+            "type": "command",
+            "command": "/usr/local/bin/user-hook",
+            "timeout": 30,
+        });
+        let mut root = json!({
+            "hooks": {
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "old-flowmux hooks claude stop # flowmux-hook",
+                        "timeout": 1,
+                    }, user_hook.clone()]
+                }]
+            }
+        });
 
-[projects."/a"]
-trust_level = "trusted"
-"#,
-        )
-        .unwrap();
-        set_codex_notify(&path, "/usr/local/bin/flowmux").unwrap();
-        let new = fs::read_to_string(&path).unwrap();
-        // Original keys preserved.
-        assert!(new.contains("model = \"gpt-x\""));
-        assert!(new.contains("trust_level = \"trusted\""));
-        // notify array present with our argv.
-        assert!(
-            new.contains(r#"notify = ["/usr/local/bin/flowmux", "hooks", "codex", "stop"]"#)
-                || new.contains("notify = [\"/usr/local/bin/flowmux\",")
+        upsert_claude_for_test(&mut root, "flowmux");
+        let stop = root["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 1);
+        assert_eq!(stop[0]["hooks"][1], user_hook);
+
+        prune_flowmux_claude_entries(root["hooks"]["Stop"].as_array_mut().unwrap());
+        assert_eq!(root["hooks"]["Stop"][0]["hooks"], json!([user_hook]));
+    }
+
+    #[test]
+    fn codex_native_entries_match_current_schema() {
+        let mut root = json!({});
+        let executable = std::env::current_exe().unwrap();
+        upsert_codex_hooks(&mut root, executable.to_str().unwrap()).unwrap();
+
+        assert!(root.get("SessionStart").is_none());
+        for event in CODEX_EVENTS {
+            assert_eq!(codex_matching_entry_count(&root, *event), 1);
+            let entry = &root["hooks"][event.name][0];
+            assert_eq!(entry["matcher"], event.matcher);
+            assert_eq!(entry["hooks"][0]["timeout"], event.timeout_secs);
+            let command = entry["hooks"][0]["command"].as_str().unwrap();
+            assert!(command.contains(&format!("hooks codex {}", event.subcommand)));
+            assert!(command.contains("FLOWMUX_PANE_ID"));
+            assert!(command.contains("FLOWMUX_SURFACE_ID"));
+            assert!(command.contains(FLOWMUX_HOOK_MARKER));
+        }
+        assert_eq!(
+            root["hooks"]["SessionStart"][0]["matcher"],
+            "^(startup|resume|clear)$"
         );
-        assert!(new.contains("\"hooks\""));
-        assert!(new.contains("\"codex\""));
-        assert!(new.contains("\"stop\""));
     }
 
     #[test]
-    fn codex_set_notify_strips_deprecated_features_keys() {
+    fn codex_native_upsert_is_idempotent_and_preserves_user_handlers() {
+        let user_hook = json!({
+            "type": "command",
+            "command": "/usr/local/bin/user-hook",
+            "timeout": 9,
+        });
+        let mut root = json!({
+            "description": "keep me",
+            "hooks": {
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [
+                        user_hook.clone(),
+                        {
+                            "type": "command",
+                            "command": "old hooks claude stop # flowmux-hook",
+                            "timeout": 1,
+                        }
+                    ]
+                }],
+                "SubagentStop": [{
+                    "hooks": [user_hook.clone()]
+                }]
+            },
+            "Stop": [{
+                "matcher": "",
+                "hooks": [{
+                    "type": "command",
+                    "command": "old hooks codex stop # flowmux-hook",
+                    "timeout": 1,
+                }]
+            }]
+        });
+
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        let after_first = root.clone();
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+
+        assert_eq!(root, after_first);
+        assert_eq!(root["description"], "keep me");
+        assert!(root.get("Stop").is_none());
+        assert_eq!(
+            root["hooks"]["Stop"][0]["hooks"],
+            json!([
+                user_hook.clone(),
+                codex_hook_entry(
+                    "flowmux",
+                    *CODEX_EVENTS
+                        .iter()
+                        .find(|event| event.name == "Stop")
+                        .unwrap()
+                )["hooks"][0]
+                    .clone()
+            ])
+        );
+        assert_eq!(
+            root["hooks"]["SubagentStop"][0]["hooks"],
+            json!([user_hook])
+        );
+        assert_eq!(codex_owned_hook_count(&root), CODEX_EVENTS.len());
+        for event in CODEX_EVENTS {
+            assert_eq!(codex_matching_entry_count(&root, *event), 1);
+        }
+    }
+
+    #[test]
+    fn codex_native_prune_preserves_unrelated_state() {
+        let mut root = json!({
+            "description": "keep me",
+            "hooks": {
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "/usr/local/bin/user-hook",
+                    }]
+                }],
+                "UserEvent": []
+            }
+        });
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        prune_codex_hooks(&mut root);
+
+        assert_eq!(root["description"], "keep me");
+        assert_eq!(root["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(root["hooks"]["UserEvent"], json!([]));
+        assert_eq!(codex_owned_hook_count(&root), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_uninstall_preserves_final_symlink_and_clears_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
         let dir = tmp();
-        let path = dir.path().join("config.toml");
+        let home = dir.path().join("codex");
+        fs::create_dir(&home).unwrap();
+        let target = dir.path().join("managed-hooks.json");
+        let hooks_path = home.join("hooks.json");
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        write_json(&target, &root).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();
+        symlink("../managed-hooks.json", &hooks_path).unwrap();
+
+        let report = uninstall_codex_in(&home).unwrap();
+
+        assert_eq!(report.touched_paths, vec![hooks_path.clone()]);
+        assert!(fs::symlink_metadata(&hooks_path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(read_json_or_empty_object(&target).unwrap(), json!({}));
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[test]
+    fn codex_native_upsert_preserves_user_handler_indices() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let user_hook = json!({
+            "type": "command",
+            "command": "/usr/local/bin/user-hook",
+            "timeout": 9,
+        });
+        let mut root = json!({
+            "hooks": {
+                "Stop": [{
+                    "matcher": "",
+                    "hooks": [codex_hook_entry("old-flowmux", stop)["hooks"][0].clone(), user_hook.clone()]
+                }]
+            }
+        });
+
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+
+        let hooks = root["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
+        assert_eq!(hooks.len(), 2);
+        assert!(hook_is_flowmux_owned(&hooks[0]));
+        assert_eq!(hooks[1], user_hook);
+    }
+
+    #[test]
+    fn codex_native_upsert_preserves_owned_group_position_across_legacy_matchers() {
+        let session_start = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "SessionStart")
+            .unwrap();
+        let replacement = codex_hook_entry("flowmux", session_start);
+        let user_before = json!({
+            "matcher": "before",
+            "hooks": [{ "type": "command", "command": "user-before" }],
+        });
+        let user_after = json!({
+            "matcher": "after",
+            "hooks": [{ "type": "command", "command": "user-after" }],
+        });
+
+        for legacy_matcher in [None, Some("^legacy$")] {
+            let mut legacy = codex_hook_entry("old-flowmux", session_start);
+            legacy["futureGroupField"] = json!({ "preserve": true });
+            legacy["hooks"][0]["futureHandlerField"] = json!(["preserve"]);
+            match legacy_matcher {
+                Some(matcher) => legacy["matcher"] = json!(matcher),
+                None => {
+                    legacy.as_object_mut().unwrap().remove("matcher");
+                }
+            }
+            let mut entries = vec![user_before.clone(), legacy, user_after.clone()];
+            let mut expected = replacement.clone();
+            expected["futureGroupField"] = json!({ "preserve": true });
+            expected["hooks"][0]["futureHandlerField"] = json!(["preserve"]);
+
+            upsert_flowmux_hook_entry(&mut entries, replacement.clone());
+
+            assert_eq!(
+                entries,
+                vec![user_before.clone(), expected, user_after.clone()]
+            );
+        }
+    }
+
+    #[test]
+    fn codex_native_upsert_preserves_owned_handler_extension_fields() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let mut existing = codex_hook_entry("old-flowmux", stop);
+        existing["hooks"][0]["futureHandlerField"] = json!({ "preserve": true });
+        let mut entries = vec![existing];
+
+        upsert_flowmux_hook_entry(&mut entries, codex_hook_entry("flowmux", stop));
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0]["hooks"][0]["futureHandlerField"],
+            json!({ "preserve": true })
+        );
+        assert!(entries[0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("flowmux hooks codex stop"));
+    }
+
+    #[test]
+    fn claude_native_upsert_drops_stale_schema_controlled_handler_fields() {
+        let stop = *CLAUDE_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let mut existing = claude_hook_entry("old-flowmux", stop);
+        let handler = &mut existing["hooks"][0];
+        handler["if"] = json!("Bash(*)");
+        handler["args"] = json!([]);
+        handler["asyncRewake"] = json!(true);
+        handler["shell"] = json!("powershell");
+        handler["once"] = json!(true);
+        let mut entries = vec![existing];
+
+        upsert_flowmux_hook_entry(&mut entries, claude_hook_entry("flowmux", stop));
+
+        let handler = entries[0]["hooks"][0].as_object().unwrap();
+        for field in ["if", "args", "asyncRewake", "shell", "once"] {
+            assert!(
+                !handler.contains_key(field),
+                "stale schema field {field} must not survive refresh"
+            );
+        }
+        assert!(handler["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("flowmux hooks claude stop"));
+    }
+
+    #[test]
+    fn codex_native_upsert_preserves_extensions_from_later_owned_group() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let first = codex_hook_entry("first-flowmux", stop);
+        let mut second = codex_hook_entry("second-flowmux", stop);
+        second["futureGroupField"] = json!({ "preserve": true });
+        let mut entries = vec![first, second];
+
+        upsert_flowmux_hook_entry(&mut entries, codex_hook_entry("flowmux", stop));
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["futureGroupField"], json!({ "preserve": true }));
+        assert!(entries[0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("flowmux hooks codex stop"));
+    }
+
+    #[test]
+    fn codex_native_upsert_moves_owned_extensions_out_of_shared_legacy_group() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let user_hook = json!({
+            "type": "command",
+            "command": "/usr/local/bin/user-hook",
+        });
+        let mut owned_hook = codex_hook_entry("old-flowmux", stop)["hooks"][0].clone();
+        owned_hook["futureHandlerField"] = json!({ "preserve": true });
+        let mut entries = vec![json!({
+            "matcher": "^legacy$",
+            "hooks": [owned_hook, user_hook.clone()],
+            "futureGroupField": "keep shared group",
+        })];
+
+        upsert_flowmux_hook_entry(&mut entries, codex_hook_entry("flowmux", stop));
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["hooks"], json!([user_hook]));
+        assert_eq!(entries[0]["futureGroupField"], "keep shared group");
+        assert_eq!(entries[1]["matcher"], stop.matcher);
+        assert_eq!(
+            entries[1]["hooks"][0]["futureHandlerField"],
+            json!({ "preserve": true })
+        );
+        assert!(entries[1]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("flowmux hooks codex stop"));
+    }
+
+    #[test]
+    fn codex_native_check_distinguishes_missing_drift_and_installed() {
+        assert_eq!(
+            codex_check_status(&json!({}), false),
+            HookCheckStatus::Missing
+        );
+
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Installed);
+
+        let mut stale_context = root.clone();
+        stale_context["hooks"]["Stop"][0]["hooks"][0]["command"] =
+            json!("flowmux hooks codex stop # flowmux-hook");
+        assert_eq!(
+            codex_check_status(&stale_context, false),
+            HookCheckStatus::Drift
+        );
+        let mut asynchronous = root.clone();
+        asynchronous["hooks"]["Stop"][0]["hooks"][0]["async"] = json!(true);
+        assert_eq!(
+            codex_check_status(&asynchronous, false),
+            HookCheckStatus::Drift
+        );
+
+        root["hooks"].as_object_mut().unwrap().remove("SessionEnd");
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+        assert_eq!(codex_check_status(&json!({}), true), HookCheckStatus::Drift);
+
+        let legacy = json!({
+            "Stop": [{
+                "hooks": [{
+                    "type": "command",
+                    "command": "flowmux hooks codex stop # flowmux-hook",
+                }]
+            }]
+        });
+        assert_eq!(codex_check_status(&legacy, false), HookCheckStatus::Drift);
+    }
+
+    #[test]
+    fn codex_native_check_rejects_missing_direct_absolute_executable() {
+        let dir = tmp();
+        let missing = dir.path().join("deleted flowmux's");
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, missing.to_str().unwrap()).unwrap();
+
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+    }
+
+    #[test]
+    fn codex_native_check_accepts_existing_shell_quoted_executable() {
+        let dir = tmp();
+        let executable = dir.path().join("flowmux build's");
+        fs::write(&executable, "fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, executable.to_str().unwrap()).unwrap();
+
+        let command = root["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            command.starts_with('\''),
+            "fixture path should be shell quoted"
+        );
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Installed);
+
+        fs::remove_file(&executable).unwrap();
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+    }
+
+    #[test]
+    fn codex_native_check_rejects_cwd_relative_executable_path() {
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, "./target/debug/flowmux").unwrap();
+
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+    }
+
+    #[test]
+    fn codex_native_check_rejects_arbitrary_multiword_or_malformed_prefix() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        for prefix in ["definitely-missing --bad", "'unterminated"] {
+            let mut root = json!({});
+            upsert_codex_hooks(&mut root, "flowmux").unwrap();
+            let command = root["hooks"]["Stop"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap();
+            let (_, suffix) = command
+                .rsplit_once(&format!(" hooks codex {}", stop.subcommand))
+                .unwrap();
+            root["hooks"]["Stop"][0]["hooks"][0]["command"] =
+                json!(format!("{prefix} hooks codex {}{suffix}", stop.subcommand));
+
+            assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+        }
+    }
+
+    #[test]
+    fn codex_native_check_accepts_canonical_flatpak_prefix() {
+        let stop = *CODEX_EVENTS
+            .iter()
+            .find(|event| event.name == "Stop")
+            .unwrap();
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+        let command = root["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        let (_, suffix) = command
+            .rsplit_once(&format!(" hooks codex {}", stop.subcommand))
+            .unwrap();
+        root["hooks"]["Stop"][0]["hooks"][0]["command"] = json!(format!(
+            "flatpak run --command=flowmuxctl com.flowmux.App hooks codex {}{suffix}",
+            stop.subcommand
+        ));
+
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Installed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_native_check_rejects_non_executable_absolute_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tmp();
+        let executable = dir.path().join("flowmux");
+        fs::write(&executable, "fixture").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut root = json!({});
+        upsert_codex_hooks(&mut root, executable.to_str().unwrap()).unwrap();
+
+        assert_eq!(codex_check_status(&root, false), HookCheckStatus::Drift);
+    }
+
+    #[test]
+    fn codex_native_migration_removes_only_owned_notify() {
+        let dir = tmp();
+        let owned = dir.path().join("owned.toml");
         fs::write(
-            &path,
-            r#"[features]
-codex_hooks = true
+            &owned,
+            r#"model = "gpt-x"
+notify = ["flowmux", "hooks", "codex", "stop"]
+
+[features]
 hooks = true
+codex_hooks = true
 "#,
         )
         .unwrap();
-        set_codex_notify(&path, "flowmux").unwrap();
-        let new = fs::read_to_string(&path).unwrap();
-        assert!(!new.contains("codex_hooks"), "stale key remained: {new}");
-        assert!(!new.contains("hooks = true"), "stale flag remained: {new}");
-        assert!(new.contains("notify = "));
-    }
+        assert!(remove_owned_codex_notify(&owned).unwrap());
+        let migrated = fs::read_to_string(&owned).unwrap();
+        assert!(!migrated.contains("notify ="));
+        assert!(migrated.contains("model = \"gpt-x\""));
+        assert!(migrated.contains("hooks = true"));
+        assert!(migrated.contains("codex_hooks = true"));
 
-    #[test]
-    fn codex_set_notify_idempotent_no_op_on_second_call() {
-        let dir = tmp();
-        let path = dir.path().join("config.toml");
-        fs::write(&path, "").unwrap();
-        set_codex_notify(&path, "flowmux").unwrap();
-        let after_first = fs::read_to_string(&path).unwrap();
-        set_codex_notify(&path, "flowmux").unwrap();
-        let after_second = fs::read_to_string(&path).unwrap();
-        assert_eq!(after_first, after_second);
-    }
-
-    #[test]
-    fn codex_set_notify_preserves_existing_notifier() {
-        let dir = tmp();
-        let path = dir.path().join("config.toml");
+        let user = dir.path().join("user.toml");
         let original = r#"model = "gpt-x"
 notify = ["/usr/local/bin/user-notifier", "--keep"]
 "#;
-        fs::write(&path, original).unwrap();
+        fs::write(&user, original).unwrap();
 
-        let error = set_codex_notify(&path, "flowmux").unwrap_err();
+        assert!(!remove_owned_codex_notify(&user).unwrap());
+        assert_eq!(fs::read_to_string(&user).unwrap(), original);
 
-        assert!(error.to_string().contains("non-flowmux notify"));
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        let wrapped = dir.path().join("wrapped.toml");
+        fs::write(
+            &wrapped,
+            r#"notify = ["/usr/local/bin/user-wrapper", "turn-ended", "--previous-notify", "[\"/Applications/FlowMux.app/Contents/MacOS/flowmuxctl\",\"hooks\",\"codex\",\"stop\"]", "--keep"]
+"#,
+        )
+        .unwrap();
+        assert!(codex_config_has_owned_notify(&wrapped).unwrap());
+        assert!(remove_owned_codex_notify(&wrapped).unwrap());
+        let migrated = fs::read_to_string(&wrapped).unwrap();
+        assert!(migrated.contains("user-wrapper"));
+        assert!(migrated.contains("turn-ended"));
+        assert!(migrated.contains("--keep"));
+        assert!(!migrated.contains("previous-notify"));
+        assert!(!migrated.contains("flowmuxctl"));
     }
 
     #[test]
-    fn codex_notify_ownership_requires_hook_suffix() {
+    fn codex_notify_ownership_requires_flowmux_executable_and_hook_suffix() {
         use toml_edit::DocumentMut;
 
         let custom: DocumentMut =
             r#"notify = ["/usr/local/bin/flowmux-notifier"]"#.parse().unwrap();
         let owned: DocumentMut =
             r#"notify = ["flowmux", "hooks", "codex", "stop"]"#.parse().unwrap();
+        let user_wrapper: DocumentMut =
+            r#"notify = ["/usr/local/bin/user-wrapper", "hooks", "codex", "stop"]"#
+                .parse()
+                .unwrap();
+        let flatpak: DocumentMut = r#"notify = ["flatpak", "run", "--command=flowmuxctl", "com.flowmux.App", "hooks", "codex", "stop"]"#
+            .parse()
+            .unwrap();
 
         assert!(!codex_notify_is_flowmux_owned(&custom["notify"]));
+        assert!(!codex_notify_is_flowmux_owned(&user_wrapper["notify"]));
         assert!(codex_notify_is_flowmux_owned(&owned["notify"]));
+        assert!(codex_notify_is_flowmux_owned(&flatpak["notify"]));
+    }
+
+    #[test]
+    fn codex_shape_validation_rejects_malformed_containers() {
+        assert!(validate_codex_hooks_shape(&json!([])).is_err());
+        assert!(validate_codex_hooks_shape(&json!({ "hooks": [] })).is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": {} }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [42] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{ "matcher": 42 }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{ "hooks": {} }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{ "hooks": [42] }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{ "hooks": [{ "type": "command" }] }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{
+                "hooks": [{ "type": "command", "command": "ok", "timeout": "soon" }]
+            }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{
+                "hooks": [{ "type": "mcp_tool", "server": "example" }]
+            }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{
+                "hooks": [{
+                    "type": "mcp_tool",
+                    "server": "example",
+                    "tool": "check",
+                    "input": null
+                }]
+            }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({
+            "hooks": { "Stop": [{ "hooks": [{ "type": "future" }] }] }
+        }))
+        .is_err());
+        assert!(validate_codex_hooks_shape(&json!({ "future": {} })).is_err());
+    }
+
+    #[test]
+    fn codex_shape_validation_accepts_and_preserves_valid_user_handlers() {
+        let user_handlers = json!([
+            {
+                "type": "command",
+                "command": "/usr/local/bin/user-hook",
+                "commandWindows": "C:\\user-hook.exe",
+                "timeout": 9,
+                "async": false,
+                "statusMessage": "Checking",
+                "additionalContextLimit": 2500,
+                "futureField": { "preserve": true }
+            },
+            {
+                "type": "mcp_tool",
+                "server": "example",
+                "tool": "check",
+                "input": { "nested": [1, 2] }
+            },
+            { "type": "prompt", "futureField": "preserve" },
+            { "type": "agent" }
+        ]);
+        let mut root = json!({
+            "description": "keep me",
+            "hooks": {
+                "Stop": [{
+                    "matcher": null,
+                    "hooks": user_handlers.clone(),
+                    "futureGroupField": true
+                }],
+                "FutureEvent": []
+            }
+        });
+
+        validate_codex_hooks_shape(&root).unwrap();
+        upsert_codex_hooks(&mut root, "flowmux").unwrap();
+
+        assert_eq!(root["description"], "keep me");
+        assert_eq!(root["hooks"]["Stop"][0]["hooks"], user_handlers);
+        assert_eq!(root["hooks"]["Stop"][0]["futureGroupField"], true);
+        assert_eq!(root["hooks"]["FutureEvent"], json!([]));
+    }
+
+    #[test]
+    fn codex_install_rejects_invalid_hooks_without_rewriting() {
+        let dir = tmp();
+        let hooks = dir.path().join("hooks.json");
+        for original in [
+            br#"{"hooks":{"Stop":[42]}}"#.as_slice(),
+            br#"{"hooks":{"Stop":[{"hooks":[{"type":"future"}]}]}}"#.as_slice(),
+            br#"{"unknown_root":{"preserve":true}}"#.as_slice(),
+        ] {
+            fs::write(&hooks, original).unwrap();
+
+            assert!(install_codex_in(dir.path(), "flowmux").is_err());
+            assert_eq!(fs::read(&hooks).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn codex_disabled_feature_flags_are_detected_without_rewriting() {
+        let dir = tmp();
+        for (name, config) in [
+            ("canonical.toml", "[features]\nhooks = false\n"),
+            ("deprecated.toml", "[features]\ncodex_hooks = false\n"),
+            ("managed-only.toml", "allow_managed_hooks_only = true\n"),
+        ] {
+            let path = dir.path().join(name);
+            fs::write(&path, config).unwrap();
+            assert!(codex_config_hooks_disabled(&path).unwrap());
+        }
+        let enabled = dir.path().join("enabled.toml");
+        fs::write(
+            &enabled,
+            "allow_managed_hooks_only = false\n[features]\nhooks = true\n",
+        )
+        .unwrap();
+        assert!(!codex_config_hooks_disabled(&enabled).unwrap());
+    }
+
+    #[test]
+    fn codex_install_preflights_config_before_writing_hooks() {
+        let dir = tmp();
+        let hooks = dir.path().join("hooks.json");
+        let original = b"{\n  \"description\": \"keep\"\n}\n";
+        fs::write(&hooks, original).unwrap();
+        fs::write(dir.path().join("config.toml"), "notify = [").unwrap();
+
+        assert!(install_codex_in(dir.path(), "flowmux").is_err());
+        assert_eq!(fs::read(&hooks).unwrap(), original);
+
+        fs::write(
+            dir.path().join("config.toml"),
+            "allow_managed_hooks_only = true\n",
+        )
+        .unwrap();
+        assert!(install_codex_in(dir.path(), "flowmux").is_err());
+        assert_eq!(fs::read(&hooks).unwrap(), original);
     }
 
     #[test]
@@ -2619,6 +4219,84 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         assert!(write_atomic(&path, b"second").unwrap());
         assert!(!write_atomic(&path, b"second").unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_uses_private_mode_and_preserves_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tmp();
+        let path = dir.path().join("config.toml");
+        assert!(write_atomic(&path, b"first").unwrap());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(write_atomic(&path, b"second").unwrap());
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_preserves_relative_final_symlink_and_target_mode() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tmp();
+        let config_dir = dir.path().join(".codex");
+        let dotfiles_dir = dir.path().join("dotfiles");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&dotfiles_dir).unwrap();
+        let target = dotfiles_dir.join("config.toml");
+        fs::write(&target, "old").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let link = config_dir.join("config.toml");
+        symlink("../dotfiles/config.toml", &link).unwrap();
+
+        assert!(write_atomic(&link, b"new").unwrap());
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_rejects_dangling_or_looping_final_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmp();
+        let dangling = dir.path().join("dangling.json");
+        symlink("missing.json", &dangling).unwrap();
+        assert!(write_atomic(&dangling, b"new").is_err());
+        assert!(fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        let first = dir.path().join("first.json");
+        let second = dir.path().join("second.json");
+        symlink("second.json", &first).unwrap();
+        symlink("first.json", &second).unwrap();
+        assert!(write_atomic(&first, b"new").is_err());
+        assert!(fs::symlink_metadata(&first)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::symlink_metadata(&second)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]

@@ -35,6 +35,14 @@ const MAX_RETAINED: usize = 50;
 /// double toast.
 const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 
+fn attention_priority(level: NotificationLevel) -> u8 {
+    match level {
+        NotificationLevel::Info | NotificationLevel::TurnCompleted => 0,
+        NotificationLevel::NeedsInput => 1,
+        NotificationLevel::Error => 2,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NotificationEntry {
     pub id: NotificationId,
@@ -102,7 +110,8 @@ impl NotificationStore {
     ) -> Option<NotificationId> {
         let now = chrono::Utc::now();
         let mut entries = self.inner.borrow_mut();
-        // Same (pane, surface) inside DUP_WINDOW → drop. Body and
+        // Same (pane, surface) inside DUP_WINDOW → drop unless the new
+        // notification needs more attention. Body and completion-vs-info
         // level are intentionally NOT part of the key: the OSC path
         // carries the raw agent message ("Codex finished — review
         // the diff") at the heuristic-inferred level (Info when the
@@ -123,7 +132,9 @@ impl NotificationStore {
                 .rev()
                 .find(|e| e.pane == pane && e.surface == surface)
             {
-                if now.signed_duration_since(last.created_at) < DUP_WINDOW {
+                if now.signed_duration_since(last.created_at) < DUP_WINDOW
+                    && attention_priority(level) <= attention_priority(last.level)
+                {
                     return None;
                 }
             }
@@ -575,6 +586,73 @@ mod tests {
             .expect("push must record an entry");
         assert_ne!(a, b);
         assert_eq!(s.entries().len(), 2);
+    }
+
+    #[test]
+    fn urgent_notification_pierces_recent_info_for_same_surface() {
+        for urgent in [NotificationLevel::NeedsInput, NotificationLevel::Error] {
+            let s = store();
+            let pane = PaneId::new();
+            let surface = SurfaceId::new();
+            s.push(
+                "Claude resumed".into(),
+                "status changed".into(),
+                NotificationLevel::Info,
+                Some(pane),
+                Some(surface),
+                None,
+            )
+            .expect("initial info notification must be recorded");
+
+            assert!(
+                s.push(
+                    "Claude needs attention".into(),
+                    "Waiting for approval".into(),
+                    urgent,
+                    Some(pane),
+                    Some(surface),
+                    None,
+                )
+                .is_some(),
+                "urgent notification must not be hidden by a recent info entry"
+            );
+        }
+    }
+
+    #[test]
+    fn same_or_lower_attention_notification_remains_deduplicated() {
+        for (first, second) in [
+            (NotificationLevel::Info, NotificationLevel::TurnCompleted),
+            (NotificationLevel::NeedsInput, NotificationLevel::NeedsInput),
+            (NotificationLevel::NeedsInput, NotificationLevel::Info),
+            (NotificationLevel::Error, NotificationLevel::NeedsInput),
+        ] {
+            let s = store();
+            let pane = PaneId::new();
+            let surface = SurfaceId::new();
+            s.push(
+                "first".into(),
+                "first".into(),
+                first,
+                Some(pane),
+                Some(surface),
+                None,
+            )
+            .expect("initial notification must be recorded");
+
+            assert!(
+                s.push(
+                    "second".into(),
+                    "second".into(),
+                    second,
+                    Some(pane),
+                    Some(surface),
+                    None,
+                )
+                .is_none(),
+                "same or lower-attention notification should remain deduplicated"
+            );
+        }
     }
 
     #[test]

@@ -212,6 +212,116 @@ pub enum Payload {
     Event(Event),
 }
 
+/// Correlated hook transitions that need daemon-side state. Separate hook
+/// processes cannot safely decide these from one event in isolation: Claude
+/// may run tools in parallel, and Codex can stop its parent turn while spawned
+/// subagents are still active.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum AgentLifecycleEvent {
+    TurnStarted {
+        #[serde(default)]
+        turn_id: Option<String>,
+        status_text: String,
+    },
+    /// Ordinary model/tool progress. The daemon applies this only while the
+    /// session has no unresolved user-input or permission waits.
+    ProgressObserved {
+        status_text: String,
+    },
+    /// Codex root Pre/PostToolUse progress. Root identity is explicit so a
+    /// newer event can invalidate a pending Stop even while children remain;
+    /// payloads missing `turn_id` stay on the conservative generic path.
+    CodexRootProgressObserved {
+        turn_id: String,
+        status_text: String,
+    },
+    /// Claude permission prompts have no tool-use id. Track one idempotent
+    /// marker for the current parallel tool batch until `PostToolBatch`.
+    PermissionWaitStarted {
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+        /// Codex root/child turn scope. Claude omits this and uses its
+        /// authoritative PostToolBatch session marker.
+        #[serde(default)]
+        scope: Option<String>,
+    },
+    /// A coarse prompt/error that is not tied to one tool batch. Keep it
+    /// authoritative until the next root turn, turn completion, or session
+    /// teardown so unrelated progress cannot hide a real user wait.
+    SessionWaitStarted {
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+        #[serde(default)]
+        scope: Option<String>,
+    },
+    /// An explicit notification-level resolution for a coarse session wait
+    /// (for example Claude quota auto-resume firing).
+    SessionWaitResolved {
+        status_text: String,
+        /// True when the agent is known to resume work; false when the wait
+        /// ended without resuming (for example auto-resume was disabled).
+        resume: bool,
+        #[serde(default)]
+        scope: Option<String>,
+    },
+    /// Claude's authoritative boundary after every call in a parallel batch
+    /// has resolved. This clears only the uncorrelated permission marker.
+    ToolBatchFinished {
+        status_text: String,
+    },
+    WaitStarted {
+        item_id: String,
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+    },
+    WaitResolved {
+        item_id: String,
+    },
+    /// A non-Codex root turn completed. Keeping this in the lifecycle stream
+    /// makes completion, wait cleanup, stale-event rejection, and notification
+    /// one atomic daemon decision.
+    TurnStopped {
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+    },
+    CodexSubagentStarted {
+        agent_id: String,
+        turn_id: String,
+    },
+    /// A Codex child emitted Pre/PostToolUse. This is authoritative evidence
+    /// that the child turn is active, but it must not advance the root turn's
+    /// stale-event fence.
+    CodexChildProgressObserved {
+        agent_id: String,
+        turn_id: String,
+    },
+    CodexSubagentStopped {
+        agent_id: String,
+        turn_id: String,
+    },
+    CodexTurnStopped {
+        turn_id: String,
+        #[serde(default)]
+        message: Option<String>,
+        status_text: String,
+        /// Codex is retrying Stop for the same turn after a prior handler
+        /// blocked it. This permits state to settle again without a duplicate
+        /// completion notification.
+        #[serde(default)]
+        stop_hook_active: bool,
+    },
+    /// Codex emitted its native Interrupt boundary for the root turn.
+    CodexTurnInterrupted {
+        turn_id: String,
+        status_text: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Request {
@@ -539,6 +649,23 @@ pub enum Request {
         session_name: Option<String>,
         #[serde(default)]
         messaging_socket: Option<String>,
+    },
+
+    /// A lifecycle transition whose meaning depends on earlier events from the
+    /// same session. The GUI daemon serializes these updates so parallel hook
+    /// processes cannot clear another tool's wait or finish a Codex parent
+    /// while an observed child is still active.
+    AgentLifecycleUpdate {
+        #[serde(default)]
+        pane: Option<PaneId>,
+        surface: SurfaceId,
+        agent: String,
+        #[serde(default)]
+        pid: Option<u32>,
+        #[serde(default)]
+        seq: Option<u64>,
+        session_id: String,
+        lifecycle: AgentLifecycleEvent,
     },
 
     /// `flowmux claude-teams [--count N] [-- args...]` — spin up a

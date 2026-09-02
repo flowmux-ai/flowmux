@@ -4,6 +4,7 @@
 //! Split out of `main.rs` (pure move; behavior unchanged).
 
 use super::*;
+use flowmux_ipc::protocol::AgentLifecycleEvent;
 
 const RESUME_RETURNED_REASON: &str = "flowmux_resume_returned";
 const FLOWMUX_AGENT_NAME_ENV: &str = "FLOWMUX_AGENT_NAME";
@@ -13,10 +14,12 @@ pub(crate) fn select_hook_agent_name(
     env_name: Option<&str>,
     process_name: Option<&str>,
 ) -> String {
-    env_name
-        .and_then(known_agent_name)
+    // Native hook routing is the strongest identity signal. Wrapper env is
+    // inherited, so an absolute-path Codex launched from Claude can otherwise
+    // be mislabeled with the parent agent and PID.
+    known_agent_name(reported)
         .or_else(|| process_name.and_then(known_agent_name))
-        .or_else(|| known_agent_name(reported))
+        .or_else(|| env_name.and_then(known_agent_name))
         .unwrap_or(reported)
         .to_ascii_lowercase()
 }
@@ -35,6 +38,16 @@ fn resolve_hook_agent_name(reported: &str, pid: Option<u32>) -> String {
     select_hook_agent_name(reported, env_name.as_deref(), process_name)
 }
 
+fn inherited_wrapper_conflicts_with(reported: &str) -> bool {
+    let reported = known_agent_name(reported);
+    std::env::var(FLOWMUX_AGENT_NAME_ENV)
+        .ok()
+        .as_deref()
+        .and_then(known_agent_name)
+        .zip(reported)
+        .is_some_and(|(inherited, reported)| inherited != reported)
+}
+
 fn hook_agent_display_name(agent: &str) -> &str {
     match agent {
         "codex" => "Codex",
@@ -46,6 +59,36 @@ fn hook_agent_display_name(agent: &str) -> &str {
         "goose" => "Goose",
         _ => agent,
     }
+}
+
+pub(crate) fn build_claude_notification_toast(
+    agent: &str,
+    notification_type: Option<&str>,
+    message: Option<&str>,
+    pane: Option<flowmux_core::PaneId>,
+    surface: Option<flowmux_core::SurfaceId>,
+) -> Option<flowmux_ipc::protocol::Request> {
+    use flowmux_core::NotificationLevel;
+    use flowmux_ipc::protocol::Request;
+
+    let informational_title = match notification_type {
+        Some("quota_auto_resume_fired") => Some(format!("{agent} resumed")),
+        Some("quota_auto_resume_disabled") => Some(format!("{agent} auto-resume stopped")),
+        Some("agent_completed") => Some(format!("{agent} background agent finished")),
+        _ => None,
+    };
+    if let Some(title) = informational_title {
+        return Some(Request::Notify {
+            pane,
+            surface,
+            title,
+            body: hooks::normalized_activity_text(message)
+                .unwrap_or_else(|| "status changed".into()),
+            level: NotificationLevel::Info,
+        });
+    }
+    hooks::claude_notification_needs_input(notification_type)
+        .then(|| hooks::build_notification_notify(agent, message, pane, surface))
 }
 
 /// Claude reports deliberate session replacement/termination with a specific
@@ -135,7 +178,11 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
             let _ = HookInstallStatus::Installed;
             Ok(())
         }
-        HooksOp::Claude { event } => run_claude_hook_event(event, socket).await,
+        HooksOp::Claude {
+            event,
+            pane,
+            surface,
+        } => run_claude_hook_event(event, socket, *pane, *surface).await,
         HooksOp::Codex { event } => run_generic_agent_hook_event("Codex", event, socket).await,
         HooksOp::Opencode { event } => {
             run_generic_agent_hook_event("OpenCode", event, socket).await
@@ -229,6 +276,9 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
         };
         let entry = hook_install::check(*t);
         println!("{label:8}  status={:?}", entry.status);
+        if *t == HookTarget::Codex {
+            println!("           trust is user-controlled; verify changed hooks with Codex /hooks");
+        }
         for p in &entry.paths {
             let info = if p.exists() {
                 let len = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
@@ -269,6 +319,11 @@ pub(crate) fn print_hook_report(report: &hook_install::HookInstallReport) {
             println!("{label:8}  skipped (agent not installed)");
         }
     }
+    if report.target == hook_install::HookTarget::Codex
+        && matches!(report.status, hook_install::HookInstallStatus::Installed)
+    {
+        println!("           restart Codex and review changed hooks with /hooks");
+    }
 }
 /// Best-effort discovery of the running `flowmux` binary path so the
 /// command lines we drop into `~/.claude/settings.json` etc. survive
@@ -282,15 +337,21 @@ pub(crate) fn resolve_self_bin() -> Option<String> {
 pub(crate) async fn run_claude_hook_event(
     event: &ClaudeHookEvent,
     socket: Option<PathBuf>,
+    cli_pane: Option<flowmux_core::PaneId>,
+    cli_surface: Option<flowmux_core::SurfaceId>,
 ) -> anyhow::Result<()> {
     use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
     use hooks::*;
     let input = read_claude_hook_input();
-    let pane = pane_from_env();
-    let surface = surface_from_env();
-    let pid = match event {
-        ClaudeHookEvent::SessionStart => pid_from_env_or_parent(),
-        _ => pid_from_env(),
+    let pane = cli_pane.or_else(pane_from_env);
+    let surface = cli_surface.or_else(surface_from_env);
+    let pid = if inherited_wrapper_conflicts_with("claude") {
+        None
+    } else {
+        match event {
+            ClaudeHookEvent::SessionStart => pid_from_env_or_parent(),
+            _ => pid_from_env(),
+        }
     };
     let agent = resolve_hook_agent_name("claude", pid);
     let agent_display_name = hook_agent_display_name(&agent);
@@ -301,24 +362,64 @@ pub(crate) async fn run_claude_hook_event(
     let mut reqs: Vec<_> = Vec::new();
     match event {
         ClaudeHookEvent::Stop => {
-            let body = normalized_activity_text(input.last_assistant_message.as_deref());
-            let status_text = completed_activity_text(body.as_deref());
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(Idle),
-                pid,
-                pane,
-                surface,
-                body.as_deref(),
-                Some(&status_text),
-                input.session_id.as_deref(),
-            ));
-            reqs.push(build_stop_notify(
-                agent_display_name,
-                body.as_deref(),
-                pane,
-                surface,
-            ));
+            if input.has_pending_work() {
+                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::ProgressObserved {
+                            status_text: "Background work pending".into(),
+                        },
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(Running),
+                        pid,
+                        pane,
+                        surface,
+                        None,
+                        Some("Background work pending"),
+                        input.session_id.as_deref(),
+                    ));
+                }
+            } else {
+                let body = normalized_activity_text(input.last_assistant_message.as_deref());
+                let status_text = completed_activity_text(body.as_deref());
+                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::TurnStopped {
+                            message: body,
+                            status_text,
+                        },
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(Idle),
+                        pid,
+                        pane,
+                        surface,
+                        body.as_deref(),
+                        Some(&status_text),
+                        input.session_id.as_deref(),
+                    ));
+                    reqs.push(build_stop_notify(
+                        agent_display_name,
+                        body.as_deref(),
+                        pane,
+                        surface,
+                    ));
+                }
+            }
         }
         ClaudeHookEvent::StopFailure => {
             let message = normalized_activity_text(input.last_assistant_message.as_deref())
@@ -329,16 +430,38 @@ pub(crate) async fn run_claude_hook_event(
                         .map(|error| format!("API error: {error}"))
                 });
             let status_text = message.as_deref().unwrap_or("API request failed");
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(NeedsInput),
-                pid,
-                pane,
-                surface,
-                message.as_deref(),
-                Some(status_text),
-                input.session_id.as_deref(),
-            ));
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::SessionWaitStarted {
+                        message: message.clone(),
+                        status_text: status_text.to_string(),
+                        scope: Some(
+                            if matches!(input.error.as_deref(), Some("rate_limit" | "usage_limit"))
+                            {
+                                "quota".into()
+                            } else {
+                                "api_failure".into()
+                            },
+                        ),
+                    },
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(NeedsInput),
+                    pid,
+                    pane,
+                    surface,
+                    message.as_deref(),
+                    Some(status_text),
+                    input.session_id.as_deref(),
+                ));
+            }
             reqs.push(build_failure_notify(
                 agent_display_name,
                 message.as_deref(),
@@ -347,21 +470,123 @@ pub(crate) async fn run_claude_hook_event(
             ));
         }
         ClaudeHookEvent::Notification => {
-            if !claude_notification_needs_input(input.notification_type.as_deref()) {
-                return Ok(());
-            }
+            let notification_type = input.notification_type.as_deref();
             let msg = normalized_activity_text(input.message.as_deref());
-            let status_text = msg.as_deref().unwrap_or("Waiting for input");
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(NeedsInput),
-                pid,
+            match notification_type {
+                Some("quota_auto_resume_fired" | "quota_auto_resume_disabled") => {
+                    if let (Some(surface), Some(session_id)) =
+                        (surface, input.session_id.as_deref())
+                    {
+                        let resumed = notification_type == Some("quota_auto_resume_fired");
+                        reqs.push(build_agent_lifecycle_update(
+                            &agent,
+                            pid,
+                            pane,
+                            surface,
+                            session_id,
+                            AgentLifecycleEvent::SessionWaitResolved {
+                                status_text: if resumed {
+                                    "Working".into()
+                                } else {
+                                    "Auto-resume disabled".into()
+                                },
+                                resume: resumed,
+                                scope: Some("quota".into()),
+                            },
+                        ));
+                    }
+                }
+                Some("agent_completed" | "agent_needs_input") => {
+                    // These refer to an unattributed background session, not
+                    // necessarily the pane's root session. Forward attention
+                    // only; no payload identity exists for safe resolution.
+                }
+                _ if !claude_notification_needs_input(notification_type) => return Ok(()),
+                _ => {
+                    let status_text = msg.as_deref().unwrap_or("Waiting for input");
+                    let batch_wait = matches!(
+                        notification_type,
+                        Some("permission_prompt" | "elicitation_dialog" | "elicitation_url_dialog")
+                    );
+                    if let (Some(surface), Some(session_id)) =
+                        (surface, input.session_id.as_deref())
+                    {
+                        let lifecycle = if batch_wait {
+                            AgentLifecycleEvent::PermissionWaitStarted {
+                                message: msg.clone(),
+                                status_text: status_text.to_string(),
+                                scope: None,
+                            }
+                        } else {
+                            AgentLifecycleEvent::SessionWaitStarted {
+                                message: msg.clone(),
+                                status_text: status_text.to_string(),
+                                scope: Some(
+                                    if notification_type == Some("quota_auto_resume_stale") {
+                                        "quota".into()
+                                    } else {
+                                        "agent_input".into()
+                                    },
+                                ),
+                            }
+                        };
+                        reqs.push(build_agent_lifecycle_update(
+                            &agent, pid, pane, surface, session_id, lifecycle,
+                        ));
+                    } else {
+                        reqs.push(build_activity_update_with_metadata(
+                            &agent,
+                            Some(NeedsInput),
+                            pid,
+                            pane,
+                            surface,
+                            msg.as_deref(),
+                            Some(status_text),
+                            input.session_id.as_deref(),
+                        ));
+                    }
+                }
+            }
+            if let Some(notification) = build_claude_notification_toast(
+                agent_display_name,
+                notification_type,
+                msg.as_deref(),
                 pane,
                 surface,
-                msg.as_deref(),
-                Some(status_text),
-                input.session_id.as_deref(),
-            ));
+            ) {
+                reqs.push(notification);
+            }
+        }
+        ClaudeHookEvent::PermissionRequest => {
+            let msg = normalized_activity_text(input.message.as_deref());
+            // Claude deliberately omits tool_use_id here. PostToolBatch is the
+            // first authoritative boundary after every parallel permission in
+            // this model-call batch has resolved.
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::PermissionWaitStarted {
+                        message: msg.clone(),
+                        status_text: "Waiting for approval".into(),
+                        scope: None,
+                    },
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(NeedsInput),
+                    pid,
+                    pane,
+                    surface,
+                    msg.as_deref(),
+                    Some("Waiting for approval"),
+                    input.session_id.as_deref(),
+                ));
+            }
             reqs.push(build_notification_notify(
                 agent_display_name,
                 msg.as_deref(),
@@ -386,29 +611,180 @@ pub(crate) async fn run_claude_hook_event(
         // A new prompt or an imminent tool call means the agent is
         // actively working this turn — and clears any "needs input".
         ClaudeHookEvent::PromptSubmit => {
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(Running),
-                pid,
-                pane,
-                surface,
-                None,
-                Some("Starting turn"),
-                input.session_id.as_deref(),
-            ));
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: input.turn_id.clone(),
+                        status_text: "Starting turn".into(),
+                    },
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Running),
+                    pid,
+                    pane,
+                    surface,
+                    None,
+                    Some("Starting turn"),
+                    input.session_id.as_deref(),
+                ));
+            }
         }
         ClaudeHookEvent::PreToolUse => {
-            let status_text = tool_activity_text(input.tool_name.as_deref());
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(Running),
-                pid,
-                pane,
-                surface,
-                None,
-                Some(&status_text),
-                input.session_id.as_deref(),
-            ));
+            let needs_input = claude_tool_needs_input(input.tool_name.as_deref());
+            let status_text = if needs_input {
+                "Waiting for input".into()
+            } else {
+                tool_activity_text(input.tool_name.as_deref())
+            };
+            if needs_input {
+                if let (Some(surface), Some(session_id), Some(tool_use_id)) = (
+                    surface,
+                    input.session_id.as_deref(),
+                    input.tool_use_id.as_deref(),
+                ) {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::WaitStarted {
+                            item_id: tool_use_id.to_string(),
+                            message: None,
+                            status_text: status_text.clone(),
+                        },
+                    ));
+                } else if let (Some(surface), Some(session_id)) =
+                    (surface, input.session_id.as_deref())
+                {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::SessionWaitStarted {
+                            message: None,
+                            status_text: status_text.clone(),
+                            scope: Some("tool_input".into()),
+                        },
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(NeedsInput),
+                        pid,
+                        pane,
+                        surface,
+                        None,
+                        Some(&status_text),
+                        input.session_id.as_deref(),
+                    ));
+                }
+                if input.permission_mode.as_deref() == Some("bypassPermissions") {
+                    reqs.push(build_notification_notify(
+                        agent_display_name,
+                        None,
+                        pane,
+                        surface,
+                    ));
+                }
+            } else {
+                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::ProgressObserved { status_text },
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(Running),
+                        pid,
+                        pane,
+                        surface,
+                        None,
+                        Some(&status_text),
+                        input.session_id.as_deref(),
+                    ));
+                }
+            }
+        }
+        ClaudeHookEvent::PostToolUse
+        | ClaudeHookEvent::PostToolUseFailure
+        | ClaudeHookEvent::PermissionDenied => {
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                if claude_tool_needs_input(input.tool_name.as_deref()) {
+                    if let Some(tool_use_id) = input.tool_use_id.as_deref() {
+                        reqs.push(build_agent_lifecycle_update(
+                            &agent,
+                            pid,
+                            pane,
+                            surface,
+                            session_id,
+                            AgentLifecycleEvent::WaitResolved {
+                                item_id: tool_use_id.to_string(),
+                            },
+                        ));
+                    }
+                }
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Working".into(),
+                    },
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Running),
+                    pid,
+                    pane,
+                    surface,
+                    None,
+                    Some("Working"),
+                    input.session_id.as_deref(),
+                ));
+            }
+        }
+        ClaudeHookEvent::PostToolBatch => {
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::ToolBatchFinished {
+                        status_text: "Working".into(),
+                    },
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Running),
+                    pid,
+                    pane,
+                    surface,
+                    None,
+                    Some("Working"),
+                    input.session_id.as_deref(),
+                ));
+            }
         }
         // Real teardown (covers Ctrl+C, where Stop never fires). The
         // daemon PID sweep is the backstop for a hard kill that skips
@@ -462,6 +838,26 @@ pub(crate) async fn run_generic_agent_hook_event(
             surface,
             args,
         }
+        | AgentHookEvent::TurnStart {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::SubagentStart {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::SubagentStop {
+            pane,
+            surface,
+            args,
+        }
+        | AgentHookEvent::Interrupt {
+            pane,
+            surface,
+            args,
+        }
         | AgentHookEvent::SessionStart {
             pane,
             surface,
@@ -481,12 +877,16 @@ pub(crate) async fn run_generic_agent_hook_event(
     let pane = cli_pane.or(env_pane);
     let surface = cli_surface.or(env_surface);
     use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
-    let pid = match event {
-        AgentHookEvent::SessionStart { .. } => hooks::pid_from_env_or_parent(),
-        _ => hooks::pid_from_env(),
+    let pid = if inherited_wrapper_conflicts_with(reported_agent) {
+        None
+    } else {
+        match event {
+            AgentHookEvent::SessionStart { .. } => hooks::pid_from_env_or_parent(),
+            _ => hooks::pid_from_env(),
+        }
     };
-    // Gemini's official hooks deliver JSON on stdin. Codex and the generated
-    // OpenCode plugin pass it as an argument; never probe their attached PTY.
+    // Gemini and native Codex hooks deliver JSON on stdin. Codex retains a
+    // positional legacy-notify fallback; OpenCode passes its payload as an arg.
     let input = if reported_agent.eq_ignore_ascii_case("gemini") {
         read_claude_hook_input()
     } else {
@@ -501,6 +901,47 @@ pub(crate) async fn run_generic_agent_hook_event(
                 generic_resume_return_forget_request(&agent, input.reason.as_deref(), surface)
             {
                 reqs.push(request);
+            } else if reported_agent.eq_ignore_ascii_case("codex") {
+                if let (Some(surface), Some(session_id), Some(turn_id)) = (
+                    surface,
+                    input.session_id.as_deref(),
+                    input.turn_id.as_deref(),
+                ) {
+                    let body = normalized_activity_text(input.last_assistant_message.as_deref());
+                    let status_text = completed_activity_text(body.as_deref());
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::CodexTurnStopped {
+                            turn_id: turn_id.to_string(),
+                            message: body,
+                            status_text,
+                            stop_hook_active: input.stop_hook_active,
+                        },
+                    ));
+                } else {
+                    let body = normalized_activity_text(input.last_assistant_message.as_deref());
+                    let status_text = completed_activity_text(body.as_deref());
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(Idle),
+                        pid,
+                        pane,
+                        surface,
+                        body.as_deref(),
+                        Some(&status_text),
+                        input.session_id.as_deref(),
+                    ));
+                    reqs.push(build_stop_notify(
+                        agent_display_name,
+                        body.as_deref(),
+                        pane,
+                        surface,
+                    ));
+                }
             } else {
                 let body = normalized_activity_text(input.last_assistant_message.as_deref());
                 let status_text = completed_activity_text(body.as_deref());
@@ -525,16 +966,53 @@ pub(crate) async fn run_generic_agent_hook_event(
         AgentHookEvent::Notification { .. } => {
             let msg = normalized_activity_text(input.message.as_deref());
             let status_text = msg.as_deref().unwrap_or("Waiting for input");
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(NeedsInput),
-                pid,
-                pane,
-                surface,
-                msg.as_deref(),
-                Some(status_text),
-                input.session_id.as_deref(),
-            ));
+            if reported_agent.eq_ignore_ascii_case("codex") {
+                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                    // PermissionRequest has no call identity, so even identical
+                    // Bash/apply_patch inputs are not safe correlation keys when
+                    // parallel or repeated calls coexist. Preserve a coarse
+                    // turn marker until an authoritative root boundary.
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent,
+                        pid,
+                        pane,
+                        surface,
+                        session_id,
+                        AgentLifecycleEvent::PermissionWaitStarted {
+                            message: msg.clone(),
+                            status_text: status_text.to_string(),
+                            scope: input.turn_id.as_deref().map(|turn_id| {
+                                input.agent_id.as_deref().map_or_else(
+                                    || format!("root:{turn_id}"),
+                                    |agent_id| format!("child:{agent_id}:{turn_id}"),
+                                )
+                            }),
+                        },
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(NeedsInput),
+                        pid,
+                        pane,
+                        surface,
+                        msg.as_deref(),
+                        Some(status_text),
+                        input.session_id.as_deref(),
+                    ));
+                }
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(NeedsInput),
+                    pid,
+                    pane,
+                    surface,
+                    msg.as_deref(),
+                    Some(status_text),
+                    input.session_id.as_deref(),
+                ));
+            }
             reqs.push(build_notification_notify(
                 agent_display_name,
                 msg.as_deref(),
@@ -543,16 +1021,152 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
         AgentHookEvent::Running { .. } => {
-            reqs.push(build_activity_update_with_metadata(
-                &agent,
-                Some(Running),
-                pid,
-                pane,
+            if reported_agent.eq_ignore_ascii_case("codex") {
+                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                    let lifecycle = match (input.agent_id.as_deref(), input.turn_id.as_deref()) {
+                        (Some(agent_id), Some(turn_id)) => {
+                            AgentLifecycleEvent::CodexChildProgressObserved {
+                                agent_id: agent_id.to_string(),
+                                turn_id: turn_id.to_string(),
+                            }
+                        }
+                        (None, Some(turn_id)) => AgentLifecycleEvent::CodexRootProgressObserved {
+                            turn_id: turn_id.to_string(),
+                            status_text: "Working".into(),
+                        },
+                        _ => AgentLifecycleEvent::ProgressObserved {
+                            status_text: "Working".into(),
+                        },
+                    };
+                    reqs.push(build_agent_lifecycle_update(
+                        &agent, pid, pane, surface, session_id, lifecycle,
+                    ));
+                } else {
+                    reqs.push(build_activity_update_with_metadata(
+                        &agent,
+                        Some(Running),
+                        pid,
+                        pane,
+                        surface,
+                        None,
+                        Some("Working"),
+                        input.session_id.as_deref(),
+                    ));
+                }
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Running),
+                    pid,
+                    pane,
+                    surface,
+                    None,
+                    Some("Working"),
+                    input.session_id.as_deref(),
+                ));
+            }
+        }
+        AgentHookEvent::TurnStart { .. } => {
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                let lifecycle = if reported_agent.eq_ignore_ascii_case("codex") {
+                    match (input.agent_id.as_deref(), input.turn_id.as_deref()) {
+                        // Codex emits UserPromptSubmit for child turns too. Treat
+                        // that as an observed child-turn start so a reused child
+                        // becomes active again, without replacing the root turn.
+                        (Some(agent_id), Some(turn_id)) => {
+                            AgentLifecycleEvent::CodexSubagentStarted {
+                                agent_id: agent_id.to_string(),
+                                turn_id: turn_id.to_string(),
+                            }
+                        }
+                        (Some(_), None) => AgentLifecycleEvent::ProgressObserved {
+                            status_text: "Working".into(),
+                        },
+                        (None, _) => AgentLifecycleEvent::TurnStarted {
+                            turn_id: input.turn_id.clone(),
+                            status_text: "Starting turn".into(),
+                        },
+                    }
+                } else {
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: input.turn_id.clone(),
+                        status_text: "Starting turn".into(),
+                    }
+                };
+                reqs.push(build_agent_lifecycle_update(
+                    &agent, pid, pane, surface, session_id, lifecycle,
+                ));
+            } else {
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Running),
+                    pid,
+                    pane,
+                    surface,
+                    None,
+                    Some("Starting turn"),
+                    input.session_id.as_deref(),
+                ));
+            }
+        }
+        AgentHookEvent::SubagentStart { .. } => {
+            if let (Some(surface), Some(session_id), Some(agent_id), Some(turn_id)) = (
                 surface,
-                None,
-                Some("Working"),
                 input.session_id.as_deref(),
-            ));
+                input.agent_id.as_deref(),
+                input.turn_id.as_deref(),
+            ) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::CodexSubagentStarted {
+                        agent_id: agent_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                    },
+                ));
+            }
+        }
+        AgentHookEvent::SubagentStop { .. } => {
+            if let (Some(surface), Some(session_id), Some(agent_id), Some(turn_id)) = (
+                surface,
+                input.session_id.as_deref(),
+                input.agent_id.as_deref(),
+                input.turn_id.as_deref(),
+            ) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::CodexSubagentStopped {
+                        agent_id: agent_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                    },
+                ));
+            }
+        }
+        AgentHookEvent::Interrupt { .. } => {
+            if let (Some(surface), Some(session_id), Some(turn_id)) = (
+                surface,
+                input.session_id.as_deref(),
+                input.turn_id.as_deref(),
+            ) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::CodexTurnInterrupted {
+                        turn_id: turn_id.to_string(),
+                        status_text: "Turn interrupted".into(),
+                    },
+                ));
+            }
         }
         // Codex / OpenCode register presence on session start without claiming
         // a turn is idle. The wrapper PID, when available, lets the liveness

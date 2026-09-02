@@ -9,14 +9,16 @@
 use flowmux_core::{
     agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_idle_name_from_signals,
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
-    detect_agent_status_from_signals, detect_agent_usage_limit_text, terminal_tab_title_for_cwd,
-    AgentBarModel, AgentPresence, AgentStatus, AgentStatusReport, CloseSurfaceOutcome,
-    EditorSessionState, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
-    Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceAgentBlock,
-    WorkspaceId,
+    detect_agent_status_from_signals, detect_agent_usage_limit_text,
+    select_process_agent_candidate, terminal_tab_title_for_cwd, AgentBarModel, AgentPresence,
+    AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent,
+    PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind,
+    TerminalScrollback, Workspace, WorkspaceAgentBlock, WorkspaceId,
 };
+use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::{State, WindowLayout, WindowOwner};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -59,6 +61,78 @@ pub struct LocatedAgentPresence {
     pub surface_label: String,
     pub color: String,
     pub presence: AgentPresence,
+}
+
+type AgentLifecycleKey = (SurfaceId, String, String);
+type AgentPermissionSeqKey = (SurfaceId, String, String, String);
+type AgentSessionWaitSeqKey = (SurfaceId, String, String, String);
+const SESSION_PERMISSION_SCOPE: &str = "session";
+const SESSION_WAIT_SCOPE: &str = "session";
+
+#[derive(Debug, Clone, Default)]
+struct AgentLifecycleRuntime {
+    /// Signed balances make start/resolve deltas commutative when parallel
+    /// hook processes reach the daemon out of order.
+    waits: HashMap<AgentLifecycleKey, HashMap<String, i64>>,
+    permission_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
+    permission_event_seq: HashMap<AgentPermissionSeqKey, u64>,
+    session_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
+    session_wait_event_seq: HashMap<AgentSessionWaitSeqKey, u64>,
+    /// Highest non-child event observed, used to reject delayed terminal
+    /// boundaries and native SessionStart. Codex child ordering is tracked by
+    /// the child-specific sequence maps below so its start/Stop ingress race
+    /// cannot invalidate a legitimate parent Stop.
+    last_seq: HashMap<AgentLifecycleKey, u64>,
+    /// Latest root/session boundary. Deltas older than this belong to a prior
+    /// turn even when a different parallel item arrived later.
+    boundary_seq: HashMap<AgentLifecycleKey, u64>,
+    ended: HashMap<AgentLifecycleKey, EndedAgentLifecycle>,
+    ended_order: VecDeque<AgentLifecycleKey>,
+    codex_turns: HashMap<(SurfaceId, String), CodexTurnLedger>,
+}
+
+#[derive(Debug, Clone)]
+struct EndedAgentLifecycle {
+    pid: Option<u32>,
+    seq: Option<u64>,
+    /// A different native agent temporarily took ownership of the same pane.
+    /// The displaced hook may resume only after process polling has restored
+    /// its identity and the original live PID reports a newer event.
+    reactivate_on_process_return: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CodexTurnLedger {
+    owner_pid: Option<u32>,
+    current_parent_turn: Option<String>,
+    active_children: HashMap<String, String>,
+    child_event_seq: HashMap<(String, String), u64>,
+    child_agent_event_seq: HashMap<String, u64>,
+    pending_parent_stop: Option<PendingCodexStop>,
+    settled_parent_turns: VecDeque<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingCodexStop {
+    turn_id: String,
+    message: Option<String>,
+    status_text: String,
+    notify_completion: bool,
+    seq: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentLifecycleResult {
+    pub workspace: Option<WorkspaceId>,
+    pub completed: bool,
+    pub completion_message: Option<String>,
+    pub settle_codex_after_grace: Option<CodexGraceSettlement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexGraceSettlement {
+    pub turn_id: String,
+    pub stop_seq: Option<u64>,
 }
 
 impl MoveSurfaceOutcome {
@@ -309,12 +383,221 @@ fn state_pane_surface_ids(state: &State, pane: PaneId) -> Vec<SurfaceId> {
 pub struct StateStore {
     inner: Arc<Mutex<State>>,
     cleared_agent_surfaces: Arc<Mutex<HashSet<SurfaceId>>>,
+    last_agent_screen_fingerprints: Arc<Mutex<HashMap<SurfaceId, u64>>>,
+    cleared_agent_screen_fingerprints: Arc<Mutex<HashMap<SurfaceId, Option<u64>>>>,
+    cleared_agent_saw_no_signal: Arc<Mutex<HashSet<SurfaceId>>>,
+    agent_lifecycle: Arc<Mutex<AgentLifecycleRuntime>>,
     dirty: Arc<Notify>,
     dirty_generation: Arc<AtomicU64>,
     persistence: PersistenceMode,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
+
+fn agent_screen_fingerprint(screen_text: Option<&str>, osc_title: Option<&str>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    screen_text.hash(&mut hasher);
+    osc_title.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn remember_settled_codex_turn(ledger: &mut CodexTurnLedger, turn_id: String) {
+    if ledger
+        .settled_parent_turns
+        .iter()
+        .any(|settled| settled == &turn_id)
+    {
+        return;
+    }
+    ledger.settled_parent_turns.push_back(turn_id);
+    while ledger.settled_parent_turns.len() > 32 {
+        ledger.settled_parent_turns.pop_front();
+    }
+}
+
+fn set_codex_ledger_owner_if_missing(ledger: &mut CodexTurnLedger, pid: Option<u32>) {
+    if let Some(pid) = pid {
+        ledger.owner_pid.get_or_insert(pid);
+    }
+}
+
+fn remember_ended_agent_lifecycle(
+    runtime: &mut AgentLifecycleRuntime,
+    key: AgentLifecycleKey,
+    pid: Option<u32>,
+    seq: Option<u64>,
+    reactivate_on_process_return: bool,
+) {
+    runtime.ended_order.retain(|existing| existing != &key);
+    runtime.ended.insert(
+        key.clone(),
+        EndedAgentLifecycle {
+            pid,
+            seq,
+            reactivate_on_process_return,
+        },
+    );
+    runtime.ended_order.push_back(key);
+    while runtime.ended_order.len() > 128 {
+        if let Some(oldest) = runtime.ended_order.pop_front() {
+            runtime.ended.remove(&oldest);
+        }
+    }
+}
+
+fn lifecycle_has_waits(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> bool {
+    runtime
+        .waits
+        .get(key)
+        .is_some_and(|waits| waits.values().any(|balance| *balance > 0))
+        || runtime
+            .permission_waits
+            .get(key)
+            .is_some_and(|scopes| !scopes.is_empty())
+        || runtime
+            .session_waits
+            .get(key)
+            .is_some_and(|scopes| !scopes.is_empty())
+}
+
+fn clear_permission_scope(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+    scope: &str,
+) -> bool {
+    let removed = runtime
+        .permission_waits
+        .get_mut(key)
+        .is_some_and(|scopes| scopes.remove(scope));
+    if runtime
+        .permission_waits
+        .get(key)
+        .is_some_and(HashSet::is_empty)
+    {
+        runtime.permission_waits.remove(key);
+    }
+    removed
+}
+
+fn clear_permission_scope_if_newer(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+    scope: &str,
+    seq: Option<u64>,
+) -> bool {
+    let seq_key = (key.0, key.1.clone(), key.2.clone(), scope.to_string());
+    let newer = match (runtime.permission_event_seq.get(&seq_key).copied(), seq) {
+        (Some(current), Some(incoming)) => incoming > current,
+        (Some(_), None) => false,
+        _ => true,
+    };
+    if !newer {
+        return false;
+    }
+    if let Some(seq) = seq {
+        runtime.permission_event_seq.insert(seq_key, seq);
+    }
+    clear_permission_scope(runtime, key, scope);
+    true
+}
+
+fn clear_codex_root_permission_scopes(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+) {
+    if let Some(scopes) = runtime.permission_waits.get_mut(key) {
+        scopes.retain(|scope| !scope.starts_with("root:"));
+        if scopes.is_empty() {
+            runtime.permission_waits.remove(key);
+        }
+    }
+}
+
+fn clear_permission_event_seq_for_key(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+) {
+    runtime
+        .permission_event_seq
+        .retain(|(surface, agent, session, _), _| {
+            *surface != key.0 || agent != &key.1 || session != &key.2
+        });
+}
+
+fn clear_session_wait_scope(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+    scope: &str,
+) -> bool {
+    let removed = runtime
+        .session_waits
+        .get_mut(key)
+        .is_some_and(|scopes| scopes.remove(scope));
+    if runtime
+        .session_waits
+        .get(key)
+        .is_some_and(HashSet::is_empty)
+    {
+        runtime.session_waits.remove(key);
+    }
+    removed
+}
+
+fn clear_session_wait_event_seq_for_key(
+    runtime: &mut AgentLifecycleRuntime,
+    key: &AgentLifecycleKey,
+) {
+    runtime
+        .session_wait_event_seq
+        .retain(|(surface, agent, session, _), _| {
+            *surface != key.0 || agent != &key.1 || session != &key.2
+        });
+}
+
+fn clear_agent_lifecycle_runtime(
+    lifecycle: &mut AgentLifecycleRuntime,
+    surface: SurfaceId,
+    agent: Option<&str>,
+    session_id: Option<&str>,
+    expected_pid: Option<u32>,
+) {
+    let keep_wait_key = |(key_surface, key_agent, key_session): &AgentLifecycleKey| {
+        *key_surface != surface
+            || agent.is_some_and(|agent| !key_agent.eq_ignore_ascii_case(agent))
+            || session_id.is_some_and(|session| key_session != session)
+    };
+    lifecycle.waits.retain(|key, _| keep_wait_key(key));
+    lifecycle
+        .permission_waits
+        .retain(|key, _| keep_wait_key(key));
+    lifecycle
+        .permission_event_seq
+        .retain(|(key_surface, key_agent, key_session, _), _| {
+            keep_wait_key(&(*key_surface, key_agent.clone(), key_session.clone()))
+        });
+    lifecycle.session_waits.retain(|key, _| keep_wait_key(key));
+    lifecycle
+        .session_wait_event_seq
+        .retain(|(key_surface, key_agent, key_session, _), _| {
+            keep_wait_key(&(*key_surface, key_agent.clone(), key_session.clone()))
+        });
+    lifecycle.last_seq.retain(|key, _| keep_wait_key(key));
+    lifecycle.boundary_seq.retain(|key, _| keep_wait_key(key));
+    lifecycle
+        .codex_turns
+        .retain(|(key_surface, key_session), ledger| {
+            if *key_surface != surface {
+                return true;
+            }
+            if session_id.is_some_and(|session| key_session != session) {
+                return true;
+            }
+            if expected_pid.is_some_and(|pid| ledger.owner_pid != Some(pid)) {
+                return true;
+            }
+            false
+        });
+}
 
 impl StateStore {
     async fn forget_cleared_agent_surfaces(&self, surfaces: &[SurfaceId]) {
@@ -325,6 +608,94 @@ impl StateStore {
         for surface in surfaces {
             cleared.remove(surface);
         }
+        drop(cleared);
+        let mut last = self.last_agent_screen_fingerprints.lock().await;
+        for surface in surfaces {
+            last.remove(surface);
+        }
+        drop(last);
+        let mut baselines = self.cleared_agent_screen_fingerprints.lock().await;
+        for surface in surfaces {
+            baselines.remove(surface);
+        }
+        drop(baselines);
+        let mut saw_no_signal = self.cleared_agent_saw_no_signal.lock().await;
+        for surface in surfaces {
+            saw_no_signal.remove(surface);
+        }
+        drop(saw_no_signal);
+        let mut lifecycle = self.agent_lifecycle.lock().await;
+        lifecycle
+            .waits
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .permission_waits
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .permission_event_seq
+            .retain(|(surface, _, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .session_waits
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .session_wait_event_seq
+            .retain(|(surface, _, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .last_seq
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .boundary_seq
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .ended
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
+        lifecycle
+            .ended_order
+            .retain(|(surface, _, _)| !surfaces.contains(surface));
+        lifecycle
+            .codex_turns
+            .retain(|(surface, _), _| !surfaces.contains(surface));
+    }
+
+    async fn clear_agent_lifecycle(
+        &self,
+        surface: SurfaceId,
+        agent: Option<&str>,
+        session_id: Option<&str>,
+        expected_pid: Option<u32>,
+    ) {
+        let mut lifecycle = self.agent_lifecycle.lock().await;
+        clear_agent_lifecycle_runtime(&mut lifecycle, surface, agent, session_id, expected_pid);
+    }
+
+    async fn allow_agent_screen_restore(&self, surface: SurfaceId) {
+        self.cleared_agent_surfaces.lock().await.remove(&surface);
+        self.cleared_agent_screen_fingerprints
+            .lock()
+            .await
+            .remove(&surface);
+        self.cleared_agent_saw_no_signal
+            .lock()
+            .await
+            .remove(&surface);
+    }
+
+    async fn suppress_agent_screen_restore(&self, surface: SurfaceId) {
+        let baseline = self
+            .last_agent_screen_fingerprints
+            .lock()
+            .await
+            .get(&surface)
+            .copied();
+        self.cleared_agent_surfaces.lock().await.insert(surface);
+        self.cleared_agent_screen_fingerprints
+            .lock()
+            .await
+            .insert(surface, baseline);
+        self.cleared_agent_saw_no_signal
+            .lock()
+            .await
+            .remove(&surface);
     }
 
     /// Construct from inside a tokio runtime context. Spawns the
@@ -335,6 +706,10 @@ impl StateStore {
         let store = Self {
             inner: Arc::new(Mutex::new(initial)),
             cleared_agent_surfaces: Arc::new(Mutex::new(HashSet::new())),
+            last_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_saw_no_signal: Arc::new(Mutex::new(HashSet::new())),
+            agent_lifecycle: Arc::new(Mutex::new(AgentLifecycleRuntime::default())),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
             persistence: PersistenceMode::Full,
@@ -356,6 +731,10 @@ impl StateStore {
         let store = Self {
             inner: Arc::new(Mutex::new(initial)),
             cleared_agent_surfaces: Arc::new(Mutex::new(HashSet::new())),
+            last_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_saw_no_signal: Arc::new(Mutex::new(HashSet::new())),
+            agent_lifecycle: Arc::new(Mutex::new(AgentLifecycleRuntime::default())),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
             persistence: PersistenceMode::Full,
@@ -379,6 +758,10 @@ impl StateStore {
         Self {
             inner: Arc::new(Mutex::new(initial)),
             cleared_agent_surfaces: Arc::new(Mutex::new(HashSet::new())),
+            last_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_saw_no_signal: Arc::new(Mutex::new(HashSet::new())),
+            agent_lifecycle: Arc::new(Mutex::new(AgentLifecycleRuntime::default())),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
             persistence: PersistenceMode::Disabled,
@@ -393,6 +776,10 @@ impl StateStore {
         let store = Self {
             inner: Arc::new(Mutex::new(initial)),
             cleared_agent_surfaces: Arc::new(Mutex::new(HashSet::new())),
+            last_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_screen_fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            cleared_agent_saw_no_signal: Arc::new(Mutex::new(HashSet::new())),
+            agent_lifecycle: Arc::new(Mutex::new(AgentLifecycleRuntime::default())),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
             persistence: PersistenceMode::Window(owner),
@@ -1032,9 +1419,11 @@ impl StateStore {
         drop(s);
         if found.is_some() {
             if agent.is_some() {
-                self.cleared_agent_surfaces.lock().await.remove(&surface_id);
+                self.allow_agent_screen_restore(surface_id).await;
             } else {
-                self.cleared_agent_surfaces.lock().await.insert(surface_id);
+                self.suppress_agent_screen_restore(surface_id).await;
+                self.clear_agent_lifecycle(surface_id, None, None, None)
+                    .await;
             }
         }
         found
@@ -1074,9 +1463,17 @@ impl StateStore {
         agent: &str,
         seq: Option<u64>,
         session_id: Option<&str>,
+        expected_pid: Option<u32>,
     ) -> Option<LocatedAgentPresence> {
-        self.remove_agent_presence_if_current(surface_id, Some(agent), seq, session_id, None, true)
-            .await
+        self.remove_agent_presence_if_current(
+            surface_id,
+            Some(agent),
+            seq,
+            session_id,
+            expected_pid,
+            true,
+        )
+        .await
     }
 
     /// Remove a presence whose recorded process has exited. PID liveness is the
@@ -1092,7 +1489,7 @@ impl StateStore {
             None,
             None,
             Some(expected_pid),
-            false,
+            true,
         )
         .await
     }
@@ -1106,6 +1503,10 @@ impl StateStore {
         expected_pid: Option<u32>,
         suppress_screen_restore: bool,
     ) -> Option<LocatedAgentPresence> {
+        // Serialize teardown against lifecycle reports. Otherwise a delayed
+        // pre-end event can recreate a presence in the gap between removal
+        // and ledger cleanup.
+        let mut lifecycle = self.agent_lifecycle.lock().await;
         let removed = {
             let mut s = self.inner.lock().await;
             s.workspaces.iter_mut().find_map(|workspace| {
@@ -1138,19 +1539,39 @@ impl StateStore {
                 })
             })
         };
-        if removed.is_some() {
-            let mut cleared = self.cleared_agent_surfaces.lock().await;
-            if suppress_screen_restore {
-                cleared.insert(surface_id);
-            } else {
-                cleared.remove(&surface_id);
+        if let Some(removed_presence) = removed.as_ref() {
+            let removed_agent = removed_presence.presence.name.to_ascii_lowercase();
+            let removed_session = removed_presence.presence.session_id.as_deref();
+            clear_agent_lifecycle_runtime(
+                &mut lifecycle,
+                surface_id,
+                Some(&removed_agent),
+                removed_session,
+                None,
+            );
+            if let Some(removed_session) = removed_session {
+                remember_ended_agent_lifecycle(
+                    &mut lifecycle,
+                    (surface_id, removed_agent, removed_session.to_string()),
+                    removed_presence.presence.pid,
+                    seq.or(removed_presence.presence.seq),
+                    false,
+                );
             }
         }
+        if removed.is_some() {
+            if suppress_screen_restore {
+                self.suppress_agent_screen_restore(surface_id).await;
+            } else {
+                self.allow_agent_screen_restore(surface_id).await;
+            }
+        }
+        drop(lifecycle);
         removed
     }
 
     pub async fn clear_dead_agent_activity(&self, surface_id: SurfaceId) -> Option<WorkspaceId> {
-        self.remove_agent_presence_if_current(surface_id, None, None, None, None, false)
+        self.remove_agent_presence_if_current(surface_id, None, None, None, None, true)
             .await
             .map(|removed| removed.workspace)
     }
@@ -1168,7 +1589,1012 @@ impl StateStore {
             .await
     }
 
+    /// Apply a correlated hook event under one daemon-side lock. This prevents
+    /// independently spawned hook processes from resolving another parallel
+    /// tool's permission wait or settling a Codex parent turn while an observed
+    /// subagent is still active.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn report_agent_lifecycle_with_visibility(
+        &self,
+        surface_id: SurfaceId,
+        agent: &str,
+        pid: Option<u32>,
+        seq: Option<u64>,
+        session_id: &str,
+        lifecycle_event: AgentLifecycleEvent,
+        surface_visible: bool,
+    ) -> AgentLifecycleResult {
+        use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
+
+        let agent = agent.to_ascii_lowercase();
+        let mut runtime = self.agent_lifecycle.lock().await;
+        let wait_key = (surface_id, agent.clone(), session_id.to_string());
+        let current = self.located_agent_presence(surface_id).await;
+        // SessionEnd/dead-PID teardown leaves a bounded tombstone. A native
+        // SessionStart normally establishes the next epoch. The one exception
+        // is a live outer agent returning after a nested agent owned the pane:
+        // process polling must first restore the same process identity, and the
+        // returning hook must match the displaced live PID with a newer event.
+        if let Some(ended) = runtime.ended.get(&wait_key) {
+            let can_reactivate = ended.reactivate_on_process_return
+                && current.as_ref().is_some_and(|located| {
+                    located.presence.name.eq_ignore_ascii_case(&agent)
+                        && located.presence.source.as_deref()
+                            == Some(flowmux_core::AGENT_SOURCE_PROC)
+                })
+                && ended.pid.zip(pid).is_some_and(|(ended, incoming)| {
+                    ended == incoming && flowmux_procmon::pid_alive(ended)
+                })
+                && seq.is_some_and(|incoming| ended.seq.is_none_or(|floor| incoming > floor));
+            if !can_reactivate {
+                return AgentLifecycleResult::default();
+            }
+            runtime.ended.remove(&wait_key);
+            runtime.ended_order.retain(|ended| ended != &wait_key);
+        }
+        if agent == "codex"
+            && runtime
+                .codex_turns
+                .get(&(surface_id, session_id.to_string()))
+                .and_then(|ledger| ledger.owner_pid)
+                .zip(pid)
+                .is_some_and(|(owner, incoming)| owner != incoming)
+        {
+            return AgentLifecycleResult::default();
+        }
+        if current.as_ref().is_some_and(|located| {
+            let presence = &located.presence;
+            let authoritative_other_agent = !presence.name.eq_ignore_ascii_case(&agent)
+                && matches!(
+                    presence.source.as_deref(),
+                    Some("flowmux:hook") | Some(flowmux_core::AGENT_SOURCE_PROC)
+                );
+            let other_session = presence.name.eq_ignore_ascii_case(&agent)
+                && presence
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|current| current != session_id);
+            let live_other_pid = presence.name.eq_ignore_ascii_case(&agent)
+                && presence.pid.zip(pid).is_some_and(|(current, incoming)| {
+                    current != incoming && flowmux_procmon::pid_alive(current)
+                });
+            authoritative_other_agent || other_session || live_other_pid
+        }) {
+            return AgentLifecycleResult::default();
+        }
+        let terminal_boundary = matches!(
+            &lifecycle_event,
+            AgentLifecycleEvent::TurnStopped { .. }
+                | AgentLifecycleEvent::CodexTurnStopped { .. }
+                | AgentLifecycleEvent::CodexTurnInterrupted { .. }
+                | AgentLifecycleEvent::SessionWaitResolved { resume: false, .. }
+        );
+        let mut sequence_floor = runtime.boundary_seq.get(&wait_key).copied();
+        if terminal_boundary {
+            sequence_floor = sequence_floor.max(runtime.last_seq.get(&wait_key).copied());
+        }
+        if match (sequence_floor, seq) {
+            (Some(floor), Some(incoming)) => incoming <= floor,
+            (Some(_), None) => true,
+            _ => false,
+        } {
+            return AgentLifecycleResult::default();
+        }
+        let runtime_before = runtime.clone();
+        let codex_child_event = agent == "codex"
+            && (matches!(
+                &lifecycle_event,
+                AgentLifecycleEvent::CodexSubagentStarted { .. }
+                    | AgentLifecycleEvent::CodexChildProgressObserved { .. }
+                    | AgentLifecycleEvent::CodexSubagentStopped { .. }
+            ) || matches!(
+                &lifecycle_event,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    scope: Some(scope),
+                    ..
+                } if scope.starts_with("child:")
+            ));
+        if let Some(seq) = seq.filter(|_| !codex_child_event) {
+            runtime
+                .last_seq
+                .entry(wait_key.clone())
+                .and_modify(|current| *current = (*current).max(seq))
+                .or_insert(seq);
+            if matches!(&lifecycle_event, AgentLifecycleEvent::TurnStarted { .. }) {
+                runtime.boundary_seq.insert(wait_key.clone(), seq);
+            }
+        }
+        let mut completed = false;
+        let mut turn_finished = false;
+        let turn_boundary_seq = seq;
+        let mut settle_codex_after_grace = None;
+        let mut completion_message = None;
+        let decision = match lifecycle_event {
+            AgentLifecycleEvent::TurnStarted {
+                turn_id,
+                status_text,
+            } => {
+                runtime.waits.remove(&wait_key);
+                if agent == "codex" {
+                    clear_codex_root_permission_scopes(&mut runtime, &wait_key);
+                    let ledger = runtime
+                        .codex_turns
+                        .entry((surface_id, session_id.to_string()))
+                        .or_default();
+                    set_codex_ledger_owner_if_missing(ledger, pid);
+                    ledger.pending_parent_stop = None;
+                    if turn_id.is_some() {
+                        ledger.current_parent_turn = turn_id;
+                    }
+                } else {
+                    runtime.permission_waits.remove(&wait_key);
+                    clear_permission_event_seq_for_key(&mut runtime, &wait_key);
+                    runtime.session_waits.remove(&wait_key);
+                    clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
+                }
+                Some((Running, None, status_text))
+            }
+            AgentLifecycleEvent::ProgressObserved { status_text } => {
+                if agent == "codex" {
+                    if let Some(ledger) = runtime
+                        .codex_turns
+                        .get_mut(&(surface_id, session_id.to_string()))
+                    {
+                        let supersedes_stop = ledger.active_children.is_empty()
+                            && ledger.pending_parent_stop.as_ref().is_some_and(|pending| {
+                                match (pending.seq, seq) {
+                                    (Some(stop), Some(incoming)) => incoming > stop,
+                                    (None, Some(_)) => true,
+                                    _ => false,
+                                }
+                            });
+                        if supersedes_stop {
+                            ledger.pending_parent_stop = None;
+                        }
+                    }
+                }
+                (!lifecycle_has_waits(&runtime, &wait_key)).then_some((Running, None, status_text))
+            }
+            AgentLifecycleEvent::CodexRootProgressObserved {
+                turn_id,
+                status_text,
+            } => {
+                if agent == "codex" {
+                    if let Some(ledger) = runtime
+                        .codex_turns
+                        .get_mut(&(surface_id, session_id.to_string()))
+                    {
+                        let supersedes_stop =
+                            ledger.pending_parent_stop.as_ref().is_some_and(|pending| {
+                                match (pending.seq, seq) {
+                                    (Some(stop), Some(incoming)) => incoming > stop,
+                                    (None, Some(_)) => true,
+                                    _ => false,
+                                }
+                            });
+                        if supersedes_stop {
+                            ledger.pending_parent_stop = None;
+                        }
+                        ledger.current_parent_turn = Some(turn_id);
+                    }
+                }
+                (!lifecycle_has_waits(&runtime, &wait_key)).then_some((Running, None, status_text))
+            }
+            AgentLifecycleEvent::PermissionWaitStarted {
+                message,
+                status_text,
+                scope,
+            } => {
+                let scope = scope.unwrap_or_else(|| SESSION_PERMISSION_SCOPE.to_string());
+                let permission_seq_key = (
+                    surface_id,
+                    agent.clone(),
+                    session_id.to_string(),
+                    scope.clone(),
+                );
+                let newer = match (
+                    runtime
+                        .permission_event_seq
+                        .get(&permission_seq_key)
+                        .copied(),
+                    seq,
+                ) {
+                    (Some(current), Some(incoming)) => incoming > current,
+                    (Some(_), None) => false,
+                    _ => true,
+                };
+                if newer {
+                    if let Some(seq) = seq {
+                        runtime.permission_event_seq.insert(permission_seq_key, seq);
+                    }
+                    runtime
+                        .permission_waits
+                        .entry(wait_key.clone())
+                        .or_default()
+                        .insert(scope);
+                    Some((NeedsInput, message, status_text))
+                } else {
+                    None
+                }
+            }
+            AgentLifecycleEvent::SessionWaitStarted {
+                message,
+                status_text,
+                scope,
+            } => {
+                let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
+                let session_wait_seq_key = (
+                    surface_id,
+                    agent.clone(),
+                    session_id.to_string(),
+                    scope.clone(),
+                );
+                let newer = match (
+                    runtime
+                        .session_wait_event_seq
+                        .get(&session_wait_seq_key)
+                        .copied(),
+                    seq,
+                ) {
+                    (Some(current), Some(incoming)) => incoming > current,
+                    (Some(_), None) => false,
+                    _ => true,
+                };
+                if newer {
+                    if let Some(seq) = seq {
+                        runtime
+                            .session_wait_event_seq
+                            .insert(session_wait_seq_key, seq);
+                    }
+                    runtime
+                        .session_waits
+                        .entry(wait_key.clone())
+                        .or_default()
+                        .insert(scope);
+                    Some((NeedsInput, message, status_text))
+                } else {
+                    None
+                }
+            }
+            AgentLifecycleEvent::SessionWaitResolved {
+                status_text,
+                resume,
+                scope,
+            } => {
+                let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
+                let session_wait_seq_key = (
+                    surface_id,
+                    agent.clone(),
+                    session_id.to_string(),
+                    scope.clone(),
+                );
+                let newer = match (
+                    runtime
+                        .session_wait_event_seq
+                        .get(&session_wait_seq_key)
+                        .copied(),
+                    seq,
+                ) {
+                    (Some(current), Some(incoming)) => incoming > current,
+                    (Some(_), None) => false,
+                    _ => true,
+                };
+                if !newer {
+                    None
+                } else {
+                    if let Some(seq) = seq {
+                        runtime
+                            .session_wait_event_seq
+                            .insert(session_wait_seq_key, seq);
+                    }
+                    clear_session_wait_scope(&mut runtime, &wait_key, &scope);
+                    if !resume {
+                        if let Some(seq) = seq {
+                            runtime.boundary_seq.insert(wait_key.clone(), seq);
+                        }
+                    }
+                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
+                        if resume { Running } else { Idle },
+                        None,
+                        status_text,
+                    ))
+                }
+            }
+            AgentLifecycleEvent::ToolBatchFinished { status_text } => {
+                let permission_seq_key = (
+                    surface_id,
+                    agent.clone(),
+                    session_id.to_string(),
+                    SESSION_PERMISSION_SCOPE.to_string(),
+                );
+                let newer = match (
+                    runtime
+                        .permission_event_seq
+                        .get(&permission_seq_key)
+                        .copied(),
+                    seq,
+                ) {
+                    (Some(current), Some(incoming)) => incoming > current,
+                    (Some(_), None) => false,
+                    _ => true,
+                };
+                if newer {
+                    if let Some(seq) = seq {
+                        runtime.permission_event_seq.insert(permission_seq_key, seq);
+                    }
+                    clear_permission_scope(&mut runtime, &wait_key, SESSION_PERMISSION_SCOPE);
+                    (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
+                        Running,
+                        None,
+                        status_text,
+                    ))
+                } else {
+                    None
+                }
+            }
+            AgentLifecycleEvent::WaitStarted {
+                item_id,
+                message,
+                status_text,
+            } => {
+                let balance = runtime
+                    .waits
+                    .entry(wait_key.clone())
+                    .or_default()
+                    .entry(item_id.clone())
+                    .or_default();
+                *balance += 1;
+                let active = *balance > 0;
+                if *balance == 0 {
+                    runtime
+                        .waits
+                        .get_mut(&wait_key)
+                        .expect("wait map exists")
+                        .remove(&item_id);
+                }
+                active.then_some((NeedsInput, message, status_text))
+            }
+            AgentLifecycleEvent::WaitResolved { item_id } => {
+                let waits = runtime.waits.entry(wait_key.clone()).or_default();
+                let balance = waits.entry(item_id.clone()).or_default();
+                let resolved_active = *balance > 0;
+                *balance -= 1;
+                if *balance == 0 {
+                    waits.remove(&item_id);
+                }
+                if runtime.waits.get(&wait_key).is_some_and(HashMap::is_empty) {
+                    runtime.waits.remove(&wait_key);
+                }
+                if resolved_active && !lifecycle_has_waits(&runtime, &wait_key) {
+                    Some((Running, None, "Working".into()))
+                } else {
+                    None
+                }
+            }
+            AgentLifecycleEvent::TurnStopped {
+                message,
+                status_text,
+            } if agent != "codex" => {
+                turn_finished = true;
+                completed = true;
+                completion_message = message.clone();
+                Some((Idle, message, status_text))
+            }
+            AgentLifecycleEvent::CodexSubagentStarted { agent_id, turn_id }
+            | AgentLifecycleEvent::CodexChildProgressObserved { agent_id, turn_id }
+                if agent == "codex" =>
+            {
+                let child_key = (agent_id.clone(), turn_id.clone());
+                let has_waits = lifecycle_has_waits(&runtime, &wait_key);
+                let ledger = runtime
+                    .codex_turns
+                    .entry((surface_id, session_id.to_string()))
+                    .or_default();
+                set_codex_ledger_owner_if_missing(ledger, pid);
+                let newer = seq.is_none_or(|incoming| {
+                    ledger
+                        .child_event_seq
+                        .get(&child_key)
+                        .is_none_or(|current| incoming > *current)
+                        && ledger
+                            .child_agent_event_seq
+                            .get(&agent_id)
+                            .is_none_or(|current| incoming > *current)
+                });
+                if !newer {
+                    return AgentLifecycleResult::default();
+                }
+                if let Some(seq) = seq {
+                    ledger.child_event_seq.insert(child_key, seq);
+                    ledger.child_agent_event_seq.insert(agent_id.clone(), seq);
+                }
+                ledger.active_children.insert(agent_id, turn_id);
+                if has_waits {
+                    None
+                } else {
+                    let count = ledger.active_children.len();
+                    Some((
+                        Running,
+                        None,
+                        format!(
+                            "{count} active Codex subagent{}",
+                            if count == 1 { "" } else { "s" }
+                        ),
+                    ))
+                }
+            }
+            AgentLifecycleEvent::CodexSubagentStopped { agent_id, turn_id } if agent == "codex" => {
+                let child_key = (agent_id.clone(), turn_id.clone());
+                let (remaining_children, pending) = {
+                    let ledger = runtime
+                        .codex_turns
+                        .entry((surface_id, session_id.to_string()))
+                        .or_default();
+                    set_codex_ledger_owner_if_missing(ledger, pid);
+                    let newer = seq.is_none_or(|incoming| {
+                        ledger
+                            .child_event_seq
+                            .get(&child_key)
+                            .is_none_or(|current| incoming > *current)
+                            && ledger
+                                .child_agent_event_seq
+                                .get(&agent_id)
+                                .is_none_or(|current| incoming > *current)
+                    });
+                    if !newer {
+                        return AgentLifecycleResult::default();
+                    }
+                    if let Some(seq) = seq {
+                        ledger.child_event_seq.insert(child_key, seq);
+                        ledger.child_agent_event_seq.insert(agent_id.clone(), seq);
+                    }
+                    let matches_current_turn = ledger
+                        .active_children
+                        .get(&agent_id)
+                        .is_some_and(|active_turn| active_turn == &turn_id);
+                    if !matches_current_turn {
+                        return AgentLifecycleResult::default();
+                    }
+                    ledger.active_children.remove(&agent_id);
+                    let remaining = ledger.active_children.len();
+                    let pending = (remaining == 0)
+                        .then(|| ledger.pending_parent_stop.clone())
+                        .flatten();
+                    (remaining, pending)
+                };
+                clear_permission_scope_if_newer(
+                    &mut runtime,
+                    &wait_key,
+                    &format!("child:{agent_id}:{turn_id}"),
+                    seq,
+                );
+                if let Some(pending) = pending {
+                    let ledger = runtime
+                        .codex_turns
+                        .get_mut(&(surface_id, session_id.to_string()))
+                        .expect("Codex ledger remains present");
+                    if ledger
+                        .settled_parent_turns
+                        .iter()
+                        .any(|settled| settled == &pending.turn_id)
+                    {
+                        None
+                    } else {
+                        settle_codex_after_grace = Some(CodexGraceSettlement {
+                            turn_id: pending.turn_id,
+                            stop_seq: pending.seq,
+                        });
+                        (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
+                            Running,
+                            None,
+                            "Finishing Codex turn".into(),
+                        ))
+                    }
+                } else if lifecycle_has_waits(&runtime, &wait_key) {
+                    None
+                } else if remaining_children > 0 {
+                    Some((
+                        Running,
+                        None,
+                        format!(
+                            "{remaining_children} active Codex subagent{}",
+                            if remaining_children == 1 { "" } else { "s" }
+                        ),
+                    ))
+                } else {
+                    Some((Running, None, "Working".into()))
+                }
+            }
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id,
+                message,
+                status_text,
+                stop_hook_active,
+            } if agent == "codex" => {
+                let ledger_key = (surface_id, session_id.to_string());
+                let (superseded, already_settled, child_count) = {
+                    let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
+                    set_codex_ledger_owner_if_missing(ledger, pid);
+                    (
+                        ledger
+                            .current_parent_turn
+                            .as_ref()
+                            .is_some_and(|current| current != &turn_id),
+                        ledger
+                            .settled_parent_turns
+                            .iter()
+                            .any(|settled| settled == &turn_id),
+                        ledger.active_children.len(),
+                    )
+                };
+                if superseded || (already_settled && !stop_hook_active) {
+                    None
+                } else {
+                    clear_permission_scope_if_newer(
+                        &mut runtime,
+                        &wait_key,
+                        &format!("root:{turn_id}"),
+                        seq,
+                    );
+                    let has_waits = lifecycle_has_waits(&runtime, &wait_key);
+                    let ledger = runtime
+                        .codex_turns
+                        .get_mut(&ledger_key)
+                        .expect("Codex ledger remains present");
+                    if stop_hook_active {
+                        ledger
+                            .settled_parent_turns
+                            .retain(|settled| settled != &turn_id);
+                    }
+                    ledger.pending_parent_stop = Some(PendingCodexStop {
+                        turn_id: turn_id.clone(),
+                        message,
+                        status_text,
+                        notify_completion: !already_settled,
+                        seq,
+                    });
+                    if child_count == 0 {
+                        settle_codex_after_grace = Some(CodexGraceSettlement {
+                            turn_id,
+                            stop_seq: seq,
+                        });
+                        (!has_waits).then_some((Running, None, "Finishing Codex turn".into()))
+                    } else if has_waits {
+                        None
+                    } else {
+                        Some((
+                            Running,
+                            None,
+                            format!(
+                                "{child_count} active Codex subagent{}",
+                                if child_count == 1 { "" } else { "s" }
+                            ),
+                        ))
+                    }
+                }
+            }
+            AgentLifecycleEvent::CodexTurnInterrupted {
+                turn_id,
+                status_text,
+            } if agent == "codex" => {
+                let ledger_key = (surface_id, session_id.to_string());
+                let (superseded, already_settled, child_count) = {
+                    let ledger = runtime.codex_turns.entry(ledger_key.clone()).or_default();
+                    set_codex_ledger_owner_if_missing(ledger, pid);
+                    (
+                        ledger
+                            .current_parent_turn
+                            .as_ref()
+                            .is_some_and(|current| current != &turn_id),
+                        ledger
+                            .settled_parent_turns
+                            .iter()
+                            .any(|settled| settled == &turn_id),
+                        ledger.active_children.len(),
+                    )
+                };
+                if superseded || already_settled {
+                    None
+                } else {
+                    clear_permission_scope_if_newer(
+                        &mut runtime,
+                        &wait_key,
+                        &format!("root:{turn_id}"),
+                        seq,
+                    );
+                    let has_waits = lifecycle_has_waits(&runtime, &wait_key);
+                    let ledger = runtime
+                        .codex_turns
+                        .get_mut(&ledger_key)
+                        .expect("Codex ledger remains present");
+                    if child_count == 0 {
+                        ledger.pending_parent_stop = Some(PendingCodexStop {
+                            turn_id: turn_id.clone(),
+                            message: None,
+                            status_text,
+                            notify_completion: false,
+                            seq,
+                        });
+                        settle_codex_after_grace = Some(CodexGraceSettlement {
+                            turn_id,
+                            stop_seq: seq,
+                        });
+                        (!has_waits).then_some((Running, None, "Finishing interrupted turn".into()))
+                    } else {
+                        ledger.pending_parent_stop = Some(PendingCodexStop {
+                            turn_id,
+                            message: None,
+                            status_text,
+                            notify_completion: false,
+                            seq,
+                        });
+                        if has_waits {
+                            None
+                        } else {
+                            Some((
+                                Running,
+                                None,
+                                format!(
+                                    "{child_count} active Codex subagent{}",
+                                    if child_count == 1 { "" } else { "s" }
+                                ),
+                            ))
+                        }
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        if turn_finished {
+            // A root boundary is session-wide, but Codex shares the session id
+            // with child threads. Preserve child waits while parent completion
+            // is deferred; clear them only at actual turn settlement.
+            runtime.waits.remove(&wait_key);
+            runtime.permission_waits.remove(&wait_key);
+            clear_permission_event_seq_for_key(&mut runtime, &wait_key);
+            runtime.session_waits.remove(&wait_key);
+            clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
+            if let Some(seq) = turn_boundary_seq {
+                runtime.boundary_seq.insert(wait_key.clone(), seq);
+            }
+        }
+
+        let Some((activity, message, custom_status)) = decision else {
+            return AgentLifecycleResult {
+                settle_codex_after_grace,
+                ..AgentLifecycleResult::default()
+            };
+        };
+        let report_seq = if seq
+            .zip(current.as_ref().and_then(|located| located.presence.seq))
+            .is_some_and(|(incoming, current)| incoming <= current)
+        {
+            None
+        } else {
+            seq
+        };
+        let report = AgentStatusReport {
+            name: agent,
+            status: None,
+            activity: Some(activity),
+            pid,
+            source: Some("flowmux:hook".into()),
+            seq: report_seq,
+            message,
+            custom_status: Some(custom_status),
+            session_id: Some(session_id.to_string()),
+            session_name: None,
+            messaging_socket: None,
+        };
+        let workspace = self
+            .apply_agent_status_report(surface_id, report, surface_visible)
+            .await
+            .map(|(workspace, _)| workspace);
+        if workspace.is_none() && current.is_none() {
+            *runtime = runtime_before;
+            completed = false;
+            completion_message = None;
+        }
+        if workspace.is_some() {
+            self.allow_agent_screen_restore(surface_id).await;
+        }
+        drop(runtime);
+        AgentLifecycleResult {
+            workspace,
+            completed,
+            completion_message,
+            settle_codex_after_grace,
+        }
+    }
+
     pub async fn report_agent_status_with_visibility(
+        &self,
+        surface_id: SurfaceId,
+        report: AgentStatusReport,
+        surface_visible: bool,
+    ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        // Only a native SessionStart carries both Ready and a session id.
+        // Legacy wrapper starts are metadata-free and must not erase live
+        // waits/children when they arrive late.
+        let starts_native_session = report.source.as_deref() == Some("flowmux:hook")
+            && report.custom_status.as_deref() == Some("Ready")
+            && report.session_id.is_some();
+        let hook_session = (report.source.as_deref() == Some("flowmux:hook"))
+            .then(|| {
+                report
+                    .session_id
+                    .as_ref()
+                    .map(|session_id| (report.name.to_ascii_lowercase(), session_id.to_string()))
+            })
+            .flatten();
+        let accepted = if starts_native_session {
+            let mut lifecycle = self.agent_lifecycle.lock().await;
+            let session_id = report.session_id.as_deref().unwrap();
+            let agent = report.name.to_ascii_lowercase();
+            let key = (surface_id, agent.clone(), session_id.to_string());
+            let current = self.located_agent_presence(surface_id).await;
+            let floor = lifecycle
+                .last_seq
+                .get(&key)
+                .copied()
+                .into_iter()
+                .chain(lifecycle.ended.get(&key).and_then(|ended| ended.seq))
+                .chain(current.as_ref().and_then(|located| located.presence.seq))
+                .max();
+            if match (floor, report.seq) {
+                (Some(floor), Some(incoming)) => incoming <= floor,
+                (Some(_), None) => true,
+                _ => false,
+            } {
+                return None;
+            }
+            let before = lifecycle.clone();
+            let displaced = current.as_ref().and_then(|located| {
+                let presence = &located.presence;
+                presence.session_id.as_ref().and_then(|session| {
+                    let displaced_key = (
+                        surface_id,
+                        presence.name.to_ascii_lowercase(),
+                        session.clone(),
+                    );
+                    (displaced_key != key).then_some((displaced_key, presence.pid, presence.seq))
+                })
+            });
+            clear_agent_lifecycle_runtime(&mut lifecycle, surface_id, None, None, None);
+            if let Some((displaced_key, displaced_pid, seq)) = displaced {
+                let distinct_nested_identity = displaced_key.1 != agent
+                    || displaced_pid
+                        .zip(report.pid)
+                        .is_some_and(|(outer, inner)| outer != inner);
+                let reactivates_after_process_return =
+                    distinct_nested_identity && displaced_pid.is_some();
+                remember_ended_agent_lifecycle(
+                    &mut lifecycle,
+                    displaced_key,
+                    displaced_pid,
+                    seq,
+                    reactivates_after_process_return,
+                );
+            }
+            lifecycle.ended.remove(&key);
+            lifecycle.ended_order.retain(|ended| ended != &key);
+            if let Some(seq) = report.seq {
+                lifecycle.last_seq.insert(key.clone(), seq);
+                lifecycle.boundary_seq.insert(key, seq);
+            }
+            if agent == "codex" {
+                lifecycle.codex_turns.insert(
+                    (surface_id, session_id.to_string()),
+                    CodexTurnLedger {
+                        owner_pid: report.pid,
+                        ..CodexTurnLedger::default()
+                    },
+                );
+            }
+            let accepted = self
+                .apply_agent_status_report(surface_id, report, surface_visible)
+                .await;
+            if accepted.is_none() {
+                *lifecycle = before;
+            }
+            if accepted.is_some() {
+                self.allow_agent_screen_restore(surface_id).await;
+            }
+            drop(lifecycle);
+            accepted
+        } else if let Some((agent, session_id)) = hook_session {
+            // Serialize every session-bearing direct report with lifecycle
+            // teardown. This closes the gap where SessionEnd could tombstone a
+            // session and a delayed Stop/notification would recreate it.
+            let mut lifecycle = self.agent_lifecycle.lock().await;
+            let key = (surface_id, agent.clone(), session_id.clone());
+            if lifecycle.ended.contains_key(&key) {
+                return None;
+            }
+            if agent == "codex"
+                && lifecycle
+                    .codex_turns
+                    .get(&(surface_id, session_id.clone()))
+                    .and_then(|ledger| ledger.owner_pid)
+                    .zip(report.pid)
+                    .is_some_and(|(owner, incoming)| owner != incoming)
+            {
+                return None;
+            }
+            let current = self.located_agent_presence(surface_id).await;
+            if current.as_ref().is_some_and(|located| {
+                let presence = &located.presence;
+                let authoritative_other_agent = !presence.name.eq_ignore_ascii_case(&agent)
+                    && matches!(
+                        presence.source.as_deref(),
+                        Some("flowmux:hook") | Some(flowmux_core::AGENT_SOURCE_PROC)
+                    );
+                let other_session = presence.name.eq_ignore_ascii_case(&agent)
+                    && presence
+                        .session_id
+                        .as_deref()
+                        .is_some_and(|current| current != session_id);
+                let live_other_pid = presence.name.eq_ignore_ascii_case(&agent)
+                    && presence
+                        .pid
+                        .zip(report.pid)
+                        .is_some_and(|(current, incoming)| {
+                            current != incoming && flowmux_procmon::pid_alive(current)
+                        });
+                authoritative_other_agent || other_session || live_other_pid
+            }) {
+                return None;
+            }
+            let boundary = lifecycle.boundary_seq.get(&key).copied();
+            if match (boundary, report.seq) {
+                (Some(floor), Some(incoming)) => incoming <= floor,
+                (Some(_), None) => true,
+                _ => false,
+            } {
+                return None;
+            }
+            let terminal_idle = report.effective_status() == Some(AgentStatus::Idle);
+            let report_seq = report.seq;
+            let accepted = self
+                .apply_agent_status_report(surface_id, report, surface_visible)
+                .await;
+            if accepted.is_some() {
+                if let Some(seq) = report_seq {
+                    lifecycle
+                        .last_seq
+                        .entry(key.clone())
+                        .and_modify(|current| *current = (*current).max(seq))
+                        .or_insert(seq);
+                    if terminal_idle {
+                        lifecycle.boundary_seq.insert(key.clone(), seq);
+                    }
+                }
+                if terminal_idle {
+                    lifecycle.waits.remove(&key);
+                    lifecycle.permission_waits.remove(&key);
+                    clear_permission_event_seq_for_key(&mut lifecycle, &key);
+                    lifecycle.session_waits.remove(&key);
+                    clear_session_wait_event_seq_for_key(&mut lifecycle, &key);
+                }
+                self.allow_agent_screen_restore(surface_id).await;
+            }
+            drop(lifecycle);
+            accepted
+        } else {
+            let accepted = self
+                .apply_agent_status_report(surface_id, report, surface_visible)
+                .await;
+            if accepted.is_some() {
+                self.allow_agent_screen_restore(surface_id).await;
+            }
+            accepted
+        };
+        accepted
+    }
+
+    /// Settle a Codex root Stop after a short ingress grace period. A child is
+    /// spawned before its SubagentStart hook is dispatched, so the Stop hook
+    /// can otherwise observe an empty child set and publish a false completion.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn settle_codex_turn_after_grace(
+        &self,
+        surface_id: SurfaceId,
+        pid: Option<u32>,
+        seq: Option<u64>,
+        session_id: &str,
+        turn_id: &str,
+        surface_visible: bool,
+    ) -> AgentLifecycleResult {
+        use flowmux_core::AgentActivity::Idle;
+
+        let mut runtime = self.agent_lifecycle.lock().await;
+        let wait_key = (surface_id, "codex".to_string(), session_id.to_string());
+        if runtime.ended.contains_key(&wait_key) {
+            return AgentLifecycleResult::default();
+        }
+        let current = self.located_agent_presence(surface_id).await;
+        if !current.as_ref().is_some_and(|located| {
+            located.presence.name.eq_ignore_ascii_case("codex")
+                && located.presence.session_id.as_deref() == Some(session_id)
+                && located
+                    .presence
+                    .pid
+                    .zip(pid)
+                    .is_none_or(|(current, incoming)| current == incoming)
+        }) {
+            return AgentLifecycleResult::default();
+        }
+        let before = runtime.clone();
+        let pending = {
+            let Some(ledger) = runtime
+                .codex_turns
+                .get_mut(&(surface_id, session_id.to_string()))
+            else {
+                return AgentLifecycleResult::default();
+            };
+            if ledger
+                .owner_pid
+                .zip(pid)
+                .is_some_and(|(owner, incoming)| owner != incoming)
+                || !ledger.active_children.is_empty()
+                || ledger
+                    .pending_parent_stop
+                    .as_ref()
+                    .is_none_or(|pending| pending.turn_id != turn_id || pending.seq != seq)
+            {
+                return AgentLifecycleResult::default();
+            }
+            let pending = ledger.pending_parent_stop.take().unwrap();
+            remember_settled_codex_turn(ledger, pending.turn_id.clone());
+            ledger.current_parent_turn = None;
+            pending
+        };
+        runtime.waits.remove(&wait_key);
+        runtime.permission_waits.remove(&wait_key);
+        clear_permission_event_seq_for_key(&mut runtime, &wait_key);
+        runtime.session_waits.remove(&wait_key);
+        clear_session_wait_event_seq_for_key(&mut runtime, &wait_key);
+        if let Some(seq) = seq {
+            runtime.boundary_seq.insert(wait_key.clone(), seq);
+        }
+        let report = AgentStatusReport {
+            name: "codex".into(),
+            status: None,
+            activity: Some(Idle),
+            pid,
+            source: Some("flowmux:hook".into()),
+            // The provisional Stop report already owns this sequence. The
+            // aggregate settlement is the second phase of the same event.
+            seq: None,
+            message: pending.message.clone(),
+            custom_status: Some(pending.status_text),
+            session_id: Some(session_id.to_string()),
+            session_name: None,
+            messaging_socket: None,
+        };
+        let workspace = self
+            .apply_agent_status_report(surface_id, report, surface_visible)
+            .await
+            .map(|(workspace, _)| workspace);
+        if workspace.is_none() {
+            *runtime = before;
+            return AgentLifecycleResult::default();
+        }
+        self.allow_agent_screen_restore(surface_id).await;
+        drop(runtime);
+        AgentLifecycleResult {
+            workspace,
+            completed: pending.notify_completion,
+            completion_message: pending
+                .notify_completion
+                .then_some(pending.message)
+                .flatten(),
+            settle_codex_after_grace: None,
+        }
+    }
+
+    async fn apply_agent_status_report(
         &self,
         surface_id: SurfaceId,
         mut report: AgentStatusReport,
@@ -1200,44 +2626,147 @@ impl StateStore {
                 break;
             }
         }
-        drop(s);
-        if accepted.is_some() {
-            self.cleared_agent_surfaces.lock().await.remove(&surface_id);
-        }
         accepted
     }
 
-    /// Reconcile Agent Bar presence against process-tree truth for a batch of
-    /// terminal surfaces. `detected` pairs each surface with the canonical
-    /// agent name running in its process subtree (or `None`). This is the
-    /// authoritative existence/liveness signal, independent of TUI text or
-    /// hooks. Returns the affected workspaces and their rolled-up status so the
-    /// caller can refresh the side panel and Agent Bar.
+    /// Compatibility entry point for callers with at most one process-derived
+    /// identity per surface. New process-tree scans should use
+    /// [`Self::reconcile_process_agent_candidates`] so a nested hook identity
+    /// is not discarded before reconciliation.
     pub async fn reconcile_process_agents(
         &self,
         detected: &[(SurfaceId, Option<&str>)],
     ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
+        let candidates: Vec<_> = detected
+            .iter()
+            .map(|(surface, name)| (*surface, name.iter().copied().collect::<Vec<_>>()))
+            .collect();
+        self.reconcile_process_agent_candidates(&candidates).await
+    }
+
+    /// Snapshot the live agent slot for each terminal before process-tree
+    /// inspection leaves the state lock. The process walk runs on a blocking
+    /// worker, so callers must pair these tokens with
+    /// [`Self::reconcile_process_agent_candidates_if_unchanged`] to avoid
+    /// applying a result that predates a native hook transition.
+    pub async fn agent_process_reconciliation_snapshot(
+        &self,
+        surfaces: &[SurfaceId],
+    ) -> Vec<(SurfaceId, Option<AgentPresence>)> {
+        let s = self.inner.lock().await;
+        surfaces
+            .iter()
+            .filter_map(|surface| {
+                agent_presence_slot_in_state(&s, *surface).map(|presence| (*surface, presence))
+            })
+            .collect()
+    }
+
+    /// Reconcile Agent Bar presence against all process-tree identities for a
+    /// batch of terminal surfaces. Candidates are ordered deepest-first by the
+    /// process monitor. A matching native hook identity is retained wherever
+    /// it appears in the list; without one, the first candidate is selected.
+    pub async fn reconcile_process_agent_candidates(
+        &self,
+        detected: &[(SurfaceId, Vec<&str>)],
+    ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
+        self.reconcile_process_agent_candidates_inner(detected, None)
+            .await
+    }
+
+    /// Apply a process-tree snapshot only to surfaces whose agent slot still
+    /// matches the value observed before the blocking process walk. A native
+    /// SessionStart that lands during that walk must not be displaced and
+    /// tombstoned by older process truth.
+    pub async fn reconcile_process_agent_candidates_if_unchanged(
+        &self,
+        detected: &[(SurfaceId, Vec<&str>)],
+        observed: &[(SurfaceId, Option<AgentPresence>)],
+    ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
+        self.reconcile_process_agent_candidates_inner(detected, Some(observed))
+            .await
+    }
+
+    async fn reconcile_process_agent_candidates_inner(
+        &self,
+        detected: &[(SurfaceId, Vec<&str>)],
+        observed: Option<&[(SurfaceId, Option<AgentPresence>)]>,
+    ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
         let mut changed: Vec<(WorkspaceId, Option<AgentStatus>)> = Vec::new();
         let mut created_surfaces: Vec<SurfaceId> = Vec::new();
+        // Process truth may replace a hook-owned identity. Serialize the whole
+        // mutation with hook lifecycle work (lifecycle -> state lock order) so
+        // a handler cannot validate the old owner and overwrite the replacement.
+        let mut lifecycle = self.agent_lifecycle.lock().await;
         {
             let mut s = self.inner.lock().await;
-            for (surface_id, name) in detected {
+            for (surface_id, candidates) in detected {
+                let changed_during_scan = observed
+                    .and_then(|observed| {
+                        observed
+                            .iter()
+                            .find(|(observed_surface, _)| observed_surface == surface_id)
+                    })
+                    .is_some_and(|(_, observed_presence)| {
+                        agent_presence_slot_in_state(&s, *surface_id).as_ref()
+                            != Some(observed_presence)
+                    });
+                if changed_during_scan {
+                    continue;
+                }
                 for ws in s.workspaces.iter_mut() {
                     let mut applied = None;
                     for surface in ws.surfaces.iter_mut() {
-                        if let Some(result) = surface
-                            .root_pane
-                            .reconcile_process_agent(*surface_id, *name)
+                        let previous = surface.root_pane.agent_presence_for_surface(*surface_id);
+                        let name = select_process_agent_candidate(previous.as_ref(), candidates);
+                        if let Some(result) =
+                            surface.root_pane.reconcile_process_agent(*surface_id, name)
                         {
-                            applied = Some(result);
+                            applied = Some((result, previous, name));
                             break;
                         }
                     }
-                    if let Some(result) = applied {
+                    if let Some((result, previous, name)) = applied {
                         if result {
                             changed.push((ws.id, ws.agent_status_rollup()));
                             if name.is_some() {
                                 created_surfaces.push(*surface_id);
+                            }
+                            if let Some(previous) = previous {
+                                let displaced = name.is_none_or(|detected| {
+                                    !previous.name.eq_ignore_ascii_case(detected)
+                                });
+                                if displaced {
+                                    if let Some(session_id) = previous.session_id.as_deref() {
+                                        let old_key = (
+                                            *surface_id,
+                                            previous.name.to_ascii_lowercase(),
+                                            session_id.to_string(),
+                                        );
+                                        clear_agent_lifecycle_runtime(
+                                            &mut lifecycle,
+                                            *surface_id,
+                                            Some(&previous.name),
+                                            Some(session_id),
+                                            previous.pid,
+                                        );
+                                        remember_ended_agent_lifecycle(
+                                            &mut lifecycle,
+                                            old_key,
+                                            previous.pid,
+                                            previous.seq,
+                                            false,
+                                        );
+                                    } else {
+                                        clear_agent_lifecycle_runtime(
+                                            &mut lifecycle,
+                                            *surface_id,
+                                            None,
+                                            None,
+                                            None,
+                                        );
+                                    }
+                                }
                             }
                         }
                         break;
@@ -1248,12 +2777,10 @@ impl StateStore {
         // A live agent process is ground truth: unblock the screen-refinement
         // path that a prior hook SessionEnd may have latched for this surface,
         // so working/idle status can track again.
-        if !created_surfaces.is_empty() {
-            let mut cleared = self.cleared_agent_surfaces.lock().await;
-            for surface_id in created_surfaces {
-                cleared.remove(&surface_id);
-            }
+        for surface_id in created_surfaces {
+            self.allow_agent_screen_restore(surface_id).await;
         }
+        drop(lifecycle);
         changed
     }
 
@@ -1280,6 +2807,11 @@ impl StateStore {
         osc_title: Option<&str>,
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
+        self.last_agent_screen_fingerprints
+            .lock()
+            .await
+            .insert(surface_id, fingerprint);
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
         let status_text = match detected_status {
             Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
@@ -1301,20 +2833,84 @@ impl StateStore {
             None
         };
         if status.is_none() {
+            if self
+                .cleared_agent_surfaces
+                .lock()
+                .await
+                .contains(&surface_id)
+            {
+                // Seeing a plain shell/non-agent frame after teardown is strong
+                // evidence that any later agent frame belongs to a new remote
+                // or screen-only session, including one that first appears
+                // blocked rather than working.
+                self.cleared_agent_screen_fingerprints
+                    .lock()
+                    .await
+                    .insert(surface_id, Some(fingerprint));
+                self.cleared_agent_saw_no_signal
+                    .lock()
+                    .await
+                    .insert(surface_id);
+            }
             return self
                 .clear_screen_agent_signal(surface_id, surface_visible)
                 .await;
         }
         let status = status?;
+        // Serialize the wait check, teardown latch check, and screen mutation
+        // with SessionEnd/dead-PID teardown. Otherwise teardown can remove the
+        // presence after this check but before the state lock below, allowing
+        // the stale screen frame to recreate a ghost presence.
+        let lifecycle = self.agent_lifecycle.lock().await;
+        if status != AgentStatus::Blocked
+            && (lifecycle.waits.iter().any(|((surface, _, _), waits)| {
+                *surface == surface_id && waits.values().any(|balance| *balance > 0)
+            }) || lifecycle
+                .permission_waits
+                .iter()
+                .any(|((surface, _, _), scopes)| *surface == surface_id && !scopes.is_empty())
+                || lifecycle
+                    .session_waits
+                    .iter()
+                    .any(|((surface, _, _), scopes)| *surface == surface_id && !scopes.is_empty()))
+        {
+            // Hook waits are authoritative. A spinner or stale completion line
+            // must not visually clear a real permission/input prompt.
+            return None;
+        }
         if self
             .cleared_agent_surfaces
             .lock()
             .await
             .contains(&surface_id)
         {
-            return None;
+            let baseline = self
+                .cleared_agent_screen_fingerprints
+                .lock()
+                .await
+                .get(&surface_id)
+                .copied()
+                .flatten();
+            let screen_changed_after_clear = baseline.is_some_and(|old| old != fingerprint);
+            let saw_no_agent_frame = self
+                .cleared_agent_saw_no_signal
+                .lock()
+                .await
+                .contains(&surface_id);
+            if !screen_changed_after_clear || !saw_no_agent_frame {
+                // A dead TUI can leave changing spinner/"Working" frames in
+                // scrollback. Require a plain shell/non-agent frame before
+                // treating later screen signals as a new remote agent.
+                self.cleared_agent_screen_fingerprints
+                    .lock()
+                    .await
+                    .insert(surface_id, Some(fingerprint));
+                return None;
+            }
+            self.allow_agent_screen_restore(surface_id).await;
         }
         let mut s = self.inner.lock().await;
+        let mut outcome = None;
         for ws in s.workspaces.iter_mut() {
             let mut found = false;
             let mut changed = false;
@@ -1333,13 +2929,15 @@ impl StateStore {
                 }
             }
             if found {
-                if !changed {
-                    return None;
+                if changed {
+                    outcome = Some((ws.id, ws.agent_status_rollup()));
                 }
-                return Some((ws.id, ws.agent_status_rollup()));
+                break;
             }
         }
-        None
+        drop(s);
+        drop(lifecycle);
+        outcome
     }
 
     async fn clear_screen_agent_signal(
@@ -2434,6 +4032,39 @@ fn located_agent_in_pane(
     }
 }
 
+/// Return the agent slot for a surface while preserving the distinction
+/// between an existing surface with no agent (`Some(None)`) and a surface that
+/// is not in this pane tree (`None`).
+fn agent_presence_slot_in_pane(
+    pane: &Pane,
+    surface_id: SurfaceId,
+) -> Option<Option<AgentPresence>> {
+    match pane {
+        Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } => surfaces
+            .iter()
+            .find(|surface| surface.id == surface_id)
+            .map(|surface| surface.agent.clone()),
+        Pane::Leaf { .. } => None,
+        Pane::Split { first, second, .. } => agent_presence_slot_in_pane(first, surface_id)
+            .or_else(|| agent_presence_slot_in_pane(second, surface_id)),
+    }
+}
+
+fn agent_presence_slot_in_state(
+    state: &State,
+    surface_id: SurfaceId,
+) -> Option<Option<AgentPresence>> {
+    state.workspaces.iter().find_map(|workspace| {
+        workspace
+            .surfaces
+            .iter()
+            .find_map(|surface| agent_presence_slot_in_pane(&surface.root_pane, surface_id))
+    })
+}
+
 fn take_current_agent_from_pane(
     pane: &mut Pane,
     surface_id: SurfaceId,
@@ -2505,6 +4136,12 @@ fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPrese
     if existing.source.as_deref() != Some("flowmux:hook")
         || report.source.as_deref() != Some("flowmux:hook")
     {
+        return;
+    }
+    let sessions_compatible = existing.session_id.is_none()
+        || report.session_id.is_none()
+        || existing.session_id == report.session_id;
+    if !sessions_compatible {
         return;
     }
     if flowmux_procmon::pid_alive(existing_pid) {
@@ -2815,12 +4452,2256 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn newer_native_start_reopens_an_ended_same_pid_session_epoch() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let pid = std::process::id();
+        let start = |seq| AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Idle),
+            activity: Some(flowmux_core::AgentActivity::Idle),
+            pid: Some(pid),
+            source: Some("flowmux:hook".into()),
+            seq: Some(seq),
+            message: None,
+            custom_status: Some("Ready".into()),
+            session_id: Some("session-1".into()),
+            session_name: None,
+            messaging_socket: None,
+        };
+
+        assert!(store
+            .report_agent_status_with_visibility(surface, start(1), true)
+            .await
+            .is_some());
+        assert!(store
+            .end_agent_session(surface, "claude", Some(2), Some("session-1"), Some(pid))
+            .await
+            .is_some());
+        assert!(store
+            .report_agent_status_with_visibility(surface, start(2), true)
+            .await
+            .is_none());
+        assert!(store.located_agent_presence(surface).await.is_none());
+
+        assert!(store
+            .report_agent_status_with_visibility(surface, start(3), true)
+            .await
+            .is_some());
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(presence.status, AgentStatus::Idle);
+        assert_eq!(presence.custom_status.as_deref(), Some("Ready"));
+        assert_eq!(presence.pid, Some(pid));
+        assert_eq!(presence.session_id.as_deref(), Some("session-1"));
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(pid),
+                    Some(2),
+                    "session-1",
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "stale work".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn nested_agent_exit_allows_only_the_restored_outer_process_to_reactivate() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let outer_pid = std::process::id();
+
+        store
+            .report_agent_status_with_visibility(
+                surface,
+                AgentStatusReport {
+                    name: "claude".into(),
+                    status: Some(AgentStatus::Idle),
+                    activity: Some(flowmux_core::AgentActivity::Idle),
+                    pid: Some(outer_pid),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: Some("Ready".into()),
+                    session_id: Some("outer-session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                true,
+            )
+            .await;
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(outer_pid),
+                Some(2),
+                "outer-session",
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("outer approval".into()),
+                    status_text: "Waiting for permission".into(),
+                    scope: None,
+                },
+                true,
+            )
+            .await;
+
+        // A process poll can observe the nested Codex before its SessionStart
+        // hook arrives. Since the still-live outer hook identity also appears
+        // in the subtree, process truth must not displace or tombstone it.
+        assert!(store
+            .reconcile_process_agent_candidates(&[(surface, vec!["codex", "claude"])])
+            .await
+            .is_empty());
+        let before_inner_start = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(before_inner_start.name, "claude");
+        assert_eq!(before_inner_start.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(
+            before_inner_start.session_id.as_deref(),
+            Some("outer-session")
+        );
+
+        store
+            .report_agent_status_with_visibility(
+                surface,
+                AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(AgentStatus::Unknown),
+                    activity: None,
+                    pid: None,
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(3),
+                    message: None,
+                    custom_status: Some("Ready".into()),
+                    session_id: Some("inner-session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                true,
+            )
+            .await;
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(outer_pid),
+                    Some(4),
+                    "outer-session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "must not replace Codex".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .name,
+            "codex"
+        );
+
+        assert!(store
+            .end_agent_session(surface, "codex", Some(5), Some("inner-session"), None)
+            .await
+            .is_some());
+        assert_eq!(
+            store
+                .reconcile_process_agent_candidates(&[(surface, vec!["claude"])])
+                .await,
+            vec![(ws_id, Some(AgentStatus::Idle))]
+        );
+        let resumed = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(outer_pid),
+                Some(6),
+                "outer-session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Outer resumed".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(resumed.workspace, Some(ws_id));
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(presence.name, "claude");
+        assert_eq!(presence.status, AgentStatus::Working);
+        assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(presence.pid, Some(outer_pid));
+        assert_eq!(presence.session_id.as_deref(), Some("outer-session"));
+    }
+
+    #[tokio::test]
+    async fn same_agent_nested_pid_switches_owner_then_reactivates_the_outer_process() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let outer_pid = std::process::id();
+        let inner_pid = u32::MAX;
+        let start = |session: &str, pid, seq| AgentStatusReport {
+            name: "codex".into(),
+            status: Some(AgentStatus::Unknown),
+            activity: None,
+            pid: Some(pid),
+            source: Some("flowmux:hook".into()),
+            seq: Some(seq),
+            message: None,
+            custom_status: Some("Ready".into()),
+            session_id: Some(session.into()),
+            session_name: None,
+            messaging_socket: None,
+        };
+
+        store
+            .report_agent_status_with_visibility(
+                surface,
+                start("outer-session", outer_pid, 1),
+                true,
+            )
+            .await;
+        store
+            .report_agent_status_with_visibility(
+                surface,
+                start("inner-session", inner_pid, 2),
+                true,
+            )
+            .await;
+        let inner = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(inner.pid, Some(inner_pid));
+        assert_eq!(inner.session_id.as_deref(), Some("inner-session"));
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(outer_pid),
+                    Some(3),
+                    "outer-session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("outer-turn".into()),
+                        status_text: "must not replace inner Codex".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+
+        assert!(store
+            .end_agent_session(
+                surface,
+                "codex",
+                Some(4),
+                Some("inner-session"),
+                Some(inner_pid),
+            )
+            .await
+            .is_some());
+        assert_eq!(
+            store
+                .reconcile_process_agent_candidates(&[(surface, vec!["codex"])])
+                .await,
+            vec![(ws_id, Some(AgentStatus::Idle))]
+        );
+        let resumed = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(outer_pid),
+                Some(5),
+                "outer-session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("outer-turn".into()),
+                    status_text: "Outer resumed".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(resumed.workspace, Some(ws_id));
+        let outer = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(outer.status, AgentStatus::Working);
+        assert_eq!(outer.pid, Some(outer_pid));
+        assert_eq!(outer.session_id.as_deref(), Some("outer-session"));
+        assert_eq!(outer.source.as_deref(), Some("flowmux:hook"));
+    }
+
+    #[tokio::test]
+    async fn correlated_claude_waits_resolve_only_the_matching_tool() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+        for (seq, item_id) in [(1, "tool-a"), (2, "tool-b")] {
+            let result = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(seq),
+                    "session-1",
+                    AgentLifecycleEvent::WaitStarted {
+                        item_id: item_id.into(),
+                        message: None,
+                        status_text: "Waiting for approval".into(),
+                    },
+                    false,
+                )
+                .await;
+            assert_eq!(result.workspace, Some(ws_id));
+        }
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Blocked
+        );
+
+        let first = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(3),
+                "session-1",
+                AgentLifecycleEvent::WaitResolved {
+                    item_id: "tool-a".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(first, AgentLifecycleResult::default());
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Blocked
+        );
+
+        let last = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(4),
+                "session-1",
+                AgentLifecycleEvent::WaitResolved {
+                    item_id: "tool-b".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(last.workspace, Some(ws_id));
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
+        );
+    }
+
+    #[tokio::test]
+    async fn non_resuming_session_wait_resolution_rejects_older_progress() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(10),
+                "session-1",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(20),
+                "session-1",
+                AgentLifecycleEvent::SessionWaitStarted {
+                    message: None,
+                    status_text: "Waiting for quota".into(),
+                    scope: Some("quota".into()),
+                },
+                true,
+            )
+            .await;
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(30),
+                "session-1",
+                AgentLifecycleEvent::SessionWaitResolved {
+                    status_text: "Auto-resume disabled".into(),
+                    resume: false,
+                    scope: Some("quota".into()),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(25),
+                    "session-1",
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Delayed progress".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_boundaries_cannot_overwrite_newer_same_turn_activity() {
+        for terminal in [
+            AgentLifecycleEvent::TurnStopped {
+                message: Some("stale stop".into()),
+                status_text: "Completed".into(),
+            },
+            AgentLifecycleEvent::SessionWaitResolved {
+                status_text: "Auto-resume disabled".into(),
+                resume: false,
+                scope: Some("quota".into()),
+            },
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store
+                .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+            for (seq, event) in [
+                (
+                    10,
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Starting turn".into(),
+                    },
+                ),
+                (
+                    30,
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Newer work".into(),
+                    },
+                ),
+            ] {
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "claude",
+                        Some(42),
+                        Some(seq),
+                        "session-1",
+                        event,
+                        true,
+                    )
+                    .await;
+            }
+
+            assert_eq!(
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "claude",
+                        Some(42),
+                        Some(20),
+                        "session-1",
+                        terminal,
+                        true,
+                    )
+                    .await,
+                AgentLifecycleResult::default()
+            );
+            assert_eq!(
+                store.workspace_agent_status(ws_id).await,
+                Some(AgentStatus::Working)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_codex_stop_and_interrupt_cannot_cross_newer_root_activity() {
+        for terminal in [
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id: "root-1".into(),
+                message: Some("stale stop".into()),
+                status_text: "Completed".into(),
+                stop_hook_active: false,
+            },
+            AgentLifecycleEvent::CodexTurnInterrupted {
+                turn_id: "root-1".into(),
+                status_text: "Interrupted".into(),
+            },
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store
+                .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+            for (seq, event) in [
+                (
+                    10,
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("root-1".into()),
+                        status_text: "Starting turn".into(),
+                    },
+                ),
+                (
+                    30,
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Newer work".into(),
+                    },
+                ),
+            ] {
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "codex",
+                        Some(42),
+                        Some(seq),
+                        "session-1",
+                        event,
+                        true,
+                    )
+                    .await;
+            }
+
+            assert_eq!(
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "codex",
+                        Some(42),
+                        Some(20),
+                        "session-1",
+                        terminal,
+                        true,
+                    )
+                    .await,
+                AgentLifecycleResult::default()
+            );
+            assert_eq!(
+                store.workspace_agent_status(ws_id).await,
+                Some(AgentStatus::Working)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn newer_codex_progress_cancels_provisional_grace_settlement() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+        let turn_id = "root-1";
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(10),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some(turn_id.into()),
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        let provisional = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(20),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: turn_id.into(),
+                    message: Some("provisional".into()),
+                    status_text: "Completed".into(),
+                    stop_hook_active: false,
+                },
+                true,
+            )
+            .await;
+        assert!(provisional.settle_codex_after_grace.is_some());
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(30),
+                session_id,
+                AgentLifecycleEvent::ProgressObserved {
+                    status_text: "Stop was blocked".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(
+            store
+                .settle_codex_turn_after_grace(
+                    surface,
+                    Some(42),
+                    Some(20),
+                    session_id,
+                    turn_id,
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+    }
+
+    #[tokio::test]
+    async fn older_codex_grace_timer_cannot_consume_a_newer_pending_stop() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+        let turn_id = "root-1";
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(1),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some(turn_id.into()),
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        for seq in [2, 3] {
+            let pending = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    AgentLifecycleEvent::CodexTurnStopped {
+                        turn_id: turn_id.into(),
+                        message: Some(format!("stop-{seq}")),
+                        status_text: format!("Completed stop-{seq}"),
+                        stop_hook_active: false,
+                    },
+                    true,
+                )
+                .await;
+            assert!(pending.settle_codex_after_grace.is_some());
+        }
+
+        assert_eq!(
+            store
+                .settle_codex_turn_after_grace(
+                    surface,
+                    Some(42),
+                    Some(2),
+                    session_id,
+                    turn_id,
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        let settled = store
+            .settle_codex_turn_after_grace(surface, Some(42), Some(3), session_id, turn_id, true)
+            .await;
+        assert_eq!(settled.workspace, Some(ws_id));
+        assert!(settled.completed);
+        assert_eq!(settled.completion_message.as_deref(), Some("stop-3"));
+    }
+
+    #[tokio::test]
+    async fn child_progress_cannot_make_a_delayed_parent_stop_stale() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(1),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+
+        // The parent Stop was created first but is delayed in IPC. Child tool
+        // progress is both active-child evidence and independent of root order.
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(11),
+                session_id,
+                AgentLifecycleEvent::CodexChildProgressObserved {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        let parent_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(10),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("parent result".into()),
+                    status_text: "Completed: parent result".into(),
+                    stop_hook_active: false,
+                },
+                true,
+            )
+            .await;
+        assert_eq!(parent_stop.workspace, Some(ws_id));
+        assert!(!parent_stop.completed);
+        assert!(parent_stop.settle_codex_after_grace.is_none());
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(12),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(child_stop.workspace, Some(ws_id));
+        assert!(!child_stop.completed);
+        let settlement = child_stop
+            .settle_codex_after_grace
+            .expect("last child should schedule the parent Stop grace");
+        assert_eq!(settlement.turn_id, "root-1");
+        assert_eq!(settlement.stop_seq, Some(10));
+        let settled = store
+            .settle_codex_turn_after_grace(
+                surface,
+                Some(42),
+                settlement.stop_seq,
+                session_id,
+                &settlement.turn_id,
+                true,
+            )
+            .await;
+        assert!(settled.completed);
+        assert_eq!(settled.completion_message.as_deref(), Some("parent result"));
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+    }
+
+    #[tokio::test]
+    async fn child_permission_cannot_make_a_delayed_parent_stop_stale() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                101,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("child approval".into()),
+                    status_text: "Waiting for child permission".into(),
+                    scope: Some("child:child-1:child-turn-1".into()),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        let parent_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(100),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("parent result".into()),
+                    status_text: "Completed: parent result".into(),
+                    stop_hook_active: false,
+                },
+                true,
+            )
+            .await;
+        assert!(!parent_stop.completed);
+        assert!(parent_stop.settle_codex_after_grace.is_none());
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(102),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        let settlement = child_stop
+            .settle_codex_after_grace
+            .expect("last child should preserve the delayed parent Stop");
+        assert_eq!(settlement.stop_seq, Some(100));
+        let settled = store
+            .settle_codex_turn_after_grace(
+                surface,
+                Some(42),
+                settlement.stop_seq,
+                session_id,
+                &settlement.turn_id,
+                true,
+            )
+            .await;
+        assert!(settled.completed);
+        assert_eq!(settled.completion_message.as_deref(), Some("parent result"));
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+    }
+
+    #[tokio::test]
+    async fn child_stop_settlement_preserves_a_delayed_new_root_turn() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting root 1".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("root 1 done".into()),
+                    status_text: "Completed root 1".into(),
+                    stop_hook_active: false,
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(5),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        assert!(!child_stop.completed);
+        let settlement = child_stop
+            .settle_codex_after_grace
+            .expect("last child should defer settlement");
+        assert_eq!(settlement.stop_seq, Some(3));
+
+        // Root 2 started before the child Stop but its IPC arrived afterward.
+        // The child sequence must not become the root boundary.
+        let root_two = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(4),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-2".into()),
+                    status_text: "Starting root 2".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(root_two.workspace, Some(ws_id));
+        assert_eq!(
+            store
+                .settle_codex_turn_after_grace(
+                    surface,
+                    Some(42),
+                    settlement.stop_seq,
+                    session_id,
+                    &settlement.turn_id,
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+        let runtime = store.agent_lifecycle.lock().await;
+        let ledger = runtime
+            .codex_turns
+            .get(&(surface, session_id.to_string()))
+            .unwrap();
+        assert_eq!(ledger.current_parent_turn.as_deref(), Some("root-2"));
+    }
+
+    #[tokio::test]
+    async fn newer_root_progress_cancels_pending_stop_while_children_remain() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting root 1".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("stale result".into()),
+                    status_text: "Completed root 1".into(),
+                    stop_hook_active: false,
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        let progress = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(4),
+                session_id,
+                AgentLifecycleEvent::CodexRootProgressObserved {
+                    turn_id: "root-2".into(),
+                    status_text: "Working".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(progress.workspace, Some(ws_id));
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(5),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        assert!(!child_stop.completed);
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+        let runtime = store.agent_lifecycle.lock().await;
+        let ledger = runtime
+            .codex_turns
+            .get(&(surface, session_id.to_string()))
+            .unwrap();
+        assert!(ledger.pending_parent_stop.is_none());
+        assert_eq!(ledger.current_parent_turn.as_deref(), Some("root-2"));
+    }
+
+    #[tokio::test]
+    async fn session_wait_scopes_use_last_event_sequence_independently() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(1),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        let standalone_resolution = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(30),
+                session_id,
+                AgentLifecycleEvent::SessionWaitResolved {
+                    status_text: "Quota resumed".into(),
+                    resume: true,
+                    scope: Some("quota".into()),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(standalone_resolution.workspace, Some(ws_id));
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(20),
+                    session_id,
+                    AgentLifecycleEvent::SessionWaitStarted {
+                        message: None,
+                        status_text: "Delayed quota failure".into(),
+                        scope: Some("quota".into()),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+
+        for (seq, scope) in [(40, "ask_user"), (50, "quota")] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    AgentLifecycleEvent::SessionWaitStarted {
+                        message: None,
+                        status_text: format!("Waiting for {scope}"),
+                        scope: Some(scope.into()),
+                    },
+                    true,
+                )
+                .await;
+        }
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(60),
+                    session_id,
+                    AgentLifecycleEvent::SessionWaitResolved {
+                        status_text: "Quota resumed".into(),
+                        resume: true,
+                        scope: Some("quota".into()),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        {
+            let runtime = store.agent_lifecycle.lock().await;
+            let key = (surface, "claude".to_string(), session_id.to_string());
+            let scopes = runtime.session_waits.get(&key).unwrap();
+            assert_eq!(scopes.len(), 1);
+            assert!(scopes.contains("ask_user"));
+        }
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
+
+        let resolved = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(70),
+                session_id,
+                AgentLifecycleEvent::SessionWaitResolved {
+                    status_text: "Working".into(),
+                    resume: true,
+                    scope: Some("ask_user".into()),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(resolved.workspace, Some(ws_id));
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+    }
+
+    #[tokio::test]
+    async fn standalone_session_wait_resolutions_apply_fired_and_disabled_state() {
+        for (index, resume, expected_before, expected_after) in [
+            (0, true, AgentStatus::Idle, AgentStatus::Working),
+            (1, false, AgentStatus::Working, AgentStatus::Idle),
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store
+                .create_workspace(
+                    Some(format!("demo-{index}")),
+                    std::path::PathBuf::from(format!("/tmp/demo-{index}")),
+                )
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+            let session_id = format!("session-{index}");
+
+            store
+                .report_agent_status_with_visibility(
+                    surface,
+                    AgentStatusReport {
+                        name: "claude".into(),
+                        status: Some(AgentStatus::Idle),
+                        activity: Some(flowmux_core::AgentActivity::Idle),
+                        pid: Some(42),
+                        source: Some("flowmux:hook".into()),
+                        seq: Some(1),
+                        message: None,
+                        custom_status: Some("Ready".into()),
+                        session_id: Some(session_id.clone()),
+                        session_name: None,
+                        messaging_socket: None,
+                    },
+                    true,
+                )
+                .await;
+            if !resume {
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "claude",
+                        Some(42),
+                        Some(2),
+                        &session_id,
+                        AgentLifecycleEvent::TurnStarted {
+                            turn_id: None,
+                            status_text: "Starting turn".into(),
+                        },
+                        true,
+                    )
+                    .await;
+            }
+            assert_eq!(
+                store.workspace_agent_status(ws_id).await,
+                Some(expected_before)
+            );
+
+            let resolution = store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(3),
+                    &session_id,
+                    AgentLifecycleEvent::SessionWaitResolved {
+                        status_text: if resume {
+                            "Working".into()
+                        } else {
+                            "Auto-resume disabled".into()
+                        },
+                        resume,
+                        scope: Some("quota".into()),
+                    },
+                    true,
+                )
+                .await;
+            assert_eq!(resolution.workspace, Some(ws_id));
+            assert_eq!(
+                store.workspace_agent_status(ws_id).await,
+                Some(expected_after)
+            );
+
+            if !resume {
+                assert_eq!(
+                    store
+                        .report_agent_lifecycle_with_visibility(
+                            surface,
+                            "claude",
+                            Some(42),
+                            Some(2),
+                            &session_id,
+                            AgentLifecycleEvent::ProgressObserved {
+                                status_text: "Delayed progress".into(),
+                            },
+                            true,
+                        )
+                        .await,
+                    AgentLifecycleResult::default()
+                );
+                assert_eq!(
+                    store.workspace_agent_status(ws_id).await,
+                    Some(AgentStatus::Idle)
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_batch_completion_clears_only_the_permission_wait() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Starting turn".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("Approve tool?".into()),
+                    status_text: "Waiting for permission".into(),
+                    scope: None,
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::SessionWaitStarted {
+                    message: Some("Answer question".into()),
+                    status_text: "Waiting for input".into(),
+                    scope: Some("ask_user".into()),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(4),
+                    session_id,
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Tool progress".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    Some(42),
+                    Some(5),
+                    session_id,
+                    AgentLifecycleEvent::ToolBatchFinished {
+                        status_text: "Tool batch finished".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
+        {
+            let runtime = store.agent_lifecycle.lock().await;
+            let key = (surface, "claude".to_string(), session_id.to_string());
+            assert!(!runtime.permission_waits.contains_key(&key));
+            assert!(runtime
+                .session_waits
+                .get(&key)
+                .is_some_and(|scopes| scopes.contains("ask_user")));
+        }
+
+        let resolved = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(42),
+                Some(6),
+                session_id,
+                AgentLifecycleEvent::SessionWaitResolved {
+                    status_text: "Working".into(),
+                    resume: true,
+                    scope: Some("ask_user".into()),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(resolved.workspace, Some(ws_id));
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_parent_stop_waits_for_matching_active_subagent() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(1),
+                "session-1",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+                false,
+            )
+            .await;
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(2),
+                "session-1",
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                false,
+            )
+            .await;
+        let parent_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(3),
+                "session-1",
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("parent result".into()),
+                    status_text: "Completed: parent result".into(),
+                    stop_hook_active: false,
+                },
+                false,
+            )
+            .await;
+        assert_eq!(parent_stop.workspace, Some(ws_id));
+        assert!(!parent_stop.completed);
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
+        );
+
+        // Child tool progress can arrive after the parent Stop. It must not
+        // cancel the deferred parent completion while that child is known live.
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(4),
+                "session-1",
+                AgentLifecycleEvent::ProgressObserved {
+                    status_text: "Child still working".into(),
+                },
+                false,
+            )
+            .await;
+
+        let stale_child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(5),
+                "session-1",
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "old-child-turn".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(stale_child_stop, AgentLifecycleResult::default());
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(6),
+                "session-1",
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(child_stop.workspace, Some(ws_id));
+        assert!(!child_stop.completed);
+        let settlement = child_stop
+            .settle_codex_after_grace
+            .expect("last child should schedule parent settlement");
+        let settled = store
+            .settle_codex_turn_after_grace(
+                surface,
+                Some(42),
+                settlement.stop_seq,
+                "session-1",
+                &settlement.turn_id,
+                false,
+            )
+            .await;
+        assert!(settled.completed);
+        assert_eq!(settled.completion_message.as_deref(), Some("parent result"));
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Idle
+        );
+
+        let duplicate = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(7),
+                "session-1",
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("parent result".into()),
+                    status_text: "Completed: parent result".into(),
+                    stop_hook_active: false,
+                },
+                false,
+            )
+            .await;
+        assert_eq!(duplicate, AgentLifecycleResult::default());
+    }
+
+    #[tokio::test]
+    async fn codex_active_stop_retry_resettles_without_duplicate_completion() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+        let turn_id = "root-1";
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(1),
+                session_id,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some(turn_id.into()),
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        let first_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(2),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: turn_id.into(),
+                    message: Some("first result".into()),
+                    status_text: "Completed: first result".into(),
+                    stop_hook_active: false,
+                },
+                true,
+            )
+            .await;
+        assert!(first_stop.settle_codex_after_grace.is_some());
+        let first_settlement = store
+            .settle_codex_turn_after_grace(surface, Some(42), Some(2), session_id, turn_id, true)
+            .await;
+        assert!(first_settlement.completed);
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+
+        let progress = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(3),
+                session_id,
+                AgentLifecycleEvent::ProgressObserved {
+                    status_text: "Stop hook continued the turn".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(progress.workspace, Some(ws_id));
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Working)
+        );
+
+        let retry = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(4),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: turn_id.into(),
+                    message: Some("final result".into()),
+                    status_text: "Completed: final result".into(),
+                    stop_hook_active: true,
+                },
+                true,
+            )
+            .await;
+        assert!(retry.settle_codex_after_grace.is_some());
+        let retry_settlement = store
+            .settle_codex_turn_after_grace(surface, Some(42), Some(4), session_id, turn_id, true)
+            .await;
+        assert_eq!(retry_settlement.workspace, Some(ws_id));
+        assert!(!retry_settlement.completed);
+        assert_eq!(retry_settlement.completion_message, None);
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_stops_clear_only_their_matching_permission_scopes() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("Approve root tool?".into()),
+                    status_text: "Waiting for permission".into(),
+                    scope: Some("root:root-1".into()),
+                },
+            ),
+            (
+                4,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("Approve child tool?".into()),
+                    status_text: "Waiting for permission".into(),
+                    scope: Some("child:child-1:child-turn-1".into()),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(5),
+                    session_id,
+                    AgentLifecycleEvent::CodexTurnStopped {
+                        turn_id: "root-1".into(),
+                        message: Some("done".into()),
+                        status_text: "Completed: done".into(),
+                        stop_hook_active: false,
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        {
+            let runtime = store.agent_lifecycle.lock().await;
+            let key = (surface, "codex".to_string(), session_id.to_string());
+            let scopes = runtime.permission_waits.get(&key).unwrap();
+            assert_eq!(scopes.len(), 1);
+            assert!(scopes.contains("child:child-1:child-turn-1"));
+        }
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
+
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(6),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(child_stop.workspace, Some(ws_id));
+        assert!(!child_stop.completed);
+        let settlement = child_stop
+            .settle_codex_after_grace
+            .expect("last child should schedule parent settlement");
+        let settled = store
+            .settle_codex_turn_after_grace(
+                surface,
+                Some(42),
+                settlement.stop_seq,
+                session_id,
+                &settlement.turn_id,
+                true,
+            )
+            .await;
+        assert!(settled.completed);
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Idle)
+        );
+        let runtime = store.agent_lifecycle.lock().await;
+        let key = (surface, "codex".to_string(), session_id.to_string());
+        assert!(!runtime.permission_waits.contains_key(&key));
+    }
+
+    #[tokio::test]
+    async fn codex_stops_tombstone_their_permission_scope_sequences() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        for (seq, event) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: None,
+                    status_text: "Waiting for child permission".into(),
+                    scope: Some("child:child-1:child-turn-1".into()),
+                },
+            ),
+            (
+                4,
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: None,
+                    status_text: "Waiting for root permission".into(),
+                    scope: Some("root:root-1".into()),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    session_id,
+                    event,
+                    true,
+                )
+                .await;
+        }
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(6),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(5),
+                    session_id,
+                    AgentLifecycleEvent::PermissionWaitStarted {
+                        message: None,
+                        status_text: "Delayed child permission".into(),
+                        scope: Some("child:child-1:child-turn-1".into()),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+
+        let root_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(8),
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("done".into()),
+                    status_text: "Completed: done".into(),
+                    stop_hook_active: false,
+                },
+                true,
+            )
+            .await;
+        assert!(root_stop.settle_codex_after_grace.is_some());
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(7),
+                    session_id,
+                    AgentLifecycleEvent::PermissionWaitStarted {
+                        message: None,
+                        status_text: "Delayed root permission".into(),
+                        scope: Some("root:root-1".into()),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+
+        let runtime = store.agent_lifecycle.lock().await;
+        let key = (surface, "codex".to_string(), session_id.to_string());
+        assert!(!runtime.permission_waits.contains_key(&key));
+    }
+
+    #[tokio::test]
+    async fn older_codex_child_start_cannot_revive_a_newer_stop() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(30),
+                    session_id,
+                    AgentLifecycleEvent::CodexSubagentStopped {
+                        agent_id: "child-1".into(),
+                        turn_id: "child-turn-1".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(20),
+                    session_id,
+                    AgentLifecycleEvent::CodexSubagentStarted {
+                        agent_id: "child-1".into(),
+                        turn_id: "child-turn-1".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        {
+            let runtime = store.agent_lifecycle.lock().await;
+            let ledger = runtime
+                .codex_turns
+                .get(&(surface, session_id.to_string()))
+                .unwrap();
+            assert!(ledger.active_children.is_empty());
+        }
+        assert!(store.located_agent_presence(surface).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn older_cross_turn_codex_child_events_cannot_replace_the_current_turn() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+
+        let current_start = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(30),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "new-turn".into(),
+                },
+                true,
+            )
+            .await;
+        assert_eq!(current_start.workspace, Some(ws_id));
+        for (seq, event) in [
+            (
+                20,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "old-turn".into(),
+                },
+            ),
+            (
+                25,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "old-turn".into(),
+                },
+            ),
+        ] {
+            assert_eq!(
+                store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "codex",
+                        Some(42),
+                        Some(seq),
+                        session_id,
+                        event,
+                        true,
+                    )
+                    .await,
+                AgentLifecycleResult::default()
+            );
+        }
+        {
+            let runtime = store.agent_lifecycle.lock().await;
+            let ledger = runtime
+                .codex_turns
+                .get(&(surface, session_id.to_string()))
+                .unwrap();
+            assert_eq!(
+                ledger.active_children.get("child-1").map(String::as_str),
+                Some("new-turn")
+            );
+        }
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(40),
+                session_id,
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "new-turn".into(),
+                },
+                true,
+            )
+            .await;
+        let runtime = store.agent_lifecycle.lock().await;
+        let ledger = runtime
+            .codex_turns
+            .get(&(surface, session_id.to_string()))
+            .unwrap();
+        assert!(ledger.active_children.is_empty());
+    }
+
+    #[tokio::test]
+    async fn codex_new_root_turn_invalidates_pending_parent_stop() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+
+        for (seq, lifecycle) in [
+            (
+                1,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-1".into()),
+                    status_text: "Starting turn".into(),
+                },
+            ),
+            (
+                2,
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+            ),
+            (
+                3,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: "root-1".into(),
+                    message: Some("obsolete".into()),
+                    status_text: "Completed: obsolete".into(),
+                    stop_hook_active: false,
+                },
+            ),
+            (
+                4,
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-2".into()),
+                    status_text: "Starting turn".into(),
+                },
+            ),
+        ] {
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(42),
+                    Some(seq),
+                    "session-1",
+                    lifecycle,
+                    false,
+                )
+                .await;
+        }
+        let child_stop = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(5),
+                "session-1",
+                AgentLifecycleEvent::CodexSubagentStopped {
+                    agent_id: "child-1".into(),
+                    turn_id: "child-turn-1".into(),
+                },
+                false,
+            )
+            .await;
+        assert!(!child_stop.completed);
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
+        );
+    }
+
+    #[tokio::test]
     async fn opencode_lifecycle_unknown_running_blocked_resumed_completed_exit() {
         assert_agent_lifecycle("opencode", AgentStatus::Unknown).await;
     }
 
     #[tokio::test]
-    async fn report_agent_status_keeps_opencode_name_for_oc_titled_surface() {
+    async fn report_agent_status_keeps_hook_identity_over_stale_surface_title() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -2829,9 +6710,7 @@ mod tests {
         let pane = first_pane(&ws);
         let surface = first_pane_active_surface(&ws);
         assert_eq!(
-            store
-                .rename_surface(pane, surface, "OC | greeting".into())
-                .await,
+            store.rename_surface(pane, surface, "Claude".into()).await,
             Some(ws_id)
         );
 
@@ -2839,7 +6718,7 @@ mod tests {
             .report_agent_status(
                 surface,
                 AgentStatusReport {
-                    name: "claude".into(),
+                    name: "codex".into(),
                     status: Some(AgentStatus::Idle),
                     activity: Some(flowmux_core::AgentActivity::Idle),
                     pid: None,
@@ -2847,7 +6726,7 @@ mod tests {
                     seq: Some(1),
                     message: None,
                     custom_status: None,
-                    session_id: Some("ses-opencode".into()),
+                    session_id: Some("ses-codex".into()),
                     session_name: None,
                     messaging_socket: None,
                 },
@@ -2858,7 +6737,7 @@ mod tests {
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         let agent = tree[0].panes[0].tabs[0].agent.as_ref().unwrap();
-        assert_eq!(agent.name, "opencode");
+        assert_eq!(agent.name, "codex");
         assert_eq!(agent.status, AgentStatus::Idle);
         assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
     }
@@ -2985,6 +6864,191 @@ mod tests {
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         assert!(tree[0].panes[0].tabs[0].agent.is_none());
+    }
+
+    #[tokio::test]
+    async fn reconcile_process_candidates_preserves_nested_hook_identity() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                None,
+                Some(6),
+                "codex-session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("root-turn".into()),
+                    status_text: "Starting turn".into(),
+                },
+                true,
+            )
+            .await;
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                None,
+                Some(7),
+                "codex-session",
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: Some("approval required".into()),
+                    status_text: "Waiting for permission".into(),
+                    scope: Some("root:root-turn".into()),
+                },
+                true,
+            )
+            .await;
+
+        // Claude is the outer process and Codex is nested beneath it. The
+        // native hook identity must survive even if the candidate order is not
+        // trusted here; membership in the subtree is the relevant proof.
+        assert!(store
+            .reconcile_process_agent_candidates(&[(surface, vec!["claude", "codex"])])
+            .await
+            .is_empty());
+        let agent = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(agent.name, "codex");
+        assert_eq!(agent.status, AgentStatus::Blocked);
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(agent.session_id.as_deref(), Some("codex-session"));
+        assert_eq!(agent.message.as_deref(), Some("approval required"));
+
+        // The no-op identity reconciliation must preserve the lifecycle
+        // ledger too: unrelated progress cannot clear the outstanding wait.
+        assert_eq!(
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    None,
+                    Some(8),
+                    "codex-session",
+                    AgentLifecycleEvent::ProgressObserved {
+                        status_text: "Tool progress".into(),
+                    },
+                    true,
+                )
+                .await,
+            AgentLifecycleResult::default()
+        );
+        assert_eq!(
+            store.workspace_agent_status(ws_id).await,
+            Some(AgentStatus::Blocked)
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_process_snapshot_cannot_displace_a_new_native_session() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        store
+            .reconcile_process_agent_candidates(&[(surface, vec!["claude"])])
+            .await;
+        let observed = store
+            .agent_process_reconciliation_snapshot(&[surface])
+            .await;
+
+        let started = store
+            .report_agent_status_with_visibility(
+                surface,
+                AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(AgentStatus::Unknown),
+                    activity: None,
+                    pid: Some(42),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: Some("Ready".into()),
+                    session_id: Some("codex-session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                false,
+            )
+            .await;
+        assert_eq!(started, Some((ws_id, Some(AgentStatus::Unknown))));
+
+        // This was the true process tree before Codex started. Applying it
+        // afterward would replace Codex with proc-owned Claude and tombstone
+        // the just-created Codex epoch.
+        assert!(store
+            .reconcile_process_agent_candidates_if_unchanged(
+                &[(surface, vec!["claude"])],
+                &observed,
+            )
+            .await
+            .is_empty());
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(presence.name, "codex");
+        assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(presence.session_id.as_deref(), Some("codex-session"));
+
+        let progress = store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(2),
+                "codex-session",
+                AgentLifecycleEvent::CodexRootProgressObserved {
+                    turn_id: "root-turn".into(),
+                    status_text: "Working".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(progress.workspace, Some(ws_id));
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
+        );
+    }
+
+    #[tokio::test]
+    async fn reconcile_process_candidates_uses_deepest_without_hook_identity() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+
+        let changed = store
+            .reconcile_process_agent_candidates(&[(surface, vec!["codex", "claude"])])
+            .await;
+        assert_eq!(changed, vec![(ws_id, Some(AgentStatus::Idle))]);
+        let agent = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(agent.name, "codex");
+        assert_eq!(agent.source.as_deref(), Some("flowmux:proc"));
     }
 
     #[tokio::test]
@@ -3444,7 +7508,13 @@ Do you want to continue?";
 
         assert!(
             store
-                .end_agent_session(surface, "claude", Some(6), Some(session_id))
+                .end_agent_session(
+                    surface,
+                    "claude",
+                    Some(6),
+                    Some(session_id),
+                    Some(std::process::id()),
+                )
                 .await
                 .is_some(),
             "SessionEnd must remove the current Claude session"
@@ -3562,7 +7632,7 @@ Do you want to continue?";
     }
 
     #[tokio::test]
-    async fn dead_pid_clear_does_not_block_live_screen_fallback_restore() {
+    async fn dead_pid_clear_restores_remote_agent_after_no_signal_boundary() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -3591,7 +7661,13 @@ Do you want to continue?";
                 .await,
             Some((ws_id, Some(AgentStatus::Idle)))
         );
-        assert_eq!(store.clear_dead_agent_activity(surface).await, Some(ws_id));
+        assert_eq!(
+            store
+                .clear_dead_agent_presence(surface, 42)
+                .await
+                .map(|removed| removed.workspace),
+            Some(ws_id)
+        );
         assert_eq!(
             store
                 .report_agent_screen_signals(
@@ -3604,15 +7680,172 @@ Do you want to continue?";
                     Some("OpenCode"),
                 )
                 .await,
-            Some((ws_id, Some(AgentStatus::Idle)))
+            None
+        );
+        assert!(store.located_agent_presence(surface).await.is_none());
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some("$ echo shell ready"), Some("demo"))
+                .await,
+            None
+        );
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("OpenCode\n• Working (1s • esc to interrupt)"),
+                    Some("OpenCode"),
+                )
+                .await,
+            Some((ws_id, Some(AgentStatus::Working)))
         );
 
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         let agent = tree[0].panes[0].tabs[0].agent.as_ref().unwrap();
         assert_eq!(agent.name, "opencode");
-        assert_eq!(agent.status, AgentStatus::Idle);
+        assert_eq!(agent.status, AgentStatus::Working);
         assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+    }
+
+    #[tokio::test]
+    async fn dead_pid_clear_requires_no_signal_before_restoring_changed_working_frame() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let surface = first_pane_active_surface(&ws);
+        let stale_frame = "Codex\n• Working (1s • esc to interrupt)";
+
+        store
+            .report_agent_status(
+                surface,
+                AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(AgentStatus::Working),
+                    activity: Some(flowmux_core::AgentActivity::Running),
+                    pid: Some(42),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: Some("Working".into()),
+                    session_id: Some("old-session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+            )
+            .await;
+        store
+            .report_agent_screen_signals(surface, Some(stale_frame), Some("Codex ⠋ working"))
+            .await;
+        assert!(store.clear_dead_agent_presence(surface, 42).await.is_some());
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some(stale_frame), Some("Codex ⠋ working"))
+                .await,
+            None
+        );
+        assert!(store.located_agent_presence(surface).await.is_none());
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("Codex\n• Working (2s • esc to interrupt)"),
+                    Some("Codex ⠙ working"),
+                )
+                .await,
+            None
+        );
+        assert!(store.located_agent_presence(surface).await.is_none());
+
+        assert_eq!(
+            store
+                .report_agent_screen_signals(surface, Some("$ echo shell ready"), Some("demo"))
+                .await,
+            None
+        );
+        assert_eq!(
+            store
+                .report_agent_screen_signals(
+                    surface,
+                    Some("Codex\n• Working (3s • esc to interrupt)"),
+                    Some("Codex ⠹ working"),
+                )
+                .await,
+            Some((ws_id, Some(AgentStatus::Working)))
+        );
+    }
+
+    #[tokio::test]
+    async fn teardown_serializes_with_positive_screen_signal_reconciliation() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let pid = std::process::id();
+        store
+            .report_agent_status_with_visibility(
+                surface,
+                AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(AgentStatus::Unknown),
+                    activity: None,
+                    pid: Some(pid),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: Some("Ready".into()),
+                    session_id: Some("session-1".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                true,
+            )
+            .await;
+
+        // Hold state so the screen task stops after acquiring lifecycle. A
+        // teardown queued behind it must then run last and leave no ghost.
+        let state_guard = store.inner.lock().await;
+        let screen_store = store.clone();
+        let screen = tokio::spawn(async move {
+            screen_store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some("Codex\n• Working (1s • esc to interrupt)"),
+                    Some("Codex ⠋ working"),
+                    true,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if store.agent_lifecycle.try_lock().is_err() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("screen reconciliation should hold lifecycle while waiting for state");
+
+        let teardown_store = store.clone();
+        let teardown = tokio::spawn(async move {
+            teardown_store
+                .end_agent_session(surface, "codex", Some(2), Some("session-1"), Some(pid))
+                .await
+        });
+        drop(state_guard);
+
+        assert!(screen.await.unwrap().is_some());
+        assert!(teardown.await.unwrap().is_some());
+        assert!(store.located_agent_presence(surface).await.is_none());
+        assert!(store.cleared_agent_surfaces.lock().await.contains(&surface));
     }
 
     #[tokio::test]
@@ -3747,25 +7980,25 @@ Do you want to continue?";
             .await;
 
         assert!(store
-            .end_agent_session(surface, "claude", Some(10), Some("session-new"))
+            .end_agent_session(surface, "claude", Some(10), Some("session-new"), None)
             .await
             .is_none());
         assert!(store
-            .end_agent_session(surface, "claude", Some(21), Some("session-old"))
+            .end_agent_session(surface, "claude", Some(21), Some("session-old"), None)
             .await
             .is_none());
         assert!(store
-            .end_agent_session(surface, "claude", None, Some("session-new"))
+            .end_agent_session(surface, "claude", None, Some("session-new"), None)
             .await
             .is_none());
         assert!(store
-            .end_agent_session(surface, "claude", Some(21), None)
+            .end_agent_session(surface, "claude", Some(21), None, None)
             .await
             .is_none());
         assert!(store.located_agent_presence(surface).await.is_some());
 
         let removed = store
-            .end_agent_session(surface, "claude", Some(21), Some("session-new"))
+            .end_agent_session(surface, "claude", Some(21), Some("session-new"), None)
             .await
             .expect("matching SessionEnd should remove presence");
         assert_eq!(removed.workspace, ws_id);
@@ -3827,7 +8060,7 @@ Do you want to continue?";
     }
 
     #[tokio::test]
-    async fn report_agent_screen_signals_can_replace_stale_claude_presence_name() {
+    async fn report_agent_screen_signals_rejects_mismatched_hook_status() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -3860,14 +8093,14 @@ Do you want to continue?";
         let result = store
             .report_agent_screen_signals(surface, None, Some("Cline Action Required"))
             .await;
-        assert_eq!(result, Some((ws_id, Some(AgentStatus::Blocked))));
+        assert_eq!(result, None);
 
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         let agent = tree[0].panes[0].tabs[0].agent.as_ref().unwrap();
-        assert_eq!(agent.name, "cline");
-        assert_eq!(agent.status, AgentStatus::Blocked);
-        assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+        assert_eq!(agent.name, "claude");
+        assert_eq!(agent.status, AgentStatus::Idle);
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
     }
 
     #[tokio::test]

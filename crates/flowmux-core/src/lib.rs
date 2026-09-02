@@ -755,8 +755,6 @@ impl Pane {
             } => {
                 let visible = surface_visible && *active == surface_id;
                 let surface = surfaces.iter_mut().find(|s| s.id == surface_id)?;
-                let mut report = report;
-                normalize_agent_report_name_for_surface_title(&mut report, &surface.title);
                 match surface.agent.as_mut() {
                     Some(agent) => Some(agent.apply_report(report, visible)),
                     None => {
@@ -794,6 +792,21 @@ impl Pane {
                 let incoming_is_different_agent = incoming_name
                     .as_deref()
                     .is_some_and(|name| existing_agent.is_some_and(|agent| agent.name != name));
+                let screen_conflicts_with_authoritative_agent = source == "flowmux:screen"
+                    && incoming_is_different_agent
+                    && existing_agent.is_some_and(|agent| {
+                        matches!(
+                            agent.source.as_deref(),
+                            Some("flowmux:hook") | Some(AGENT_SOURCE_PROC)
+                        )
+                    });
+                if screen_conflicts_with_authoritative_agent {
+                    // The identity heuristic and process/hook truth disagree,
+                    // so this screen status belongs to an ambiguous frame. Do
+                    // not turn stale text from another agent into a false Done
+                    // or Blocked state that screen-idle settlement cannot undo.
+                    return Some(false);
+                }
                 let explicit_screen_idle = source == "flowmux:screen"
                     && status == AgentStatus::Idle
                     && status_text.is_some();
@@ -2476,6 +2489,27 @@ pub fn agent_bar_color_for_surface(surface: SurfaceId) -> String {
 /// (agent hook reports) or `flowmux:screen` (terminal text heuristics).
 pub const AGENT_SOURCE_PROC: &str = "flowmux:proc";
 
+/// Select the process-derived identity to reconcile for a surface. Native hook
+/// identity wins when that same agent appears anywhere in the pane process
+/// subtree; otherwise the first candidate is used. Process monitoring orders
+/// candidates deepest-first, so this avoids replacing a nested Codex hook with
+/// its still-running Claude ancestor while keeping process-only detection
+/// deterministic.
+pub fn select_process_agent_candidate<'a>(
+    existing: Option<&AgentPresence>,
+    candidates: &'a [&'a str],
+) -> Option<&'a str> {
+    let hooked_name = existing
+        .filter(|presence| presence.source.as_deref() == Some("flowmux:hook"))
+        .and_then(|presence| {
+            candidates
+                .iter()
+                .copied()
+                .find(|candidate| presence.name.eq_ignore_ascii_case(candidate))
+        });
+    hooked_name.or_else(|| candidates.first().copied())
+}
+
 /// Apply process-truth to one surface's agent slot. See
 /// [`Pane::reconcile_process_agent`]. Split out as a free function so it can be
 /// unit-tested against a bare `Option<AgentPresence>`.
@@ -2509,22 +2543,21 @@ fn reconcile_surface_process_agent(
         }
         (Some(existing), Some(name)) => {
             // Process truth is authoritative on *identity and ownership*.
+            // A different process identity means the previous hook/session is
+            // no longer the pane's owner, so replace the whole presence and
+            // discard its PID, sequence, status, and messaging metadata.
             // Reclaim screen-owned presence even when its name was right so a
-            // later process exit can remove it. Hook-owned presence remains
-            // under the hook's lifecycle.
-            let reclaimable = matches!(
-                existing.source.as_deref(),
-                Some(AGENT_SOURCE_PROC) | Some("flowmux:screen")
-            );
+            // later process exit can remove it. A same-identity hook presence
+            // remains under the hook's lifecycle.
             let screen_owned = existing.source.as_deref() == Some("flowmux:screen");
             let identity_changed = existing.name != name;
-            if reclaimable && (screen_owned || identity_changed) {
-                existing.name = name.to_string();
+            if identity_changed {
+                let mut replacement = AgentPresence::new(name, AgentActivity::Idle, None);
+                replacement.source = Some(AGENT_SOURCE_PROC.to_string());
+                *existing = replacement;
+                true
+            } else if screen_owned {
                 existing.source = Some(AGENT_SOURCE_PROC.to_string());
-                if identity_changed {
-                    existing.session_name = None;
-                    existing.messaging_socket = None;
-                }
                 true
             } else {
                 false
@@ -2645,21 +2678,53 @@ impl AgentPresence {
         let same_session = same_agent
             && (report.pid.is_none() || self.pid == report.pid)
             && (report.session_id.is_none() || self.session_id == report.session_id);
+        let hook_session_start = report.source.as_deref() == Some("flowmux:hook")
+            && matches!(next, AgentStatus::Unknown | AgentStatus::Idle)
+            && report.custom_status.as_deref() == Some("Ready");
+        // Old wrapper shims emitted a second, metadata-free SessionStart in the
+        // background. Preserve a later turn state when that delayed legacy
+        // report arrives. Native SessionStart always carries a session id and
+        // must remain meaningful: startup/resume/clear deliberately resets the
+        // public lifecycle to Ready, even for the same process and session.
+        let repeated_legacy_hook_session_start = hook_session_start
+            && report.session_id.is_none()
+            && same_session
+            && self.source.as_deref() == Some("flowmux:hook")
+            && !matches!(self.status, AgentStatus::Unknown);
+        if repeated_legacy_hook_session_start {
+            if report.pid.is_some() {
+                self.pid = report.pid;
+            }
+            if report.seq.is_some() {
+                self.seq = report.seq;
+            }
+            if report.session_id.is_some() {
+                self.session_id = report.session_id;
+            }
+            if report.session_name.is_some() {
+                self.session_name = report.session_name;
+            }
+            if report.messaging_socket.is_some() {
+                self.messaging_socket = report.messaging_socket;
+            }
+            return true;
+        }
         if !same_session {
             self.session_name = None;
             self.messaging_socket = None;
         }
-        // Process-tree truth owns *identity*: a screen-text scan must not rename
-        // (or re-own) a proc-owned presence. Terminal scrollback routinely
+        // Hook/process truth owns *identity*: a screen-text scan must not rename
+        // (or re-own) an authoritative presence. Terminal scrollback routinely
         // *mentions* other agents — a log line, a file listing, or an AI chat
         // about agents — so the name heuristic would otherwise relabel a running
-        // `claude` pane as `cline`. The 2s proc sweep, not the screen, corrects a
-        // pane whose agent genuinely swapped. Hook-owned presences stay
-        // screen-replaceable so a stale hook can be superseded (see
-        // `screen_fallback_replaces_stale_claude_name_when_agent_signal_differs`).
-        let screen_defers_to_proc = report.source.as_deref() == Some("flowmux:screen")
-            && self.source.as_deref() == Some(AGENT_SOURCE_PROC);
-        if !screen_defers_to_proc {
+        // `claude` pane as `cline`. A process/session event, not text or a stale
+        // title, corrects a pane whose agent genuinely swapped.
+        let screen_defers_to_authoritative = report.source.as_deref() == Some("flowmux:screen")
+            && matches!(
+                self.source.as_deref(),
+                Some("flowmux:hook") | Some(AGENT_SOURCE_PROC)
+            );
+        if !screen_defers_to_authoritative {
             self.name = report.name;
         }
         self.status = next;
@@ -2672,10 +2737,10 @@ impl AgentPresence {
             // stronger source (a hook, or the process-tree sweep) but must not
             // steal *ownership*: otherwise the screen-cleared path would later
             // drop a presence whose existence is guaranteed by a live process or
-            // an active hook session. `screen_defers_to_proc` also covers the
+            // an active hook session. `screen_defers_to_authoritative` also covers the
             // case where the scan named a *different* agent than a proc-owned
             // presence (the scrollback false-positive above).
-            let keep_ownership = screen_defers_to_proc
+            let keep_ownership = screen_defers_to_authoritative
                 || (same_agent
                     && matches!(
                         self.source.as_deref(),
@@ -2703,10 +2768,17 @@ impl AgentPresence {
         if !from_screen {
             self.screen_working_base = None;
         }
-        let needs_acknowledgement = next == AgentStatus::Blocked
-            || AgentStatus::should_mark_unseen_on_idle(prev, next)
-            || (next == AgentStatus::Idle && prev == AgentStatus::Idle && !self.seen);
-        self.seen = !needs_acknowledgement || visible;
+        if hook_session_start {
+            // SessionStart establishes a fresh, acknowledged Ready state. In
+            // particular, do not inherit an unseen Idle/Done latch from the
+            // preceding turn or from a screen-owned fallback presence.
+            self.seen = true;
+        } else {
+            let needs_acknowledgement = next == AgentStatus::Blocked
+                || AgentStatus::should_mark_unseen_on_idle(prev, next)
+                || (next == AgentStatus::Idle && prev == AgentStatus::Idle && !self.seen);
+            self.seen = !needs_acknowledgement || visible;
+        }
         true
     }
 
@@ -2754,33 +2826,33 @@ pub fn detect_agent_status_from_signals(
             .filter(|line| !line.trim().is_empty())
             .take(12)
     };
-    if detect_agent_usage_limit_text(screen_text).is_some() {
-        return Some(AgentStatus::Blocked);
-    }
-    if recent().any(|line| {
-        [
-            "do you want to",
-            "approve this",
-            "approve command",
-            "requires approval",
-            "waiting for approval",
-            "awaiting approval",
-            "needs approval",
-            "allow this",
-            "permission to",
-            "permission prompt",
-            "requires permission",
-            "continue?",
-            "proceed?",
-            "action required",
-        ]
-        .into_iter()
-        .any(|needle| contains_ascii_case_insensitive(line, needle))
-    }) {
-        return Some(AgentStatus::Blocked);
-    }
-    if recent().any(is_agent_working_status_line) {
-        return Some(AgentStatus::Working);
+    let newest_blocked = recent().position(|line| {
+        is_agent_usage_limit_status_line(line)
+            || [
+                "do you want to",
+                "approve this",
+                "approve command",
+                "requires approval",
+                "waiting for approval",
+                "awaiting approval",
+                "needs approval",
+                "allow this",
+                "permission to",
+                "permission prompt",
+                "requires permission",
+                "continue?",
+                "proceed?",
+                "action required",
+            ]
+            .into_iter()
+            .any(|needle| contains_ascii_case_insensitive(line, needle))
+    });
+    let newest_working = recent().position(is_agent_working_status_line);
+    match (newest_blocked, newest_working) {
+        (Some(blocked), Some(working)) if working < blocked => return Some(AgentStatus::Working),
+        (Some(_), _) => return Some(AgentStatus::Blocked),
+        (None, Some(_)) => return Some(AgentStatus::Working),
+        (None, None) => {}
     }
     if detect_agent_interruption(screen_text) {
         return Some(AgentStatus::Idle);
@@ -2845,11 +2917,15 @@ pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> 
         .take(12)
         .find_map(|line| {
             let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
-            ["usage limit reached", "you've hit your session limit"]
-                .into_iter()
-                .any(|text| strip_ascii_prefix_case_insensitive(line, text).is_some())
-                .then_some(line)
+            is_agent_usage_limit_status_line(line).then_some(line)
         })
+}
+
+fn is_agent_usage_limit_status_line(line: &str) -> bool {
+    let line = line.trim().trim_start_matches(['⚠', '⎿']).trim_start();
+    ["usage limit reached", "you've hit your session limit"]
+        .into_iter()
+        .any(|text| strip_ascii_prefix_case_insensitive(line, text).is_some())
 }
 
 fn trim_agent_status_prefix(line: &str) -> &str {
@@ -2992,12 +3068,6 @@ pub fn detect_agent_interruption(screen_text: Option<&str>) -> bool {
         }
     }
     false
-}
-
-fn normalize_agent_report_name_for_surface_title(report: &mut AgentStatusReport, title: &str) {
-    if let Some(name) = detect_agent_name_from_surface_title(title) {
-        report.name = name.to_string();
-    }
 }
 
 fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {

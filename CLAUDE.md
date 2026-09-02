@@ -197,6 +197,25 @@ agent code:
   `flowmux fix` and audited by `flowmux doctor`. Hook payloads ship
   *inside* the binary, so any change to the on-disk hook format must
   be paired with a `doctor`/`fix` revision.
+- Treat native lifecycle events as activity truth, process inspection as
+  identity/liveness truth, and terminal text as a fallback. A surface title or
+  screen scan must not rename a hook/process-owned agent. Keep turn completion
+  (`Stop`) distinct from process/session teardown (`SessionEnd` or dead PID).
+- Codex lifecycle hooks live in `~/.codex/hooks.json` and send JSON on stdin.
+  Preserve unrelated hook handlers and notification config, and never write
+  Codex's hook trust state on the user's behalf.
+- Claude `PermissionRequest` has no `tool_use_id`: keep its conservative batch
+  marker until `PostToolBatch`. Correlate only explicit input-tool waits by
+  `tool_use_id`, and keep independent session waits (quota/API/input) scoped.
+- Codex `PermissionRequest` has no call identity or success/denial resolution.
+  Scope it conservatively to the reported root/child turn; ordinary
+  `PostToolUse` must not guess that another parallel request resolved. Correlate
+  parent Stop with the session-wide set of observed `SubagentStart` /
+  `SubagentStop` identities; root and child `turn_id` values are not equal.
+  Keep this ledger runtime-only and clear it on session/process/surface end.
+- Codex may not emit a second `SubagentStart` for a reused child, and Stop hooks
+  can be blocked by another handler. Never describe the observed child ledger
+  as complete ground truth; process/screen signals remain fallback evidence.
 
 ## Project conventions
 

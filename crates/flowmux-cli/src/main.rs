@@ -416,7 +416,7 @@ enum Cmd {
     /// `flowmux hooks setup` registers entries with each supported
     /// agent so its lifecycle events route into flowmux. The other
     /// subcommands are invoked by the agents themselves at runtime
-    /// (Claude Code's `Stop` hook, Codex's `notify` command, etc).
+    /// (Claude Code's `Stop` hook, Codex's `hooks.json`, etc).
     Hooks {
         #[command(subcommand)]
         op: HooksOp,
@@ -655,13 +655,19 @@ enum HooksOp {
     /// `~/.claude/settings.json` `hooks.<event>` after `flowmux hooks
     /// setup`. Reads stdin JSON, fires a desktop notification.
     Claude {
+        /// Explicit source pane for Flatpak hook commands whose environment is
+        /// filtered while crossing back into the FlowMux sandbox.
+        #[arg(long, global = true)]
+        pane: Option<PaneId>,
+        /// Explicit source tab surface; falls back to FLOWMUX_SURFACE_ID.
+        #[arg(long, global = true)]
+        surface: Option<SurfaceId>,
         #[command(subcommand)]
         event: ClaudeHookEvent,
     },
-    /// Codex CLI lifecycle hook handler. Invoked by Codex via the
-    /// `notify = [...]` config in `~/.codex/config.toml`. Codex
-    /// passes the JSON event payload as the LAST positional argument,
-    /// so we accept trailing args via `--` after the event name.
+    /// Codex CLI lifecycle hook handler. Invoked by native entries in
+    /// `~/.codex/hooks.json`; a trailing JSON argument remains accepted
+    /// for legacy notify invocations during upgrade.
     Codex {
         #[command(subcommand)]
         event: AgentHookEvent,
@@ -695,6 +701,8 @@ enum ClaudeHookEvent {
     StopFailure,
     /// Claude needs the user (permission prompt, plan summary, …).
     Notification,
+    /// Claude is presenting an immediate tool permission decision.
+    PermissionRequest,
     /// New session started — registers the agent's presence (and PID
     /// from the wrapper shim) so its activity can be tracked.
     SessionStart,
@@ -702,6 +710,14 @@ enum ClaudeHookEvent {
     SessionEnd,
     /// Claude is about to call a tool — marks the agent Running.
     PreToolUse,
+    /// Claude finished a tool — clears a resolved input/permission wait.
+    PostToolUse,
+    /// Every tool in the current parallel batch has resolved.
+    PostToolBatch,
+    /// Claude's tool failed after permission resolution; reasoning resumes.
+    PostToolUseFailure,
+    /// Claude auto-denied a tool and resumed reasoning without user input.
+    PermissionDenied,
     /// User submitted a prompt — marks the agent Running.
     PromptSubmit,
 }
@@ -709,8 +725,8 @@ enum ClaudeHookEvent {
 #[derive(Subcommand, Debug)]
 enum AgentHookEvent {
     /// Agent finished a turn. Trailing args carry an optional JSON
-    /// payload — Codex's `notify` config delivers the event JSON this
-    /// way; Claude/OpenCode use stdin and leave args empty.
+    /// payload — legacy Codex `notify` config delivers event JSON this
+    /// way; native Codex hooks and Claude use stdin.
     Stop {
         /// Source pane id. The Flatpak OpenCode plugin passes this
         /// explicitly because `flatpak run` resets env to a minimal
@@ -738,6 +754,42 @@ enum AgentHookEvent {
     },
     /// Agent started or resumed a turn.
     Running {
+        #[arg(long)]
+        pane: Option<PaneId>,
+        #[arg(long)]
+        surface: Option<SurfaceId>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// A user prompt began a new root turn and invalidates a pending stop.
+    TurnStart {
+        #[arg(long)]
+        pane: Option<PaneId>,
+        #[arg(long)]
+        surface: Option<SurfaceId>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Codex spawned a child thread.
+    SubagentStart {
+        #[arg(long)]
+        pane: Option<PaneId>,
+        #[arg(long)]
+        surface: Option<SurfaceId>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// A Codex child thread stopped its current turn.
+    SubagentStop {
+        #[arg(long)]
+        pane: Option<PaneId>,
+        #[arg(long)]
+        surface: Option<SurfaceId>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Codex aborted the current root turn.
+    Interrupt {
         #[arg(long)]
         pane: Option<PaneId>,
         #[arg(long)]
