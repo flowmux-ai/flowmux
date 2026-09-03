@@ -16,6 +16,7 @@ fn integration_help_matches_current_hook_support() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(hooks_help.contains("Codex's `hooks.json`"));
+    assert!(hooks_help.contains("antigravity"));
 
     let mut command = Cli::command();
     let doctor = command.find_subcommand_mut("doctor").unwrap();
@@ -25,7 +26,9 @@ fn integration_help_matches_current_hook_support() {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    assert!(doctor_help.contains("lifecycle hooks (Claude / Codex / OpenCode / Gemini)"));
+    assert!(
+        doctor_help.contains("lifecycle hooks (Claude / Codex / OpenCode / Gemini / Antigravity)")
+    );
     assert!(!doctor_help.contains("OpenCode / Cline"));
 }
 
@@ -764,6 +767,42 @@ fn cline_is_supported_as_a_skill_not_a_file_hook() {
     ));
 
     assert!(Cli::try_parse_from(["flowmuxctl", "hooks", "setup", "--agent", "cline"]).is_err());
+}
+
+#[test]
+fn antigravity_is_supported_by_skill_and_hook_management_parsers() {
+    for operation in ["install", "doctor", "uninstall"] {
+        let cli = Cli::try_parse_from(["flowmuxctl", "agent", operation, "--agent", "antigravity"])
+            .unwrap_or_else(|error| panic!("agent {operation} must accept antigravity: {error}"));
+        let agent = match cli.cmd {
+            Cmd::Agent {
+                op: AgentOp::Install { agent, .. },
+            }
+            | Cmd::Agent {
+                op: AgentOp::Doctor { agent },
+            }
+            | Cmd::Agent {
+                op: AgentOp::Uninstall { agent },
+            } => agent,
+            _ => panic!("expected agent {operation}"),
+        };
+        assert_eq!(agent, ["antigravity"]);
+    }
+
+    for operation in ["setup", "uninstall"] {
+        let cli = Cli::try_parse_from(["flowmuxctl", "hooks", operation, "--agent", "antigravity"])
+            .unwrap_or_else(|error| panic!("hooks {operation} must accept antigravity: {error}"));
+        let agent = match cli.cmd {
+            Cmd::Hooks {
+                op: HooksOp::Setup { agent, .. },
+            }
+            | Cmd::Hooks {
+                op: HooksOp::Uninstall { agent },
+            } => agent,
+            _ => panic!("expected hooks {operation}"),
+        };
+        assert_eq!(agent, ["antigravity"]);
+    }
 }
 
 #[test]
@@ -1639,6 +1678,116 @@ fn hooks_gemini_exposes_every_installed_lifecycle_subcommand() {
         parse("notification"),
         AgentHookEvent::Notification { .. }
     ));
+}
+
+#[test]
+fn hooks_antigravity_uses_the_generic_event_parser() {
+    let pane = PaneId::new();
+    let surface = SurfaceId::new();
+    let cli = Cli::try_parse_from([
+        "flowmuxctl",
+        "hooks",
+        "antigravity",
+        "stop",
+        "--pane",
+        &pane.to_string(),
+        "--surface",
+        &surface.to_string(),
+    ])
+    .expect("antigravity stop hook must be public and accept generic context flags");
+
+    assert!(matches!(
+        cli.cmd,
+        Cmd::Hooks {
+            op: HooksOp::Antigravity {
+                event: AgentHookEvent::Stop {
+                    pane: Some(got_pane),
+                    surface: Some(got_surface),
+                    ..
+                },
+            },
+        } if got_pane == pane && got_surface == surface
+    ));
+}
+
+#[test]
+fn antigravity_hook_stdout_contract_is_valid_json() {
+    use crate::cmd_hooks::write_antigravity_hook_response;
+
+    let render = |event: AgentHookEvent| {
+        let mut output = Vec::new();
+        write_antigravity_hook_response(&event, &mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        (text, json)
+    };
+
+    let (running_text, running_json) = render(AgentHookEvent::Running {
+        pane: None,
+        surface: None,
+        args: Vec::new(),
+    });
+    assert_eq!(running_text, "{}\n");
+    assert_eq!(running_json, serde_json::json!({}));
+
+    let (stop_text, stop_json) = render(AgentHookEvent::Stop {
+        pane: None,
+        surface: None,
+        args: Vec::new(),
+    });
+    assert_eq!(stop_text, "{\"decision\":\"\"}\n");
+    assert_eq!(stop_json, serde_json::json!({"decision": ""}));
+}
+
+#[test]
+fn antigravity_non_idle_stop_preserves_working_state() {
+    use crate::cmd_hooks::build_generic_stop_requests;
+    use crate::hooks::ClaudeHookInput;
+
+    let input = |fully_idle| ClaudeHookInput {
+        session_id: Some("conversation-1".into()),
+        last_assistant_message: Some("finished the task".into()),
+        fully_idle,
+        ..ClaudeHookInput::default()
+    };
+
+    assert!(build_generic_stop_requests(
+        "Antigravity",
+        "antigravity",
+        "Antigravity",
+        &input(Some(false)),
+        None,
+        None,
+        None,
+    )
+    .is_empty());
+
+    for fully_idle in [Some(true), None] {
+        let requests = build_generic_stop_requests(
+            "Antigravity",
+            "antigravity",
+            "Antigravity",
+            &input(fully_idle),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            requests.as_slice(),
+            [
+                Request::AgentActivityUpdate {
+                    agent,
+                    activity: Some(flowmux_core::AgentActivity::Idle),
+                    session_id: Some(session_id),
+                    ..
+                },
+                Request::Notify { title, body, .. }
+            ] if agent == "antigravity"
+                && session_id == "conversation-1"
+                && title == "Antigravity ready"
+                && body == "finished the task"
+        ));
+    }
 }
 
 #[test]

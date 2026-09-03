@@ -133,12 +133,22 @@ pub fn comm_of(pid: u32) -> Option<String> {
 /// truncation (`TASK_COMM_LEN` = 16 including NUL). These are the identity
 /// strings the Agent Bar renders and that hook/screen sources also use.
 pub const KNOWN_AGENT_COMMS: &[&str] = &[
-    "codex", "claude", "opencode", "cline", "gemini", "aider", "goose",
+    "codex",
+    "claude",
+    "opencode",
+    "cline",
+    "gemini",
+    "aider",
+    "goose",
+    "antigravity",
 ];
 
 /// Map a raw process `comm` to a canonical agent name, or `None`.
 fn match_agent_comm(comm: &str) -> Option<&'static str> {
     let c = comm.trim().to_ascii_lowercase();
+    if c == "agy" {
+        return Some("antigravity");
+    }
     KNOWN_AGENT_COMMS.iter().copied().find(|name| *name == c)
 }
 
@@ -179,7 +189,7 @@ fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
             .or_else(|| stem.strip_suffix(".cjs"))
             .unwrap_or(stem)
             .to_ascii_lowercase();
-        KNOWN_AGENT_COMMS.iter().copied().find(|name| *name == stem)
+        match_agent_comm(&stem)
     })
 }
 
@@ -597,6 +607,8 @@ mod tests {
         assert_eq!(match_agent_comm("codex"), Some("codex"));
         assert_eq!(match_agent_comm("Claude"), Some("claude"));
         assert_eq!(match_agent_comm("  opencode  "), Some("opencode"));
+        assert_eq!(match_agent_comm("agy"), Some("antigravity"));
+        assert_eq!(match_agent_comm("Antigravity"), Some("antigravity"));
         // Wrappers and unrelated processes must not match.
         assert_eq!(match_agent_comm("node"), None);
         assert_eq!(match_agent_comm("bash"), None);
@@ -655,6 +667,10 @@ mod tests {
         assert_eq!(
             agent_from_argv(&argv(&["/usr/bin/python3", "/usr/bin/aider"])),
             Some("aider")
+        );
+        assert_eq!(
+            agent_from_argv(&argv(&["python3", "/opt/agy"])),
+            Some("antigravity")
         );
         // Non-interpreter argv[0]: native binaries go through `comm`, so a shell
         // merely touching a file named `cline` must not false-match.

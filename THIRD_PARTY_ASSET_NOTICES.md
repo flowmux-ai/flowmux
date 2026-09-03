@@ -2,9 +2,28 @@
 
 # Third-Party Asset Notices
 
-This file covers third-party color data distributed with flowmux. Rust and
+This file covers third-party visual assets distributed with flowmux. Rust and
 editor dependencies are documented separately in `THIRD_PARTY_LICENSES.md`
 and the editor notice files.
+
+## AI agent icons
+
+- Codex, Claude Code, OpenCode, Cline, Gemini CLI, Antigravity, and Goose icon
+  paths and native color variants: Lobe Icons, Copyright (c) 2023 LobeHub,
+  distributed under the MIT License.
+  Source: <https://github.com/lobehub/lobe-icons/tree/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-svg/icons>
+- OpenCode, Cline, and Goose square-avatar colors and scaling: Lobe Icons.
+  Sources: <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/OpenCode/style.ts>,
+  <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/Cline/style.ts>, and
+  <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/Goose/style.ts>.
+- Aider icon path and website-logo green: Aider, distributed under the Apache
+  License 2.0 and adapted from its pinned-tab icon and website logo.
+  Source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/icons/safari-pinned-tab.svg>
+  Color source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg>
+
+The Apache License 2.0 text is reproduced in `THIRD_PARTY_LICENSES.md`. Agent
+names and marks remain the property of their respective owners and are shown
+only to identify the corresponding locally running agent.
 
 ## Built-in themes and default palette
 

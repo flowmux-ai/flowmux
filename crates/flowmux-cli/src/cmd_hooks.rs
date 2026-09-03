@@ -55,6 +55,7 @@ fn hook_agent_display_name(agent: &str) -> &str {
         "opencode" => "OpenCode",
         "cline" => "Cline",
         "gemini" => "Gemini",
+        "antigravity" => "Antigravity",
         "aider" => "Aider",
         "goose" => "Goose",
         _ => agent,
@@ -188,6 +189,7 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
             run_generic_agent_hook_event("OpenCode", event, socket).await
         }
         HooksOp::Gemini { event } => run_generic_agent_hook_event("Gemini", event, socket).await,
+        HooksOp::Antigravity { event } => run_antigravity_hook_event(event, socket).await,
         HooksOp::Cline { event } => run_generic_agent_hook_event("Cline", event, socket).await,
     }
 }
@@ -272,6 +274,7 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
             HookTarget::Codex => "codex",
             HookTarget::OpenCode => "opencode",
             HookTarget::Gemini => "gemini",
+            HookTarget::Antigravity => "antigravity",
             HookTarget::Cline => "cline",
         };
         let entry = hook_install::check(*t);
@@ -814,6 +817,87 @@ pub(crate) async fn run_claude_hook_event(
     }
     Ok(())
 }
+pub(crate) async fn run_antigravity_hook_event(
+    event: &AgentHookEvent,
+    socket: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let result = run_generic_agent_hook_event("Antigravity", event, socket).await;
+    let stdout = std::io::stdout();
+    write_antigravity_hook_response(event, &mut stdout.lock())?;
+    result
+}
+
+pub(crate) fn write_antigravity_hook_response<W: std::io::Write>(
+    event: &AgentHookEvent,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    if matches!(event, AgentHookEvent::Stop { .. }) {
+        writeln!(writer, r#"{{"decision":""}}"#)
+    } else {
+        writeln!(writer, "{{}}")
+    }
+}
+
+pub(crate) fn build_generic_stop_requests(
+    reported_agent: &str,
+    agent: &str,
+    agent_display_name: &str,
+    input: &hooks::ClaudeHookInput,
+    pid: Option<u32>,
+    pane: Option<flowmux_core::PaneId>,
+    surface: Option<flowmux_core::SurfaceId>,
+) -> Vec<Request> {
+    use flowmux_core::AgentActivity::Idle;
+    use hooks::*;
+
+    if let Some(request) =
+        generic_resume_return_forget_request(agent, input.reason.as_deref(), surface)
+    {
+        return vec![request];
+    }
+    if reported_agent.eq_ignore_ascii_case("antigravity") && input.fully_idle == Some(false) {
+        return Vec::new();
+    }
+
+    let body = normalized_activity_text(input.last_assistant_message.as_deref());
+    let status_text = completed_activity_text(body.as_deref());
+    if reported_agent.eq_ignore_ascii_case("codex") {
+        if let (Some(surface), Some(session_id), Some(turn_id)) = (
+            surface,
+            input.session_id.as_deref(),
+            input.turn_id.as_deref(),
+        ) {
+            return vec![build_agent_lifecycle_update(
+                agent,
+                pid,
+                pane,
+                surface,
+                session_id,
+                AgentLifecycleEvent::CodexTurnStopped {
+                    turn_id: turn_id.to_string(),
+                    message: body,
+                    status_text,
+                    stop_hook_active: input.stop_hook_active,
+                },
+            )];
+        }
+    }
+
+    vec![
+        build_activity_update_with_metadata(
+            agent,
+            Some(Idle),
+            pid,
+            pane,
+            surface,
+            body.as_deref(),
+            Some(&status_text),
+            input.session_id.as_deref(),
+        ),
+        build_stop_notify(agent_display_name, body.as_deref(), pane, surface),
+    ]
+}
+
 pub(crate) async fn run_generic_agent_hook_event(
     reported_agent: &str,
     event: &AgentHookEvent,
@@ -876,7 +960,7 @@ pub(crate) async fn run_generic_agent_hook_event(
     // env, preserving the legacy code path.
     let pane = cli_pane.or(env_pane);
     let surface = cli_surface.or(env_surface);
-    use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
+    use flowmux_core::AgentActivity::{NeedsInput, Running};
     let pid = if inherited_wrapper_conflicts_with(reported_agent) {
         None
     } else {
@@ -887,7 +971,9 @@ pub(crate) async fn run_generic_agent_hook_event(
     };
     // Gemini and native Codex hooks deliver JSON on stdin. Codex retains a
     // positional legacy-notify fallback; OpenCode passes its payload as an arg.
-    let input = if reported_agent.eq_ignore_ascii_case("gemini") {
+    let input = if reported_agent.eq_ignore_ascii_case("gemini")
+        || reported_agent.eq_ignore_ascii_case("antigravity")
+    {
         read_claude_hook_input()
     } else {
         read_codex_hook_input(args)
@@ -897,71 +983,15 @@ pub(crate) async fn run_generic_agent_hook_event(
     let mut reqs: Vec<_> = Vec::new();
     match event {
         AgentHookEvent::Stop { .. } => {
-            if let Some(request) =
-                generic_resume_return_forget_request(&agent, input.reason.as_deref(), surface)
-            {
-                reqs.push(request);
-            } else if reported_agent.eq_ignore_ascii_case("codex") {
-                if let (Some(surface), Some(session_id), Some(turn_id)) = (
-                    surface,
-                    input.session_id.as_deref(),
-                    input.turn_id.as_deref(),
-                ) {
-                    let body = normalized_activity_text(input.last_assistant_message.as_deref());
-                    let status_text = completed_activity_text(body.as_deref());
-                    reqs.push(build_agent_lifecycle_update(
-                        &agent,
-                        pid,
-                        pane,
-                        surface,
-                        session_id,
-                        AgentLifecycleEvent::CodexTurnStopped {
-                            turn_id: turn_id.to_string(),
-                            message: body,
-                            status_text,
-                            stop_hook_active: input.stop_hook_active,
-                        },
-                    ));
-                } else {
-                    let body = normalized_activity_text(input.last_assistant_message.as_deref());
-                    let status_text = completed_activity_text(body.as_deref());
-                    reqs.push(build_activity_update_with_metadata(
-                        &agent,
-                        Some(Idle),
-                        pid,
-                        pane,
-                        surface,
-                        body.as_deref(),
-                        Some(&status_text),
-                        input.session_id.as_deref(),
-                    ));
-                    reqs.push(build_stop_notify(
-                        agent_display_name,
-                        body.as_deref(),
-                        pane,
-                        surface,
-                    ));
-                }
-            } else {
-                let body = normalized_activity_text(input.last_assistant_message.as_deref());
-                let status_text = completed_activity_text(body.as_deref());
-                reqs.push(build_activity_update_with_metadata(
-                    &agent,
-                    Some(Idle),
-                    pid,
-                    pane,
-                    surface,
-                    body.as_deref(),
-                    Some(&status_text),
-                    input.session_id.as_deref(),
-                ));
-                reqs.push(build_stop_notify(
-                    agent_display_name,
-                    body.as_deref(),
-                    pane,
-                    surface,
-                ));
-            }
+            reqs.extend(build_generic_stop_requests(
+                reported_agent,
+                &agent,
+                agent_display_name,
+                &input,
+                pid,
+                pane,
+                surface,
+            ));
         }
         AgentHookEvent::Notification { .. } => {
             let msg = normalized_activity_text(input.message.as_deref());

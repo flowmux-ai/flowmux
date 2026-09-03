@@ -28,7 +28,9 @@ use crate::ui::usage_popover::UsagePopover;
 use crate::ui::workspace_view::{
     read_tab_dnd_payload_from_drop, tab_dnd_content_formats, tab_dnd_formats_accept_payload,
 };
-use crate::ui::{agent_status_css_class, agent_status_icon_name, agent_status_indicator};
+use crate::ui::{
+    agent_icon, agent_status_css_class, agent_status_icon_name, agent_status_indicator,
+};
 use adw::prelude::*;
 use flowmux_core::{AgentStatus, NotificationLevel, PrState, SurfaceId, Workspace, WorkspaceId};
 use std::cell::{Cell, RefCell};
@@ -1067,6 +1069,7 @@ fn activity_row(
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.set_hexpand(true);
     let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    heading.append(&agent_icon(agent));
     let agent = gtk::Label::new(Some(agent));
     agent.set_halign(gtk::Align::Start);
     agent.set_hexpand(true);
@@ -2690,6 +2693,34 @@ mod tests {
         assert!(selected.has_css_class("flowmux-agent-bar-item"));
         assert!(selected.has_css_class("flowmux-agent-bar-working"));
         assert!(selected.has_css_class("focused"));
+
+        let item_row = selected.child().unwrap().downcast::<gtk::Box>().unwrap();
+        let text = item_row
+            .first_child()
+            .unwrap()
+            .next_sibling()
+            .unwrap()
+            .next_sibling()
+            .unwrap()
+            .downcast::<gtk::Box>()
+            .unwrap();
+        let heading = text.first_child().unwrap().downcast::<gtk::Box>().unwrap();
+        let icon = heading
+            .first_child()
+            .unwrap()
+            .downcast::<gtk::Image>()
+            .unwrap();
+        assert_eq!(icon.icon_name().as_deref(), Some("flowmux-agent-codex"));
+        assert_eq!(icon.pixel_size(), 14);
+        assert_eq!(
+            icon.next_sibling()
+                .unwrap()
+                .downcast::<gtk::Label>()
+                .unwrap()
+                .label(),
+            "codex"
+        );
+
         selected.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
         assert!(matches!(

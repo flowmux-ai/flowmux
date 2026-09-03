@@ -213,6 +213,7 @@ pub(crate) fn run_agent_op(op: &AgentOp, json: bool) -> anyhow::Result<()> {
                     agent::Target::ClaudeCode => "claude",
                     agent::Target::OpenCode => "opencode",
                     agent::Target::Codex => "codex",
+                    agent::Target::Antigravity => "agy",
                     agent::Target::Cline => "cline",
                 };
                 for path in hook_install::uninstall_agent_shim(shim)? {

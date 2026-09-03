@@ -2,7 +2,7 @@
 //! Bottom bar for live AI agents across all workspaces.
 
 use crate::bridge::{Bridge, GtkCommand};
-use crate::ui::{agent_status_css_class, agent_status_indicator};
+use crate::ui::{agent_icon, agent_status_css_class, agent_status_indicator};
 use flowmux_core::{
     AgentBarItem, AgentBarModel, AgentStatus, SurfaceId, AGENT_BAR_ITEM_MAX_WIDTH_PX,
 };
@@ -120,6 +120,9 @@ impl AgentBar {
         let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
         text.set_hexpand(true);
 
+        let heading = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        heading.append(&agent_icon(&item.agent_name));
+
         let name = gtk::Label::new(Some(item.agent_name.as_str()));
         name.set_halign(gtk::Align::Start);
         name.set_xalign(0.0);
@@ -128,7 +131,8 @@ impl AgentBar {
         name.set_lines(1);
         name.set_max_width_chars((AGENT_BAR_ITEM_MAX_WIDTH_PX / 10) as i32);
         name.add_css_class("caption-heading");
-        text.append(&name);
+        heading.append(&name);
+        text.append(&heading);
 
         let status = gtk::Label::new(Some(item.status_text.as_str()));
         status.set_halign(gtk::Align::Start);
@@ -464,6 +468,28 @@ mod tests {
             .downcast::<gtk::Spinner>()
             .unwrap();
         assert!(spinner.is_spinning());
+
+        let text = spinner
+            .next_sibling()
+            .unwrap()
+            .downcast::<gtk::Box>()
+            .unwrap();
+        let heading = text.first_child().unwrap().downcast::<gtk::Box>().unwrap();
+        let icon = heading
+            .first_child()
+            .unwrap()
+            .downcast::<gtk::Image>()
+            .unwrap();
+        assert_eq!(icon.icon_name().as_deref(), Some("flowmux-agent-codex"));
+        assert_eq!(icon.pixel_size(), 14);
+        assert_eq!(
+            icon.next_sibling()
+                .unwrap()
+                .downcast::<gtk::Label>()
+                .unwrap()
+                .label(),
+            "codex"
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

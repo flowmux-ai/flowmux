@@ -16,7 +16,9 @@ for source in \
     github.com/altercation/solarized \
     github.com/tokyo-night/tokyo-night-vscode-theme \
     github.com/ghostty-org/ghostty \
-    github.com/chriskempson/tomorrow-theme
+    github.com/chriskempson/tomorrow-theme \
+    github.com/lobehub/lobe-icons \
+    github.com/Aider-AI/aider
 do
     grep -Fq "$source" "$notice" || {
         echo "missing asset attribution: $source" >&2

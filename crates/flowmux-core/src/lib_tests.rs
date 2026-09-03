@@ -3261,6 +3261,14 @@ fn detector_reads_agent_name_from_osc_and_screen_signals() {
         Some("cline")
     );
     assert_eq!(
+        detect_agent_name_from_signals(None, Some("Antigravity")),
+        Some("antigravity")
+    );
+    assert_eq!(
+        detect_agent_name_from_signals(Some("Antigravity requires permission"), None),
+        Some("antigravity")
+    );
+    assert_eq!(
         detect_agent_name_from_signals(Some("Claude is thinking"), None),
         Some("claude")
     );
@@ -3298,6 +3306,10 @@ fn detector_reads_idle_agent_prompt_without_trusting_stale_scrollback() {
             None
         ),
         Some("codex")
+    );
+    assert_eq!(
+        detect_agent_idle_name_from_signals(Some("Antigravity CLI\npress / for commands"), None),
+        Some("antigravity")
     );
     assert_eq!(
         detect_agent_idle_name_from_signals(

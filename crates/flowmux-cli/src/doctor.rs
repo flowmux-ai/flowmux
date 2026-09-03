@@ -8,7 +8,7 @@
 //! were added incrementally and `flowmux agent doctor` / `flowmux
 //! hooks doctor` only show one half each. After every flowmux upgrade
 //! — and, just as often, after the user installs Claude / Codex /
-//! OpenCode / Cline for the first time on a host that already had flowmux —
+//! OpenCode / Antigravity / Cline for the first time on a host that already had flowmux —
 //! the user wants a single "is everything wired?" check plus a single
 //! "wire it" command. That's what this module gives them.
 //!
@@ -496,6 +496,7 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
         agent::Target::ClaudeCode => Some(hook_install::HookTarget::Claude),
         agent::Target::OpenCode => Some(hook_install::HookTarget::OpenCode),
         agent::Target::Codex => Some(hook_install::HookTarget::Codex),
+        agent::Target::Antigravity => Some(hook_install::HookTarget::Antigravity),
         agent::Target::Cline => None,
     }
 }
@@ -503,7 +504,8 @@ fn hook_target_for(t: agent::Target) -> Option<hook_install::HookTarget> {
 /// Whether the user actually has the agent's CLI / config tree on
 /// disk. The skill installer happily creates `~/.claude/...` even if
 /// the user has never run Claude Code, so we use the parent dir as
-/// the "is the agent installed" signal.
+/// the "is the agent installed" signal. Antigravity shares
+/// `~/.gemini/config` with Gemini, so its own state root or binary is the signal.
 fn agent_is_installed(t: agent::Target, home: &Path, codex_home: Option<&Path>) -> bool {
     match t {
         agent::Target::ClaudeCode => home.join(".claude").exists(),
@@ -512,6 +514,7 @@ fn agent_is_installed(t: agent::Target, home: &Path, codex_home: Option<&Path>) 
             .map(Path::to_path_buf)
             .unwrap_or_else(|| home.join(".codex"))
             .exists(),
+        agent::Target::Antigravity => agent::antigravity_is_installed(home),
         agent::Target::Cline => {
             home.join(".cline").exists() || home.join("Documents").join("Cline").exists()
         }
@@ -1205,6 +1208,27 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_detection_accepts_state_root_or_binary() {
+        let state_home = fake_home();
+        fs::create_dir_all(state_home.path().join(".gemini/antigravity-cli")).unwrap();
+        assert!(agent_is_installed(
+            agent::Target::Antigravity,
+            state_home.path(),
+            None
+        ));
+
+        let binary_home = fake_home();
+        let binary = binary_home.path().join(".local/bin/agy");
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(binary, "").unwrap();
+        assert!(agent_is_installed(
+            agent::Target::Antigravity,
+            binary_home.path(),
+            None
+        ));
+    }
+
+    #[test]
     fn doctor_reports_writable_log_directory() {
         let root = TempDir::new().unwrap();
         let logs = root.path().join("logs");
@@ -1251,9 +1275,9 @@ mod tests {
 
     /// Doctor on a totally empty fake HOME: every skill row is Warn
     /// ("agent not installed") and every hook row is Warn (NoAgentHome).
-    /// Agent shims are excluded because they intentionally follow the
-    /// host PATH, not HOME. The Desktop section is also expected to flag
-    /// NeedsFix on a fresh per-user install.
+    /// Agent shims and Gemini hooks are excluded because they intentionally
+    /// follow the host PATH, not only HOME. The Desktop section is also
+    /// expected to flag NeedsFix on a fresh per-user install.
     #[test]
     fn doctor_on_empty_home_marks_agent_configs_nonactionable() {
         let _lock = home_env_lock();
@@ -1265,7 +1289,11 @@ mod tests {
             .iter()
             .find(|s| s.title == "AI agents")
             .unwrap();
-        for entry in agents.entries.iter().filter(|e| e.name != "agent shims") {
+        for entry in agents
+            .entries
+            .iter()
+            .filter(|e| e.name != "agent shims" && e.name != "gemini hooks")
+        {
             assert!(
                 matches!(entry.status, Status::Warn | Status::Info | Status::Ok),
                 "{:?} {}: status={:?}",
@@ -1279,7 +1307,7 @@ mod tests {
             .iter()
             .filter(|s| s.title != "Desktop")
             .flat_map(|s| &s.entries)
-            .filter(|e| e.name != "agent shims")
+            .filter(|e| e.name != "agent shims" && e.name != "gemini hooks")
             .any(|e| matches!(e.status, Status::NeedsFix | Status::Error));
         assert!(
             !agent_driven_problem,
@@ -1366,6 +1394,69 @@ mod tests {
             .find(|e| e.name == "tmux compat shim")
             .unwrap();
         assert_eq!(tmux_shim.status, Status::Ok, "{}", tmux_shim.detail);
+    }
+
+    #[test]
+    fn antigravity_fix_wires_skill_and_doctor_hook_rows() {
+        let _lock = home_env_lock();
+        let home = fake_home();
+        fs::create_dir_all(home.path().join(".gemini/antigravity-cli")).unwrap();
+        let _h = HomeOverride::set(home.path());
+
+        assert!(agent_is_installed(
+            agent::Target::Antigravity,
+            home.path(),
+            None
+        ));
+        assert_eq!(
+            hook_target_for(agent::Target::Antigravity),
+            Some(hook_install::HookTarget::Antigravity)
+        );
+
+        let fix = run_fix(home.path(), None, "flowmux");
+        assert!(home
+            .path()
+            .join(".gemini/config/skills/flowmux-browser/SKILL.md")
+            .exists());
+        assert!(!home
+            .path()
+            .join(".gemini/antigravity-cli/skills/flowmux-browser.md")
+            .exists());
+        for file in ["plugin.json", "hooks.json"] {
+            assert!(home
+                .path()
+                .join(".gemini/config/plugins/flowmux")
+                .join(file)
+                .exists());
+            assert!(!home
+                .path()
+                .join(".gemini/antigravity-cli/plugins/flowmux")
+                .join(file)
+                .exists());
+        }
+        for area in ["antigravity skill", "antigravity hooks"] {
+            let outcome = fix
+                .outcomes
+                .iter()
+                .find(|outcome| outcome.area == area)
+                .unwrap_or_else(|| panic!("missing {area} fix outcome"));
+            assert_eq!(outcome.status, Status::Ok, "{}", outcome.detail);
+        }
+
+        let report = collect_offline(home.path(), None);
+        let agents = report
+            .sections
+            .iter()
+            .find(|section| section.title == "AI agents")
+            .unwrap();
+        for name in ["antigravity skill", "antigravity hooks"] {
+            let entry = agents
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap_or_else(|| panic!("missing {name} doctor row"));
+            assert_eq!(entry.status, Status::Ok, "{}", entry.detail);
+        }
     }
 
     #[test]

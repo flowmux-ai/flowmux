@@ -2253,8 +2253,9 @@ impl AgentStatus {
 }
 
 /// Live activity state of an AI coding agent (Claude Code, Codex,
-/// OpenCode, Gemini CLI) running inside a surface. Driven by the agent's lifecycle
-/// hooks. Runtime-only — never persisted (see [`PaneSurface::agent`]).
+/// OpenCode, Gemini CLI, Antigravity) running inside a surface. Driven by the
+/// agent's lifecycle hooks. Runtime-only — never persisted (see
+/// [`PaneSurface::agent`]).
 ///
 /// State machine mirrors cmux: `UserPromptSubmit` → [`Running`], `Stop`
 /// → [`Idle`], `Notification` → [`NeedsInput`]; `SessionEnd` or the
@@ -2572,7 +2573,7 @@ fn reconcile_surface_process_agent(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentPresence {
     /// Agent identity as reported by its hook (`claude`, `codex`,
-    /// `opencode`, `gemini`). Lowercase CLI name.
+    /// `opencode`, `gemini`, `antigravity`). Lowercase CLI name.
     pub name: String,
     pub activity: AgentActivity,
     pub status: AgentStatus,
@@ -2985,6 +2986,8 @@ fn line_has_agent_status_cue(line: &str) -> bool {
 fn agent_name_in_text(text: &str) -> Option<&'static str> {
     if contains_ascii_token(text, "opencode") || contains_ascii_phrase(text, "open code") {
         Some("opencode")
+    } else if contains_ascii_token(text, "antigravity") || contains_ascii_token(text, "agy") {
+        Some("antigravity")
     } else if contains_ascii_token(text, "claude") {
         Some("claude")
     } else if contains_ascii_token(text, "codex") {
@@ -3016,7 +3019,7 @@ pub fn detect_agent_idle_name_from_signals(
     }
     title_agent_name
         .or_else(|| {
-            ["opencode", "claude", "codex", "cline"]
+            ["opencode", "antigravity", "claude", "codex", "cline"]
                 .into_iter()
                 .find(|name| recent().any(|line| agent_name_in_text(line) == Some(*name)))
         })
@@ -3078,6 +3081,10 @@ fn detect_agent_name_from_surface_title(title: &str) -> Option<&'static str> {
         || starts_with_ascii_case_insensitive(title, "oc|")
     {
         Some("opencode")
+    } else if starts_with_agent_title_token(title, "antigravity")
+        || starts_with_agent_title_token(title, "agy")
+    {
+        Some("antigravity")
     } else if starts_with_agent_title_token(title, "claude") {
         Some("claude")
     } else if starts_with_agent_title_token(title, "codex") {

@@ -66,3 +66,10 @@ pub(crate) fn agent_status_indicator(status: AgentStatus, seen: bool) -> gtk::Wi
         icon.upcast()
     }
 }
+
+pub(crate) fn agent_icon(agent: &str) -> gtk::Image {
+    let icon = gtk::Image::from_icon_name(crate::builtin_icons::agent_icon_name(agent));
+    icon.set_pixel_size(14);
+    icon.set_valign(gtk::Align::Center);
+    icon
+}

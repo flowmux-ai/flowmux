@@ -41,7 +41,8 @@ pub struct ClaudeHookInput {
         alias = "thread_id",
         alias = "sessionID",
         alias = "sessionId",
-        alias = "taskId"
+        alias = "taskId",
+        alias = "conversationId"
     )]
     pub session_id: Option<String>,
     #[serde(default, alias = "turn-id")]
@@ -49,7 +50,7 @@ pub struct ClaudeHookInput {
     /// Claude `SessionEnd` reason. Intentional exits such as Ctrl+C at the
     /// prompt use `prompt_input_exit`; the non-specific `other` reason remains
     /// resumable so an ambiguous teardown cannot discard recovery state.
-    #[serde(default)]
+    #[serde(default, alias = "terminationReason")]
     pub reason: Option<String>,
     /// Set when `Notification` fires for permission/info popups.
     #[serde(default)]
@@ -65,8 +66,18 @@ pub struct ClaudeHookInput {
     /// (Claude). Legacy Codex `notify` payloads called the same thing
     /// `last-assistant-message`; Gemini's `AfterAgent` calls it
     /// `prompt_response`. We accept all three spellings.
-    #[serde(default, alias = "last-assistant-message", alias = "prompt_response")]
+    #[serde(
+        default,
+        alias = "last-assistant-message",
+        alias = "prompt_response",
+        alias = "finalModelOutput"
+    )]
     pub last_assistant_message: Option<String>,
+    /// Antigravity `Stop` distinguishes a fully quiescent loop from one that
+    /// still owns background work. Missing preserves the behavior of agents
+    /// that do not report this field.
+    #[serde(default, alias = "fullyIdle")]
+    pub fully_idle: Option<bool>,
     /// Claude `PreToolUse` tool identifier. The hook deliberately does not
     /// deserialize `tool_input`, which may contain prompts, paths, or commands.
     #[serde(default)]
@@ -1130,6 +1141,33 @@ mod tests {
             let parsed: ClaudeHookInput = serde_json::from_str(raw).unwrap();
             assert!(parsed.session_id.is_some(), "payload was {raw}");
         }
+    }
+
+    #[test]
+    fn antigravity_camel_case_fields_are_accepted() {
+        let parsed: ClaudeHookInput = serde_json::from_str(
+            r#"{
+                "conversationId":"conversation-1",
+                "terminationReason":"model_stop",
+                "finalModelOutput":"finished the task",
+                "fullyIdle":false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(parsed.session_id.as_deref(), Some("conversation-1"));
+        assert_eq!(parsed.reason.as_deref(), Some("model_stop"));
+        assert_eq!(
+            parsed.last_assistant_message.as_deref(),
+            Some("finished the task")
+        );
+        assert_eq!(parsed.fully_idle, Some(false));
+        assert_eq!(
+            serde_json::from_str::<ClaudeHookInput>(r#"{"conversationId":"conversation-2"}"#)
+                .unwrap()
+                .fully_idle,
+            None
+        );
     }
 
     #[test]

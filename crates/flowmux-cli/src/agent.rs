@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `flowmux agent install / doctor / uninstall` — make the
 //! flowmux-browser SKILL discoverable to Claude Code, OpenCode,
-//! Codex CLI, and Cline installed locally for the current user.
+//! Codex CLI, Antigravity, and Cline installed locally for the current user.
 //!
 //! Strategy: every supported agent has a documented user-level skills
 //! directory under `$HOME` (`~/.claude/skills/`, `~/.config/opencode/skills/`,
-//! `~/.agents/skills/`, `~/.cline/skills/`). We mirror our embedded `SKILL.md` into each
-//! one idempotently so the same SKILL.md auto-loads as a real skill in
+//! `~/.agents/skills/`, `~/.gemini/config/skills/`, `~/.cline/skills/`). We mirror
+//! our embedded `SKILL.md` into each one idempotently so it auto-loads as a real skill in
 //! every agent. `doctor` walks the same paths and reports presence /
 //! content drift so the user can verify a fresh install or update
 //! without leaving the terminal.
@@ -41,6 +41,9 @@ pub enum Target {
     /// — so the user does not have to import anything by hand. See
     /// <https://learn.chatgpt.com/docs/build-skills>.
     Codex,
+    /// `~/.gemini/config/skills/flowmux-browser/SKILL.md`. Antigravity CLI
+    /// discovers machine-local skills from the shared Gemini config root.
+    Antigravity,
     /// `~/.cline/skills/flowmux-browser/SKILL.md`. Cline discovers
     /// user-level skills from `~/.cline/skills/`.
     Cline,
@@ -51,6 +54,7 @@ impl Target {
         Target::ClaudeCode,
         Target::OpenCode,
         Target::Codex,
+        Target::Antigravity,
         Target::Cline,
     ];
 
@@ -59,6 +63,7 @@ impl Target {
             Target::ClaudeCode => "claude-code",
             Target::OpenCode => "opencode",
             Target::Codex => "codex",
+            Target::Antigravity => "antigravity",
             Target::Cline => "cline",
         }
     }
@@ -91,6 +96,12 @@ impl Target {
                 .join("SKILL.md"),
             Target::Codex => home
                 .join(".agents")
+                .join("skills")
+                .join("flowmux-browser")
+                .join("SKILL.md"),
+            Target::Antigravity => home
+                .join(".gemini")
+                .join("config")
                 .join("skills")
                 .join("flowmux-browser")
                 .join("SKILL.md"),
@@ -187,6 +198,10 @@ pub fn resolved_home() -> Result<PathBuf> {
 
 pub fn resolved_codex_home() -> Option<PathBuf> {
     std::env::var_os("CODEX_HOME").map(PathBuf::from)
+}
+
+pub(crate) fn antigravity_is_installed(home: &Path) -> bool {
+    home.join(".gemini/antigravity-cli").is_dir() || home.join(".local/bin/agy").is_file()
 }
 
 /// Existing legacy skill copies that Codex may discover in addition to the
@@ -335,11 +350,13 @@ mod tests {
         let claude = Target::ClaudeCode.resolved_install_path(home.path(), None);
         let opencode = Target::OpenCode.resolved_install_path(home.path(), None);
         let codex = Target::Codex.resolved_install_path(home.path(), None);
+        let antigravity = Target::Antigravity.resolved_install_path(home.path(), None);
         let cline = Target::Cline.resolved_install_path(home.path(), None);
 
         assert!(claude.ends_with(".claude/skills/flowmux-browser/SKILL.md"));
         assert!(opencode.ends_with(".config/opencode/skills/flowmux-browser/SKILL.md"));
         assert!(codex.ends_with(".agents/skills/flowmux-browser/SKILL.md"));
+        assert!(antigravity.ends_with(".gemini/config/skills/flowmux-browser/SKILL.md"));
         assert!(cline.ends_with(".cline/skills/flowmux-browser/SKILL.md"));
     }
 
@@ -416,6 +433,7 @@ mod tests {
         assert_eq!(by_target[&Target::ClaudeCode], &DoctorStatus::Ok);
         assert_eq!(by_target[&Target::OpenCode], &DoctorStatus::Missing);
         assert_eq!(by_target[&Target::Codex], &DoctorStatus::Missing);
+        assert_eq!(by_target[&Target::Antigravity], &DoctorStatus::Missing);
         assert_eq!(by_target[&Target::Cline], &DoctorStatus::Missing);
     }
 

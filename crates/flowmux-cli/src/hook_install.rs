@@ -14,6 +14,7 @@
 //! - **Codex CLI**   — native lifecycle hooks in `~/.codex/hooks.json`.
 //! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.mjs`.
 //! - **Gemini CLI**  — `~/.gemini/settings.json` lifecycle hooks.
+//! - **Antigravity** — owned plugin in `~/.gemini/config/plugins/flowmux/`.
 //! - **Cline**       — skill only; obsolete file hooks are removed on repair.
 
 use anyhow::{anyhow, Context, Result};
@@ -42,6 +43,7 @@ pub enum HookTarget {
     Codex,
     OpenCode,
     Gemini,
+    Antigravity,
     Cline,
 }
 
@@ -51,6 +53,7 @@ impl HookTarget {
         HookTarget::Codex,
         HookTarget::OpenCode,
         HookTarget::Gemini,
+        HookTarget::Antigravity,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -59,6 +62,7 @@ impl HookTarget {
             HookTarget::Codex => "codex",
             HookTarget::OpenCode => "opencode",
             HookTarget::Gemini => "gemini",
+            HookTarget::Antigravity => "antigravity",
             HookTarget::Cline => "cline",
         }
     }
@@ -127,6 +131,7 @@ pub fn check(target: HookTarget) -> HookCheckEntry {
         HookTarget::Codex => check_codex(),
         HookTarget::OpenCode => check_opencode(),
         HookTarget::Gemini => check_gemini(),
+        HookTarget::Antigravity => check_antigravity(),
         HookTarget::Cline => check_cline(),
     }
 }
@@ -323,7 +328,7 @@ fn check_gemini() -> HookCheckEntry {
         Some(path) => path,
         None => return entry(HookTarget::Gemini, HookCheckStatus::NoAgentHome, vec![]),
     };
-    if !path.parent().is_some_and(|parent| parent.exists()) {
+    if !gemini_is_installed(&path, agent_has_real_binary("gemini")) {
         return entry(HookTarget::Gemini, HookCheckStatus::NoAgentHome, vec![path]);
     }
     if !path.exists() {
@@ -361,6 +366,93 @@ fn check_gemini() -> HookCheckEntry {
     entry(HookTarget::Gemini, status, vec![path])
 }
 
+fn check_antigravity() -> HookCheckEntry {
+    let plugin_dir = match antigravity_plugin_dir() {
+        Some(path) => path,
+        None => {
+            return entry(
+                HookTarget::Antigravity,
+                HookCheckStatus::NoAgentHome,
+                vec![],
+            )
+        }
+    };
+    if !antigravity_home_exists(&plugin_dir) {
+        return entry(
+            HookTarget::Antigravity,
+            HookCheckStatus::NoAgentHome,
+            antigravity_plugin_paths(&plugin_dir).to_vec(),
+        );
+    }
+    check_antigravity_in(&plugin_dir)
+}
+
+fn check_antigravity_in(plugin_dir: &Path) -> HookCheckEntry {
+    let [manifest_path, hooks_path] = antigravity_plugin_paths(plugin_dir);
+    let paths = vec![manifest_path.clone(), hooks_path.clone()];
+    let disabled = match antigravity_plugin_disabled(plugin_dir) {
+        Ok(disabled) => disabled,
+        Err(error) => {
+            return entry(
+                HookTarget::Antigravity,
+                HookCheckStatus::Error(error.to_string()),
+                paths,
+            )
+        }
+    };
+    if disabled {
+        return entry(
+            HookTarget::Antigravity,
+            HookCheckStatus::Error("Antigravity flowmux plugin is explicitly disabled".into()),
+            paths,
+        );
+    }
+    if !manifest_path.exists() && !hooks_path.exists() {
+        return entry(HookTarget::Antigravity, HookCheckStatus::Missing, paths);
+    }
+    let manifest = match read_json_or_empty_object(&manifest_path) {
+        Ok(value) => value,
+        Err(error) => {
+            return entry(
+                HookTarget::Antigravity,
+                HookCheckStatus::Error(error.to_string()),
+                paths,
+            )
+        }
+    };
+    let hooks = match read_json_or_empty_object(&hooks_path) {
+        Ok(value) => value,
+        Err(error) => {
+            return entry(
+                HookTarget::Antigravity,
+                HookCheckStatus::Error(error.to_string()),
+                paths,
+            )
+        }
+    };
+    let hook_group = hooks
+        .as_object()
+        .and_then(|root| root.get(ANTIGRAVITY_HOOK_GROUP));
+    if !hook_group.is_some_and(antigravity_group_is_owned) {
+        return entry(
+            HookTarget::Antigravity,
+            HookCheckStatus::Error(format!(
+                "{} exists and is not managed by flowmux",
+                plugin_dir.display()
+            )),
+            paths,
+        );
+    }
+    let installed = manifest == antigravity_plugin_manifest()
+        && hook_group.is_some_and(antigravity_group_matches);
+    let status = if installed {
+        HookCheckStatus::Installed
+    } else {
+        HookCheckStatus::Drift
+    };
+    entry(HookTarget::Antigravity, status, paths)
+}
+
 fn entry(target: HookTarget, status: HookCheckStatus, paths: Vec<PathBuf>) -> HookCheckEntry {
     HookCheckEntry {
         target,
@@ -378,6 +470,7 @@ pub fn install(target: HookTarget, flowmux_bin: &str) -> Result<HookInstallRepor
         HookTarget::Codex => install_codex(flowmux_bin),
         HookTarget::OpenCode => install_opencode(flowmux_bin),
         HookTarget::Gemini => install_gemini(flowmux_bin),
+        HookTarget::Antigravity => install_antigravity(flowmux_bin),
         HookTarget::Cline => uninstall_cline(),
     }
 }
@@ -390,6 +483,7 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
         HookTarget::Codex => uninstall_codex(),
         HookTarget::OpenCode => uninstall_opencode(),
         HookTarget::Gemini => uninstall_gemini(),
+        HookTarget::Antigravity => uninstall_antigravity(),
         HookTarget::Cline => uninstall_cline(),
     }
 }
@@ -403,11 +497,12 @@ pub fn uninstall(target: HookTarget) -> Result<HookInstallReport> {
 /// otherwise fully transparent. Lifecycle presence comes from each agent's
 /// native hook (or the process-tree fallback), so the shim never emits a
 /// competing synthetic SessionStart.
-pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini", "cline"];
+pub(crate) const SHIM_AGENTS: &[&str] = &["claude", "codex", "opencode", "gemini", "cline", "agy"];
 
 /// Body of a wrapper shim for `agent`. Skips flowmux-managed shims when
 /// resolving the real binary so it never re-execs itself or another copy.
 pub(crate) fn shim_script(agent: &str) -> String {
+    let canonical_agent = if agent == "agy" { "antigravity" } else { agent };
     let claude_session_name = if agent == "claude" {
         r#"
 if [ -n "${FLOWMUX_SURFACE_ID:-}" ]; then
@@ -461,7 +556,7 @@ fi
 # Native hooks report lifecycle state; process scanning is the fallback.
 if [ -n "${{FLOWMUX_SURFACE_ID:-}}" ]; then
   export FLOWMUX_AGENT_PID=$$
-  export FLOWMUX_AGENT_NAME={agent}
+  export FLOWMUX_AGENT_NAME={canonical_agent}
 fi
 self_dir=$(cd "$(dirname "$0")" && pwd)
 is_flowmux_shim() {{
@@ -2460,6 +2555,10 @@ fn gemini_settings_path() -> Option<PathBuf> {
     host_home_dir().map(|home| home.join(".gemini").join("settings.json"))
 }
 
+fn gemini_is_installed(settings_path: &Path, binary_present: bool) -> bool {
+    settings_path.exists() || binary_present
+}
+
 fn gemini_hook_entry(flowmux_bin: &str, event: GeminiEvent) -> Value {
     let command = format!(
         "{} hooks gemini {} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}}  # {}",
@@ -2550,7 +2649,7 @@ fn prune_gemini_entries(entries: &mut Vec<Value>) {
 
 fn install_gemini(flowmux_bin: &str) -> Result<HookInstallReport> {
     let path = match gemini_settings_path() {
-        Some(path) if path.parent().is_some_and(|parent| parent.exists()) => path,
+        Some(path) if gemini_is_installed(&path, agent_has_real_binary("gemini")) => path,
         _ => return Ok(skipped(HookTarget::Gemini)),
     };
     let mut root = read_json_or_empty_object(&path)?;
@@ -2575,6 +2674,251 @@ fn uninstall_gemini() -> Result<HookInstallReport> {
         target: HookTarget::Gemini,
         status: HookInstallStatus::Installed,
         touched_paths: changed.then_some(path).into_iter().collect(),
+    })
+}
+
+// ---- Antigravity ---------------------------------------------------
+
+const ANTIGRAVITY_HOOK_GROUP: &str = "flowmux";
+const ANTIGRAVITY_HOOK_TIMEOUT_SECS: u64 = 10;
+
+fn antigravity_plugin_dir() -> Option<PathBuf> {
+    host_home_dir().map(|home| home.join(".gemini/config/plugins/flowmux"))
+}
+
+fn antigravity_home_exists(plugin_dir: &Path) -> bool {
+    plugin_dir
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .is_some_and(crate::agent::antigravity_is_installed)
+}
+
+fn antigravity_plugin_paths(plugin_dir: &Path) -> [PathBuf; 2] {
+    [
+        plugin_dir.join("plugin.json"),
+        plugin_dir.join("hooks.json"),
+    ]
+}
+
+fn antigravity_plugin_disabled(plugin_dir: &Path) -> Result<bool> {
+    let Some(config_path) = plugin_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(|config_root| config_root.join("config.json"))
+    else {
+        return Ok(false);
+    };
+    if !config_path.exists() {
+        return Ok(false);
+    }
+    let config = read_json_or_empty_object(&config_path)?;
+    Ok(config
+        .get("plugins")
+        .and_then(Value::as_object)
+        .and_then(|plugins| plugins.get("flowmux"))
+        .and_then(Value::as_object)
+        .and_then(|plugin| plugin.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(false))
+}
+
+fn antigravity_plugin_manifest() -> Value {
+    json!({ "name": "flowmux" })
+}
+
+fn antigravity_command(flowmux_bin: &str, subcommand: &str) -> String {
+    let response = if subcommand == "stop" {
+        r#"{"decision":""}"#
+    } else {
+        "{}"
+    };
+    format!(
+        "{} hooks antigravity {subcommand} ${{FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}} ${{FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}} >/dev/null 2>&1; printf '%s' {}  # {}",
+        host_invocation_shell_command(flowmux_bin),
+        shell_quote(response),
+        FLOWMUX_HOOK_MARKER,
+    )
+}
+
+fn antigravity_command_entry(flowmux_bin: &str, subcommand: &str) -> Value {
+    json!({
+        "type": "command",
+        "command": antigravity_command(flowmux_bin, subcommand),
+        "timeout": ANTIGRAVITY_HOOK_TIMEOUT_SECS,
+    })
+}
+
+fn antigravity_hook_group(flowmux_bin: &str) -> Value {
+    json!({
+        "PreInvocation": [antigravity_command_entry(flowmux_bin, "running")],
+        "PostToolUse": [{
+            "matcher": "*",
+            "hooks": [antigravity_command_entry(flowmux_bin, "running")],
+        }],
+        "Stop": [antigravity_command_entry(flowmux_bin, "stop")],
+    })
+}
+
+fn antigravity_command_matches(value: &Value, subcommand: &str) -> bool {
+    let response = if subcommand == "stop" {
+        r#"{"decision":""}"#
+    } else {
+        "{}"
+    };
+    value.get("type").and_then(Value::as_str) == Some("command")
+        && value.get("timeout").and_then(Value::as_u64) == Some(ANTIGRAVITY_HOOK_TIMEOUT_SECS)
+        && value
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| {
+                command.contains(FLOWMUX_HOOK_MARKER)
+                    && command.contains(&format!("hooks antigravity {subcommand}"))
+                    && command.contains(&format!(
+                        ">/dev/null 2>&1; printf '%s' {}",
+                        shell_quote(response)
+                    ))
+                    && command.contains("${FLOWMUX_PANE_ID:+--pane=$FLOWMUX_PANE_ID}")
+                    && command.contains("${FLOWMUX_SURFACE_ID:+--surface=$FLOWMUX_SURFACE_ID}")
+            })
+}
+
+fn antigravity_group_matches(group: &Value) -> bool {
+    let Some(group) = group.as_object().filter(|group| group.len() == 3) else {
+        return false;
+    };
+    let flat_event_matches = |name: &str, subcommand: &str| {
+        group
+            .get(name)
+            .and_then(Value::as_array)
+            .filter(|entries| entries.len() == 1)
+            .is_some_and(|entries| antigravity_command_matches(&entries[0], subcommand))
+    };
+    let post_tool_use_matches = group
+        .get("PostToolUse")
+        .and_then(Value::as_array)
+        .filter(|entries| entries.len() == 1)
+        .and_then(|entries| entries[0].as_object())
+        .is_some_and(|entry| {
+            entry.len() == 2
+                && entry.get("matcher").and_then(Value::as_str) == Some("*")
+                && entry
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .filter(|hooks| hooks.len() == 1)
+                    .is_some_and(|hooks| antigravity_command_matches(&hooks[0], "running"))
+        });
+    flat_event_matches("PreInvocation", "running")
+        && post_tool_use_matches
+        && flat_event_matches("Stop", "stop")
+}
+
+fn antigravity_group_is_owned(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().any(antigravity_group_is_owned),
+        Value::Object(object) => {
+            object
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| {
+                    command.contains(FLOWMUX_HOOK_MARKER) && command.contains("hooks antigravity")
+                })
+                || object.values().any(antigravity_group_is_owned)
+        }
+        _ => false,
+    }
+}
+
+fn install_antigravity(flowmux_bin: &str) -> Result<HookInstallReport> {
+    let plugin_dir = match antigravity_plugin_dir() {
+        Some(path) if antigravity_home_exists(&path) => path,
+        _ => return Ok(skipped(HookTarget::Antigravity)),
+    };
+    install_antigravity_in(&plugin_dir, flowmux_bin)
+}
+
+fn install_antigravity_in(plugin_dir: &Path, flowmux_bin: &str) -> Result<HookInstallReport> {
+    if antigravity_plugin_disabled(plugin_dir)? {
+        return Err(anyhow!(
+            "Antigravity flowmux plugin is explicitly disabled in config.json"
+        ));
+    }
+    let [manifest_path, hooks_path] = antigravity_plugin_paths(plugin_dir);
+    let manifest_exists = manifest_path.exists();
+    let hooks_exists = hooks_path.exists();
+    let manifest = read_json_or_empty_object(&manifest_path)?;
+    let hooks = read_json_or_empty_object(&hooks_path)?;
+    if !manifest.is_object() || !hooks.is_object() {
+        return Err(anyhow!(
+            "Antigravity flowmux plugin files must be JSON objects"
+        ));
+    }
+    let hooks_owned = hooks
+        .get(ANTIGRAVITY_HOOK_GROUP)
+        .is_some_and(antigravity_group_is_owned);
+    if (manifest_exists || hooks_exists) && !hooks_owned {
+        return Err(anyhow!(
+            "{} exists and is not managed by flowmux",
+            plugin_dir.display()
+        ));
+    }
+
+    let hooks = json!({
+        (ANTIGRAVITY_HOOK_GROUP): antigravity_hook_group(flowmux_bin),
+    });
+    let hooks_changed = write_json(&hooks_path, &hooks)?;
+    let manifest_changed = write_json(&manifest_path, &antigravity_plugin_manifest())?;
+    let touched_paths = [
+        (manifest_changed, manifest_path),
+        (hooks_changed, hooks_path),
+    ]
+    .into_iter()
+    .filter_map(|(changed, path)| changed.then_some(path))
+    .collect();
+    Ok(HookInstallReport {
+        target: HookTarget::Antigravity,
+        status: HookInstallStatus::Installed,
+        touched_paths,
+    })
+}
+
+fn uninstall_antigravity() -> Result<HookInstallReport> {
+    let plugin_dir = match antigravity_plugin_dir() {
+        Some(path) if path.exists() || antigravity_home_exists(&path) => path,
+        _ => return Ok(skipped(HookTarget::Antigravity)),
+    };
+    uninstall_antigravity_in(&plugin_dir)
+}
+
+fn uninstall_antigravity_in(plugin_dir: &Path) -> Result<HookInstallReport> {
+    let [manifest_path, hooks_path] = antigravity_plugin_paths(plugin_dir);
+    let manifest_matches = manifest_path.exists()
+        && read_json_or_empty_object(&manifest_path)? == antigravity_plugin_manifest();
+    let hooks_owned = hooks_path.exists()
+        && read_json_or_empty_object(&hooks_path)?
+            .get(ANTIGRAVITY_HOOK_GROUP)
+            .is_some_and(antigravity_group_is_owned);
+    let mut touched_paths = Vec::new();
+    if hooks_owned {
+        fs::remove_file(&hooks_path).with_context(|| format!("remove {}", hooks_path.display()))?;
+        touched_paths.push(hooks_path.clone());
+    }
+    if hooks_owned && manifest_matches {
+        fs::remove_file(&manifest_path)
+            .with_context(|| format!("remove {}", manifest_path.display()))?;
+        touched_paths.push(manifest_path);
+    }
+    if fs::symlink_metadata(plugin_dir).is_ok_and(|metadata| metadata.file_type().is_dir())
+        && fs::read_dir(plugin_dir)?.next().is_none()
+    {
+        fs::remove_dir(plugin_dir)
+            .with_context(|| format!("remove empty directory {}", plugin_dir.display()))?;
+    }
+    Ok(HookInstallReport {
+        target: HookTarget::Antigravity,
+        status: HookInstallStatus::Installed,
+        touched_paths,
     })
 }
 
@@ -2813,6 +3157,14 @@ mod tests {
         assert!(body.contains("exec \"$real\" \"$@\""));
         // Agent name is substituted into the lookup.
         assert!(body.contains("$d/claude"));
+    }
+
+    #[test]
+    fn agy_shim_exports_canonical_antigravity_identity() {
+        assert!(SHIM_AGENTS.contains(&"agy"));
+        let body = shim_script("agy");
+        assert!(body.contains("export FLOWMUX_AGENT_NAME=antigravity"));
+        assert!(body.contains("candidate=\"$d/agy\""));
     }
 
     #[test]
@@ -4061,6 +4413,233 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         {
             assert_eq!(root["hooks"][event.name], json!([]));
         }
+    }
+
+    #[test]
+    fn antigravity_hooks_follow_native_schema_and_emit_json() {
+        let group = antigravity_hook_group("flowmux");
+
+        assert_eq!(antigravity_plugin_manifest(), json!({ "name": "flowmux" }));
+        assert!(antigravity_group_matches(&group));
+        for (event, subcommand) in [("PreInvocation", "running"), ("Stop", "stop")] {
+            let hook = &group[event][0];
+            assert!(antigravity_command_matches(hook, subcommand));
+            assert_eq!(hook["timeout"], ANTIGRAVITY_HOOK_TIMEOUT_SECS);
+        }
+        let post_tool_use = &group["PostToolUse"][0];
+        assert_eq!(post_tool_use["matcher"], "*");
+        assert!(antigravity_command_matches(
+            &post_tool_use["hooks"][0],
+            "running"
+        ));
+        let pre_invocation = group["PreInvocation"][0]["command"].as_str().unwrap();
+        let post_tool_use = post_tool_use["hooks"][0]["command"].as_str().unwrap();
+        let stop = group["Stop"][0]["command"].as_str().unwrap();
+        assert!(pre_invocation.contains("printf '%s' '{}'"));
+        assert!(post_tool_use.contains("printf '%s' '{}'"));
+        assert!(stop.contains(r#"printf '%s' '{"decision":""}'"#));
+    }
+
+    #[test]
+    fn antigravity_home_accepts_cli_state_root_or_binary() {
+        let dir = tmp();
+        let plugin_dir = dir.path().join(".gemini/config/plugins/flowmux");
+        fs::create_dir_all(plugin_dir.parent().unwrap()).unwrap();
+        assert!(!antigravity_home_exists(&plugin_dir));
+
+        fs::create_dir_all(dir.path().join(".gemini/antigravity-cli")).unwrap();
+        assert!(antigravity_home_exists(&plugin_dir));
+
+        let binary_dir = tmp();
+        let plugin_dir = binary_dir.path().join(".gemini/config/plugins/flowmux");
+        let binary = binary_dir.path().join(".local/bin/agy");
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(binary, "").unwrap();
+        assert!(antigravity_home_exists(&plugin_dir));
+    }
+
+    #[test]
+    fn gemini_presence_ignores_antigravity_shared_directory() {
+        let dir = tmp();
+        let settings = dir.path().join(".gemini/settings.json");
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+
+        assert!(!gemini_is_installed(&settings, false));
+        assert!(gemini_is_installed(&settings, true));
+        fs::write(&settings, "{}").unwrap();
+        assert!(gemini_is_installed(&settings, false));
+    }
+
+    #[test]
+    fn antigravity_plugin_install_and_uninstall_leave_neighboring_config_untouched() {
+        let dir = tmp();
+        let gemini_home = dir.path().join(".gemini");
+        let plugin_dir = gemini_home.join("config/plugins/flowmux");
+        let neighbor = gemini_home.join("config/plugins/orca-status/plugin.json");
+        let user_hooks = gemini_home.join("config/hooks.json");
+        write_json(&neighbor, &json!({ "name": "orca-status" })).unwrap();
+        write_json(
+            &user_hooks,
+            &json!({ "orca-status": { "PreInvocation": [] } }),
+        )
+        .unwrap();
+        let neighbor_before = fs::read(&neighbor).unwrap();
+        let user_hooks_before = fs::read(&user_hooks).unwrap();
+        let [manifest_path, hooks_path] = antigravity_plugin_paths(&plugin_dir);
+
+        assert_eq!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Missing
+        );
+        let first = install_antigravity_in(&plugin_dir, "flowmux").unwrap();
+        assert_eq!(
+            first.touched_paths,
+            vec![manifest_path.clone(), hooks_path.clone()]
+        );
+        assert_eq!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Installed
+        );
+        let second = install_antigravity_in(&plugin_dir, "flowmux").unwrap();
+        assert!(second.touched_paths.is_empty());
+
+        assert_eq!(
+            read_json_or_empty_object(&manifest_path).unwrap(),
+            antigravity_plugin_manifest()
+        );
+        let installed = read_json_or_empty_object(&hooks_path).unwrap();
+        assert!(antigravity_group_matches(
+            &installed[ANTIGRAVITY_HOOK_GROUP]
+        ));
+        assert_eq!(fs::read(&neighbor).unwrap(), neighbor_before);
+        assert_eq!(fs::read(&user_hooks).unwrap(), user_hooks_before);
+
+        fs::write(plugin_dir.join("README.user"), "keep").unwrap();
+        let report = uninstall_antigravity_in(&plugin_dir).unwrap();
+        assert_eq!(report.touched_paths, vec![hooks_path, manifest_path]);
+        assert!(plugin_dir.join("README.user").exists());
+        assert_eq!(fs::read(&neighbor).unwrap(), neighbor_before);
+        assert_eq!(fs::read(&user_hooks).unwrap(), user_hooks_before);
+        assert!(uninstall_antigravity_in(&plugin_dir)
+            .unwrap()
+            .touched_paths
+            .is_empty());
+        fs::remove_file(plugin_dir.join("README.user")).unwrap();
+        uninstall_antigravity_in(&plugin_dir).unwrap();
+        assert!(!plugin_dir.exists());
+    }
+
+    #[test]
+    fn antigravity_plugin_does_not_overwrite_or_remove_unowned_files() {
+        let dir = tmp();
+        let plugin_dir = dir.path().join("flowmux");
+        let [manifest_path, hooks_path] = antigravity_plugin_paths(&plugin_dir);
+        // A matching name alone is not an ownership marker. Never replace a
+        // same-name plugin unless its hooks contain flowmux's command marker.
+        write_json(&manifest_path, &antigravity_plugin_manifest()).unwrap();
+        write_json(&hooks_path, &json!({ "user-hook": {} })).unwrap();
+        let manifest_before = fs::read(&manifest_path).unwrap();
+        let hooks_before = fs::read(&hooks_path).unwrap();
+
+        assert!(install_antigravity_in(&plugin_dir, "flowmux").is_err());
+        assert!(uninstall_antigravity_in(&plugin_dir)
+            .unwrap()
+            .touched_paths
+            .is_empty());
+        assert_eq!(fs::read(&manifest_path).unwrap(), manifest_before);
+        assert_eq!(fs::read(&hooks_path).unwrap(), hooks_before);
+
+        let manifest_only_dir = dir.path().join("manifest-only");
+        let [manifest_path, _] = antigravity_plugin_paths(&manifest_only_dir);
+        write_json(&manifest_path, &antigravity_plugin_manifest()).unwrap();
+        assert!(matches!(
+            check_antigravity_in(&manifest_only_dir).status,
+            HookCheckStatus::Error(_)
+        ));
+        assert!(install_antigravity_in(&manifest_only_dir, "flowmux").is_err());
+        assert!(uninstall_antigravity_in(&manifest_only_dir)
+            .unwrap()
+            .touched_paths
+            .is_empty());
+        assert!(manifest_path.exists());
+    }
+
+    #[test]
+    fn antigravity_plugin_respects_an_explicit_disable() {
+        let dir = tmp();
+        let plugin_dir = dir.path().join(".gemini/config/plugins/flowmux");
+        let config = dir.path().join(".gemini/config/config.json");
+        write_json(
+            &config,
+            &json!({ "plugins": { "flowmux": { "enabled": false } } }),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Error(message) if message.contains("explicitly disabled")
+        ));
+        assert!(install_antigravity_in(&plugin_dir, "flowmux").is_err());
+
+        write_json(
+            &config,
+            &json!({ "plugins": { "flowmux": { "enabled": true } } }),
+        )
+        .unwrap();
+        install_antigravity_in(&plugin_dir, "flowmux").unwrap();
+        write_json(
+            &config,
+            &json!({ "plugins": { "flowmux": { "enabled": false } } }),
+        )
+        .unwrap();
+        assert!(matches!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Error(message) if message.contains("explicitly disabled")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_uninstall_preserves_plugin_directory_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmp();
+        let target = dir.path().join("plugin-target");
+        let plugin_dir = dir.path().join("flowmux");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, &plugin_dir).unwrap();
+        install_antigravity_in(&plugin_dir, "flowmux").unwrap();
+
+        uninstall_antigravity_in(&plugin_dir).unwrap();
+
+        assert!(plugin_dir.is_symlink());
+        assert!(fs::read_dir(target).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn antigravity_check_reports_drift_for_stale_owned_group() {
+        let dir = tmp();
+        let plugin_dir = dir.path().join("flowmux");
+        let [manifest_path, hooks_path] = antigravity_plugin_paths(&plugin_dir);
+        write_json(&manifest_path, &antigravity_plugin_manifest()).unwrap();
+        write_json(
+            &hooks_path,
+            &json!({
+                (ANTIGRAVITY_HOOK_GROUP): {
+                    "Stop": [{
+                        "type": "command",
+                        "command": format!("flowmux hooks antigravity stop # {FLOWMUX_HOOK_MARKER}"),
+                        "timeout": 10,
+                    }]
+                }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            check_antigravity_in(&plugin_dir).status,
+            HookCheckStatus::Drift
+        );
     }
 
     #[test]

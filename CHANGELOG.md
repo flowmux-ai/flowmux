@@ -7,6 +7,11 @@ change the crate version by itself.
 
 ## [Unreleased]
 
+### Added
+
+- Added Antigravity CLI process detection, lifecycle hooks, session restore,
+  browser skill installation, and a native-color agent icon.
+
 ## [0.9.0] - 2026-08-10
 
 ### Added

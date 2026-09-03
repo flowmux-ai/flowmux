@@ -193,7 +193,7 @@ agent code:
   (network mocking, viewport, screencast) are intentionally `not_supported`; do
   not stub them as no-ops. `wait` (DOM polling) and `screenshot` (native
   snapshot) do not need CDP and are supported.
-- Agent hooks (Claude Code, Codex, OpenCode, Gemini CLI) are installed by
+- Agent hooks (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity CLI) are installed by
   `flowmux fix` and audited by `flowmux doctor`. Hook payloads ship
   *inside* the binary, so any change to the on-disk hook format must
   be paired with a `doctor`/`fix` revision.

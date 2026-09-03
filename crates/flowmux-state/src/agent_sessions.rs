@@ -31,7 +31,7 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const RESUMABLE_AGENTS: [&str; 3] = ["claude", "codex", "opencode"];
+const RESUMABLE_AGENTS: [&str; 4] = ["claude", "codex", "opencode", "antigravity"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedAgentSession {
@@ -47,6 +47,11 @@ impl SavedAgentSession {
             "opencode" => vec![
                 "opencode".into(),
                 "--session".into(),
+                self.session_id.clone(),
+            ],
+            "antigravity" => vec![
+                "agy".into(),
+                "--conversation".into(),
                 self.session_id.clone(),
             ],
             _ => Vec::new(),
@@ -71,6 +76,7 @@ impl SavedAgentSession {
                 "if command -v flowmuxctl >/dev/null 2>&1; then flowmuxctl hooks {agent} stop '{{\"reason\":\"flowmux_resume_returned\"}}' >/dev/null 2>&1; fi; ",
                 agent = self.agent,
             ),
+            "antigravity" => "if command -v flowmuxctl >/dev/null 2>&1; then printf '%s' '{\"reason\":\"flowmux_resume_returned\"}' | flowmuxctl hooks antigravity stop >/dev/null 2>&1; fi; ".to_string(),
             _ => String::new(),
         };
         Some(format!(
@@ -293,6 +299,19 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_session_round_trips_with_canonical_name() {
+        let (s, _td) = store();
+        let surface = SurfaceId::new();
+        s.record("Antigravity", surface, "conversation-1").unwrap();
+        let saved = s.lookup_surface(surface).unwrap();
+        assert_eq!(saved.agent, "antigravity");
+        assert_eq!(
+            saved.resume_argv(),
+            ["agy", "--conversation", "conversation-1"]
+        );
+    }
+
+    #[test]
     fn record_overwrites_existing_session_id() {
         let (s, _td) = store();
         let surface = SurfaceId::new();
@@ -415,6 +434,7 @@ mod tests {
             ("claude", vec!["claude", "--resume", "session-1"]),
             ("codex", vec!["codex", "resume", "session-1"]),
             ("opencode", vec!["opencode", "--session", "session-1"]),
+            ("antigravity", vec!["agy", "--conversation", "session-1"]),
         ];
         for (agent, expected) in cases {
             let saved = SavedAgentSession {
@@ -541,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_and_opencode_resume_return_emit_silent_cleanup_hooks() {
+    fn resumable_agents_emit_silent_cleanup_hooks() {
         for (agent, expected) in [
             (
                 "codex",
@@ -550,6 +570,10 @@ mod tests {
             (
                 "opencode",
                 "flowmuxctl hooks opencode stop '{\"reason\":\"flowmux_resume_returned\"}'",
+            ),
+            (
+                "antigravity",
+                "printf '%s' '{\"reason\":\"flowmux_resume_returned\"}' | flowmuxctl hooks antigravity stop",
             ),
         ] {
             let saved = SavedAgentSession {
