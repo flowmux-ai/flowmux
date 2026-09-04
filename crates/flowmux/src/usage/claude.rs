@@ -8,6 +8,7 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDate, Offset, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -25,8 +26,9 @@ pub(crate) async fn collect(home: PathBuf, client: reqwest::Client) -> ProviderR
     let local_now = Local::now();
     let day = local_now.date_naive();
     let offset = local_now.offset().fix();
-    let transcript_root = home.join(".claude").join("projects");
-    let credentials_path = home.join(".claude").join(".credentials.json");
+    let config_root = claude_config_root(&home, std::env::var_os("CLAUDE_CONFIG_DIR").as_deref());
+    let transcript_root = config_root.join("projects");
+    let credentials_path = config_root.join(".credentials.json");
 
     let tokens_task = tokio::task::spawn_blocking(move || {
         sum_transcript_tree(&transcript_root, day, offset).map(|today| TokenTotals {
@@ -79,12 +81,18 @@ async fn fetch_limits(
             .header("accept", "application/json")
             .send()
             .await
-            .map_err(|_| UsageError::network())?;
+            .map_err(claude_request_error)?;
         if matches!(response.status().as_u16(), 401 | 403) {
             return Err(UsageError::unauthorized());
         }
         if !response.status().is_success() {
-            return Err(UsageError::network());
+            return Err(UsageError::new(
+                UsageErrorKind::Network,
+                format!(
+                    "The Claude usage service returned HTTP {}.",
+                    response.status().as_u16()
+                ),
+            ));
         }
         let value = response.json::<Value>().await.map_err(|_| {
             UsageError::new(
@@ -103,6 +111,29 @@ async fn fetch_limits(
                 "The Claude usage request timed out.",
             )
         })?
+}
+
+fn claude_config_root(home: &Path, configured: Option<&OsStr>) -> PathBuf {
+    configured
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".claude"))
+}
+
+fn claude_request_error(error: reqwest::Error) -> UsageError {
+    if error.is_timeout() {
+        UsageError::new(
+            UsageErrorKind::Timeout,
+            "The Claude usage request timed out.",
+        )
+    } else if error.is_connect() {
+        UsageError::new(
+            UsageErrorKind::Network,
+            "Could not connect to Claude usage. Check the proxy and corporate CA settings.",
+        )
+    } else {
+        UsageError::network()
+    }
 }
 
 fn not_logged_in() -> UsageError {
@@ -600,6 +631,24 @@ mod tests {
         }"#;
 
         assert_eq!(access_token_from_credentials(raw).unwrap(), "access-secret");
+    }
+
+    #[test]
+    fn config_root_honors_claude_config_dir() {
+        let home = Path::new("/home/example");
+
+        assert_eq!(
+            claude_config_root(home, Some(OsStr::new("/managed/claude"))),
+            PathBuf::from("/managed/claude")
+        );
+        assert_eq!(
+            claude_config_root(home, None),
+            PathBuf::from("/home/example/.claude")
+        );
+        assert_eq!(
+            claude_config_root(home, Some(OsStr::new(""))),
+            PathBuf::from("/home/example/.claude")
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use super::{
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde_json::{json, Value};
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{ErrorKind, Read};
 #[cfg(unix)]
@@ -79,9 +79,13 @@ async fn read_app_server_with_timeout(
 ) -> Result<(Value, Value), UsageError> {
     let executable = resolve_codex_executable(home, path)
         .ok_or_else(|| UsageError::new(UsageErrorKind::NotInstalled, "Codex CLI was not found."))?;
+    let command_path = executable_search_path(&executable.program, path);
     let mut command = Command::new(executable.program);
     if let Some(script) = executable.script {
         command.arg(script);
+    }
+    if let Some(path) = command_path {
+        command.env("PATH", path);
     }
     let mut child = command
         .arg("app-server")
@@ -204,6 +208,12 @@ struct CodexExecutable {
     script: Option<PathBuf>,
 }
 
+fn executable_search_path(program: &Path, inherited: Option<&OsStr>) -> Option<OsString> {
+    let directory = program.parent()?;
+    let inherited = inherited.into_iter().flat_map(std::env::split_paths);
+    std::env::join_paths(std::iter::once(directory.to_path_buf()).chain(inherited)).ok()
+}
+
 fn resolve_codex_executable(home: &Path, path: Option<&OsStr>) -> Option<CodexExecutable> {
     let executable_name = format!("codex{}", std::env::consts::EXE_SUFFIX);
     if let Some(candidate) = path
@@ -218,18 +228,48 @@ fn resolve_codex_executable(home: &Path, path: Option<&OsStr>) -> Option<CodexEx
         });
     }
 
-    let versions = home.join(".nvm/versions/node");
+    if let Some(candidate) = resolve_node_installations(
+        &home.join(".nvm/versions/node"),
+        Path::new("bin"),
+        &executable_name,
+    ) {
+        return Some(candidate);
+    }
+    if let Some(candidate) = resolve_node_installations(
+        &home.join(".local/share/fnm/node-versions"),
+        Path::new("installation/bin"),
+        &executable_name,
+    ) {
+        return Some(candidate);
+    }
+
+    fallback_codex_directories(home)
+        .into_iter()
+        .map(|directory| directory.join(&executable_name))
+        .find(|candidate| is_executable(candidate) && !is_flowmux_agent_wrapper(candidate))
+        .map(|program| CodexExecutable {
+            program,
+            script: None,
+        })
+}
+
+fn resolve_node_installations(
+    versions: &Path,
+    bin_suffix: &Path,
+    executable_name: &str,
+) -> Option<CodexExecutable> {
     fs::read_dir(versions)
         .ok()?
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let version = parse_node_version(&entry.file_name())?;
-            let candidate = entry.path().join("bin").join(&executable_name);
-            let node = entry
-                .path()
-                .join("bin")
-                .join(format!("node{}", std::env::consts::EXE_SUFFIX));
-            (is_executable(&candidate) && is_executable(&node)).then_some((
+            let bin = entry.path().join(bin_suffix);
+            let candidate = bin.join(executable_name);
+            let node = bin.join(format!("node{}", std::env::consts::EXE_SUFFIX));
+            (is_executable(&candidate)
+                && !is_flowmux_agent_wrapper(&candidate)
+                && is_executable(&node))
+            .then_some((
                 version,
                 CodexExecutable {
                     program: node,
@@ -239,6 +279,19 @@ fn resolve_codex_executable(home: &Path, path: Option<&OsStr>) -> Option<CodexEx
         })
         .max_by_key(|(version, _)| *version)
         .map(|(_, candidate)| candidate)
+}
+
+fn fallback_codex_directories(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local/bin"),
+        home.join(".volta/bin"),
+        home.join(".asdf/shims"),
+        home.join(".local/share/mise/shims"),
+        home.join(".local/share/pnpm"),
+        home.join(".bun/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]
 }
 
 fn parse_node_version(value: &OsStr) -> Option<(u64, u64, u64)> {
@@ -418,7 +471,7 @@ fn parse_token_usage_response(value: &Value, day: NaiveDate) -> Result<TokenTota
 fn response_result(value: &Value) -> Result<&Value, UsageError> {
     if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
         let error = error.as_object().ok_or_else(invalid_response)?;
-        error
+        let code = error
             .get("code")
             .and_then(Value::as_i64)
             .ok_or_else(invalid_response)?;
@@ -430,6 +483,12 @@ fn response_result(value: &Value) -> Result<&Value, UsageError> {
             return Err(UsageError::new(
                 UsageErrorKind::NotLoggedIn,
                 "Check the local Codex login.",
+            ));
+        }
+        if code == -32601 {
+            return Err(UsageError::new(
+                UsageErrorKind::InvalidData,
+                "The installed Codex CLI does not support usage reporting. Update Codex and retry.",
             ));
         }
         return Err(UsageError::new(
@@ -531,6 +590,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn selected_executable_directory_is_prepended_to_child_path() {
+        let program = Path::new("/managed/codex/bin/codex");
+        let inherited = std::env::join_paths([Path::new("/usr/bin"), Path::new("/bin")]).unwrap();
+        let adjusted = executable_search_path(program, Some(&inherited)).unwrap();
+        let entries = std::env::split_paths(&adjusted).collect::<Vec<_>>();
+
+        assert_eq!(entries[0], PathBuf::from("/managed/codex/bin"));
+        assert_eq!(entries[1], PathBuf::from("/usr/bin"));
+        assert_eq!(entries[2], PathBuf::from("/bin"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn executable_resolution_uses_newest_nvm_version_as_fallback() {
@@ -548,6 +619,52 @@ mod tests {
 
         assert_eq!(resolved.program, newer_node);
         assert_eq!(resolved.script, Some(newer));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_resolution_supports_fnm_installations() {
+        let temp = tempfile::tempdir().unwrap();
+        let older = temp
+            .path()
+            .join(".local/share/fnm/node-versions/v20.18.0/installation/bin/codex");
+        let older_node = temp
+            .path()
+            .join(".local/share/fnm/node-versions/v20.18.0/installation/bin/node");
+        let newer = temp
+            .path()
+            .join(".local/share/fnm/node-versions/v22.22.2/installation/bin/codex");
+        let newer_node = temp
+            .path()
+            .join(".local/share/fnm/node-versions/v22.22.2/installation/bin/node");
+        make_executable(&older);
+        make_executable(&older_node);
+        make_executable(&newer);
+        make_executable(&newer_node);
+
+        assert_eq!(
+            resolve_codex_executable(temp.path(), None),
+            Some(CodexExecutable {
+                program: newer_node,
+                script: Some(newer),
+            })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_resolution_checks_common_user_bin_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex = temp.path().join(".volta/bin/codex");
+        make_executable(&codex);
+
+        assert_eq!(
+            resolve_codex_executable(temp.path(), None),
+            Some(CodexExecutable {
+                program: codex,
+                script: None,
+            })
+        );
     }
 
     #[cfg(unix)]
@@ -760,10 +877,26 @@ mod tests {
     }
 
     #[test]
-    fn non_auth_rpc_error_is_not_reported_as_login_problem() {
+    fn unsupported_rpc_method_requests_a_codex_update() {
         let value = serde_json::json!({
             "id": 1,
             "error": {"code": -32601, "message": "Method not found"}
+        });
+
+        let error = response_result(&value).unwrap_err();
+
+        assert_eq!(error.kind, UsageErrorKind::InvalidData);
+        assert_eq!(
+            error.message,
+            "The installed Codex CLI does not support usage reporting. Update Codex and retry."
+        );
+    }
+
+    #[test]
+    fn server_limitation_does_not_request_a_codex_update() {
+        let value = serde_json::json!({
+            "id": 1,
+            "error": {"code": -32000, "message": "Usage reporting is not implemented for this account"}
         });
 
         let error = response_result(&value).unwrap_err();
