@@ -2634,7 +2634,7 @@ fn screen_working_keeps_proc_ownership_then_settles_idle_without_clearing() {
 }
 
 #[test]
-fn screen_working_settles_only_when_it_overrode_a_lifecycle_status() {
+fn screen_working_settles_only_when_it_can_prove_completion() {
     for (name, lifecycle_status) in [
         ("codex", AgentStatus::Idle),
         ("opencode", AgentStatus::Idle),
@@ -2684,17 +2684,25 @@ fn screen_working_settles_only_when_it_overrode_a_lifecycle_status() {
                     None,
                     true,
                 ),
-                Some(false),
-                "{name}: a composer must not override lifecycle Working"
+                Some(name == "codex"),
+                "{name}: only Codex can fall back from an observed spinner to its prompt"
             );
         }
         assert_eq!(
             pane.settle_screen_idle(surface_id, true),
             Some(lifecycle_status == AgentStatus::Idle),
-            "{name}: screen-derived Working should settle, lifecycle Working should not"
+            "{name}: screen-derived Working should settle exactly once"
         );
         let agent = pane.agent_presence_for_surface(surface_id).unwrap();
-        assert_eq!(agent.status, lifecycle_status, "{name}");
+        assert_eq!(
+            agent.status,
+            if name == "codex" {
+                AgentStatus::Idle
+            } else {
+                lifecycle_status
+            },
+            "{name}"
+        );
         assert_eq!(agent.source.as_deref(), Some("flowmux:hook"), "{name}");
     }
 }

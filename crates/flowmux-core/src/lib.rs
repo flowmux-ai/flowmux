@@ -884,14 +884,25 @@ impl Pane {
                         let before = agent.clone();
                         let accepted = agent.apply_report(report, visible);
                         if accepted && source == "flowmux:screen" {
+                            let codex_screen_fallback = agent.name == "codex"
+                                && agent.source.as_deref() == Some("flowmux:hook")
+                                && before.status == AgentStatus::Working
+                                && agent.screen_working_base.is_none();
                             if agent.source.as_deref() == Some("flowmux:screen") {
                                 agent.screen_working_base = None;
                             } else if agent.status == AgentStatus::Working
-                                && before.status != AgentStatus::Working
+                                && (before.status != AgentStatus::Working || codex_screen_fallback)
                             {
+                                // Codex Stop hooks can be absent or blocked. Once its live
+                                // spinner is observed, the next prompt is completion truth.
+                                let base_status = if codex_screen_fallback {
+                                    AgentStatus::Idle
+                                } else {
+                                    before.status
+                                };
                                 agent
                                     .screen_working_base
-                                    .get_or_insert((before.status, before.seen));
+                                    .get_or_insert((base_status, before.seen));
                             } else if agent.status != AgentStatus::Working
                                 && before.status == AgentStatus::Working
                             {
