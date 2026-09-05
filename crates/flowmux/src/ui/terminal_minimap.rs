@@ -400,6 +400,11 @@ fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Min
     if !state.enabled.get() || state.alternate_screen.get() || !area.is_mapped() {
         return;
     }
+    // A split can shrink and return to the cached width before the refresh.
+    // VTE still rebases its text rows, so invalidate the offset on each event.
+    if state.columns.get() != term.column_count().max(1) as usize {
+        state.text_row_offset.set(0);
+    }
     // Keep the pending deadline: continuous output or resizing must not
     // postpone the refresh indefinitely, especially after an unmap clears the cache.
     if state.refresh_source.borrow().is_some() {
@@ -928,6 +933,63 @@ mod tests {
         ));
         assert_eq!(adjustment.value(), terminal_position);
         assert_eq!(minimap.state.preview_offset.get(), PREVIEW_SCROLL_ROWS);
+        window.close();
+    }
+
+    #[gtk::test]
+    async fn pixel_preview_survives_resize_round_trip_before_refresh() {
+        let term = vte::Terminal::new();
+        term.set_scrollback_lines(10_000);
+        let adjustment = gtk::Adjustment::new(0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        term.set_property("vadjustment", &adjustment);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        minimap.set_width(48);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let split = gtk::Paned::new(gtk::Orientation::Horizontal);
+        split.set_start_child(Some(&overlay));
+        split.set_end_child(Some(&gtk::DrawingArea::new()));
+        split.set_position(600);
+        let window = gtk::Window::new();
+        window.set_default_size(1_200, 700);
+        window.set_child(Some(&split));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+
+        let output = (0..2_000)
+            .map(|index| format!("{index:04} {}\r\n", "x".repeat(index % 180 + 20)))
+            .collect::<String>();
+        term.feed(output.as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        term.feed(b"\x1b[H\x1b[2J\x1b[3J");
+        gtk::glib::timeout_future(Duration::from_millis(150)).await;
+        term.feed(output.as_bytes());
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert!(minimap.state.text_row_offset.get() > 0);
+
+        let columns = term.column_count();
+        split.set_position(100);
+        gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        assert!(term.column_count() < columns);
+        assert_eq!(minimap.state.columns.get(), columns as usize);
+        split.set_position(600);
+        gtk::glib::timeout_future(Duration::from_millis(20)).await;
+        assert_eq!(term.column_count(), columns);
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+
+        assert!(
+            minimap
+                .state
+                .pixel_rows
+                .borrow()
+                .iter()
+                .filter(|row| !row.is_empty())
+                .count()
+                > 100,
+            "minimap stayed blank after the split returned to its original width"
+        );
         window.close();
     }
 
