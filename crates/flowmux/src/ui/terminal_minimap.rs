@@ -400,8 +400,10 @@ fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Min
     if !state.enabled.get() || state.alternate_screen.get() || !area.is_mapped() {
         return;
     }
-    if let Some(source) = state.refresh_source.borrow_mut().take() {
-        source.remove();
+    // Keep the pending deadline: continuous output or resizing must not
+    // postpone the refresh indefinitely, especially after an unmap clears the cache.
+    if state.refresh_source.borrow().is_some() {
+        return;
     }
 
     let term = term.downgrade();
@@ -722,7 +724,7 @@ mod tests {
     use super::*;
 
     #[gtk::test]
-    async fn refresh_waits_for_a_quiet_period() {
+    async fn refresh_is_not_postponed_by_new_requests() {
         let term = vte::Terminal::new();
         let area = gtk::DrawingArea::new();
         let state = Rc::new(MinimapState::default());
@@ -736,14 +738,12 @@ mod tests {
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
         schedule_refresh(&term, &area, state.clone());
         gtk::glib::timeout_future(Duration::from_millis(75)).await;
-        assert!(state.refresh_source.borrow().is_some());
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
         assert!(state.refresh_source.borrow().is_none());
         window.close();
     }
 
     #[gtk::test]
-    async fn viewport_shift_uses_debounced_refresh() {
+    async fn viewport_shift_schedules_refresh() {
         let term = vte::Terminal::new();
         let adjustment = gtk::Adjustment::new(0.0, -1_000.0, 24.0, 1.0, 24.0, 24.0);
         term.set_property("vadjustment", &adjustment);
@@ -760,6 +760,51 @@ mod tests {
         adjustment.set_value(-400.0);
         assert!(minimap.state.refresh_source.borrow().is_some());
         minimap.set_enabled(false);
+        window.close();
+    }
+
+    #[gtk::test]
+    async fn refresh_continues_during_output_and_resize() {
+        let term = vte::Terminal::new();
+        term.set_scrollback_lines(5_000);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&term));
+        let minimap = TerminalMinimap::new(&term);
+        minimap.set_width(48);
+        overlay.add_overlay(minimap.widget());
+        minimap.set_enabled(true);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+
+        let mut observed_rows = Vec::new();
+        for index in 0..24 {
+            term.feed(format!("stream {index:04}\r\n").as_bytes());
+            window.set_default_size(if index % 2 == 0 { 400 } else { 800 }, 600);
+            gtk::glib::timeout_future(Duration::from_millis(30)).await;
+            observed_rows.push(
+                minimap
+                    .state
+                    .pixel_rows
+                    .borrow()
+                    .iter()
+                    .filter(|row| !row.is_empty())
+                    .count(),
+            );
+        }
+
+        // Check before the stream becomes quiet: an idle-only refresh leaves
+        // the cache empty throughout output and layout changes.
+        assert!(observed_rows[12] > 0, "minimap stayed blank during output");
+        assert!(
+            observed_rows[23] > observed_rows[12],
+            "minimap stopped updating"
+        );
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert_eq!(minimap.state.columns.get(), term.column_count() as usize);
+        assert!(minimap.state.refresh_source.borrow().is_none());
         window.close();
     }
 
