@@ -3217,6 +3217,66 @@ fn agent_status_rollup_uses_blocked_done_working_idle_unknown_order() {
 }
 
 #[test]
+fn completion_footer_requires_the_matching_live_composer() {
+    for (screen, expected) in [
+        (
+            "─ Worked for 6m 15s ─────\n› Ask Codex to do anything\ngpt-6-astra",
+            Some("codex"),
+        ),
+        ("─ Worked for 1h 02m 03s ─\n›", Some("codex")),
+        (
+            "✻ Cooked for 3m 12s\n────────\n❯\n? for shortcuts",
+            Some("claude"),
+        ),
+        ("✽ Churned for 7s\n❯ next draft", Some("claude")),
+        ("Worked for 2s\n›", None),
+        ("─ Worked for a while ─\n›", None),
+        ("─ Worked for 2s ─\n❯", None),
+        ("✻ Cooked for 2s\n›", None),
+        (
+            "─ Worked for 2s ─\n• Working (1s • esc to interrupt)\n›",
+            None,
+        ),
+        (
+            "─ Worked for 2s ─\nDo you want to approve this command?\n›",
+            None,
+        ),
+        ("› submitted prompt\n─ Worked for 2s ─", None),
+        ("• The job worked for 2s\n›", None),
+        ("─ Worked for 2s ─\nordinary shell output\n$", None),
+    ] {
+        assert_eq!(detect_agent_completion(Some(screen)), expected, "{screen}");
+    }
+}
+
+#[test]
+fn detector_handles_variable_action_labels_and_empty_composers() {
+    for screen in [
+        "✻ Cogitating… (2m 34s · ↓ 6.4k tokens)\n❯",
+        "✽ Reticulating… (1s · esc to interrupt)\n❯",
+        "• Compacting context (12s • esc to interrupt)\n›",
+        "• Running Stop hooks (1m 01s • esc to interrupt)\n›",
+    ] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(screen), None),
+            Some(AgentStatus::Working),
+            "{screen}"
+        );
+        assert!(
+            detect_agent_progress_text(Some(screen)).is_some(),
+            "{screen}"
+        );
+    }
+    for screen in ["❯", "›", "\n❯  \n? for shortcuts"] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(screen), None),
+            Some(AgentStatus::Idle),
+            "{screen}"
+        );
+    }
+}
+
+#[test]
 fn detector_reads_strong_osc_and_screen_signals() {
     assert_eq!(
         detect_agent_status_from_signals(None, Some("Codex Action Required")),

@@ -848,6 +848,7 @@ impl Pane {
 
                 let screen_base = if source == "flowmux:screen"
                     && status == AgentStatus::Idle
+                    && !explicit_screen_idle
                     && !incoming_is_different_agent
                 {
                     surface
@@ -2887,7 +2888,20 @@ pub fn detect_agent_status_from_signals(
 }
 
 fn is_agent_working_status_line(line: &str) -> bool {
+    let decorated = line.trim_start() != trim_agent_status_prefix(line);
     let line = trim_agent_status_prefix(line);
+    // Both TUIs use changing action labels, and Claude uses whimsical verbs.
+    // Match the live clock/control shape, not an ever-growing verb dictionary.
+    if decorated
+        && line.find('(').is_some_and(|offset| {
+            starts_with_elapsed_duration(&line[offset..])
+                && (contains_ascii_case_insensitive(line, "esc to interrupt")
+                    || contains_ascii_case_insensitive(line, "ctrl+c to stop")
+                    || (line.contains("tokens") && (line.contains('↓') || line.contains('↑'))))
+        })
+    {
+        return true;
+    }
     [
         "working",
         "thinking",
@@ -2926,10 +2940,7 @@ pub fn detect_agent_progress_text(screen_text: Option<&str>) -> Option<&str> {
         .rev()
         .filter(|line| !line.trim().is_empty())
         .take(12)
-        .find_map(|line| {
-            let line = trim_agent_status_prefix(line);
-            is_agent_working_status_line(line).then_some(line)
-        })
+        .find_map(|line| is_agent_working_status_line(line).then(|| trim_agent_status_prefix(line)))
 }
 
 pub fn detect_agent_usage_limit_text(screen_text: Option<&str>) -> Option<&str> {
@@ -3054,6 +3065,56 @@ pub fn detect_agent_idle_name_from_signals(
         })
 }
 
+/// A completed-turn footer immediately above the live composer is stronger
+/// evidence than a bare prompt (which also remains visible while working).
+/// Keep this deliberately structural: arbitrary assistant prose is not a
+/// lifecycle event, and a future unknown TUI format must fall back to hooks.
+pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str> {
+    let lines: Vec<_> = screen_text?
+        .lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(12)
+        .collect();
+    let prompt = lines
+        .iter()
+        .position(|line| line.starts_with('›') || line.starts_with('❯'))?;
+    let footer = lines
+        .iter()
+        .skip(prompt + 1)
+        .find(|line| !line.chars().all(|c| matches!(c, '─' | '━' | ' ')))?;
+    let (agent, elapsed) = if let Some(rest) = footer
+        .trim_start_matches('─')
+        .trim_start()
+        .strip_prefix("Worked for ")
+    {
+        if !footer.starts_with('─') || !lines[prompt].starts_with('›') {
+            return None;
+        }
+        ("codex", rest.trim_end_matches(['─', ' ']))
+    } else {
+        if !lines[prompt].starts_with('❯') || !footer.starts_with(['✢', '✳', '✶', '✻', '✽'])
+        {
+            return None;
+        }
+        let (_, elapsed) = footer.split_once(" for ")?;
+        ("claude", elapsed)
+    };
+    let mut tokens = elapsed.split_whitespace().peekable();
+    if tokens.peek().is_none()
+        || !tokens.all(|token| {
+            let bytes = token.as_bytes();
+            bytes.len() > 1
+                && matches!(bytes.last(), Some(b's' | b'm' | b'h'))
+                && bytes[..bytes.len() - 1].iter().all(u8::is_ascii_digit)
+        })
+    {
+        return None;
+    }
+    Some(agent)
+}
+
 fn is_agent_idle_prompt_line(line: &str) -> bool {
     let line = line.trim();
     let is_shell_command = line.contains("\\n")
@@ -3062,7 +3123,9 @@ fn is_agent_idle_prompt_line(line: &str) -> bool {
         || starts_with_ascii_case_insensitive(line, "clear;")
         || contains_ascii_case_insensitive(line, "; echo ");
     !is_shell_command
-        && (line.starts_with("› ")
+        && (line == "›"
+            || line == "❯"
+            || line.starts_with("› ")
             || line.starts_with("❯ ")
             || contains_ascii_case_insensitive(line, "press / for commands")
             || contains_ascii_case_insensitive(line, "press / to")

@@ -7,9 +7,9 @@
 //! boot.
 
 use flowmux_core::{
-    agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_idle_name_from_signals,
-    detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
-    detect_agent_status_from_signals, detect_agent_usage_limit_text,
+    agent_bar_color_for_surface, collect_agent_bar_model, detect_agent_completion,
+    detect_agent_idle_name_from_signals, detect_agent_interruption, detect_agent_name_from_signals,
+    detect_agent_progress_text, detect_agent_status_from_signals, detect_agent_usage_limit_text,
     select_process_agent_candidate, terminal_tab_title_for_cwd, AgentBarModel, AgentPresence,
     AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent,
     PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind,
@@ -2808,17 +2808,22 @@ impl StateStore {
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
-        self.last_agent_screen_fingerprints
+        let previous_fingerprint = self
+            .last_agent_screen_fingerprints
             .lock()
             .await
             .insert(surface_id, fingerprint);
         let detected_status = detect_agent_status_from_signals(screen_text, osc_title);
+        let completed_agent = (detected_status == Some(AgentStatus::Idle))
+            .then(|| detect_agent_completion(screen_text))
+            .flatten();
         let status_text = match detected_status {
             Some(AgentStatus::Working) => detect_agent_progress_text(screen_text),
             Some(AgentStatus::Blocked) => detect_agent_usage_limit_text(screen_text),
             Some(AgentStatus::Idle) if detect_agent_interruption(screen_text) => {
                 Some("Interrupted")
             }
+            Some(AgentStatus::Idle) if completed_agent.is_some() => Some("Completed"),
             _ => None,
         };
         let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
@@ -2828,7 +2833,9 @@ impl StateStore {
         };
         let status = detected_status.or_else(|| idle_agent_name.map(|_| AgentStatus::Idle));
         let agent_name = if status.is_some() {
-            detect_agent_name_from_signals(screen_text, osc_title).or(idle_agent_name)
+            completed_agent
+                .or_else(|| detect_agent_name_from_signals(screen_text, osc_title))
+                .or(idle_agent_name)
         } else {
             None
         };
@@ -2862,6 +2869,27 @@ impl StateStore {
         // presence after this check but before the state lock below, allowing
         // the stale screen frame to recreate a ghost presence.
         let lifecycle = self.agent_lifecycle.lock().await;
+        if completed_agent.is_some()
+            && previous_fingerprint == Some(fingerprint)
+            && self
+                .located_agent_presence(surface_id)
+                .await
+                .is_some_and(|located| {
+                    located.presence.status == AgentStatus::Working
+                        && located.presence.custom_status.as_deref() == Some("Starting turn")
+                })
+        {
+            // A new hook turn must not be completed by its unchanged old footer.
+            // Ordinary late tool hooks still allow the live footer to recover.
+            return None;
+        }
+        if status == AgentStatus::Idle
+            && lifecycle.codex_turns.iter().any(|((surface, _), ledger)| {
+                *surface == surface_id && !ledger.active_children.is_empty()
+            })
+        {
+            return None;
+        }
         if status != AgentStatus::Blocked
             && (lifecycle.waits.iter().any(|((surface, _, _), waits)| {
                 *surface == surface_id && waits.values().any(|balance| *balance > 0)
@@ -2945,6 +2973,24 @@ impl StateStore {
         surface_id: SurfaceId,
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        // A blank/unrecognized frame is weaker than an idle composer. It must
+        // not bypass the correlated-work guards used by recognized frames.
+        let lifecycle = self.agent_lifecycle.lock().await;
+        if lifecycle.codex_turns.iter().any(|((surface, _), ledger)| {
+            *surface == surface_id && !ledger.active_children.is_empty()
+        }) || lifecycle.waits.iter().any(|((surface, _, _), waits)| {
+            *surface == surface_id && waits.values().any(|balance| *balance > 0)
+        }) || lifecycle
+            .permission_waits
+            .iter()
+            .any(|((surface, _, _), scopes)| *surface == surface_id && !scopes.is_empty())
+            || lifecycle
+                .session_waits
+                .iter()
+                .any(|((surface, _, _), scopes)| *surface == surface_id && !scopes.is_empty())
+        {
+            return None;
+        }
         let mut s = self.inner.lock().await;
         for ws in s.workspaces.iter_mut() {
             let mut found = false;
@@ -7049,6 +7095,256 @@ mod tests {
             .presence;
         assert_eq!(agent.name, "codex");
         assert_eq!(agent.source.as_deref(), Some("flowmux:proc"));
+    }
+
+    #[tokio::test]
+    async fn completed_codex_screen_recovers_without_observing_a_spinner() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), "/tmp/demo".into())
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(std::process::id()),
+                Some(1),
+                "session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("turn".into()),
+                    status_text: "Starting turn".into(),
+                },
+                false,
+            )
+            .await;
+        store.report_agent_screen_signals_with_visibility(surface,
+            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
+            Some("work"), false).await;
+        let agent = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(agent.public_status(), AgentStatus::Done);
+        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+        assert_eq!(agent.session_id.as_deref(), Some("session"));
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(std::process::id()),
+                Some(2),
+                "session",
+                AgentLifecycleEvent::CodexRootProgressObserved {
+                    turn_id: "turn".into(),
+                    status_text: "Working".into(),
+                },
+                false,
+            )
+            .await;
+        store.report_agent_screen_signals_with_visibility(surface,
+            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
+            Some("work"), false).await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .public_status(),
+            AgentStatus::Done
+        );
+        // A new turn can begin before the terminal repaints. Its old completed
+        // footer must not cancel the authoritative TurnStarted event.
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(std::process::id()),
+                Some(3),
+                "session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: Some("next".into()),
+                    status_text: "Starting turn".into(),
+                },
+                false,
+            )
+            .await;
+        store.report_agent_screen_signals_with_visibility(surface,
+            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
+            Some("work"), false).await;
+        assert_eq!(
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status,
+            AgentStatus::Working
+        );
+    }
+
+    #[tokio::test]
+    async fn completion_screen_preserves_correlated_waits_and_children() {
+        for (agent, event, expected) in [
+            (
+                "codex",
+                AgentLifecycleEvent::PermissionWaitStarted {
+                    message: None,
+                    status_text: "Waiting for approval".into(),
+                    scope: Some("root:turn".into()),
+                },
+                AgentStatus::Blocked,
+            ),
+            (
+                "claude",
+                AgentLifecycleEvent::WaitStarted {
+                    item_id: "question".into(),
+                    message: None,
+                    status_text: "Waiting for input".into(),
+                },
+                AgentStatus::Blocked,
+            ),
+            (
+                "claude",
+                AgentLifecycleEvent::SessionWaitStarted {
+                    message: None,
+                    status_text: "API error".into(),
+                    scope: None,
+                },
+                AgentStatus::Blocked,
+            ),
+            (
+                "codex",
+                AgentLifecycleEvent::CodexSubagentStarted {
+                    agent_id: "child".into(),
+                    turn_id: "child-turn".into(),
+                },
+                AgentStatus::Working,
+            ),
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store
+                .create_workspace(Some("demo".into()), "/tmp/demo".into())
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(std::process::id()),
+                    Some(1),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("turn".into()),
+                        status_text: "Starting turn".into(),
+                    },
+                    false,
+                )
+                .await;
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    agent,
+                    Some(std::process::id()),
+                    Some(2),
+                    "session",
+                    event,
+                    false,
+                )
+                .await;
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some("• Working (1s • esc to interrupt)"),
+                    Some("work"),
+                    false,
+                )
+                .await;
+            store
+                .report_agent_screen_signals_with_visibility(surface, Some(""), Some("work"), false)
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                expected,
+                "blank frame: {agent}"
+            );
+            let screen = if agent == "codex" {
+                "─ Worked for 3s ─\n›"
+            } else {
+                "✻ Cooked for 3s\n❯"
+            };
+            store
+                .report_agent_screen_signals_with_visibility(
+                    surface,
+                    Some(screen),
+                    Some("work"),
+                    false,
+                )
+                .await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                expected,
+                "{agent}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_completion_recovers_without_a_stop_hook() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), "/tmp/demo".into())
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        store
+            .report_agent_lifecycle_with_visibility(
+                surface,
+                "claude",
+                Some(std::process::id()),
+                Some(1),
+                "session",
+                AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "Starting turn".into(),
+                },
+                false,
+            )
+            .await;
+        store
+            .report_agent_screen_signals_with_visibility(
+                surface,
+                Some("✻ Cogitating… (2m 34s · ↓ 6.4k tokens)\n❯"),
+                Some("work"),
+                false,
+            )
+            .await;
+        store
+            .report_agent_screen_signals_with_visibility(
+                surface,
+                Some("✻ Cooked for 3m 12s\n────────\n❯\n? for shortcuts"),
+                Some("work"),
+                false,
+            )
+            .await;
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(presence.public_status(), AgentStatus::Done);
+        assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
     }
 
     #[tokio::test]
