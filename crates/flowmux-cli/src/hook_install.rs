@@ -12,7 +12,7 @@
 //! Supported targets (mirroring cmux):
 //! - **Claude Code** — native lifecycle hooks in `~/.claude/settings.json`.
 //! - **Codex CLI**   — native lifecycle hooks in `~/.codex/hooks.json`.
-//! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.mjs`.
+//! - **OpenCode**    — `~/.config/opencode/plugins/flowmux-session.js`.
 //! - **Gemini CLI**  — `~/.gemini/settings.json` lifecycle hooks.
 //! - **Antigravity** — owned plugin in `~/.gemini/config/plugins/flowmux/`.
 //! - **Cline**       — skill only; obsolete file hooks are removed on repair.
@@ -31,7 +31,7 @@ pub const FLOWMUX_HOOK_MARKER: &str = "flowmux-hook";
 
 /// Plugin source-marker for the OpenCode JS plugin file. Lets a re-run
 /// detect that the file is owned by flowmux and may be overwritten.
-pub const FLOWMUX_OPENCODE_PLUGIN_MARKER: &str = "flowmux-opencode-session-plugin v4";
+pub const FLOWMUX_OPENCODE_PLUGIN_MARKER: &str = "flowmux-opencode-session-plugin v5";
 const FLOWMUX_OPENCODE_PLUGIN_MARKER_PREFIX: &str = "flowmux-opencode-session-plugin";
 
 /// One agent flowmux knows how to install hooks for. Same enum shape
@@ -273,7 +273,10 @@ fn check_opencode() -> HookCheckEntry {
     let mut every_installed = true;
     let mut every_missing = true;
     for home in &homes {
-        let plugin_path = home.join("plugins").join("flowmux-session.mjs");
+        let plugin_path = home.join("plugins").join("flowmux-session.js");
+        let legacy_path = home.join("plugins").join("flowmux-session.mjs");
+        let legacy_owned =
+            fs::read_to_string(&legacy_path).is_ok_and(|source| opencode_plugin_is_owned(&source));
         let opencode_json = home.join("opencode.json");
         all_paths.push(plugin_path.clone());
         all_paths.push(opencode_json.clone());
@@ -308,8 +311,8 @@ fn check_opencode() -> HookCheckEntry {
         } else {
             false
         };
-        let this_installed = plugin_ok && !registered;
-        let this_missing = !plugin_exists && !registered;
+        let this_installed = plugin_ok && !registered && !legacy_owned;
+        let this_missing = !plugin_exists && !registered && !legacy_owned;
         every_installed &= this_installed;
         every_missing &= this_missing;
     }
@@ -2291,38 +2294,46 @@ fn install_opencode(flowmux_bin: &str) -> Result<HookInstallReport> {
     let plugin_src = opencode_plugin_source_with_argv(&argv);
     let mut touched: Vec<PathBuf> = Vec::with_capacity(homes.len() * 2);
     for home in &homes {
-        let plugin_dir = home.join("plugins");
-        fs::create_dir_all(&plugin_dir)
-            .with_context(|| format!("create {}", plugin_dir.display()))?;
-        // Older flowmux installs wrote a CommonJS `.js` plugin; OpenCode
-        // 1.14+ refuses to load it. Purge it so re-running setup is enough.
-        let _ = fs::remove_file(plugin_dir.join("flowmux-session.js"));
-        let plugin_path = plugin_dir.join("flowmux-session.mjs");
-        let existing = fs::read_to_string(&plugin_path).ok();
-        if existing
-            .as_deref()
-            .is_some_and(|source| !opencode_plugin_is_owned(source))
-        {
-            return Err(anyhow!(
-                "{} exists and is not managed by flowmux",
-                plugin_path.display()
-            ));
-        }
-        if existing.as_deref() != Some(plugin_src.as_str()) {
-            write_atomic(&plugin_path, plugin_src.as_bytes())?;
-            touched.push(plugin_path);
-        }
-
-        let opencode_json = home.join("opencode.json");
-        if unregister_opencode_plugin(&opencode_json, "flowmux-session")? {
-            touched.push(opencode_json);
-        }
+        touched.extend(install_opencode_in(home, &plugin_src)?);
     }
     Ok(HookInstallReport {
         target: HookTarget::OpenCode,
         status: HookInstallStatus::Installed,
         touched_paths: touched,
     })
+}
+
+fn install_opencode_in(home: &Path, plugin_src: &str) -> Result<Vec<PathBuf>> {
+    let plugin_dir = home.join("plugins");
+    let plugin_path = plugin_dir.join("flowmux-session.js");
+    let legacy_path = plugin_dir.join("flowmux-session.mjs");
+    for path in [&plugin_path, &legacy_path] {
+        let existing = fs::read_to_string(path).ok();
+        if existing
+            .as_deref()
+            .is_some_and(|source| !opencode_plugin_is_owned(source))
+        {
+            return Err(anyhow!(
+                "{} exists and is not managed by flowmux",
+                path.display()
+            ));
+        }
+    }
+    fs::create_dir_all(&plugin_dir).with_context(|| format!("create {}", plugin_dir.display()))?;
+    let mut touched = Vec::new();
+    // OpenCode discovers .js/.ts files, including ESM, but skips .mjs files.
+    if write_atomic(&plugin_path, plugin_src.as_bytes())? {
+        touched.push(plugin_path);
+    }
+    if legacy_path.exists() {
+        fs::remove_file(&legacy_path)?;
+        touched.push(legacy_path);
+    }
+    let opencode_json = home.join("opencode.json");
+    if unregister_opencode_plugin(&opencode_json, "flowmux-session")? {
+        touched.push(opencode_json);
+    }
+    Ok(touched)
 }
 
 fn uninstall_opencode() -> Result<HookInstallReport> {
@@ -2335,10 +2346,14 @@ fn uninstall_opencode() -> Result<HookInstallReport> {
     }
     let mut touched: Vec<PathBuf> = Vec::with_capacity(homes.len() * 2);
     for home in &homes {
-        let plugin_path = home.join("plugins").join("flowmux-session.mjs");
-        if fs::read_to_string(&plugin_path).is_ok_and(|source| opencode_plugin_is_owned(&source)) {
-            fs::remove_file(&plugin_path)?;
-            touched.push(plugin_path);
+        for name in ["flowmux-session.js", "flowmux-session.mjs"] {
+            let plugin_path = home.join("plugins").join(name);
+            if fs::read_to_string(&plugin_path)
+                .is_ok_and(|source| opencode_plugin_is_owned(&source))
+            {
+                fs::remove_file(&plugin_path)?;
+                touched.push(plugin_path);
+            }
         }
 
         let opencode_json = home.join("opencode.json");
@@ -2420,22 +2435,27 @@ function buildSpawnArgs(event, payload) {{
   const surface = process.env.FLOWMUX_SURFACE_ID;
   if (pane) args.push("--pane", pane);
   if (surface) args.push("--surface", surface);
-  if (payload) args.push(payload);
+  if (payload) args.push(JSON.stringify(payload));
   return args;
 }}
 
+let pendingHook = Promise.resolve();
+
 function fireFlowmuxHook(event, payload) {{
   const args = buildSpawnArgs(event, payload);
-  try {{
-    const child = spawn(FLOWMUX_BIN, args, {{
-      stdio: "ignore",
-      detached: true,
-    }});
-    child.on("error", () => {{}});
-    child.unref();
-  }} catch (_) {{
-    // Hook failures must never crash OpenCode.
-  }}
+  // CLI sequence numbers are assigned at delivery time. Preserve event order
+  // so a slow busy hook cannot overwrite a newer completion or session end.
+  pendingHook = pendingHook.then(() => new Promise((resolve) => {{
+    try {{
+      const child = spawn(FLOWMUX_BIN, args, {{ stdio: "ignore", timeout: 5000 }});
+      child.on("error", resolve);
+      child.on("close", resolve);
+    }} catch (_) {{
+      // Hook failures must never crash OpenCode or block subsequent events.
+      resolve();
+    }}
+  }}));
+  return pendingHook;
 }}
 
 export const id = "flowmux-session";
@@ -2443,10 +2463,10 @@ export const id = "flowmux-session";
 function sessionPayload(event) {{
   const properties = event && event.properties;
   if (!properties) return null;
-  const session = properties.session;
+  const session = properties.info || properties.session;
   const sessionId = properties.sessionID || properties.sessionId || properties.session_id ||
     (session && (session.id || session.sessionID || session.sessionId));
-  return sessionId ? JSON.stringify({{ session_id: String(sessionId) }}) : null;
+  return sessionId ? {{ session_id: String(sessionId) }} : null;
 }}
 
 export const server = async () => ({{
@@ -2455,20 +2475,22 @@ export const server = async () => ({{
     const t = event.type;
     const payload = sessionPayload(event);
     if (t === "session.created") {{
-      fireFlowmuxHook("session-start", payload);
+      await fireFlowmuxHook("session-start", payload);
+    }} else if (t === "session.deleted") {{
+      await fireFlowmuxHook("session-end", payload);
     }} else if (t === "session.status") {{
       const status = event.properties && event.properties.status;
       if (status && (status.type === "busy" || status.type === "retry")) {{
-        fireFlowmuxHook("running", payload);
+        await fireFlowmuxHook("running", payload);
       }} else if (status && status.type === "idle") {{
-        fireFlowmuxHook("stop", payload);
+        await fireFlowmuxHook("stop", payload);
       }}
     }} else if (t === "session.error") {{
-      fireFlowmuxHook("notification", JSON.stringify({{ message: "OpenCode session error" }}));
+      await fireFlowmuxHook("notification", {{ ...payload, message: "OpenCode session error" }});
     }} else if (t === "permission.asked") {{
-      fireFlowmuxHook("notification", JSON.stringify({{ message: "OpenCode needs your input" }}));
+      await fireFlowmuxHook("notification", {{ ...payload, message: "OpenCode needs your input" }});
     }} else if (t === "permission.replied") {{
-      fireFlowmuxHook("running");
+      await fireFlowmuxHook("running", payload);
     }}
   }},
 }});
@@ -2510,6 +2532,7 @@ fn unregister_opencode_plugin(path: &Path, plugin_name: &str) -> Result<bool> {
 fn opencode_plugin_is_current(source: &str) -> bool {
     source.contains(FLOWMUX_OPENCODE_PLUGIN_MARKER)
         && source.contains("session.created")
+        && source.contains("session.deleted")
         && source.contains("session.status")
         && source.contains("permission.asked")
         && source.contains("permission.replied")
@@ -4701,6 +4724,72 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
     }
 
     #[test]
+    fn opencode_plugin_executes_lifecycle_events_in_order() {
+        let dir = tmp();
+        let plugin = dir.path().join("flowmux-session.mjs");
+        fs::write(&plugin, opencode_plugin_source("flowmux")).unwrap();
+        let output = match std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/opencode_plugin_events.mjs"
+            ))
+            .arg(&plugin)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipping OpenCode plugin execution: node is not installed");
+                return;
+            }
+            Err(error) => panic!("run OpenCode plugin test: {error}"),
+        };
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn opencode_install_migrates_to_discoverable_esm_without_losing_user_hooks() {
+        let home = tmp();
+        let plugins = home.path().join("plugins");
+        fs::create_dir_all(&plugins).unwrap();
+        let legacy = plugins.join("flowmux-session.mjs");
+        fs::write(&legacy, "// flowmux-opencode-session-plugin v4").unwrap();
+        let config = home.path().join("opencode.json");
+        write_json(&config, &json!({"plugin": ["file://./plugins/flowmux-session.mjs", "user-plugin"], "theme": "user-theme"})).unwrap();
+        let source = opencode_plugin_source("flowmux");
+        install_opencode_in(home.path(), &source).unwrap();
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read_to_string(plugins.join("flowmux-session.js")).unwrap(),
+            source
+        );
+        assert_eq!(
+            read_json_or_empty_object(&config).unwrap(),
+            json!({"plugin": ["user-plugin"], "theme": "user-theme"})
+        );
+        assert!(install_opencode_in(home.path(), &source)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn opencode_install_preserves_unowned_js_and_mjs_files() {
+        for name in ["flowmux-session.js", "flowmux-session.mjs"] {
+            let home = tmp();
+            let plugins = home.path().join("plugins");
+            fs::create_dir_all(&plugins).unwrap();
+            let path = plugins.join(name);
+            fs::write(&path, "// user-owned plugin").unwrap();
+            assert!(install_opencode_in(home.path(), &opencode_plugin_source("flowmux")).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), "// user-owned plugin");
+        }
+    }
+
+    #[test]
     fn opencode_plugin_source_passes_pane_and_surface_as_cli_args() {
         // `flatpak run` resets env to a minimal sandbox set, so the
         // in-sandbox flowmuxctl could not recover FLOWMUX_PANE_ID /
@@ -4748,7 +4837,7 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         assert!(src.contains("session.status"));
         assert!(src.contains("status.type === \"busy\""));
         assert!(src.contains("status.type === \"retry\""));
-        assert!(src.contains("fireFlowmuxHook(\"running\")"));
+        assert!(src.contains("fireFlowmuxHook(\"running\", payload)"));
         // Errors and permission requests both go through the
         // `notification` subcommand with a JSON payload so the toast
         // body is informative.

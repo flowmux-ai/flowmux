@@ -146,6 +146,7 @@ pub const KNOWN_AGENT_COMMS: &[&str] = &[
 /// Map a raw process `comm` to a canonical agent name, or `None`.
 fn match_agent_comm(comm: &str) -> Option<&'static str> {
     let c = comm.trim().to_ascii_lowercase();
+    let c = c.strip_suffix(".exe").unwrap_or(&c);
     if c == "agy" {
         return Some("antigravity");
     }
@@ -613,6 +614,16 @@ mod tests {
         assert_eq!(match_agent_comm("node"), None);
         assert_eq!(match_agent_comm("bash"), None);
         assert_eq!(match_agent_comm("python"), None);
+    }
+
+    #[test]
+    fn match_agent_comm_recognizes_native_exe_distributions() {
+        // OpenCode's macOS npm package installs a Mach-O named opencode.exe.
+        assert_eq!(match_agent_comm("opencode.exe"), Some("opencode"));
+        assert_eq!(match_agent_comm("CODEX.EXE"), Some("codex"));
+        assert_eq!(match_agent_comm("agy.exe"), Some("antigravity"));
+        assert_eq!(match_agent_comm("node.exe"), None);
+        assert_eq!(match_agent_comm("opencode-helper.exe"), None);
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
