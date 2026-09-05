@@ -442,7 +442,6 @@ impl PaneZoomTransition {
 
 struct PendingPaneZoomTransition {
     overlay: gtk::Fixed,
-    picture: gtk::Picture,
     source: WindowMoveRect,
     generation: u64,
     _native_views_suspend: crate::ui::browser_pane::NativeBrowserViewsSuspend,
@@ -712,6 +711,15 @@ fn set_window_move_widget_rect(
     let transform = gtk::gsk::Transform::new()
         .translate(&gtk::graphene::Point::new(rect.x, rect.y))
         .scale(rect.width / base.width, rect.height / base.height);
+    overlay.set_child_transform(widget, Some(&transform));
+}
+
+fn set_pane_zoom_widget_rect(overlay: &gtk::Fixed, widget: &gtk::Widget, rect: WindowMoveRect) {
+    // Resize the live content at its normal font scale. Scaling a snapshot
+    // stretches glyphs and delays the terminal grid change until the end.
+    widget.set_size_request(rect.width.round() as i32, rect.height.round() as i32);
+    let transform =
+        gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(rect.x, rect.y));
     overlay.set_child_transform(widget, Some(&transform));
 }
 
@@ -1259,12 +1267,6 @@ impl WindowController {
         if !adw::is_animations_enabled(frame) {
             return None;
         }
-        // Freeze the current pixels before reparenting. Scaling the live
-        // terminal reallocates its grid before the animation even starts.
-        let paintable = gtk::WidgetPaintable::new(Some(frame)).current_image();
-        let picture = gtk::Picture::for_paintable(&paintable);
-        picture.set_content_fit(gtk::ContentFit::Fill);
-        picture.set_can_shrink(true);
         let overlay = gtk::Fixed::new();
         overlay.set_can_target(false);
         overlay.set_halign(gtk::Align::Fill);
@@ -1278,7 +1280,6 @@ impl WindowController {
         let window = self.window.clone().upcast::<gtk::Window>();
         Some(PendingPaneZoomTransition {
             overlay,
-            picture,
             source,
             generation,
             _native_views_suspend: crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -1308,35 +1309,33 @@ impl WindowController {
         }
         self.stack.remove(frame);
 
-        let base = WindowMoveRect {
-            x: 0.0,
-            y: 0.0,
-            width: pending.source.width.max(destination.width),
-            height: pending.source.height.max(destination.height),
-        };
-        let picture = pending.picture;
-        picture.set_halign(gtk::Align::Start);
-        picture.set_valign(gtk::Align::Start);
-        picture.set_size_request(base.width.round() as i32, base.height.round() as i32);
+        let original_halign = frame.halign();
+        let original_valign = frame.valign();
+        let original_width_request = frame.width_request();
+        let original_height_request = frame.height_request();
+        frame.set_halign(gtk::Align::Start);
+        frame.set_valign(gtk::Align::Start);
         self.content_overlay.add_overlay(&pending.overlay);
-        pending.overlay.put(&picture, 0.0, 0.0);
-        set_window_move_widget_rect(&pending.overlay, picture.upcast_ref(), base, pending.source);
+        pending.overlay.put(frame, 0.0, 0.0);
+        set_pane_zoom_widget_rect(&pending.overlay, frame, pending.source);
 
         let content_overlay = self.content_overlay.clone();
         let transition = self.pane_zoom.transition.clone();
         let transition_generation = self.pane_zoom.transition_generation.clone();
         let frame = frame.clone();
         let overlay = pending.overlay.clone();
-        let picture_for_finish = picture.clone();
         let frame_for_finish = frame.clone();
         let content_overlay_for_finish = content_overlay.clone();
         let native_views_suspend = pending._native_views_suspend;
         let finish: Rc<RefCell<Option<Box<dyn FnOnce(bool)>>>> =
             Rc::new(RefCell::new(Some(Box::new(move |completed| {
                 let _native_views_suspend = native_views_suspend;
-                if picture_for_finish.parent().as_ref() == Some(overlay.upcast_ref()) {
-                    overlay.remove(&picture_for_finish);
+                if frame_for_finish.parent().as_ref() == Some(overlay.upcast_ref()) {
+                    overlay.remove(&frame_for_finish);
                 }
+                frame_for_finish.set_size_request(original_width_request, original_height_request);
+                frame_for_finish.set_halign(original_halign);
+                frame_for_finish.set_valign(original_valign);
                 if overlay.parent().as_ref()
                     == Some(content_overlay_for_finish.upcast_ref::<gtk::Widget>())
                 {
@@ -1364,7 +1363,7 @@ impl WindowController {
             let elapsed = clock.frame_time().saturating_sub(start) as f32;
             let progress = (elapsed / duration_micros).clamp(0.0, 1.0);
             let rect = pending.source.interpolate(destination, progress);
-            set_window_move_widget_rect(overlay, picture.upcast_ref(), base, rect);
+            set_pane_zoom_widget_rect(overlay, &frame, rect);
 
             if progress < 1.0 {
                 return glib::ControlFlow::Continue;
@@ -1400,6 +1399,9 @@ impl WindowController {
             let frame_for_finish = frame.clone();
             let stack = self.stack.clone();
             let registry = self.pane_registry.clone();
+            // The zoom badge increases the tab bar's minimum width. Remove
+            // it before shrinking so it cannot hold the animation open.
+            registry.borrow_mut().set_pane_zoomed(pane, false);
             let surfaces = self.surfaces.clone();
             let workspace = active.workspace;
             set_visible_stack_child_immediately(&self.stack, &active.workspace.to_string());
@@ -1411,7 +1413,6 @@ impl WindowController {
                 .bounds(&self.content_overlay)
                 .unwrap_or(active.source);
             self.start_pane_zoom_transition(pending, &frame, destination, move |completed| {
-                registry.borrow_mut().set_pane_zoomed(pane, false);
                 restore_pane_from_zoom(&frame_for_finish, &stack, active.origin);
                 if surfaces.borrow().contains_key(&workspace) {
                     set_visible_stack_child_immediately(&stack, &workspace.to_string());
@@ -1465,7 +1466,6 @@ impl WindowController {
             tracing::warn!(%pane, "pane zoom: unsupported parent");
             return;
         };
-        self.pane_registry.borrow_mut().set_pane_zoomed(pane, true);
         *self.pane_zoom.active.borrow_mut() = Some(ActivePaneZoom {
             pane,
             workspace,
@@ -1490,6 +1490,7 @@ impl WindowController {
                 stack.add_named(&frame_for_finish, Some(PANE_ZOOM_PAGE));
             }
             set_visible_stack_child_immediately(&stack, PANE_ZOOM_PAGE);
+            registry.borrow_mut().set_pane_zoomed(pane, true);
             if completed {
                 grab_registered_pane_focus(registry, pane);
             }
@@ -3834,6 +3835,31 @@ mod tests {
             "zoom must return to the current split allocation"
         );
         assert_eq!(actual.height, 750.0);
+    }
+
+    #[gtk::test]
+    fn pane_zoom_animation_resizes_without_scaling_content() {
+        let overlay = gtk::Fixed::new();
+        let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        overlay.put(&frame, 0.0, 0.0);
+        let rect = WindowMoveRect {
+            x: 24.0,
+            y: 36.0,
+            width: 640.0,
+            height: 480.0,
+        };
+
+        set_pane_zoom_widget_rect(&overlay, frame.upcast_ref(), rect);
+
+        assert_eq!(frame.size_request(), (640, 480));
+        let transform = overlay.child_transform(&frame).unwrap();
+        let origin = transform.transform_point(&gtk::graphene::Point::new(0.0, 0.0));
+        let glyph_corner = transform.transform_point(&gtk::graphene::Point::new(8.0, 16.0));
+        assert_eq!((origin.x(), origin.y()), (24.0, 36.0));
+        assert_eq!(
+            (glyph_corner.x() - origin.x(), glyph_corner.y() - origin.y()),
+            (8.0, 16.0)
+        );
     }
 
     #[gtk::test]

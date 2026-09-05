@@ -1313,10 +1313,9 @@ mod tests {
             controller.toggle_pane_zoom(first_pane);
             let overlay = controller.content_overlay.last_child().unwrap().downgrade();
             glib::timeout_future(Duration::from_millis(80)).await;
-            assert_eq!(
-                frame.width(),
-                original_width,
-                "zoom must not reflow the live pane mid-animation"
+            assert!(
+                frame.width() > original_width && frame.width() < controller.stack.width(),
+                "zoom must resize the live pane towards its destination during animation"
             );
             controller.clear_pane_zoom();
             assert!(controller.pane_zoom.transition.borrow().is_none());
