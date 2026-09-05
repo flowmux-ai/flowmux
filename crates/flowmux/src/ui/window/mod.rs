@@ -342,7 +342,7 @@ struct WorktreePanelState {
 }
 
 const PANE_ZOOM_PAGE: &str = "__pane_zoom";
-const WINDOW_MOVE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const WINDOW_MOVE_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const WORKSPACE_OVERVIEW_WINDOW_TITLE: &str = "Workspace overview mode";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1349,16 +1349,12 @@ impl WindowController {
             finish: finish.clone(),
             tick: None,
         });
-        let primed = Cell::new(false);
         let started_at = Cell::new(None::<i64>);
         let duration_micros = WINDOW_MOVE_ANIMATION_DURATION.as_micros() as f32;
 
         let tick = pending.overlay.add_tick_callback(move |overlay, clock| {
             if transition_generation.get() != pending.generation {
                 return glib::ControlFlow::Break;
-            }
-            if !primed.replace(true) {
-                return glib::ControlFlow::Continue;
             }
             let start = started_at.get().unwrap_or_else(|| {
                 let now = clock.frame_time();

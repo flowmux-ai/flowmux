@@ -784,7 +784,6 @@ fn animate_workspace_picture(
 
     let layer = layer.clone();
     let picture = picture.clone();
-    let primed = Cell::new(false);
     let started_at = Cell::new(None::<i64>);
     let finish = Rc::new(RefCell::new(Some(finish)));
     let duration_micros = WINDOW_MOVE_ANIMATION_DURATION.as_micros() as f32;
@@ -792,9 +791,6 @@ fn animate_workspace_picture(
     let tick = layer.clone().add_tick_callback(move |layer, clock| {
         if current_generation.get() != generation {
             return glib::ControlFlow::Break;
-        }
-        if !primed.replace(true) {
-            return glib::ControlFlow::Continue;
         }
         let start = started_at.get().unwrap_or_else(|| {
             let now = clock.frame_time();
