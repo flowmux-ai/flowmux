@@ -330,7 +330,7 @@ fn build_dialog(
     connect_value_changed(&blink_interval_spin, apply_current.clone());
     let update_tab = build_update_tab(
         &dialog,
-        &about_version(),
+        env!("CARGO_PKG_VERSION"),
         install_origin,
         update_state,
         Rc::new(on_check_update),
@@ -615,7 +615,7 @@ fn build_update_tab(
         .build();
 
     let version_row = adw::ActionRow::builder()
-        .title("Installed version")
+        .title("Running version")
         .subtitle(format!("v{current_version}"))
         .build();
     group.add(&version_row);
@@ -859,7 +859,7 @@ fn build_update_tab(
 }
 
 fn show_about_popup(parent: &impl IsA<gtk::Widget>) {
-    let body = about_body_with_version(&about_version());
+    let body = about_body_with_version(env!("CARGO_PKG_VERSION"));
     let dialog = adw::AlertDialog::builder()
         .heading("About")
         .body(body.as_str())
@@ -883,39 +883,6 @@ fn about_body_with_version(version: &str) -> String {
          Version: v{}",
         version
     )
-}
-
-fn about_version() -> String {
-    installed_package_version().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
-}
-
-fn installed_package_version() -> Option<String> {
-    let output = std::process::Command::new("dpkg-query")
-        .args(["-W", "-f=${Version}", "flowmux"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let raw = String::from_utf8(output.stdout).ok()?;
-    clean_installed_version(&raw)
-}
-
-fn clean_installed_version(raw: &str) -> Option<String> {
-    let version = raw.trim();
-    if version.is_empty() || version.contains('\n') {
-        return None;
-    }
-    if !version.chars().all(is_safe_version_char) {
-        return None;
-    }
-    Some(version.to_string())
-}
-
-fn is_safe_version_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+' | '~' | ':')
 }
 
 pub(crate) fn row(label_text: &str, value_widget: &impl IsA<gtk::Widget>) -> gtk::Box {
@@ -1503,6 +1470,16 @@ mod tests {
         assert!(!button_labels.iter().any(|label| label == "OK"));
         assert!(!button_labels.iter().any(|label| label == "Cancel"));
 
+        let version_row = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<adw::ActionRow>().ok())
+            .find(|row| row.title() == "Running version")
+            .unwrap();
+        assert_eq!(
+            version_row.subtitle().as_deref(),
+            Some(concat!("v", env!("CARGO_PKG_VERSION")))
+        );
+
         let font_label = widgets
             .iter()
             .filter_map(|widget| widget.clone().downcast::<gtk::Label>().ok())
@@ -1716,21 +1693,6 @@ mod tests {
             preinstall_decision(Version(0, 8, 0), &BannerState::Current),
             PreinstallDecision::Unavailable
         );
-    }
-
-    #[test]
-    fn clean_installed_version_accepts_debian_versions() {
-        assert_eq!(
-            clean_installed_version(" 1:0.1.0-2+ubuntu~24.04 \n"),
-            Some("1:0.1.0-2+ubuntu~24.04".into())
-        );
-    }
-
-    #[test]
-    fn clean_installed_version_rejects_empty_multiline_or_markup() {
-        assert_eq!(clean_installed_version(""), None);
-        assert_eq!(clean_installed_version("1.2.3\n4.5.6"), None);
-        assert_eq!(clean_installed_version("<b>1.2.3</b>"), None);
     }
 
     /// The persistence checkbox should reflect the seeded value so the
