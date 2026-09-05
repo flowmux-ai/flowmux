@@ -11,6 +11,8 @@ pub(super) struct WorkspaceOverviewState {
     active: Rc<RefCell<Option<ActiveWorkspaceOverview>>>,
     transitioning: Rc<Cell<bool>>,
     generation: Rc<Cell<u64>>,
+    tick: Rc<RefCell<Option<gtk::TickCallbackId>>>,
+    dismiss_pending: Rc<Cell<bool>>,
 }
 
 struct ActiveWorkspaceOverview {
@@ -65,6 +67,7 @@ impl WorkspaceOverviewState {
 impl WindowController {
     pub(super) fn toggle_workspace_overview(&self) {
         if self.workspace_overview.transitioning.get() {
+            self.workspace_overview.dismiss_pending.set(true);
             return;
         }
         if self.workspace_overview.is_active() {
@@ -75,6 +78,14 @@ impl WindowController {
     }
 
     fn open_workspace_overview(&self) {
+        let interrupted_zoom = self.pane_zoom.transition.borrow().is_some();
+        self.cancel_pane_zoom_transition();
+        if interrupted_zoom {
+            // Cancellation reparents the real pane. Allocate it before taking
+            // the preview, rather than capturing its invalidated old bounds.
+            self.stack
+                .allocate(self.stack.width(), self.stack.height(), -1, None);
+        }
         let active_workspace = self.sidebar.selected_workspace();
         let titles = self.sidebar.workspace_titles().borrow().clone();
         let (window_width, window_height) =
@@ -83,7 +94,6 @@ impl WindowController {
             workspace_preview_texture(&zoom.frame, window_width, window_height)
                 .map(|(texture, _, _)| (zoom.workspace, texture))
         });
-        self.clear_pane_zoom();
         let entries = {
             let surfaces = self.surfaces.borrow();
             titles
@@ -139,6 +149,8 @@ impl WindowController {
 
         self.window.set_title(Some(WORKSPACE_OVERVIEW_WINDOW_TITLE));
         self.content_overlay.add_overlay(&view.root);
+        // Capture Escape during entry too, before the card receives focus.
+        view.root.grab_focus();
         self.workspace_overview
             .active
             .replace(Some(ActiveWorkspaceOverview {
@@ -161,7 +173,21 @@ impl WindowController {
 
         self.workspace_overview.transitioning.set(true);
         let controller = self.clone();
-        glib::idle_add_local_once(move || controller.start_workspace_overview_open_animation());
+        // Wait for layout before reading the new card's bounds. An idle can
+        // run before allocation, causing the opening animation to be skipped.
+        let generation = self.workspace_overview.next_generation();
+        let primed = Cell::new(false);
+        let tick = view.root.add_tick_callback(move |_, _| {
+            if !primed.replace(true) {
+                return glib::ControlFlow::Continue;
+            }
+            if controller.workspace_overview.generation.get() == generation {
+                controller.workspace_overview.tick.borrow_mut().take();
+                controller.start_workspace_overview_open_animation();
+            }
+            glib::ControlFlow::Break
+        });
+        *self.workspace_overview.tick.borrow_mut() = Some(tick);
     }
 
     fn start_workspace_overview_open_animation(&self) {
@@ -223,6 +249,7 @@ impl WindowController {
             target,
             generation,
             self.workspace_overview.generation.clone(),
+            self.workspace_overview.tick.clone(),
             move |progress| chrome.set_opacity(f64::from(progress)),
             move || {
                 card.picture.set_opacity(1.0);
@@ -251,10 +278,14 @@ impl WindowController {
         if let Some(focus) = focus {
             focus.grab_focus();
         }
+        if self.workspace_overview.dismiss_pending.replace(false) {
+            self.close_workspace_overview(None);
+        }
     }
 
     fn close_workspace_overview(&self, selected_workspace: Option<WorkspaceId>) {
         if self.workspace_overview.transitioning.get() {
+            self.workspace_overview.dismiss_pending.set(true);
             return;
         }
         let selected_workspace =
@@ -324,6 +355,7 @@ impl WindowController {
             target,
             generation,
             self.workspace_overview.generation.clone(),
+            self.workspace_overview.tick.clone(),
             move |progress| chrome.set_opacity(f64::from(1.0 - progress)),
             move || controller.finish_workspace_overview_close(selected_workspace),
         );
@@ -338,7 +370,9 @@ impl WindowController {
         self.workspace_overview.transitioning.set(true);
         let controller = self.clone();
         glib::MainContext::default().spawn_local(async move {
-            controller.activate_workspace(workspace).await;
+            if controller.sidebar.selected_workspace() != Some(workspace) {
+                controller.activate_workspace(workspace).await;
+            }
             controller.workspace_overview.transitioning.set(false);
             if controller.workspace_overview.is_active() {
                 controller.close_workspace_overview(Some(workspace));
@@ -429,6 +463,9 @@ impl WindowController {
                 if controller.sidebar.selected_workspace() != Some(workspace) {
                     controller.activate_workspace(workspace).await;
                 }
+                if let Some(pane) = controller.focused_pane.get() {
+                    controller.focus_pane(pane);
+                }
                 controller.refresh_window_title().await;
             });
         } else if let Some(saved_focus) = saved_focus.and_then(|focus| focus.upgrade()) {
@@ -445,6 +482,10 @@ impl WindowController {
     fn remove_workspace_overview(&self) -> Option<glib::WeakRef<gtk::Widget>> {
         self.workspace_overview.next_generation();
         self.workspace_overview.transitioning.set(false);
+        self.workspace_overview.dismiss_pending.set(false);
+        if let Some(tick) = self.workspace_overview.tick.borrow_mut().take() {
+            tick.remove();
+        }
         let active = self.workspace_overview.active.borrow_mut().take()?;
         if active.root.parent().as_ref() == Some(self.content_overlay.upcast_ref()) {
             self.content_overlay.remove_overlay(&active.root);
@@ -463,6 +504,7 @@ fn build_workspace_overview_view(
     dismiss: Rc<dyn Fn()>,
 ) -> WorkspaceOverviewView {
     let root = gtk::Overlay::new();
+    root.set_focusable(true);
     root.set_halign(gtk::Align::Fill);
     root.set_valign(gtk::Align::Fill);
     root.set_hexpand(true);
@@ -590,11 +632,14 @@ fn build_workspace_overview_view(
         .iter()
         .map(|card| card.button.clone())
         .collect::<Vec<_>>();
-    let root_for_key = root.clone();
+    let root_for_key = root.downgrade();
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     key.connect_key_pressed(move |_, keyval, _, _| {
-        handle_workspace_overview_key(&root_for_key, &buttons, keyval, dismiss.as_ref())
+        let Some(root) = root_for_key.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
+        handle_workspace_overview_key(&root, &buttons, keyval, dismiss.as_ref())
     });
     root.add_controller(key);
     root.set_child(Some(&chrome));
@@ -721,6 +766,7 @@ fn animate_workspace_picture(
     target: WindowMoveRect,
     generation: u64,
     current_generation: Rc<Cell<u64>>,
+    current_tick: Rc<RefCell<Option<gtk::TickCallbackId>>>,
     progress_changed: impl Fn(f32) + 'static,
     finish: impl FnOnce() + 'static,
 ) {
@@ -742,7 +788,8 @@ fn animate_workspace_picture(
     let started_at = Cell::new(None::<i64>);
     let finish = Rc::new(RefCell::new(Some(finish)));
     let duration_micros = WINDOW_MOVE_ANIMATION_DURATION.as_micros() as f32;
-    layer.clone().add_tick_callback(move |layer, clock| {
+    let tick_for_finish = current_tick.clone();
+    let tick = layer.clone().add_tick_callback(move |layer, clock| {
         if current_generation.get() != generation {
             return glib::ControlFlow::Break;
         }
@@ -769,11 +816,13 @@ fn animate_workspace_picture(
         if picture.parent().as_ref() == Some(layer.upcast_ref()) {
             layer.remove(&picture);
         }
+        tick_for_finish.borrow_mut().take();
         if let Some(finish) = finish.borrow_mut().take() {
             finish();
         }
         glib::ControlFlow::Break
     });
+    *current_tick.borrow_mut() = Some(tick);
 }
 
 #[cfg(test)]
@@ -1073,8 +1122,8 @@ mod tests {
             "the zoomed pane must remain visible in its overview card"
         );
         assert!(
-            controller.pane_zoom.active.borrow().is_none(),
-            "opening overview should leave the workspace unzoomed underneath"
+            controller.zoomed_pane() == Some(first_pane),
+            "overview must preserve zoom so its preview matches the returning workspace"
         );
         assert!(!controller.workspace_overview.transitioning.get());
         assert_eq!(
@@ -1207,5 +1256,79 @@ mod tests {
             controller.window.title().map(|title| title.to_string()),
             title_before_second_overview
         );
+
+        controller.toggle_workspace_overview();
+        let root = controller
+            .workspace_overview
+            .active
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .root
+            .clone();
+        if animations_enabled {
+            assert_eq!(
+                gtk::prelude::GtkWindowExt::focus(&controller.window).as_ref(),
+                Some(root.upcast_ref()),
+                "Escape must reach overview before the first animation frame"
+            );
+        }
+        controller.close_workspace_overview(None);
+        wait_for_overview_transition(&controller).await;
+        assert!(
+            !controller.workspace_overview.is_active(),
+            "entry must honor an immediate dismiss request"
+        );
+        drop(root);
+
+        // Cancel before the first frame and during a running animation. Both
+        // callbacks used to retain the detached overlay and controller.
+        for delay in [0, 80] {
+            controller.toggle_workspace_overview();
+            let root = controller
+                .workspace_overview
+                .active
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .root
+                .downgrade();
+            if delay > 0 {
+                glib::timeout_future(Duration::from_millis(delay)).await;
+            }
+            controller.dismiss_workspace_overview_immediately();
+            assert!(controller.workspace_overview.tick.borrow().is_none());
+            assert!(
+                root.upgrade().is_none(),
+                "cancelling overview must release its widget graph"
+            );
+            assert!(!controller.workspace_overview.transitioning.get());
+        }
+
+        if animations_enabled {
+            controller.activate_workspace(first).await;
+            glib::timeout_future(Duration::from_millis(100)).await;
+            let frame = controller
+                .pane_registry
+                .borrow()
+                .pane_frame(first_pane)
+                .unwrap();
+            let original_width = frame.width();
+            controller.toggle_pane_zoom(first_pane);
+            let overlay = controller.content_overlay.last_child().unwrap().downgrade();
+            glib::timeout_future(Duration::from_millis(80)).await;
+            assert_eq!(
+                frame.width(),
+                original_width,
+                "zoom must not reflow the live pane mid-animation"
+            );
+            controller.clear_pane_zoom();
+            assert!(controller.pane_zoom.transition.borrow().is_none());
+            assert!(
+                overlay.upgrade().is_none(),
+                "cancelling zoom must remove its tick callback and overlay"
+            );
+            assert_eq!(controller.zoomed_pane(), None);
+        }
     }
 }

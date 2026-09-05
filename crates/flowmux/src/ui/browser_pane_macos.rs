@@ -321,30 +321,31 @@ impl Drop for NativeBrowserView {
 }
 
 pub struct NativeBrowserViewsSuspend {
-    views: Vec<(Retained<NSView>, bool)>,
+    _views: Vec<Retained<NSView>>,
 }
 
 impl Drop for NativeBrowserViewsSuspend {
     fn drop(&mut self) {
-        let still_suspended = pop_native_browser_view_suspend();
-        for (view, was_hidden) in self.views.drain(..) {
-            view.setHidden(if still_suspended { true } else { was_hidden });
-        }
+        pop_native_browser_view_suspend();
+        // The GTK pane may have been hidden or moved during the transition.
+        // Its native frame synchronizer will reveal it only if still mapped;
+        // restoring the old NSView flag can resurrect an inactive browser
+        // over a zoomed terminal. This also handles nested suspensions.
     }
 }
 
 pub fn suspend_native_browser_views_for_window(window: &gtk::Window) -> NativeBrowserViewsSuspend {
     push_native_browser_view_suspend();
     let Some(content_view) = native_content_view(window) else {
-        return NativeBrowserViewsSuspend { views: Vec::new() };
+        return NativeBrowserViewsSuspend { _views: Vec::new() };
     };
 
     let mut views = Vec::new();
     collect_web_views(&content_view, &mut views);
-    for (view, _) in &views {
+    for view in &views {
         view.setHidden(true);
     }
-    NativeBrowserViewsSuspend { views }
+    NativeBrowserViewsSuspend { _views: views }
 }
 
 fn push_native_browser_view_suspend() {
@@ -353,11 +354,10 @@ fn push_native_browser_view_suspend() {
     });
 }
 
-fn pop_native_browser_view_suspend() -> bool {
+fn pop_native_browser_view_suspend() {
     NATIVE_BROWSER_VIEW_SUSPEND_COUNT.with(|count| {
         let next = count.get().saturating_sub(1);
         count.set(next);
-        next > 0
     })
 }
 
@@ -365,9 +365,9 @@ pub(crate) fn native_browser_views_are_suspended() -> bool {
     NATIVE_BROWSER_VIEW_SUSPEND_COUNT.with(|count| count.get() > 0)
 }
 
-fn collect_web_views(view: &NSView, views: &mut Vec<(Retained<NSView>, bool)>) {
+fn collect_web_views(view: &NSView, views: &mut Vec<Retained<NSView>>) {
     if view.isKindOfClass(WKWebView::class()) {
-        views.push((view.retain(), view.isHidden()));
+        views.push(view.retain());
     }
 
     let subviews = view.subviews();
