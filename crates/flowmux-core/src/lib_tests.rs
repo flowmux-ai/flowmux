@@ -2708,6 +2708,91 @@ fn screen_working_settles_only_when_it_can_prove_completion() {
 }
 
 #[test]
+fn codex_screen_completion_survives_tool_progress_but_not_a_new_turn() {
+    for (status, text, session, pid, settles) in [
+        (AgentStatus::Working, "Working", "session", 42, true),
+        (AgentStatus::Working, "Starting turn", "session", 42, false),
+        (AgentStatus::Working, "Working", "new-session", 42, false),
+        (AgentStatus::Working, "Working", "session", 43, false),
+        (AgentStatus::Blocked, "Needs approval", "session", 42, false),
+    ] {
+        for visible in [false, true] {
+            let mut surface = PaneSurface::terminal("agent", None);
+            let surface_id = surface.id;
+            let mut presence = AgentPresence::new("codex", AgentActivity::Running, Some(42));
+            presence.source = Some("flowmux:hook".into());
+            presence.session_id = Some("session".into());
+            surface.agent = Some(presence);
+            let mut pane = Pane::Leaf {
+                id: PaneId::new(),
+                content: PaneContent::Tabs {
+                    active: surface_id,
+                    surfaces: vec![surface],
+                },
+            };
+            pane.report_surface_agent_signal(
+                surface_id,
+                AgentStatus::Working,
+                "flowmux:screen",
+                Some("codex"),
+                Some("Working (1s • esc to interrupt)"),
+                visible,
+            );
+            // The last tool hook can arrive after the last observed spinner.
+            pane.report_surface_agent(
+                surface_id,
+                AgentStatusReport {
+                    name: "codex".into(),
+                    status: Some(status),
+                    activity: None,
+                    pid: Some(pid),
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(2),
+                    message: None,
+                    custom_status: Some(text.into()),
+                    session_id: Some(session.into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                visible,
+            );
+            assert_eq!(
+                pane.report_surface_agent_signal(
+                    surface_id,
+                    AgentStatus::Idle,
+                    "flowmux:screen",
+                    Some("codex"),
+                    None,
+                    visible,
+                ),
+                Some(settles),
+                "{status:?}, {text}, {session}, {pid}, visible={visible}"
+            );
+            let agent = pane.agent_presence_for_surface(surface_id).unwrap();
+            assert_eq!(
+                agent.status,
+                if settles { AgentStatus::Idle } else { status }
+            );
+            if settles {
+                assert_eq!(
+                    agent.public_status(),
+                    if visible {
+                        AgentStatus::Idle
+                    } else {
+                        AgentStatus::Done
+                    }
+                );
+                assert_eq!(agent.custom_status, None);
+            }
+            assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+            assert_eq!(agent.session_id.as_deref(), Some(session));
+            assert_eq!(agent.pid, Some(pid));
+            assert_eq!(agent.seq, Some(2));
+        }
+    }
+}
+
+#[test]
 fn screen_idle_restores_hidden_screen_working_as_done() {
     let mut surface = PaneSurface::terminal("agent", None);
     let surface_id = surface.id;

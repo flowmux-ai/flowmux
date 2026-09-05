@@ -2693,6 +2693,17 @@ impl AgentPresence {
         let hook_session_start = report.source.as_deref() == Some("flowmux:hook")
             && matches!(next, AgentStatus::Unknown | AgentStatus::Idle)
             && report.custom_status.as_deref() == Some("Ready");
+        // Codex's last tool hook may follow the last spinner frame. Keep that
+        // observation so the next idle prompt can recover a missing Stop hook.
+        // Only ordinary progress qualifies; turn/session boundaries and waits
+        // must discard the previous turn's screen evidence.
+        let codex_tool_progress = same_session
+            && self.name == "codex"
+            && self.source.as_deref() == Some("flowmux:hook")
+            && report.source.as_deref() == Some("flowmux:hook")
+            && prev == AgentStatus::Working
+            && next == AgentStatus::Working
+            && report.custom_status.as_deref() == Some("Working");
         // Old wrapper shims emitted a second, metadata-free SessionStart in the
         // background. Preserve a later turn state when that delayed legacy
         // report arrives. Native SessionStart always carries a session id and
@@ -2777,7 +2788,7 @@ impl AgentPresence {
         if report.messaging_socket.is_some() {
             self.messaging_socket = report.messaging_socket;
         }
-        if !from_screen {
+        if !from_screen && !codex_tool_progress {
             self.screen_working_base = None;
         }
         if hook_session_start {
