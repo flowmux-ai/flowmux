@@ -845,6 +845,23 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
+    async fn wait_for_detached_widget_release(widget: &glib::WeakRef<gtk::Widget>) {
+        if let Some(widget) = widget.upgrade() {
+            assert!(widget.parent().is_none(), "widget must detach immediately");
+        }
+        // GTK 4.14 retains the removed focus widget until the next after-paint
+        // phase. Let that cleanup run without accepting a persistent reference.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while widget.upgrade().is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "detached widget must be released after GTK focus cleanup"
+            );
+            glib::timeout_future(Duration::from_millis(5)).await;
+        }
+    }
+
     fn save_overview_snapshot(
         content_overlay: &gtk::Overlay,
         root: &gtk::Overlay,
@@ -1288,17 +1305,15 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .root
+                .upcast_ref::<gtk::Widget>()
                 .downgrade();
             if delay > 0 {
                 glib::timeout_future(Duration::from_millis(delay)).await;
             }
             controller.dismiss_workspace_overview_immediately();
             assert!(controller.workspace_overview.tick.borrow().is_none());
-            assert!(
-                root.upgrade().is_none(),
-                "cancelling overview must release its widget graph"
-            );
             assert!(!controller.workspace_overview.transitioning.get());
+            wait_for_detached_widget_release(&root).await;
         }
 
         if animations_enabled {
@@ -1319,11 +1334,8 @@ mod tests {
             );
             controller.clear_pane_zoom();
             assert!(controller.pane_zoom.transition.borrow().is_none());
-            assert!(
-                overlay.upgrade().is_none(),
-                "cancelling zoom must remove its tick callback and overlay"
-            );
             assert_eq!(controller.zoomed_pane(), None);
+            wait_for_detached_widget_release(&overlay).await;
         }
     }
 }
