@@ -1,6 +1,6 @@
 
 <div align="center">
-  
+
 # flowmux
 ![icon](resources/icons/flowmux-180.png)
 
@@ -16,13 +16,13 @@
 
 </div>
 
-### A terminal for AI agent workflows, browser control, and task signals.
+flowmux is a Linux/GTK4 terminal built for AI coding agents. Workspaces in the
+side panel hold tasks side by side; each one splits into panes that mix
+terminal tabs and browser tabs. Agent hooks report turn state as desktop
+notifications, and a CLI lets agents drive the browser, panes, and terminal
+over a Unix socket. Supported on Ubuntu 24.04 and later.
 
-flowmux is a Linux/GTK4 terminal for AI coding agents. The terminal pane uses
-the system VTE widget for terminal emulation, flowmux-owned PTYs, and GTK integration.
-Supported on Ubuntu 24.04 and later.
-
-> Unofficial GPL-3.0-or-later reimplementation inspired by [cmux](https://cmux.com/ko), a macOS/AppKit app. Not affiliated with cmux.
+> Unofficial GPL-3.0-or-later reimplementation inspired by [cmux](https://cmux.com/), a macOS/AppKit app. Not affiliated with cmux.
 
 ## Install (Ubuntu 24.04+, amd64)
 
@@ -30,285 +30,192 @@ Supported on Ubuntu 24.04 and later.
 curl -fsSL https://flowmux.org/install.sh | sh
 ```
 
-Uninstall the release package with `sudo apt remove flowmux`.
-  
-## Control internal browser
+The script installs the release `.deb`. Uninstall with `sudo apt remove flowmux`.
+To build from source instead, see [Build from source](#build-from-source).
 
-A WebKitGTK 6.0 browser tab lives next to terminal tabs in the same pane tree.
-The clip shows an AI agent driving the page over flowmux's IPC socket —
-snapshot the DOM, click, type, read state back — with no system Chromium and
-no separate driver.
-
-<img src="resources/screenshot/video_control_browser.gif" alt="video" width="100%" />
-
-## AI Agent notification (Claude, Codex, OpenCode, Gemini, Antigravity)
-
-`flowmux fix` adds lifecycle hooks to Claude Code, Codex, OpenCode, Gemini, and
-Antigravity.
-FlowMux keeps session start/end separate from turn working/waiting/completion,
-then surfaces attention and completion as native desktop notifications — routed
-to the workspace that fired them, suppressed while that surface is focused,
-and isolated per window.
-
-Claude's `PermissionRequest` has no tool-use ID, so FlowMux keeps a conservative
-permission marker for the whole model-call batch and clears it at the matching
-`PostToolBatch` boundary. Explicit input tools are still correlated by their
-tool-use IDs. Codex permission waits are scoped to the reported root or child
-turn and are cleared only by an authoritative turn boundary. Observed
-`SubagentStart`/`SubagentStop` events keep a stopped parent turn in Working
-until its last known child stops; internal or reused-child work that Codex does
-not expose still falls back to process and terminal signals.
-
-Both Claude Code and Codex run `Stop`/`SubagentStop` hooks before all handlers
-have agreed to stop. If another third-party handler blocks that same stop, the
-completion or child removal FlowMux saw is provisional until a later activity
-event corrects it; neither hook API currently exposes a final stop-accepted
-event. On a retry, FlowMux uses `stop_hook_active` to re-settle the same Codex
-turn without issuing a duplicate completion notification, but the retry is
-still provisional for the same reason.
-
-<img src="resources/screenshot/claude_notification.gif" alt="video2" width="100%" />
-
-## Split panes
-
-Split a pane horizontally or vertically and drag the divider to resize. Mix
-terminal and browser tabs across panes, and navigate between them from the
-keyboard.
-
-<img src="resources/screenshot/view_split.gif" alt="split" width="100%" />
-
-## Overview mode
-
-See every active workspace at a glance and jump directly to the one you need.
-
-<img src="resources/screenshot/overview_mode.gif" alt="overview mode" width="100%" />
-
-## File and worktree views
-
-Open the **Files** and **Worktrees** sidebars to browse the current repository,
-inspect Git worktree status, and remove worktrees without leaving the terminal.
-
-<img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
-
-## Themes
-
-Choose a built-in light or dark theme in **Options → Theme**, or customize the
-terminal and editor background, text, cursor, selection, and font.
-
-<img src="resources/screenshot/setting_theme.gif" alt="theme settings" width="100%" />
-
-## Image viewer
-
-Ctrl+click an image path in a terminal pane to preview it inline without
-leaving flowmux. Supports **PNG, JPEG, WebP, GIF, SVG, and Lottie**
-(`.lottie` / `.json`). Everything is drawn by
-[ThorVG](https://www.thorvg.org/): PNG / JPEG / WebP / SVG are decoded and
-rendered by ThorVG's own loaders, Lottie plays back frame by frame, and GIF
-(which ThorVG has no loader for) is decoded with the Rust `image` crate and
-then handed to ThorVG to render. ThorVG is an optional runtime dependency — see
-[ThorVG (image viewer — optional)](#thorvg-image-viewer--optional).
-
-<img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />
-
-## Markdown viewer
-
-`flowmux-md-viewer` renders Markdown files in a WebKit view for a formatted,
-scrollable preview.
-
-<img src="resources/screenshot/md_viewer.gif" alt="markdown viewer" width="100%" />
-
-## File and worktree views
-
-Open the Files and Worktrees sidebars to browse the current repository,
-inspect Git worktree status, and remove worktrees without leaving the terminal.
-Open the AI Usage popover from the workspace controls to review current agent
-token and activity totals without interrupting running sessions.
+After installing or upgrading, run `flowmux fix` to wire agent hooks, then
+restart any running agent sessions. See [Verify & repair](#verify--repair).
 
 ## Features
 
-- **Workspaces & panes** — side-panel workspaces hold tasks side by side, each
-  split into multiple keyboard-navigable panes mixing terminal and browser
-  tabs. `Ctrl+Shift+K` copies the focused cwd; right-click for Copy path / URL.
-- **In-app browser** — a WebKitGTK tab next to your terminals, drivable by
-  agents in a neighbouring pane (snapshot, click, type, read state). Import a
-  session from Firefox / Chrome / Chromium / Brave / Edge / Arc; **Web
-  Inspector** opens WebKit dev tools.
-- **Embedded editor** — double-click a text file in Files to edit it in the
-  selected pane. Supports multilingual text and paths, atomic save, find and
-  replace, Quick Open, workspace search, conflict comparison, close guards,
-  and crash recovery without a separate editor runtime.
-- **Notifications** — terminal "task complete" / "needs attention" signals
-  become desktop notifications, routed to the firing workspace and quiet while
-  focused. Bell popover **All Clear** clears all entries and toasts at once.
-- **AI agent integration** — Claude Code, Codex, OpenCode, Gemini, and
-  Antigravity are wired by `flowmux fix`; sessions persist across restarts.
-  `claude-teams` opens a workspace pre-split into per-Claude panes. `flowmux
-  doctor` / `fix` audit and repair wiring.
-- **Agent CLI** — scripts and agents drive flowmux over its socket:
-  `flowmux browser <op>` (snapshot / click / fill / type / press /
-  is-visible / count / …), `flowmux identify` and `capabilities` for context
-  discovery, `flowmux tree` to inspect the workspace → pane → tab structure,
-  `workspace current|focus`, `focus-pane|close-pane`, `focus-tab|close-tab`,
-  `send-keys`, and `read-screen` (terminal buffer dump). Pane args accept
-  `pane:<uuid>` or fall back to
-  `$FLOWMUX_PANE_ID`; supported commands accept `--json` for machine-readable
-  output. Full contract in
-  [`AGENTS.md`](AGENTS.md).
-- **Customizable keybindings** — Options → **Keybindings** rebinds any shortcut
-  (applies on OK, no restart), saved to
-  `$XDG_CONFIG_HOME/flowmux/options.json`. IME/scroll terminal shortcuts
-  (Shift+Enter Hangul flush, smart PgUp/PgDn) are fixed and not editable. The
-  AI Usage popover opens and closes with **Ctrl+Alt+U** by default
-  (**Cmd+Alt+U** on macOS; `toggle-usage-popover` in the Keybindings options).
-  **Ctrl+Alt+G** opens `tig` in a new tab in the focused pane
-  (**Cmd+Alt+G** on macOS; `open-tig` in the Keybindings options).
+### Agent notifications
 
-See the [keyboard shortcut reference](docs/keybindings.md) and
+`flowmux fix` installs lifecycle hooks for Claude Code, Codex, OpenCode,
+Gemini CLI, and Antigravity CLI. Each agent's session start/end is tracked
+separately from its turn state (working, waiting for input, completed), and
+"task complete" / "needs attention" signals become desktop notifications
+routed to the firing workspace. Sessions persist across restarts. The bell
+popover's **All Clear** dismisses every entry at once. Details of the hook
+model are in [`docs/agent-status-verification.md`](docs/agent-status-verification.md).
+
+<img src="resources/screenshot/claude_notification.gif" alt="agent notification" width="100%" />
+
+### Browser tab
+
+A WebKitGTK 6.0 browser tab sits next to terminal tabs in the same pane. An
+agent in a neighbouring pane can drive it over the IPC socket — snapshot the
+DOM, click, type, read state back — without a system Chromium or a separate
+driver. Import a session from Firefox, Chrome, Chromium, Brave, Edge, or Arc;
+**Web Inspector** opens WebKit's dev tools.
+
+<img src="resources/screenshot/video_control_browser.gif" alt="browser control" width="100%" />
+
+### Split panes and overview mode
+
+Split a pane horizontally or vertically, drag dividers to resize, and move
+between panes from the keyboard. Overview mode shows every active workspace
+at a glance so you can jump straight to the one you need.
+
+<img src="resources/screenshot/view_split.gif" alt="split panes" width="100%" />
+<img src="resources/screenshot/overview_mode.gif" alt="overview mode" width="100%" />
+
+### Files, worktrees, and AI usage
+
+The **Files** and **Worktrees** sidebars browse the current repository,
+show Git worktree status, and remove worktrees without leaving the terminal.
+Double-click a text file to open it in the embedded editor (find and replace,
+Quick Open, workspace search, conflict comparison, crash recovery). The AI
+Usage popover (**Ctrl+Alt+U**) shows current agent token and activity totals.
+
+<img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
+
+### Themes and keybindings
+
+Pick a built-in light or dark theme in **Options → Theme**, or customize the
+terminal and editor colors and font. **Options → Keybindings** rebinds any
+shortcut without a restart; settings live in
+`$XDG_CONFIG_HOME/flowmux/options.json`. See the
+[keyboard shortcut reference](docs/keybindings.md) and
 [configuration reference](docs/configuration.md).
 
+<img src="resources/screenshot/setting_theme.gif" alt="theme settings" width="100%" />
 
-### ThorVG (image viewer — optional)
+### Image and Markdown viewers
 
-The image viewer loads **ThorVG** at runtime (`dlopen`). It is **optional** —
-flowmux builds and runs without it; only the image viewer needs it, and shows a
-"ThorVG is unavailable or incompatible" message until a build with its C API
-and image loaders is present (no flowmux rebuild needed).
+Ctrl+click an image path in a terminal to preview it inline. PNG, JPEG,
+WebP, GIF, SVG, and Lottie (`.lottie` / `.json`) are supported; rendering
+needs the optional [ThorVG](#thorvg-image-viewer) runtime library. Markdown
+files open in a formatted, scrollable WebKit preview.
 
-On macOS, install the Homebrew package and restart flowmux:
+<img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />
+<img src="resources/screenshot/md_viewer.gif" alt="markdown viewer" width="100%" />
+
+### Agent CLI
+
+Scripts and agents drive flowmux through `flowmux <verb>` (forwarded to
+`flowmuxctl`): `browser <op>` for snapshot / click / fill / type / press,
+`identify` and `capabilities` for context discovery, `tree` for the
+workspace → pane → tab structure, `focus-pane` / `close-pane`,
+`focus-tab` / `close-tab`, `send-keys`, and `read-screen`. Pane arguments
+fall back to `$FLOWMUX_PANE_ID` inside a pane, and `--json` gives
+machine-readable output. `claude-teams` opens a workspace pre-split into
+per-Claude panes. The full contract is in [`AGENTS.md`](AGENTS.md).
+
+## Optional runtime dependencies
+
+### ThorVG (image viewer)
+
+The image viewer loads ThorVG with `dlopen` at runtime. flowmux builds and
+runs without it; the viewer shows a "ThorVG is unavailable" message until a
+build with the C API and image loaders is present. Ubuntu does not package
+ThorVG, so build it with the helper script (needs `meson` and `ninja-build`):
 
 ```bash
-brew install thorvg
-```
-
-Ubuntu does not package ThorVG, so install it with the helper script (needs
-`meson` + `ninja-build`):
-
-```bash
-sudo scripts/install-thorvg.sh     # ThorVG v1.0.6 → /usr/local, then restart flowmux
+sudo scripts/install-thorvg.sh                 # ThorVG v1.0.6 → /usr/local
 PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 ```
 
-ThorVG must be built with the C API and all loaders; the script does that
-(`meson -Dbindings=capi -Dloaders=all`). Where a distro packages such a build
-you can use it instead — e.g. Debian `libthorvg-dev`, Fedora `thorvg`.
+Restart flowmux afterwards. Distro packages built with `-Dbindings=capi
+-Dloaders=all` also work (Debian `libthorvg-dev`, Fedora `thorvg`, Homebrew
+`thorvg`).
 
-### Optional — full media playback in tab browser
+### GStreamer (browser media)
 
-WebKitGTK decodes media via GStreamer. Without these plugins pages still load,
-but YouTube / Twitch / `<video>` may stall, miss subtitles, or fail on DRM:
-
-```bash
-sudo apt install \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav
-```
-
-## Build
+WebKitGTK plays media through GStreamer. Without these plugins pages still
+load, but video sites may stall or miss subtitles:
 
 ```bash
-cargo build --release --workspace
+sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+  gstreamer1.0-plugins-ugly gstreamer1.0-libav
 ```
 
-Produces two binaries under `target/release/`:
+## Build from source
 
-- `flowmux` — GTK4 GUI; also forwards CLI subcommands to `flowmuxctl`.
-- `flowmuxctl` — CLI helper invoked by the GUI and by agent hooks.
+Prerequisites on Ubuntu 24.04+ (Rust stable, MSRV 1.93):
 
-`flowmux read-screen` (terminal buffer dump) reads the viewport straight from
-the VTE terminal buffer, so it works in every build.
+```bash
+sudo apt install build-essential pkg-config git curl ca-certificates \
+  libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libwebkitgtk-6.0-dev \
+  libssl-dev libdbus-1-dev libsecret-1-dev
+```
+
+Install to the host (builds with the `fast` profile, then installs
+`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` plus the
+desktop entry and icons):
+
+```bash
+./install.sh
+```
+
+`install.sh` offers to install missing apt packages and the Rust toolchain.
+It leaves agent settings unchanged; run `flowmux fix` to enable hooks.
+Restart any running flowmux GUI to pick up the new binary.
 
 For development:
 
 ```bash
-cargo run -p flowmux           # debug GUI
-cargo check --workspace        # type-check everything
-scripts/check-ubuntu-compat.sh # Docker smoke check for 24.04/26.04
+cargo build --release --workspace   # binaries under target/release/
+cargo run -p flowmux                # debug GUI
+cargo check --workspace             # type-check everything
+xvfb-run -a dbus-run-session -- cargo test --workspace --locked
+scripts/check-ubuntu-compat.sh      # Docker smoke check for 24.04 / 26.04
 ```
 
 The Monaco editor bundle under `editor/flowmux-editor-web/dist` is committed,
-so regular flowmux builds and installs do not require Node.js. Only developers
-who change the editor frontend need Node.js 20 or newer and npm. Rebuild and
-verify the locked assets with:
-
-```bash
-scripts/build-editor-assets.sh
-```
-
-The script uses `npm ci`, runs the TypeScript and multilingual path tests,
-builds the worker bundles, and checks the distributable asset set. Commit the
+so builds do not need Node.js. Only changes to the editor frontend need
+Node.js 20+; rebuild with `scripts/build-editor-assets.sh` and commit the
 updated `dist` directory and `package-lock.json` together.
 
-## macOS local install
+### macOS (development only)
 
-The macOS build uses Homebrew GTK / libadwaita and the system
-WebKit.framework for the browser pane. It installs a
-regular app bundle plus CLI binaries:
+macOS builds use Homebrew GTK / libadwaita and the system WebKit for the
+browser tab. `scripts/install-macos.sh` installs `FlowMux.app` under
+`~/Applications` and the CLI binaries to `~/.local/bin`:
 
 ```bash
 brew install pkg-config gtk4 libadwaita
 scripts/install-macos.sh --check
 scripts/install-macos.sh
-open "$HOME/Applications/FlowMux.app"
 ```
-
-The script installs `FlowMux.app` under `~/Applications` and copies `flowmux`,
-`flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin`.
-
-### Install a source build to the host
-
-```bash
-./install.sh                   # installs missing prerequisites, flowmux, and app icon
-```
-
-This installs `flowmux`, `flowmuxctl`, and `flowmux-md-viewer` binaries to
-`~/.local/bin` and `~/.cargo/bin`, plus the desktop entry
-(`~/.local/share/applications/com.flowmux.App.desktop`) and the app icons
-(`~/.local/share/icons/hicolor/…`) so flowmux appears in the app launcher.
-It uses the `fast` profile (release optimization without LTO) and the system
-VTE library; no Zig toolchain or vendored terminal backend is required.
-ThorVG (image viewer) is optional and loaded at runtime, so the build does not
-depend on it; `install.sh` only prints a note if it is missing.
-The installer leaves agent settings unchanged, including integrations removed
-by the user. Run `flowmux fix` explicitly to enable or refresh them.
-
-After installing, fully restart any running flowmux GUI to pick up the new
-binary.
 
 ## Verify & repair
 
-flowmux wires into host pieces: agent SKILL files, agent hooks, the browser
-data dir, host browsers for the cookie importer, and the daemon socket.
+flowmux wires into host pieces: agent hooks, agent SKILL files, the browser
+data dir, host browsers for cookie import, and the daemon socket.
 
 ```bash
 flowmux doctor   # read-only audit; non-zero exit if anything needs fixing
-flowmux fix      # re-install / refresh what doctor flagged
+flowmux fix      # install / refresh what doctor flagged
 ```
 
-`doctor` prints one row per check with a status badge (`ok` / `fix` / `warn` /
-`info`); `NO_COLOR=1` or piping disables colour. Run it after a flowmux
-install/upgrade and after installing a new agent. `fix` is idempotent: hook
-config entries without a flowmux marker are preserved, while flowmux-managed
-SKILL copies are re-synced to the version embedded in the binary. Add `--json`
-to either command for machine-readable output.
+Both accept `--json`. `fix` is idempotent: hook entries without a flowmux
+marker are preserved, and flowmux-managed SKILL copies are re-synced to the
+version embedded in the binary. Restart running agent sessions afterwards so
+they reload hook configuration.
 
-Restart running agent sessions after `flowmux fix` so they reload their hook
-configuration. Codex asks you to review changed user hooks in `/hooks`; FlowMux
-does not bypass that trust decision. A doctor status of `Installed` verifies the
-managed JSON/config shape, not that Codex has approved a changed command. Codex
-configurations with `allow_managed_hooks_only = true` cannot load these user
-hooks; `doctor`/`fix` reports that policy instead of silently claiming coverage.
+Codex asks you to approve changed user hooks in `/hooks`; flowmux does not
+bypass that. Codex configurations with `allow_managed_hooks_only = true`
+cannot load these hooks, and `doctor` reports that policy.
 
 ### Troubleshooting
 
-Set `FLOWMUX_LOG=/path/to/flowmux.log` for a persistent diagnostic log.
-Crash diagnostics are stored under `$XDG_STATE_HOME/flowmux/crashes` (usually
-`~/.local/state/flowmux/crashes`). Start with `flowmux doctor`; it is read-only,
-while `flowmux fix` repairs marked integration entries.
+- `FLOWMUX_LOG=debug` (or any `tracing` filter) raises console log verbosity.
+- Daily log files are written under `$XDG_STATE_HOME/flowmux/logs`
+  (usually `~/.local/state/flowmux/logs`); crash reports go to
+  `$XDG_STATE_HOME/flowmux/crash`.
 
 ## License
 
 GPL-3.0-or-later. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-Contributions accepted under the same license; see
+Contributions are accepted under the same license; see
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
