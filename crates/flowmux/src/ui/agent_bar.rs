@@ -450,9 +450,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn working_item_uses_spinner_and_highlight_class() {
-        if gtk::init().is_err() {
-            return;
-        }
         let (bridge, _rx) = Bridge::new();
         let bar = AgentBar::new(bridge);
         let item = working_item();
@@ -495,9 +492,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn rerender_releases_buttons_with_dnd_controllers() {
-        if gtk::init().is_err() {
-            return;
-        }
         let (bridge, _rx) = Bridge::new();
         let bar = AgentBar::new(bridge);
         let item = working_item();
@@ -526,9 +520,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn dropping_bar_releases_current_dnd_item_graph() {
-        if gtk::init().is_err() {
-            return;
-        }
         let (bridge, _rx) = Bridge::new();
         let bar = AgentBar::new(bridge);
         let item = working_item();

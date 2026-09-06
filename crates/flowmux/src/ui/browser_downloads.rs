@@ -781,9 +781,6 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[gtk::test]
     fn manager_uses_bounded_vertical_scroller() {
-        if gtk::init().is_err() {
-            return;
-        }
         let manager = DownloadManager::new();
         let weak = manager.downgrade();
         assert_eq!(manager.scroll_policy(), gtk::PolicyType::Never);
@@ -799,9 +796,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn clear_all_keeps_active_download_rows() {
-        if gtk::init().is_err() {
-            return;
-        }
         let manager = DownloadManager::new();
         let active = manager.add(|| {});
         let complete = manager.add(|| {});
@@ -816,9 +810,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn manager_removes_rows_evicted_from_terminal_history() {
-        if gtk::init().is_err() {
-            return;
-        }
         let manager = DownloadManager::new();
         let oldest = manager.add(|| {});
         oldest.finish();
@@ -834,9 +825,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn cancel_then_finished_renders_cancelled_and_runs_cancel_once() {
-        if gtk::init().is_err() {
-            return;
-        }
         let cancelled = Rc::new(Cell::new(0));
         let cancelled_for_action = cancelled.clone();
         let manager = DownloadManager::new();
@@ -855,9 +843,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn failed_then_finished_adapter_order_preserves_failure() {
-        if gtk::init().is_err() {
-            return;
-        }
         let manager = DownloadManager::new();
         let item = manager.add(|| {});
         item.fail("connection reset".into());
@@ -870,9 +855,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn destination_and_progress_enable_file_actions_only_after_completion() {
-        if gtk::init().is_err() {
-            return;
-        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("report.txt");
         std::fs::write(&path, "downloaded").unwrap();
@@ -892,9 +874,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn individual_removal_rejects_active_and_removes_terminal_row() {
-        if gtk::init().is_err() {
-            return;
-        }
         let manager = DownloadManager::new();
         let item = manager.add(|| {});
 
@@ -910,9 +889,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn opening_a_missing_completed_file_reports_missing() {
-        if gtk::init().is_err() {
-            return;
-        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("missing.txt");
         let manager = DownloadManager::new();
@@ -929,9 +905,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn revealing_a_missing_completed_file_reports_missing() {
-        if gtk::init().is_err() {
-            return;
-        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("missing.txt");
         let manager = DownloadManager::new();

@@ -1,26 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Stress: serialization round-trip + light fuzz over the IPC protocol.
-//!
-//! Marked `#[ignore]`. Run with:
-//!     cargo test -p flowmux-ipc --release --test stress_protocol_fuzz -- --ignored --nocapture
-//!
-//! Two passes:
-//!
-//! 1. **Round-trip stability** -- generate envelopes covering every variant
-//!    of [`Request`], [`Response`], [`Event`], and [`RpcError`]; serialize,
-//!    deserialize, then serialize the deserialized form. The two JSON
-//!    strings must be byte-equal so a refactor that drops a tag, breaks
-//!    rename_all, or loses a field surfaces here.
-//! 2. **Garbage-input safety** -- take valid serialized envelopes and
-//!    apply byte-level mutations (flip / drop / insert random bytes).
-//!    Deserialization must return `Err`, never panic.
+//! Selected protocol samples must preserve their fields through serialization.
+//! This is not exhaustive wire compatibility coverage: literal wire/default
+//! contracts live in protocol.rs and framing behavior lives in server.rs.
 
 use flowmux_core::{
     NotificationLevel, PaneId, PlacementStrategy, SplitDirection, SurfaceId, WorkspaceId,
 };
 use flowmux_ipc::protocol::{Envelope, Event, Payload, Request, Response, RpcError};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 struct Xs(u64);
 impl Xs {
@@ -32,9 +20,6 @@ impl Xs {
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
-    }
-    fn next_u8(&mut self) -> u8 {
-        (self.next_u64() & 0xFF) as u8
     }
     fn ascii_word(&mut self, max: usize) -> String {
         let len = (self.next_u64() as usize) % max.max(1);
@@ -312,7 +297,6 @@ fn assert_round_trip_stable(env: &Envelope) {
 }
 
 #[test]
-#[ignore = "stress: protocol round-trip across all variants"]
 fn protocol_envelopes_survive_round_trip() {
     let mut rng = Xs::new(0xFE_ED_BE_EF_BA_AD_F0_0Du64);
     let start = Instant::now();
@@ -344,86 +328,6 @@ fn protocol_envelopes_survive_round_trip() {
     }
     eprintln!(
         "round-trip: {count} envelopes verified in {:?}",
-        start.elapsed()
-    );
-}
-
-#[test]
-#[ignore = "stress: protocol garbage-input safety"]
-fn protocol_decoder_rejects_garbage_without_panic() {
-    // Take a known-good serialized envelope and apply byte-level mutations.
-    // None of these may panic; serde_json must always return Err for
-    // syntactically broken or schema-violating input, never abort. (Valid
-    // mutations that happen to remain parseable are also fine.)
-    const ITER: usize = 5_000;
-    const BUDGET: Duration = Duration::from_secs(20);
-
-    let seed_envelopes = [
-        Envelope {
-            id: 1,
-            payload: Payload::Request(Request::Ping),
-        },
-        Envelope {
-            id: 42,
-            payload: Payload::Request(Request::PaneSplit {
-                pane: PaneId::new(),
-                direction: SplitDirection::Vertical,
-            }),
-        },
-        Envelope {
-            id: 7,
-            payload: Payload::Response(Response::Error(RpcError::NotFound("x".into()))),
-        },
-    ];
-    let baselines: Vec<String> = seed_envelopes
-        .iter()
-        .map(|e| serde_json::to_string(e).expect("seed envelope serializes"))
-        .collect();
-
-    let mut rng = Xs::new(0xDEAD_BEEF_F00Du64);
-    let start = Instant::now();
-    let mut decoded_ok = 0u32;
-    let mut decoded_err = 0u32;
-
-    for i in 0..ITER {
-        let base = &baselines[(rng.next_u64() as usize) % baselines.len()];
-        let mut bytes = base.as_bytes().to_vec();
-        // Mutation: flip / drop / insert N times.
-        let muts = (rng.next_u64() % 6 + 1) as usize;
-        for _ in 0..muts {
-            if bytes.is_empty() {
-                bytes.push(b'{');
-                continue;
-            }
-            let pos = (rng.next_u64() as usize) % bytes.len();
-            match rng.next_u64() % 3 {
-                0 => bytes[pos] = rng.next_u8(),
-                1 => {
-                    if bytes.len() > 1 {
-                        bytes.remove(pos);
-                    }
-                }
-                _ => bytes.insert(pos, rng.next_u8()),
-            }
-        }
-        // The use of `String::from_utf8_lossy` is intentional: serde_json
-        // accepts invalid UTF-8 only inside string values, and on the wire
-        // we only ever decode bytes that arrived as valid UTF-8 from
-        // tokio's line codec. Lossy here matches that guarantee for the
-        // fuzz target.
-        let s = String::from_utf8_lossy(&bytes);
-        match serde_json::from_str::<Envelope>(&s) {
-            Ok(_) => decoded_ok += 1,
-            Err(_) => decoded_err += 1,
-        }
-
-        assert!(
-            start.elapsed() < BUDGET,
-            "garbage-input fuzz exceeded {BUDGET:?} after {i} iters"
-        );
-    }
-    eprintln!(
-        "garbage-input fuzz: {ITER} mutations -> {decoded_ok} accepted, {decoded_err} rejected, no panic, {:?}",
         start.elapsed()
     );
 }

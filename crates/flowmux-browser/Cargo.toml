@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Browser controller trait + DOM snapshot types + JS scripts shared by flowmux's WebKit impl and headless test mocks."
+description = "Browser controller trait + DOM snapshot types + JS scripts shared by flowmux's WebKit impl."
 
 [dependencies]
 serde = { workspace = true }
@@ -16,4 +16,3 @@ async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { workspace = true, features = ["macros", "rt"] }

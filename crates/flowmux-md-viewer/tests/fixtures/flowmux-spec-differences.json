@@ -1,0 +1,478 @@
+{
+  "#\tFoo\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n"
+    ]
+  },
+  "Foo\n---\nbar\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h2>\n<p>bar</p>\n"
+    ]
+  },
+  "# foo\n## foo\n### foo\n#### foo\n##### foo\n###### foo\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h1>\n<h2><a href=\"#foo-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-1\"></a>foo</h2>\n<h3><a href=\"#foo-2\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-2\"></a>foo</h3>\n<h4><a href=\"#foo-3\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-3\"></a>foo</h4>\n<h5><a href=\"#foo-4\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-4\"></a>foo</h5>\n<h6><a href=\"#foo-5\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-5\"></a>foo</h6>\n"
+    ]
+  },
+  "# foo *bar* \\*baz\\*\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo-bar-baz\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar-baz\"></a>foo <em>bar</em> *baz*</h1>\n"
+    ]
+  },
+  "#                  foo                     \n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h1>\n"
+    ]
+  },
+  " ### foo\n  ## foo\n   # foo\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h3>\n<h2><a href=\"#foo-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-1\"></a>foo</h2>\n<h1><a href=\"#foo-2\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-2\"></a>foo</h1>\n"
+    ]
+  },
+  "## foo ##\n  ###   bar    ###\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h2>\n<h3><a href=\"#bar\" aria-hidden=\"true\" class=\"anchor\" id=\"bar\"></a>bar</h3>\n"
+    ]
+  },
+  "# foo ##################################\n##### foo ##\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h1>\n<h5><a href=\"#foo-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-1\"></a>foo</h5>\n"
+    ]
+  },
+  "### foo ###     \n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h3>\n"
+    ]
+  },
+  "### foo ### b\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo--b\" aria-hidden=\"true\" class=\"anchor\" id=\"foo--b\"></a>foo ### b</h3>\n"
+    ]
+  },
+  "# foo#\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo#</h1>\n"
+    ]
+  },
+  "### foo \\###\n## foo #\\##\n# foo \\#\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo-\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-\"></a>foo ###</h3>\n<h2><a href=\"#foo--1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo--1\"></a>foo ###</h2>\n<h1><a href=\"#foo--2\" aria-hidden=\"true\" class=\"anchor\" id=\"foo--2\"></a>foo #</h1>\n"
+    ]
+  },
+  "****\n## foo\n****\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<hr />\n<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h2>\n<hr />\n"
+    ]
+  },
+  "Foo bar\n# baz\nBar foo\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<p>Foo bar</p>\n<h1><a href=\"#baz\" aria-hidden=\"true\" class=\"anchor\" id=\"baz\"></a>baz</h1>\n<p>Bar foo</p>\n"
+    ]
+  },
+  "## \n#\n### ###\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#\" aria-hidden=\"true\" class=\"anchor\" id=\"\"></a></h2>\n<h1><a href=\"#-1\" aria-hidden=\"true\" class=\"anchor\" id=\"-1\"></a></h1>\n<h3><a href=\"#-2\" aria-hidden=\"true\" class=\"anchor\" id=\"-2\"></a></h3>\n"
+    ]
+  },
+  "Foo *bar*\n=========\n\nFoo *bar*\n---------\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo-bar\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar\"></a>Foo <em>bar</em></h1>\n<h2><a href=\"#foo-bar-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar-1\"></a>Foo <em>bar</em></h2>\n"
+    ]
+  },
+  "Foo *bar\nbaz*\n====\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo-bar-baz\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar-baz\"></a>Foo <em>bar\nbaz</em></h1>\n"
+    ]
+  },
+  "  Foo *bar\nbaz*\t\n====\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo-bar-baz\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar-baz\"></a>Foo <em>bar\nbaz</em></h1>\n"
+    ]
+  },
+  "Foo\n-------------------------\n\nFoo\n=\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h2>\n<h1><a href=\"#foo-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-1\"></a>Foo</h1>\n"
+    ]
+  },
+  "   Foo\n---\n\n  Foo\n-----\n\n  Foo\n  ===\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h2>\n<h2><a href=\"#foo-1\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-1\"></a>Foo</h2>\n<h1><a href=\"#foo-2\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-2\"></a>Foo</h1>\n"
+    ]
+  },
+  "Foo\n   ----      \n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h2>\n"
+    ]
+  },
+  "Foo  \n-----\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h2>\n"
+    ]
+  },
+  "Foo\\\n----\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo\\</h2>\n"
+    ]
+  },
+  "`Foo\n----\n`\n\n<a title=\"a lot\n---\nof dashes\"/>\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>`Foo</h2>\n<p>`</p>\n<h2><a href=\"#a-titlea-lot\" aria-hidden=\"true\" class=\"anchor\" id=\"a-titlea-lot\"></a>&lt;a title=&quot;a lot</h2>\n<p>of dashes&quot;/&gt;</p>\n"
+    ]
+  },
+  "Foo\nBar\n---\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo-bar\" aria-hidden=\"true\" class=\"anchor\" id=\"foo-bar\"></a>Foo\nBar</h2>\n"
+    ]
+  },
+  "---\nFoo\n---\nBar\n---\nBaz\n": {
+    "reason": "Front matter is hidden; the following heading still gets an anchor.",
+    "html": [
+      "<h2><a href=\"#bar\" aria-hidden=\"true\" class=\"anchor\" id=\"bar\"></a>Bar</h2>\n<p>Baz</p>\n"
+    ]
+  },
+  "\\> foo\n------\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#-foo\" aria-hidden=\"true\" class=\"anchor\" id=\"-foo\"></a>&gt; foo</h2>\n"
+    ]
+  },
+  "Foo\n\nbar\n---\nbaz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<p>Foo</p>\n<h2><a href=\"#bar\" aria-hidden=\"true\" class=\"anchor\" id=\"bar\"></a>bar</h2>\n<p>baz</p>\n"
+    ]
+  },
+  "# Heading\n    foo\nHeading\n------\n    foo\n----\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#heading\" aria-hidden=\"true\" class=\"anchor\" id=\"heading\"></a>Heading</h1>\n<pre><code>foo\n</code></pre>\n<h2><a href=\"#heading-1\" aria-hidden=\"true\" class=\"anchor\" id=\"heading-1\"></a>Heading</h2>\n<pre><code>foo\n</code></pre>\n<hr />\n"
+    ]
+  },
+  "foo\n---\n~~~\nbar\n~~~\n# baz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h2><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h2>\n<pre><code>bar\n</code></pre>\n<h1><a href=\"#baz\" aria-hidden=\"true\" class=\"anchor\" id=\"baz\"></a>baz</h1>\n"
+    ]
+  },
+  "~~~~    ruby startline=3 $%@#$\ndef foo(x)\n  return 3\nend\n~~~~~~~\n": {
+    "reason": "Full fenced-code info strings are retained in data-meta; attribute order is unspecified.",
+    "html": [
+      "<pre><code data-meta=\"startline=3 $%@#$\" class=\"language-ruby\">def foo(x)\n  return 3\nend\n</code></pre>\n",
+      "<pre><code class=\"language-ruby\" data-meta=\"startline=3 $%@#$\">def foo(x)\n  return 3\nend\n</code></pre>\n"
+    ]
+  },
+  "~~~ aa ``` ~~~\nfoo\n~~~\n": {
+    "reason": "Full fenced-code info strings are retained in data-meta; attribute order is unspecified.",
+    "html": [
+      "<pre><code class=\"language-aa\" data-meta=\"``` ~~~\">foo\n</code></pre>\n",
+      "<pre><code data-meta=\"``` ~~~\" class=\"language-aa\">foo\n</code></pre>\n"
+    ]
+  },
+  "<script type=\"text/javascript\">\n// JavaScript example\n\ndocument.getElementById(\"demo\").innerHTML = \"Hello JavaScript!\";\n</script>\nokay\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;script type=\"text/javascript\">\n// JavaScript example\n\ndocument.getElementById(\"demo\").innerHTML = \"Hello JavaScript!\";\n&lt;/script>\n<p>okay</p>\n"
+    ]
+  },
+  "<textarea>\n\n*foo*\n\n_bar_\n\n</textarea>\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;textarea>\n\n*foo*\n\n_bar_\n\n&lt;/textarea>\n"
+    ]
+  },
+  "<style\n  type=\"text/css\">\nh1 {color:red;}\n\np {color:blue;}\n</style>\nokay\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;style\n  type=\"text/css\">\nh1 {color:red;}\n\np {color:blue;}\n&lt;/style>\n<p>okay</p>\n"
+    ]
+  },
+  "<style\n  type=\"text/css\">\n\nfoo\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;style\n  type=\"text/css\">\n\nfoo\n"
+    ]
+  },
+  "<style>p{color:red;}</style>\n*foo*\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;style>p{color:red;}&lt;/style>\n<p><em>foo</em></p>\n"
+    ]
+  },
+  "<script>\nfoo\n</script>1. *bar*\n": {
+    "reason": "GFM tagfilter escapes disallowed raw HTML tags.",
+    "html": [
+      "&lt;script>\nfoo\n&lt;/script>1. *bar*\n"
+    ]
+  },
+  "# [Foo]\n[foo]: /url\n> bar\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a><a href=\"/url\">Foo</a></h1>\n<blockquote>\n<p>bar</p>\n</blockquote>\n"
+    ]
+  },
+  "[foo]: /url\nbar\n===\n[foo]\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h1><a href=\"#bar\" aria-hidden=\"true\" class=\"anchor\" id=\"bar\"></a>bar</h1>\n<p><a href=\"/url\">foo</a></p>\n"
+    ]
+  },
+  "  \n\naaa\n  \n\n# aaa\n\n  \n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<p>aaa</p>\n<h1><a href=\"#aaa\" aria-hidden=\"true\" class=\"anchor\" id=\"aaa\"></a>aaa</h1>\n"
+    ]
+  },
+  "> # Foo\n> bar\n> baz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<blockquote>\n<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n<p>bar\nbaz</p>\n</blockquote>\n"
+    ]
+  },
+  "># Foo\n>bar\n> baz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<blockquote>\n<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n<p>bar\nbaz</p>\n</blockquote>\n"
+    ]
+  },
+  "   > # Foo\n   > bar\n > baz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<blockquote>\n<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n<p>bar\nbaz</p>\n</blockquote>\n"
+    ]
+  },
+  "> # Foo\n> bar\nbaz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<blockquote>\n<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n<p>bar\nbaz</p>\n</blockquote>\n"
+    ]
+  },
+  "- # Foo\n- Bar\n  ---\n  baz\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<ul>\n<li>\n<h1><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>Foo</h1>\n</li>\n<li>\n<h2><a href=\"#bar\" aria-hidden=\"true\" class=\"anchor\" id=\"bar\"></a>Bar</h2>\nbaz</li>\n</ul>\n"
+    ]
+  },
+  "__foo bar__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo bar</u></p>\n"
+    ]
+  },
+  "__foo, __bar__, baz__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo, <u>bar</u>, baz</u></p>\n"
+    ]
+  },
+  "foo-__(bar)__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p>foo-<u>(bar)</u></p>\n"
+    ]
+  },
+  "_(__foo__)_\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><em>(<u>foo</u>)</em></p>\n"
+    ]
+  },
+  "__foo__bar__baz__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo__bar__baz</u></p>\n"
+    ]
+  },
+  "__(bar)__.\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>(bar)</u>.</p>\n"
+    ]
+  },
+  "_foo __bar__ baz_\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><em>foo <u>bar</u> baz</em></p>\n"
+    ]
+  },
+  "__foo _bar_ baz__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo <em>bar</em> baz</u></p>\n"
+    ]
+  },
+  "__foo __bar__ baz__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo <u>bar</u> baz</u></p>\n"
+    ]
+  },
+  "____foo__ bar__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u><u>foo</u> bar</u></p>\n"
+    ]
+  },
+  "foo __\\___\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p>foo <u>_</u></p>\n"
+    ]
+  },
+  "foo __*__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p>foo <u>*</u></p>\n"
+    ]
+  },
+  "___foo__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p>_<u>foo</u></p>\n"
+    ]
+  },
+  "__foo___\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo</u>_</p>\n"
+    ]
+  },
+  "__foo__\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u>foo</u></p>\n"
+    ]
+  },
+  "____foo____\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><u><u>foo</u></u></p>\n"
+    ]
+  },
+  "_____foo_____\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><em><u><u>foo</u></u></em></p>\n"
+    ]
+  },
+  "*foo __bar *baz bim__ bam*\n": {
+    "reason": "Double underscores enable underline; nested delimiters follow modern CommonMark.",
+    "html": [
+      "<p><em>foo <u>bar *baz bim</u> bam</em></p>\n"
+    ]
+  },
+  "<https://foo.bar/baz bim>\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p>&lt;<a href=\"https://foo.bar/baz\">https://foo.bar/baz</a> bim&gt;</p>\n"
+    ]
+  },
+  "< https://foo.bar >\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p>&lt; <a href=\"https://foo.bar\">https://foo.bar</a> &gt;</p>\n"
+    ]
+  },
+  "https://example.com\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p><a href=\"https://example.com\">https://example.com</a></p>\n"
+    ]
+  },
+  "foo@bar.example.com\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p><a href=\"mailto:foo@bar.example.com\">foo@bar.example.com</a></p>\n"
+    ]
+  },
+  "### foo\\\n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo\\</h3>\n"
+    ]
+  },
+  "### foo  \n": {
+    "reason": "Headings include navigable anchors with deduplicated IDs.",
+    "html": [
+      "<h3><a href=\"#foo\" aria-hidden=\"true\" class=\"anchor\" id=\"foo\"></a>foo</h3>\n"
+    ]
+  },
+  "- [ ] foo\n- [x] bar\n": {
+    "reason": "Task lists include CSS classes and XHTML checkbox markup.",
+    "html": [
+      "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled=\"\" /> foo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" /> bar</li>\n</ul>\n"
+    ]
+  },
+  "- [x] foo\n  - [ ] bar\n  - [x] baz\n- [ ] bim\n": {
+    "reason": "Task lists include CSS classes and XHTML checkbox markup.",
+    "html": [
+      "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" /> foo\n<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled=\"\" /> bar</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" checked=\"\" disabled=\"\" /> baz</li>\n</ul>\n</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled=\"\" /> bim</li>\n</ul>\n"
+    ]
+  },
+  "foo******bar*********baz\n": {
+    "reason": "Modern CommonMark preserves nested strong emphasis; the older GFM fixture collapses it.",
+    "html": [
+      "<p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>\n"
+    ]
+  },
+  "**foo **bar****\n": {
+    "reason": "Modern CommonMark preserves nested strong emphasis; the older GFM fixture collapses it.",
+    "html": [
+      "<p><strong>foo <strong>bar</strong></strong></p>\n"
+    ]
+  },
+  "****foo****\n": {
+    "reason": "Modern CommonMark preserves nested strong emphasis; the older GFM fixture collapses it.",
+    "html": [
+      "<p><strong><strong>foo</strong></strong></p>\n"
+    ]
+  },
+  "******foo******\n": {
+    "reason": "Modern CommonMark preserves nested strong emphasis; the older GFM fixture collapses it.",
+    "html": [
+      "<p><strong><strong><strong>foo</strong></strong></strong></p>\n"
+    ]
+  },
+  "<http://foo.bar/baz bim>\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p>&lt;<a href=\"http://foo.bar/baz\">http://foo.bar/baz</a> bim&gt;</p>\n"
+    ]
+  },
+  "< http://foo.bar >\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p>&lt; <a href=\"http://foo.bar\">http://foo.bar</a> &gt;</p>\n"
+    ]
+  },
+  "http://example.com\n": {
+    "reason": "GFM extended autolinks recognize bare URLs and email addresses.",
+    "html": [
+      "<p><a href=\"http://example.com\">http://example.com</a></p>\n"
+    ]
+  }
+}

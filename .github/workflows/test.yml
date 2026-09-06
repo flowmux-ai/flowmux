@@ -69,4 +69,5 @@ jobs:
         run: sudo ./scripts/install-thorvg.sh
 
       - name: Run tests
+        timeout-minutes: 15
         run: xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture

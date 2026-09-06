@@ -594,6 +594,19 @@ impl BrowserPane {
             });
         }
 
+        // Native links, address-bar navigation and reloads bypass the IPC
+        // dispatcher. Invalidate refs at the common document-load boundary.
+        let refs = Rc::new(RefCell::new(RefStore::new()));
+        let ref_scope = ref_scope_for_surface(surface_id);
+        {
+            let refs = refs.clone();
+            web_view.connect_load_changed(move |_, event| {
+                if event == webkit6::LoadEvent::Started {
+                    refs.borrow_mut().clear(ref_scope);
+                }
+            });
+        }
+
         if let Some(url) = initial_url {
             let normalized = normalize_uri(url);
             address.set_text(&normalized);
@@ -610,8 +623,8 @@ impl BrowserPane {
             zoom_label,
             find_entry,
             _download_signal: download_signal,
-            refs: Rc::new(RefCell::new(RefStore::new())),
-            ref_scope: ref_scope_for_surface(surface_id),
+            refs,
+            ref_scope,
         }
     }
 
@@ -987,17 +1000,8 @@ pub(crate) fn cookies_sqlite_path(data_dir: &std::path::Path) -> std::path::Path
 mod tests {
     use super::*;
 
-    #[test]
+    #[gtk::test]
     fn dropping_browser_pane_releases_root_and_web_view() {
-        // GTK binds to its first test thread. The focused test below performs
-        // the real check; a full suite may have initialized GTK elsewhere.
-        if gtk::is_initialized() && !gtk::is_initialized_main_thread() {
-            return;
-        }
-        if !gtk::is_initialized() {
-            gtk::init().expect("GTK must initialize for the browser lifetime test");
-        }
-
         let pane = BrowserPane::new(
             PaneId::new(),
             SurfaceId::new(),
@@ -1131,3 +1135,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "browser_behavior_tests.rs"]
+mod browser_behavior_tests;

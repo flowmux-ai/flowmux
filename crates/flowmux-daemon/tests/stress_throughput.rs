@@ -4,16 +4,13 @@
 //! Marked `#[ignore]`. Run with:
 //!     cargo test -p flowmux-daemon --release --test stress_throughput -- --ignored --nocapture
 //!
-//! These tests check three things:
+//! These tests check two things:
 //!
 //! 1. **Hot-loop throughput** -- 20k `update_surface_auto_title` calls on a
 //!    single-pane workspace. Asserts the loop finishes within a generous
 //!    wall-clock budget so a future N^2 or lock-contention regression trips
 //!    the test.
-//! 2. **No-op fast path** -- repeating the same title is detected as
-//!    unchanged and the second half of a same-title burst stays at least as
-//!    fast as the first.
-//! 3. **Linear, not quadratic, scaling in workspace count** -- driving 2k
+//! 2. **Linear, not quadratic, scaling in workspace count** -- driving 2k
 //!    title updates with 1000 workspaces present should be slower than with
 //!    10 workspaces present (the lookup walks workspaces), but not orders
 //!    of magnitude worse than that linear factor would predict.
@@ -69,49 +66,6 @@ async fn auto_title_burst_meets_throughput_budget() {
     assert!(
         elapsed < BUDGET,
         "auto_title burst {OPS} ops took {elapsed:?}, budget {BUDGET:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "stress: no-op burst path"]
-async fn auto_title_repeat_is_a_fast_path() {
-    // Repeating the same title should hit the "unchanged" branch and stay
-    // cheap. We measure the second half against the first: it should be
-    // strictly cheaper or roughly equal, never noticeably slower.
-    const HALF: usize = 10_000;
-    let store = StateStore::new_lazy(State::default());
-    let ws_id = store
-        .create_workspace(Some("hot".into()), PathBuf::from("/tmp"))
-        .await;
-    let snap = store.snapshot().await;
-    let ws = snap.workspaces.iter().find(|w| w.id == ws_id).unwrap();
-    let (pane, surface) = first_pane_surface(ws).unwrap();
-
-    // Prime: set the title once.
-    let _ = store
-        .update_surface_auto_title(pane, surface, "Same".into())
-        .await;
-
-    let t0 = Instant::now();
-    for _ in 0..HALF {
-        let _ = store
-            .update_surface_auto_title(pane, surface, "Same".into())
-            .await;
-    }
-    let first = t0.elapsed();
-    let t1 = Instant::now();
-    for _ in 0..HALF {
-        let _ = store
-            .update_surface_auto_title(pane, surface, "Same".into())
-            .await;
-    }
-    let second = t1.elapsed();
-    eprintln!("auto_title same-value: first half {first:?}, second half {second:?} ({HALF} each)");
-    // Loose envelope: second must be within 4x of first. Catches a regression
-    // that turns the no-op path quadratic without false-firing on noisy CI.
-    assert!(
-        second <= first * 4 + Duration::from_millis(200),
-        "second-half ({second:?}) ran much slower than first ({first:?})"
     );
 }
 

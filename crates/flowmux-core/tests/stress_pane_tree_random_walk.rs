@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Stress: deterministic random walk over the Pane tree.
 //!
-//! Marked `#[ignore]` so the default suite stays quick. Run with:
+//! Behavioral checks run by default; the deep-chain probe is opt-in:
 //!     cargo test -p flowmux-core --release --test stress_pane_tree_random_walk -- --ignored --nocapture
 
 use flowmux_core::{
@@ -108,7 +108,6 @@ fn check_invariants(root: &Pane, op_index: usize, max_depth: u32) {
 }
 
 #[test]
-#[ignore = "stress: long random walk; run with --ignored"]
 fn pane_tree_random_walk_holds_invariants() {
     const ITERATIONS: usize = 5_000;
     const MAX_DEPTH: u32 = 60;

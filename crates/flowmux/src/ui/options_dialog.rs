@@ -1438,9 +1438,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn dialog_applies_changes_immediately_and_has_close_only() {
-        if gtk::init().is_err() {
-            return;
-        }
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.OptionsImmediateApply")
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
@@ -1515,9 +1512,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn closing_dialog_releases_widget_graph() {
-        if gtk::init().is_err() {
-            return;
-        }
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.OptionsRelease")
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
@@ -1557,9 +1551,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn widget_action_finishes_before_deferred_dialog_work() {
-        if gtk::init().is_err() {
-            return;
-        }
         let ran = Rc::new(std::cell::Cell::new(false));
         let ran_later = ran.clone();
         defer_widget_action(move || ran_later.set(true));
@@ -1702,9 +1693,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn persist_check_reflects_initial_value() {
-        if gtk::init().is_err() {
-            return;
-        }
         let check_on = build_persist_check(true);
         assert!(check_on.is_active());
         let check_off = build_persist_check(false);
@@ -1719,9 +1707,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn collect_options_round_trips_persist_browser_session() {
-        if gtk::init().is_err() {
-            return;
-        }
         let zoom = ZoomPicker::new(117, 12.0);
         let engine = build_engine_drop(&BrowserEngine::Firefox);
         let focus_color = build_focus_color_button("#abcdef");
@@ -1927,9 +1912,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn zoom_picker_only_exposes_whole_point_values() {
-        if gtk::init().is_err() {
-            return;
-        }
         let picker = ZoomPicker::new(85, 12.0);
         assert_eq!(picker.selected(), 83);
         assert_eq!(picker.values.borrow().first(), Some(&50));
@@ -1948,9 +1930,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn focus_opacity_row_widgets_share_adjustment_and_clamp_initial() {
-        if gtk::init().is_err() {
-            return;
-        }
         // Out-of-range initial values clamp the spin button to 100.
         let widgets = build_focus_opacity_row(250);
         assert_eq!(widgets.spin.value_as_int(), 100);

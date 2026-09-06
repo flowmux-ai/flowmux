@@ -445,9 +445,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn parse_accel_list_drops_empty_pieces_and_trims() {
-        if gtk::init().is_err() {
-            return;
-        }
         let parsed = parse_accel_list(" <Ctrl>c ,, <Ctrl>v , ").unwrap();
         assert_eq!(parsed, vec!["<Ctrl>c".to_string(), "<Ctrl>v".to_string()]);
     }
@@ -455,9 +452,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn parse_accel_list_returns_invalid_piece() {
-        if gtk::init().is_err() {
-            return;
-        }
         let err = parse_accel_list("<Ctrl>c, totally-not-an-accel").unwrap_err();
         assert_eq!(err, "totally-not-an-accel");
     }

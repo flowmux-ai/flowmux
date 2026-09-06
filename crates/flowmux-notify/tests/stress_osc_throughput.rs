@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Stress: OSC extractor throughput under realistic and adversarial loads.
 //!
-//! Marked `#[ignore]`. Run with:
+//! Behavioral checks run by default; run opt-in throughput probes with:
 //!     cargo test -p flowmux-notify --release --test stress_osc_throughput -- --ignored --nocapture
 //!
 //! Three probes:
@@ -58,7 +58,6 @@ fn osc_extractor_handles_megabytes_of_healthy_traffic() {
 }
 
 #[test]
-#[ignore = "stress: osc extractor memory bound on hostile input"]
 fn osc_extractor_buffer_stays_below_cap_on_unterminated_payload() {
     // Feed 4x MAX_OSC_PAYLOAD bytes inside an unterminated OSC. The
     // extractor's buffer must never exceed MAX_OSC_PAYLOAD even though we
@@ -85,7 +84,6 @@ fn osc_extractor_buffer_stays_below_cap_on_unterminated_payload() {
 }
 
 #[test]
-#[ignore = "stress: osc extractor across irregular chunk boundaries"]
 fn osc_extractor_split_writes_at_arbitrary_offsets() {
     // Build a stream of 1000 valid OSC 9 messages back-to-back and feed
     // it 13 bytes at a time. The state machine must produce exactly 1000

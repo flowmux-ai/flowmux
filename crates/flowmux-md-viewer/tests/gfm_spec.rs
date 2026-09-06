@@ -2,6 +2,8 @@
 
 use flowmux_md_viewer::render_markdown_body;
 
+mod support;
+
 struct GfmExample {
     number: usize,
     markdown: String,
@@ -13,25 +15,21 @@ fn renders_gfm_spec_examples() {
     let examples = gfm_examples(include_str!("fixtures/gfm-spec.txt"));
     assert_eq!(examples.len(), 672);
 
+    let differences = support::expected_differences();
     for example in examples {
         let html = render_markdown_body(&example.markdown);
-        assert!(
-            example.html.is_empty() || !html.is_empty(),
-            "GFM example {} rendered empty HTML for non-empty expected HTML",
-            example.number
-        );
-        if is_core_gfm_extension_example(example.number) {
-            assert_eq!(
-                html, example.html,
-                "GFM example {} did not match expected HTML",
-                example.number
+        if let Some(expected) = differences.get(&example.markdown) {
+            assert!(
+                expected.html.contains(&html),
+                "example {}: {}\nexpected: {:?}\nactual: {html:?}",
+                example.number,
+                expected.reason,
+                expected.html
             );
+        } else {
+            assert_eq!(html, example.html, "example {}", example.number);
         }
     }
-}
-
-fn is_core_gfm_extension_example(number: usize) -> bool {
-    matches!(number, 198..=205 | 491..=502 | 536..=544 | 631..=635)
 }
 
 fn gfm_examples(spec: &str) -> Vec<GfmExample> {

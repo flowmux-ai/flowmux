@@ -9847,6 +9847,17 @@ Do you want to continue?";
             Some("Example A — Home")
         );
 
+        assert_eq!(
+            store
+                .update_surface_auto_title(pane, browser_a, "Example A — Home".into())
+                .await,
+            None
+        );
+        assert_eq!(
+            store.surface_title(pane, browser_a).await.as_deref(),
+            Some("Example A — Home")
+        );
+
         // User names B directly -> automatic updates are ignored.
         store
             .rename_surface(pane, browser_b, "Pinned".into())

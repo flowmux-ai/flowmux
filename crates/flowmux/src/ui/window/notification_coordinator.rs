@@ -46,6 +46,10 @@ impl NotificationCoordinator {
     }
 
     pub(super) fn refresh_launcher_badge(&self) {
+        // Controllers without a runtime have local notification state only.
+        let Some(handle) = self.tokio_handle.clone() else {
+            return;
+        };
         if self.badge_publisher_busy.get() {
             self.badge_dirty.set(true);
             return;
@@ -56,9 +60,8 @@ impl NotificationCoordinator {
         let store = self.store.clone();
         let busy = self.badge_publisher_busy.clone();
         let dirty = self.badge_dirty.clone();
-        let handle = self.tokio_handle.clone();
         glib::MainContext::default().spawn_local(async move {
-            let _enter = handle.as_ref().map(|handle| handle.enter());
+            let _enter = handle.enter();
             let app_uri = format!(
                 "application://{}.desktop",
                 flowmux_notify::DESKTOP_FILE_BASENAME
@@ -86,10 +89,12 @@ impl NotificationCoordinator {
         if desktop_ids.is_empty() {
             return;
         }
+        let Some(handle) = self.tokio_handle.clone() else {
+            return;
+        };
         let notifier_cell = self.notifier.clone();
-        let handle = self.tokio_handle.clone();
         glib::MainContext::default().spawn_local(async move {
-            let _enter = handle.as_ref().map(|handle| handle.enter());
+            let _enter = handle.enter();
             let Some(notifier) = ensure_desktop_notifier(&notifier_cell).await else {
                 return;
             };
@@ -99,5 +104,22 @@ impl NotificationCoordinator {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    async fn local_only_controller_does_not_start_desktop_delivery() {
+        let coordinator = NotificationCoordinator::new(NotificationStore::new(), None);
+        coordinator.refresh_launcher_badge();
+        coordinator.refresh_launcher_badge();
+        coordinator.close_desktop_notifications(vec!["late-desktop-id".into()]);
+        glib::timeout_future(Duration::from_millis(10)).await;
+        assert!(!coordinator.badge_publisher_busy.get());
+        assert!(!coordinator.badge_dirty.get());
+        assert!(coordinator.notifier.lock().await.is_none());
     }
 }

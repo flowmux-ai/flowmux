@@ -1053,17 +1053,33 @@ mod tests {
 
         controller.toggle_pane_zoom(first_pane);
         glib::timeout_future(WINDOW_MOVE_ANIMATION_DURATION + Duration::from_millis(100)).await;
-        let zoomed_texture = {
-            let zoom = controller.pane_zoom.active.borrow();
-            let frame = &zoom.as_ref().expect("pane should be zoomed").frame;
-            workspace_preview_texture(
-                frame,
-                controller.content_overlay.width(),
-                controller.content_overlay.height(),
-            )
-            .expect("the zoomed pane should be capturable")
-            .0
-        };
+        // A static marker distinguishes the zoomed pane from an empty/other
+        // workspace without comparing blinking cursors or shell startup output.
+        let frame = controller
+            .pane_registry
+            .borrow()
+            .pane_frame(first_pane)
+            .unwrap()
+            .downcast::<gtk::Frame>()
+            .unwrap();
+        let child = frame.child().unwrap();
+        frame.set_child(None::<&gtk::Widget>);
+        let marked = gtk::Overlay::new();
+        marked.set_child(Some(&child));
+        let marker = gtk::DrawingArea::builder()
+            .width_request(64)
+            .height_request(64)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Center)
+            .can_target(false)
+            .build();
+        marker.set_draw_func(|_, cr, _, _| {
+            cr.set_source_rgb(1.0, 0.0, 1.0);
+            cr.paint().unwrap();
+        });
+        marked.add_overlay(&marker);
+        frame.set_child(Some(&marked));
+        glib::timeout_future(Duration::from_millis(100)).await;
 
         controller
             .dispatch(GtkCommand::ToggleWorkspaceOverview)
@@ -1129,10 +1145,13 @@ mod tests {
             let active = controller.workspace_overview.active.borrow();
             active.as_ref().unwrap().cards[0].texture.clone().unwrap()
         };
-        assert_eq!(
-            texture_bytes(&overview_texture),
-            texture_bytes(&zoomed_texture),
-            "the zoomed pane must remain visible in its overview card"
+        let marker_pixels = texture_bytes(&overview_texture)
+            .chunks_exact(4)
+            .filter(|pixel| pixel[0] > 240 && pixel[1] < 15 && pixel[2] > 240)
+            .count();
+        assert!(
+            marker_pixels > 100,
+            "overview must show the zoomed pane's marker"
         );
         assert!(
             controller.zoomed_pane() == Some(first_pane),

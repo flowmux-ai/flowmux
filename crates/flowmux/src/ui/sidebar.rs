@@ -2548,9 +2548,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn activity_panel_and_agents_bar_switch_remain_available_and_navigable() {
-        if gtk::init().is_err() {
-            return;
-        }
         let (bridge, rx) = crate::bridge::Bridge::new();
         let store = ActivityStore::new();
         let sidebar = Sidebar::new(
@@ -2904,9 +2901,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn row_widget_builds_with_one_to_three_subtitle_lines() {
-        if gtk::init().is_err() {
-            return;
-        }
         let ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/home/u/dev/os/flowmux")));
         let bridge = crate::bridge::Bridge::new().0;
         let on_close: Rc<dyn Fn(WorkspaceId)> = Rc::new(|_| {});
@@ -2932,9 +2926,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn unmapping_workspace_row_clears_hover() {
-        if gtk::init().is_err() {
-            return;
-        }
         let ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/flowmux")));
         let hovered = Rc::new(Cell::new(true));
         let hovered_for_handler = hovered.clone();
@@ -2963,9 +2954,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn row_widget_builds_with_agent_blocks_and_paths() {
-        if gtk::init().is_err() {
-            return;
-        }
         let ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/home/u/dev/os/flowmux")));
         let bridge = crate::bridge::Bridge::new().0;
         let on_close: Rc<dyn Fn(WorkspaceId)> = Rc::new(|_| {});
@@ -2986,9 +2974,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn metadata_widgets_have_expected_tree_gutter_depths() {
-        if gtk::init().is_err() {
-            return;
-        }
         let mut ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/flowmux")));
 
         let empty = build_meta_column(&ws, &WorkspaceRowDetails::default());
@@ -3009,9 +2994,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn long_tree_metadata_remains_ellipsized_at_narrow_widths() {
-        if gtk::init().is_err() {
-            return;
-        }
         let mut ws = ws_with_active_terminal_cwd(Some(PathBuf::from("/tmp/flowmux")));
         ws.name = "an-extremely-long-workspace-name-that-must-fit-a-narrow-panel".into();
         let details = WorkspaceRowDetails {
@@ -3046,9 +3028,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn redrawing_workspace_reuses_row_widgets_and_removal_releases_them() {
-        if gtk::init().is_err() {
-            return;
-        }
         let bridge = crate::bridge::Bridge::new().0;
         let sidebar = Sidebar::new(
             |_| {},
@@ -3106,9 +3085,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn footer_orders_agents_bar_before_usage_overview_worktrees_and_file_browser_buttons() {
-        if gtk::init().is_err() {
-            return;
-        }
         let (bridge, rx) = crate::bridge::Bridge::new();
         let sidebar = Sidebar::new(
             |_| {},
@@ -3184,9 +3160,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn workspace_titles_track_display_title_through_rename() {
-        if gtk::init().is_err() {
-            return;
-        }
         let bridge = crate::bridge::Bridge::new().0;
         let sidebar = Sidebar::new(
             |_| {},
@@ -3245,9 +3218,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn removing_workspace_preserves_survivor_order_for_followup_reorder() {
-        if gtk::init().is_err() {
-            return;
-        }
         let bridge = crate::bridge::Bridge::new().0;
         let sidebar = Sidebar::new(
             |_| {},

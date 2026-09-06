@@ -14,3 +14,16 @@
   under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 The snapshots have not been modified by flowmux.
+
+`flowmux-spec-differences.json` records flowmux's reviewed, input-specific
+expected output where its enabled extensions differ from those specifications.
+It is adapted from the fixtures above, under the same CC BY-SA 4.0 license.
+Each entry explains the difference: heading anchors, front matter, full code
+info strings, tag filtering, underline, task lists, extended autolinks, or the
+modern CommonMark emphasis rules absent from the old GFM snapshot. The only
+accepted output alternatives are the two orders of code metadata attributes.
+All other examples compare directly against the upstream expected HTML.
+
+These are regression expectations, not a claim of strict CommonMark/GFM
+conformance. Review the input, intended extension behavior, and expected HTML
+when updating them; do not regenerate them automatically to make a failure pass.

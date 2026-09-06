@@ -2575,17 +2575,7 @@ impl WindowController {
             .first()
             .and_then(|s| s.root_pane.first_leaf_id());
         let Some(leaf_id) = leaf else { return };
-        let registry = self.pane_registry.clone();
-        glib::idle_add_local_once(move || {
-            let r = registry.borrow();
-            if let Some(term) = r.active_terminal(leaf_id) {
-                term.grab_focus();
-            } else if let Some(browser) = r.active_browser(leaf_id) {
-                browser.grab_focus();
-            } else if let Some(editor) = r.active_editor(leaf_id) {
-                editor.grab_focus();
-            }
-        });
+        self.focus_pane(leaf_id);
     }
 
     /// Focus the active workspace's first leaf pane. Used as a fallback when the
@@ -9433,14 +9423,8 @@ mod tests {
     /// dispatch sequence `unread_count()` must be 0. A follow-up
     /// activation must remain a no-op and not regress the count.
     ///
-    /// Note: the publish task itself (`refresh_launcher_badge`) is
-    /// scheduled via `glib::MainContext::default().spawn_local` and
-    /// short-circuits in headless tests because the FDO daemon is not
-    /// reachable; we deliberately do not assert on the
-    /// `badge_publisher_busy` / `badge_dirty` internals here because
-    /// they are timing-dependent on when the GLib main context schedules
-    /// the spawned future. The user-visible invariant is the store
-    /// state, which is what the dock would receive next.
+    /// Controllers without a Tokio handle keep notifications local. Desktop
+    /// delivery is exercised separately from these store/dispatcher checks.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn rapid_push_push_activate_sequence_drains_unread_to_zero() {

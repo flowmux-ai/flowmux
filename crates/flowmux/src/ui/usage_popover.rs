@@ -595,10 +595,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn menu_button_owns_a_wide_upward_popover() {
-        if gtk::init().is_err() {
-            return;
-        }
-
         let usage = UsagePopover::new(None);
         let popover = usage
             .button()
@@ -636,10 +632,6 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn dropping_usage_popover_releases_refresh_widgets() {
-        if gtk::init().is_err() {
-            return;
-        }
-
         let usage = UsagePopover::new(None);
         let refresh_weak = {
             let popover = usage.button().popover().unwrap();

@@ -4988,23 +4988,3 @@ notify = ["/usr/local/bin/user-notifier", "--keep"]
         assert!(read_json_or_empty_object(&bad).is_err());
     }
 }
-
-#[cfg(test)]
-mod render_dump {
-    use super::*;
-
-    #[test]
-    #[ignore] // run manually with `cargo test -p flowmux-cli -- --ignored render_dump::dump_plugin_source`
-    fn dump_plugin_source() {
-        let src = opencode_plugin_source_with_argv(&[
-            "flatpak".into(),
-            "run".into(),
-            "--command=flowmuxctl".into(),
-            "com.flowmux.App".into(),
-        ]);
-        eprintln!(
-            "\n----- BEGIN PLUGIN SOURCE -----\n{}\n----- END PLUGIN SOURCE -----\n",
-            src
-        );
-    }
-}

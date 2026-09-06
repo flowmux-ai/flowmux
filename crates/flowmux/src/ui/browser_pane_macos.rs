@@ -22,10 +22,10 @@ use objc2_foundation::{
 };
 use objc2_web_kit::{
     WKAudiovisualMediaTypes, WKDownload, WKDownloadDelegate, WKFrameInfo, WKMediaCaptureType,
-    WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationResponse,
-    WKNavigationResponsePolicy, WKPermissionDecision, WKPreferences, WKSecurityOrigin,
-    WKSnapshotConfiguration, WKUIDelegate, WKWebView, WKWebViewConfiguration, WKWebsiteDataStore,
-    WKWindowFeatures,
+    WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
+    WKNavigationResponse, WKNavigationResponsePolicy, WKPermissionDecision, WKPreferences,
+    WKSecurityOrigin, WKSnapshotConfiguration, WKUIDelegate, WKWebView, WKWebViewConfiguration,
+    WKWebsiteDataStore, WKWindowFeatures,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -70,6 +70,8 @@ struct DownloadUi {
 }
 
 struct BrowserNavigationDelegateIvars {
+    refs: Rc<RefCell<RefStore>>,
+    ref_scope: RefScope,
     download_manager: DownloadManager,
     download_directory: PathBuf,
     downloads: RefCell<HashMap<usize, DownloadUi>>,
@@ -156,6 +158,16 @@ define_class!(
     unsafe impl NSObjectProtocol for BrowserNavigationDelegate {}
 
     unsafe impl WKNavigationDelegate for BrowserNavigationDelegate {
+        #[unsafe(method(webView:didStartProvisionalNavigation:))]
+        #[allow(non_snake_case)]
+        fn webView_didStartProvisionalNavigation(
+            &self,
+            _web_view: &WKWebView,
+            _navigation: Option<&WKNavigation>,
+        ) {
+            self.ivars().refs.borrow_mut().clear(self.ivars().ref_scope);
+        }
+
         #[unsafe(method(webView:decidePolicyForNavigationAction:decisionHandler:))]
         #[allow(non_snake_case)]
         fn webView_decidePolicyForNavigationAction_decisionHandler(
@@ -498,6 +510,8 @@ impl BrowserPane {
         root.append(&find_entry);
         root.append(&viewport);
 
+        let refs = Rc::new(RefCell::new(RefStore::new()));
+        let ref_scope = ref_scope_for_surface(surface_id);
         let native = Rc::new(NativeBrowserView {
             web_view: web_view.clone(),
             _ui_delegate: install_ui_delegate(
@@ -507,7 +521,13 @@ impl BrowserPane {
                 callbacks.on_open_url.clone(),
                 web_widget.downgrade(),
             ),
-            _navigation_delegate: install_navigation_delegate(mtm, &web_view, downloads),
+            _navigation_delegate: install_navigation_delegate(
+                mtm,
+                &web_view,
+                downloads,
+                refs.clone(),
+                ref_scope,
+            ),
             last_url: RefCell::new(String::new()),
             last_title: RefCell::new(String::new()),
             zoom: Cell::new(1.0),
@@ -681,8 +701,8 @@ impl BrowserPane {
             address,
             zoom_label,
             find_entry,
-            refs: Rc::new(RefCell::new(RefStore::new())),
-            ref_scope: ref_scope_for_surface(surface_id),
+            refs,
+            ref_scope,
         }
     }
 
@@ -882,9 +902,13 @@ fn install_navigation_delegate(
     mtm: MainThreadMarker,
     web_view: &WKWebView,
     download_manager: DownloadManager,
+    refs: Rc<RefCell<RefStore>>,
+    ref_scope: RefScope,
 ) -> Retained<BrowserNavigationDelegate> {
     let delegate =
         BrowserNavigationDelegate::alloc(mtm).set_ivars(BrowserNavigationDelegateIvars {
+            refs,
+            ref_scope,
             download_manager,
             download_directory: download_directory(),
             downloads: RefCell::new(HashMap::new()),
