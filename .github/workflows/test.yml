@@ -8,6 +8,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
 
 jobs:
   editor-web:
@@ -23,7 +25,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: editor/flowmux-editor-web/package-lock.json
 
@@ -32,7 +34,7 @@ jobs:
 
       - name: Test and rebuild editor assets
         run: |
-          npm test
+          npm run test:coverage
           npm run build
           npm run verify
 
@@ -41,18 +43,35 @@ jobs:
         run: git diff --exit-code -- editor/flowmux-editor-web/dist
 
   cargo-test:
-    name: cargo test
+    name: cargo test and coverage
     runs-on: ubuntu-latest
     env:
       GDK_BACKEND: x11
       GTK_A11Y: none
       RUST_BACKTRACE: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_BUILD_JOBS: "2"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview, rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --version 0.6.24 --locked
+
+      - name: Install Node.js for the OpenCode hook integration test
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
 
       - name: Install system dependencies
         run: |
@@ -69,5 +88,36 @@ jobs:
         run: sudo ./scripts/install-thorvg.sh
 
       - name: Run tests
-        timeout-minutes: 15
-        run: xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
+        timeout-minutes: 30
+        run: xvfb-run -a dbus-run-session -- bash scripts/test-coverage.sh -- --nocapture
+
+      - name: Export coverage
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p target/llvm-cov
+          cargo llvm-cov report --json --summary-only --output-path target/llvm-cov/summary.json
+          cargo llvm-cov report --html
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-workspace-coverage
+          path: target/llvm-cov
+          if-no-files-found: error
+
+      - name: Enforce coverage floor
+        run: cargo llvm-cov report --fail-under-lines 79 --fail-under-regions 78 --fail-under-functions 78
+
+  stress:
+    name: headless stress probes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run the separately ignored stress probes
+        run: cargo test -p flowmux-core -p flowmux-daemon -p flowmux-notify --locked -- --ignored --nocapture

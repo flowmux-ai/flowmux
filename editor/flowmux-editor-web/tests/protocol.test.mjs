@@ -26,6 +26,38 @@ const koreanDocument = {
   scrollTop: 0,
 };
 
+test("rejects non-object envelopes and malformed save acknowledgements", () => {
+  for (const value of [null, undefined, false, 1, "message", [], {}]) {
+    assert.equal(isHostMessage(value), false);
+  }
+  for (const type of ["save_completed", "save_failed"]) {
+    const message = {
+      protocolVersion: 1,
+      surfaceId: "surface-1",
+      type,
+      documentId: koreanDocument.id,
+      documentVersion: 1,
+      changeSequence: 2,
+      ...(type === "save_failed" ? { reason: "changed on disk", conflict: true } : {}),
+    };
+    assert.equal(isHostMessage(message), true);
+    for (const field of Object.keys(message)) {
+      assert.equal(isHostMessage({ ...message, [field]: undefined }), false, `${type}.${field}`);
+    }
+    for (const value of [-1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.equal(isHostMessage({ ...message, changeSequence: value }), false);
+    }
+  }
+  assert.equal(isHostMessage({
+    protocolVersion: 1, surfaceId: "surface-1", type: "show_workspace_search",
+  }), true);
+  for (const type of ["open_document", "replace_document"]) {
+    assert.equal(isHostMessage({
+      protocolVersion: 1, surfaceId: "surface-1", type, document: koreanDocument,
+    }), true);
+  }
+});
+
 test("accepts a complete multilingual initialization message", () => {
   assert.equal(
     isHostMessage({

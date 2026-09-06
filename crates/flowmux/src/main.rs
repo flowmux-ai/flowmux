@@ -797,13 +797,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn application_uses_non_unique_so_each_window_runs_in_its_own_process() {
-        // libadwaita refuses to initialize without a display server.
-        // Skip silently on headless CI; the assertion below is a pure
-        // check against the configured GApplication flags and does not
-        // need a live GTK loop to be meaningful.
-        if adw::init().is_err() {
-            return;
-        }
+        adw::init().expect("libadwaita initialization failed; run under Xvfb + D-Bus");
         let app = build_application();
         assert!(
             app.flags().contains(ApplicationFlags::NON_UNIQUE),

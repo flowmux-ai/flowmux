@@ -479,6 +479,10 @@ fn perform_native_edit(
 }
 
 #[cfg(test)]
+#[path = "editor_behavior_tests.rs"]
+mod behavior_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

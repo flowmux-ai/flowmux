@@ -7,6 +7,7 @@
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
     "test": "npm run check && tsc -p tsconfig.test.json && node --test tests/*.test.mjs",
+    "test:coverage": "npm run check && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-coverage-include='.test-build/*.js' --test-coverage-lines=98 --test-coverage-branches=90 --test-coverage-functions=100 tests/*.test.mjs",
     "verify": "node scripts/verify-dist.mjs"
   },
   "dependencies": {

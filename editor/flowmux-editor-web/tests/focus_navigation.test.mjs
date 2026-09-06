@@ -26,6 +26,7 @@ test("plain Alt+arrow requests pane focus navigation", () => {
 test("typing and editor navigation remain owned by Monaco", () => {
   assert.equal(focusDirectionForKey(key("ArrowLeft")), null);
   assert.equal(focusDirectionForKey(key("a")), null);
+  assert.equal(focusDirectionForKey(key("a", { altKey: true })), null);
   assert.equal(focusDirectionForKey(key("ArrowRight", { altKey: true, shiftKey: true })), null);
   assert.equal(focusDirectionForKey(key("ArrowUp", { altKey: true, ctrlKey: true })), null);
   assert.equal(focusDirectionForKey(key("ArrowDown", { altKey: true, metaKey: true })), null);

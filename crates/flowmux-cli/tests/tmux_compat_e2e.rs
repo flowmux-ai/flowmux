@@ -43,6 +43,8 @@ impl Harness {
             .args(args)
             .current_dir(&self.cwd)
             .env_clear()
+            // Keep instrumentation output while isolating the user's app env.
+            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|path| ("LLVM_PROFILE_FILE", path)))
             .env("PATH", &self.path_env)
             .env("FLOWMUX_SOCKET_PATH", &self.socket)
             .output()
@@ -64,6 +66,7 @@ async fn harness() -> (Harness, StateStore) {
     let fix = Command::new(flowmuxctl_path())
         .arg("fix")
         .env_clear()
+        .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|path| ("LLVM_PROFILE_FILE", path)))
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &home)
         .env("XDG_DATA_HOME", &data_home)

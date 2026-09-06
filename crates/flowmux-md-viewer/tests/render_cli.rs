@@ -3,17 +3,8 @@
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-fn gtk_display_available() -> bool {
-    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
-}
-
 #[test]
 fn cli_renders_png_for_markdown_file() {
-    if !gtk_display_available() {
-        eprintln!("skipping WebKit PNG CLI test without a display");
-        return;
-    }
-
     let dir = tempfile::tempdir().expect("tempdir");
     let input = dir.path().join("sample.md");
     let output = dir.path().join("sample.png");
@@ -59,11 +50,6 @@ fn cli_renders_png_for_markdown_file() {
 
 #[test]
 fn cli_gui_accepts_markdown_file_argument() {
-    if !gtk_display_available() {
-        eprintln!("skipping WebKit GUI CLI test without a display");
-        return;
-    }
-
     let dir = tempfile::tempdir().expect("tempdir");
     let markdown = dir.path().join("README.md");
     std::fs::write(&markdown, "# GUI\n\nBody").expect("write markdown");

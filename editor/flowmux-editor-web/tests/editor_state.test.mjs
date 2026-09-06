@@ -62,6 +62,12 @@ test("conflict actions distinguish changed deleted and compare states", () => {
 });
 
 test("document state distinguishes external changes and deletion", () => {
+  assert.deepEqual(visibleDocumentState("unchanged", false, true), {
+    text: "Unsaved", kind: "dirty", hidden: false,
+  });
+  assert.deepEqual(visibleDocumentState("unchanged", true, true), {
+    text: "Read only", kind: "normal", hidden: false,
+  });
   assert.deepEqual(visibleDocumentState("modified", false, true), {
     text: "Changed on disk",
     kind: "conflict",

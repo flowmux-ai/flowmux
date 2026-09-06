@@ -8,7 +8,7 @@ use flowmux_browser::DomSnapshot;
 use flowmux_core::{PaneId, SplitDirection};
 use flowmux_ipc::{
     client::Client,
-    protocol::{Request, Response},
+    protocol::{BrowserWaitCondition, Request, Response},
 };
 use std::{
     process::{Child, Command, Stdio},
@@ -60,6 +60,76 @@ async fn snapshot(client: &Client, pane: PaneId) -> DomSnapshot {
         Response::BrowserResult { value } => serde_json::from_str(&value).unwrap(),
         other => panic!("snapshot failed: {other:?}"),
     }
+}
+
+async fn terminal_split_roundtrip(client: &Client, terminal: PaneId) {
+    assert!(
+        matches!(
+            call(client, Request::PaneClose { pane: terminal }).await,
+            Response::Error(_)
+        ),
+        "the last pane must refuse closing without opening a dialog"
+    );
+    let split = match call(
+        client,
+        Request::PaneSplit {
+            pane: terminal,
+            direction: SplitDirection::Horizontal,
+        },
+    )
+    .await
+    {
+        Response::PaneSplitDone { new_pane } => new_pane,
+        other => panic!("split terminal: {other:?}"),
+    };
+    for request in [
+        Request::PaneResize {
+            pane: split,
+            ratio: 0.4,
+        },
+        Request::PaneFocus { pane: split },
+        Request::PaneSendKeys {
+            pane: split,
+            keys: "printf '%s\\n' flowmux-terminal-output\r".into(),
+        },
+    ] {
+        assert!(matches!(call(client, request).await, Response::Ok));
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let response = call(client, Request::PaneReadScreen { pane: split }).await;
+        let Response::ScreenContents { text } = response else {
+            panic!("read terminal: {response:?}");
+        };
+        // Exact line, so the shell echo of the command cannot pass this check.
+        if text
+            .lines()
+            .any(|line| line.trim() == "flowmux-terminal-output")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "shell output missing: {text:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    match call(client, Request::PaneReadScreen { pane: terminal }).await {
+        Response::ScreenContents { text } => assert!(!text.contains("flowmux-terminal-output")),
+        other => panic!("read original terminal: {other:?}"),
+    }
+    assert!(matches!(
+        call(client, Request::PaneClose { pane: split }).await,
+        Response::Ok
+    ));
+    assert!(matches!(
+        call(client, Request::PaneReadScreen { pane: split }).await,
+        Response::Error(_)
+    ));
+    assert!(matches!(
+        call(client, Request::PaneReadScreen { pane: terminal }).await,
+        Response::ScreenContents { .. }
+    ));
 }
 
 #[tokio::test]
@@ -126,6 +196,7 @@ async fn native_link_navigation_rejects_old_refs_and_fresh_snapshot_restores_act
         }
         other => panic!("tree: {other:?}"),
     };
+    terminal_split_roundtrip(&client, terminal).await;
     let pane = match call(
         &client,
         Request::BrowserOpen {
@@ -207,4 +278,76 @@ async fn native_link_navigation_rejects_old_refs_and_fresh_snapshot_restores_act
         Response::BrowserResult { value } => assert_eq!(value, "Clicked"),
         other => panic!("fresh ref action: {other:?}"),
     }
+    for condition in [
+        BrowserWaitCondition::Selector("#next".into()),
+        BrowserWaitCondition::Text("Clicked".into()),
+        BrowserWaitCondition::Url("second.html".into()),
+        BrowserWaitCondition::ReadyState("complete".into()),
+        BrowserWaitCondition::Js(
+            "document.querySelector('#next').textContent === 'Clicked'".into(),
+        ),
+    ] {
+        assert!(matches!(
+            call(
+                &client,
+                Request::BrowserWait {
+                    pane,
+                    condition,
+                    timeout_ms: 2_000,
+                    poll_ms: 10,
+                }
+            )
+            .await,
+            Response::BrowserBoolResult { value: true }
+        ));
+    }
+    assert!(matches!(
+        call(
+            &client,
+            Request::BrowserWait {
+                pane,
+                condition: BrowserWaitCondition::Selector("#missing".into()),
+                timeout_ms: 50,
+                poll_ms: 5,
+            }
+        )
+        .await,
+        Response::BrowserBoolResult { value: false }
+    ));
+    assert!(
+        matches!(
+            call(&client, Request::PaneReadScreen { pane }).await,
+            Response::Error(_)
+        ),
+        "browser tabs must not masquerade as terminal screens"
+    );
+    let screenshot = dir.path().join("browser.png");
+    let response = call(
+        &client,
+        Request::BrowserScreenshot {
+            pane,
+            path: screenshot.clone(),
+        },
+    )
+    .await;
+    assert!(
+        !matches!(response, Response::Error(_)),
+        "screenshot: {response:?}"
+    );
+    let pixels = image::open(&screenshot)
+        .expect("screenshot must be a decodable image")
+        .to_rgba8();
+    assert!(pixels.width() > 100 && pixels.height() > 100);
+    assert!(
+        pixels
+            .pixels()
+            .any(|pixel| pixel.0[0] < 100 && pixel.0[3] > 0),
+        "screenshot must include the button/text"
+    );
+    assert!(
+        pixels
+            .pixels()
+            .any(|pixel| pixel.0[0] > 200 && pixel.0[3] > 0),
+        "screenshot must include the page background, not a solid dark image"
+    );
 }
