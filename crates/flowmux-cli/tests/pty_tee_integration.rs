@@ -508,6 +508,51 @@ fn process_exists(pid: libc::pid_t) -> bool {
 }
 
 #[test]
+fn pty_tee_preserves_input_queued_before_startup() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let socket = tmp.path().join("flowmux.sock");
+    let output = tmp.path().join("received-input");
+    let _rx = spawn_fake_daemon(socket.clone());
+    let outer = nix::pty::openpty(None, None).expect("outer PTY");
+    let mut master = std::fs::File::from(outer.master);
+    // Queue a complete line before the proxy starts, just like send-keys
+    // immediately after a pane split. Pipes do not exercise termios flushing.
+    master.write_all(b"queued-input\n").unwrap();
+    let child = Command::new(flowmuxctl_path())
+        .args([
+            "pty-tee",
+            "--",
+            "/bin/sh",
+            "-c",
+            "IFS= read -r line; printf '%s' \"$line\" > \"$FLOWMUX_PTY_TEST_OUTPUT\"",
+        ])
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_PTY_TEST_OUTPUT", &output)
+        .stdin(Stdio::from(outer.slave))
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn pty-tee");
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = guard.child.try_wait().unwrap() {
+            assert!(status.success(), "pty-tee failed: {status}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "pty-tee discarded input queued before startup"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "queued-input");
+}
+
+#[test]
 fn pty_tee_outer_eof_kills_signal_ignoring_inner_group() {
     const POLL_STEP: Duration = Duration::from_millis(20);
     const PID_TIMEOUT: Duration = Duration::from_secs(3);

@@ -207,7 +207,9 @@ fn run_pty_pump(
     if let Some(ref s) = _saved_termios {
         let mut raw = s.termios.clone();
         termios::cfmakeraw(&mut raw);
-        let _ = termios::tcsetattr(std::io::stdin(), SetArg::TCSAFLUSH, &raw);
+        // A newly split pane can receive send-keys before this proxy starts.
+        // Preserve that queued input; TCSAFLUSH silently discards it.
+        let _ = termios::tcsetattr(std::io::stdin(), SetArg::TCSANOW, &raw);
     }
 
     // 5. Set up the self-pipe and signal handlers for SIGWINCH (window
