@@ -52,6 +52,10 @@ impl WindowController {
                             .and_then(|a| a.downcast::<adw::Application>().ok())
                         {
                             crate::keybindings::install_accels(&app, &opts);
+                            controller
+                                .pane_registry
+                                .borrow()
+                                .refresh_pane_tool_tooltips();
                         } else {
                             tracing::warn!(
                             "options applied without keybinding re-install — window had no Application; restart to pick up shortcut changes"

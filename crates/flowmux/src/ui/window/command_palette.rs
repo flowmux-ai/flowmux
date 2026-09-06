@@ -46,10 +46,7 @@ fn palette_button(label: &str, shortcut: Option<&str>) -> gtk::Button {
     button
 }
 
-fn accelerator_label(accelerator: &str) -> Option<String> {
-    gtk::accelerator_parse(accelerator)
-        .map(|(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string())
-}
+use crate::keybindings::accelerator_label;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct WorkspaceTemplate {
@@ -929,6 +926,7 @@ impl WindowController {
             .and_then(|a| a.downcast::<adw::Application>().ok())
         {
             crate::keybindings::install_accels(&app, &opts);
+            self.pane_registry.borrow().refresh_pane_tool_tooltips();
         } else {
             tracing::warn!(
                 "config reloaded without keybinding re-install — window had no Application"
@@ -953,14 +951,6 @@ mod tests {
     fn empty_fuzzy_query_matches_every_command() {
         assert!(fuzzy_matches("", "Open browser"));
         assert!(fuzzy_matches("   ", "Project test"));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[gtk::test]
-    fn accelerator_labels_are_human_readable() {
-        let label = super::accelerator_label("<Ctrl><Shift>b").unwrap();
-        assert!(label.contains("Ctrl"));
-        assert!(label.to_lowercase().contains('b'));
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::ui::browser_pane::BrowserPane;
 use crate::ui::editor_pane::EditorPane;
 use crate::ui::ghostty_pane::{is_flatpak_sandbox, GhosttyPane};
 use crate::ui::pane_terminal::{PaneCallbacks, PaneTerminal, TabDropCommand};
+use flowmux_config::keybindings::ActionId;
 use flowmux_core::{
     terminal_tab_title_for_cwd, EditorFileState, Pane, PaneContent, PaneId, PaneSurface,
     SplitDirection, Surface, SurfaceId, SurfaceKind, TerminalScrollback, Workspace, WorkspaceId,
@@ -138,6 +139,25 @@ pub fn solo_workspace_pane(ws: &Workspace) -> Option<PaneId> {
     }
 }
 
+/// A pane tool-row button bound to a keyboard action. `base` is the
+/// description shown before the shortcut suffix; it changes for the zoom
+/// button (Maximize ↔ Restore) so it is stored here rather than derived.
+struct PaneToolButton {
+    action: ActionId,
+    base: &'static str,
+    button: gtk::Button,
+}
+
+impl PaneToolButton {
+    fn apply_tooltip(&self, accel_labels: &[String]) {
+        self.button
+            .set_tooltip_text(Some(&crate::keybindings::tooltip_with_accels(
+                self.base,
+                accel_labels,
+            )));
+    }
+}
+
 #[derive(Default)]
 pub struct PaneRegistry {
     pub terminals: HashMap<SurfaceId, PaneTerminal>,
@@ -152,7 +172,10 @@ pub struct PaneRegistry {
     /// Tab-bar `gtk::Box` so incremental tab additions can `append`
     /// into the same row instead of rebuilding the whole pane.
     pane_tab_containers: HashMap<PaneId, gtk::Box>,
-    pane_zoom_buttons: HashMap<PaneId, gtk::Button>,
+    /// Per-pane tool-row buttons (maximize / split / add tab / add browser
+    /// tab) that mirror a keyboard action, so their tooltips can be refreshed
+    /// whenever the shortcut set changes.
+    pane_tool_buttons: HashMap<PaneId, Vec<PaneToolButton>>,
     pane_zoom_badges: HashMap<PaneId, gtk::Label>,
     surface_tab_labels: HashMap<SurfaceId, gtk::Label>,
     pane_workspace: HashMap<PaneId, WorkspaceId>,
@@ -211,18 +234,52 @@ impl PaneRegistry {
         self.pane_frames.get(&pane).cloned()
     }
 
+    /// Re-apply the shortcut suffix on every pane tool-row tooltip from the
+    /// accelerators currently installed on the application. Call after
+    /// `install_accels` so options-dialog shortcut edits show up immediately.
+    pub fn refresh_pane_tool_tooltips(&self) {
+        self.refresh_pane_tool_tooltips_with(crate::keybindings::action_accel_labels);
+    }
+
+    fn refresh_pane_tool_tooltips_with(&self, accel_labels: impl Fn(ActionId) -> Vec<String>) {
+        for tool in self.pane_tool_buttons.values().flatten() {
+            tool.apply_tooltip(&accel_labels(tool.action));
+        }
+    }
+
+    fn register_pane_tool_button(
+        &mut self,
+        pane: PaneId,
+        action: ActionId,
+        base: &'static str,
+        button: gtk::Button,
+    ) {
+        let tool = PaneToolButton {
+            action,
+            base,
+            button,
+        };
+        tool.apply_tooltip(&crate::keybindings::action_accel_labels(action));
+        self.pane_tool_buttons.entry(pane).or_default().push(tool);
+    }
+
     pub fn set_pane_zoomed(&mut self, pane: PaneId, zoomed: bool) {
         let Some(frame) = self.pane_frames.get(&pane) else {
             return;
         };
-        if let Some(button) = self.pane_zoom_buttons.get(&pane) {
+        if let Some(tool) = self.pane_tool_buttons.get_mut(&pane).and_then(|tools| {
+            tools
+                .iter_mut()
+                .find(|t| t.action == ActionId::TogglePaneZoom)
+        }) {
             if zoomed {
-                button.set_icon_name("view-restore-symbolic");
-                button.set_tooltip_text(Some("Restore pane"));
+                tool.button.set_icon_name("view-restore-symbolic");
+                tool.base = "Restore pane";
             } else {
-                button.set_icon_name("view-fullscreen-symbolic");
-                button.set_tooltip_text(Some("Maximize pane"));
+                tool.button.set_icon_name("view-fullscreen-symbolic");
+                tool.base = "Maximize pane";
             }
+            tool.apply_tooltip(&crate::keybindings::action_accel_labels(tool.action));
         }
         if zoomed {
             frame.add_css_class("flowmux-pane-zoomed");
@@ -527,7 +584,7 @@ impl PaneRegistry {
             self.surface_stacks.remove(&pane);
             self.surface_tabs.remove(&pane);
             self.pane_tab_containers.remove(&pane);
-            self.pane_zoom_buttons.remove(&pane);
+            self.pane_tool_buttons.remove(&pane);
             self.pane_zoom_badges.remove(&pane);
             self.pane_workspace.remove(&pane);
         }
@@ -804,7 +861,7 @@ impl PaneRegistry {
         self.surface_stacks.remove(&pane);
         self.pane_frames.remove(&pane);
         self.pane_tab_containers.remove(&pane);
-        self.pane_zoom_buttons.remove(&pane);
+        self.pane_tool_buttons.remove(&pane);
         self.pane_zoom_badges.remove(&pane);
         self.active_terminal_by_pane.remove(&pane);
         self.active_browser_by_pane.remove(&pane);
@@ -1596,7 +1653,16 @@ fn build_leaf_pane(
         r.surface_stacks.insert(pane_id, stack);
         r.surface_tabs.insert(pane_id, tab_widgets);
         r.pane_tab_containers.insert(pane_id, tabs);
-        r.pane_zoom_buttons.insert(pane_id, zoom);
+        r.register_pane_tool_button(pane_id, ActionId::TogglePaneZoom, "Maximize pane", zoom);
+        r.register_pane_tool_button(pane_id, ActionId::SplitRight, "Split right", split_right);
+        r.register_pane_tool_button(pane_id, ActionId::SplitDown, "Split down", split_down);
+        r.register_pane_tool_button(pane_id, ActionId::NewSurface, "Add tab", add);
+        r.register_pane_tool_button(
+            pane_id,
+            ActionId::NewBrowserSurface,
+            "Add browser tab",
+            add_browser,
+        );
         r.pane_workspace.insert(pane_id, workspace);
         if !empty {
             r.activate_surface(pane_id, active);
@@ -3300,7 +3366,12 @@ mod pane_menu_tests {
             .pane_frames
             .insert(pane, frame.upcast::<gtk::Widget>());
         registry.pane_tab_containers.insert(pane, tabs);
-        registry.pane_zoom_buttons.insert(pane, button.clone());
+        registry.register_pane_tool_button(
+            pane,
+            ActionId::TogglePaneZoom,
+            "Maximize pane",
+            button.clone(),
+        );
 
         registry.set_pane_zoomed(pane, true);
         assert_eq!(button.icon_name().as_deref(), Some("view-restore-symbolic"));
@@ -3312,6 +3383,52 @@ mod pane_menu_tests {
             Some("view-fullscreen-symbolic")
         );
         assert_eq!(button.tooltip_text().as_deref(), Some("Maximize pane"));
+    }
+
+    #[gtk::test]
+    fn pane_tool_tooltips_follow_the_installed_shortcuts() {
+        let pane = PaneId::new();
+        let zoom = pane_tool_button("view-fullscreen-symbolic", "Maximize pane");
+        let split = pane_tool_button("flowmux-split-right-symbolic", "Split right");
+        let mut registry = PaneRegistry::default();
+        registry.register_pane_tool_button(
+            pane,
+            ActionId::TogglePaneZoom,
+            "Maximize pane",
+            zoom.clone(),
+        );
+        registry.register_pane_tool_button(
+            pane,
+            ActionId::SplitRight,
+            "Split right",
+            split.clone(),
+        );
+
+        // No application in tests → registration leaves the bare description.
+        assert_eq!(zoom.tooltip_text().as_deref(), Some("Maximize pane"));
+
+        registry.refresh_pane_tool_tooltips_with(|action| match action {
+            ActionId::TogglePaneZoom => vec!["Ctrl+Shift+Z".to_string()],
+            ActionId::SplitRight => vec!["Ctrl+Shift+Page Down".to_string(), "F5".to_string()],
+            _ => Vec::new(),
+        });
+        assert_eq!(
+            zoom.tooltip_text().as_deref(),
+            Some("Maximize pane (Ctrl+Shift+Z)")
+        );
+        assert_eq!(
+            split.tooltip_text().as_deref(),
+            Some("Split right (Ctrl+Shift+Page Down, F5)")
+        );
+
+        // Rebinding to nothing drops the suffix again.
+        registry.refresh_pane_tool_tooltips_with(|_| Vec::new());
+        assert_eq!(zoom.tooltip_text().as_deref(), Some("Maximize pane"));
+        assert_eq!(split.tooltip_text().as_deref(), Some("Split right"));
+
+        // Removing the pane forgets its buttons.
+        registry.pane_tool_buttons.remove(&pane);
+        assert!(registry.pane_tool_buttons.is_empty());
     }
 
     #[gtk::test]

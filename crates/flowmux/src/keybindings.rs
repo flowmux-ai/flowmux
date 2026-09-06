@@ -141,6 +141,41 @@ pub fn install_accels(app: &adw::Application, options: &Options) {
     }
 }
 
+/// Human-readable label for a GTK accelerator string (`"<Ctrl><Shift>b"` →
+/// `"Ctrl+Shift+B"`). `None` when the accelerator does not parse.
+pub fn accelerator_label(accelerator: &str) -> Option<String> {
+    gtk::accelerator_parse(accelerator)
+        .map(|(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string())
+}
+
+/// Accelerators currently installed on the default application for
+/// `action`, as human-readable labels. Reads what [`install_accels`] wrote,
+/// so it always reflects the live shortcut set — including edits made in
+/// the options dialog after startup. Empty when no application is
+/// registered (headless tests) or the action is unbound.
+pub fn action_accel_labels(action: ActionId) -> Vec<String> {
+    let Some(app) =
+        gtk::gio::Application::default().and_then(|app| app.downcast::<gtk::Application>().ok())
+    else {
+        return Vec::new();
+    };
+    app.accels_for_action(&full_action_name(action))
+        .iter()
+        .filter_map(|accel| accelerator_label(accel.as_str()))
+        .collect()
+}
+
+/// Tooltip text for a button that triggers `action`: the base description
+/// followed by its shortcut(s) in parentheses, or the bare description when
+/// the action is unbound.
+pub fn tooltip_with_accels(base: &str, accel_labels: &[String]) -> String {
+    if accel_labels.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} ({})", accel_labels.join(", "))
+    }
+}
+
 /// Test helper for resolving one action without the GTK install path.
 #[cfg(test)]
 pub fn resolved_accels(overrides: &KeybindingOverrides, action: ActionId) -> Vec<String> {
@@ -1104,6 +1139,34 @@ fn make_paste_action(
 mod tests {
     use super::*;
     use flowmux_config::keybindings::default_accels;
+
+    #[test]
+    fn tooltip_with_accels_appends_shortcuts_in_parentheses() {
+        assert_eq!(tooltip_with_accels("Maximize pane", &[]), "Maximize pane");
+        assert_eq!(
+            tooltip_with_accels("Split right", &["Ctrl+Shift+Page Down".to_string()]),
+            "Split right (Ctrl+Shift+Page Down)"
+        );
+        assert_eq!(
+            tooltip_with_accels("Add tab", &["Ctrl+Shift+T".to_string(), "F2".to_string()]),
+            "Add tab (Ctrl+Shift+T, F2)"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn accelerator_labels_are_human_readable() {
+        let label = accelerator_label("<Ctrl><Shift>b").unwrap();
+        assert!(label.contains("Ctrl"));
+        assert!(label.to_lowercase().contains('b'));
+    }
+
+    #[gtk::test]
+    fn action_accel_labels_is_empty_without_an_application() {
+        // No gio::Application is registered in unit tests, so the lookup must
+        // degrade to "unbound" instead of panicking.
+        assert!(action_accel_labels(ActionId::SplitRight).is_empty());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
