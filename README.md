@@ -12,7 +12,7 @@
 
 [Website](https://flowmux.org/) · [Latest release](https://github.com/flowmux-ai/flowmux/releases/latest)
 
-<img src=resources/screenshot/screenshot_1.gif  width="850"/>
+<img src="resources/screenshot/screenshot_1.gif" alt="flowmux overview" width="100%" />
 
 </div>
 
@@ -39,7 +39,7 @@ The clip shows an AI agent driving the page over flowmux's IPC socket —
 snapshot the DOM, click, type, read state back — with no system Chromium and
 no separate driver.
 
-![video](resources/screenshot/video_control_browser.gif)
+<img src="resources/screenshot/video_control_browser.gif" alt="video" width="100%" />
 
 ## AI Agent notification (Claude, Codex, OpenCode, Gemini, Antigravity)
 
@@ -67,7 +67,7 @@ event. On a retry, FlowMux uses `stop_hook_active` to re-settle the same Codex
 turn without issuing a duplicate completion notification, but the retry is
 still provisional for the same reason.
 
-![video2](resources/screenshot/claude_notification.gif)
+<img src="resources/screenshot/claude_notification.gif" alt="video2" width="100%" />
 
 ## Split panes
 
@@ -75,27 +75,27 @@ Split a pane horizontally or vertically and drag the divider to resize. Mix
 terminal and browser tabs across panes, and navigate between them from the
 keyboard.
 
-![split](resources/screenshot/view_split.gif)
+<img src="resources/screenshot/view_split.gif" alt="split" width="100%" />
 
 ## Overview mode
 
 See every active workspace at a glance and jump directly to the one you need.
 
-![overview mode](resources/screenshot/overview_mode.gif)
+<img src="resources/screenshot/overview_mode.gif" alt="overview mode" width="100%" />
 
 ## File and worktree views
 
 Open the **Files** and **Worktrees** sidebars to browse the current repository,
 inspect Git worktree status, and remove worktrees without leaving the terminal.
 
-![file and worktree views](resources/screenshot/usage_fileview_worktreeview.gif)
+<img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
 ## Themes
 
 Choose a built-in light or dark theme in **Options → Theme**, or customize the
 terminal and editor background, text, cursor, selection, and font.
 
-![theme settings](resources/screenshot/setting_theme.gif)
+<img src="resources/screenshot/setting_theme.gif" alt="theme settings" width="100%" />
 
 ## Image viewer
 
@@ -108,14 +108,14 @@ rendered by ThorVG's own loaders, Lottie plays back frame by frame, and GIF
 then handed to ThorVG to render. ThorVG is an optional runtime dependency — see
 [ThorVG (image viewer — optional)](#thorvg-image-viewer--optional).
 
-![image viewer](resources/screenshot/image_viewer.gif)
+<img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />
 
 ## Markdown viewer
 
 `flowmux-md-viewer` renders Markdown files in a WebKit view for a formatted,
 scrollable preview.
 
-![markdown viewer](resources/screenshot/md_viewer.gif)
+<img src="resources/screenshot/md_viewer.gif" alt="markdown viewer" width="100%" />
 
 ## File and worktree views
 
