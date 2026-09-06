@@ -90,7 +90,9 @@ async fn terminal_split_roundtrip(client: &Client, terminal: PaneId) {
         Request::PaneFocus { pane: split },
         Request::PaneSendKeys {
             pane: split,
-            keys: "printf '%s\\n' flowmux-terminal-output\r".into(),
+            // Input sent before the first prompt can be echoed before it.
+            // Start a new line so the result never shares the prompt's line.
+            keys: "printf '\\n%s\\n' flowmux-terminal-output\r".into(),
         },
     ] {
         assert!(matches!(call(client, request).await, Response::Ok));
