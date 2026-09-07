@@ -2168,6 +2168,12 @@ fn agent_block_header(block: &WorkspaceRowAgentBlock) -> gtk::Box {
     icon.add_css_class(agent_status_css_class(block.status, block.seen));
     row.append(&icon);
 
+    let agent_icon = agent_icon(&block.agent_name);
+    agent_icon.set_pixel_size(-1);
+    agent_icon.add_css_class("caption");
+    agent_icon.add_css_class("flowmux-workspace-agent-icon");
+    row.append(&agent_icon);
+
     let label_text = agent_block_label_text(block);
     let label = gtk::Label::new(Some(&label_text));
     label.set_halign(gtk::Align::Start);
@@ -2969,6 +2975,57 @@ mod tests {
             path_lines: vec![".../fallback/path".into()],
         };
         let _ = row_widget(&ws, &details, on_close, bridge, Rc::new(RefCell::new(None)));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn workspace_agent_icons_follow_caption_size() {
+        let display = gtk::gdk::Display::default().unwrap();
+        let provider = gtk::CssProvider::new();
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        let theme = crate::theme::ResolvedTheme::resolve(&Default::default());
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("flowmux-sidebar-shell");
+        let mut icons = Vec::new();
+        for agent in ["codex", "claude", "gemini", "opencode"] {
+            let header = agent_block_header(&agent_block(agent, None));
+            let status = header.first_child().unwrap();
+            let icon = status
+                .next_sibling()
+                .unwrap()
+                .downcast::<gtk::Image>()
+                .unwrap();
+            assert_eq!(
+                icon.icon_name().as_deref(),
+                Some(crate::builtin_icons::agent_icon_name(agent))
+            );
+            let label = icon
+                .next_sibling()
+                .unwrap()
+                .downcast::<gtk::Label>()
+                .unwrap();
+            assert_eq!(label.label(), agent);
+            content.append(&header);
+            icons.push(icon);
+        }
+        let window = gtk::Window::builder().child(&content).build();
+        window.present();
+        for zoom in [100, 200] {
+            provider.load_from_string(&theme.css("#fff4b3", 0.5, zoom));
+            gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            for icon in &icons {
+                assert!(icon.is_mapped());
+                assert_eq!(icon.pixel_size(), -1);
+                assert_eq!(icon.width(), 12 * i32::from(zoom) / 100);
+                assert_eq!(icon.height(), icon.width());
+            }
+        }
+        window.close();
+        gtk::style_context_remove_provider_for_display(&display, &provider);
     }
 
     #[cfg(not(target_os = "macos"))]

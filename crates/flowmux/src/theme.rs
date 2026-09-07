@@ -404,6 +404,9 @@ paned > separator {{
 .flowmux-sidebar-shell .caption-heading {{
     font-size: {sidebar_caption_font:.2}pt;
 }}
+.flowmux-workspace-agent-icon {{
+    -gtk-icon-size: 1em;
+}}
 .flowmux-sidebar-shell headerbar {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
