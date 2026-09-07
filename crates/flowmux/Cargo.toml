@@ -83,7 +83,6 @@ adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 # required now that Ubuntu 22.04 support is dropped.
 vte = { package = "vte4", version = "0.8", features = ["v0_76"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
-nix = { workspace = true }
 libc = { workspace = true }
 libloading = "0.8"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

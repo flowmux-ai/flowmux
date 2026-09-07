@@ -8,7 +8,6 @@ publish = false
 description = "Browser cookie + session import for the flowmux in-app browser."
 
 [dependencies]
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

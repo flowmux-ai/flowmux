@@ -934,7 +934,6 @@ dependencies = [
  "libadwaita",
  "libc",
  "libloading",
- "nix",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -1013,7 +1012,6 @@ dependencies = [
 name = "flowmux-cookies"
 version = "0.9.11"
 dependencies = [
- "anyhow",
  "chrono",
  "dirs",
  "rusqlite",
@@ -1075,12 +1073,10 @@ version = "0.9.11"
 dependencies = [
  "anyhow",
  "chrono",
- "flowmux-config",
  "flowmux-core",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -1103,13 +1099,8 @@ dependencies = [
 name = "flowmux-notify"
 version = "0.9.11"
 dependencies = [
- "anyhow",
  "chrono",
  "flowmux-core",
- "serde",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
  "uuid",
  "zbus",
 ]
@@ -1118,17 +1109,14 @@ dependencies = [
 name = "flowmux-procmon"
 version = "0.9.11"
 dependencies = [
- "anyhow",
  "libc",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
 name = "flowmux-state"
 version = "0.9.11"
 dependencies = [
- "anyhow",
  "chrono",
  "flowmux-config",
  "flowmux-core",
@@ -1138,7 +1126,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
- "tracing",
  "uuid",
 ]
 
@@ -1148,14 +1135,12 @@ version = "0.9.11"
 dependencies = [
  "flowmux-core",
  "libc",
- "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "flowmux-vcs"
 version = "0.9.11"
 dependencies = [
- "anyhow",
  "flowmux-core",
  "gix",
  "serde",

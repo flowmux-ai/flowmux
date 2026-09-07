@@ -9,11 +9,6 @@ description = "OSC notification parser (9 / 99 / 777) and a D-Bus desktop sender
 
 [dependencies]
 flowmux-core = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
 zbus = { workspace = true }
-serde = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }

@@ -9,5 +9,4 @@ description = "Terminal PTY and compatibility helpers for flowmux."
 
 [dependencies]
 flowmux-core = { workspace = true }
-thiserror = { workspace = true }
 libc = { workspace = true }

@@ -9,7 +9,6 @@ description = "Git branch / remote / linked-PR detection for the flowmux sidebar
 
 [dependencies]
 flowmux-core = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
