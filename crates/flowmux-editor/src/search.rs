@@ -313,16 +313,21 @@ fn collect_matches(
             return;
         }
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        let mut previous_start = 0;
+        let mut column = 0_u32;
         for found in matcher.find_iter(line) {
             if result.matches.len() >= max_results {
                 result.truncated = true;
                 return;
             }
+            // Matches advance monotonically; count each prefix segment once.
+            column = column.saturating_add(utf16_len(&line[previous_start..found.start()]));
+            previous_start = found.start();
             let (preview, preview_column, preview_length) = match_preview(line, &found);
             result.matches.push(WorkspaceSearchMatch {
                 path: path.to_string(),
                 line: u32::try_from(line_index).unwrap_or(u32::MAX),
-                column: utf16_len(&line[..found.start()]),
+                column,
                 length: utf16_len(found.as_str()),
                 preview,
                 preview_column,
@@ -380,6 +385,37 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    #[ignore = "manual long-line benchmark; run with --profile fast --ignored --nocapture"]
+    fn benchmark_search_columns() {
+        let content = format!("{}needle", "앞🙂".repeat(200)).repeat(500);
+        let matcher = build_matcher("needle", &SearchOptions::default()).unwrap();
+        let mut samples = Vec::new();
+        for _ in 0..7 {
+            let started = std::time::Instant::now();
+            for _ in 0..10 {
+                let mut result = WorkspaceSearchResult::default();
+                collect_matches(
+                    Path::new("long.txt"),
+                    &content,
+                    &matcher,
+                    500,
+                    &mut result,
+                    &SearchCancellation::default(),
+                );
+                assert_eq!(result.matches.len(), 500);
+                std::hint::black_box(result);
+            }
+            samples.push(started.elapsed());
+        }
+        samples.sort();
+        println!(
+            "500 matches in {} bytes: median {:?}/10 searches",
+            content.len(),
+            samples[3]
+        );
+    }
 
     #[test]
     #[ignore = "manual traversal benchmark; run with --profile fast --ignored --nocapture"]
@@ -527,6 +563,49 @@ mod tests {
         assert_eq!(result.matches[0].preview, "앞🙂 검색🙂 뒤");
         assert_eq!(result.matches[0].preview_column, 4);
         assert_eq!(result.matches[0].preview_length, 4);
+    }
+
+    #[test]
+    fn search_columns_match_prefix_counts_for_unicode_empty_matches_and_limits() {
+        let content = "앞🙂needle 앞🙂needle\r\n🙂needle needle\n";
+        for pattern in ["needle", "앞|🙂|needle", r"\b", "", "^|$"] {
+            let matcher = Regex::new(pattern).unwrap();
+            let expected: Vec<_> = content
+                .split('\n')
+                .enumerate()
+                .flat_map(|(row, line)| {
+                    let line = line.strip_suffix('\r').unwrap_or(line);
+                    matcher.find_iter(line).map(move |found| {
+                        (
+                            row as u32,
+                            line[..found.start()].encode_utf16().count() as u32,
+                            found.as_str().encode_utf16().count() as u32,
+                        )
+                    })
+                })
+                .collect();
+            for limit in [3, usize::MAX] {
+                let mut result = WorkspaceSearchResult::default();
+                collect_matches(
+                    Path::new("unicode.txt"),
+                    content,
+                    &matcher,
+                    limit,
+                    &mut result,
+                    &SearchCancellation::default(),
+                );
+                assert_eq!(
+                    result
+                        .matches
+                        .iter()
+                        .map(|m| (m.line, m.column, m.length))
+                        .collect::<Vec<_>>(),
+                    expected.iter().copied().take(limit).collect::<Vec<_>>(),
+                    "pattern={pattern:?}, limit={limit}",
+                );
+                assert_eq!(result.truncated, expected.len() > limit);
+            }
+        }
     }
 
     #[test]
