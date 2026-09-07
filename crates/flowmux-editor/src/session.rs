@@ -97,24 +97,24 @@ impl EditorSession {
                 .open_order
                 .iter()
                 .filter_map(|id| {
-                    let document = self.documents.snapshot(*id).ok()?;
+                    let document = self.documents.snapshot_ref(*id).ok()?;
                     Some(EditorFileSessionState {
-                        path: document.display_path,
+                        path: document.display_path.clone(),
                         view: self.view_states.get(id).cloned().unwrap_or_default(),
                     })
                 })
                 .collect(),
             active_file: self
                 .active
-                .and_then(|id| self.documents.snapshot(id).ok())
-                .map(|document| document.display_path),
+                .and_then(|id| self.documents.snapshot_ref(id).ok())
+                .map(|document| document.display_path.clone()),
         }
     }
 
     pub fn activate_path(&mut self, path: impl AsRef<Path>) {
         let path = path.as_ref();
         let active = self.open_order.iter().copied().find(|id| {
-            self.documents.snapshot(*id).is_ok_and(|document| {
+            self.documents.snapshot_ref(*id).is_ok_and(|document| {
                 document.display_path == path || document.identity_path == path
             })
         });
@@ -145,10 +145,10 @@ impl EditorSession {
         }];
         messages.extend(documents.map(|(_, document)| HostMessage::OpenDocument { document }));
         if let Some(active) = self.active.filter(|active| Some(*active) != last_document) {
-            if let Ok(document) = self.documents.snapshot(active) {
+            if let Ok((version, _)) = self.documents.version_and_dirty(active) {
                 messages.push(HostMessage::SetActiveDocument {
                     document_id: protocol_id(active),
-                    document_version: document.version,
+                    document_version: version,
                 });
             }
         }
@@ -158,11 +158,11 @@ impl EditorSession {
     pub fn dirty_document_paths(&self) -> Vec<PathBuf> {
         self.open_order
             .iter()
-            .filter_map(|id| self.documents.snapshot(*id).ok())
+            .filter_map(|id| self.documents.snapshot_ref(*id).ok())
             .filter(|snapshot| {
                 snapshot.is_dirty() || self.pending_client_dirty.contains(&snapshot.id)
             })
-            .map(|snapshot| snapshot.display_path)
+            .map(|snapshot| snapshot.display_path.clone())
             .collect()
     }
 
@@ -188,10 +188,10 @@ impl EditorSession {
         let Some(active) = self.active else {
             return Ok(messages);
         };
-        let snapshot = self.documents.snapshot(active)?;
+        let (version, _) = self.documents.version_and_dirty(active)?;
         messages.push(HostMessage::RevealRange {
             document_id: protocol_id(active),
-            document_version: snapshot.version,
+            document_version: version,
             line,
             column,
             length,
@@ -790,11 +790,11 @@ impl EditorSession {
             .get(document_id)
             .copied()
             .ok_or_else(|| EditorSessionError::UnknownDocument(document_id.to_string()))?;
-        let snapshot = self.documents.snapshot(id)?;
-        if snapshot.version != document_version {
+        let (version, _) = self.documents.version_and_dirty(id)?;
+        if version != document_version {
             return Err(EditorSessionError::StaleMessageVersion {
                 document_id: document_id.to_string(),
-                expected: snapshot.version,
+                expected: version,
                 actual: document_version,
             });
         }
@@ -886,6 +886,40 @@ mod tests {
     fn apply_recovery_operations(session: &mut EditorSession, store: &RecoveryStore) {
         for operation in session.take_recovery_operations() {
             store.apply(&operation).unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "manual metadata benchmark; run with --profile fast --ignored --nocapture"]
+    fn benchmark_session_metadata() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        for bytes in [1024, 2 * 1024 * 1024] {
+            let workspace = tempdir().unwrap();
+            let mut session = EditorSession::new(workspace.path()).unwrap();
+            for index in 0..8 {
+                let path = workspace.path().join(format!("{index}.txt"));
+                fs::write(&path, "x".repeat(bytes)).unwrap();
+                session.open_document(path).unwrap();
+            }
+            let expected = session.session_snapshot();
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let started = Instant::now();
+                for _ in 0..200 {
+                    black_box(session.session_snapshot());
+                    black_box(session.dirty_document_paths());
+                    black_box(session.checked_document("document-1", 1).unwrap());
+                }
+                samples.push(started.elapsed());
+            }
+            samples.sort();
+            assert_eq!(session.session_snapshot(), expected);
+            println!(
+                "8 documents x {bytes} bytes: median {:?}/200 metadata batches",
+                samples[3]
+            );
         }
     }
 

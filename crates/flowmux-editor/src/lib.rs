@@ -280,16 +280,19 @@ impl DocumentService {
     /// Version and dirty state without cloning the document text; used by the
     /// external-change poll, which runs for every open document.
     pub fn version_and_dirty(&self, id: DocumentId) -> Result<(u64, bool), DocumentError> {
-        self.documents
-            .get(&id)
-            .map(|document| (document.snapshot.version, document.snapshot.is_dirty()))
-            .ok_or(DocumentError::NotOpen(id))
+        self.snapshot_ref(id)
+            .map(|snapshot| (snapshot.version, snapshot.is_dirty()))
     }
 
     pub fn snapshot(&self, id: DocumentId) -> Result<DocumentSnapshot, DocumentError> {
+        self.snapshot_ref(id).cloned()
+    }
+
+    // Metadata readers borrow the live snapshot instead of copying its text.
+    fn snapshot_ref(&self, id: DocumentId) -> Result<&DocumentSnapshot, DocumentError> {
         self.documents
             .get(&id)
-            .map(|document| document.snapshot.clone())
+            .map(|document| &document.snapshot)
             .ok_or(DocumentError::NotOpen(id))
     }
 
