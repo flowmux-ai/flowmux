@@ -240,6 +240,19 @@ done < "resources/desktop/$APP_ID.desktop" \
 chmod 644 "$DATA_DIR/applications/$APP_ID.desktop"
 echo "==> installed desktop entry to $DATA_DIR/applications/$APP_ID.desktop"
 
+MD_APP_ID="com.flowmux.App.Markdown"
+while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "Exec=flowmux-md-viewer %f" ]; then
+        printf 'Exec="%s-md-viewer" %%f\n' "$DESKTOP_EXEC"
+    else
+        printf '%s\n' "$line"
+    fi
+done < "resources/desktop/$MD_APP_ID.desktop" \
+    > "$DATA_DIR/applications/$MD_APP_ID.desktop"
+chmod 644 "$DATA_DIR/applications/$MD_APP_ID.desktop"
+install -Dm644 resources/icons/flowmux-markdown.svg \
+    "$DATA_DIR/icons/hicolor/scalable/apps/$MD_APP_ID.svg"
+
 install -Dm644 resources/icons/flowmux.svg \
     "$DATA_DIR/icons/hicolor/scalable/apps/$APP_ID.svg"
 for size in 16 24 32 48 64 96 128 256 512; do

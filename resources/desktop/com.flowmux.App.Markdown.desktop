@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Desktop Entry]
+Type=Application
+Name=flowmux Markdown Reader
+GenericName=Markdown Reader
+Comment=Read Markdown documents with flowmux
+Exec=flowmux-md-viewer %f
+Icon=com.flowmux.App.Markdown
+Terminal=false
+NoDisplay=true
+MimeType=text/markdown;text/x-markdown;
+Categories=Office;Viewer;
+StartupWMClass=com.flowmux.App.Markdown
+StartupNotify=true

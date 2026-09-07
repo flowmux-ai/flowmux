@@ -29,7 +29,7 @@ use gtk::{gdk, glib};
 use webkit6::prelude::*;
 
 #[cfg(target_os = "linux")]
-const APP_ID: &str = "com.flowmux.MdViewer";
+const APP_ID: &str = "com.flowmux.App.Markdown";
 const DEFAULT_WINDOW_HEIGHT: i32 = 700;
 #[cfg(any(test, target_os = "linux"))]
 const RENDER_TIMEOUT_SECS: u32 = 15;
@@ -286,7 +286,11 @@ fn run_app(args: Args) {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
-    app.connect_startup(|_| install_viewer_chrome_theme());
+    app.connect_startup(|_| {
+        glib::set_application_name("flowmux Markdown Reader");
+        gtk::Window::set_default_icon_name(APP_ID);
+        install_viewer_chrome_theme();
+    });
     app.connect_activate(move |app| build_window(app, args.clone()));
     app.run_with_args(&[APP_ID]);
 }
@@ -718,6 +722,32 @@ mod tests {
     use std::time::Duration;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_identity_matches_reader_application_and_icon() {
+        let desktop = glib::KeyFile::new();
+        desktop
+            .load_from_data(
+                include_str!("../../../resources/desktop/com.flowmux.App.Markdown.desktop"),
+                glib::KeyFileFlags::NONE,
+            )
+            .unwrap();
+        assert_eq!(desktop.string("Desktop Entry", "Icon").unwrap(), APP_ID);
+        assert_eq!(
+            desktop.string("Desktop Entry", "StartupWMClass").unwrap(),
+            APP_ID
+        );
+        assert_eq!(
+            desktop.string("Desktop Entry", "Exec").unwrap(),
+            "flowmux-md-viewer %f"
+        );
+        assert!(
+            APP_ID.starts_with("com.flowmux.App."),
+            "Flatpak must export the reader identity"
+        );
+    }
+
     fn parse_args(args: &[&str]) -> Args {
         Args::parse(args.iter().map(|arg| arg.to_string())).expect("parse args")
     }

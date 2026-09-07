@@ -1,0 +1,21 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>flowmux Markdown Reader</title>
+  <defs>
+    <linearGradient id="bg" x2="0" y2="1">
+      <stop stop-color="#2a3340"/>
+      <stop offset="1" stop-color="#161c24"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/>
+  <rect x="19" y="31" width="5" height="17" rx="2" fill="#d97757"/>
+  <rect x="19" y="55" width="5" height="17" rx="2" fill="#10a37f"/>
+  <rect x="19" y="79" width="5" height="17" rx="2" fill="#f59e0b"/>
+  <g transform="translate(7.1 6.4) scale(0.9)">
+    <path d="M36 23h42l19 19v63H36z" fill="#e6e7ea"/>
+    <path d="M78 23v19h19" fill="#aab5c2"/>
+    <rect x="43" y="51" width="63" height="39" rx="7" fill="#243440"/>
+    <path d="M51 80V61l9 10 9-10v19" fill="none" stroke="#e6e7ea" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M88 60v18m-8-6 8 8 8-8" fill="none" stroke="#22d3ee" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
