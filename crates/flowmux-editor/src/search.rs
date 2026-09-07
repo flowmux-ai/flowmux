@@ -111,7 +111,12 @@ pub fn index_workspace_files(
             files.push(entry.into_path());
         }
     }
-    files.sort_by_key(|path| (path.components().count(), path.clone()));
+    files.sort_by(|left, right| {
+        left.components()
+            .count()
+            .cmp(&right.components().count())
+            .then_with(|| left.cmp(right))
+    });
     files
 }
 
@@ -173,7 +178,8 @@ pub fn search_workspace(
             continue;
         };
         if !is_searchable_file(&entry)
-            || overridden_paths.contains(&normalized_identity(entry.path()))
+            || (!overridden_paths.is_empty()
+                && overridden_paths.contains(&normalized_identity(entry.path())))
         {
             continue;
         }
@@ -376,6 +382,55 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    #[ignore = "manual traversal benchmark; run with --profile fast --ignored --nocapture"]
+    fn benchmark_workspace_traversal() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let workspace = tempdir().unwrap();
+        for directory in 0..10 {
+            let directory = workspace.path().join(format!("dir-{directory}"));
+            fs::create_dir(&directory).unwrap();
+            for file in 0..100 {
+                fs::write(directory.join(format!("file-{file}.txt")), "plain text\n").unwrap();
+            }
+        }
+        let cancellation = SearchCancellation::default();
+        for index_only in [true, false] {
+            let mut samples = Vec::new();
+            for _ in 0..7 {
+                let started = Instant::now();
+                for _ in 0..20 {
+                    if index_only {
+                        let files = index_workspace_files(workspace.path(), 2000, &cancellation);
+                        assert_eq!(files.len(), 1000);
+                        black_box(files);
+                    } else {
+                        let result = search_workspace(
+                            workspace.path(),
+                            "absent",
+                            &SearchOptions::default(),
+                            &[],
+                            &cancellation,
+                        )
+                        .unwrap();
+                        assert!(
+                            result.matches.is_empty() && !result.cancelled && !result.truncated
+                        );
+                        black_box(result);
+                    }
+                }
+                samples.push(started.elapsed());
+            }
+            samples.sort();
+            println!(
+                "1000 files, index_only={index_only}: median {:?}/20 traversals",
+                samples[3]
+            );
+        }
+    }
+
+    #[test]
     fn index_respects_gitignore_hidden_and_generated_directories() {
         let workspace = tempdir().unwrap();
         fs::write(workspace.path().join(".gitignore"), "ignored.txt\n").unwrap();
@@ -389,6 +444,62 @@ mod tests {
             index_workspace_files(workspace.path(), 20, &SearchCancellation::default()),
             vec![workspace.path().join("visible.txt")]
         );
+    }
+
+    #[test]
+    fn index_keeps_depth_then_path_order_and_limits() {
+        let workspace = tempdir().unwrap();
+        fs::create_dir(workspace.path().join("nested")).unwrap();
+        for path in [
+            "z.txt",
+            "a.txt",
+            "nested/z.txt",
+            "nested/가.txt",
+            "nested/a.txt",
+        ] {
+            fs::write(workspace.path().join(path), "text").unwrap();
+        }
+        let cancellation = SearchCancellation::default();
+        let files = index_workspace_files(workspace.path(), 20, &cancellation);
+        let expected = [
+            "a.txt",
+            "z.txt",
+            "nested/a.txt",
+            "nested/z.txt",
+            "nested/가.txt",
+        ]
+        .map(|path| workspace.path().join(path));
+        assert_eq!(files, expected);
+        assert!(index_workspace_files(workspace.path(), 0, &cancellation).is_empty());
+        assert_eq!(
+            index_workspace_files(workspace.path(), 2, &cancellation).len(),
+            2
+        );
+        cancellation.cancel();
+        assert!(index_workspace_files(workspace.path(), 20, &cancellation).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dirty_override_through_workspace_alias_still_replaces_disk_content() {
+        let workspace = tempdir().unwrap();
+        let aliases = tempdir().unwrap();
+        let alias = aliases.path().join("workspace");
+        std::os::unix::fs::symlink(workspace.path(), &alias).unwrap();
+        fs::write(workspace.path().join("file.txt"), "disk needle").unwrap();
+        let result = search_workspace(
+            workspace.path(),
+            "needle",
+            &SearchOptions::default(),
+            &[SearchDocument {
+                path: alias.join("file.txt"),
+                content: "live needle".into(),
+            }],
+            &SearchCancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(result.matches.len(), 1);
+        assert_eq!(result.matches[0].preview, "live needle");
     }
 
     #[test]
