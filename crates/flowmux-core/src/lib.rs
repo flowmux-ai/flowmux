@@ -2046,14 +2046,6 @@ impl PaneContent {
         }
     }
 
-    pub fn tabbed_editor(title: impl Into<String>, workspace_root: PathBuf) -> Self {
-        let surface = PaneSurface::editor(title, workspace_root);
-        Self::Tabs {
-            active: surface.id,
-            surfaces: vec![surface],
-        }
-    }
-
     pub fn active_surface(&self) -> Option<&PaneSurface> {
         match self {
             PaneContent::Tabs { active, surfaces } => surfaces
@@ -2086,19 +2078,6 @@ impl PaneContent {
                     SurfaceKind::Terminal { cwd: Some(cwd), .. } => Some(cwd.clone()),
                     _ => None,
                 }),
-        }
-    }
-
-    pub fn active_surface_mut(&mut self) -> Option<&mut PaneSurface> {
-        match self {
-            PaneContent::Tabs { active, surfaces } => {
-                let idx = surfaces
-                    .iter()
-                    .position(|surface| surface.id == *active)
-                    .unwrap_or(0);
-                surfaces.get_mut(idx)
-            }
-            PaneContent::Terminal { .. } | PaneContent::Browser { .. } => None,
         }
     }
 

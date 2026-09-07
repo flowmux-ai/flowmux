@@ -145,10 +145,6 @@ pub fn host_config_dir_for(agent_subdir: &str) -> Option<PathBuf> {
     }
 }
 
-pub fn ghostty_config_path() -> Option<PathBuf> {
-    base_config_dir().map(|d| d.join("ghostty").join("config"))
-}
-
 fn whoami() -> String {
     std::env::var("USER").unwrap_or_else(|_| "anon".into())
 }

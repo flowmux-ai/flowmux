@@ -13,7 +13,7 @@ use flowmux_core::{
     select_process_agent_candidate, terminal_tab_title_for_cwd, AgentBarModel, AgentPresence,
     AgentStatus, AgentStatusReport, CloseSurfaceOutcome, EditorSessionState, Pane, PaneContent,
     PaneId, PaneSurface, RemoveOutcome, SplitDirection, Surface, SurfaceId, SurfaceKind,
-    TerminalScrollback, Workspace, WorkspaceAgentBlock, WorkspaceId,
+    TerminalScrollback, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::{State, WindowLayout, WindowOwner};
@@ -926,15 +926,6 @@ impl StateStore {
         self.mark_dirty();
     }
 
-    pub async fn replace_listening_ports(&self, workspace: WorkspaceId, ports: Vec<u16>) {
-        let mut s = self.inner.lock().await;
-        if let Some(w) = s.workspaces.iter_mut().find(|w| w.id == workspace) {
-            w.listening_ports = ports;
-        }
-        drop(s);
-        self.mark_dirty();
-    }
-
     /// Split a target leaf and replace the new sibling with a
     /// browser pane carrying `url`. Used by `flowmux browser open` to
     /// drop a webview next to a terminal without touching the
@@ -1568,12 +1559,6 @@ impl StateStore {
         }
         drop(lifecycle);
         removed
-    }
-
-    pub async fn clear_dead_agent_activity(&self, surface_id: SurfaceId) -> Option<WorkspaceId> {
-        self.remove_agent_presence_if_current(surface_id, None, None, None, None, true)
-            .await
-            .map(|removed| removed.workspace)
     }
 
     /// Merge a live agent status report into a tab surface. Returns the owning
@@ -3048,19 +3033,6 @@ impl StateStore {
             .iter()
             .find(|ws| ws.id == workspace)
             .and_then(Workspace::agent_attention_rollup)
-    }
-
-    pub async fn workspace_agent_blocks(
-        &self,
-        workspace: WorkspaceId,
-        mru: &[PaneId],
-    ) -> Vec<WorkspaceAgentBlock> {
-        let s = self.inner.lock().await;
-        s.workspaces
-            .iter()
-            .find(|ws| ws.id == workspace)
-            .map(|ws| ws.collect_agent_blocks(mru))
-            .unwrap_or_default()
     }
 
     fn mark_all_agents_seen_locked(ws: &mut Workspace) -> bool {

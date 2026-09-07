@@ -121,11 +121,6 @@ impl BrowserEngine {
             }
         }
     }
-
-    /// Built-in item order shown in the drop-down.
-    pub fn builtin_order() -> [Self; 3] {
-        [Self::Webkit, Self::Chrome, Self::Firefox]
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -470,12 +465,6 @@ impl Options {
     /// Builder-style setter for the default terminal shell.
     pub fn with_default_shell(mut self, shell: Option<String>) -> Self {
         self.default_shell = Self::normalize_default_shell(shell);
-        self
-    }
-
-    /// Builder-style setter for the system-notification (desktop toast) flag.
-    pub fn with_system_notifications_enabled(mut self, enabled: bool) -> Self {
-        self.system_notifications_enabled = enabled;
         self
     }
 

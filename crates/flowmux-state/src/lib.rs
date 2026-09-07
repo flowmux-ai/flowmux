@@ -403,12 +403,6 @@ fn claim_window_impl(
     ))
 }
 
-/// Merge one window's latest snapshot into the shared state while preserving
-/// workspace sets and layout records owned by every other live process.
-pub fn save_window(owner: WindowOwner, snapshot: &State) -> Result<(), StateError> {
-    save_window_to(&default_path()?, owner, snapshot)
-}
-
 /// Merge an owned window snapshot without cloning its workspace tree.
 pub fn save_window_owned(owner: WindowOwner, snapshot: State) -> Result<(), StateError> {
     save_window_owned_to(&default_path()?, owner, snapshot)

@@ -54,12 +54,6 @@ pub struct HtmlDocument {
     pub base_dir: Option<PathBuf>,
 }
 
-impl HtmlDocument {
-    pub fn body_contains(&self, needle: &str) -> bool {
-        self.html.contains(needle)
-    }
-}
-
 #[derive(Debug)]
 pub enum RenderError {
     Io(String),
