@@ -103,7 +103,14 @@ impl UsageBar {
                 let meter = &self.meters[provider][period];
                 if let Some((label, value)) = slot {
                     let name = ["Claude", "Codex"][provider];
-                    let description = format!("{name} {label} usage");
+                    // Values kept from an earlier collection say so on hover,
+                    // since the bar itself has no room for a staleness marker.
+                    let stale = if state.limits_error.is_some() {
+                        " (last known)"
+                    } else {
+                        ""
+                    };
+                    let description = format!("{name} {label} usage{stale}");
                     meter.root.set_tooltip_text(Some(&description));
                     meter
                         .progress
@@ -135,10 +142,11 @@ fn scope_percent(state: &ProviderState, scope: &str) -> Option<f64> {
     max_percent(state, |window| window.scope.as_deref() == Some(scope))
 }
 
+/// A failed refresh keeps whatever was collected last — the endpoint rate
+/// limits often enough that hiding the bar on a single failure would make it
+/// blink out while the numbers are still fresh enough to act on. Only a
+/// provider that never reported anything has no slots to show.
 fn max_percent(state: &ProviderState, matches: impl Fn(&UsageWindow) -> bool) -> Option<f64> {
-    if state.limits_error.is_some() {
-        return None;
-    }
     // Some plans return several scoped limits. Show the highest utilization
     // for each period so the compact bar doesn't understate a reached limit.
     state
@@ -215,6 +223,12 @@ mod tests {
         state.apply(refresh(Provider::Claude, &[(300, 20.0), (300, 120.0)]));
         assert_eq!(window_percent(&state.claude, 300), Some(120.0));
         state.claude.limits_error = Some(UsageError::network());
+        assert_eq!(
+            window_percent(&state.claude, 300),
+            Some(120.0),
+            "a failed refresh keeps the last known value"
+        );
+        state.claude.limits = None;
         assert_eq!(window_percent(&state.claude, 300), None);
     }
 
@@ -277,20 +291,34 @@ mod tests {
             0,
             "successful refresh must not hide the footer"
         );
+        // A failed refresh keeps the last known values instead of blinking out,
+        // and says so on hover.
         state.claude.limits_error = Some(UsageError::network());
         bar.render(&state, true);
-        assert!(!bar.providers[0].is_visible());
+        assert!(bar.providers[0].is_visible());
+        assert_eq!(bar.meters[0][0].percent.text(), "51%(5h)");
+        assert_eq!(
+            bar.meters[0][0].root.tooltip_text().as_deref(),
+            Some("Claude 5h usage (last known)")
+        );
         assert!(bar.providers[1].is_visible());
-        assert!(!bar.separator.is_visible());
+        assert!(bar.separator.is_visible());
         state.apply(refresh(Provider::Codex, &[(300, 0.0), (10_080, 65.0)]));
         bar.render(&state, true);
         assert!(bar.meters[1][0].root.is_visible());
         assert_eq!(bar.meters[1][0].progress.fraction(), 0.0);
         assert_eq!(bar.meters[1][0].percent.text(), "0%(5h)");
+        assert_eq!(
+            bar.meters[1][0].root.tooltip_text().as_deref(),
+            Some("Codex 5h usage")
+        );
         assert!(bar.meters[1][1].root.is_visible());
         assert!(bar.icons[1].is_visible());
         bar.render(&state, false);
         assert!(!bar.root.is_visible());
+        // A provider that never collected anything has nothing to keep.
+        state.claude.limits = None;
+        state.codex.limits = None;
         state.codex.limits_error = Some(UsageError::network());
         bar.render(&state, true);
         assert!(!bar.root.is_visible());

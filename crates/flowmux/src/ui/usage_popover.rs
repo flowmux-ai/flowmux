@@ -94,7 +94,10 @@ impl UsagePopover {
         let cards_weak = cards.downgrade();
         let refresh_weak = refresh_button.downgrade();
         let spinner_weak = spinner.downgrade();
+        let handle_for_retry = tokio_handle.clone();
+        let tx_for_retry = result_tx.clone();
         gtk::glib::MainContext::default().spawn_local(async move {
+            let mut attempt = 0;
             while let Ok(refreshes) = result_rx.recv().await {
                 {
                     let mut state = state_for_results.borrow_mut();
@@ -105,6 +108,22 @@ impl UsagePopover {
                 }
                 if let (Some(bar), Some(toggle)) = (bar_weak.upgrade(), show_bar_weak.upgrade()) {
                     bar.render(&state_for_results.borrow(), toggle.is_active());
+                }
+                // A failed fetch leaves the last known values on screen, so
+                // retry it without waiting out the periodic refresh.
+                let failed = {
+                    let state = state_for_results.borrow();
+                    state.claude.limits_error.is_some() || state.codex.limits_error.is_some()
+                };
+                let (delay, next_attempt) = next_retry(failed, attempt);
+                attempt = next_attempt;
+                if let Some(delay) = delay {
+                    let state = state_for_results.clone();
+                    let handle = handle_for_retry.clone();
+                    let result_tx = tx_for_retry.clone();
+                    gtk::glib::timeout_add_seconds_local_once(delay, move || {
+                        request_refresh(&state, true, &handle, &result_tx);
+                    });
                 }
                 let animate = !manual_for_results.replace(false);
                 let Some(popover) = popover_weak.upgrade() else {
@@ -287,6 +306,21 @@ fn request_refresh(
 }
 
 const BAR_REFRESH_SECONDS: u32 = 150;
+
+/// Delay before each retry of a failed fetch, in seconds. The spacing grows so
+/// a rate-limited endpoint (`HTTP 429` is what the Claude usage service returns
+/// under frequent polling) is not hammered, and once the list runs out the
+/// periodic refresh takes over again.
+const RETRY_DELAYS: [u32; 3] = [5, 20, 60];
+
+/// How long to wait before retrying, plus the attempt counter to keep. A
+/// successful refresh resets the counter so the next failure retries promptly.
+fn next_retry(failed: bool, attempt: usize) -> (Option<u32>, usize) {
+    if !failed {
+        return (None, 0);
+    }
+    (RETRY_DELAYS.get(attempt).copied(), attempt + 1)
+}
 
 /// Backstop deadline for a full usage refresh. Comfortably larger than the sum
 /// of the collectors' own internal timeouts so it only fires when something
@@ -594,6 +628,20 @@ mod tests {
         assert_eq!(progress_fraction(120.0), 1.0);
         assert_eq!(percent_label(120.0), "120%");
         assert_eq!(percent_label(42.5), "42.5%");
+    }
+
+    #[test]
+    fn failed_fetches_retry_with_growing_spacing_and_reset_on_success() {
+        let mut attempt = 0;
+        let mut delays = Vec::new();
+        for _ in 0..5 {
+            let (delay, next) = next_retry(true, attempt);
+            attempt = next;
+            delays.push(delay);
+        }
+        assert_eq!(delays, [Some(5), Some(20), Some(60), None, None]);
+        assert_eq!(next_retry(false, attempt), (None, 0));
+        assert_eq!(next_retry(true, 0), (Some(5), 1));
     }
 
     #[test]

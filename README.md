@@ -83,7 +83,9 @@ such as `25%(5h)` and `60%(1W)`. The footer uses 80% of the terminal font size, 
 150 seconds, and hides unavailable usage periods. Available periods remain visible
 at 0% utilization. Credit-based plans report no 5h/1W window — Claude only
 `Extra usage` and Codex only `Individual` — so the bar shows that balance
-instead, as `12%(Extra)` or `12%(Individual)`.
+instead, as `12%(Extra)` or `12%(Individual)`. A failed fetch keeps the last
+known values (the tooltip then reads `(last known)`) and is retried after 5, 20
+and 60 seconds, so a rate-limited provider no longer empties the bar.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
