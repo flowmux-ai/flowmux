@@ -179,6 +179,9 @@ pub struct Options {
     /// [`AGENT_BAR_MODE_DEFAULT`] (`false`).
     #[serde(default = "default_agent_bar_mode")]
     pub agent_bar_mode: bool,
+    /// Show the compact AI usage footer. Enabled by default.
+    #[serde(default = "default_usage_bar_enabled")]
+    pub usage_bar_enabled: bool,
     /// When true, the terminal cursor blinks. Default:
     /// [`CURSOR_BLINK_DEFAULT`] (`true`).
     #[serde(default = "default_cursor_blink")]
@@ -271,6 +274,10 @@ fn default_agent_bar_mode() -> bool {
     AGENT_BAR_MODE_DEFAULT
 }
 
+fn default_usage_bar_enabled() -> bool {
+    true
+}
+
 fn default_cursor_blink() -> bool {
     CURSOR_BLINK_DEFAULT
 }
@@ -300,6 +307,7 @@ impl Default for Options {
             default_shell: None,
             system_notifications_enabled: default_system_notifications_enabled(),
             agent_bar_mode: default_agent_bar_mode(),
+            usage_bar_enabled: default_usage_bar_enabled(),
             cursor_blink: default_cursor_blink(),
             editor_minimap_enabled: default_editor_minimap_enabled(),
             cursor_blink_interval_ms: default_cursor_blink_interval(),
@@ -568,6 +576,32 @@ mod tests {
             None => std::env::remove_var("XDG_CONFIG_HOME"),
         }
         result
+    }
+
+    #[test]
+    fn usage_bar_defaults_on_and_round_trips_both_values() {
+        let defaults = Options::default();
+        assert!(defaults.usage_bar_enabled);
+        let mut legacy = serde_json::to_value(&defaults).unwrap();
+        legacy.as_object_mut().unwrap().remove("usage_bar_enabled");
+        assert!(
+            serde_json::from_value::<Options>(legacy)
+                .unwrap()
+                .usage_bar_enabled
+        );
+        for enabled in [true, false] {
+            let opts = Options {
+                usage_bar_enabled: enabled,
+                ..defaults.clone()
+            };
+            let json = serde_json::to_string(&opts).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Options>(&json)
+                    .unwrap()
+                    .usage_bar_enabled,
+                enabled
+            );
+        }
     }
 
     #[test]

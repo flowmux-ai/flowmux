@@ -11,6 +11,13 @@ impl WindowController {
                     self.refresh_activity_panel().await;
                 }
             }
+            GtkCommand::SetUsageBarEnabled { enabled } => {
+                self.options.borrow_mut().usage_bar_enabled = enabled;
+                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                    tracing::warn!(%error, "usage bar option save failed");
+                }
+                self.sidebar.usage.set_bar_enabled(enabled);
+            }
             GtkCommand::SetAgentBarMode { enabled } => {
                 self.options.borrow_mut().agent_bar_mode = enabled;
                 if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {

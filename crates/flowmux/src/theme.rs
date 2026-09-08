@@ -550,6 +550,27 @@ paned > separator {{
     color: @sidebar_fg_color;
     opacity: 0.72;
 }}
+.flowmux-usage-bar {{
+    background-color: {sidebar};
+    color: {fg};
+    border-top: 1px solid {border};
+    padding: 1px 6px;
+}}
+.flowmux-usage-bar progressbar trough,
+.flowmux-usage-bar progressbar progress {{
+    min-height: 4px;
+    border: none;
+}}
+.flowmux-usage-bar progressbar trough {{
+    min-width: 95px;
+    background-color: {border};
+}}
+.flowmux-usage-bar progressbar.claude progress {{
+    background-color: #d97757;
+}}
+.flowmux-usage-bar progressbar.codex progress {{
+    background-color: #7a9dff;
+}}
 .flowmux-agent-bar {{
     background-color: {sidebar};
     border-top: 1px solid {border};

@@ -14,6 +14,8 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub(crate) struct UsagePopover {
     button: gtk::MenuButton,
+    show_bar: gtk::ToggleButton,
+    pub(crate) bar: Rc<super::usage_bar::UsageBar>,
 }
 
 impl UsagePopover {
@@ -32,6 +34,7 @@ impl UsagePopover {
         popover.set_position(gtk::PositionType::Top);
 
         let state = Rc::new(RefCell::new(UsagePanelState::default()));
+        let bar = Rc::new(super::usage_bar::UsageBar::new());
         // Set while a manual (refresh-button) refresh is in flight so its
         // result render does not replay the bar animation.
         let manual_refresh = Rc::new(Cell::new(false));
@@ -48,6 +51,15 @@ impl UsagePopover {
         title.set_halign(gtk::Align::Start);
         title.set_hexpand(true);
         header.append(&title);
+
+        let show_bar = gtk::ToggleButton::new();
+        show_bar.set_icon_name("view-bottom-pane-symbolic");
+        show_bar.add_css_class("flat");
+        show_bar.set_focus_on_click(false);
+        show_bar.set_widget_name("flowmux-usage-show-bar");
+        show_bar.set_tooltip_text(Some("Show bar"));
+        show_bar.update_property(&[gtk::accessible::Property::Label("Show bar")]);
+        header.append(&show_bar);
 
         let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
         refresh_button.add_css_class("flat");
@@ -74,6 +86,8 @@ impl UsagePopover {
         render_usage(&cards, &refresh_button, &spinner, &state.borrow(), false);
 
         let (result_tx, result_rx) = async_channel::bounded(1);
+        let bar_weak = Rc::downgrade(&bar);
+        let show_bar_weak = show_bar.downgrade();
         let state_for_results = state.clone();
         let manual_for_results = manual_refresh.clone();
         let popover_weak = popover.downgrade();
@@ -88,6 +102,9 @@ impl UsagePopover {
                         state.apply(refresh);
                     }
                     state.finish_refresh(Utc::now());
+                }
+                if let (Some(bar), Some(toggle)) = (bar_weak.upgrade(), show_bar_weak.upgrade()) {
+                    bar.render(&state_for_results.borrow(), toggle.is_active());
                 }
                 let animate = !manual_for_results.replace(false);
                 let Some(popover) = popover_weak.upgrade() else {
@@ -166,7 +183,48 @@ impl UsagePopover {
         // refresh, so opening the popover shortly after does not double-fetch.
         request_refresh(&state, false, &tokio_handle, &result_tx);
 
-        Self { button }
+        let state_for_toggle = state.clone();
+        let bar_for_toggle = bar.clone();
+        let handle_for_toggle = tokio_handle.clone();
+        let tx_for_toggle = result_tx.clone();
+        show_bar.connect_toggled(move |toggle| {
+            if toggle.is_active() {
+                request_refresh(&state_for_toggle, false, &handle_for_toggle, &tx_for_toggle);
+            }
+            bar_for_toggle.render(&state_for_toggle.borrow(), toggle.is_active());
+        });
+
+        let toggle_weak = show_bar.downgrade();
+        let bar_weak = Rc::downgrade(&bar);
+        gtk::glib::timeout_add_seconds_local(BAR_REFRESH_SECONDS, move || {
+            let (Some(toggle), Some(bar)) = (toggle_weak.upgrade(), bar_weak.upgrade()) else {
+                return gtk::glib::ControlFlow::Break;
+            };
+            if toggle.is_active() {
+                // The periodic refresh must not be postponed by the popover
+                // cache throttle; the in-flight guard still prevents overlap.
+                request_refresh(&state, true, &tokio_handle, &result_tx);
+                // Keep the previous values during collection; a local failure
+                // has already updated the state and must hide unavailable bars.
+                bar.render(&state.borrow(), true);
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+
+        Self {
+            button,
+            show_bar,
+            bar,
+        }
+    }
+
+    pub(crate) fn set_bar_enabled(&self, enabled: bool) {
+        self.show_bar.set_active(enabled);
+    }
+
+    pub(crate) fn connect_bar_clicked(&self, callback: impl Fn(bool) + 'static) {
+        self.show_bar
+            .connect_clicked(move |toggle| callback(toggle.is_active()));
     }
 
     pub(crate) fn button(&self) -> &gtk::MenuButton {
@@ -227,6 +285,8 @@ fn request_refresh(
         gtk::glib::MainContext::default().wakeup();
     });
 }
+
+const BAR_REFRESH_SECONDS: u32 = 150;
 
 /// Backstop deadline for a full usage refresh. Comfortably larger than the sum
 /// of the collectors' own internal timeouts so it only fires when something
@@ -611,6 +671,39 @@ mod tests {
         assert_eq!(popover.width_request(), 360);
 
         let root = popover.child().unwrap();
+        let toggle = find_named_widget(&root, "flowmux-usage-show-bar")
+            .unwrap()
+            .downcast::<gtk::ToggleButton>()
+            .unwrap();
+        assert_eq!(
+            toggle.icon_name().as_deref(),
+            Some("view-bottom-pane-symbolic")
+        );
+        assert!(toggle.label().is_none());
+        assert_eq!(toggle.tooltip_text().as_deref(), Some("Show bar"));
+        assert!(!toggle.is_active());
+        assert_eq!(
+            toggle.next_sibling().unwrap().widget_name(),
+            "flowmux-usage-refresh-button"
+        );
+        let changed = Rc::new(Cell::new(None));
+        let changed_cb = changed.clone();
+        usage.connect_bar_clicked(move |enabled| changed_cb.set(Some(enabled)));
+        usage.set_bar_enabled(true);
+        assert!(toggle.is_active());
+        assert_eq!(
+            changed.get(),
+            None,
+            "options synchronization must not echo a click"
+        );
+        toggle.emit_clicked();
+        assert_eq!(changed.get(), Some(false));
+        toggle.emit_clicked();
+        assert_eq!(changed.get(), Some(true));
+        assert!(
+            !usage.bar.root.is_visible(),
+            "unavailable limits must stay hidden"
+        );
         let refresh = find_named_widget(&root, "flowmux-usage-refresh-button")
             .unwrap()
             .downcast::<gtk::Button>()

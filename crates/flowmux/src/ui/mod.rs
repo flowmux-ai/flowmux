@@ -21,6 +21,7 @@ mod terminal_scrollback;
 pub mod theme_tab;
 pub mod thorvg;
 pub mod update_banner;
+pub(crate) mod usage_bar;
 pub mod usage_popover;
 pub mod window;
 pub mod workspace_view;

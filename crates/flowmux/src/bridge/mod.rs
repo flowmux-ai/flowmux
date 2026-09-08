@@ -563,6 +563,9 @@ pub enum GtkCommand {
     AddActivity {
         entry: ActivityEntry,
     },
+    SetUsageBarEnabled {
+        enabled: bool,
+    },
     SetAgentBarMode {
         enabled: bool,
     },

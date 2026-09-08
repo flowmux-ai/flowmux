@@ -161,6 +161,7 @@ pub struct Sidebar {
     agent_bar_mode: Rc<Cell<bool>>,
     agent_bar_button: gtk::ToggleButton,
     usage_button: gtk::MenuButton,
+    pub(crate) usage: UsagePopover,
     notifications: NotificationStore,
     activities: ActivityStore,
     attentions: Rc<RefCell<HashSet<WorkspaceId>>>,
@@ -347,6 +348,12 @@ impl Sidebar {
         footer.append(&agent_bar_button);
 
         let usage = UsagePopover::new(tokio_handle.clone());
+        let usage_bridge = bridge.clone();
+        usage.connect_bar_clicked(move |enabled| {
+            let _ = usage_bridge
+                .tx
+                .try_send(GtkCommand::SetUsageBarEnabled { enabled });
+        });
         usage
             .button()
             .set_tooltip_text(Some("AI usage (Ctrl+Alt+U)"));
@@ -515,6 +522,7 @@ impl Sidebar {
             agent_bar_mode,
             agent_bar_button,
             usage_button,
+            usage,
             notifications,
             activities,
             attentions,

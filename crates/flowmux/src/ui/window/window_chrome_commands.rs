@@ -30,6 +30,10 @@ impl WindowController {
                         }
                         *options_cell.borrow_mut() = opts.clone();
                         controller.sidebar.set_agent_bar_mode(opts.agent_bar_mode);
+                        controller
+                            .sidebar
+                            .usage
+                            .set_bar_enabled(opts.usage_bar_enabled);
                         // Re-resolves the theme (preset + overrides), repaints
                         // every terminal, reapplies the effective font, and
                         // reloads the CSS provider.

@@ -140,6 +140,8 @@ fn build_dialog(
     let default_shell_entry = build_default_shell_entry(current.default_shell.as_deref());
     let system_notify_switch = build_toggle_switch(current.system_notifications_enabled);
     let agent_bar_switch = build_toggle_switch(current.agent_bar_mode);
+    let usage_bar_switch = build_toggle_switch(current.usage_bar_enabled);
+    usage_bar_switch.set_widget_name("flowmux-usage-bar-switch");
     let editor_minimap_switch = build_toggle_switch(current.editor_minimap_enabled);
     let cursor_blink_switch = build_toggle_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
@@ -172,6 +174,7 @@ fn build_dialog(
     general.append(&row("Default shell", &default_shell_entry));
     general.append(&row("System notifications", &system_notify_switch));
     general.append(&row("Agents bar mode", &agent_bar_switch));
+    general.append(&row("AI Usage bar", &usage_bar_switch));
     general.append(&row("Editor minimap", &editor_minimap_switch));
     general.append(&row("Cursor blink", &cursor_blink_switch));
     general.append(&row("Cursor blink interval (ms)", &blink_interval_spin));
@@ -219,6 +222,7 @@ fn build_dialog(
         let default_shell_entry = default_shell_entry.clone();
         let system_notify_switch = system_notify_switch.clone();
         let agent_bar_switch = agent_bar_switch.clone();
+        let usage_bar_switch = usage_bar_switch.clone();
         let editor_minimap_switch = editor_minimap_switch.clone();
         let cursor_blink_switch = cursor_blink_switch.clone();
         let blink_interval_spin = blink_interval_spin.clone();
@@ -253,6 +257,7 @@ fn build_dialog(
                 &default_shell_entry,
                 &system_notify_switch,
                 &agent_bar_switch,
+                &usage_bar_switch,
                 &editor_minimap_switch,
                 &cursor_blink_switch,
                 &blink_interval_spin,
@@ -325,6 +330,7 @@ fn build_dialog(
     }
     connect_active_notify(&system_notify_switch, apply_current.clone());
     connect_active_notify(&agent_bar_switch, apply_current.clone());
+    connect_active_notify(&usage_bar_switch, apply_current.clone());
     connect_active_notify(&editor_minimap_switch, apply_current.clone());
     connect_active_notify(&cursor_blink_switch, apply_current.clone());
     connect_value_changed(&blink_interval_spin, apply_current.clone());
@@ -1007,6 +1013,7 @@ fn collect_options(
     default_shell_entry: &gtk::Entry,
     system_notify_switch: &gtk::Switch,
     agent_bar_switch: &gtk::Switch,
+    usage_bar_switch: &gtk::Switch,
     editor_minimap_switch: &gtk::Switch,
     cursor_blink_switch: &gtk::Switch,
     blink_interval_spin: &gtk::SpinButton,
@@ -1063,6 +1070,7 @@ fn collect_options(
         )),
         system_notifications_enabled: system_notify_switch.is_active(),
         agent_bar_mode: agent_bar_switch.is_active(),
+        usage_bar_enabled: usage_bar_switch.is_active(),
         editor_minimap_enabled: editor_minimap_switch.is_active(),
         cursor_blink: cursor_blink_switch.is_active(),
         cursor_blink_interval_ms: Options::clamp_cursor_blink_interval(
@@ -1748,6 +1756,7 @@ mod tests {
             &default_shell,
             &notify_on,
             &agent_bar_on,
+            &build_toggle_switch(true),
             &minimap_on,
             &blink_on,
             &blink_interval,
@@ -1760,6 +1769,7 @@ mod tests {
             &crate::ui::theme_tab::ThemeSelection::default(),
         );
         assert!(opts.agent_bar_mode);
+        assert!(opts.usage_bar_enabled);
         assert!(opts.editor_minimap_enabled);
         assert!(opts.cursor_blink);
         assert_eq!(opts.cursor_blink_interval_ms, 300);
@@ -1814,6 +1824,7 @@ mod tests {
             &default_shell,
             &notify_off,
             &agent_bar_off,
+            &build_toggle_switch(false),
             &minimap_off,
             &blink_off,
             &blink_interval,
@@ -1839,6 +1850,7 @@ mod tests {
         assert_eq!(opts.terminal_minimap_opacity, 65);
         assert!(!opts.system_notifications_enabled);
         assert!(!opts.agent_bar_mode);
+        assert!(!opts.usage_bar_enabled);
         assert!(!opts.editor_minimap_enabled);
         assert_eq!(opts.zoom_percent, 200);
         assert_eq!(opts.default_shell, None);

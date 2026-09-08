@@ -76,6 +76,12 @@ show Git worktree status, and remove worktrees without leaving the terminal.
 Double-click a text file to open it in the embedded editor (find and replace,
 Quick Open, workspace search, conflict comparison, crash recovery). The AI
 Usage popover (**Ctrl+Alt+U**) shows current agent token and activity totals.
+Compact Claude and Codex 5h/1W meters appear below the terminal content and Agents
+bar by default. Toggle them with the **Show bar** icon beside Refresh, or
+**Options → AI Usage bar**. Each provider icon precedes its meters, with labels
+such as `25%(5h)` and `60%(1W)`. The footer uses 80% of the terminal font size, refreshes every
+150 seconds, and hides unavailable usage periods. Available periods remain visible
+at 0% utilization.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 

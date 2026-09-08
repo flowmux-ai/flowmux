@@ -132,6 +132,10 @@ const SYMBOLIC_ICONS: &[SymbolicIcon] = &[
         path: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm.5 1.5v7h9v-7zM3.5 7.25h9v1.5h-9z",
     },
     SymbolicIcon {
+        name: "view-bottom-pane-symbolic",
+        path: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm.5 1.5v7h9v-7zM3.5 9h9v2.5h-9z",
+    },
+    SymbolicIcon {
         name: "flowmux-split-right-symbolic",
         path: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm.5 1.5v7h9v-7zM7.25 4.5h1.5v7h-1.5z",
     },

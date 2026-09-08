@@ -1535,6 +1535,7 @@ impl WindowController {
         });
 
         let font = resolved.terminal_font(opts);
+        self.sidebar.usage.bar.set_font(&font);
         let registry = self.pane_registry.borrow();
         for terminal in registry.terminals.values() {
             resolved.apply_to_ghostty(terminal);
@@ -1627,6 +1628,13 @@ impl WindowController {
             tokio_handle.clone(),
             initial_options.agent_bar_mode,
         );
+        sidebar
+            .usage
+            .set_bar_enabled(initial_options.usage_bar_enabled);
+        sidebar
+            .usage
+            .bar
+            .set_font(&theme.terminal_font(&initial_options));
         let agent_bar = AgentBar::new(bridge.clone());
         let agent_bar_attentions = Rc::new(RefCell::new(HashSet::new()));
 
@@ -1655,6 +1663,7 @@ impl WindowController {
         content_box.set_vexpand(true);
         content_box.append(&stack);
         content_box.append(&agent_bar.root);
+        content_box.append(&sidebar.usage.bar.root);
 
         let file_browser = FileBrowserPanel::new();
         #[cfg(target_os = "macos")]
@@ -2621,6 +2630,7 @@ impl WindowController {
             command @ (GtkCommand::AddNotification { .. }
             | GtkCommand::AddActivity { .. }
             | GtkCommand::SetAgentBarMode { .. }
+            | GtkCommand::SetUsageBarEnabled { .. }
             | GtkCommand::OpenActivityTarget { .. }
             | GtkCommand::SetNotificationDesktopId { .. }
             | GtkCommand::CloseDesktopNotifications { .. }
@@ -8311,6 +8321,20 @@ mod tests {
         controller.render_workspace(&ws);
         store.set_active_workspace(Some(ws_id)).await;
         (controller, ws_id, pane)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn usage_bar_is_last_content_row_below_agent_bar_outside_side_panel() {
+        let (controller, _, _) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.UsageBarLayout").await;
+        let usage = &controller.sidebar.usage.bar.root;
+        let agent = &controller.agent_bar.bar.root;
+        assert_eq!(agent.next_sibling().as_ref(), Some(usage.upcast_ref()));
+        assert!(usage.next_sibling().is_none());
+        assert_eq!(usage.parent(), agent.parent());
+        assert_ne!(usage.parent(), controller.sidebar.root.parent());
+        assert!(!usage.is_visible());
     }
 
     #[cfg(not(target_os = "macos"))]
