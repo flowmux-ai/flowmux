@@ -62,6 +62,16 @@ depend on native events and the existing fallback. An observed child ledger is
 not complete ground truth, so a missing child-stop event can keep work pending.
 The change does not read entire transcripts in production or modify hook trust.
 
+Codex goal mode can leave a `Conversation recap` above the composer and
+`Goal achieved (16m)` in the model/cwd row below it. That adjacent status row
+now qualifies as completion evidence, with the same duration validation,
+live-progress precedence, and native wait/child guards as the other footers.
+Recap prose alone never declares completion. Core/daemon regression cases and
+a live PTY replay of the captured screen verified Working → Idle without Stop;
+starting another turn against the unchanged screen retained Working. The
+original stale session was separately reconciled from its verified live PID,
+session ID, and completed turn; the running app did not hot-load this change.
+
 - [Codex hooks](https://developers.openai.com/codex/hooks): native stdin JSON,
   turn identities, concurrent handlers, trust, Stop continuation, Interrupt;
   transcript format is explicitly not stable.

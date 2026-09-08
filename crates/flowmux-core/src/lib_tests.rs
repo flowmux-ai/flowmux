@@ -3225,6 +3225,18 @@ fn completion_footer_requires_the_matching_live_composer() {
         ),
         ("─ Worked for 1h 02m 03s ─\n›", Some("codex")),
         (
+            "─ Conversation recap ─\n전체 사용량 0일 때 숨김 처리 여부는 확인이 필요합니다.\n› Ask Codex to do anything\ngpt-6-astra high fast · ~/work    Goal achieved (16m)",
+            Some("codex"),
+        ),
+        ("›\ngpt-6-astra · ~/work    Goal achieved (1h 02m)", Some("codex")),
+        ("Goal achieved (16m)\n›", None),
+        ("─ Conversation recap ─\n확인이 필요합니다.\n›", None),
+        ("›\nGoal achieved (16m)", None),
+        ("❯\ngpt-6-astra · ~/work    Goal achieved (16m)", None),
+        ("›\ngpt-6-astra · ~/work    Goal achieved (later)", None),
+        ("›\ngpt-6-astra · ~/work    Goal achieved (16m) extra", None),
+        ("›\ngpt-6-astra · ~/work    Goal running (16m)", None),
+        (
             "✻ Cooked for 3m 12s\n────────\n❯\n? for shortcuts",
             Some("claude"),
         ),
@@ -3256,6 +3268,7 @@ fn detector_handles_variable_action_labels_and_empty_composers() {
         "✽ Reticulating… (1s · esc to interrupt)\n❯",
         "• Compacting context (12s • esc to interrupt)\n›",
         "• Running Stop hooks (1m 01s • esc to interrupt)\n›",
+        "• Working (1s • esc to interrupt)\n›\ngpt-6-astra · ~/work    Goal achieved (16m)",
     ] {
         assert_eq!(
             detect_agent_status_from_signals(Some(screen), None),

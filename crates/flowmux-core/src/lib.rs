@@ -3044,8 +3044,8 @@ pub fn detect_agent_idle_name_from_signals(
         })
 }
 
-/// A completed-turn footer immediately above the live composer is stronger
-/// evidence than a bare prompt (which also remains visible while working).
+/// A completed-turn footer next to the live composer is stronger evidence
+/// than a bare prompt (which also remains visible while working).
 /// Keep this deliberately structural: arbitrary assistant prose is not a
 /// lifecycle event, and a future unknown TUI format must fall back to hooks.
 pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str> {
@@ -3059,11 +3059,23 @@ pub fn detect_agent_completion(screen_text: Option<&str>) -> Option<&'static str
     let prompt = lines
         .iter()
         .position(|line| line.starts_with('›') || line.starts_with('❯'))?;
+    // Codex goal mode puts completion in the model/cwd row below the
+    // composer, including after a recap. Prose above the composer is not
+    // activity evidence. Live progress and native waits still take priority.
+    let goal_elapsed = (prompt == 1 && lines[prompt].starts_with('›'))
+        .then(|| lines[0].rsplit_once("  Goal achieved ("))
+        .flatten()
+        .filter(|(prefix, _)| prefix.contains(" · "))
+        .and_then(|(_, elapsed)| elapsed.strip_suffix(')'));
     let footer = lines
         .iter()
         .skip(prompt + 1)
-        .find(|line| !line.chars().all(|c| matches!(c, '─' | '━' | ' ')))?;
-    let (agent, elapsed) = if let Some(rest) = footer
+        .find(|line| !line.chars().all(|c| matches!(c, '─' | '━' | ' ')))
+        .copied()
+        .unwrap_or_default();
+    let (agent, elapsed) = if let Some(elapsed) = goal_elapsed {
+        ("codex", elapsed)
+    } else if let Some(rest) = footer
         .trim_start_matches('─')
         .trim_start()
         .strip_prefix("Worked for ")

@@ -7071,90 +7071,95 @@ mod tests {
 
     #[tokio::test]
     async fn completed_codex_screen_recovers_without_observing_a_spinner() {
-        let store = StateStore::new_lazy(State::default());
-        let ws_id = store
-            .create_workspace(Some("demo".into()), "/tmp/demo".into())
-            .await;
-        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
-        store
-            .report_agent_lifecycle_with_visibility(
-                surface,
-                "codex",
-                Some(std::process::id()),
-                Some(1),
-                "session",
-                AgentLifecycleEvent::TurnStarted {
-                    turn_id: Some("turn".into()),
-                    status_text: "Starting turn".into(),
-                },
-                false,
-            )
-            .await;
-        store.report_agent_screen_signals_with_visibility(surface,
-            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
-            Some("work"), false).await;
-        let agent = store
-            .located_agent_presence(surface)
-            .await
-            .unwrap()
-            .presence;
-        assert_eq!(agent.public_status(), AgentStatus::Done);
-        assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
-        assert_eq!(agent.session_id.as_deref(), Some("session"));
-        store
-            .report_agent_lifecycle_with_visibility(
-                surface,
-                "codex",
-                Some(std::process::id()),
-                Some(2),
-                "session",
-                AgentLifecycleEvent::CodexRootProgressObserved {
-                    turn_id: "turn".into(),
-                    status_text: "Working".into(),
-                },
-                false,
-            )
-            .await;
-        store.report_agent_screen_signals_with_visibility(surface,
-            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
-            Some("work"), false).await;
-        assert_eq!(
+        for screen in [
+            "• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work",
+            "─ Conversation recap ─\n전체 사용량 0일 때 숨김 처리 여부는 확인이 필요합니다.\n› Ask Codex to do anything\ngpt-6-astra high fast · ~/work    Goal achieved (16m)",
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store
+                .create_workspace(Some("demo".into()), "/tmp/demo".into())
+                .await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
             store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(std::process::id()),
+                    Some(1),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("turn".into()),
+                        status_text: "Starting turn".into(),
+                    },
+                    false,
+                )
+                .await;
+            store.report_agent_screen_signals_with_visibility(surface,
+                Some(screen),
+                Some("work"), false).await;
+            let agent = store
                 .located_agent_presence(surface)
                 .await
                 .unwrap()
-                .presence
-                .public_status(),
-            AgentStatus::Done
-        );
-        // A new turn can begin before the terminal repaints. Its old completed
-        // footer must not cancel the authoritative TurnStarted event.
-        store
-            .report_agent_lifecycle_with_visibility(
-                surface,
-                "codex",
-                Some(std::process::id()),
-                Some(3),
-                "session",
-                AgentLifecycleEvent::TurnStarted {
-                    turn_id: Some("next".into()),
-                    status_text: "Starting turn".into(),
-                },
-                false,
-            )
-            .await;
-        store.report_agent_screen_signals_with_visibility(surface,
-            Some("• 수정했습니다.\n─ Worked for 6m 15s ─────\n› Ask Codex to do anything\n  gpt-6-astra high fast · ~/work"),
-            Some("work"), false).await;
-        assert_eq!(
+                .presence;
+            assert_eq!(agent.public_status(), AgentStatus::Done);
+            assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+            assert_eq!(agent.session_id.as_deref(), Some("session"));
             store
-                .located_agent_presence(surface)
-                .await
-                .unwrap()
-                .presence
-                .status,
-            AgentStatus::Working
-        );
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(std::process::id()),
+                    Some(2),
+                    "session",
+                    AgentLifecycleEvent::CodexRootProgressObserved {
+                        turn_id: "turn".into(),
+                        status_text: "Working".into(),
+                    },
+                    false,
+                )
+                .await;
+            store.report_agent_screen_signals_with_visibility(surface,
+                Some(screen),
+                Some("work"), false).await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .public_status(),
+                AgentStatus::Done
+            );
+            // A new turn can begin before the terminal repaints. Its old completed
+            // footer must not cancel the authoritative TurnStarted event.
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "codex",
+                    Some(std::process::id()),
+                    Some(3),
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: Some("next".into()),
+                        status_text: "Starting turn".into(),
+                    },
+                    false,
+                )
+                .await;
+            store.report_agent_screen_signals_with_visibility(surface,
+                Some(screen),
+                Some("work"), false).await;
+            assert_eq!(
+                store
+                    .located_agent_presence(surface)
+                    .await
+                    .unwrap()
+                    .presence
+                    .status,
+                AgentStatus::Working
+            );
+        }
     }
 
     #[tokio::test]
@@ -7247,29 +7252,34 @@ mod tests {
                 expected,
                 "blank frame: {agent}"
             );
-            let screen = if agent == "codex" {
-                "─ Worked for 3s ─\n›"
+            let screens: &[&str] = if agent == "codex" {
+                &[
+                    "─ Worked for 3s ─\n›",
+                    "›\ngpt-6-astra · ~/work    Goal achieved (16m)",
+                ]
             } else {
-                "✻ Cooked for 3s\n❯"
+                &["✻ Cooked for 3s\n❯"]
             };
-            store
-                .report_agent_screen_signals_with_visibility(
-                    surface,
-                    Some(screen),
-                    Some("work"),
-                    false,
-                )
-                .await;
-            assert_eq!(
+            for screen in screens {
                 store
-                    .located_agent_presence(surface)
-                    .await
-                    .unwrap()
-                    .presence
-                    .status,
-                expected,
-                "{agent}"
-            );
+                    .report_agent_screen_signals_with_visibility(
+                        surface,
+                        Some(screen),
+                        Some("work"),
+                        false,
+                    )
+                    .await;
+                assert_eq!(
+                    store
+                        .located_agent_presence(surface)
+                        .await
+                        .unwrap()
+                        .presence
+                        .status,
+                    expected,
+                    "{agent}"
+                );
+            }
         }
     }
 
