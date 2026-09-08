@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use crate::usage::{ProviderState, UsagePanelState};
+use crate::usage::{ProviderState, UsagePanelState, UsageWindow};
 use gtk::prelude::*;
 
 /// Persistent widgets: refreshing changes values without rebuilding the footer.
@@ -39,16 +39,9 @@ impl UsageBar {
                     progress: gtk::ProgressBar::new(),
                     percent: gtk::Label::new(None),
                 };
-                let name = ["Claude", "Codex"][provider];
-                let duration = ["5h", "1W"][period];
-                meter
-                    .root
-                    .set_tooltip_text(Some(&format!("{name} {duration} usage")));
-                meter
-                    .progress
-                    .update_property(&[gtk::accessible::Property::Label(&format!(
-                        "{name} {duration} usage"
-                    ))]);
+                // The tooltip and accessible label name the window each meter
+                // ends up showing, so `render` sets them: a credit-based plan
+                // puts its balance in the first slot instead of the 5h window.
                 meter.progress.add_css_class(["claude", "codex"][provider]);
                 meter.progress.set_valign(gtk::Align::Center);
                 meter.progress.set_width_request(95);
@@ -96,17 +89,30 @@ impl UsageBar {
     pub(crate) fn render(&self, state: &UsagePanelState, enabled: bool) {
         let mut visible = [false; 2];
         for (provider, state) in [&state.claude, &state.codex].into_iter().enumerate() {
-            for (period, duration) in [300, 10_080].into_iter().enumerate() {
-                let value = window_percent(state, duration);
+            let mut slots = [(300, "5h"), (10_080, "1W")].map(|(duration, label)| {
+                window_percent(state, duration).map(|value| (label, value))
+            });
+            // Credit-based plans report no 5h/1W window at all — Claude exposes
+            // only "Extra usage" and Codex only "Individual". Show that balance
+            // in the first slot so the bar still reports usage on such plans.
+            if slots.iter().all(Option::is_none) {
+                slots[0] = scope_percent(state, CREDIT_SCOPES[provider])
+                    .map(|value| (CREDIT_LABELS[provider], value));
+            }
+            for (period, slot) in slots.into_iter().enumerate() {
                 let meter = &self.meters[provider][period];
-                if let Some(value) = value {
-                    meter.progress.set_fraction((value / 100.0).clamp(0.0, 1.0));
+                if let Some((label, value)) = slot {
+                    let name = ["Claude", "Codex"][provider];
+                    let description = format!("{name} {label} usage");
+                    meter.root.set_tooltip_text(Some(&description));
                     meter
-                        .percent
-                        .set_text(&format!("{value:.0}%({})", ["5h", "1W"][period]));
+                        .progress
+                        .update_property(&[gtk::accessible::Property::Label(&description)]);
+                    meter.progress.set_fraction((value / 100.0).clamp(0.0, 1.0));
+                    meter.percent.set_text(&format!("{value:.0}%({label})"));
                 }
-                meter.root.set_visible(value.is_some());
-                visible[provider] |= value.is_some();
+                meter.root.set_visible(slot.is_some());
+                visible[provider] |= slot.is_some();
             }
             self.providers[provider].set_visible(visible[provider]);
         }
@@ -116,7 +122,20 @@ impl UsageBar {
     }
 }
 
+/// The only limit a credit-based plan reports, per provider, and the short
+/// label the bar shows for it.
+const CREDIT_SCOPES: [&str; 2] = ["Extra usage", "Individual"];
+const CREDIT_LABELS: [&str; 2] = ["Extra", "Individual"];
+
 fn window_percent(state: &ProviderState, duration: u64) -> Option<f64> {
+    max_percent(state, |window| window.duration_minutes == Some(duration))
+}
+
+fn scope_percent(state: &ProviderState, scope: &str) -> Option<f64> {
+    max_percent(state, |window| window.scope.as_deref() == Some(scope))
+}
+
+fn max_percent(state: &ProviderState, matches: impl Fn(&UsageWindow) -> bool) -> Option<f64> {
     if state.limits_error.is_some() {
         return None;
     }
@@ -127,7 +146,7 @@ fn window_percent(state: &ProviderState, duration: u64) -> Option<f64> {
         .as_ref()?
         .value
         .iter()
-        .filter(|window| window.duration_minutes == Some(duration))
+        .filter(|window| matches(window))
         .map(|window| window.used_percent)
         .filter(|value| value.is_finite() && *value >= 0.0)
         .max_by(f64::total_cmp)
@@ -155,6 +174,21 @@ mod tests {
                     })
                     .collect(),
             ),
+            collected_at: Utc::now(),
+        }
+    }
+
+    fn credit_refresh(provider: Provider, scope: &str, percent: f64) -> ProviderRefresh {
+        ProviderRefresh {
+            provider,
+            tokens: FieldRefresh::Failure(UsageError::network()),
+            limits: FieldRefresh::Success(vec![UsageWindow {
+                label: String::new(),
+                scope: Some(scope.to_owned()),
+                used_percent: percent,
+                duration_minutes: None,
+                resets_at: None,
+            }]),
             collected_at: Utc::now(),
         }
     }
@@ -265,6 +299,41 @@ mod tests {
         assert!(bar.root.is_visible());
         assert_eq!(bar.meters[0][0].progress.fraction(), 1.0);
         assert_eq!(bar.meters[0][0].percent.text(), "120%(5h)");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn credit_based_plans_show_their_single_balance_in_the_first_slot() {
+        let bar = UsageBar::new();
+        let mut state = UsagePanelState::default();
+        state.apply(credit_refresh(Provider::Claude, "Extra usage", 42.0));
+        state.apply(credit_refresh(Provider::Codex, "Individual", 7.0));
+        bar.render(&state, true);
+        assert!(bar.root.is_visible());
+        assert!(bar.separator.is_visible());
+        assert_eq!(bar.meters[0][0].percent.text(), "42%(Extra)");
+        assert_eq!(bar.meters[0][0].progress.fraction(), 0.42);
+        assert_eq!(
+            bar.meters[0][0].root.tooltip_text().as_deref(),
+            Some("Claude Extra usage")
+        );
+        assert_eq!(bar.meters[1][0].percent.text(), "7%(Individual)");
+        for provider in 0..2 {
+            assert!(bar.providers[provider].is_visible());
+            assert!(bar.meters[provider][0].root.is_visible());
+            assert!(
+                !bar.meters[provider][1].root.is_visible(),
+                "a credit plan has no second window"
+            );
+        }
+        // A plan that reports real periods keeps them; the balance is a fallback.
+        state.apply(refresh(Provider::Claude, &[(300, 22.0)]));
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0][0].percent.text(), "22%(5h)");
+        // Other scoped windows are not promoted into the bar.
+        state.apply(credit_refresh(Provider::Codex, "Team pool", 90.0));
+        bar.render(&state, true);
+        assert!(!bar.providers[1].is_visible());
     }
 
     #[cfg(not(target_os = "macos"))]

@@ -81,7 +81,9 @@ bar by default. Toggle them with the **Show bar** icon beside Refresh, or
 **Options → AI Usage bar**. Each provider icon precedes its meters, with labels
 such as `25%(5h)` and `60%(1W)`. The footer uses 80% of the terminal font size, refreshes every
 150 seconds, and hides unavailable usage periods. Available periods remain visible
-at 0% utilization.
+at 0% utilization. Credit-based plans report no 5h/1W window — Claude only
+`Extra usage` and Codex only `Individual` — so the bar shows that balance
+instead, as `12%(Extra)` or `12%(Individual)`.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
