@@ -346,14 +346,12 @@ mod tests {
         bar.set_font(&font);
         assert!(bar.icons[0].pixel_size() > small_icon);
         assert_eq!(bar.icons[0].pixel_size(), bar.icons[1].pixel_size());
-        let original_label = gtk::Label::new(Some("100%(5h)"));
-        let original_attributes = gtk::pango::AttrList::new();
-        original_attributes.insert(gtk::pango::AttrFontDesc::new(&font));
-        original_label.set_attributes(Some(&original_attributes));
-        let original_height = original_label.measure(gtk::Orientation::Vertical, -1).1;
+        // Icons scale from font metrics; a label's layout height can round differently.
+        let metrics = bar.root.pango_context().metrics(Some(&font), None);
+        let original_height = gtk::pango::units_to_double(metrics.height()).ceil();
         assert_eq!(
             bar.icons[0].pixel_size(),
-            (original_height as f64 * 0.8).round() as i32
+            (original_height * 0.8).round() as i32
         );
         assert_eq!(
             bar.meters[0][0].percent.attributes().unwrap().to_string(),
