@@ -3468,6 +3468,13 @@ fn detector_reads_agent_name_from_osc_and_screen_signals() {
 fn detector_reads_idle_agent_prompt_without_trusting_stale_scrollback() {
     assert_eq!(
         detect_agent_idle_name_from_signals(
+            Some("?? .claude/\n?? reports/\n› Ask Codex to do anything\n  gpt-6-astra xhigh fast · ~/work"),
+            None
+        ),
+        Some("codex")
+    );
+    assert_eq!(
+        detect_agent_idle_name_from_signals(
             Some("Codex\npress / for commands\n\n\n\n\n\n\n\n\n\n\n\n"),
             None
         ),

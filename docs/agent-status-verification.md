@@ -34,6 +34,23 @@ completion/interruption no longer restores an older screen Working/Blocked base.
 Variable progress labels are recognized by their decorated clock/control or
 token-counter shape, including Claude's changing spinner verbs.
 
+A second stuck Working came from the opposite direction. Codex's Stop hook was
+delivered and settled to Idle after the ingress grace, but the TUI repainted its
+last `Working (44s • esc to interrupt)` frame after the hook returned. That
+stale spinner reopened Working on the hook-owned presence, and the final frame
+could not close it: it had no completion footer, and `?? .claude/` from a git
+status above the composer made the idle-name heuristic call the pane Claude, so
+the frame was discarded as an identity conflict. A settled Codex turn now
+ignores screen Working until a new native turn starts, and idle-name detection
+prefers the line nearest the composer.
+
+A separate running app replayed TurnStarted, native Stop, a repainted stale
+spinner, the final prompt containing `?? .claude/`, and a second turn. Both the
+public presence and the visible Agents entry stayed Idle/Completed after Stop
+and returned to Working on the second turn. Core/daemon checks passed 320 tests
+(3 ignored), format checks, and Clippy. The verified fast-profile binaries were
+installed; existing windows need a restart to load the change.
+
 ## Case coverage
 
 | Case | Evidence and behavior | Verification |
@@ -45,6 +62,7 @@ token-counter shape, including Claude's changing spinner verbs.
 | Bare/empty composer while working | Progress takes precedence; a prompt alone cannot clear native Working | Core tests |
 | Variable progress verb / compaction / Stop-hook progress | Decorated duration and live controls preserve Working | Core tests |
 | New turn before repaint | Unchanged completion frame cannot finish the new turn | Daemon regression |
+| Stale spinner after Stop settlement | Settled Codex turn ignores screen Working until a new native turn; idle name follows the line nearest the composer | Daemon/core regression |
 | Permission, AskUserQuestion, API/quota/session waits | Correlated waits remain Blocked despite completion-looking output | Existing and new daemon tests |
 | Parallel tools, reordered events | Tool identities, scopes, and boundary sequences retain independent waits | Existing daemon/CLI tests |
 | Active/reused child, child/root Stop race | Observed child ledger defers root completion; screen Idle cannot clear active children | Existing and new daemon tests |

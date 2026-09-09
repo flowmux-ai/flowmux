@@ -2923,6 +2923,37 @@ impl StateStore {
             self.allow_agent_screen_restore(surface_id).await;
         }
         let mut s = self.inner.lock().await;
+        let settled_codex_turn = status == AgentStatus::Working
+            && s.workspaces.iter().any(|ws| {
+                ws.surfaces.iter().any(|surface| {
+                    surface
+                        .root_pane
+                        .agent_presence_for_surface(surface_id)
+                        .is_some_and(|presence| {
+                            presence.name == "codex"
+                                && presence.source.as_deref() == Some("flowmux:hook")
+                                && presence.session_id.as_deref().is_some_and(|session_id| {
+                                    lifecycle
+                                        .codex_turns
+                                        .get(&(surface_id, session_id.to_string()))
+                                        .is_some_and(|ledger| {
+                                            !ledger.settled_parent_turns.is_empty()
+                                                && ledger.current_parent_turn.is_none()
+                                                && ledger.pending_parent_stop.is_none()
+                                                && ledger.active_children.is_empty()
+                                        })
+                                })
+                        })
+                })
+            });
+        if settled_codex_turn {
+            // The native lifecycle already settled this Codex turn and no new
+            // turn has started. The TUI repaints its last spinner frame after
+            // the Stop hook returns, so a screen Working here is stale and
+            // must not reopen the turn: a bare prompt cannot clear hook
+            // Working, so nothing would ever settle it again.
+            return None;
+        }
         let mut outcome = None;
         for ws in s.workspaces.iter_mut() {
             let mut found = false;
@@ -11359,5 +11390,98 @@ Do you want to continue?";
             .await
             .is_none());
         assert!(pane_tab_ids(&store, ws, src).await.contains(&moved));
+    }
+    #[tokio::test]
+    async fn stale_codex_spinner_after_grace_settlement_stays_idle() {
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
+        let session_id = "session-1";
+        let spinner = "• Ran git status\n• Working (44s • esc to interrupt)\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
+        // The final frame carries no completion footer and names another
+        // agent in scrollback, so it can never clear a hook Working by itself.
+        let final_frame =
+            "?? .claude/\n• Done.\n› Ask Codex to do anything\n  gpt-6-astra · ~/work";
+        let lifecycle = |event, seq| {
+            store.report_agent_lifecycle_with_visibility(
+                surface,
+                "codex",
+                Some(42),
+                Some(seq),
+                session_id,
+                event,
+                false,
+            )
+        };
+        let status = || async {
+            store
+                .located_agent_presence(surface)
+                .await
+                .unwrap()
+                .presence
+                .status
+        };
+
+        lifecycle(
+            AgentLifecycleEvent::TurnStarted {
+                turn_id: Some("turn-1".into()),
+                status_text: "Starting turn".into(),
+            },
+            10,
+        )
+        .await;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(spinner), None, false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Working);
+        lifecycle(
+            AgentLifecycleEvent::CodexTurnStopped {
+                turn_id: "turn-1".into(),
+                message: Some("Done.".into()),
+                status_text: "Completed".into(),
+                stop_hook_active: false,
+            },
+            20,
+        )
+        .await;
+        store
+            .settle_codex_turn_after_grace(surface, Some(42), Some(20), session_id, "turn-1", false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Idle);
+
+        // The TUI repaints its last spinner frame after the Stop hook returns.
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(spinner), None, false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Idle);
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(final_frame), None, false)
+            .await;
+        assert_eq!(status().await, AgentStatus::Idle);
+
+        // A new native turn still accepts live spinner progress.
+        lifecycle(
+            AgentLifecycleEvent::TurnStarted {
+                turn_id: Some("turn-2".into()),
+                status_text: "Starting turn".into(),
+            },
+            30,
+        )
+        .await;
+        store
+            .report_agent_screen_signals_with_visibility(surface, Some(spinner), None, false)
+            .await;
+        let presence = store
+            .located_agent_presence(surface)
+            .await
+            .unwrap()
+            .presence;
+        assert_eq!(presence.status, AgentStatus::Working);
+        assert_eq!(
+            presence.custom_status.as_deref(),
+            Some("Working (44s • esc to interrupt)")
+        );
     }
 }
