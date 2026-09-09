@@ -575,7 +575,10 @@ mod tests {
 
         // Workspace root came from the request cwd.
         let ws = find_workspace(&store, sock).await.expect("workspace");
-        assert_eq!(ws.root_dir, PathBuf::from("/tmp/team-root"));
+        assert_eq!(
+            ws.local_root(),
+            Some(std::path::Path::new("/tmp/team-root"))
+        );
         assert_eq!(ws.custom_title.as_deref(), Some(sock));
 
         // The GTK side continuously updates the automatic workspace

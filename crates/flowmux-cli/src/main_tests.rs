@@ -593,7 +593,10 @@ fn session_name_is_stable_and_unique_per_tab() {
     let workspace = TreeWorkspace {
         id: "12345678-0000-0000-0000-000000000000".parse().unwrap(),
         name: "changing title".into(),
-        root: "/tmp/My Feature".into(),
+        root: Some("/tmp/My Feature".into()),
+        location: flowmux_core::WorkspaceLocation::Local {
+            root_dir: "/tmp/My Feature".into(),
+        },
         panes: vec![],
     };
     let surface: SurfaceId = "abcdef12-0000-0000-0000-000000000000".parse().unwrap();
@@ -614,6 +617,45 @@ fn session_name_is_stable_and_unique_per_tab() {
 }
 
 #[test]
+fn ssh_session_name_uses_host_instead_of_remote_cwd_or_title() {
+    use flowmux_core::{SshTarget, SshWorkspaceConfig, WorkspaceLocation};
+    use flowmux_ipc::protocol::TreeWorkspace;
+
+    let mut workspace = TreeWorkspace {
+        id: "12345678-0000-0000-0000-000000000000".parse().unwrap(),
+        name: "changing title".into(),
+        root: None,
+        location: WorkspaceLocation::Ssh {
+            config: SshWorkspaceConfig {
+                target: SshTarget::parse("user@Build.Example.test").unwrap(),
+                cwd: Some("/remote/project".into()),
+                tmux: false,
+                forwards: vec![],
+            },
+        },
+        panes: vec![],
+    };
+    let surface: SurfaceId = "abcdef12-0000-0000-0000-000000000000".parse().unwrap();
+    assert_eq!(
+        claude_session_name(&workspace, surface),
+        "build-example-test-1234-abcd"
+    );
+    workspace.name = "new title".into();
+    if let WorkspaceLocation::Ssh { config } = &mut workspace.location {
+        config.cwd = Some("/different/remote/project".into());
+    }
+    assert_eq!(
+        claude_session_name(&workspace, surface),
+        "build-example-test-1234-abcd"
+    );
+    let other_surface: SurfaceId = "fedcba98-0000-0000-0000-000000000000".parse().unwrap();
+    assert_eq!(
+        claude_session_name(&workspace, other_surface),
+        "build-example-test-1234-fedc"
+    );
+}
+
+#[test]
 fn render_tree_marks_active_tab_and_indents() {
     use flowmux_core::{AgentActivity, AgentStatus};
     use flowmux_ipc::protocol::{TreeAgent, TreePane, TreeTab, TreeWorkspace};
@@ -623,7 +665,10 @@ fn render_tree_marks_active_tab_and_indents() {
     let ws = TreeWorkspace {
         id: flowmux_core::WorkspaceId::new(),
         name: "demo".into(),
-        root: "/tmp/demo".into(),
+        root: Some("/tmp/demo".into()),
+        location: flowmux_core::WorkspaceLocation::Local {
+            root_dir: "/tmp/demo".into(),
+        },
         panes: vec![TreePane {
             id: pane,
             tabs: vec![

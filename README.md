@@ -121,6 +121,37 @@ fall back to `$FLOWMUX_PANE_ID` inside a pane, and `--json` gives
 machine-readable output. `claude-teams` opens a workspace pre-split into
 per-Claude panes. The full contract is in [`AGENTS.md`](AGENTS.md).
 
+### SSH workspaces
+
+Right-click the side panel's blank area or a workspace row and choose
+**New SSH Workspace**. Enter a Host alias or `user@host` and an optional
+absolute remote directory. The connection starts without opening another window.
+If SSH needs a password, key passphrase, or host confirmation, click
+**Authentication** in the workspace toolbar to open its terminal.
+**New workspace**, `+`, and Ctrl+N continue to create local workspaces.
+
+Every terminal tab and split in an SSH workspace runs on that host through
+one workspace-owned connection. The toolbar provides Connect, Disconnect,
+Authentication, and Ports. Ports forward remote loopback TCP services to a
+local browser preview (Linux only). Optional remote tmux sessions survive disconnects;
+reconnect attaches to existing sessions. Restored workspaces start disconnected.
+Remote Files, Worktrees, local agent resume, and file drops are unavailable.
+
+```bash
+flowmux ssh connect devbox --cwd /srv/project --tmux
+flowmux ssh status --workspace <id>
+flowmux ssh forward add --workspace <id> --remote-port 3000
+flowmux ssh preview --workspace <id> <forward-id>
+flowmux ssh disconnect --workspace <id>
+flowmux ssh reconnect --workspace <id>
+```
+
+Use `--socket <window-socket>` to target an existing window from an external
+terminal. The remote host needs OpenSSH and a POSIX-compatible login shell;
+tmux is needed only when enabled. Install the GUI and its matching `flowmuxctl`
+together. See the [design](docs/ssh-workspace-design.md) and
+[validation report](docs/ssh-workspace-validation.md).
+
 ## Optional runtime dependencies
 
 ### ThorVG (image viewer)

@@ -53,6 +53,7 @@ name = "flowmux"
 path = "src/main.rs"
 
 [dependencies]
+uuid = { workspace = true }
 flowmux-core = { workspace = true }
 flowmux-config = { workspace = true }
 flowmux-ipc = { workspace = true }

@@ -321,7 +321,7 @@ impl WindowController {
             workspaces
                 .iter()
                 .find(|workspace| workspace.id == active)
-                .map(|workspace| workspace.root_dir.clone())
+                .and_then(|workspace| workspace.local_root().map(PathBuf::from))
         });
         let project_config = self.command_palette_project_config();
         let dialog = gtk::Window::builder()
@@ -736,6 +736,13 @@ impl WindowController {
     }
 
     pub(super) fn command_palette_project_config(&self) -> Option<(std::path::PathBuf, CmuxJson)> {
+        if self
+            .focused_pane
+            .get()
+            .is_some_and(|pane| self.pane_registry.borrow().is_ssh_pane(pane))
+        {
+            return None;
+        }
         let base_dir = self
             .focused_pane
             .get()
@@ -753,6 +760,7 @@ impl WindowController {
     }
     pub(super) async fn run_command_palette_command(&self, command: CommandPaletteCommand) {
         match command {
+            CommandPaletteCommand::NewSshWorkspace => self.show_ssh_dialog(),
             CommandPaletteCommand::OpenBrowser => {
                 if let Some(pane) = self.focused_pane.get() {
                     self.dispatch(GtkCommand::NewBrowserSurface { pane }).await;
@@ -853,6 +861,9 @@ impl WindowController {
         cwd: std::path::PathBuf,
     ) -> Option<PaneId> {
         let pane = self.focused_pane.get()?;
+        if self.pane_registry.borrow().is_ssh_pane(pane) {
+            return None;
+        }
         match target {
             CommandTarget::FocusedPane => Some(pane),
             CommandTarget::NewSurface => {

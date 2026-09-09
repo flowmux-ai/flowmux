@@ -41,6 +41,7 @@ pub struct BrowserPane {
     pane_id: Rc<Cell<PaneId>>,
     pub root: gtk::Box,
     pub web_view: webkit6::WebView,
+    navigation_enabled: Rc<Cell<bool>>,
     zoom: Rc<Cell<f64>>,
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
@@ -86,6 +87,7 @@ impl BrowserPane {
         persist_session: bool,
     ) -> Self {
         let pane_id = Rc::new(Cell::new(id));
+        let navigation_enabled = Rc::new(Cell::new(true));
         // BrowserEngine labels affect only WebsiteDataStore isolation, matching
         // upstream cmux. Every tab renders through the same WebKitGTK engine.
         // Map them 1:1 to flowmux-browser::BrowserProfile to split data dirs.
@@ -119,6 +121,31 @@ impl BrowserPane {
         webkit6::prelude::WebViewExt::set_is_muted(&web_view, false);
         web_view.set_hexpand(true);
         web_view.set_vexpand(true);
+        {
+            let navigation_enabled = navigation_enabled.clone();
+            web_view.connect_decide_policy(move |_, decision, _| {
+                if navigation_enabled.get() {
+                    return false;
+                }
+                let request = decision
+                    .downcast_ref::<webkit6::NavigationPolicyDecision>()
+                    .and_then(|decision| decision.navigation_action())
+                    .and_then(|mut action| action.request())
+                    .or_else(|| {
+                        decision
+                            .downcast_ref::<webkit6::ResponsePolicyDecision>()
+                            .and_then(|decision| decision.request())
+                    });
+                // Permit only the inert document used to retire this preview.
+                // This also guards chrome controls and native redirects, which
+                // call WebView directly instead of BrowserPane::load_uri.
+                if request.and_then(|request| request.uri()).as_deref() == Some("about:blank") {
+                    return false;
+                }
+                decision.ignore();
+                true
+            });
+        }
 
         // Map the core options from cmux's `configureWebViewConfiguration`
         // (BrowserPanel.swift:2586-) to WebKitGTK Settings:
@@ -191,13 +218,14 @@ impl BrowserPane {
         {
             let pane_id = pane_id.clone();
             let open_url = callbacks.on_open_url.clone();
+            let navigation_enabled = navigation_enabled.clone();
             web_view.connect_create(move |parent, navigation_action| {
                 let url = navigation_action
                     .clone()
                     .request()
                     .and_then(|request| request.uri())
                     .map(|uri| uri.to_string());
-                if let Some(url) = url {
+                if let Some(url) = url.filter(|_| navigation_enabled.get()) {
                     (open_url.borrow_mut())(pane_id.get(), url);
                 }
 
@@ -619,6 +647,7 @@ impl BrowserPane {
             pane_id,
             root,
             web_view,
+            navigation_enabled,
             zoom,
             zoom_label,
             find_entry,
@@ -643,11 +672,13 @@ impl BrowserPane {
     }
 
     pub fn load_uri(&self, url: &str) {
-        self.web_view.load_uri(url);
+        if self.navigation_enabled.get() {
+            self.web_view.load_uri(url);
+        }
     }
 
     pub fn go_back(&self) -> bool {
-        let moved = self.web_view.can_go_back();
+        let moved = self.navigation_enabled.get() && self.web_view.can_go_back();
         if moved {
             self.web_view.go_back();
         }
@@ -655,7 +686,7 @@ impl BrowserPane {
     }
 
     pub fn go_forward(&self) -> bool {
-        let moved = self.web_view.can_go_forward();
+        let moved = self.navigation_enabled.get() && self.web_view.can_go_forward();
         if moved {
             self.web_view.go_forward();
         }
@@ -663,7 +694,24 @@ impl BrowserPane {
     }
 
     pub fn reload(&self) {
-        self.web_view.reload();
+        if self.navigation_enabled.get() {
+            self.web_view.reload();
+        }
+    }
+
+    /// Retire a preview before releasing its SSH forward's local port.
+    /// The tab cannot be reused: reconnect opens a new preview with a new lease.
+    pub fn expire_ssh_preview(&self) {
+        if !self.navigation_enabled.replace(false) {
+            return;
+        }
+        self.web_view.stop_loading();
+        self.refs.borrow_mut().clear(self.ref_scope);
+        if let Some(settings) = webkit6::prelude::WebViewExt::settings(&self.web_view) {
+            settings.set_enable_javascript(false);
+        }
+        self.web_view.load_uri("about:blank");
+        self.root.set_sensitive(false);
     }
 
     pub fn stop_loading(&self) {
@@ -731,12 +779,25 @@ impl BrowserPane {
         source: &str,
         on_done: F,
     ) {
+        if !self.navigation_enabled.get() {
+            on_done(Err(
+                "SSH preview expired; open a new preview after reconnecting".into(),
+            ));
+            return;
+        }
+        let navigation_enabled = self.navigation_enabled.clone();
         self.web_view.evaluate_javascript(
             source,
             None,
             None,
             gtk::gio::Cancellable::NONE,
             move |result| {
+                if !navigation_enabled.get() {
+                    on_done(Err(
+                        "SSH preview expired; open a new preview after reconnecting".into(),
+                    ));
+                    return;
+                }
                 let r = match result {
                     Ok(value) => Ok(value.to_str().to_string()),
                     Err(e) => Err(e.to_string()),
@@ -999,6 +1060,86 @@ pub(crate) fn cookies_sqlite_path(data_dir: &std::path::Path) -> std::path::Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn expired_ssh_preview_blocks_native_and_programmatic_navigation() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let stale_requests = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = {
+            let stale_requests = stale_requests.clone();
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while !stop.load(Ordering::Relaxed) && Instant::now() < deadline {
+                    if let Ok((mut stream, _)) = listener.accept() {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0; 4096];
+                        let count = stream.read(&mut request).unwrap_or(0);
+                        if request[..count].starts_with(b"GET /stale ") {
+                            stale_requests.fetch_add(1, Ordering::Relaxed);
+                        }
+                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 7\r\nConnection: close\r\n\r\nfixture");
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            })
+        };
+        let wait_until = |condition: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let context = gtk::glib::MainContext::default();
+            while !condition() {
+                assert!(Instant::now() < deadline, "WebKit load did not finish");
+                while context.pending() {
+                    context.iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let live = format!("{base}/live");
+        let stale = format!("{base}/stale");
+        let pane = BrowserPane::new(
+            PaneId::new(),
+            SurfaceId::new(),
+            Some(&live),
+            PaneCallbacks::noop_for_test(),
+            BrowserEngine::Webkit,
+            false,
+        );
+        wait_until(&|| pane.current_url() == live && !pane.web_view.is_loading());
+        pane.expire_ssh_preview();
+        wait_until(&|| pane.current_url() == "about:blank" && !pane.web_view.is_loading());
+        assert!(!pane.root.is_sensitive());
+        pane.load_uri(&stale);
+        pane.reload();
+        assert!(!pane.go_back());
+        assert!(!pane.go_forward());
+        let js_result = Rc::new(RefCell::new(None));
+        let result = js_result.clone();
+        pane.evaluate_js("location.href='/stale'", move |value| {
+            *result.borrow_mut() = Some(value)
+        });
+        assert!(js_result.borrow().as_ref().unwrap().is_err());
+
+        // Native chrome controls bypass BrowserPane::load_uri. Prove WebKit's
+        // common policy boundary blocks that route before any HTTP request.
+        pane.web_view.load_uri(&stale);
+        let settle = Instant::now() + Duration::from_millis(500);
+        wait_until(&|| Instant::now() >= settle && !pane.web_view.is_loading());
+        assert_eq!(stale_requests.load(Ordering::Relaxed), 0);
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        pane.prepare_for_close();
+    }
 
     #[gtk::test]
     fn dropping_browser_pane_releases_root_and_web_view() {

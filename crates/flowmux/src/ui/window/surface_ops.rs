@@ -135,7 +135,11 @@ impl WindowController {
             stack.add_named(&sibling, Some(&name));
             self.surfaces.borrow_mut().insert(ws_id, sibling.clone());
             stack.set_visible_child_name(&name);
-        } else if let Some(b) = grand.downcast_ref::<gtk::Box>() {
+        } else if let Some(b) = grand.downcast_ref::<gtk::Box>().filter(|container| {
+            container.has_css_class("flowmux-ssh-workspace")
+                && container.last_child().as_ref() == Some(&paned_widget)
+        }) {
+            // Keep the SSH toolbar and the outer widget tracked by surfaces.
             b.remove(&paned);
             b.append(&sibling);
         } else {
@@ -262,7 +266,7 @@ impl WindowController {
         // Fallback cwd for the new terminal. Surface content cwd wins; this
         // value is only for legacy or empty-state fallback, so workspace root_dir
         // is enough.
-        let new_cwd = Some(ws.root_dir.clone());
+        let new_cwd = ws.local_root().map(PathBuf::from);
 
         let stack_name = ws.id.to_string();
         let outcome = split_pane_incremental(
@@ -397,7 +401,9 @@ impl WindowController {
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let icon_name = match torn.kind {
-            SurfaceKind::Terminal { .. } => "utilities-terminal-symbolic",
+            SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. } => {
+                "utilities-terminal-symbolic"
+            }
             SurfaceKind::Browser { .. } => "web-browser-symbolic",
             SurfaceKind::Editor { .. } => "text-x-generic-symbolic",
         };
@@ -494,7 +500,9 @@ impl WindowController {
             id: workspace_id,
             name: title.clone(),
             custom_title: None,
-            root_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
+            },
             git: None,
             listening_ports: Vec::new(),
             surfaces: vec![Surface {
@@ -525,6 +533,12 @@ impl WindowController {
                     .and_then(|window| window.upgrade())
                 {
                     window.close();
+                }
+            },
+            {
+                let bridge = sidebar_bridge.clone();
+                move || {
+                    let _ = bridge.tx.try_send(GtkCommand::ShowSshDialog);
                 }
             },
             sidebar_bridge,
@@ -682,6 +696,11 @@ impl WindowController {
         dst_pane: PaneId,
         target_index: usize,
     ) -> Result<(), String> {
+        if self.store.workspace_of_pane(src_pane).await.is_some()
+            && !self.store.can_move_between_panes(src_pane, dst_pane).await
+        {
+            return Err("Moving tabs across SSH workspaces is not supported".into());
+        }
         if src_pane == dst_pane {
             // A drop onto the tab's own pane (e.g. pane-body drop) is just a
             // reorder; do that instead of a no-op move.
@@ -965,7 +984,7 @@ impl WindowController {
             direction,
             0.5,
             content,
-            Some(ws.root_dir.clone()),
+            ws.local_root().map(PathBuf::from),
             &stack_name,
             &self.callbacks,
             self.pane_registry.clone(),
@@ -998,6 +1017,12 @@ impl WindowController {
         dst_pane: PaneId,
         direction: SplitDirection,
     ) -> Result<(), String> {
+        if self.store.workspace_of_pane(src_pane).await.is_some()
+            && !self.store.can_move_between_panes(src_pane, dst_pane).await
+        {
+            return Err("Moving tabs across SSH workspaces is not supported".into());
+        }
+
         if !self.pane_registry.borrow().has_pane(dst_pane) {
             return Err("destination pane is not rendered".to_string());
         }
@@ -1076,7 +1101,7 @@ impl WindowController {
             direction,
             0.5,
             empty,
-            Some(ws.root_dir.clone()),
+            ws.local_root().map(PathBuf::from),
             &stack_name,
             &self.callbacks,
             self.pane_registry.clone(),
@@ -1125,5 +1150,101 @@ impl WindowController {
         self.refresh_window_title().await;
         self.focus_pane(new_pane);
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    async fn ssh_wrapper_split_and_close_preserve_toolbar_and_terminal_pid() {
+        let (controller, workspace, pane) = super::super::tests::build_single_workspace_controller(
+            "com.flowmux.App.UiTest.SshWrapperSplitClose",
+        )
+        .await;
+        let original = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(pane)
+            .unwrap()
+            .clone();
+        let original_pid = original.pid.get().expect("terminal child must be running");
+        let frame = controller.pane_registry.borrow().pane_frame(pane).unwrap();
+        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        wrapper.add_css_class("flowmux-ssh-workspace");
+        let toolbar = gtk::Label::new(Some("SSH toolbar"));
+        wrapper.append(&toolbar);
+        controller.stack.remove(&frame);
+        wrapper.append(&frame);
+        controller
+            .stack
+            .add_named(&wrapper, Some(&workspace.to_string()));
+        controller
+            .surfaces
+            .borrow_mut()
+            .insert(workspace, wrapper.clone().upcast());
+        let wrapper_widget: gtk::Widget = wrapper.clone().upcast();
+
+        for direction in [SplitDirection::Vertical, SplitDirection::Horizontal] {
+            assert!(can_split_pane_incrementally(
+                &controller.pane_registry.borrow(),
+                pane
+            ));
+            let (_, sibling) = controller.store.split_pane(pane, direction).await.unwrap();
+            controller
+                .apply_split_incremental_or_rerender(workspace, pane, sibling, direction)
+                .await
+                .unwrap();
+            assert!(wrapper.last_child().unwrap().is::<gtk::Paned>());
+            assert_eq!(wrapper.first_child().as_ref(), Some(toolbar.upcast_ref()));
+            assert_eq!(
+                controller.surfaces.borrow().get(&workspace),
+                Some(&wrapper_widget)
+            );
+            let after_split = controller
+                .pane_registry
+                .borrow()
+                .active_terminal(pane)
+                .unwrap()
+                .clone();
+            assert_eq!(after_split.widget, original.widget);
+            assert_eq!(after_split.pid.get(), Some(original_pid));
+
+            controller.store.close_pane(sibling).await.unwrap();
+            controller
+                .apply_close_pane_incremental_or_rerender(workspace, sibling)
+                .await;
+            assert_eq!(wrapper.last_child().as_ref(), Some(&frame));
+            assert_eq!(wrapper.first_child().as_ref(), Some(toolbar.upcast_ref()));
+            assert_eq!(toolbar.next_sibling().as_ref(), Some(&frame));
+            assert_eq!(
+                controller.surfaces.borrow().get(&workspace),
+                Some(&wrapper_widget)
+            );
+            assert_eq!(
+                controller.stack.child_by_name(&workspace.to_string()),
+                Some(wrapper_widget.clone())
+            );
+            let survivor = controller
+                .pane_registry
+                .borrow()
+                .active_terminal(pane)
+                .unwrap()
+                .clone();
+            assert_eq!(survivor.widget, original.widget);
+            assert_eq!(survivor.pid.get(), Some(original_pid));
+            assert_eq!(
+                unsafe { libc::kill(original_pid, 0) },
+                0,
+                "surviving PTY process must remain alive"
+            );
+            assert!(controller
+                .pane_registry
+                .borrow()
+                .pane_frame(sibling)
+                .is_none());
+        }
+        original.close_pty();
     }
 }

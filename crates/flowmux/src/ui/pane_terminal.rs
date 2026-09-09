@@ -100,6 +100,8 @@ pub struct PaneCallbacks {
     /// The workspace a given pane currently lives in, queried synchronously so
     /// the "Move" submenu can exclude the tab's own workspace at click time.
     pub workspace_of_pane: Rc<dyn Fn(PaneId) -> Option<WorkspaceId>>,
+    /// Query the pane's workspace location before handling local file actions.
+    pub is_ssh_pane: Rc<dyn Fn(PaneId) -> bool>,
     /// Shared across all surface tabs in one window for the duration of a drag.
     /// The source tab uses this to distinguish a true no-target drag from a
     /// rejected drop on a known tab (self/cross-pane/invalid payload).
@@ -183,6 +185,7 @@ impl PaneCallbacks {
             dispatch_tab_drop: Rc::new(|_| None),
             list_workspaces: Rc::new(Vec::new),
             workspace_of_pane: Rc::new(|_| None),
+            is_ssh_pane: Rc::new(|_| false),
             tab_drag_drop_seen: Rc::new(Cell::new(false)),
             tab_drag_drop_committed: Rc::new(Cell::new(false)),
             tab_drag_split_candidate: Rc::new(RefCell::new(None)),

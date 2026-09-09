@@ -144,10 +144,16 @@ impl WindowController {
                 }
             }
             GtkCommand::OpenImageViewer { pane, path } => {
+                if self.pane_registry.borrow().is_ssh_pane(pane) {
+                    return;
+                }
                 tracing::info!(%pane, path = %path.display(), "opening terminal image path");
                 crate::ui::image_viewer::open_image_viewer(&self.window, path);
             }
             GtkCommand::OpenMarkdownViewer { pane, path } => {
+                if self.pane_registry.borrow().is_ssh_pane(pane) {
+                    return;
+                }
                 tracing::info!(%pane, path = %path.display(), "opening terminal markdown path");
                 if let Err(err) = crate::ui::file_browser::launch_markdown_viewer(&path) {
                     tracing::warn!(error = %err, path = %path.display(), "failed to open Markdown viewer from terminal path");
@@ -225,7 +231,11 @@ impl WindowController {
                         break;
                     }
                 }
-                let text = resolved.unwrap_or_else(|| CopyableText::stored_path(ws.root_dir));
+                let text = resolved.unwrap_or_else(|| CopyableText {
+                    value: ws.location.display(),
+                    kind: "location",
+                    live_terminal_cwd: None,
+                });
                 self.window.clipboard().set_text(&text.value);
                 self.clipboard_toast
                     .show_with_message(&format!("Copied {}: {}", text.kind, text.value));
@@ -265,8 +275,10 @@ impl WindowController {
                             .or_else(|| stored_terminal_cwd_from_workspace(&ws, *pane, surface))
                     })
                 }
-                .unwrap_or_else(|| ws.root_dir.clone());
-                crate::ui::show_in_folder::open_directory(&path);
+                .or_else(|| ws.local_root().map(PathBuf::from));
+                if let Some(path) = path {
+                    crate::ui::show_in_folder::open_directory(&path);
+                }
             }
             other => unreachable!("non-chrome command routed to window dispatcher: {other:?}"),
         }

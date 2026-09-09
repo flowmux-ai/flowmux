@@ -268,7 +268,9 @@ mod tests {
                 id: workspace,
                 name: "automatic".into(),
                 custom_title: Some("flowmux-terminal".into()),
-                root_dir: PathBuf::from("/tmp/flowmux"),
+                location: flowmux_core::WorkspaceLocation::Local {
+                    root_dir: PathBuf::from("/tmp/flowmux"),
+                },
                 git: None,
                 listening_ports: vec![],
                 surfaces: vec![Surface {

@@ -130,6 +130,7 @@ pub(crate) fn browser_wait_condition(
 pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
     Ok(match cmd {
         Cmd::Ping => Request::Ping,
+        Cmd::Ssh { op } => ssh_op_to_request(op)?,
         Cmd::Tree | Cmd::Agents | Cmd::SessionName => Request::WorkspaceTree,
         Cmd::Workspace {
             op: WorkspaceOp::New { name, root },
@@ -282,11 +283,302 @@ pub(crate) fn build_request(cmd: Cmd) -> anyhow::Result<Request> {
         Cmd::Capabilities => unreachable!("handled before request build"),
     })
 }
+
+fn ssh_op_to_request(op: SshOp) -> anyhow::Result<Request> {
+    use flowmux_core::{SshForwardSpec, SshTarget, SshWorkspaceConfig};
+    use flowmux_ipc::protocol::SshRequest;
+    let request = match op {
+        SshOp::Host(args) => {
+            let cli = Cli::try_parse_from(
+                ["flowmux", "ssh", "connect"]
+                    .into_iter()
+                    .map(String::from)
+                    .chain(args),
+            )?;
+            return build_request(cli.cmd);
+        }
+        SshOp::Connect {
+            host,
+            cwd,
+            name,
+            port,
+            user,
+            identity_file,
+            config_file,
+            tmux,
+            command,
+        } => {
+            let mut target = SshTarget::parse(&host).map_err(anyhow::Error::msg)?;
+            target.user = user.or(target.user);
+            target.port = port;
+            target.identity_file = identity_file;
+            target.config_file = config_file;
+            let config = SshWorkspaceConfig {
+                target,
+                cwd,
+                tmux,
+                forwards: Vec::new(),
+            };
+            config.validate().map_err(anyhow::Error::msg)?;
+            if command.iter().any(|arg| arg.contains('\0')) {
+                anyhow::bail!("SSH command contains a NUL byte");
+            }
+            SshRequest::Create {
+                request_id: uuid::Uuid::new_v4(),
+                name,
+                config,
+                command,
+            }
+        }
+        SshOp::Status { workspace }
+        | SshOp::Forward {
+            op: SshForwardOp::List { workspace },
+        } => SshRequest::Status {
+            workspace: resolve_workspace(workspace)?,
+        },
+        SshOp::Reconnect { workspace } => SshRequest::Connect {
+            workspace: resolve_workspace(workspace)?,
+        },
+        SshOp::Disconnect { workspace } => SshRequest::Disconnect {
+            workspace: resolve_workspace(workspace)?,
+        },
+        SshOp::Forward {
+            op:
+                SshForwardOp::Add {
+                    workspace,
+                    remote_port,
+                    local_port,
+                    https,
+                },
+        } => {
+            let spec = SshForwardSpec {
+                id: uuid::Uuid::new_v4(),
+                remote_port,
+                local_port,
+                https,
+            };
+            spec.validate().map_err(anyhow::Error::msg)?;
+            SshRequest::ForwardAdd {
+                workspace: resolve_workspace(workspace)?,
+                spec,
+            }
+        }
+        SshOp::Forward {
+            op: SshForwardOp::Remove { workspace, id },
+        } => SshRequest::ForwardRemove {
+            workspace: resolve_workspace(workspace)?,
+            id,
+        },
+        SshOp::Preview { workspace, id } => SshRequest::Preview {
+            workspace: resolve_workspace(workspace)?,
+            id,
+        },
+    };
+    Ok(Request::Ssh { request })
+}
+
 pub(crate) fn parse_level(s: &str) -> NotificationLevel {
     match s {
         "complete" => NotificationLevel::TurnCompleted,
         "attention" | "needs_input" => NotificationLevel::NeedsInput,
         "error" => NotificationLevel::Error,
         _ => NotificationLevel::Info,
+    }
+}
+
+#[cfg(test)]
+mod ssh_tests {
+    use super::*;
+    use flowmux_ipc::protocol::SshRequest;
+
+    #[test]
+    fn ssh_host_alias_reuses_connect_flags_and_remote_command_parser() {
+        let arguments = [
+            "alice@devbox",
+            "--cwd",
+            "/srv/a b",
+            "--name",
+            "Remote",
+            "--port",
+            "2222",
+            "--user",
+            "bob",
+            "--identity-file",
+            "/tmp/key",
+            "--config-file",
+            "/tmp/config",
+            "--tmux",
+            "--",
+            "agent",
+            "--prompt",
+            "a ' literal $(value)",
+        ];
+        let create = |prefix: &[&str]| {
+            let cli = Cli::try_parse_from(prefix.iter().chain(arguments.iter()).copied()).unwrap();
+            let Request::Ssh {
+                request:
+                    SshRequest::Create {
+                        config,
+                        command,
+                        name,
+                        ..
+                    },
+            } = build_request(cli.cmd).unwrap()
+            else {
+                panic!("SSH create request");
+            };
+            (config, command, name)
+        };
+        assert_eq!(
+            create(&["flowmux", "ssh"]),
+            create(&["flowmux", "ssh", "connect"])
+        );
+        for arguments in [
+            vec!["flowmux", "ssh", "devbox", "--port", "0"],
+            vec!["flowmux", "ssh", "devbox", "--cwd", "relative"],
+            vec!["flowmux", "ssh", "devbox", "--unknown"],
+        ] {
+            assert!(build_request(Cli::try_parse_from(arguments).unwrap().cmd).is_err());
+        }
+    }
+
+    #[test]
+    fn ssh_reserved_host_names_require_explicit_connect() {
+        for host in [
+            "status",
+            "reconnect",
+            "disconnect",
+            "forward",
+            "preview",
+            "connect",
+            "help",
+        ] {
+            let cli = Cli::try_parse_from(["flowmux", "ssh", "connect", host]).unwrap();
+            assert!(matches!(build_request(cli.cmd).unwrap(), Request::Ssh {
+                request: SshRequest::Create { config, .. }
+            } if config.target.host == host));
+        }
+        let cli = Cli::try_parse_from(["flowmux", "ssh", "status"]).unwrap();
+        assert!(matches!(
+            cli.cmd,
+            Cmd::Ssh {
+                op: SshOp::Status { .. }
+            }
+        ));
+        assert!(Cli::try_parse_from(["flowmux", "ssh", "status", "--port", "22"]).is_err());
+    }
+
+    #[test]
+    fn ssh_connect_preserves_remote_arguments_and_validates_configuration() {
+        let cli = Cli::try_parse_from([
+            "flowmux",
+            "ssh",
+            "connect",
+            "alice@devbox",
+            "--port",
+            "2222",
+            "--cwd",
+            "/srv/a b",
+            "--name",
+            "Remote",
+            "--config-file",
+            "/tmp/ssh config",
+            "--identity-file",
+            "/tmp/key",
+            "--tmux",
+            "--",
+            "agent",
+            "--prompt",
+            "keep spaces",
+        ])
+        .unwrap();
+        let Request::Ssh {
+            request:
+                SshRequest::Create {
+                    config,
+                    command,
+                    name,
+                    request_id,
+                },
+        } = build_request(cli.cmd).unwrap()
+        else {
+            panic!("SSH create request")
+        };
+        assert_eq!(config.target.destination(), "alice@devbox");
+        assert_eq!(config.target.port, Some(2222));
+        assert_eq!(config.cwd.as_deref(), Some("/srv/a b"));
+        assert_eq!(config.target.config_file, Some("/tmp/ssh config".into()));
+        assert_eq!(config.target.identity_file, Some("/tmp/key".into()));
+        assert_eq!(name.as_deref(), Some("Remote"));
+        assert!(config.tmux && !request_id.is_nil());
+        assert_eq!(command, ["agent", "--prompt", "keep spaces"]);
+        for args in [
+            vec!["flowmux", "ssh", "connect", "bad host"],
+            vec!["flowmux", "ssh", "connect", "devbox", "--port", "0"],
+            vec!["flowmux", "ssh", "connect", "devbox", "--cwd", "relative"],
+        ] {
+            assert!(build_request(Cli::try_parse_from(args).unwrap().cmd).is_err());
+        }
+    }
+
+    #[test]
+    fn ssh_controls_and_forwards_target_the_explicit_workspace() {
+        let id = "11111111-1111-1111-1111-111111111111";
+        for action in ["status", "reconnect", "disconnect"] {
+            let cli = Cli::try_parse_from(["flowmux", "ssh", action, "--workspace", id]).unwrap();
+            let Request::Ssh { request } = build_request(cli.cmd).unwrap() else {
+                panic!("SSH request")
+            };
+            let actual = match request {
+                SshRequest::Status { workspace }
+                | SshRequest::Connect { workspace }
+                | SshRequest::Disconnect { workspace } => workspace,
+                _ => panic!("SSH control request"),
+            };
+            assert_eq!(actual.to_string(), id);
+        }
+        let cli = Cli::try_parse_from([
+            "flowmux",
+            "ssh",
+            "forward",
+            "add",
+            "--workspace",
+            id,
+            "--remote-port",
+            "3000",
+            "--https",
+        ])
+        .unwrap();
+        let Request::Ssh {
+            request: SshRequest::ForwardAdd { workspace, spec },
+        } = build_request(cli.cmd).unwrap()
+        else {
+            panic!("forward add request")
+        };
+        assert_eq!(workspace.to_string(), id);
+        assert_eq!(
+            (spec.remote_port, spec.local_port, spec.https),
+            (3000, None, true)
+        );
+        let cli =
+            Cli::try_parse_from(["flowmux", "ssh", "preview", id, "--workspace", id]).unwrap();
+        assert!(matches!(
+            build_request(cli.cmd).unwrap(),
+            Request::Ssh {
+                request: SshRequest::Preview { .. }
+            }
+        ));
+        let cli = Cli::try_parse_from([
+            "flowmux",
+            "ssh",
+            "forward",
+            "add",
+            "--workspace",
+            id,
+            "--remote-port",
+            "0",
+        ])
+        .unwrap();
+        assert!(build_request(cli.cmd).is_err());
     }
 }

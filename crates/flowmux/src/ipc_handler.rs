@@ -173,6 +173,15 @@ impl Handler for GuiHandler {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
         Box::pin(async move {
             match req {
+                Request::Ssh { request } => {
+                    let (ack, rx) = oneshot::channel();
+                    let _ = self.bridge.tx.send(GtkCommand::Ssh { request, ack }).await;
+                    match rx.await {
+                        Ok(Ok(value)) => Response::Ssh { value },
+                        Ok(Err(error)) => Response::Error(RpcError::Internal(error)),
+                        Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                    }
+                }
                 Request::WorkspaceCreate { .. }
                 | Request::WorkspaceFocus { .. }
                 | Request::SurfaceCreate { .. } => self.handle_workspace_verb(req).await,
@@ -651,6 +660,16 @@ impl GuiHandler {
 
     /// Dispatch for the agent verb group (split out of the `handle` match).
     async fn handle_agent_verb(&self, req: Request) -> Response {
+        if let Request::AgentSessionUpdate { surface, .. }
+        | Request::AgentSessionGet { surface, .. }
+        | Request::AgentSessionForget { surface, .. } = &req
+        {
+            if self.inner.store().is_ssh_surface(*surface).await {
+                return Response::Error(RpcError::Unimplemented(
+                    "Local agent sessions are unavailable for SSH terminals".into(),
+                ));
+            }
+        }
         match req {
             // One tmux CLI invocation forwarded by the `tmux` shim —
             // Claude Code agent teams driving flowmux panes natively.

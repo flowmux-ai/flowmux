@@ -160,6 +160,7 @@ impl PaneToolButton {
 
 #[derive(Default)]
 pub struct PaneRegistry {
+    pub ssh: HashMap<WorkspaceId, Rc<RefCell<super::window::ssh::SshRuntime>>>,
     pub terminals: HashMap<SurfaceId, PaneTerminal>,
     pub browsers: HashMap<SurfaceId, BrowserPane>,
     pub editors: HashMap<SurfaceId, EditorPane>,
@@ -179,7 +180,7 @@ pub struct PaneRegistry {
     pane_zoom_badges: HashMap<PaneId, gtk::Label>,
     surface_tab_labels: HashMap<SurfaceId, gtk::Label>,
     pane_workspace: HashMap<PaneId, WorkspaceId>,
-    surface_workspace: HashMap<SurfaceId, WorkspaceId>,
+    pub(crate) surface_workspace: HashMap<SurfaceId, WorkspaceId>,
     /// PaneId of a Pane::Split node -> the `gtk::Paned` widget representing it.
     /// On exit, compute the ratio from paned.position()/width/height, persist it
     /// in the store, and restore the same ratio on next launch.
@@ -364,7 +365,15 @@ impl PaneRegistry {
             .copied()
     }
 
+    pub fn is_ssh_pane(&self, pane: PaneId) -> bool {
+        self.workspace_of_pane(pane)
+            .is_some_and(|workspace| self.ssh.contains_key(&workspace))
+    }
+
     pub fn current_dir_for_pane(&self, pane: PaneId) -> Option<std::path::PathBuf> {
+        if self.is_ssh_pane(pane) {
+            return None;
+        }
         if let Some(surface) = self.active_terminal_by_pane.get(&pane) {
             if let Some(dir) = self
                 .terminals
@@ -462,7 +471,9 @@ impl PaneRegistry {
         {
             self.terminals
                 .iter()
-                .filter(|(_, terminal)| terminal.announced_current_dir().is_none())
+                .filter(|(_, terminal)| {
+                    !terminal.is_ssh && terminal.announced_current_dir().is_none()
+                })
                 .map(|(surface, terminal)| (terminal.id(), *surface, None, terminal.pid.get()))
                 .collect()
         }
@@ -491,6 +502,9 @@ impl PaneRegistry {
         self.terminals
             .iter()
             .filter_map(|(surface, terminal)| {
+                if terminal.is_ssh {
+                    return None;
+                }
                 let pid = terminal.pid.get()?;
                 (pid > 0).then_some((*surface, pid as u32))
             })
@@ -950,6 +964,9 @@ impl PaneRegistry {
         surface: SurfaceId,
         fallback_title: &str,
     ) -> Option<TornOffSurface> {
+        if self.is_ssh_pane(pane) {
+            return None;
+        }
         let stack = self.surface_stacks.get(&pane)?.clone();
         let content = stack.child_by_name(&surface.to_string())?;
         let title = self
@@ -1200,7 +1217,7 @@ fn apply_ratio_when_sized(paned: &gtk::Paned, ratio: f32) {
 
 /// Result of [`split_pane_incremental`].
 pub enum IncrementalSplitOutcome {
-    /// Success. The target was already inside another split, so the stack child
+    /// Success. The target was inside another split or an SSH wrapper, so the stack child
     /// is unchanged and the caller does not need to update the surfaces map.
     SucceededNested,
     /// Success. The target was a direct child of the workspace stack, so that
@@ -1217,6 +1234,7 @@ enum IncrementalSplitSlot {
     PanedStart(gtk::Paned),
     PanedEnd(gtk::Paned),
     Stack(gtk::Stack),
+    SshContent(gtk::Box),
 }
 
 fn incremental_split_slot(target: &gtk::Widget) -> Option<IncrementalSplitSlot> {
@@ -1229,6 +1247,11 @@ fn incremental_split_slot(target: &gtk::Widget) -> Option<IncrementalSplitSlot> 
         } else {
             None
         }
+    } else if let Some(container) = parent.downcast_ref::<gtk::Box>().filter(|container| {
+        container.has_css_class("flowmux-ssh-workspace")
+            && container.last_child().as_ref() == Some(target)
+    }) {
+        Some(IncrementalSplitSlot::SshContent(container.clone()))
     } else {
         parent
             .downcast_ref::<gtk::Stack>()
@@ -1309,7 +1332,7 @@ pub fn split_pane_incremental(
         IncrementalSplitSlot::PanedStart(p) | IncrementalSplitSlot::PanedEnd(p) => {
             handoff_paned_focus_before_detach(p, &target_frame)
         }
-        IncrementalSplitSlot::Stack(_) => false,
+        IncrementalSplitSlot::Stack(_) | IncrementalSplitSlot::SshContent(_) => false,
     };
 
     // Detach the target frame from its parent. set_*_child(None) automatically
@@ -1318,6 +1341,7 @@ pub fn split_pane_incremental(
         IncrementalSplitSlot::PanedStart(p) => p.set_start_child(gtk::Widget::NONE),
         IncrementalSplitSlot::PanedEnd(p) => p.set_end_child(gtk::Widget::NONE),
         IncrementalSplitSlot::Stack(s) => s.remove(&target_frame),
+        IncrementalSplitSlot::SshContent(container) => container.remove(&target_frame),
     }
 
     // Build the new sibling pane widget. cwd / argv belong only to the sibling;
@@ -1360,6 +1384,10 @@ pub fn split_pane_incremental(
 
     // Insert the new Paned back into the vacated slot.
     match slot {
+        IncrementalSplitSlot::SshContent(container) => {
+            container.append(&paned_widget);
+            IncrementalSplitOutcome::SucceededNested
+        }
         IncrementalSplitSlot::PanedStart(p) => {
             p.set_start_child(Some(&paned_widget));
             if restore_parent_focus {
@@ -1399,7 +1427,7 @@ pub fn build_surface(
             cwd.clone(),
         ),
         SurfaceKind::Browser { .. } => (Vec::new(), None),
-        SurfaceKind::Editor { .. } => (Vec::new(), None),
+        SurfaceKind::Editor { .. } | SurfaceKind::SshTerminal { .. } => (Vec::new(), None),
     };
     build_pane(
         workspace,
@@ -2673,6 +2701,7 @@ fn attach_tab_dnd_handlers(
     let saw_target_for_drop = saw_tab_drop_target.clone();
     let committed_for_drop = committed_tab_drop.clone();
     let split_candidate_for_drop = split_candidate.clone();
+    let is_ssh_pane = callbacks.is_ssh_pane.clone();
     drop_target.connect_drop(move |_, value, x, _y| {
         tracing::debug!(%target_pane, %target_surface, "tab drop fired");
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-before");
@@ -2699,6 +2728,9 @@ fn attach_tab_dnd_handlers(
                 (payload.src_pane, payload.src_surface, payload.surface)
             }
             PaneDndPayload::File(path) => {
+                if is_ssh_pane(target_pane) {
+                    return false;
+                }
                 saw_target_for_drop.set(false);
                 committed_for_drop.set(false);
                 match file_drop_parts(&path) {
@@ -3135,6 +3167,7 @@ fn attach_pane_body_dnd(
     let saw_drop_target = callbacks.tab_drag_drop_seen.clone();
     let committed_drop = callbacks.tab_drag_drop_committed.clone();
     let split_candidate = callbacks.tab_drag_split_candidate.clone();
+    let is_ssh_pane = callbacks.is_ssh_pane.clone();
     drop_target.connect_drop(move |_, value, x, y| {
         let (w, h) = (frame.width() as f64, frame.height() as f64);
         let landed = landed_drop_zone(
@@ -3168,6 +3201,9 @@ fn attach_pane_body_dnd(
                 (payload.src_pane, payload.src_surface, payload.surface)
             }
             PaneDndPayload::File(path) => {
+                if is_ssh_pane(pane_id) {
+                    return false;
+                }
                 saw_drop_target.set(false);
                 committed_drop.set(false);
                 match file_drop_parts(&path) {
@@ -3284,7 +3320,9 @@ fn surface_tab(surface: &PaneSurface, active: bool) -> (gtk::Box, gtk::Label) {
 
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let icon_name = match surface.kind {
-        SurfaceKind::Terminal { .. } => "utilities-terminal-symbolic",
+        SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. } => {
+            "utilities-terminal-symbolic"
+        }
         SurfaceKind::Browser { .. } => "web-browser-symbolic",
         SurfaceKind::Editor { .. } => "text-x-generic-symbolic",
     };
@@ -3475,6 +3513,9 @@ fn build_panel(
     frame: gtk::Frame,
 ) -> gtk::Widget {
     match &surface.kind {
+        SurfaceKind::SshTerminal { .. } => super::window::ssh::build_ssh_panel(
+            workspace, pane_id, surface, callbacks, registry, theme,
+        ),
         SurfaceKind::Terminal { cwd, shell } => {
             let opts = (callbacks.read_options)();
             let inherited_shell = argv.first().map(String::as_str);
@@ -3609,15 +3650,39 @@ fn build_panel(
             widget
         }
         SurfaceKind::Browser { initial_url } => {
+            let preview = initial_url
+                .as_deref()
+                .filter(|url| url.starts_with("flowmux-ssh-preview://"));
+            let runtime = registry.borrow().ssh.get(&workspace).cloned();
+            let preview_url = preview.and_then(|binding| {
+                runtime
+                    .as_ref()
+                    .and_then(|r| r.borrow().preview_url(binding))
+            });
+            if preview.is_some() && preview_url.is_none() {
+                registry
+                    .borrow_mut()
+                    .surface_workspace
+                    .insert(surface.id, workspace);
+                return gtk::Label::new(Some(
+                    "SSH preview inactive — connect and enable its forwarding",
+                ))
+                .upcast();
+            }
             let opts = (callbacks.read_options)();
             let pane = BrowserPane::new(
                 pane_id,
                 surface.id,
-                initial_url.as_deref(),
+                preview_url.as_deref().or(initial_url.as_deref()),
                 callbacks.clone(),
                 opts.default_browser_engine.clone(),
                 opts.persist_browser_session,
             );
+            if let Some(preview) = preview {
+                if let Some(runtime) = runtime {
+                    runtime.borrow_mut().register_preview(preview, pane.clone());
+                }
+            }
             // Apply the zoom option to the new browser tab immediately so
             // widgets created before apply_zoom still start in sync.
             pane.set_zoom_level(opts.zoom_factor());

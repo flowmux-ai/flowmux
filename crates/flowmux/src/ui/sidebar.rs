@@ -151,6 +151,7 @@ pub struct Sidebar {
     rows: Rc<RefCell<Vec<(WorkspaceId, gtk::ListBoxRow)>>>,
     row_widgets: Rc<RefCell<HashMap<WorkspaceId, WorkspaceRowWidget>>>,
     on_close: Rc<dyn Fn(WorkspaceId)>,
+    on_new_ssh_workspace: Rc<dyn Fn()>,
     bell_button: gtk::MenuButton,
     bell_popover: gtk::Popover,
     activity_panel: gtk::Box,
@@ -188,9 +189,10 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    pub fn new<S, C>(
+    pub fn new<S, C, N>(
         on_select: S,
         on_close: C,
+        on_new_ssh_workspace: N,
         bridge: Bridge,
         notifications: NotificationStore,
         activities: ActivityStore,
@@ -200,6 +202,7 @@ impl Sidebar {
     where
         S: Fn(WorkspaceId) + 'static,
         C: Fn(WorkspaceId) + 'static,
+        N: Fn() + 'static,
     {
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
@@ -239,20 +242,39 @@ impl Sidebar {
         });
 
         let on_close: Rc<dyn Fn(WorkspaceId)> = Rc::new(on_close);
+        let on_new_ssh_workspace: Rc<dyn Fn()> = Rc::new(on_new_ssh_workspace);
+        let context_click = gtk::GestureClick::new();
+        context_click.set_button(gtk::gdk::BUTTON_SECONDARY);
+        let menu_bridge = bridge.clone();
+        let new_ssh = on_new_ssh_workspace.clone();
+        context_click.connect_pressed(move |gesture, _, x, y| {
+            let Some(widget) = gesture.widget() else {
+                return;
+            };
+            if !workspace_menu_target_allowed(
+                &widget,
+                widget.pick(x, y, gtk::PickFlags::DEFAULT),
+                false,
+            ) {
+                gesture.set_state(gtk::EventSequenceState::Denied);
+                return;
+            }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            crate::ui::overlay_menu::show_at(
+                &widget,
+                x,
+                y,
+                workspace_creation_items(&menu_bridge, new_ssh.clone()),
+            );
+        });
+        scroll.add_controller(context_click);
 
         // ---- Native sidebar header ----
         let new_btn = gtk::Button::from_icon_name("list-add-symbolic");
         new_btn.set_tooltip_text(Some("New workspace (Ctrl+N)"));
         let bridge_for_new = bridge.clone();
         new_btn.connect_clicked(move |_| {
-            let bridge = bridge_for_new.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                let root =
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                let _ = bridge
-                    .send_priority(GtkCommand::NewWorkspace { root })
-                    .await;
-            });
+            create_local_workspace(&bridge_for_new);
         });
         let bell_button = gtk::MenuButton::new();
         bell_button.set_icon_name("notifications-symbolic");
@@ -512,6 +534,7 @@ impl Sidebar {
             rows,
             row_widgets: Rc::new(RefCell::new(HashMap::new())),
             on_close,
+            on_new_ssh_workspace,
             bell_button,
             bell_popover,
             activity_panel,
@@ -610,6 +633,7 @@ impl Sidebar {
             ws,
             details,
             self.on_close.clone(),
+            self.on_new_ssh_workspace.clone(),
             self.bridge.clone(),
             self.workspace_hover_handler.clone(),
         );
@@ -1663,10 +1687,61 @@ impl WorkspaceRowWidget {
     }
 }
 
+fn create_local_workspace(bridge: &Bridge) {
+    let bridge = bridge.clone();
+    gtk::glib::MainContext::default().spawn_local(async move {
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        let _ = bridge
+            .send_priority(GtkCommand::NewWorkspace { root })
+            .await;
+    });
+}
+
+fn workspace_creation_items(
+    bridge: &Bridge,
+    on_new_ssh: Rc<dyn Fn()>,
+) -> Vec<crate::ui::overlay_menu::MenuItem> {
+    use crate::ui::overlay_menu::MenuItem;
+    let bridge = bridge.clone();
+    vec![
+        MenuItem::Action {
+            label: "New workspace",
+            activate: Box::new(move || create_local_workspace(&bridge)),
+        },
+        MenuItem::Action {
+            label: "New SSH Workspace",
+            activate: Box::new(move || on_new_ssh()),
+        },
+    ]
+}
+
+fn workspace_menu_target_allowed(
+    boundary: &gtk::Widget,
+    mut target: Option<gtk::Widget>,
+    allow_row: bool,
+) -> bool {
+    while let Some(widget) = target {
+        if widget.is::<gtk::Button>()
+            || widget.is::<gtk::MenuButton>()
+            || widget.is::<gtk::Editable>()
+            || widget.is::<gtk::Scrollbar>()
+            || (!allow_row && widget.is::<gtk::ListBoxRow>())
+        {
+            return false;
+        }
+        if &widget == boundary {
+            return true;
+        }
+        target = widget.parent();
+    }
+    false
+}
+
 fn row_widget(
     ws: &Workspace,
     details: &WorkspaceRowDetails,
     on_close: Rc<dyn Fn(WorkspaceId)>,
+    on_new_ssh_workspace: Rc<dyn Fn()>,
     bridge: Bridge,
     workspace_hover_handler: Rc<RefCell<Option<WorkspaceHoverHandler>>>,
 ) -> WorkspaceRowWidget {
@@ -1764,6 +1839,14 @@ fn row_widget(
         let Some(row) = row_for_click.upgrade() else {
             return;
         };
+        if !workspace_menu_target_allowed(
+            row.upcast_ref(),
+            row.pick(x, y, gtk::PickFlags::DEFAULT),
+            true,
+        ) {
+            gesture.set_state(gtk::EventSequenceState::Denied);
+            return;
+        }
         // Claim the sequence up front so the row's primary-click gesture
         // and the ListBox don't also act on this press.
         gesture.set_state(gtk::EventSequenceState::Claimed);
@@ -1853,21 +1936,19 @@ fn row_widget(
             }),
         };
 
-        crate::ui::overlay_menu::show_at(
-            &row,
-            x,
-            y,
-            vec![
-                rename,
-                color,
-                MenuItem::Separator,
-                close,
-                close_all,
-                MenuItem::Separator,
-                show_folder,
-                copy_path,
-            ],
-        );
+        let mut items = workspace_creation_items(&bridge, on_new_ssh_workspace.clone());
+        items.push(MenuItem::Separator);
+        items.extend([
+            rename,
+            color,
+            MenuItem::Separator,
+            close,
+            close_all,
+            MenuItem::Separator,
+            show_folder,
+            copy_path,
+        ]);
+        crate::ui::overlay_menu::show_at(&row, x, y, items);
     });
     row.add_controller(click);
 
@@ -2332,11 +2413,76 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
+    async fn workspace_creation_menu_keeps_local_and_ssh_actions_separate() {
+        use crate::ui::overlay_menu::MenuItem;
+        let (bridge, rx) = Bridge::new();
+        let ssh_calls = Rc::new(Cell::new(0));
+        let calls = ssh_calls.clone();
+        let items = workspace_creation_items(&bridge, Rc::new(move || calls.set(calls.get() + 1)));
+        assert_eq!(items.len(), 2);
+        let MenuItem::Action { label, activate } = &items[0] else {
+            panic!("missing local action")
+        };
+        assert_eq!(*label, "New workspace");
+        activate();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::NewWorkspace { .. }
+        ));
+        assert_eq!(ssh_calls.get(), 0);
+        let MenuItem::Action { label, activate } = &items[1] else {
+            panic!("missing SSH action")
+        };
+        assert_eq!(*label, "New SSH Workspace");
+        activate();
+        assert_eq!(ssh_calls.get(), 1);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    fn workspace_context_menu_ignores_buttons_inputs_and_background_row_events() {
+        let boundary = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let button = gtk::Button::with_label("close");
+        let entry = gtk::Entry::new();
+        let row = gtk::ListBoxRow::new();
+        let label = gtk::Label::new(Some("workspace"));
+        row.set_child(Some(&label));
+        boundary.append(&button);
+        boundary.append(&entry);
+        boundary.append(&row);
+        for target in [button.child().unwrap(), entry.upcast()] {
+            assert!(!workspace_menu_target_allowed(
+                boundary.upcast_ref(),
+                Some(target),
+                true
+            ));
+        }
+        assert!(!workspace_menu_target_allowed(
+            boundary.upcast_ref(),
+            Some(label.clone().upcast()),
+            false
+        ));
+        assert!(workspace_menu_target_allowed(
+            boundary.upcast_ref(),
+            Some(label.upcast()),
+            true
+        ));
+        assert!(workspace_menu_target_allowed(
+            boundary.upcast_ref(),
+            Some(boundary.clone().upcast()),
+            false
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
     async fn new_workspace_button_bypasses_a_full_refresh_queue_without_dropping_updates() {
         let (bridge, rx) = crate::bridge::Bridge::new();
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge.clone(),
             NotificationStore::new(),
             ActivityStore::new(),
@@ -2370,7 +2516,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "auto".into(),
             custom_title: None,
-            root_dir: PathBuf::from("/tmp/origin"),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: PathBuf::from("/tmp/origin"),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -2567,6 +2715,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge.clone(),
             NotificationStore::new(),
             store.clone(),
@@ -2876,6 +3025,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge,
             NotificationStore::new(),
             ActivityStore::new(),
@@ -2927,6 +3077,7 @@ mod tests {
                 &ws,
                 &details,
                 on_close.clone(),
+                Rc::new(|| {}),
                 bridge.clone(),
                 on_hover.clone(),
             );
@@ -2934,7 +3085,7 @@ mod tests {
         // Even with 4 lines, WorkspaceRowDetails truncates to 3.
         let four = vec!["a".into(), "b".into(), "c".into(), "d-overflow".into()];
         let details = WorkspaceRowDetails::path_only(&four);
-        let _ = row_widget(&ws, &details, on_close, bridge, on_hover);
+        let _ = row_widget(&ws, &details, on_close, Rc::new(|| {}), bridge, on_hover);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -2950,6 +3101,7 @@ mod tests {
             &ws,
             &WorkspaceRowDetails::default(),
             Rc::new(|_| {}),
+            Rc::new(|| {}),
             crate::bridge::Bridge::new().0,
             Rc::new(RefCell::new(Some(on_hover))),
         );
@@ -2982,7 +3134,14 @@ mod tests {
             }],
             path_lines: vec![".../fallback/path".into()],
         };
-        let _ = row_widget(&ws, &details, on_close, bridge, Rc::new(RefCell::new(None)));
+        let _ = row_widget(
+            &ws,
+            &details,
+            on_close,
+            Rc::new(|| {}),
+            bridge,
+            Rc::new(RefCell::new(None)),
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -3097,6 +3256,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge,
             NotificationStore::new(),
             ActivityStore::new(),
@@ -3154,6 +3314,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge,
             NotificationStore::new(),
             ActivityStore::new(),
@@ -3229,6 +3390,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge,
             NotificationStore::new(),
             ActivityStore::new(),
@@ -3287,6 +3449,7 @@ mod tests {
         let sidebar = Sidebar::new(
             |_| {},
             |_| {},
+            || {},
             bridge,
             NotificationStore::new(),
             ActivityStore::new(),

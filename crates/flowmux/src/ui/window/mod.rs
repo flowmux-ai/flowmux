@@ -129,6 +129,7 @@ fn agent_surface_is_visible(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandPaletteCommand {
+    NewSshWorkspace,
     OpenBrowser,
     RenameTab,
     ReloadConfig,
@@ -181,6 +182,7 @@ impl CopyableText {
 
 fn command_palette_commands() -> &'static [CommandPaletteCommand] {
     &[
+        CommandPaletteCommand::NewSshWorkspace,
         CommandPaletteCommand::OpenBrowser,
         CommandPaletteCommand::RenameTab,
         CommandPaletteCommand::ReloadConfig,
@@ -190,6 +192,7 @@ fn command_palette_commands() -> &'static [CommandPaletteCommand] {
 
 fn command_palette_label(command: CommandPaletteCommand) -> &'static str {
     match command {
+        CommandPaletteCommand::NewSshWorkspace => "New SSH Workspace",
         CommandPaletteCommand::OpenBrowser => "Open browser",
         CommandPaletteCommand::RenameTab => "Rename tab",
         CommandPaletteCommand::ReloadConfig => "Reload config",
@@ -212,6 +215,11 @@ fn stored_surface_copy_text_from_workspace(
         .and_then(|pane_surface| match pane_surface.kind {
             SurfaceKind::Terminal { cwd: Some(cwd), .. } => Some(CopyableText::stored_path(cwd)),
             SurfaceKind::Terminal { cwd: None, .. } => None,
+            SurfaceKind::SshTerminal { cwd, .. } => cwd.map(|value| CopyableText {
+                value,
+                kind: "remote path",
+                live_terminal_cwd: None,
+            }),
             SurfaceKind::Browser { initial_url } => initial_url.and_then(CopyableText::url),
             SurfaceKind::Editor { workspace_root, .. } => {
                 Some(CopyableText::stored_path(workspace_root))
@@ -229,7 +237,9 @@ fn stored_terminal_cwd_from_workspace(
         .find_map(|surface_root| surface_root.root_pane.find_surface(pane, surface))
         .and_then(|pane_surface| match pane_surface.kind {
             SurfaceKind::Terminal { cwd, .. } => cwd,
-            SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. } => None,
+            SurfaceKind::SshTerminal { .. }
+            | SurfaceKind::Browser { .. }
+            | SurfaceKind::Editor { .. } => None,
         })
 }
 
@@ -1220,6 +1230,7 @@ mod notification_coordinator;
 mod pane_callbacks;
 mod pane_commands;
 mod polling;
+pub(crate) mod ssh;
 mod surface_ops;
 mod window_chrome_commands;
 mod workspace_commands;
@@ -1622,6 +1633,12 @@ impl WindowController {
         let sidebar = Sidebar::new(
             on_select,
             on_close,
+            {
+                let bridge = bridge.clone();
+                move || {
+                    let _ = bridge.tx.try_send(GtkCommand::ShowSshDialog);
+                }
+            },
             bridge.clone(),
             notifications.clone(),
             activities.clone(),
@@ -2000,6 +2017,7 @@ impl WindowController {
     }
 
     pub fn rerender_workspace(&self, ws: &Workspace) {
+        self.preserve_ssh_channels(ws.id);
         let name = ws.id.to_string();
         let activate = self.stack.visible_child_name().as_deref() == Some(name.as_str());
         if activate {
@@ -2014,6 +2032,7 @@ impl WindowController {
             registry.clear_workspace(ws.id);
         }
         let new_widget = self.build_workspace_widget(ws);
+        self.discard_unused_ssh_channels(ws.id);
         self.pane_registry
             .borrow_mut()
             .discard_unused_detached_editors();
@@ -2101,6 +2120,7 @@ impl WindowController {
                 }
                 controller.window_close.approved.set(true);
             }
+            controller.pane_registry.borrow_mut().ssh.clear();
             controller.flush_terminal_cwds_blocking();
             controller.flush_terminal_scrollback_blocking();
             controller.flush_editor_sessions_blocking();
@@ -2339,6 +2359,7 @@ impl WindowController {
             self.clear_pane_zoom();
         }
         self.sidebar.remove(id);
+        self.pane_registry.borrow_mut().ssh.remove(&id);
         self.pane_registry.borrow_mut().clear_workspace(id);
         let mut surfaces = self.surfaces.borrow_mut();
         if let Some(old) = surfaces.remove(&id) {
@@ -2600,7 +2621,10 @@ impl WindowController {
     }
 
     fn build_workspace_widget(&self, ws: &Workspace) -> gtk::Widget {
-        match ws.surfaces.first() {
+        if ws.ssh_config().is_some() {
+            self.ensure_ssh_runtime(ws);
+        }
+        let content = match ws.surfaces.first() {
             Some(s) => build_surface(
                 ws.id,
                 s,
@@ -2609,6 +2633,11 @@ impl WindowController {
                 self.current_theme(),
             ),
             None => gtk::Label::new(Some("(empty workspace)")).upcast(),
+        };
+        if ws.ssh_config().is_some() {
+            self.wrap_ssh_workspace(ws, content)
+        } else {
+            content
         }
     }
 
@@ -2620,6 +2649,25 @@ impl WindowController {
             self.clear_pane_zoom();
         }
         match cmd {
+            GtkCommand::SshCwd {
+                workspace,
+                generation,
+                instance,
+                pane,
+                surface,
+                cwd,
+            } => {
+                self.update_ssh_cwd(workspace, generation, instance, pane, surface, cwd)
+                    .await
+            }
+            GtkCommand::ShowSshDialog => self.show_ssh_dialog(),
+            GtkCommand::Ssh { request, ack } => {
+                let _ = ack.send(self.dispatch_ssh(request).await);
+            }
+            GtkCommand::SshRefresh {
+                workspace,
+                generation,
+            } => self.refresh_ssh(workspace, generation).await,
             command @ (GtkCommand::BrowserEval { .. }
             | GtkCommand::BrowserAction { .. }
             | GtkCommand::BrowserOpenSplit { .. }
@@ -3025,6 +3073,7 @@ fn collect_subtitle_lines_excluding(
             SurfaceKind::Terminal { cwd: None, .. } => None,
             SurfaceKind::Browser { .. } => Some(format!("Browser-{}", surface.title)),
             SurfaceKind::Editor { .. } => Some(format!("Editor-{}", surface.title)),
+            SurfaceKind::SshTerminal { .. } => Some(format!("SSH-{}", surface.title)),
         }
     };
 
@@ -4085,7 +4134,7 @@ mod tests {
             id: WorkspaceId::new(),
             name: "copy-test".into(),
             custom_title: None,
-            root_dir,
+            location: flowmux_core::WorkspaceLocation::Local { root_dir },
             git: None,
             listening_ports: vec![],
             color: None,
@@ -5864,7 +5913,8 @@ mod tests {
             .get_workspace(ws_id)
             .await
             .unwrap()
-            .root_dir
+            .local_root()
+            .unwrap()
             .join("live-editor.rs");
         std::fs::write(&file, "fn main() {}\n").unwrap();
         controller.focused_pane.set(Some(pane));
@@ -6248,7 +6298,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "any".into(),
             custom_title: None,
-            root_dir: cwd.clone(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: cwd.clone(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -6289,7 +6341,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "any".into(),
             custom_title: None,
-            root_dir: cwd.clone(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: cwd.clone(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -6330,7 +6384,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "any".into(),
             custom_title: None,
-            root_dir: "/tmp".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![flowmux_core::Surface {
@@ -6417,7 +6473,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "any".into(),
             custom_title: None,
-            root_dir: "/tmp".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -6475,7 +6533,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "any".into(),
             custom_title: None,
-            root_dir: "/tmp".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -8290,7 +8350,7 @@ mod tests {
 
     /// Helper: build a controller with a single workspace and return
     /// `(controller, ws_id, pane_id)`.
-    async fn build_single_workspace_controller(
+    pub(super) async fn build_single_workspace_controller(
         app_id: &str,
     ) -> (WindowController, WorkspaceId, PaneId) {
         adw::init().expect("libadwaita should initialize in GTK test");
@@ -8992,6 +9052,7 @@ mod tests {
         assert_eq!(
             labels,
             vec![
+                "New SSH Workspace",
                 "Open browser",
                 "Rename tab",
                 "Reload config",
@@ -9040,6 +9101,7 @@ mod tests {
                 };
                 surfaces.first().map(|surface| match surface.kind {
                     SurfaceKind::Terminal { .. } => "terminal",
+                    SurfaceKind::SshTerminal { .. } => "ssh_terminal",
                     SurfaceKind::Browser { .. } => "browser",
                     SurfaceKind::Editor { .. } => "editor",
                 })

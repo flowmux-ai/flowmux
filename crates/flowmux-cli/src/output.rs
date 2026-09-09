@@ -91,7 +91,7 @@ pub(crate) fn render_tree(workspaces: &[flowmux_ipc::protocol::TreeWorkspace]) -
             "workspace {} \"{}\" ({})",
             ws.id,
             ws.name,
-            ws.root.display()
+            ws.location.display()
         );
         for pane in &ws.panes {
             let _ = writeln!(out, "  pane {}", pane.id);

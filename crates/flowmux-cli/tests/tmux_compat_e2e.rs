@@ -157,7 +157,10 @@ async fn claude_code_external_swarm_sequence_end_to_end() {
         .into_iter()
         .find(|w| w.name == sock)
         .expect("swarm workspace");
-    assert_eq!(ws.root_dir, h.cwd.canonicalize().unwrap_or(h.cwd.clone()));
+    assert_eq!(
+        ws.local_root().map(PathBuf::from),
+        Some(h.cwd.canonicalize().unwrap_or(h.cwd.clone()))
+    );
 
     // Window probe + first-teammate setup on the initial pane.
     let out = h.tmux(&[

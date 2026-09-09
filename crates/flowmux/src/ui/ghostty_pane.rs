@@ -31,6 +31,8 @@ use vte::prelude::*;
 #[derive(Clone)]
 pub struct GhosttyPane {
     id: Rc<Cell<PaneId>>,
+    /// SSH terminals must never expose their paths as local filesystem paths.
+    pub is_ssh: bool,
     /// The VTE widget itself. Sits inside `container` and owns every
     /// event controller, IM context, focus, and PTY child. Theme and
     /// font calls target this widget directly.
@@ -502,7 +504,7 @@ impl GhosttyPane {
         self.widget
             .set_color_highlight_foreground(selection_fg.map(rgb_to_rgba).as_ref());
     }
-    /// Best-effort current working directory of the shell.
+    /// Best-effort local working directory; SSH terminals always return None.
     ///
     /// Preference order:
     ///   1. VTE's `current-directory-uri` (OSC 7) — set by zsh / bash
@@ -511,6 +513,9 @@ impl GhosttyPane {
     ///   2. `/proc/<pid>/cwd` symlink target — works for any spawned
     ///      shell on Linux even without OSC 7 support.
     pub fn current_dir(&self) -> Option<PathBuf> {
+        if self.is_ssh {
+            return None;
+        }
         if let Some(path) = self.announced_current_dir() {
             return Some(path);
         }
@@ -639,6 +644,7 @@ impl GhosttyPane {
         scrollback_lines: u32,
         callbacks: PaneCallbacks,
     ) -> Self {
+        let is_ssh = last_env_value(&extra_env, "FLOWMUX_SSH_TERMINAL") == Some("1");
         let pane_id = Rc::new(Cell::new(id));
         let last_selection: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let scrollback_dirty = Rc::new(Cell::new(false));
@@ -847,6 +853,7 @@ impl GhosttyPane {
         install_url_link_handling(
             &term,
             id,
+            is_ssh,
             pid.clone(),
             callbacks.on_open_url.clone(),
             callbacks.on_open_image.clone(),
@@ -1012,12 +1019,25 @@ impl GhosttyPane {
         // the helper is missing we fall back to a direct shell spawn so the
         // terminal still works — notifications and background Agent refreshes
         // are then unavailable.
-        let argv = wrap_argv_with_pty_tee(argv, id, surface);
+        let argv = if is_ssh && flowmux_terminal::find_flowmuxctl().is_none() {
+            term.feed(b"flowmux: SSH requires the matching flowmuxctl helper.\r\n");
+            vec!["/bin/false".into()]
+        } else {
+            let mut wrapped = wrap_argv_with_pty_tee(argv, id, surface);
+            if is_ssh {
+                // Old helpers must reject the command instead of launching SSH
+                // without its environment/cwd isolation contract.
+                wrapped[1] = "ssh-pty-tee".into();
+            }
+            wrapped
+        };
         let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         let cwd_str = cwd.as_ref().and_then(|p| p.to_str());
 
         let mut extra_env = extra_env;
-        prepare_terminal_child_env(&mut extra_env);
+        if !is_ssh {
+            prepare_terminal_child_env(&mut extra_env);
+        }
 
         let _ = cwd_str;
         // Spawn the child synchronously with a forkpty so the PID is available
@@ -1052,6 +1072,7 @@ impl GhosttyPane {
 
         Self {
             id: pane_id,
+            is_ssh,
             widget: term,
             container,
             search_revealer,
@@ -1183,6 +1204,16 @@ fn trim_url_trailing(s: &str) -> String {
         )
     })
     .to_string()
+}
+
+fn terminal_url_allowed(url: &str, is_ssh: bool) -> bool {
+    // OSC 8 can carry file URLs as well as regex matches. A remote file URL
+    // must not make the local browser or desktop application read that path.
+    !url.is_empty()
+        && !(is_ssh
+            && url
+                .split_once(':')
+                .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("file")))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1374,6 +1405,7 @@ fn arm_title_coalesce_window(
 fn install_url_link_handling(
     term: &vte::Terminal,
     pane_id: PaneId,
+    is_ssh: bool,
     pid: Rc<Cell<Option<i32>>>,
     on_open_url: Rc<RefCell<dyn FnMut(PaneId, String)>>,
     on_open_image: Rc<RefCell<dyn FnMut(PaneId, PathBuf)>>,
@@ -1471,10 +1503,10 @@ fn install_url_link_handling(
             .or_else(|| {
                 let (m, tag) = term_widget.check_match_at(x, y);
                 let raw = m.map(|g| g.to_string())?;
-                if tag == image_tag {
+                if tag == image_tag && !is_ssh {
                     let cwd = terminal_current_dir(&term_widget, &pid);
                     terminal_image_path(&raw, cwd.as_deref()).map(TerminalClickTarget::Image)
-                } else if tag == markdown_tag {
+                } else if tag == markdown_tag && !is_ssh {
                     let cwd = terminal_current_dir(&term_widget, &pid);
                     terminal_markdown_path(&raw, cwd.as_deref()).map(TerminalClickTarget::Markdown)
                 } else if tag == url_tag {
@@ -1494,7 +1526,7 @@ fn install_url_link_handling(
         let link = match link {
             TerminalClickTarget::Url(raw) => {
                 let url = trim_url_trailing(&raw);
-                if url.is_empty() {
+                if !terminal_url_allowed(&url, is_ssh) {
                     gesture.set_state(gtk::EventSequenceState::Denied);
                     return;
                 }
@@ -2861,6 +2893,47 @@ except (ChildProcessError, ValueError):
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_links_cannot_open_local_files() {
+        assert!(!terminal_url_allowed("file:///tmp/private.md", true));
+        assert!(!terminal_url_allowed("FILE://remote/tmp/private.png", true));
+        assert!(terminal_url_allowed("https://example.com/image.png", true));
+        assert!(terminal_url_allowed("file:///tmp/private.md", false));
+        assert!(!terminal_url_allowed("", false));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn ssh_cwd_is_never_exposed_as_local() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/true".into()],
+            None,
+            vec![("FLOWMUX_SSH_TERMINAL".into(), "1".into())],
+            100,
+            PaneCallbacks::noop_for_test(),
+        );
+        assert!(pane.is_ssh);
+        // A live local wrapper PID is never the remote shell's directory.
+        pane.pid.set(Some(std::process::id() as i32));
+        assert_eq!(pane.current_dir(), None);
+        pane.widget.feed(b"\x1b]7;file://remote/remote-only\x07");
+        for _ in 0..20 {
+            if pane.announced_current_dir().as_deref() == Some(std::path::Path::new("/remote-only"))
+            {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            pane.announced_current_dir(),
+            Some(PathBuf::from("/remote-only"))
+        );
+        assert_eq!(pane.current_dir(), None);
+        pane.close_pty();
+    }
 
     #[cfg(not(target_os = "macos"))]
     async fn wait_for_idle_cycle() {

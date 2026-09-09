@@ -145,8 +145,7 @@ impl WindowController {
                 let cwd = {
                     let r = self.pane_registry.borrow();
                     r.active_terminal(pane).and_then(|term| term.current_dir())
-                }
-                .or_else(|| std::env::current_dir().ok());
+                };
                 if let Some((ws_id, surface_id)) =
                     self.store.add_terminal_surface_to_pane(pane, cwd).await
                 {

@@ -83,7 +83,9 @@ fn pane_uses_worktree(pane: &Pane, path: &Path) -> bool {
 }
 
 fn workspace_uses_worktree(workspace: &Workspace, path: &Path) -> bool {
-    path_is_within(&workspace.root_dir, path)
+    workspace
+        .local_root()
+        .is_some_and(|root| path_is_within(root, path))
         || workspace.surfaces.iter().any(|surface| {
             matches!(
                 &surface.kind,
@@ -421,6 +423,12 @@ impl WindowController {
         else {
             return;
         };
+        if self.pane_registry.borrow().is_ssh_pane(pane) {
+            self.worktrees
+                .panel
+                .show_error("Worktrees are unavailable for SSH workspaces");
+            return;
+        }
         let Some(start) = self
             .file_browser_root_for_pane(pane)
             .await
@@ -632,7 +640,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "nested".into(),
             custom_title: None,
-            root_dir: nested.clone(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: nested.clone(),
+            },
             git: None,
             listening_ports: Vec::new(),
             surfaces: Vec::new(),

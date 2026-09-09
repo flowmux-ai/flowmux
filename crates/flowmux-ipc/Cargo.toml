@@ -8,6 +8,7 @@ publish = false
 description = "Unix-socket IPC protocol between the flowmux GUI/daemon and the flowmux CLI."
 
 [dependencies]
+uuid = { workspace = true }
 flowmux-core = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }

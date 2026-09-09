@@ -47,6 +47,14 @@ fn editor_workspace_root(path: &std::path::Path, workspace_root: &std::path::Pat
 
 impl WindowController {
     pub(super) async fn open_file_in_editor(&self, path: PathBuf, source_pane: Option<PaneId>) {
+        if source_pane
+            .or(self.focused_pane.get())
+            .is_some_and(|pane| self.pane_registry.borrow().is_ssh_pane(pane))
+        {
+            self.clipboard_toast
+                .show_with_message("Files are unavailable for SSH workspaces");
+            return;
+        }
         match crate::ui::file_browser::file_open_target(&path) {
             crate::ui::file_browser::FileOpenTarget::Editor => {}
             crate::ui::file_browser::FileOpenTarget::ImageViewer => {
@@ -103,7 +111,10 @@ impl WindowController {
         // Never reuse an existing editor for a different file: doing so hides
         // the previous document inside the WebView instead of leaving a visible
         // flowmux tab the user can move, split, or return to.
-        let editor_root = editor_workspace_root(&path, &workspace_state.root_dir);
+        let Some(root) = workspace_state.local_root() else {
+            return;
+        };
+        let editor_root = editor_workspace_root(&path, root);
         let Some((workspace_id, editor_surface)) = self
             .store
             .add_editor_surface_to_pane(target_pane, editor_root)
@@ -228,9 +239,14 @@ impl WindowController {
             }
         }
 
-        Some(ws.root_dir)
+        ws.local_root().map(PathBuf::from)
     }
     pub(super) async fn show_file_browser_for_pane(&self, pane: PaneId) {
+        if self.pane_registry.borrow().is_ssh_pane(pane) {
+            self.clipboard_toast
+                .show_with_message("Files are unavailable for SSH workspaces");
+            return;
+        }
         let root = self
             .file_browser_root_for_pane(pane)
             .await

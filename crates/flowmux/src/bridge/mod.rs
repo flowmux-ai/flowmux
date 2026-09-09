@@ -487,6 +487,23 @@ pub enum GtkCommand {
         pane: PaneId,
     },
     /// Create a brand-new workspace and add it to the sidebar.
+    ShowSshDialog,
+    Ssh {
+        request: flowmux_ipc::protocol::SshRequest,
+        ack: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
+    SshCwd {
+        workspace: WorkspaceId,
+        generation: u64,
+        instance: uuid::Uuid,
+        pane: PaneId,
+        surface: SurfaceId,
+        cwd: String,
+    },
+    SshRefresh {
+        workspace: WorkspaceId,
+        generation: u64,
+    },
     NewWorkspace {
         root: std::path::PathBuf,
     },

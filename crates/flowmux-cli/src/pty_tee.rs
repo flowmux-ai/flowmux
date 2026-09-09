@@ -27,7 +27,8 @@
 //! output into renderer-independent refresh events, since VTE does not emit
 //! `contents-changed` for hidden tabs and workspaces. The shell's view (its
 //! `tty`, its termios, its environment) is unchanged from a direct terminal
-//! spawn.
+//! spawn. SSH terminals opt out of local cwd/title synthesis and remove
+//! `FLOWMUX_*` from the inner SSH process while retaining wrapper IPC context.
 //!
 //! ## Why a separate process
 //!
@@ -50,13 +51,17 @@ use nix::pty::{openpty, OpenptyResult};
 use nix::sys::signal::{self, SigHandler, Signal};
 use nix::sys::termios::{self, SetArg, Termios};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-use nix::unistd::{execvp, fork, setsid, ForkResult, Pid};
+use nix::unistd::{fork, setsid, ForkResult, Pid};
 use std::cell::RefCell;
-use std::ffi::{CString, OsString};
+use std::ffi::OsString;
 use std::io::Write;
 use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStringExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
@@ -144,6 +149,16 @@ pub fn run(
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from))
         .or_else(|| std::env::var_os("FLOWMUX_SOCKET").map(PathBuf::from))
         .unwrap_or_else(flowmux_config::paths::runtime_socket);
+    let ssh_terminal = std::env::var_os("FLOWMUX_SSH_TERMINAL").is_some_and(|value| value == "1");
+    let mut child_command = Command::new(&child_argv[0]);
+    child_command.args(&child_argv[1..]);
+    if ssh_terminal {
+        // Keep IPC context in this wrapper, but never expose it to ssh's
+        // SendEnv, ProxyCommand, or any remote command. Snapshot before fork.
+        child_command.env_clear().envs(
+            std::env::vars_os().filter(|(name, _)| !name.as_bytes().starts_with(b"FLOWMUX_")),
+        );
+    }
 
     // Spin up the IPC worker BEFORE the I/O loop starts so the first
     // terminal-side event arriving in the very first millisecond doesn't get
@@ -156,7 +171,7 @@ pub fn run(
         .spawn(move || ipc_worker(socket, pane, surface, event_rx, output_refresh_for_worker))
         .context("spawn ipc worker thread")?;
 
-    let result = run_pty_pump(child_argv, event_tx, output_refresh);
+    let result = run_pty_pump(child_command, ssh_terminal, event_tx, output_refresh);
 
     // Worker shuts down naturally when the sender half drops. Join so
     // the last in-flight event isn't truncated mid-write on exit.
@@ -166,7 +181,8 @@ pub fn run(
 }
 
 fn run_pty_pump(
-    child_argv: Vec<OsString>,
+    child_command: Command,
+    ssh_terminal: bool,
     event_tx: mpsc::SyncSender<PtyEvent>,
     output_refresh: Arc<OutputRefreshState>,
 ) -> anyhow::Result<i32> {
@@ -188,7 +204,7 @@ fn run_pty_pump(
         ForkResult::Child => {
             // Child path: never returns. child_exec is `-> !`.
             drop(master);
-            child_exec(slave, child_argv);
+            child_exec(slave, child_command);
         }
         ForkResult::Parent { child } => {
             drop(slave);
@@ -249,7 +265,10 @@ fn run_pty_pump(
         pending_for_cb.borrow_mut().push(payload.to_string());
     });
     let mut input_modes = TerminalInputModes::default();
-    let mut cwd_tracker = CwdOscTracker::default();
+    let mut cwd_tracker = CwdOscTracker {
+        local: !ssh_terminal,
+        last: None,
+    };
     cwd_tracker.emit_if_changed(child_pid);
 
     // 7. Pump loop.
@@ -539,7 +558,7 @@ fn wait_for_group_exit(
 
 // ---- Child path: exec the shell on the inner slave ----------------
 
-fn child_exec(slave: OwnedFd, argv: Vec<OsString>) -> ! {
+fn child_exec(slave: OwnedFd, mut command: Command) -> ! {
     // setsid drops our parent's controlling terminal so the next
     // TIOCSCTTY actually attaches the inner slave. Failing here is a
     // catastrophic configuration error — exit so the parent observes
@@ -569,26 +588,13 @@ fn child_exec(slave: OwnedFd, argv: Vec<OsString>) -> ! {
         }
     }
 
-    // Build NUL-terminated C argv.
-    let cstr_argv: Vec<CString> = argv
-        .into_iter()
-        .filter_map(|s| CString::new(s.into_vec()).ok())
-        .collect();
-    if cstr_argv.is_empty() {
-        unsafe { libc::_exit(125) };
-    }
-    let argv_refs: Vec<&std::ffi::CStr> = cstr_argv.iter().map(|c| c.as_c_str()).collect();
-    match execvp(argv_refs[0], &argv_refs) {
-        Ok(_) => unreachable!(),
-        Err(e) => {
-            let msg = format!(
-                "flowmuxctl pty-tee: execvp({:?}) failed: {}\n",
-                argv_refs[0], e
-            );
-            let _ = std::io::stderr().write_all(msg.as_bytes());
-            unsafe { libc::_exit(127) };
-        }
-    }
+    let error = command.exec();
+    let msg = format!(
+        "flowmuxctl pty-tee: exec({:?}) failed: {error}\n",
+        command.get_program()
+    );
+    let _ = std::io::stderr().write_all(msg.as_bytes());
+    unsafe { libc::_exit(127) };
 }
 
 // ---- IPC worker thread -------------------------------------------
@@ -833,13 +839,16 @@ fn wait_writable(fd: RawFd) -> std::io::Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
 struct CwdOscTracker {
+    local: bool,
     last: Option<PathBuf>,
 }
 
 impl CwdOscTracker {
     fn emit_if_changed(&mut self, pid: Pid) {
+        if !self.local {
+            return;
+        }
         let Some(cwd) = child_cwd(pid) else {
             return;
         };
@@ -854,6 +863,9 @@ impl CwdOscTracker {
     }
 
     fn emit_shell_title(&self, pid: Pid) {
+        if !self.local {
+            return;
+        }
         let cwd = child_cwd(pid).or_else(|| self.last.clone());
         let title = terminal_tab_title_for_cwd(cwd.as_deref());
         let _ = write_all(libc::STDOUT_FILENO, &osc0_for_title(&title));
@@ -1000,6 +1012,17 @@ impl Drop for SavedTermios {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_tracker_does_not_inject_local_cwd_or_title() {
+        let mut tracker = CwdOscTracker {
+            local: false,
+            last: None,
+        };
+        tracker.emit_if_changed(Pid::this());
+        tracker.emit_shell_title(Pid::this());
+        assert_eq!(tracker.last, None);
+    }
 
     #[test]
     fn terminal_output_events_coalesce_until_worker_accepts_one() {

@@ -947,6 +947,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
  "vte4",
  "webkit6",
  "zbus",
@@ -989,6 +990,7 @@ dependencies = [
  "tokio",
  "toml_edit 0.22.27",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1079,6 +1081,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

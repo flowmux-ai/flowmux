@@ -221,6 +221,9 @@ pub mod id {
 
 pub use id::{NotificationId, PaneId, SurfaceId, WorkspaceId};
 
+pub mod ssh;
+pub use ssh::{SshForwardSpec, SshTarget, SshWorkspaceConfig, WorkspaceLocation};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: WorkspaceId,
@@ -236,7 +239,7 @@ pub struct Workspace {
     /// the final name shown in the side panel.
     #[serde(default)]
     pub custom_title: Option<String>,
-    pub root_dir: PathBuf,
+    pub location: WorkspaceLocation,
     /// Resolved when the workspace's root_dir is a git checkout.
     pub git: Option<GitInfo>,
     /// Ports observed listening on localhost from any process descendant of
@@ -252,6 +255,13 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn local_root(&self) -> Option<&std::path::Path> {
+        self.location.local_root()
+    }
+
+    pub fn ssh_config(&self) -> Option<&SshWorkspaceConfig> {
+        self.location.ssh()
+    }
     /// Final name shown in the side panel / window title. Returns user-provided
     /// [`Workspace::custom_title`] when present; otherwise the automatically
     /// determined [`Workspace::name`].
@@ -270,7 +280,7 @@ impl Workspace {
             id: self.id,
             name: self.name.clone(),
             custom_title: self.custom_title.clone(),
-            root_dir: self.root_dir.clone(),
+            location: self.location.clone(),
             git: self.git.clone(),
             listening_ports: self.listening_ports.clone(),
             surfaces: self
@@ -402,6 +412,10 @@ pub struct EditorFileState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SurfaceKind {
+    SshTerminal {
+        cwd: Option<String>,
+        tmux_session: Option<String>,
+    },
     Terminal {
         shell: Option<String>,
         cwd: Option<PathBuf>,
@@ -1185,6 +1199,7 @@ impl Pane {
                     };
                     let status = agent.public_status();
                     let cwd = match &surface.kind {
+                        SurfaceKind::SshTerminal { cwd, .. } => cwd.clone(),
                         SurfaceKind::Terminal { cwd: Some(cwd), .. } => {
                             Some(cwd.display().to_string())
                         }
@@ -1389,7 +1404,10 @@ impl Pane {
         let Some(surface) = self.find_surface_mut(target, surface_id) else {
             return false;
         };
-        if !matches!(surface.kind, SurfaceKind::Terminal { .. }) {
+        if !matches!(
+            surface.kind,
+            SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. }
+        ) {
             return false;
         }
         let next = snapshot.into_bounded();
@@ -2070,6 +2088,7 @@ impl PaneContent {
             .unwrap_or(0);
         let active_surface = surfaces.get(active_idx)?;
         match &active_surface.kind {
+            SurfaceKind::SshTerminal { .. } => None,
             SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
             SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. } => surfaces[..active_idx]
                 .iter()

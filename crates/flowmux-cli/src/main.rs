@@ -126,6 +126,14 @@ enum Cmd {
         op: WorkspaceOp,
     },
 
+    /// Open and manage SSH workspaces in this flowmux window.
+    /// `ssh <host>` is shorthand for `ssh connect <host>`. For a host named
+    /// like a subcommand (for example `status`), use `ssh connect status`.
+    Ssh {
+        #[command(subcommand)]
+        op: SshOp,
+    },
+
     /// Send a desktop notification attached to a pane.
     ///
     /// When `--pane` is omitted the daemon picks up `FLOWMUX_PANE_ID`
@@ -279,7 +287,7 @@ enum Cmd {
     ///
     /// Hidden because end users should never invoke it directly —
     /// `terminal_pane::spawn` wraps the shell with it automatically.
-    #[command(name = "pty-tee", hide = true)]
+    #[command(name = "pty-tee", alias = "ssh-pty-tee", hide = true)]
     PtyTee {
         /// Pane id this terminal belongs to. Forwarded as the
         /// notification's `pane` so the bell-popover click router can
@@ -821,6 +829,87 @@ enum AgentHookEvent {
         surface: Option<SurfaceId>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshOp {
+    #[command(external_subcommand)]
+    Host(Vec<String>),
+    /// Create an SSH workspace; authenticate in its connection terminal.
+    Connect {
+        /// SSH Host alias, hostname, or user@host.
+        host: String,
+        /// Absolute remote directory; omitted means the remote login home.
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        identity_file: Option<PathBuf>,
+        /// Use this OpenSSH configuration file instead of the default.
+        #[arg(long)]
+        config_file: Option<PathBuf>,
+        /// Keep remote tab processes in separate tmux sessions.
+        #[arg(long)]
+        tmux: bool,
+        /// Command to run once in the first remote tab, after `--`.
+        #[arg(last = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Inspect connection and port forwarding state.
+    Status {
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+    },
+    /// Connect a disconnected workspace without rerunning its start command.
+    Reconnect {
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+    },
+    /// Disconnect the workspace's SSH transport.
+    Disconnect {
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+    },
+    /// Manage SSH forwards to remote loopback ports.
+    Forward {
+        #[command(subcommand)]
+        op: SshForwardOp,
+    },
+    /// Open a forwarded port in a browser tab.
+    Preview {
+        id: uuid::Uuid,
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshForwardOp {
+    Add {
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+        #[arg(long)]
+        remote_port: u16,
+        /// Omit to allocate a free local loopback port.
+        #[arg(long)]
+        local_port: Option<u16>,
+        #[arg(long)]
+        https: bool,
+    },
+    List {
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
+    },
+    Remove {
+        id: uuid::Uuid,
+        #[arg(long)]
+        workspace: Option<WorkspaceId>,
     },
 }
 

@@ -123,12 +123,14 @@ pub struct TreePane {
 pub struct TreeWorkspace {
     pub id: WorkspaceId,
     pub name: String,
-    pub root: PathBuf,
+    pub root: Option<PathBuf>,
+    pub location: flowmux_core::WorkspaceLocation,
     pub panes: Vec<TreePane>,
 }
 
 fn surface_kind_label(kind: &SurfaceKind) -> &'static str {
     match kind {
+        SurfaceKind::SshTerminal { .. } => "ssh_terminal",
         SurfaceKind::Terminal { .. } => "terminal",
         SurfaceKind::Browser { .. } => "browser",
         SurfaceKind::Editor { .. } => "editor",
@@ -189,7 +191,8 @@ pub fn describe_workspaces(workspaces: &[Workspace]) -> Vec<TreeWorkspace> {
             TreeWorkspace {
                 id: w.id,
                 name: w.display_title().to_string(),
-                root: w.root_dir.clone(),
+                root: w.local_root().map(std::path::Path::to_path_buf),
+                location: w.location.clone(),
                 panes,
             }
         })
@@ -323,8 +326,44 @@ pub enum AgentLifecycleEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum SshRequest {
+    Create {
+        request_id: uuid::Uuid,
+        name: Option<String>,
+        config: flowmux_core::SshWorkspaceConfig,
+        #[serde(default)]
+        command: Vec<String>,
+    },
+    Connect {
+        workspace: WorkspaceId,
+    },
+    Disconnect {
+        workspace: WorkspaceId,
+    },
+    Status {
+        workspace: WorkspaceId,
+    },
+    ForwardAdd {
+        workspace: WorkspaceId,
+        spec: flowmux_core::SshForwardSpec,
+    },
+    ForwardRemove {
+        workspace: WorkspaceId,
+        id: uuid::Uuid,
+    },
+    Preview {
+        workspace: WorkspaceId,
+        id: uuid::Uuid,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Request {
+    Ssh {
+        request: SshRequest,
+    },
     /// Daemon health probe.
     Ping,
 
@@ -733,6 +772,9 @@ pub enum BrowserWaitCondition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
+    Ssh {
+        value: serde_json::Value,
+    },
     Ok,
     Pong,
     WorkspaceCreated {
@@ -948,7 +990,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "demo".into(),
             custom_title: None,
-            root_dir: "/tmp/demo".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp/demo".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {

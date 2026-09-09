@@ -73,11 +73,13 @@ pub(crate) fn claude_session_name(
     workspace: &flowmux_ipc::protocol::TreeWorkspace,
     surface: SurfaceId,
 ) -> String {
-    let base = workspace
-        .root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("workspace");
+    let base = match &workspace.location {
+        flowmux_core::WorkspaceLocation::Local { root_dir } => root_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("workspace"),
+        flowmux_core::WorkspaceLocation::Ssh { config } => &config.target.host,
+    };
     let mut slug = String::new();
     for ch in base.chars() {
         if ch.is_ascii_alphanumeric() {

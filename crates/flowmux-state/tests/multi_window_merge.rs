@@ -12,7 +12,9 @@ fn snapshot(name: &str) -> (State, WorkspaceId) {
         id: WorkspaceId::new(),
         name: name.into(),
         custom_title: None,
-        root_dir: PathBuf::from(format!("/tmp/{name}")),
+        location: flowmux_core::WorkspaceLocation::Local {
+            root_dir: PathBuf::from(format!("/tmp/{name}")),
+        },
         git: None,
         listening_ports: vec![],
         surfaces: vec![],

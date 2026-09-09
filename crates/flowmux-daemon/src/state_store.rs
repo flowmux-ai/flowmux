@@ -19,11 +19,47 @@ use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::{State, WindowLayout, WindowOwner};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify};
 use tracing::{error, info};
+
+fn remote_cwd_for_pane(tree: &Pane, pane: PaneId) -> Option<String> {
+    let content = tree.find_leaf_content(pane)?;
+    match &content.active_surface()?.kind {
+        SurfaceKind::SshTerminal { cwd, .. } => cwd.clone(),
+        _ => match content {
+            PaneContent::Tabs { surfaces, .. } => {
+                surfaces
+                    .iter()
+                    .rev()
+                    .find_map(|surface| match &surface.kind {
+                        SurfaceKind::SshTerminal { cwd, .. } => cwd.clone(),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        },
+    }
+}
+
+fn can_move_between_panes(state: &State, src: PaneId, dst: PaneId) -> bool {
+    let owner = |pane| {
+        state.workspaces.iter().find(|ws| {
+            ws.surfaces
+                .iter()
+                .any(|sf| sf.root_pane.find_leaf_content(pane).is_some())
+        })
+    };
+    match (owner(src), owner(dst)) {
+        (Some(a), Some(b)) => {
+            a.id == b.id || (a.local_root().is_some() && b.local_root().is_some())
+        }
+        _ => false,
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum CloseOutcome {
@@ -886,7 +922,9 @@ impl StateStore {
             id,
             name: auto_name,
             custom_title: None,
-            root_dir: root.clone(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: root.clone(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -920,10 +958,156 @@ impl StateStore {
     ) {
         let mut s = self.inner.lock().await;
         if let Some(w) = s.workspaces.iter_mut().find(|w| w.id == workspace) {
+            if w.ssh_config().is_some() {
+                return;
+            }
             w.git = info;
         }
         drop(s);
         self.mark_dirty();
+    }
+
+    pub async fn create_ssh_workspace(
+        &self,
+        name: Option<String>,
+        config: flowmux_core::SshWorkspaceConfig,
+    ) -> Result<WorkspaceId, String> {
+        config.validate()?;
+        let tab = config.terminal(None);
+        let id = WorkspaceId::new();
+        let mut s = self.inner.lock().await;
+        let ws = Workspace {
+            id,
+            name: name.unwrap_or_else(|| config.target.destination()),
+            custom_title: None,
+            location: flowmux_core::WorkspaceLocation::Ssh { config },
+            git: None,
+            listening_ports: Vec::new(),
+            color: None,
+            surfaces: vec![Surface {
+                id: SurfaceId::new(),
+                kind: tab.kind.clone(),
+                title: "SSH".into(),
+                root_pane: Pane::Leaf {
+                    id: PaneId::new(),
+                    content: PaneContent::Tabs {
+                        active: tab.id,
+                        surfaces: vec![tab],
+                    },
+                },
+            }],
+        };
+        s.workspaces.push(ws);
+        s.workspace_order.push(id);
+        drop(s);
+        self.mark_dirty();
+        Ok(id)
+    }
+
+    pub async fn set_ssh_forwards(
+        &self,
+        workspace: WorkspaceId,
+        forwards: Vec<flowmux_core::SshForwardSpec>,
+    ) -> Result<(), String> {
+        let mut ids = HashSet::new();
+        for forward in &forwards {
+            forward.validate()?;
+            if !ids.insert(forward.id) {
+                return Err("Duplicate SSH forward ID".into());
+            }
+        }
+        let mut state = self.inner.lock().await;
+        let workspace = state
+            .workspaces
+            .iter_mut()
+            .find(|ws| ws.id == workspace)
+            .ok_or("Workspace not found")?;
+        let flowmux_core::WorkspaceLocation::Ssh { config } = &mut workspace.location else {
+            return Err("Workspace is not SSH".into());
+        };
+        if config.forwards == forwards {
+            return Ok(());
+        }
+        config.forwards = forwards;
+        drop(state);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub async fn set_ssh_cwd(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+        cwd: String,
+    ) -> Option<WorkspaceId> {
+        flowmux_core::ssh::validate_remote_cwd(Some(&cwd)).ok()?;
+        fn update(tree: &mut Pane, pane: PaneId, surface: SurfaceId, cwd: &str) -> bool {
+            match tree {
+                Pane::Split { first, second, .. } => {
+                    update(first, pane, surface, cwd) || update(second, pane, surface, cwd)
+                }
+                Pane::Leaf {
+                    id,
+                    content: PaneContent::Tabs { surfaces, .. },
+                } if *id == pane => {
+                    let Some(tab) = surfaces.iter_mut().find(|tab| tab.id == surface) else {
+                        return false;
+                    };
+                    let SurfaceKind::SshTerminal { cwd: current, .. } = &mut tab.kind else {
+                        return false;
+                    };
+                    if current.as_deref() == Some(cwd) {
+                        return false;
+                    }
+                    *current = Some(cwd.into());
+                    true
+                }
+                _ => false,
+            }
+        }
+        let mut state = self.inner.lock().await;
+        for workspace in state
+            .workspaces
+            .iter_mut()
+            .filter(|ws| ws.ssh_config().is_some())
+        {
+            if workspace
+                .surfaces
+                .iter_mut()
+                .any(|root| update(&mut root.root_pane, pane, surface, &cwd))
+            {
+                let id = workspace.id;
+                drop(state);
+                self.mark_dirty();
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    async fn is_local_agent_surface(&self, surface: SurfaceId) -> bool {
+        let state = self.inner.lock().await;
+        agent_presence_slot_in_state(&state, surface).is_some()
+    }
+
+    pub async fn is_ssh_surface(&self, surface: SurfaceId) -> bool {
+        let state = self.inner.lock().await;
+        state
+            .workspaces
+            .iter()
+            .filter(|workspace| workspace.ssh_config().is_some())
+            .any(|workspace| {
+                workspace
+                    .surfaces
+                    .iter()
+                    .any(|root| agent_presence_slot_in_pane(&root.root_pane, surface).is_some())
+            })
+    }
+
+    /// Execution ownership cannot migrate with a widget to another workspace.
+    pub async fn can_move_between_panes(&self, src: PaneId, dst: PaneId) -> bool {
+        let state = self.inner.lock().await;
+        can_move_between_panes(&state, src, dst)
     }
 
     /// Split a target leaf and replace the new sibling with a
@@ -967,18 +1151,26 @@ impl StateStore {
     ) -> Option<(WorkspaceId, PaneId)> {
         let mut s = self.inner.lock().await;
         for ws in s.workspaces.iter_mut() {
+            let location = ws.location.clone();
             for surface in ws.surfaces.iter_mut() {
                 let cwd = surface
                     .root_pane
                     .terminal_surface_cwd(target)
-                    .or_else(|| Some(ws.root_dir.clone()));
+                    .or_else(|| location.local_root().map(Path::to_path_buf));
                 let title = terminal_tab_title_for_cwd(cwd.as_deref());
-                if let Some(new_id) = surface.root_pane.split_leaf(
-                    target,
-                    direction,
-                    0.5,
-                    PaneContent::tabbed_terminal(title, cwd),
-                ) {
+                let content = if let Some(config) = location.ssh() {
+                    let tab = config.terminal(remote_cwd_for_pane(&surface.root_pane, target));
+                    PaneContent::Tabs {
+                        active: tab.id,
+                        surfaces: vec![tab],
+                    }
+                } else {
+                    PaneContent::tabbed_terminal(title, cwd)
+                };
+                if let Some(new_id) = surface
+                    .root_pane
+                    .split_leaf(target, direction, 0.5, content)
+                {
                     let ws_id = ws.id;
                     drop(s);
                     self.mark_dirty();
@@ -1020,6 +1212,9 @@ impl StateStore {
         direction: SplitDirection,
     ) -> Option<SplitMoveOutcome> {
         let mut s = self.inner.lock().await;
+        if !can_move_between_panes(&s, src_pane, dst_pane) {
+            return None;
+        }
 
         // Splitting the only tab back into its own pane would create a split and
         // immediately collapse the now-empty original leaf, so the returned pane
@@ -1094,6 +1289,9 @@ impl StateStore {
         mut surface: PaneSurface,
         target_index: usize,
     ) -> Option<(WorkspaceId, SurfaceId)> {
+        if matches!(surface.kind, SurfaceKind::SshTerminal { .. }) {
+            return None;
+        }
         surface.id = SurfaceId::new();
         surface.agent = None;
         let surface_id = surface.id;
@@ -1102,6 +1300,9 @@ impl StateStore {
         for ws in s.workspaces.iter_mut() {
             for sf in ws.surfaces.iter_mut() {
                 if sf.root_pane.find_leaf_content(dst_pane).is_some() {
+                    if ws.location.ssh().is_some() {
+                        return None;
+                    }
                     sf.root_pane
                         .insert_surface_into_leaf(dst_pane, surface, target_index)?;
                     let ws_id = ws.id;
@@ -1123,6 +1324,9 @@ impl StateStore {
         mut surface: PaneSurface,
         direction: SplitDirection,
     ) -> Option<(WorkspaceId, PaneId, SurfaceId)> {
+        if matches!(surface.kind, SurfaceKind::SshTerminal { .. }) {
+            return None;
+        }
         surface.id = SurfaceId::new();
         surface.agent = None;
         let surface_id = surface.id;
@@ -1135,6 +1339,9 @@ impl StateStore {
         for ws in s.workspaces.iter_mut() {
             for sf in ws.surfaces.iter_mut() {
                 if sf.root_pane.find_leaf_content(dst_pane).is_some() {
+                    if ws.location.ssh().is_some() {
+                        return None;
+                    }
                     let new_pane = sf.root_pane.split_leaf(dst_pane, direction, 0.5, content)?;
                     let ws_id = ws.id;
                     drop(s);
@@ -1175,6 +1382,9 @@ impl StateStore {
         target_index: usize,
     ) -> Option<MoveSurfaceOutcome> {
         let mut s = self.inner.lock().await;
+        if !can_move_between_panes(&s, src_pane, dst_pane) {
+            return None;
+        }
 
         // Treat a same-pane move as an in-place reorder. Without this guard,
         // moving the pane's only tab removes it, reinserts it, then collapses
@@ -1393,7 +1603,11 @@ impl StateStore {
     ) -> Option<WorkspaceId> {
         let mut s = self.inner.lock().await;
         let mut found = None;
-        for ws in s.workspaces.iter_mut() {
+        for ws in s
+            .workspaces
+            .iter_mut()
+            .filter(|ws| ws.local_root().is_some())
+        {
             for surface in ws.surfaces.iter_mut() {
                 if surface
                     .root_pane
@@ -1425,24 +1639,27 @@ impl StateStore {
         surface_id: SurfaceId,
     ) -> Option<LocatedAgentPresence> {
         let s = self.inner.lock().await;
-        s.workspaces.iter().find_map(|workspace| {
-            workspace.surfaces.iter().find_map(|surface| {
-                located_agent_in_pane(&surface.root_pane, surface_id).map(
-                    |(pane, surface_label, presence)| LocatedAgentPresence {
-                        workspace: workspace.id,
-                        pane,
-                        surface: surface_id,
-                        workspace_label: workspace.display_title().to_string(),
-                        surface_label,
-                        color: workspace
-                            .color
-                            .clone()
-                            .unwrap_or_else(|| agent_bar_color_for_surface(surface_id)),
-                        presence,
-                    },
-                )
+        s.workspaces
+            .iter()
+            .filter(|ws| ws.local_root().is_some())
+            .find_map(|workspace| {
+                workspace.surfaces.iter().find_map(|surface| {
+                    located_agent_in_pane(&surface.root_pane, surface_id).map(
+                        |(pane, surface_label, presence)| LocatedAgentPresence {
+                            workspace: workspace.id,
+                            pane,
+                            surface: surface_id,
+                            workspace_label: workspace.display_title().to_string(),
+                            surface_label,
+                            color: workspace
+                                .color
+                                .clone()
+                                .unwrap_or_else(|| agent_bar_color_for_surface(surface_id)),
+                            presence,
+                        },
+                    )
+                })
             })
-        })
     }
 
     /// Remove a hook-owned presence only when the teardown still belongs to
@@ -1590,6 +1807,9 @@ impl StateStore {
         surface_visible: bool,
     ) -> AgentLifecycleResult {
         use flowmux_core::AgentActivity::{Idle, NeedsInput, Running};
+        if !self.is_local_agent_surface(surface_id).await {
+            return AgentLifecycleResult::default();
+        }
 
         let agent = agent.to_ascii_lowercase();
         let mut runtime = self.agent_lifecycle.lock().await;
@@ -2299,6 +2519,9 @@ impl StateStore {
         report: AgentStatusReport,
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        if !self.is_local_agent_surface(surface_id).await {
+            return None;
+        }
         // Only a native SessionStart carries both Ready and a session id.
         // Legacy wrapper starts are metadata-free and must not erase live
         // waits/children when they arrive late.
@@ -2587,7 +2810,11 @@ impl StateStore {
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
         let mut s = self.inner.lock().await;
         let mut accepted = None;
-        for ws in s.workspaces.iter_mut() {
+        for ws in s
+            .workspaces
+            .iter_mut()
+            .filter(|ws| ws.local_root().is_some())
+        {
             let mut found = false;
             let mut changed = false;
             for surface in ws.surfaces.iter_mut() {
@@ -2699,7 +2926,11 @@ impl StateStore {
                 if changed_during_scan {
                     continue;
                 }
-                for ws in s.workspaces.iter_mut() {
+                for ws in s
+                    .workspaces
+                    .iter_mut()
+                    .filter(|ws| ws.local_root().is_some())
+                {
                     let mut applied = None;
                     for surface in ws.surfaces.iter_mut() {
                         let previous = surface.root_pane.agent_presence_for_surface(*surface_id);
@@ -2792,6 +3023,11 @@ impl StateStore {
         osc_title: Option<&str>,
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
+        // Preserve lifecycle -> state ordering while rejecting remote sources.
+        let lifecycle = self.agent_lifecycle.lock().await;
+        if !self.is_local_agent_surface(surface_id).await {
+            return None;
+        }
         let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
         let previous_fingerprint = self
             .last_agent_screen_fingerprints
@@ -2844,6 +3080,7 @@ impl StateStore {
                     .await
                     .insert(surface_id);
             }
+            drop(lifecycle);
             return self
                 .clear_screen_agent_signal(surface_id, surface_visible)
                 .await;
@@ -2853,7 +3090,6 @@ impl StateStore {
         // with SessionEnd/dead-PID teardown. Otherwise teardown can remove the
         // presence after this check but before the state lock below, allowing
         // the stale screen frame to recreate a ghost presence.
-        let lifecycle = self.agent_lifecycle.lock().await;
         if completed_agent.is_some()
             && previous_fingerprint == Some(fingerprint)
             && self
@@ -3082,7 +3318,7 @@ impl StateStore {
     pub async fn live_agent_presences(&self) -> Vec<(WorkspaceId, SurfaceId, u32)> {
         let s = self.inner.lock().await;
         let mut out = Vec::new();
-        for ws in &s.workspaces {
+        for ws in s.workspaces.iter().filter(|ws| ws.local_root().is_some()) {
             let mut found = Vec::new();
             for surface in &ws.surfaces {
                 surface.root_pane.collect_agent_presences(&mut found);
@@ -3123,6 +3359,11 @@ impl StateStore {
         let mut updated = None;
         for ws in s.workspaces.iter_mut() {
             for surface in ws.surfaces.iter_mut() {
+                if matches!(surface.root_pane.find_surface_ref(pane, surface_id).map(|tab| &tab.kind),
+                    Some(SurfaceKind::Browser { initial_url: Some(url) }) if url.starts_with("flowmux-ssh-preview://"))
+                {
+                    return None;
+                }
                 if surface
                     .root_pane
                     .set_surface_browser_url(pane, surface_id, url.clone())
@@ -3562,9 +3803,22 @@ impl StateStore {
         let pane = w.surfaces.first()?.root_pane.first_leaf_id()?;
         let cwd = cwd
             .or_else(|| w.surfaces[0].root_pane.terminal_surface_cwd(pane))
-            .or_else(|| Some(w.root_dir.clone()));
+            .or_else(|| w.local_root().map(Path::to_path_buf));
         let title = terminal_tab_title_for_cwd(cwd.as_deref());
-        let surface = PaneSurface::terminal(title, cwd);
+        let surface = if let Some(config) = w.ssh_config() {
+            if cwd.as_ref().is_some_and(|path| path.to_str().is_none()) {
+                return None;
+            }
+            let remote_cwd = cwd
+                .as_ref()
+                .and_then(|p| p.to_str())
+                .map(str::to_string)
+                .or_else(|| remote_cwd_for_pane(&w.surfaces[0].root_pane, pane));
+            flowmux_core::ssh::validate_remote_cwd(remote_cwd.as_deref()).ok()?;
+            config.terminal(remote_cwd)
+        } else {
+            PaneSurface::terminal(title, cwd)
+        };
         let surface_id = w.surfaces[0].root_pane.add_surface_to_leaf(pane, surface)?;
         drop(s);
         self.mark_dirty();
@@ -3588,13 +3842,33 @@ impl StateStore {
     ) -> Option<(WorkspaceId, SurfaceId)> {
         let mut s = self.inner.lock().await;
         for ws in s.workspaces.iter_mut() {
+            let location = ws.location.clone();
             for surface in ws.surfaces.iter_mut() {
+                if surface.root_pane.find_leaf_content(pane).is_none() {
+                    continue;
+                }
                 let resolved_cwd = cwd
                     .clone()
                     .or_else(|| surface.root_pane.terminal_surface_cwd(pane))
-                    .or_else(|| Some(ws.root_dir.clone()));
+                    .or_else(|| location.local_root().map(Path::to_path_buf));
                 let title = terminal_tab_title_for_cwd(resolved_cwd.as_deref());
-                let mut tab = PaneSurface::terminal(title, resolved_cwd);
+                let mut tab = if let Some(config) = location.ssh() {
+                    if shell.is_some() {
+                        return None;
+                    }
+                    if cwd.as_ref().is_some_and(|path| path.to_str().is_none()) {
+                        return None;
+                    }
+                    let remote_cwd = cwd
+                        .as_ref()
+                        .and_then(|p| p.to_str())
+                        .map(str::to_string)
+                        .or_else(|| remote_cwd_for_pane(&surface.root_pane, pane));
+                    flowmux_core::ssh::validate_remote_cwd(remote_cwd.as_deref()).ok()?;
+                    config.terminal(remote_cwd)
+                } else {
+                    PaneSurface::terminal(title, resolved_cwd)
+                };
                 if let SurfaceKind::Terminal {
                     shell: tab_shell, ..
                 } = &mut tab.kind
@@ -3673,7 +3947,11 @@ impl StateStore {
         editor_root: std::path::PathBuf,
     ) -> Option<(WorkspaceId, SurfaceId)> {
         let mut s = self.inner.lock().await;
-        for ws in s.workspaces.iter_mut() {
+        for ws in s
+            .workspaces
+            .iter_mut()
+            .filter(|ws| ws.local_root().is_some())
+        {
             for surface in ws.surfaces.iter_mut() {
                 let tab = PaneSurface::editor("Editor", editor_root.clone());
                 if let Some(surface_id) = surface.root_pane.add_surface_to_leaf(pane, tab) {
@@ -3938,7 +4216,11 @@ fn update_surface_cwd_in_state(
     surface_id: SurfaceId,
     cwd: std::path::PathBuf,
 ) -> Option<WorkspaceId> {
-    for ws in state.workspaces.iter_mut() {
+    for ws in state
+        .workspaces
+        .iter_mut()
+        .filter(|ws| ws.local_root().is_some())
+    {
         for surface in ws.surfaces.iter_mut() {
             if surface
                 .root_pane
@@ -3980,7 +4262,11 @@ fn update_editor_session_in_state(
     surface_id: SurfaceId,
     session: EditorSessionState,
 ) -> Option<WorkspaceId> {
-    for workspace in &mut state.workspaces {
+    for workspace in state
+        .workspaces
+        .iter_mut()
+        .filter(|ws| ws.local_root().is_some())
+    {
         for surface in &mut workspace.surfaces {
             if surface
                 .root_pane
@@ -4014,7 +4300,9 @@ fn normalize_state(state: &mut State) -> bool {
         for surface in &mut ws.surfaces {
             let fallback_cwd = match &surface.kind {
                 SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
-                SurfaceKind::Browser { .. } | SurfaceKind::Editor { .. } => None,
+                SurfaceKind::SshTerminal { .. }
+                | SurfaceKind::Browser { .. }
+                | SurfaceKind::Editor { .. } => None,
             };
             changed |= surface.root_pane.normalize_leaf_tabs(fallback_cwd);
         }
@@ -4106,12 +4394,16 @@ fn agent_presence_slot_in_state(
     state: &State,
     surface_id: SurfaceId,
 ) -> Option<Option<AgentPresence>> {
-    state.workspaces.iter().find_map(|workspace| {
-        workspace
-            .surfaces
-            .iter()
-            .find_map(|surface| agent_presence_slot_in_pane(&surface.root_pane, surface_id))
-    })
+    state
+        .workspaces
+        .iter()
+        .filter(|ws| ws.local_root().is_some())
+        .find_map(|workspace| {
+            workspace
+                .surfaces
+                .iter()
+                .find_map(|surface| agent_presence_slot_in_pane(&surface.root_pane, surface_id))
+        })
 }
 
 fn take_current_agent_from_pane(
@@ -4201,6 +4493,257 @@ fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPrese
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn ssh_workspace(store: &StateStore) -> (WorkspaceId, PaneId, SurfaceId) {
+        let config = flowmux_core::SshWorkspaceConfig {
+            target: flowmux_core::SshTarget::parse("devbox").unwrap(),
+            cwd: Some("/srv/project".into()),
+            tmux: true,
+            forwards: vec![],
+        };
+        let id = store.create_ssh_workspace(None, config).await.unwrap();
+        let ws = store.get_workspace(id).await.unwrap();
+        (id, first_pane(&ws), first_pane_active_surface(&ws))
+    }
+
+    #[tokio::test]
+    async fn ssh_tabs_and_splits_inherit_only_remote_cwd_and_have_distinct_tmux_sessions() {
+        let store = StateStore::new_lazy(State::default());
+        let (ws, pane, tab) = ssh_workspace(&store).await;
+        assert_eq!(
+            store
+                .set_ssh_cwd(pane, tab, "/srv/a ' $literal".into())
+                .await,
+            Some(ws)
+        );
+        assert_eq!(
+            store
+                .update_surface_cwd(pane, tab, "/tmp/local".into())
+                .await,
+            None
+        );
+        assert_eq!(store.set_ssh_cwd(pane, tab, "relative".into()).await, None);
+        store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        store.add_terminal_surface(ws, None).await.unwrap();
+        store
+            .add_browser_surface_to_pane(pane, "about:blank".into())
+            .await
+            .unwrap();
+        let (_, split) = store
+            .split_pane(pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let workspace = store.get_workspace(ws).await.unwrap();
+        let tabs = pane_surfaces(&workspace, pane)
+            .into_iter()
+            .chain(pane_surfaces(&workspace, split));
+        let mut sessions = HashSet::new();
+        for tab in tabs {
+            match tab.kind {
+                SurfaceKind::SshTerminal { cwd, tmux_session } => {
+                    assert_eq!(cwd.as_deref(), Some("/srv/a ' $literal"));
+                    assert!(sessions.insert(tmux_session.unwrap()));
+                }
+                SurfaceKind::Browser { .. } => {}
+                _ => panic!("local surface in remote workspace"),
+            }
+        }
+        assert_eq!(sessions.len(), 4);
+        assert!(store
+            .add_terminal_surface_to_pane_with_shell(pane, None, Some("/bin/sh".into()))
+            .await
+            .is_none());
+        let local = store.create_workspace(None, "/tmp".into()).await;
+        let local_pane = first_pane(&store.get_workspace(local).await.unwrap());
+        assert!(
+            store
+                .add_terminal_surface_to_pane_with_shell(local_pane, None, Some("/bin/sh".into()))
+                .await
+                .is_some(),
+            "earlier SSH workspace must not reject a local shell override"
+        );
+    }
+
+    #[tokio::test]
+    async fn ssh_location_moves_imports_and_editor_rejection_preserve_state() {
+        let store = StateStore::new_lazy(State::default());
+        let (remote, pane, tab) = ssh_workspace(&store).await;
+        let (_, other_remote, _) = ssh_workspace(&store).await;
+        let local = store.create_workspace(None, "/tmp".into()).await;
+        let ws = store.get_workspace(local).await.unwrap();
+        let local_pane = first_pane(&ws);
+        let local_tab = first_pane_active_surface(&ws);
+        let before = format!("{:?}", store.snapshot().await);
+        for destination in [local_pane, other_remote] {
+            assert!(store
+                .move_surface_to_pane(pane, tab, destination, 0)
+                .await
+                .is_none());
+            assert!(store
+                .split_surface_into_pane(pane, tab, destination, SplitDirection::Horizontal)
+                .await
+                .is_none());
+        }
+        assert!(store
+            .move_surface_to_pane(local_pane, local_tab, pane, 0)
+            .await
+            .is_none());
+        assert!(store
+            .add_editor_surface_to_pane(pane, "/tmp".into())
+            .await
+            .is_none());
+        let remote_tab =
+            pane_surfaces(&store.get_workspace(remote).await.unwrap(), pane)[0].clone();
+        for (destination, payload) in [
+            (pane, PaneSurface::terminal("local", None)),
+            (local_pane, remote_tab),
+        ] {
+            assert!(store
+                .import_surface_to_pane(destination, payload.clone(), 0)
+                .await
+                .is_none());
+            assert!(store
+                .split_imported_surface_into_pane(destination, payload, SplitDirection::Vertical)
+                .await
+                .is_none());
+        }
+        assert_eq!(format!("{:?}", store.snapshot().await), before);
+        let (_, split) = store
+            .split_pane(pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        assert!(store
+            .move_surface_to_pane(pane, tab, split, 0)
+            .await
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn ssh_rejects_local_agent_metadata_and_validates_forward_updates() {
+        let store = StateStore::new_lazy(State::default());
+        let (ws, pane, tab) = ssh_workspace(&store).await;
+        assert!(store.is_ssh_surface(tab).await);
+        assert!(!store.is_ssh_surface(SurfaceId::new()).await);
+        assert!(store
+            .set_agent_activity(
+                tab,
+                Some(AgentPresence::new(
+                    "claude",
+                    flowmux_core::AgentActivity::Running,
+                    Some(42)
+                ))
+            )
+            .await
+            .is_none());
+        let report = AgentStatusReport {
+            name: "claude".into(),
+            status: Some(AgentStatus::Working),
+            activity: None,
+            pid: Some(42),
+            source: Some("flowmux:hook".into()),
+            seq: Some(1),
+            message: None,
+            custom_status: None,
+            session_id: Some("local-session".into()),
+            session_name: None,
+            messaging_socket: None,
+        };
+        assert!(store.report_agent_status(tab, report).await.is_none());
+        assert!(store
+            .report_agent_screen_signals(tab, Some("Welcome to Claude Code"), None)
+            .await
+            .is_none());
+        assert!(store
+            .reconcile_process_agents(&[(tab, Some("claude"))])
+            .await
+            .is_empty());
+        let lifecycle = store
+            .report_agent_lifecycle_with_visibility(
+                tab,
+                "claude",
+                Some(42),
+                Some(2),
+                "local-session",
+                AgentLifecycleEvent::ProgressObserved {
+                    status_text: "working".into(),
+                },
+                false,
+            )
+            .await;
+        assert_eq!(lifecycle, AgentLifecycleResult::default());
+        assert!(store.live_agent_presences().await.is_empty());
+        assert!(store
+            .agent_process_reconciliation_snapshot(&[tab])
+            .await
+            .is_empty());
+        assert!(store.get_workspace(ws).await.unwrap().surfaces[0]
+            .root_pane
+            .agent_presence_for_surface(tab)
+            .is_none());
+        assert!(store.last_agent_screen_fingerprints.lock().await.is_empty());
+        let forward = flowmux_core::SshForwardSpec {
+            id: SurfaceId::new().0,
+            remote_port: 3000,
+            local_port: None,
+            https: false,
+        };
+        store
+            .set_ssh_forwards(ws, vec![forward.clone()])
+            .await
+            .unwrap();
+        assert!(store
+            .set_ssh_forwards(ws, vec![forward.clone(), forward.clone()])
+            .await
+            .is_err());
+        let mut invalid = forward.clone();
+        invalid.remote_port = 0;
+        assert!(store.set_ssh_forwards(ws, vec![invalid]).await.is_err());
+        assert_eq!(
+            store
+                .get_workspace(ws)
+                .await
+                .unwrap()
+                .ssh_config()
+                .unwrap()
+                .forwards,
+            vec![forward]
+        );
+        assert_eq!(
+            store
+                .set_ssh_cwd(pane, SurfaceId::new(), "/srv/nope".into())
+                .await,
+            None
+        );
+        let binding = "flowmux-ssh-preview://test-forward/path?query=1#fragment";
+        let (_, preview) = store
+            .add_browser_surface_to_pane(pane, binding.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .update_browser_url(pane, preview, "http://127.0.0.1:1234/path".into())
+                .await,
+            None
+        );
+        let (_, browser) = store
+            .add_browser_surface_to_pane(pane, "about:blank".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .update_browser_url(pane, browser, "https://example.com".into())
+                .await,
+            Some(ws)
+        );
+        let workspace = store.get_workspace(ws).await.unwrap();
+        assert!(
+            matches!(&workspace.surfaces[0].root_pane.find_surface_ref(pane, preview).unwrap().kind,
+            SurfaceKind::Browser { initial_url: Some(url) } if url == binding)
+        );
+    }
 
     fn first_pane(ws: &Workspace) -> PaneId {
         ws.surfaces[0].root_pane.first_leaf_id().unwrap()
@@ -8560,7 +9103,9 @@ Do you want to continue?";
             id: ws_id,
             name: "legacy".into(),
             custom_title: None,
-            root_dir: "/tmp/legacy".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp/legacy".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![
@@ -8621,7 +9166,9 @@ Do you want to continue?";
             id: ws_id,
             name: "legacy".into(),
             custom_title: None,
-            root_dir: "/tmp/legacy".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp/legacy".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -8672,7 +9219,9 @@ Do you want to continue?";
             id: ws_id,
             name: "legacy".into(),
             custom_title: None,
-            root_dir: "/tmp/legacy".into(),
+            location: flowmux_core::WorkspaceLocation::Local {
+                root_dir: "/tmp/legacy".into(),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![Surface {
@@ -9943,6 +10492,10 @@ Do you want to continue?";
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum SurfaceKindFingerprint {
+        SshTerminal {
+            cwd: Option<String>,
+            tmux_session: Option<String>,
+        },
         Terminal {
             shell: Option<String>,
             cwd: Option<std::path::PathBuf>,
@@ -9959,6 +10512,10 @@ Do you want to continue?";
 
     fn fingerprint(s: &PaneSurface) -> SurfaceFingerprint {
         let kind = match &s.kind {
+            SurfaceKind::SshTerminal { cwd, tmux_session } => SurfaceKindFingerprint::SshTerminal {
+                cwd: cwd.clone(),
+                tmux_session: tmux_session.clone(),
+            },
             SurfaceKind::Terminal { shell, cwd } => SurfaceKindFingerprint::Terminal {
                 shell: shell.clone(),
                 cwd: cwd.clone(),

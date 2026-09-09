@@ -9,7 +9,7 @@
 //! migrate old state files from this format.
 
 use flowmux_config::paths;
-use flowmux_core::Workspace;
+use flowmux_core::{Pane, PaneContent, SurfaceKind, Workspace};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -21,7 +21,7 @@ pub mod instance_lock;
 pub use agent_sessions::{default_agent_session_store, AgentSessionStore, SavedAgentSession};
 pub use instance_lock::{try_acquire_state_lock, InstanceLock};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Window size and maximized state, saved on exit and restored on next launch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,7 +55,8 @@ pub struct SavedWindow {
     pub owner_pid: u32,
     /// Kernel boot id at save time. A record from a different boot predates a
     /// reboot: every PTY it owned is dead and its pid may have been reused, so
-    /// restart discards its workspaces instead of restoring dead panes.
+    /// restart discards its local workspaces instead of restoring dead panes.
+    /// SSH configuration and layout survive a local reboot.
     /// `None` (old state files, non-Linux) keeps the always-restore behavior.
     #[serde(default)]
     pub boot_id: Option<String>,
@@ -118,7 +119,9 @@ pub enum StateError {
     #[error("state dir is unavailable")]
     NoStateDir,
     #[error("schema version {found} is newer than supported ({supported})")]
-    SchemaTooNew { found: u32, supported: u32 },
+    SchemaTooNew { found: u64, supported: u32 },
+    #[error("invalid state: {0}")]
+    Invalid(String),
 }
 
 pub fn default_path() -> Result<PathBuf, StateError> {
@@ -145,15 +148,140 @@ pub fn load_from(path: &Path) -> Result<State, StateError> {
         return Ok(State::default());
     }
     let text = std::fs::read_to_string(path)?;
-    let mut state: State = serde_json::from_str(&text)?;
-    if state.schema_version > SCHEMA_VERSION {
-        return Err(StateError::SchemaTooNew {
-            found: state.schema_version,
-            supported: SCHEMA_VERSION,
-        });
+    let mut raw: serde_json::Value = serde_json::from_str(&text)?;
+    let version = checked_schema_version(&raw)?;
+    if version < u64::from(SCHEMA_VERSION) {
+        for workspace in raw["workspaces"]
+            .as_array_mut()
+            .ok_or_else(|| StateError::Invalid("workspaces must be an array".into()))?
+        {
+            let workspace = workspace
+                .as_object_mut()
+                .ok_or_else(|| StateError::Invalid("workspace must be an object".into()))?;
+            if workspace.contains_key("location") {
+                return Err(StateError::Invalid(
+                    "legacy workspace has an unexpected location".into(),
+                ));
+            }
+            let root = workspace.remove("root_dir").ok_or_else(|| {
+                StateError::Invalid("legacy workspace is missing root_dir".into())
+            })?;
+            workspace.insert(
+                "location".into(),
+                serde_json::json!({"type": "local", "root_dir": root}),
+            );
+        }
+        raw["schema_version"] = SCHEMA_VERSION.into();
+    }
+    let mut state: State = serde_json::from_value(raw)?;
+    validate_locations(&state)?;
+    if version < u64::from(SCHEMA_VERSION) {
+        backup_legacy_state(path, version, text.as_bytes())?;
     }
     migrate_legacy_state(&mut state);
     Ok(state)
+}
+
+fn checked_schema_version(raw: &serde_json::Value) -> Result<u64, StateError> {
+    let version = raw["schema_version"]
+        .as_u64()
+        .ok_or_else(|| StateError::Invalid("schema_version must be an unsigned integer".into()))?;
+    if version > u64::from(SCHEMA_VERSION) {
+        return Err(StateError::SchemaTooNew {
+            found: version,
+            supported: SCHEMA_VERSION,
+        });
+    }
+    Ok(version)
+}
+
+fn backup_legacy_state(path: &Path, version: u64, bytes: &[u8]) -> Result<(), StateError> {
+    let backup = path.with_extension(format!("json.v{version}.bak"));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&backup)
+    {
+        Ok(mut file) => {
+            if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+                let _ = std::fs::remove_file(&backup);
+                return Err(error.into());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Never replace a prior backup or migrate past an incomplete one.
+            if std::fs::read(&backup)? != bytes {
+                return Err(StateError::Invalid(format!(
+                    "migration backup differs from source: {}",
+                    backup.display()
+                )));
+            }
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+fn validate_locations(state: &State) -> Result<(), StateError> {
+    fn kind(kind: &SurfaceKind, remote: bool) -> Result<(), StateError> {
+        match kind {
+            SurfaceKind::Terminal { .. } | SurfaceKind::Editor { .. } if remote => Err(
+                StateError::Invalid("SSH workspace contains a local terminal or editor".into()),
+            ),
+            SurfaceKind::SshTerminal { .. } if !remote => Err(StateError::Invalid(
+                "local workspace contains an SSH terminal".into(),
+            )),
+            SurfaceKind::SshTerminal { cwd, tmux_session } => {
+                flowmux_core::ssh::validate_remote_cwd(cwd.as_deref())
+                    .map_err(StateError::Invalid)?;
+                if tmux_session.as_ref().is_some_and(|session| {
+                    !session.starts_with("flowmux-")
+                        || !session
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || c == b'-')
+                }) {
+                    return Err(StateError::Invalid("invalid SSH tmux session".into()));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+    fn pane(node: &Pane, remote: bool) -> Result<(), StateError> {
+        match node {
+            Pane::Split { first, second, .. } => {
+                pane(first, remote)?;
+                pane(second, remote)
+            }
+            Pane::Leaf {
+                content: PaneContent::Tabs { surfaces, .. },
+                ..
+            } => {
+                for surface in surfaces {
+                    kind(&surface.kind, remote)?;
+                }
+                Ok(())
+            }
+            Pane::Leaf {
+                content: PaneContent::Terminal { .. },
+                ..
+            } if remote => Err(StateError::Invalid(
+                "SSH workspace contains a legacy local terminal".into(),
+            )),
+            _ => Ok(()),
+        }
+    }
+    for workspace in &state.workspaces {
+        if let Some(config) = workspace.ssh_config() {
+            config.validate().map_err(StateError::Invalid)?;
+        }
+        let remote = workspace.ssh_config().is_some();
+        for surface in &workspace.surfaces {
+            kind(&surface.kind, remote)?;
+            pane(&surface.root_pane, remote)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn save_to(path: &Path, state: &State) -> Result<(), StateError> {
@@ -161,6 +289,21 @@ pub fn save_to(path: &Path, state: &State) -> Result<(), StateError> {
 }
 
 fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
+    if u64::from(state.schema_version) > u64::from(SCHEMA_VERSION) {
+        return Err(StateError::SchemaTooNew {
+            found: u64::from(state.schema_version),
+            supported: SCHEMA_VERSION,
+        });
+    }
+    validate_locations(&state)?;
+    if path.exists() {
+        let bytes = std::fs::read(path)?;
+        let raw = serde_json::from_slice(&bytes)?;
+        let version = checked_schema_version(&raw)?;
+        if version < u64::from(SCHEMA_VERSION) {
+            backup_legacy_state(path, version, &bytes)?;
+        }
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -265,10 +408,11 @@ fn workspace_surface_ids(workspace: &Workspace, out: &mut Vec<flowmux_core::Surf
 /// window. The on-disk ownership update happens before returning so two
 /// concurrent launches cannot restore the same workspace set.
 ///
-/// Workspaces owned by a window from a previous kernel boot are discarded,
+/// Local workspaces owned by a window from a previous kernel boot are discarded,
 /// not claimed: after a reboot their processes and agent sessions are gone,
 /// so restoring the workspace would only show dead panes. Their saved agent
-/// session bindings are forgotten too.
+/// session bindings are forgotten too. SSH workspace configuration and layout
+/// are retained because remote sessions can outlive the local boot.
 pub fn claim_window(owner: WindowOwner) -> Result<State, StateError> {
     let path = default_path()?;
     let (state, expired_surfaces) = claim_window_impl(&path, owner, current_boot_id())?;
@@ -317,10 +461,12 @@ fn claim_window_impl(
         .workspaces
         .iter()
         .filter_map(|workspace| {
-            disk.workspace_owners
-                .get(&workspace.id)
-                .is_some_and(|owner| expired_owners.contains(owner))
-                .then_some(workspace.id)
+            (workspace.local_root().is_some()
+                && disk
+                    .workspace_owners
+                    .get(&workspace.id)
+                    .is_some_and(|owner| expired_owners.contains(owner)))
+            .then_some(workspace.id)
         })
         .collect::<HashSet<_>>();
     let mut expired_surfaces = Vec::new();
@@ -470,7 +616,9 @@ mod tests {
             id: WorkspaceId::new(),
             name: "demo".into(),
             custom_title: None,
-            root_dir: PathBuf::from("/tmp/demo"),
+            location: WorkspaceLocation::Local {
+                root_dir: PathBuf::from("/tmp/demo"),
+            },
             git: None,
             listening_ports: vec![],
             surfaces: vec![],
@@ -697,6 +845,9 @@ mod tests {
         let path = dir.path().join("state.json");
         let workspace = sample_workspace();
         let workspace_id = workspace.id;
+        let mut workspace = serde_json::to_value(workspace).unwrap();
+        workspace["root_dir"] = workspace["location"]["root_dir"].clone();
+        workspace.as_object_mut().unwrap().remove("location");
         let fixture = serde_json::json!({
             "schema_version": 1,
             "workspaces": [workspace],
@@ -749,10 +900,149 @@ mod tests {
         let path = dir.path().join("state.json");
         std::fs::write(
             &path,
-            r#"{"schema_version": 9999, "workspaces": [], "last_saved": "2026-01-01T00:00:00Z"}"#,
+            r#"{"schema_version": 9999, "workspaces": [{"unknown_future_shape": true}]}"#,
         )
         .unwrap();
         let err = load_from(&path).unwrap_err();
         assert!(matches!(err, StateError::SchemaTooNew { .. }));
+        let before = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            save_to(&path, &State::default()),
+            Err(StateError::SchemaTooNew { .. })
+        ));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn v2_migration_preserves_tabs_scrollback_and_window_ownership_with_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let owner = WindowOwner::current();
+        let tab = SurfaceId::new();
+        let original = state_with_owned_workspace(owner, Some("boot-a"), tab);
+        let mut raw = serde_json::to_value(&original).unwrap();
+        raw["schema_version"] = 2.into();
+        let ws = &mut raw["workspaces"][0];
+        ws["root_dir"] = ws["location"]["root_dir"].clone();
+        ws.as_object_mut().unwrap().remove("location");
+        let bytes = serde_json::to_vec_pretty(&raw).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+
+        let migrated = load_from(&path).unwrap();
+        assert_eq!(migrated.workspaces[0].id, original.workspaces[0].id);
+        assert_eq!(
+            migrated.workspaces[0].local_root(),
+            Some(Path::new("/tmp/demo"))
+        );
+        assert_eq!(migrated.workspace_owners, original.workspace_owners);
+        assert_eq!(migrated.windows, original.windows);
+        assert_eq!(
+            serde_json::to_value(&migrated.workspaces[0].surfaces).unwrap(),
+            raw["workspaces"][0]["surfaces"]
+        );
+        let backup = path.with_extension("json.v2.bak");
+        assert_eq!(std::fs::read(&backup).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "load never rewrites source"
+        );
+        save_to(&path, &migrated).unwrap();
+        assert_eq!(load_from(&path).unwrap().schema_version, 3);
+        assert_eq!(std::fs::read(&backup).unwrap(), bytes);
+
+        std::fs::write(&path, &bytes).unwrap();
+        std::fs::write(&backup, b"earlier backup").unwrap();
+        assert!(load_from(&path).is_err());
+        assert!(save_to(&path, &migrated).is_err());
+        assert_eq!(std::fs::read(&backup).unwrap(), b"earlier backup");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    fn ssh_state() -> State {
+        let mut state =
+            state_with_owned_workspace(WindowOwner::current(), Some("old-boot"), SurfaceId::new());
+        let config = SshWorkspaceConfig {
+            target: SshTarget::parse("devbox").unwrap(),
+            cwd: Some("/srv/project".into()),
+            tmux: true,
+            forwards: vec![],
+        };
+        let terminal = config.terminal(None);
+        let surface = &mut state.workspaces[0].surfaces[0];
+        surface.kind = terminal.kind.clone();
+        surface.root_pane = Pane::Leaf {
+            id: PaneId::new(),
+            content: PaneContent::Tabs {
+                active: terminal.id,
+                surfaces: vec![terminal],
+            },
+        };
+        state.workspaces[0].location = WorkspaceLocation::Ssh { config };
+        state
+    }
+
+    #[test]
+    fn ssh_layout_survives_local_reboot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let original = ssh_state();
+        save_to(&path, &original).unwrap();
+        let (restored, expired) =
+            claim_window_impl(&path, WindowOwner::current(), Some("new-boot".into())).unwrap();
+        assert!(expired.is_empty());
+        assert_eq!(restored.workspaces[0].id, original.workspaces[0].id);
+        assert_eq!(
+            serde_json::to_value(&restored.workspaces[0]).unwrap(),
+            serde_json::to_value(&original.workspaces[0]).unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_ssh_configuration_and_mixed_location_leaves_without_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let valid = serde_json::to_value(ssh_state()).unwrap();
+        let mut cases = vec![];
+        let mut raw = valid.clone();
+        raw["workspaces"][0]["location"]["config"]["target"]["host"] = "-oProxyCommand=bad".into();
+        cases.push(raw);
+        let mut raw = valid.clone();
+        raw["workspaces"][0]["location"]["type"] = "unknown_remote".into();
+        cases.push(raw);
+        let mut raw = valid.clone();
+        raw["workspaces"][0]["location"] = serde_json::json!({"type": "local", "root_dir": "/tmp"});
+        cases.push(raw);
+        let mut raw = valid.clone();
+        raw["workspaces"][0]["surfaces"][0]["kind"] =
+            serde_json::json!({"type": "terminal", "cwd": null, "shell": null});
+        cases.push(raw);
+        for content in [
+            serde_json::json!({"type": "terminal", "pid": null}),
+            serde_json::json!({"type": "tabs", "active": SurfaceId::new(), "surfaces": [PaneSurface::terminal("local", None)]}),
+        ] {
+            let mut raw = valid.clone();
+            let root = &mut raw["workspaces"][0]["surfaces"][0]["root_pane"];
+            *root = serde_json::json!({"kind": "split", "id": PaneId::new(), "direction": "vertical", "ratio": 0.5,
+                "first": root.clone(), "second": {"kind": "leaf", "id": PaneId::new(), "content": content}});
+            cases.push(raw);
+        }
+        let mut raw = valid;
+        raw["workspaces"][0]["surfaces"][0]["root_pane"]["content"]["surfaces"][0]["kind"]["cwd"] =
+            "relative/path".into();
+        cases.push(raw);
+        for raw in cases {
+            if raw["workspaces"][0]["location"]["type"] != "unknown_remote" {
+                let state: State = serde_json::from_value(raw.clone()).unwrap();
+                assert!(matches!(
+                    validate_locations(&state),
+                    Err(StateError::Invalid(_))
+                ));
+            }
+            let bytes = serde_json::to_vec(&raw).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(load_from(&path).is_err(), "accepted {raw}");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
     }
 }

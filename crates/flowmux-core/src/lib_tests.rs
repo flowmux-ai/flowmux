@@ -1192,7 +1192,9 @@ fn workspace_roundtrips_through_json() {
         id: WorkspaceId::new(),
         name: "demo".into(),
         custom_title: None,
-        root_dir: PathBuf::from("/tmp/demo"),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: PathBuf::from("/tmp/demo"),
+        },
         git: None,
         listening_ports: vec![3000, 5173],
         surfaces: vec![Surface {
@@ -1221,7 +1223,9 @@ fn display_title_falls_back_to_name_when_custom_unset() {
         id: WorkspaceId::new(),
         name: "auto".into(),
         custom_title: None,
-        root_dir: PathBuf::from("/tmp/auto"),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: PathBuf::from("/tmp/auto"),
+        },
         git: None,
         listening_ports: vec![],
         surfaces: vec![],
@@ -1236,7 +1240,9 @@ fn display_title_prefers_custom_title_when_set() {
         id: WorkspaceId::new(),
         name: "auto".into(),
         custom_title: Some("My Project".into()),
-        root_dir: PathBuf::from("/tmp/auto"),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: PathBuf::from("/tmp/auto"),
+        },
         git: None,
         listening_ports: vec![],
         surfaces: vec![],
@@ -1256,7 +1262,9 @@ fn display_title_treats_empty_custom_as_unset() {
         id: WorkspaceId::new(),
         name: "auto".into(),
         custom_title: Some("".into()),
-        root_dir: PathBuf::from("/tmp/auto"),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: PathBuf::from("/tmp/auto"),
+        },
         git: None,
         listening_ports: vec![],
         surfaces: vec![],
@@ -1272,7 +1280,7 @@ fn workspace_loads_legacy_state_without_custom_title() {
     let json = r#"{
             "id": "00000000-0000-0000-0000-000000000001",
             "name": "old-project",
-            "root_dir": "/tmp/old",
+            "location": { "type": "local", "root_dir": "/tmp/old" },
             "git": null,
             "surfaces": [],
             "color": null
@@ -1994,7 +2002,9 @@ fn workspace_with_agent_leaves(leaves: Vec<(PaneId, PaneSurface)>) -> Workspace 
         id: WorkspaceId::new(),
         name: "agents".into(),
         custom_title: None,
-        root_dir: "/tmp".into(),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: "/tmp".into(),
+        },
         git: None,
         listening_ports: Vec::new(),
         surfaces: vec![Surface {
@@ -2038,7 +2048,9 @@ fn workspace_with_tab_leaves(leaves: Vec<(PaneId, Vec<PaneSurface>)>) -> Workspa
         id: WorkspaceId::new(),
         name: "agents".into(),
         custom_title: None,
-        root_dir: "/tmp".into(),
+        location: crate::WorkspaceLocation::Local {
+            root_dir: "/tmp".into(),
+        },
         git: None,
         listening_ports: Vec::new(),
         surfaces: vec![Surface {

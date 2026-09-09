@@ -177,6 +177,13 @@ impl WindowController {
     ) {
         let (screen, title) = {
             let registry = self.pane_registry.borrow();
+            if registry
+                .terminals
+                .get(&surface)
+                .is_some_and(|terminal| terminal.is_ssh)
+            {
+                return;
+            }
             let screen = registry
                 .terminals
                 .get(&surface)

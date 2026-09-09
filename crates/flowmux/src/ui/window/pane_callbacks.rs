@@ -226,6 +226,14 @@ impl PaneCallbackRouter {
                 let pane_registry = pane_registry.clone();
                 Rc::new(move |pane| pane_registry.borrow().workspace_of_pane(pane))
             },
+            is_ssh_pane: {
+                let pane_registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |pane| {
+                    pane_registry
+                        .upgrade()
+                        .is_some_and(|registry| registry.borrow().is_ssh_pane(pane))
+                })
+            },
             on_split_surface_into_pane: {
                 let bridge = bridge.clone();
                 Rc::new(RefCell::new(
