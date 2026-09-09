@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Isolated, unprivileged OpenSSH integration checks; --keep serves GUI tests.
+"""Isolated, unprivileged OpenSSH checks; --gui also runs the live GUI suite.
 
 Example with distribution packages extracted into /tmp/ssh-tools:
   python3 scripts/ssh-workspace-fixture.py \
@@ -23,6 +23,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -57,6 +58,8 @@ def main():
     parser.add_argument("--tmux", default=shutil.which("tmux"))
     parser.add_argument("--library-path")
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--gui", help="Run the GUI integration suite against this fixture")
+    parser.add_argument("--cli", default="target/debug/flowmuxctl")
     args = parser.parse_args()
     if not args.sshd or not args.tmux:
         parser.error("Provide --sshd and --tmux, or install both in PATH")
@@ -212,6 +215,11 @@ LogLevel VERBOSE
             fallback = subprocess.run(slave + [host, "printf unexpected-fallback"], capture_output=True, timeout=5)
             assert fallback.returncode != 0 and b"unexpected-fallback" not in fallback.stdout
             print("PASS: a slave fails closed after master exit", flush=True)
+            if args.gui:
+                subprocess.run([sys.executable, str(Path(__file__).with_name("test-ssh-workspace-gui.py")),
+                                "--gui", args.gui, "--cli", args.cli,
+                                "--ssh-config", str(client_config), "--remote-cwd", str(remote),
+                                "--http-port", str(httpd.server_port)], env=env, check=True)
             if args.keep:
                 print(json.dumps({"root": str(root), "fixture_pid": os.getpid(), "sshd_pid": sshd.pid,
                                   "host": host, "port": port, "identity_file": str(root / "client"),

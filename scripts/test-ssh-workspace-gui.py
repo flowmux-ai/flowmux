@@ -3,11 +3,13 @@
 """Exercise a real flowmux GUI against ssh-workspace-fixture.py --keep.
 
 Uses its own Xvfb, D-Bus, XDG directories and process handles. HOME is unchanged.
+Requires python3-xlib to close test windows through WM_DELETE_WINDOW.
 Artifacts remain in the printed temporary directory, including on failure.
 --keep leaves the isolated windows open until Ctrl+C/SIGTERM.
 """
 
 import argparse
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -24,6 +26,8 @@ import threading
 import time
 import urllib.request
 import uuid
+
+from Xlib import X, display, protocol
 
 
 def wait_for(check, description, timeout=30):
@@ -96,6 +100,25 @@ class Harness:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        self.assert_protected()
+
+    def close_window(self, process):
+        assert process in self.children and process.pid not in self.protected_pids
+        assert process.args[0] == self.args.gui
+        # Ask only this process's windows on our private Xvfb to close.
+        # Normal GTK shutdown flushes state and LLVM coverage profiles;
+        # SIGTERM skips both.
+        with closing(display.Display(self.env["DISPLAY"])) as connection:
+            pid_atom = connection.intern_atom("_NET_WM_PID")
+            for window in connection.screen().root.query_tree().children:
+                pid = window.get_full_property(pid_atom, X.AnyPropertyType)
+                if pid is not None and int(pid.value[0]) == process.pid:
+                    window.send_event(protocol.event.ClientMessage(
+                        window=window, client_type=connection.intern_atom("WM_PROTOCOLS"),
+                        data=(32, [connection.intern_atom("WM_DELETE_WINDOW"), X.CurrentTime, 0, 0, 0])))
+            connection.sync()
+        process.wait(timeout=20)
+        assert process.returncode == 0, f"GUI exited with {process.returncode}"
         self.assert_protected()
 
     def assert_protected(self):
@@ -490,7 +513,7 @@ while time.monotonic() < deadline:
         before_restart = {ws["id"]: ws["panes"] for ws in self.tree(path)}
         for ws_id, panes in before_restart.items():
             self.persisted(ws_id, [tab["id"] for pane in panes for tab in pane["tabs"]])
-        self.stop(first)
+        self.close_window(first)
         first, path = self.window("window-a-restored")
         restored = {ws["id"]: ws["panes"] for ws in self.tree(path)}
         assert set(restored) == set(before_restart)
@@ -525,6 +548,8 @@ while time.monotonic() < deadline:
             print(f"KEEP: DISPLAY={self.env['DISPLAY']} GUI PIDs={first.pid},{second.pid}; Ctrl+C/SIGTERM cleans up", flush=True)
             while True:
                 signal.pause()
+        self.close_window(first)
+        self.close_window(second)
 
     def cleanup(self):
         for remote_file in self.remote_files:

@@ -9,3 +9,9 @@ eval "$(CARGO_TARGET_DIR="$PWD/target/llvm-cov-target" cargo llvm-cov show-env -
 # Use cargo test itself: llvm-cov's --tests omits the normal example binary
 # needed by cross_process_lock, and also omits stable doctests.
 cargo test --workspace --locked --target-dir "$CARGO_LLVM_COV_TARGET_DIR" "$@"
+# Exercise SSH lifecycle code through the existing isolated live GUI suite.
+# Keep the same instrumentation environment so its profiles join the unit tests.
+cargo build --workspace --locked --target-dir "$CARGO_LLVM_COV_TARGET_DIR"
+python3 scripts/ssh-workspace-fixture.py \
+  --gui "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmux" \
+  --cli "$CARGO_LLVM_COV_TARGET_DIR/debug/flowmuxctl"
