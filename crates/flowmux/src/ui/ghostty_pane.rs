@@ -1100,6 +1100,11 @@ impl GhosttyPane {
 
     /// Recent live terminal rows used only for Agent status detection.
     pub fn agent_status_text(&self) -> Option<String> {
+        if self.terminal_alternate_screen.get() {
+            // Alternate-screen row coordinates differ from scrollback ranges.
+            // VTE's viewport extraction includes status rows below the cursor.
+            return self.screen_text();
+        }
         let (_, cursor_row) = self.widget.cursor_position();
         let last_row = self
             .widget
@@ -3679,6 +3684,55 @@ mod tests {
         }
         assert_eq!(calls.get(), 1, "mapping catches up the visible Agent state");
         pane.close_pty();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn agent_status_text_includes_rows_below_alternate_screen_cursor() {
+        let pane = GhosttyPane::spawn(
+            PaneId::new(),
+            SurfaceId::new(),
+            vec!["/bin/sleep".into(), "30".into()],
+            None,
+            Vec::new(),
+            5_000,
+            PaneCallbacks::noop_for_test(),
+        );
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&pane.container));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let rows = pane.widget.row_count();
+        assert!(rows > 4);
+        let footer = "[flowmux-0:node*  \"⠋ work\" 14:25 09-Sep-26";
+        // feed() bypasses the PTY mode observer used by a real tmux channel.
+        pane.set_alternate_screen(true);
+        pane.widget.feed(
+            format!(
+                "\x1b[?1049h\x1b[{rows};1H{footer}\x1b[{};1H› Ask Codex to do anything",
+                rows - 4
+            )
+            .as_bytes(),
+        );
+        for _ in 0..20 {
+            if pane.screen_text().is_some_and(|text| text.contains(footer)) {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(pane.screen_text().unwrap().contains(footer));
+        let text = pane.agent_status_text().unwrap();
+        pane.close_pty();
+        window.close();
+        assert!(
+            text.contains(footer),
+            "status row below cursor missing: {text:?}"
+        );
+        assert_eq!(
+            flowmux_core::detect_agent_status_from_signals(Some(&text), None),
+            Some(flowmux_core::AgentStatus::Working)
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

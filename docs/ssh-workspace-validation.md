@@ -124,6 +124,38 @@ daemon 단위 검사 170개를 통과했으며, SSH 화면 감지 후에도 로�
 격리 GUI 검사 676개(675 unit + 1 browser integration), GUI/daemon all-targets
 clippy `-D warnings`, rustfmt와 diff whitespace 검사도 통과했다.
 
+### 후속: Codex 작업 중 항목 깜빡임
+
+Codex 입력란의 이름을 idle 상태에서만 읽던 조건을 제거했다. 작업 중에도
+입력란으로 이름을 식별하되 상태는 진행 표시로 판정한다. tmux title이 폴더명이고
+진행 행에 agent 이름이 없어도 항목을 유지하며, 일반 shell로 돌아오면 제거한다.
+
+기존 실행 파일을 격리 GUI에서 실행해 Codex 입력란 + Working 화면을 재현했을 때
+agent가 사라졌다(`/tmp/fm-gui-e_ydmn21/events.jsonl`). 수정 빌드에서는 반복 갱신 중
+`codex / working`이 유지되고 idle로 복귀했다. 모델 요청 없이 원격 Python TUI로
+화면을 재생했으며, 하네스는 이전 frame이 VTE scrollback에 남지 않도록 화면을
+지운 뒤 scrollback을 지운다. SSH GUI 15개 시나리오 모두 통과했다
+(`/tmp/fm-gui-roz_1nsc/events.jsonl`). daemon 단위 검사 171개, daemon all-targets
+clippy, GUI/CLI 빌드와 rustfmt 검사도 통과했다.
+
+### 후속: 실제 대화 중 working/idle 반복
+
+앞선 이름 감지 수정만으로는 해결되지 않았다. 실제 Codex 0.153.4 대화를 SSH/tmux에서
+실행해 `•`와 `◦`가 교대로 표시될 때 약 0.6초마다 working/idle이 바뀌는 것을
+확인했다(`/tmp/fm-gui-aqfnr5eu/codex-frames.jsonl`). `◦`도 진행 표시로 처리한다.
+
+답변 streaming 중에는 tmux 하단 제목의 spinner를 작업 신호로 사용한다. 마지막
+status 행의 형식과 agent 입력란을 함께 확인하며, 승인 대기 신호는 우선한다.
+VTE 대체 화면은 scrollback 범위 추출에서 하단 행이 누락되어, 기존 viewport 추출
+API를 사용하도록 바꿨다. 일반 terminal의 최근 80행 추출은 유지한다.
+
+수정 후 실제 SSH/tmux Codex 대화에서 0.46초에 working으로 전환하고, 60행 답변이
+완료된 10.34초에만 idle로 전환했다. 중간 idle 전환·항목 누락은 없었다.
+기록: `/tmp/fm-gui-r7dcx_wk/frames.jsonl`.
+core/daemon 검사 325개, GUI 검사 677개, SSH GUI 시나리오 15개
+(`/tmp/fm-gui-exe4324u/events.jsonl`), 변경 crate all-targets clippy를 통과했다.
+하네스에는 두 bullet의 교대와 대체 화면에서 커서 아래에 있는 tmux 제목의 갱신을 포함한다.
+
 ## 재현 방법
 
 먼저 GUI·CLI를 함께 빌드한다. sshd, ssh, tmux, Xvfb, D-Bus와 프로젝트 GUI

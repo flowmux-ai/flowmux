@@ -294,6 +294,7 @@ class Harness:
         # real agent credentials, or touching another user's running process.
         program = """import json, pathlib, sys, time
 control = pathlib.Path(sys.argv[1])
+sys.stdout.write('\\x1b[?1049h')
 last = None
 deadline = time.monotonic() + 120
 while time.monotonic() < deadline:
@@ -305,7 +306,7 @@ while time.monotonic() < deadline:
     if value != last:
         if value.get('exit'):
             break
-        sys.stdout.write('\\x1b[3J\\x1b[2J\\x1b[H\\x1b]2;' + value['title'] + '\\x07' + value['text'])
+        sys.stdout.write('\\x1b[2J\\x1b[3J\\x1b[H\\x1b]2;' + value['title'] + '\\x07' + value['text'])
         sys.stdout.flush()
         last = value
     time.sleep(.05)
@@ -335,6 +336,29 @@ while time.monotonic() < deadline:
         frame(text="Codex working\r\nWorking (1s • esc to interrupt)\r\n")
         start()
         detected("codex", "working")
+        # Real Codex keeps its name in the composer, not the progress row;
+        # tmux commonly supplies a directory title instead of an agent name.
+        composer = "› Ask Codex to do anything\r\n  gpt-6-astra high · /srv/project\r\n"
+        frame("remote workdir", composer)
+        detected("codex", "idle")
+        for second, bullet in enumerate("•◦•◦", 1):
+            frame("remote workdir", f"{bullet} Working ({second}s • esc to interrupt)\r\n\r\n" + composer)
+            detected("codex", "working")
+            for _ in range(8):
+                value = agent()
+                assert value and value["name"] == "codex" and value["status"] == "working", value
+                time.sleep(.1)
+        for spinner in "⠋⠹⠸⠼":
+            frame("remote workdir", "• 1 일\r\n  2 이\r\n" + composer +
+                  f'\x1b[24;1H[flowmux-90:node*  "{spinner} remote workdir" 14:25 09-Sep-26\x1b[4;1H')
+            detected("codex", "working")
+            for _ in range(8):
+                value = agent()
+                assert value and value["name"] == "codex" and value["status"] == "working", value
+                time.sleep(.1)
+        frame("remote workdir", composer)
+        detected("codex", "idle")
+        self.pass_check("Codex stays working across both animated bullets and tmux streaming title frames, then returns idle")
         for title, name in [("Claude", "claude"), ("Codex", "codex"),
                             ("OpenCode", "opencode"), ("Cline", "cline"),
                             ("agy", "antigravity")]:

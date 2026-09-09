@@ -2876,6 +2876,22 @@ pub fn detect_agent_status_from_signals(
         (None, Some(_)) => return Some(AgentStatus::Working),
         (None, None) => {}
     }
+    // tmux keeps the remote OSC title in its bottom status row instead of
+    // forwarding it. Codex's progress row disappears while streaming text,
+    // but this title spinner remains until the turn ends. Require a live
+    // agent composer so braille in ordinary terminal output is not activity.
+    let tmux_title = recent().next().and_then(|line| {
+        let (status, quoted_title) = line.trim().strip_prefix('[')?.split_once('"')?;
+        if !status.contains('*') {
+            return None;
+        }
+        quoted_title.split_once('"').map(|(title, _)| title)
+    });
+    if tmux_title.is_some_and(|title| title.chars().next().is_some_and(is_braille_spinner))
+        && detect_agent_idle_name_from_signals(screen_text, None).is_some()
+    {
+        return Some(AgentStatus::Working);
+    }
     if detect_agent_interruption(screen_text) {
         return Some(AgentStatus::Idle);
     }
@@ -2962,7 +2978,7 @@ fn is_agent_usage_limit_status_line(line: &str) -> bool {
 
 fn trim_agent_status_prefix(line: &str) -> &str {
     line.trim()
-        .trim_start_matches(['•', '●', '◉', '✢', '✳', '✶', '✻', '✽'])
+        .trim_start_matches(['•', '◦', '●', '◉', '✢', '✳', '✶', '✻', '✽'])
         .trim_start()
 }
 

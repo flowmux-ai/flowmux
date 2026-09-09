@@ -3279,6 +3279,8 @@ fn detector_handles_variable_action_labels_and_empty_composers() {
         "✻ Cogitating… (2m 34s · ↓ 6.4k tokens)\n❯",
         "✽ Reticulating… (1s · esc to interrupt)\n❯",
         "• Compacting context (12s • esc to interrupt)\n›",
+        "◦ Working (3s • esc to interrupt)\n› Ask Codex to do anything",
+        "◦ Compacting context (12s • esc to interrupt)\n›",
         "• Running Stop hooks (1m 01s • esc to interrupt)\n›",
         "• Working (1s • esc to interrupt)\n›\ngpt-6-astra · ~/work    Goal achieved (16m)",
     ] {
@@ -3298,6 +3300,31 @@ fn detector_handles_variable_action_labels_and_empty_composers() {
             Some(AgentStatus::Idle),
             "{screen}"
         );
+    }
+}
+
+#[test]
+fn detector_reads_tmux_title_spinner_while_codex_streams() {
+    let composer = "› Ask Codex to do anything\n  gpt-6-astra high · /srv/project";
+    for spinner in ["⠋ ", "⠹ ", "⠸ ", "⠼ ", ""] {
+        let screen = format!("• 1 일\n  2 이\n{composer}\n[flowmux-90:node*  \"{spinner}remote workdir\" 14:25 09-Sep-26\n");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&screen), None),
+            Some(if spinner.is_empty() {
+                AgentStatus::Idle
+            } else {
+                AgentStatus::Working
+            }),
+            "{screen}"
+        );
+    }
+    for screen in [
+        "› Ask Codex to do anything\nordinary output with ⠋",
+        "[flowmux-90:node*  \"⠋ remote workdir\" 14:25 09-Sep-26\n› Ask Codex to do anything",
+        "› Ask Codex to do anything\nDo you want to approve this command?\n[flowmux-90:node*  \"⠋ remote workdir\" 14:25 09-Sep-26",
+        "junsu@host:~$\n[flowmux-90:node*  \"⠋ remote workdir\" 14:25 09-Sep-26",
+    ] {
+        assert_ne!(detect_agent_status_from_signals(Some(screen), None), Some(AgentStatus::Working), "{screen}");
     }
 }
 

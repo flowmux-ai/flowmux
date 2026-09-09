@@ -3049,16 +3049,14 @@ impl StateStore {
             Some(AgentStatus::Idle) if completed_agent.is_some() => Some("Completed"),
             _ => None,
         };
-        let idle_agent_name = if matches!(detected_status, None | Some(AgentStatus::Idle)) {
-            detect_agent_idle_name_from_signals(screen_text, osc_title)
-        } else {
-            None
-        };
-        let status = detected_status.or_else(|| idle_agent_name.map(|_| AgentStatus::Idle));
+        // The composer stays visible while working: it identifies the agent
+        // even when the progress row and tmux title do not contain its name.
+        let prompt_agent_name = detect_agent_idle_name_from_signals(screen_text, osc_title);
+        let status = detected_status.or_else(|| prompt_agent_name.map(|_| AgentStatus::Idle));
         let agent_name = if status.is_some() {
             completed_agent
                 .or_else(|| detect_agent_name_from_signals(screen_text, osc_title))
-                .or(idle_agent_name)
+                .or(prompt_agent_name)
         } else {
             None
         };
@@ -7359,6 +7357,53 @@ mod tests {
         assert_eq!(agent.name, "codex");
         assert_eq!(agent.status, AgentStatus::Idle);
         assert_eq!(agent.source.as_deref(), Some("flowmux:hook"));
+    }
+
+    #[tokio::test]
+    async fn ssh_codex_composer_keeps_identity_during_working_frames() {
+        let store = StateStore::new_lazy(State::default());
+        let (ws, _, tab) = ssh_workspace(&store).await;
+        let composer = "› Ask Codex to do anything\n  gpt-6-astra high · /srv/project";
+        for visible in [true, false] {
+            for progress in [
+                "",
+                "• Working (1s • esc to interrupt)\n",
+                "• Working (2s • esc to interrupt)\n",
+                "",
+            ] {
+                let screen = format!("{progress}\n{composer}");
+                store
+                    .report_agent_screen_signals_with_visibility(
+                        tab,
+                        Some(&screen),
+                        Some("remote workdir"),
+                        visible,
+                    )
+                    .await;
+                let workspace = store.get_workspace(ws).await.unwrap();
+                let agent = workspace.surfaces[0]
+                    .root_pane
+                    .agent_presence_for_surface(tab)
+                    .expect("live composer must preserve Codex while its progress frame changes");
+                assert_eq!(agent.name, "codex");
+                assert_eq!(
+                    agent.status,
+                    if progress.is_empty() {
+                        AgentStatus::Idle
+                    } else {
+                        AgentStatus::Working
+                    }
+                );
+                assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+            }
+        }
+        store
+            .report_agent_screen_signals(tab, Some("junsu@host:~$"), Some("remote workdir"))
+            .await;
+        assert!(store.get_workspace(ws).await.unwrap().surfaces[0]
+            .root_pane
+            .agent_presence_for_surface(tab)
+            .is_none());
     }
 
     #[tokio::test]
