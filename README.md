@@ -137,6 +137,11 @@ local browser preview (Linux only). Optional remote tmux sessions survive discon
 reconnect attaches to existing sessions. Restored workspaces start disconnected.
 Remote Files, Worktrees, local agent resume, and file drops are unavailable.
 
+SSH agents appear in the Agents list using the same screen and terminal-title
+heuristics as local terminals, without installing a remote helper. Detection
+depends on recognizable agent UI/title text; remote PID and native hook tracking
+are unavailable. Disconnecting or exiting a terminal channel clears its entry.
+
 ```bash
 flowmux ssh connect devbox --cwd /srv/project --tmux
 flowmux ssh status --workspace <id>

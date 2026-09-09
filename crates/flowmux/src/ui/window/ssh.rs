@@ -30,6 +30,14 @@ pub(crate) struct SshRuntime {
 }
 
 impl SshRuntime {
+    pub(super) fn agent_signals_active(&self, surface: SurfaceId) -> bool {
+        self.state == "connected"
+            && self
+                .tabs
+                .get(&surface)
+                .is_some_and(|status| status == "running")
+    }
+
     pub(crate) fn preview_url(&self, binding: &str) -> Option<String> {
         // Only WebKitGTK currently blocks all navigation after binding expiry.
         if !cfg!(target_os = "linux") || self.state != "connected" {
@@ -206,13 +214,21 @@ pub(crate) fn build_ssh_panel(
             let mut state = runtime.borrow_mut();
             if state.generation == generation && state.instances.get(&id) == Some(&instance) {
                 state.tabs.insert(id, format!("exited ({status})"));
+                let _ = state
+                    .bridge
+                    .tx
+                    .try_send(GtkCommand::TerminalContentsChanged { surface: id });
             }
         }
     }));
-    // SSH titles/cwd are not local agent or filesystem evidence. Cwd is routed
-    // through a dedicated generation-checked message below.
-    scoped.on_terminal_title_changed = Rc::new(RefCell::new(|_, _, _| {}));
-    scoped.on_terminal_contents_changed = Rc::new(RefCell::new(|_| {}));
+    // Use live OSC titles only as screen evidence, never as local paths or
+    // cached tab labels. Contents retain the usual throttled refresh callback.
+    let bridge = runtime.borrow().bridge.clone();
+    scoped.on_terminal_title_changed = Rc::new(RefCell::new(move |_, surface, _| {
+        let _ = bridge
+            .tx
+            .try_send(GtkCommand::TerminalContentsChanged { surface });
+    }));
     let bridge = runtime.borrow().bridge.clone();
     scoped.on_terminal_cwd_changed = Rc::new(RefCell::new(move |pane, surface, cwd: PathBuf| {
         if let Some(cwd) = cwd.to_str() {
@@ -779,7 +795,8 @@ impl WindowController {
             }
             SshRequest::Disconnect { .. } => {
                 self.stop_ssh(workspace).await;
-                self.rerender_workspace(&ws);
+                let generation = runtime.borrow().generation;
+                self.refresh_ssh(workspace, generation).await;
             }
             SshRequest::ForwardAdd { spec, .. } => {
                 spec.validate()?;
@@ -1053,6 +1070,18 @@ impl WindowController {
         };
         if runtime.borrow().generation != generation {
             return;
+        }
+        if runtime.borrow().state != "connected" {
+            let surfaces: Vec<_> = runtime.borrow().tabs.keys().copied().collect();
+            for surface in surfaces {
+                if let Some((workspace, _)) = self
+                    .store
+                    .report_agent_screen_signals(surface, None, None)
+                    .await
+                {
+                    self.sync_workspace_agent_status(workspace).await;
+                }
+            }
         }
         if runtime.borrow().state == "connected" {
             let specs = runtime.borrow().config.forwards.clone();

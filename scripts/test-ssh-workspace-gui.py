@@ -284,6 +284,94 @@ class Harness:
         assert {ws["id"] for ws in self.tree(path)} == before | {workspace}
         self.pass_check("one-shot command appends once; request-id replay and disconnect/reconnect never rerun it")
 
+    def check_agent_fallback(self, path):
+        workspace = self.create(path)
+        pane, tab = self.terminals(self.workspace(path, workspace))[0]
+        surface = tab["id"]
+        control = self.args.remote_cwd + "/gui-agent-" + uuid.uuid4().hex
+        self.remote_files.add(control)
+        # A bounded remote TUI lets hidden panes change without keyboard focus,
+        # real agent credentials, or touching another user's running process.
+        program = """import json, pathlib, sys, time
+control = pathlib.Path(sys.argv[1])
+last = None
+deadline = time.monotonic() + 120
+while time.monotonic() < deadline:
+    try:
+        value = json.loads(control.read_text())
+    except (OSError, ValueError):
+        time.sleep(.05)
+        continue
+    if value != last:
+        if value.get('exit'):
+            break
+        sys.stdout.write('\\x1b[3J\\x1b[2J\\x1b[H\\x1b]2;' + value['title'] + '\\x07' + value['text'])
+        sys.stdout.flush()
+        last = value
+    time.sleep(.05)
+"""
+
+        def frame(title="fixture shell", text="ordinary remote output\r\n", **extra):
+            value = json.dumps({"title": title, "text": text, **extra})
+            self.remote("printf %s " + shlex.quote(value) + " > " + shlex.quote(control))
+
+        def start():
+            self.marker(path, pane, surface, self.args.remote_cwd)
+            self.send(path, pane, "exec python3 -u -c " + shlex.quote(program) + " " + shlex.quote(control))
+
+        def agent():
+            return next(t for _, t in self.terminals(self.workspace(path, workspace))
+                        if t["id"] == surface).get("agent")
+
+        def detected(name, status):
+            def matches():
+                value = agent()
+                return value if value and value["name"] == name and value["status"] == status else None
+            value = wait_for(matches, f"remote {name}/{status} screen fallback")
+            assert value["source"] == "flowmux:screen", value
+            for field in ("pid", "session_id", "session_name", "messaging_socket"):
+                assert value.get(field) is None, value
+
+        frame(text="Codex working\r\nWorking (1s • esc to interrupt)\r\n")
+        start()
+        detected("codex", "working")
+        for title, name in [("Claude", "claude"), ("Codex", "codex"),
+                            ("OpenCode", "opencode"), ("Cline", "cline"),
+                            ("agy", "antigravity")]:
+            frame(title + " working")
+            detected(name, "working")
+        self.pass_check("SSH screen text and all five agent OSC titles register screen-only identity without session metadata")
+
+        hidden = self.rpc(path, "surface_create", workspace=workspace, cwd=None)["surface_created"]
+        self.marker(path, hidden["pane"], hidden["id"], self.args.remote_cwd)
+        frame("Claude needs permission")
+        detected("claude", "blocked")
+        frame()
+        wait_for(lambda: agent() is None, "non-agent frame clears hidden SSH agent")
+        frame("Codex working")
+        detected("codex", "working")
+        self.ssh(path, "disconnect", workspace=workspace)
+        wait_for(lambda: agent() is None, "disconnect clears SSH screen identity")
+        # Old terminal buffers remain after disconnect; later periodic scans must
+        # not republish them as a running agent.
+        for _ in range(20):
+            assert agent() is None, "Disconnected terminal buffer revived an agent"
+            time.sleep(.1)
+        self.pass_check("hidden SSH frames update and clear agents; disconnect prevents stale-buffer rediscovery")
+
+        frame()
+        self.ssh(path, "connect", workspace=workspace)
+        self.connected(path, workspace)
+        assert agent() is None, "Reconnect retained the previous channel's identity"
+        start()
+        frame("Codex working")
+        detected("codex", "working")
+        frame(exit=True)
+        wait_for(lambda: "exited" in self.ssh(path, "status", workspace=workspace)["tabs"].get(surface, ""),
+                 "fake agent terminal exits")
+        wait_for(lambda: agent() is None, "channel exit clears SSH screen identity")
+        self.pass_check("reconnected SSH channel detects agents again and terminal exit removes them")
+
     def run(self):
         self.start_display()
         first, path = self.window("window-a")
@@ -405,6 +493,7 @@ class Harness:
         assert self.remote(f"tmux has-session -t {shlex.quote(session)}", check=False).returncode != 0
         self.pass_check("missing tmux session is never recreated by reconnect")
         self.check_one_shot(path)
+        self.check_agent_fallback(path)
         self.assert_protected()
         (self.root / "final-tree.json").write_text(json.dumps(self.tree(path), indent=2))
         self.log("complete", protected_pids=sorted(self.protected_pids), display=self.env["DISPLAY"])

@@ -103,6 +103,27 @@ GUI 회귀 검사에는 split/collapse 시 기존 terminal widget/PID 보존과
 자동화한 검사는 아니며, terminal의 UTF-8 입력·편집·출력 경로를 검증한다.
 확장된 11개 GUI 시나리오 기록: `/tmp/fm-gui-euh9ax3s/events.jsonl`.
 
+### 후속: SSH agent 감지
+
+`4271c5c` 위의 변경으로 기존 화면·OSC title 감지를 SSH terminal에도 연결했다.
+원격 helper 없이 Agents에 `flowmux:screen` 출처로 표시하고, 원격 PID나 session
+정보를 로컬 hook/process 감지에 전달하지 않는다. 연결 종료와 channel 종료 시
+이전 화면이 남아 있어도 항목을 제거한다. 화면·title 형식에 의존하는 추정이므로
+정확한 원격 process 생존 여부나 native lifecycle event까지 보장하지 않는다.
+
+확장된 실제 GUI/sshd 하네스 14개 검사를 통과했다. 원격 Python TUI로 Codex 화면과
+Claude/Codex/OpenCode/Cline/agy title, 숨겨진 tab의 blocked 상태와 일반 화면으로의
+전환, Disconnect 후 재등록 방지, reconnect와 channel 종료를 확인했다.
+기록: `/tmp/fm-gui-yn4ej0ly/events.jsonl`.
+
+별도의 SSH workspace에서 실제 Codex 0.153.4를 실행하고 모델 요청 없이
+`codex / idle / flowmux:screen` 등록을 확인했다. 기록은
+`/tmp/fm-gui-27e7qd7j/screen.txt`, `tree.json`에 있다.
+daemon 단위 검사 170개를 통과했으며, SSH 화면 감지 후에도 로컬 PID/hook/lifecycle
+보고와 process sweep이 해당 항목을 덮어쓰지 않는 회귀 검사를 포함한다.
+격리 GUI 검사 676개(675 unit + 1 browser integration), GUI/daemon all-targets
+clippy `-D warnings`, rustfmt와 diff whitespace 검사도 통과했다.
+
 ## 재현 방법
 
 먼저 GUI·CLI를 함께 빌드한다. sshd, ssh, tmux, Xvfb, D-Bus와 프로젝트 GUI

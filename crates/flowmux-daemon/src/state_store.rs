@@ -3023,9 +3023,11 @@ impl StateStore {
         osc_title: Option<&str>,
         surface_visible: bool,
     ) -> Option<(WorkspaceId, Option<AgentStatus>)> {
-        // Preserve lifecycle -> state ordering while rejecting remote sources.
+        // Screen evidence is already scoped to a tab and carries no local PID.
+        // SSH remains excluded from process scans and native hook reports.
         let lifecycle = self.agent_lifecycle.lock().await;
-        if !self.is_local_agent_surface(surface_id).await {
+        if !self.is_local_agent_surface(surface_id).await && !self.is_ssh_surface(surface_id).await
+        {
             return None;
         }
         let fingerprint = agent_screen_fingerprint(screen_text, osc_title);
@@ -4627,6 +4629,12 @@ mod tests {
         let (ws, pane, tab) = ssh_workspace(&store).await;
         assert!(store.is_ssh_surface(tab).await);
         assert!(!store.is_ssh_surface(SurfaceId::new()).await);
+        assert_eq!(
+            store
+                .report_agent_screen_signals(tab, Some("Codex\npress / for commands"), None)
+                .await,
+            Some((ws, Some(AgentStatus::Idle)))
+        );
         assert!(store
             .set_agent_activity(
                 tab,
@@ -4653,10 +4661,6 @@ mod tests {
         };
         assert!(store.report_agent_status(tab, report).await.is_none());
         assert!(store
-            .report_agent_screen_signals(tab, Some("Welcome to Claude Code"), None)
-            .await
-            .is_none());
-        assert!(store
             .reconcile_process_agents(&[(tab, Some("claude"))])
             .await
             .is_empty());
@@ -4679,11 +4683,34 @@ mod tests {
             .agent_process_reconciliation_snapshot(&[tab])
             .await
             .is_empty());
+        let workspace = store.get_workspace(ws).await.unwrap();
+        let agent = workspace.surfaces[0]
+            .root_pane
+            .agent_presence_for_surface(tab)
+            .unwrap();
+        assert_eq!(agent.name, "codex");
+        assert_eq!(agent.source.as_deref(), Some("flowmux:screen"));
+        assert_eq!(agent.pid, None);
+        assert_eq!(agent.session_id, None);
+        let tree = flowmux_ipc::protocol::describe_workspaces(&[workspace]);
+        assert_eq!(
+            tree[0].panes[0].tabs[0].agent.as_ref().unwrap().name,
+            "codex"
+        );
+        assert_eq!(
+            store
+                .report_agent_screen_signals(tab, None, Some("Codex Action Required"))
+                .await,
+            Some((ws, Some(AgentStatus::Blocked)))
+        );
+        assert_eq!(
+            store.report_agent_screen_signals(tab, None, None).await,
+            Some((ws, None))
+        );
         assert!(store.get_workspace(ws).await.unwrap().surfaces[0]
             .root_pane
             .agent_presence_for_surface(tab)
             .is_none());
-        assert!(store.last_agent_screen_fingerprints.lock().await.is_empty());
         let forward = flowmux_core::SshForwardSpec {
             id: SurfaceId::new().0,
             remote_port: 3000,

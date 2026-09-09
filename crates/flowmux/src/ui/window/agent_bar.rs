@@ -4,6 +4,7 @@
 //! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
+use vte::prelude::TerminalExt;
 
 impl WindowController {
     fn hide_agent_bar(&self) {
@@ -175,23 +176,37 @@ impl WindowController {
         surface: SurfaceId,
         title: Option<String>,
     ) {
-        let (screen, title) = {
+        let (screen, title, is_ssh) = {
             let registry = self.pane_registry.borrow();
-            if registry
-                .terminals
+            let terminal = registry.terminals.get(&surface);
+            let ssh = registry
+                .surface_workspace
                 .get(&surface)
-                .is_some_and(|terminal| terminal.is_ssh)
-            {
-                return;
+                .and_then(|workspace| registry.ssh.get(workspace));
+            // ponytail: remote identity follows screen/title heuristics; use
+            // remote lifecycle hooks if exact identity and teardown are needed.
+            if let Some(ssh) = ssh {
+                if ssh.borrow().agent_signals_active(surface) {
+                    (
+                        terminal.and_then(|terminal| terminal.agent_status_text()),
+                        terminal.and_then(|terminal| {
+                            terminal.widget.window_title().map(|s| s.to_string())
+                        }),
+                        true,
+                    )
+                } else {
+                    // Disconnect/exit can leave an agent frame on screen.
+                    (None, None, true)
+                }
+            } else {
+                (
+                    terminal.and_then(|terminal| terminal.agent_status_text()),
+                    title.or_else(|| registry.surface_title_text(surface)),
+                    false,
+                )
             }
-            let screen = registry
-                .terminals
-                .get(&surface)
-                .and_then(|terminal| terminal.agent_status_text());
-            let title = title.or_else(|| registry.surface_title_text(surface));
-            (screen, title)
         };
-        if screen.is_none() && title.is_none() {
+        if screen.is_none() && title.is_none() && !is_ssh {
             return;
         }
         if let Some((ws_id, _)) = self
