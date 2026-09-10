@@ -285,6 +285,17 @@ pub fn install_actions(
             })
             .build()
     };
+    let git_changes = {
+        let bridge = bridge.clone();
+        gtk::gio::ActionEntry::builder("git-changes")
+            .activate(move |_, _, _| {
+                let bridge = bridge.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    let _ = bridge.tx.send(GtkCommand::ShowGitChanges).await;
+                });
+            })
+            .build()
+    };
     let terminal_search = {
         let focused = focused.clone();
         let registry = registry.clone();
@@ -489,6 +500,7 @@ pub fn install_actions(
         new_window,
         command_palette,
         terminal_search,
+        git_changes,
         toggle_pane_zoom,
         toggle_workspace_overview,
         next_workspace,

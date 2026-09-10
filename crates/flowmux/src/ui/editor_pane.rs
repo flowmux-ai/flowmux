@@ -110,6 +110,7 @@ pub(super) struct EditorBridgeState {
     surface_id: String,
     ready: Cell<bool>,
     pending: RefCell<Vec<HostMessage>>,
+    git_diff: RefCell<Option<HostMessage>>,
 }
 
 impl EditorBridgeState {
@@ -118,6 +119,7 @@ impl EditorBridgeState {
             surface_id: surface_id.0.to_string(),
             ready: Cell::new(false),
             pending: RefCell::new(Vec::new()),
+            git_diff: RefCell::new(None),
         }
     }
 
@@ -131,6 +133,10 @@ impl EditorBridgeState {
 
     pub(super) fn queue(&self, message: HostMessage) -> Result<Option<String>, ProtocolError> {
         let script = javascript_for_host_message(&self.surface_id, &message)?;
+        if matches!(message, HostMessage::ShowGitDiff { .. }) {
+            *self.git_diff.borrow_mut() = Some(message);
+            return Ok(self.ready.get().then_some(script));
+        }
         if self.ready.get() {
             Ok(Some(script))
         } else {
@@ -172,6 +178,9 @@ impl EditorBridgeState {
             .pending
             .borrow_mut()
             .drain(..)
+            // Git comparisons have no document session. Replay the latest pair
+            // after initialization, including after a WebKit process restart.
+            .chain(self.git_diff.borrow().iter().cloned())
             .filter_map(|message| {
                 javascript_for_host_message(&self.surface_id, &message)
                     .map_err(|error| {

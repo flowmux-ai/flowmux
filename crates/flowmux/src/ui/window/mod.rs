@@ -103,6 +103,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::OpenUrlInBrowserTab { .. }
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
+            | GtkCommand::ShowGitChanges
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
@@ -1225,6 +1226,7 @@ mod agent_bar;
 mod browser_commands;
 mod command_palette;
 mod file_browser;
+mod git_changes;
 mod notification_commands;
 mod notification_coordinator;
 mod pane_callbacks;
@@ -2744,6 +2746,7 @@ impl WindowController {
             }
             command @ (GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
+            | GtkCommand::ShowGitChanges
             | GtkCommand::ToggleWorkspaceOverview
             | GtkCommand::FileBrowserFocusOut { .. }
             | GtkCommand::FileBrowserCloseAndRestoreFocus

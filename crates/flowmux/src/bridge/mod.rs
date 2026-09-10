@@ -211,6 +211,8 @@ pub enum GtkCommand {
     ShowOptionsDialog,
     /// Show the command palette from the GTK side.
     ShowCommandPalette,
+    /// Open Git Changes for the focused local worktree.
+    ShowGitChanges,
     /// Render a freshly-created workspace in the sidebar + open its first pane.
     WorkspaceCreated {
         id: WorkspaceId,

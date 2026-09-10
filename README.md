@@ -89,6 +89,21 @@ and 60 seconds, so a rate-limited provider no longer empties the bar.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
+### Git Changes
+
+Open **Git Changes** from the side panel, command palette, or
+**Ctrl+Alt+Shift+G** (configurable in Options → Keybindings). Select a changed
+file to compare **HEAD → Index** or **Index → Working file**, then stage or
+unstage that file. Both comparison sides are read-only; unstaging preserves
+working files. Unsaved editor changes are not included.
+
+The Changes window stays pinned to the displayed local worktree. **Refresh**
+or **F5** rescans external changes; index operations refresh automatically.
+**Escape** closes Changes. Binary, non-UTF-8 and files above 2 MiB show a
+preview-unavailable message but can still be staged or unstaged. Resolve merge
+conflicts and submodule changes in the terminal. SSH Git, hunk staging and
+commit/push are outside this view. The existing **Ctrl+Alt+G** opens tig.
+
 ### Themes and keybindings
 
 Pick a built-in light or dark theme in **Options → Theme**, or customize the

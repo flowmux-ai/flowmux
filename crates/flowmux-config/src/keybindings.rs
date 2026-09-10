@@ -67,6 +67,7 @@ pub enum ActionId {
     NewWindow,
     CommandPalette,
     TerminalSearch,
+    GitChanges,
     TogglePaneZoom,
     /// Toggle the full-window workspace overview.
     ToggleWorkspaceOverview,
@@ -114,6 +115,7 @@ impl ActionId {
             Self::NewWindow => "new-window",
             Self::CommandPalette => "command-palette",
             Self::TerminalSearch => "terminal-search",
+            Self::GitChanges => "git-changes",
             Self::TogglePaneZoom => "toggle-pane-zoom",
             Self::ToggleWorkspaceOverview => "toggle-workspace-overview",
             Self::CopyPanePath => "copy-pane-path",
@@ -155,6 +157,7 @@ impl ActionId {
             Self::NewWindow => "New window",
             Self::CommandPalette => "Command palette",
             Self::TerminalSearch => "Find in terminal or page",
+            Self::GitChanges => "Git Changes",
             Self::TogglePaneZoom => "Toggle pane zoom",
             Self::ToggleWorkspaceOverview => "Toggle workspace overview",
             Self::CopyPanePath => "Copy focused pane path",
@@ -199,6 +202,7 @@ impl ActionId {
             Self::NewWindow,
             Self::CommandPalette,
             Self::TerminalSearch,
+            Self::GitChanges,
             Self::TogglePaneZoom,
             Self::ToggleWorkspaceOverview,
             Self::CopyPanePath,
@@ -266,6 +270,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::NewWindow, &["<Ctrl><Shift>n"]),
     (ActionId::CommandPalette, &["<Ctrl><Shift>p"]),
     (ActionId::TerminalSearch, &["<Ctrl><Shift>f"]),
+    (ActionId::GitChanges, &["<Ctrl><Alt><Shift>g"]),
     (ActionId::TogglePaneZoom, &["<Ctrl><Alt>m"]),
     (ActionId::ToggleWorkspaceOverview, &["<Ctrl><Alt>k"]),
     (ActionId::CopyPanePath, &["<Ctrl><Shift>k"]),
@@ -319,6 +324,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::NewWindow, &["<Meta><Shift>n"]),
     (ActionId::CommandPalette, &["<Meta><Shift>p"]),
     (ActionId::TerminalSearch, &["<Ctrl><Shift>f"]),
+    (ActionId::GitChanges, &["<Ctrl><Alt><Shift>g"]),
     (ActionId::TogglePaneZoom, &["<Ctrl><Alt>m"]),
     (ActionId::ToggleWorkspaceOverview, &["<Ctrl><Alt>k"]),
     (ActionId::CopyPanePath, &["<Meta><Shift>k"]),
@@ -551,6 +557,32 @@ mod tests {
             .find(|(action, _)| *action == ActionId::OpenTig)
             .unwrap();
         assert_eq!(open_tig.1, vec!["<Alt>g".to_string()]);
+    }
+
+    #[test]
+    fn git_changes_has_a_unique_configurable_shortcut() {
+        assert_eq!(
+            default_accels(ActionId::GitChanges),
+            &["<Ctrl><Alt><Shift>g"]
+        );
+        assert_ne!(
+            default_accels(ActionId::GitChanges),
+            default_accels(ActionId::OpenTig)
+        );
+        let mut overrides = KeybindingOverrides::new();
+        overrides.set(ActionId::GitChanges, vec!["<Alt>d".into()]);
+        let encoded = serde_json::to_string(&overrides).unwrap();
+        assert!(encoded.contains("git-changes"));
+        let decoded: KeybindingOverrides = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            decoded
+                .resolve()
+                .into_iter()
+                .find(|(a, _)| *a == ActionId::GitChanges)
+                .unwrap()
+                .1,
+            vec!["<Alt>d"]
+        );
     }
 
     #[test]

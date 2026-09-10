@@ -12,6 +12,7 @@ use flowmux_core::{GitInfo, LinkedPr, PrState};
 use std::path::Path;
 use tracing::warn;
 
+pub mod changes;
 pub mod worktree;
 
 #[derive(Debug, thiserror::Error)]

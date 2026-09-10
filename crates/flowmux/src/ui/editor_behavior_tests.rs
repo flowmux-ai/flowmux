@@ -55,6 +55,79 @@ impl Drop for EditorPage {
 }
 
 #[gtk::test]
+async fn shipped_editor_git_diff_is_read_only_and_independent_of_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let options = flowmux_config::options::Options::default();
+    let appearance = crate::theme::ResolvedTheme::resolve(&options).editor_appearance(&options);
+    let pane = EditorPane::new(
+        PaneId::new(),
+        SurfaceId::new(),
+        dir.path().to_path_buf(),
+        EditorSessionState::default(),
+        appearance,
+    )
+    .unwrap();
+    let window = gtk::Window::builder()
+        .default_width(1000)
+        .default_height(600)
+        .child(&pane.root)
+        .build();
+    window.present();
+    let page = EditorPage { pane, window };
+    page.pane
+        .send(HostMessage::ShowGitDiff {
+            path: "deleted.rs".into(),
+            original: "HEAD 한글🙂\n".into(),
+            modified: "INDEX saved\n".into(),
+        })
+        .unwrap();
+    page.wait("document.querySelector('#diff-editor')?.classList.contains('is-visible') && document.querySelector('#diff-editor').textContent.includes('HEAD') && document.querySelector('#diff-editor').textContent.includes('INDEX')").await;
+    for side in ["original", "modified"] {
+        page.eval(&format!(
+            "document.querySelector('#diff-editor .{side} textarea').focus()"
+        ))
+        .await;
+        page.pane
+            .web_view
+            .execute_editing_command_with_argument("InsertText", "MUSTNOTWRITE");
+    }
+    glib::timeout_future(Duration::from_millis(100)).await;
+    assert_eq!(
+        page.eval("document.querySelector('#diff-editor').textContent.includes('MUSTNOTWRITE')")
+            .await,
+        "false"
+    );
+    assert!(page.pane.dirty_document_paths().is_empty());
+    assert!(page.pane.session_state().active_file.is_none());
+    assert!(!dir.path().join("deleted.rs").exists());
+    page.eval("document.querySelector('#diff-editor .modified textarea').focus(); document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', keyCode: 80, ctrlKey: true, bubbles: true, cancelable: true }))").await;
+    assert_eq!(
+        page.eval("document.querySelector('#search-dialog').open")
+            .await,
+        "false"
+    );
+    page.eval("window.beforeGitCrash = true").await;
+    page.pane.web_view.terminate_web_process();
+    page.wait("typeof window.beforeGitCrash === 'undefined' && document.querySelector('#diff-editor')?.classList.contains('is-visible') && document.querySelector('#diff-editor').textContent.includes('INDEX')").await;
+    page.pane
+        .send(HostMessage::ShowGitDiff {
+            path: "new.txt".into(),
+            original: "".into(),
+            modified: "NEWONLY\n".into(),
+        })
+        .unwrap();
+    page.wait("document.querySelector('#diff-editor').textContent.includes('NEWONLY') && !document.querySelector('#diff-editor').textContent.includes('INDEX')").await;
+    page.pane
+        .send(HostMessage::ShowGitDiff {
+            path: "deleted.txt".into(),
+            original: "DELETEDONLY\n".into(),
+            modified: "".into(),
+        })
+        .unwrap();
+    page.wait("document.querySelector('#diff-editor').textContent.includes('DELETEDONLY') && !document.querySelector('#diff-editor').textContent.includes('NEWONLY')").await;
+}
+
+#[gtk::test]
 async fn shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("문서🙂.txt");

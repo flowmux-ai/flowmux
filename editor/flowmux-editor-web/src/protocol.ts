@@ -68,6 +68,7 @@ interface HostMessageBase {
 }
 
 export type HostMessage =
+  | (HostMessageBase & { type: "show_git_diff"; path: string; original: string; modified: string })
   | (HostMessageBase & { type: "set_appearance"; appearance: EditorAppearance })
   | (HostMessageBase & {
       type: "initialize_editor";
@@ -300,6 +301,8 @@ export function isHostMessage(value: unknown): value is HostMessage {
   }
 
   switch (value.type) {
+    case "show_git_diff":
+      return typeof value.path === "string" && typeof value.original === "string" && typeof value.modified === "string";
     case "set_appearance":
       return isEditorAppearance(value.appearance);
     case "initialize_editor":

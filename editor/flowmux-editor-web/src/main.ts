@@ -178,6 +178,7 @@ let saveAsDocumentId: string | null = null;
 let saveAsOverwrite = false;
 let diffDocumentId: string | null = null;
 let diffOriginalModel: monaco.editor.ITextModel | null = null;
+let gitModifiedModel: monaco.editor.ITextModel | null = null;
 let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
 let recoveryDialogDocumentId: string | null = null;
 let recoveryDialogDocumentVersion = 0;
@@ -263,8 +264,9 @@ window.addEventListener(
 );
 
 function focusedCodeEditor(): monaco.editor.ICodeEditor | null {
-  const target = diffDocumentId === null ? editor : diffEditor?.getModifiedEditor();
-  return target?.hasTextFocus() === true ? target : null;
+  const targets = diffDocumentId === null && gitModifiedModel === null
+    ? [editor] : [diffEditor?.getOriginalEditor(), diffEditor?.getModifiedEditor()];
+  return targets.find((target) => target?.hasTextFocus() === true) ?? null;
 }
 
 function runNativeEditorAction(
@@ -462,6 +464,9 @@ function handleHostMessage(message: HostMessage): void {
   surfaceId = message.surfaceId;
 
   switch (message.type) {
+    case "show_git_diff":
+      showGitDiff(message.path, message.original, message.modified);
+      break;
     case "set_appearance":
       applyAppearance(message.appearance);
       break;
@@ -1041,6 +1046,27 @@ function showDiff(document: OpenDocument, diskContent: string): void {
       `flowmux-disk://comparison/${encodeURIComponent(document.payload.id)}/${document.payload.version}`,
     ),
   );
+  const view = ensureDiffEditor();
+  view.getModifiedEditor().updateOptions({ readOnly: document.payload.readOnly });
+  view.setModel({ original: diffOriginalModel, modified: document.model });
+  diffDocumentId = document.payload.id;
+  renderState();
+  view.focus();
+}
+
+function showGitDiff(path: string, original: string, modified: string): void {
+  closeDiffView(false);
+  const language = languageForPath(path);
+  diffOriginalModel = monaco.editor.createModel(original, language);
+  gitModifiedModel = monaco.editor.createModel(modified, language);
+  const view = ensureDiffEditor();
+  view.getModifiedEditor().updateOptions({ readOnly: true });
+  view.updateOptions({ ignoreTrimWhitespace: false, useInlineViewWhenSpaceIsLimited: false });
+  view.setModel({ original: diffOriginalModel, modified: gitModifiedModel });
+  renderState();
+}
+
+function ensureDiffEditor(): monaco.editor.IStandaloneDiffEditor {
   if (diffEditor === null) {
     diffEditor = monaco.editor.createDiffEditor(diffEditorContainer, {
       automaticLayout: true,
@@ -1066,20 +1092,18 @@ function showDiff(document: OpenDocument, diskContent: string): void {
       label: "Close Diff",
       keybindings: [monaco.KeyCode.Escape],
       precondition: "!findWidgetVisible",
-      run: () => closeDiffView(),
+      run: () => { if (gitModifiedModel === null) closeDiffView(); },
     });
   }
-  diffEditor.getModifiedEditor().updateOptions({ readOnly: document.payload.readOnly });
-  diffEditor.setModel({ original: diffOriginalModel, modified: document.model });
-  diffDocumentId = document.payload.id;
-  renderState();
-  diffEditor.focus();
+  return diffEditor;
 }
 
 function closeDiffView(render = true): void {
   diffEditor?.setModel(null);
   diffOriginalModel?.dispose();
   diffOriginalModel = null;
+  gitModifiedModel?.dispose();
+  gitModifiedModel = null;
   diffDocumentId = null;
   if (render) {
     renderState();
@@ -1186,7 +1210,7 @@ function showWorkspaceSearch(): void {
 }
 
 function canShowSearchDialog(): boolean {
-  return !closeDialog.open && !recoveryDialog.open && !saveAsDialog.open;
+  return gitModifiedModel === null && !closeDialog.open && !recoveryDialog.open && !saveAsDialog.open;
 }
 
 function openSearchDialog(): void {
@@ -1579,8 +1603,8 @@ function setEditorZoom(zoomPercent: number, announce: boolean): void {
 
 function renderState(): void {
   const active = activeDocumentId === null ? undefined : documents.get(activeDocumentId);
-  const showingDiff = active !== undefined && diffDocumentId === active.payload.id;
-  emptyState.classList.toggle("is-hidden", active !== undefined);
+  const showingDiff = gitModifiedModel !== null || (active !== undefined && diffDocumentId === active.payload.id);
+  emptyState.classList.toggle("is-hidden", active !== undefined || showingDiff);
   editorContainer.classList.toggle("is-visible", active !== undefined && !showingDiff);
   diffEditorContainer.classList.toggle("is-visible", showingDiff);
   if (showingDiff) {

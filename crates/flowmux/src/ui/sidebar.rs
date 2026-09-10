@@ -418,6 +418,20 @@ impl Sidebar {
         });
         footer.append(&worktree_btn);
 
+        let changes_btn = gtk::Button::from_icon_name("text-x-patch-symbolic");
+        changes_btn.add_css_class("flat");
+        changes_btn.set_tooltip_text(Some("Git Changes"));
+        changes_btn.set_focus_on_click(false);
+        changes_btn.set_widget_name("flowmux-git-changes-button");
+        let changes_bridge = bridge.clone();
+        changes_btn.connect_clicked(move |_| {
+            let bridge = changes_bridge.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::ShowGitChanges).await;
+            });
+        });
+        footer.append(&changes_btn);
+
         // File browser toggle, immediately right of the worktree button. Sends
         // `None` so the window dispatcher targets the focused pane (the footer
         // has no pane context). Same Ctrl+Alt+F path.

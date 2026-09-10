@@ -19,6 +19,7 @@ under Options → Keybindings. Action names are the keys used in
 | new-workspace / new-window | Ctrl+N / Ctrl+Shift+N | Cmd+N / Cmd+Shift+N |
 | command-palette | Ctrl+Shift+P | Cmd+Shift+P |
 | terminal-search | Ctrl+Shift+F | Ctrl+Shift+F |
+| git-changes | Ctrl+Alt+Shift+G | Ctrl+Alt+Shift+G |
 | toggle-pane-zoom | Ctrl+Alt+M | Ctrl+Alt+M |
 | toggle-workspace-overview | Ctrl+Alt+K | Ctrl+Alt+K |
 | copy-pane-path | Ctrl+Shift+K | Cmd+Shift+K |
@@ -29,6 +30,12 @@ under Options → Keybindings. Action names are the keys used in
 The terminal IME and scroll workarounds are intentionally fixed: Shift+Enter
 flushes composed Hangul input, and PgUp/PgDn use smart scrollback behavior.
 They are not editable keybindings.
+
+**Git Changes** is also available from the side panel and command palette.
+Select a file under Staged, Unstaged, or Untracked to compare it and use
+**Stage file** / **Unstage file**. **F5** refreshes the list; **Escape** closes
+the Changes window. The displayed worktree stays selected when you switch
+workspaces; close and reopen Changes to review the newly focused worktree.
 
 When the embedded editor has focus, it also provides its local editing
 shortcuts: Ctrl/Cmd+S saves, Ctrl/Cmd+Shift+S opens Save As,

@@ -88,6 +88,9 @@ impl WindowController {
             GtkCommand::ShowCommandPalette => {
                 self.show_command_palette().await;
             }
+            GtkCommand::ShowGitChanges => {
+                self.show_git_changes().await;
+            }
             GtkCommand::ToggleWorkspaceOverview => {
                 self.toggle_workspace_overview();
             }

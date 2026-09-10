@@ -158,6 +158,11 @@ pub enum HostMessage {
         document_version: u64,
         disk_content: String,
     },
+    ShowGitDiff {
+        path: String,
+        original: String,
+        modified: String,
+    },
     ConflictActionFailed {
         document_id: String,
         document_version: u64,
@@ -545,6 +550,12 @@ fn validate_host_message(message: &HostMessage) -> Result<(), ProtocolError> {
             validate_document_size(disk_content)
         }
         HostMessage::ShowWorkspaceSearch => Ok(()),
+        HostMessage::ShowGitDiff {
+            original, modified, ..
+        } => {
+            validate_document_size(original)?;
+            validate_document_size(modified)
+        }
         HostMessage::QuickOpenCompleted {
             request_id, paths, ..
         } => {

@@ -26,6 +26,17 @@ const koreanDocument = {
   scrollTop: 0,
 };
 
+test("Git comparisons accept independent empty sides and reject missing payloads", () => {
+  const message = { protocolVersion: 1, surfaceId: "surface-1", type: "show_git_diff",
+    path: "삭제🙂.txt", original: "before\n", modified: "" };
+  assert.equal(isHostMessage(message), true);
+  assert.equal(isHostMessage({ ...message, original: "", modified: "new\n" }), true);
+  for (const field of ["path", "original", "modified"]) {
+    assert.equal(isHostMessage({ ...message, [field]: undefined }), false);
+    assert.equal(isHostMessage({ ...message, [field]: 42 }), false);
+  }
+});
+
 test("rejects non-object envelopes and malformed save acknowledgements", () => {
   for (const value of [null, undefined, false, 1, "message", [], {}]) {
     assert.equal(isHostMessage(value), false);
