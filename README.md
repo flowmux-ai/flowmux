@@ -89,6 +89,11 @@ and 60 seconds, so a rate-limited provider no longer empties the bar.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
+### Search terminal output
+
+Search all terminal tabs with **Ctrl+Alt+Shift+F** or the magnifying-glass
+button beside Files in the side panel.
+
 ### Themes and keybindings
 
 Pick a built-in light or dark theme in **Options → Theme**, or customize the

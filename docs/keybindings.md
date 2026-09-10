@@ -19,6 +19,7 @@ under Options → Keybindings. Action names are the keys used in
 | new-workspace / new-window | Ctrl+N / Ctrl+Shift+N | Cmd+N / Cmd+Shift+N |
 | command-palette | Ctrl+Shift+P | Cmd+Shift+P |
 | terminal-search | Ctrl+Shift+F | Ctrl+Shift+F |
+| search-all-terminals | Ctrl+Alt+Shift+F | Ctrl+Alt+Shift+F |
 | toggle-pane-zoom | Ctrl+Alt+M | Ctrl+Alt+M |
 | toggle-workspace-overview | Ctrl+Alt+K | Ctrl+Alt+K |
 | copy-pane-path | Ctrl+Shift+K | Cmd+Shift+K |
@@ -57,3 +58,15 @@ flowmux action are handled at the window level in both contexts, so focusing an
 editor does not disable pane, tab, workspace, or panel control.
 
 See the [configuration reference](configuration.md) for the JSON shape.
+
+**Search all terminals** also appears in the command palette and as a
+magnifying-glass button immediately right of Files in the side panel. It searches the
+retained output of every open terminal tab across this window's workspaces,
+including hidden tabs and SSH terminals. Results show the workspace and tab
+name plus matching text. Select a result with a click, or use Down and Enter,
+to activate that tab and scroll to the highlighted search text, even in long
+wrapped lines. Escape closes the search and cancels pending result navigation.
+Search is literal and ignores case unless **Match case** is enabled.
+Refresh searches new output. The first 500 matching lines are displayed, with
+**Show more results** to expand the list. Output removed from scrollback and closed
+tabs are unavailable; changed results ask you to refresh.

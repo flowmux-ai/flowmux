@@ -103,6 +103,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::OpenUrlInBrowserTab { .. }
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
+            | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
@@ -1232,6 +1233,7 @@ mod pane_commands;
 mod polling;
 pub(crate) mod ssh;
 mod surface_ops;
+mod terminal_output_search;
 mod window_chrome_commands;
 mod workspace_commands;
 mod workspace_overview;
@@ -2744,6 +2746,7 @@ impl WindowController {
             }
             command @ (GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
+            | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::ToggleWorkspaceOverview
             | GtkCommand::FileBrowserFocusOut { .. }
             | GtkCommand::FileBrowserCloseAndRestoreFocus

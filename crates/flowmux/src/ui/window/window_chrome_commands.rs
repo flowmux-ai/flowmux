@@ -88,6 +88,9 @@ impl WindowController {
             GtkCommand::ShowCommandPalette => {
                 self.show_command_palette().await;
             }
+            GtkCommand::ShowTerminalOutputSearch => {
+                self.show_terminal_output_search();
+            }
             GtkCommand::ToggleWorkspaceOverview => {
                 self.toggle_workspace_overview();
             }

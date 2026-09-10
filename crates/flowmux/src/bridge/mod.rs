@@ -211,6 +211,8 @@ pub enum GtkCommand {
     ShowOptionsDialog,
     /// Show the command palette from the GTK side.
     ShowCommandPalette,
+    /// Search retained output across all terminal tabs in this window.
+    ShowTerminalOutputSearch,
     /// Render a freshly-created workspace in the sidebar + open its first pane.
     WorkspaceCreated {
         id: WorkspaceId,

@@ -134,7 +134,7 @@ fn cacheable_terminal_selection(text: &str) -> Option<String> {
     (!text.is_empty() && text.len() <= TERMINAL_SELECTION_CACHE_MAX_BYTES).then(|| text.to_string())
 }
 
-const SEARCH_REGEX_COMPILE_FLAGS: u32 = 0x0008_0000 | 0x4000_0000;
+const SEARCH_REGEX_COMPILE_FLAGS: u32 = 0x0000_0400 | 0x0008_0000 | 0x4000_0000;
 const PCRE2_CASELESS: u32 = 0x0000_0008;
 
 fn set_terminal_search(
@@ -1096,6 +1096,58 @@ impl GhosttyPane {
         self.widget
             .text_format(vte::Format::Text)
             .map(|g| g.to_string())
+    }
+
+    /// Retained normal-screen history, or the current alternate screen. The
+    /// range uses VTE absolute rows, not the adjustment's rebased coordinates.
+    pub(crate) fn output_search_range(&self) -> (i64, i64) {
+        let rows = self.widget.row_count().max(1);
+        let cursor = self.widget.cursor_position().1;
+        let history = if self.terminal_alternate_screen.get() {
+            0
+        } else {
+            self.widget.scrollback_lines().max(0)
+        };
+        (
+            (cursor - history - rows).max(0),
+            cursor.saturating_add(rows),
+        )
+    }
+
+    pub(crate) fn output_search_text(&self, first: i64, last: i64) -> Option<String> {
+        self.widget
+            // End column is exclusive. Ending at column zero of the next row
+            // preserves hard/soft line breaks when bounded chunks are joined.
+            .text_range_format(vte::Format::Text, first, 0, last, 0)
+            .0
+            .map(|text| text.to_string())
+    }
+
+    /// Use VTE's own match selection/scrolling, including soft-wrapped lines.
+    pub(crate) fn find_output_match(&self, needle: &str, column: usize, occurrence: usize) -> bool {
+        self.search_revealer.set_reveal_child(false);
+        self.widget.search_set_regex(None, 0);
+        self.widget.unselect_all();
+        if let Some(adjustment) = self.widget.vadjustment() {
+            adjustment.set_value(adjustment.lower());
+        }
+        // PCRE2 limits both compiled pattern size and each repeat count. Skip
+        // to the matched column, then select only the bounded literal needle.
+        let mut pattern = format!("^{}", ".{65535}".repeat(column / 65535));
+        pattern.push_str(&format!(
+            ".{{{}}}\\K{}",
+            column % 65535,
+            escape_pcre_literal(needle)
+        ));
+        if set_terminal_search(&self.widget, &pattern, true, true).is_err() {
+            return false;
+        }
+        self.widget.search_set_wrap_around(false);
+        let found = (0..=occurrence).all(|_| self.widget.search_find_next());
+        if !found {
+            self.widget.search_set_regex(None, 0);
+        }
+        found
     }
 
     /// Recent live terminal rows used only for Agent status detection.

@@ -285,6 +285,17 @@ pub fn install_actions(
             })
             .build()
     };
+    let search_all_terminals = {
+        let bridge = bridge.clone();
+        gtk::gio::ActionEntry::builder("search-all-terminals")
+            .activate(move |_, _, _| {
+                let bridge = bridge.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    let _ = bridge.tx.send(GtkCommand::ShowTerminalOutputSearch).await;
+                });
+            })
+            .build()
+    };
     let terminal_search = {
         let focused = focused.clone();
         let registry = registry.clone();
@@ -489,6 +500,7 @@ pub fn install_actions(
         new_window,
         command_palette,
         terminal_search,
+        search_all_terminals,
         toggle_pane_zoom,
         toggle_workspace_overview,
         next_workspace,
