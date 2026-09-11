@@ -443,7 +443,7 @@ impl Sidebar {
         let search_btn = gtk::Button::from_icon_name("system-search-symbolic");
         search_btn.add_css_class("flat");
         search_btn.add_css_class("flowmux-sidebar-options");
-        search_btn.set_tooltip_text(Some("Search all terminals"));
+        search_btn.set_tooltip_text(Some("Search all terminals (Ctrl+Alt+Shift+F)"));
         search_btn.update_property(&[gtk::accessible::Property::Label("Search all terminals")]);
         search_btn.set_focus_on_click(false);
         search_btn.set_widget_name("flowmux-terminal-output-search-button");
