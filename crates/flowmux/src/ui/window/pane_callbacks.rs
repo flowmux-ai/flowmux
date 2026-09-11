@@ -223,8 +223,12 @@ impl PaneCallbackRouter {
                 Rc::new(move || workspace_titles.borrow().clone())
             },
             workspace_of_pane: {
-                let pane_registry = pane_registry.clone();
-                Rc::new(move |pane| pane_registry.borrow().workspace_of_pane(pane))
+                let pane_registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |pane| {
+                    let registry = pane_registry.upgrade()?;
+                    let workspace = registry.borrow().workspace_of_pane(pane);
+                    workspace
+                })
             },
             is_ssh_pane: {
                 let pane_registry = Rc::downgrade(&pane_registry);
@@ -352,8 +356,9 @@ impl PaneCallbackRouter {
                 Rc::new(move || options.borrow().clone())
             },
             position_of_surface_in_pane: {
-                let registry = pane_registry.clone();
+                let registry = Rc::downgrade(&pane_registry);
                 Rc::new(move |pane, surface| {
+                    let registry = registry.upgrade()?;
                     let r = registry.borrow();
                     r.surface_tabs
                         .get(&pane)?
@@ -363,13 +368,21 @@ impl PaneCallbackRouter {
             },
             #[cfg(target_os = "macos")]
             pane_at_root_point: {
-                let registry = pane_registry.clone();
-                Rc::new(move |root, x, y| registry.borrow().pane_at_root_point(root, x, y))
+                let registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |root, x, y| {
+                    let registry = registry.upgrade()?;
+                    let pane = registry.borrow().pane_at_root_point(root, x, y);
+                    pane
+                })
             },
             #[cfg(target_os = "macos")]
             tab_at_root_point: {
-                let registry = pane_registry.clone();
-                Rc::new(move |root, x, y| registry.borrow().tab_at_root_point(root, x, y))
+                let registry = Rc::downgrade(&pane_registry);
+                Rc::new(move |root, x, y| {
+                    let registry = registry.upgrade()?;
+                    let tab = registry.borrow().tab_at_root_point(root, x, y);
+                    tab
+                })
             },
             on_open_url: {
                 let bridge = bridge.clone();
@@ -396,6 +409,32 @@ impl PaneCallbackRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    fn pane_callbacks_do_not_retain_registry() {
+        let registry = Rc::new(RefCell::new(PaneRegistry::default()));
+        let weak = Rc::downgrade(&registry);
+        let (bridge, _rx) = Bridge::new();
+        let callbacks = PaneCallbackRouter::new(
+            Rc::new(Cell::new(None)),
+            bridge,
+            Rc::new(RefCell::new(flowmux_config::options::Options::default())),
+            registry.clone(),
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(Cell::new(false)),
+            Rc::new(Cell::new(false)),
+        )
+        .into_callbacks();
+        drop(registry);
+        assert!(weak.upgrade().is_none(), "callbacks retained the registry");
+        let pane = PaneId::new();
+        assert_eq!((callbacks.workspace_of_pane)(pane), None);
+        assert_eq!(
+            (callbacks.position_of_surface_in_pane)(pane, SurfaceId::new()),
+            None
+        );
+        assert!(!(callbacks.is_ssh_pane)(pane));
+    }
 
     #[cfg_attr(target_os = "macos", test)]
     #[cfg_attr(not(target_os = "macos"), gtk::test)]

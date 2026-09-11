@@ -1576,7 +1576,6 @@ impl FileBrowserPanel {
         click.set_button(0);
         let panel = self.clone();
         let path = row.path.clone();
-        let row_for_menu = list_row.clone();
         click.connect_pressed(
             move |gesture, n_press, x, y| match gesture.current_button() {
                 gdk::BUTTON_PRIMARY => {
@@ -1587,6 +1586,9 @@ impl FileBrowserPanel {
                     );
                 }
                 gdk::BUTTON_SECONDARY => {
+                    let Some(row_for_menu) = gesture.widget() else {
+                        return;
+                    };
                     panel.focus_path(path.clone());
                     show_context_menu(&row_for_menu, &path, x, y, panel.on_open_file.clone());
                 }
@@ -2412,10 +2414,12 @@ fn show_context_menu(
     open.set_halign(gtk::Align::Fill);
     open.set_hexpand(true);
     let target = path.to_path_buf();
-    let pop = popover.clone();
+    let pop = popover.downgrade();
     open.connect_clicked(move |_| {
         (on_open_file.borrow())(target.clone());
-        pop.popdown();
+        if let Some(pop) = pop.upgrade() {
+            pop.popdown();
+        }
     });
     content.append(&open);
 
@@ -2424,10 +2428,12 @@ fn show_context_menu(
     open_externally.set_halign(gtk::Align::Fill);
     open_externally.set_hexpand(true);
     let target = path.to_path_buf();
-    let pop = popover.clone();
+    let pop = popover.downgrade();
     open_externally.connect_clicked(move |_| {
         open_file(&target);
-        pop.popdown();
+        if let Some(pop) = pop.upgrade() {
+            pop.popdown();
+        }
     });
     content.append(&open_externally);
 
@@ -2436,16 +2442,19 @@ fn show_context_menu(
     show.set_halign(gtk::Align::Fill);
     show.set_hexpand(true);
     let target = path.to_path_buf();
-    let pop = popover.clone();
+    let pop = popover.downgrade();
     show.connect_clicked(move |_| {
         show_path_in_folder(&target);
-        pop.popdown();
+        if let Some(pop) = pop.upgrade() {
+            pop.popdown();
+        }
     });
     content.append(&show);
 
     popover.set_child(Some(&content));
     popover.set_parent(parent);
     popover_pos::anchor_at_click(&popover, parent, x, y);
+    popover.connect_closed(popover_pos::unparent_after_close);
     popover.popup();
 }
 
@@ -2748,6 +2757,56 @@ mod tests {
             selected: false,
             cut: false,
         }
+    }
+
+    #[gtk::test]
+    async fn dismissed_file_menu_releases_widgets_and_callback() {
+        let window = gtk::Window::new();
+        window.set_default_size(640, 480);
+        let anchor = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        window.set_child(Some(&anchor));
+        window.present();
+        glib::timeout_future(Duration::from_millis(30)).await;
+        for activate in [false, true] {
+            let called = Rc::new(Cell::new(false));
+            let weak_called = Rc::downgrade(&called);
+            show_context_menu(
+                &anchor,
+                Path::new("/tmp/example.txt"),
+                0.0,
+                0.0,
+                Rc::new(RefCell::new(Box::new(move |path| {
+                    assert_eq!(path, Path::new("/tmp/example.txt"));
+                    called.set(true);
+                }))),
+            );
+            let popover = anchor.last_child().and_downcast::<gtk::Popover>().unwrap();
+            let weak_popover = popover.downgrade();
+            if activate {
+                let open = popover
+                    .child()
+                    .unwrap()
+                    .first_child()
+                    .and_downcast::<gtk::Button>()
+                    .unwrap();
+                open.emit_clicked();
+                assert!(weak_called.upgrade().unwrap().get());
+            } else {
+                popover.popdown();
+            }
+            drop(popover);
+            glib::timeout_future(Duration::from_millis(30)).await;
+            assert!(anchor.first_child().is_none(), "file menu stayed parented");
+            for _ in 0..40 {
+                if weak_popover.upgrade().is_none() {
+                    break;
+                }
+                gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+            }
+            assert!(weak_popover.upgrade().is_none(), "file menu leaked");
+            assert!(weak_called.upgrade().is_none(), "file menu callback leaked");
+        }
+        window.close();
     }
 
     #[test]

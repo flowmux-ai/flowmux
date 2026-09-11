@@ -28,6 +28,21 @@
 use gtk::graphene;
 use gtk::prelude::*;
 
+/// Detach a one-shot menu after GTK finishes hiding it. Clear its focus
+/// first: GTK 4.14 defers focus movement until after paint, and hiding then
+/// unparenting a focused widget can overwrite (and leak) that pending reference.
+pub fn unparent_after_close(popover: &gtk::Popover) {
+    if let Some(root) = popover.root() {
+        if root.focus().is_some_and(|focus| focus.is_ancestor(popover)) {
+            root.set_focus(gtk::Widget::NONE);
+        }
+    }
+    let popover = popover.clone();
+    gtk::glib::idle_add_local_once(move || {
+        popover.unparent();
+    });
+}
+
 pub fn anchor_at_click(popover: &gtk::Popover, parent: &impl IsA<gtk::Widget>, x: f64, y: f64) {
     let parent_widget: &gtk::Widget = parent.upcast_ref();
 

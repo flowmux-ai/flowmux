@@ -47,9 +47,15 @@ pub fn show_at(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, items: Vec<MenuIt
     scrim.set_vexpand(true);
 
     let dismiss: Rc<dyn Fn()> = {
-        let overlay = overlay.clone();
-        let scrim = scrim.clone();
-        Rc::new(move || overlay.remove_overlay(&scrim))
+        let overlay = overlay.downgrade();
+        let scrim = scrim.downgrade();
+        Rc::new(move || {
+            if let (Some(overlay), Some(scrim)) = (overlay.upgrade(), scrim.upgrade()) {
+                if scrim.parent().is_some() {
+                    overlay.remove_overlay(&scrim);
+                }
+            }
+        })
     };
 
     let mut first_button: Option<gtk::Button> = None;
@@ -104,9 +110,11 @@ pub fn show_at(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, items: Vec<MenuIt
     {
         let dismiss = dismiss.clone();
         let menu = menu.clone();
-        let scrim_for_click = scrim.clone();
         click.connect_pressed(move |gesture, _n_press, px, py| {
-            let on_menu = scrim_for_click
+            let Some(scrim) = gesture.widget() else {
+                return;
+            };
+            let on_menu = scrim
                 .pick(px, py, gtk::PickFlags::DEFAULT)
                 .map(|t| t == *menu.upcast_ref::<gtk::Widget>() || t.is_ancestor(&menu))
                 .unwrap_or(false);
@@ -152,4 +160,87 @@ fn host_overlay(widget: &gtk::Widget) -> Option<gtk::Overlay> {
         cur = w.parent();
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gtk::test]
+    async fn dismissed_overlay_menu_releases_widgets_and_action() {
+        let window = gtk::Window::new();
+        let overlay = gtk::Overlay::new();
+        let anchor = gtk::Button::with_label("Menu");
+        overlay.set_child(Some(&anchor));
+        window.set_child(Some(&overlay));
+        window.present();
+        gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        for dismiss_kind in 0..3 {
+            let sentinel = Rc::new(std::cell::Cell::new(false));
+            let weak_action = Rc::downgrade(&sentinel);
+            show_at(
+                &anchor,
+                0.0,
+                0.0,
+                vec![MenuItem::Action {
+                    label: "Run",
+                    activate: Box::new(move || sentinel.set(true)),
+                }],
+            );
+            let scrim = overlay
+                .last_child()
+                .unwrap()
+                .downcast::<gtk::Fixed>()
+                .unwrap();
+            let weak_scrim = scrim.downgrade();
+            let menu = scrim.first_child().unwrap();
+            let button = menu
+                .first_child()
+                .unwrap()
+                .downcast::<gtk::Button>()
+                .unwrap();
+            match dismiss_kind {
+                0 => button.emit_clicked(),
+                1 => {
+                    let controllers = menu.observe_controllers();
+                    let key = (0..controllers.n_items())
+                        .find_map(|i| {
+                            controllers
+                                .item(i)
+                                .and_downcast::<gtk::EventControllerKey>()
+                        })
+                        .unwrap();
+                    assert!(key.emit_by_name::<bool>(
+                        "key-pressed",
+                        &[
+                            &gtk::gdk::Key::Escape,
+                            &0u32,
+                            &gtk::gdk::ModifierType::empty(),
+                        ]
+                    ));
+                }
+                _ => {
+                    let controllers = scrim.observe_controllers();
+                    let click = (0..controllers.n_items())
+                        .find_map(|i| controllers.item(i).and_downcast::<gtk::GestureClick>())
+                        .unwrap();
+                    click.emit_by_name::<()>("pressed", &[&1i32, &-10.0f64, &-10.0f64]);
+                }
+            }
+            assert_eq!(weak_action.upgrade().unwrap().get(), dismiss_kind == 0);
+            assert!(scrim.parent().is_none());
+            drop(button);
+            drop(menu);
+            drop(scrim);
+            for _ in 0..40 {
+                if weak_scrim.upgrade().is_none() {
+                    break;
+                }
+                gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+            }
+            assert!(weak_scrim.upgrade().is_none(), "dismissed scrim leaked");
+            assert!(weak_action.upgrade().is_none(), "dismissed action leaked");
+        }
+        window.close();
+    }
 }

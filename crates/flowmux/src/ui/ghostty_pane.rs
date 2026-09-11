@@ -927,11 +927,16 @@ impl GhosttyPane {
                 // never clobber the clipboard; Paste lets VTE bracket
                 // the text when the app set DECSET 2004.
                 let copy = mk("Copy");
-                let pop = popover.clone();
-                let term_for_copy = term_widget.clone();
+                let pop = popover.downgrade();
+                let term_for_copy = term_widget.downgrade();
                 let cache_for_copy = last_selection_for_menu.clone();
                 copy.connect_clicked(move |_| {
-                    pop.popdown();
+                    let Some(term_for_copy) = term_for_copy.upgrade() else {
+                        return;
+                    };
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     if term_for_copy.has_selection() {
                         term_for_copy.copy_clipboard_format(vte::Format::Text);
                         return;
@@ -947,10 +952,15 @@ impl GhosttyPane {
                 v.append(&copy);
 
                 let paste = mk("Paste");
-                let pop = popover.clone();
-                let term_for_paste = term_widget.clone();
+                let pop = popover.downgrade();
+                let term_for_paste = term_widget.downgrade();
                 paste.connect_clicked(move |_| {
-                    pop.popdown();
+                    let Some(term_for_paste) = term_for_paste.upgrade() else {
+                        return;
+                    };
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     term_for_paste.paste_clipboard();
                 });
                 v.append(&paste);
@@ -958,19 +968,23 @@ impl GhosttyPane {
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
                 let split_r = mk("Split Right");
-                let pop = popover.clone();
+                let pop = popover.downgrade();
                 let cb = on_split_right.clone();
                 split_r.connect_clicked(move |_| {
-                    pop.popdown();
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     (cb.borrow_mut())(id);
                 });
                 v.append(&split_r);
 
                 let split_d = mk("Split Down");
-                let pop = popover.clone();
+                let pop = popover.downgrade();
                 let cb = on_split_down.clone();
                 split_d.connect_clicked(move |_| {
-                    pop.popdown();
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     (cb.borrow_mut())(id);
                 });
                 v.append(&split_d);
@@ -978,10 +992,12 @@ impl GhosttyPane {
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
                 let copy_path = mk("Copy path");
-                let pop = popover.clone();
+                let pop = popover.downgrade();
                 let cb = on_copy_text.clone();
                 copy_path.connect_clicked(move |_| {
-                    pop.popdown();
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     (cb.borrow_mut())(id, surface_for_menu);
                 });
                 v.append(&copy_path);
@@ -989,10 +1005,12 @@ impl GhosttyPane {
                 v.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
 
                 let close_p = mk("Close Pane");
-                let pop = popover.clone();
+                let pop = popover.downgrade();
                 let cb = on_close_pane.clone();
                 close_p.connect_clicked(move |_| {
-                    pop.popdown();
+                    if let Some(pop) = pop.upgrade() {
+                        pop.popdown();
+                    }
                     (cb.borrow_mut())(id);
                 });
                 v.append(&close_p);
@@ -1001,7 +1019,7 @@ impl GhosttyPane {
                 popover.set_parent(&term_widget);
                 popover.set_has_arrow(false);
                 crate::ui::popover_pos::anchor_at_click(&popover, &term_widget, x, y);
-                popover.connect_closed(|p| p.unparent());
+                popover.connect_closed(crate::ui::popover_pos::unparent_after_close);
                 popover.popup();
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             });
@@ -3507,7 +3525,7 @@ mod tests {
     }
 
     #[gtk::test]
-    fn closing_terminal_releases_widget_graph() {
+    async fn closing_terminal_releases_widget_graph() {
         let pane = GhosttyPane::spawn(
             PaneId::new(),
             SurfaceId::new(),
@@ -3535,13 +3553,67 @@ mod tests {
         assert_eq!(pane.widget.margin_end(), 24);
         pane.show_message("minimap release check\n");
 
+        let window = gtk::Window::new();
+        window.set_default_size(640, 480);
+        window.set_child(Some(&pane.container));
+        window.present();
+        glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        for activate in [false, true] {
+            let controllers = pane.widget.observe_controllers();
+            let click = (0..controllers.n_items())
+                .filter_map(|i| controllers.item(i).and_downcast::<gtk::GestureClick>())
+                .find(|click| click.button() == gtk::gdk::BUTTON_SECONDARY)
+                .unwrap();
+            click.emit_by_name::<()>("pressed", &[&1i32, &10.0f64, &10.0f64]);
+            let popover = pane
+                .widget
+                .last_child()
+                .and_downcast::<gtk::Popover>()
+                .unwrap();
+            let weak_popover = popover.downgrade();
+            glib::timeout_future(std::time::Duration::from_millis(100)).await;
+            if activate {
+                let copy = popover
+                    .child()
+                    .unwrap()
+                    .first_child()
+                    .and_downcast::<gtk::Button>()
+                    .unwrap();
+                copy.emit_clicked();
+            } else {
+                popover.popdown();
+            }
+            drop(popover);
+            glib::timeout_future(std::time::Duration::from_millis(30)).await;
+            for _ in 0..40 {
+                if weak_popover.upgrade().is_none() {
+                    break;
+                }
+                gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+            }
+            assert!(
+                weak_popover.upgrade().is_none(),
+                "terminal menu leaked: activate={activate}"
+            );
+        }
+        gtk::prelude::GtkWindowExt::set_focus(&window, gtk::Widget::NONE);
+        window.destroy();
+        drop(window);
+
         pane.close_pty();
         drop(pane);
+        glib::timeout_future(std::time::Duration::from_millis(30)).await;
         let context = glib::MainContext::default();
         while context.pending() {
             context.iteration(false);
         }
 
+        for _ in 0..40 {
+            if terminal.upgrade().is_none() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(25)).await;
+        }
         assert!(
             terminal.upgrade().is_none(),
             "closed terminal retained its VTE widget"

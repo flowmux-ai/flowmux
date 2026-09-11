@@ -7267,6 +7267,16 @@ mod tests {
             assert!(r.pane_frame(right).is_some(), "right pane registered");
         }
 
+        controller.window.present();
+        glib::timeout_future(Duration::from_millis(50)).await;
+        let (closed_terminal, closed_tab) = {
+            let r = controller.pane_registry.borrow();
+            (
+                r.terminals[&right_surface].widget.downgrade(),
+                r.surface_tabs[&right][0].1.downgrade(),
+            )
+        };
+
         // X-button on the right pane → CloseFocused dispatches
         // close_pane → PaneRemoved → apply_close_pane_incremental_or_rerender.
         let (ack_tx, ack_rx) = oneshot::channel();
@@ -7277,6 +7287,21 @@ mod tests {
             })
             .await;
         ack_rx.await.unwrap().unwrap();
+
+        for _ in 0..40 {
+            if closed_terminal.upgrade().is_none() && closed_tab.upgrade().is_none() {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(25)).await;
+        }
+        assert!(
+            closed_terminal.upgrade().is_none(),
+            "closed pane retained VTE"
+        );
+        assert!(
+            closed_tab.upgrade().is_none(),
+            "closed pane retained its tab"
+        );
 
         // The left pane must still be rendered and the workspace
         // stack must still have a visible child for this workspace —

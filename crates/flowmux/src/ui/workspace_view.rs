@@ -1786,7 +1786,7 @@ fn attach_tab_context_menu(
 ) {
     let click = gtk::GestureClick::new();
     click.set_button(gtk::gdk::BUTTON_SECONDARY);
-    let tab_for_click = tab.clone();
+    let tab_for_click = tab.downgrade();
     let on_show = callbacks.on_show_surface_folder.clone();
     let on_copy = callbacks.on_copy_surface_text.clone();
     let list_workspaces = callbacks.list_workspaces.clone();
@@ -1795,6 +1795,9 @@ fn attach_tab_context_menu(
     let surface_id = surface.id;
     let is_terminal = matches!(surface.kind, SurfaceKind::Terminal { .. });
     click.connect_pressed(move |gesture, _n_press, x, y| {
+        let Some(tab_for_click) = tab_for_click.upgrade() else {
+            return;
+        };
         let popover = gtk::Popover::new();
         let v = gtk::Box::new(gtk::Orientation::Vertical, 0);
         v.set_margin_top(4);
@@ -1813,28 +1816,34 @@ fn attach_tab_context_menu(
 
         if is_terminal {
             let show_btn = mk("Show in folder");
-            let pop = popover.clone();
+            let pop = popover.downgrade();
             let cb = on_show.clone();
             show_btn.connect_clicked(move |_| {
-                pop.popdown();
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
                 (cb.borrow_mut())(pane_id, surface_id);
             });
             v.append(&show_btn);
 
             let copy_btn = mk("Copy path");
-            let pop = popover.clone();
+            let pop = popover.downgrade();
             let cb = on_copy.clone();
             copy_btn.connect_clicked(move |_| {
-                pop.popdown();
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
                 (cb.borrow_mut())(pane_id, surface_id);
             });
             v.append(&copy_btn);
         } else {
             let copy_btn = mk("Copy URL");
-            let pop = popover.clone();
+            let pop = popover.downgrade();
             let cb = on_copy.clone();
             copy_btn.connect_clicked(move |_| {
-                pop.popdown();
+                if let Some(pop) = pop.upgrade() {
+                    pop.popdown();
+                }
                 (cb.borrow_mut())(pane_id, surface_id);
             });
             v.append(&copy_btn);
@@ -1880,20 +1889,39 @@ fn attach_tab_context_menu(
             for (number, ws_id, name) in movable.into_iter() {
                 // Numbered by side-panel position so the order is visible.
                 let item = mk(&format!("{}. {}", number, name));
-                let outer = popover.clone();
-                let sub = submenu.clone();
+                let outer = popover.downgrade();
+                let sub = submenu.downgrade();
                 let cb = on_move_to_workspace.clone();
                 item.connect_clicked(move |_| {
-                    sub.popdown();
-                    outer.popdown();
+                    if let Some(sub) = sub.upgrade() {
+                        sub.popdown();
+                    }
+                    if let Some(outer) = outer.upgrade() {
+                        outer.popdown();
+                    }
                     (cb.borrow_mut())(pane_id, surface_id, ws_id);
                 });
                 sub_v.append(&item);
             }
             submenu.set_child(Some(&sub_v));
-            let sub_for_btn = submenu.clone();
+            // Restore focus before closing the outer menu as well. GTK 4.14
+            // otherwise overwrites its pending focus reference to the submenu.
+            submenu.connect_closed(|sub| {
+                if let Some(parent) = sub.parent() {
+                    parent.grab_focus();
+                }
+            });
+            let sub_for_close = submenu.downgrade();
+            popover.connect_closed(move |_| {
+                if let Some(sub) = sub_for_close.upgrade() {
+                    crate::ui::popover_pos::unparent_after_close(&sub);
+                }
+            });
+            let sub_for_btn = submenu.downgrade();
             move_btn.connect_clicked(move |_| {
-                sub_for_btn.popup();
+                if let Some(submenu) = sub_for_btn.upgrade() {
+                    submenu.popup();
+                }
             });
         }
         v.append(&move_btn);
@@ -1902,7 +1930,7 @@ fn attach_tab_context_menu(
         popover.set_parent(&tab_for_click);
         popover.set_has_arrow(false);
         crate::ui::popover_pos::anchor_at_click(&popover, &tab_for_click, x, y);
-        popover.connect_closed(|p| p.unparent());
+        popover.connect_closed(crate::ui::popover_pos::unparent_after_close);
         popover.popup();
         gesture.set_state(gtk::EventSequenceState::Claimed);
     });
@@ -1979,6 +2007,115 @@ fn file_drop_parts(path: &Path) -> Result<(PaneId, SurfaceId, PaneSurface), Stri
 #[cfg(test)]
 mod tab_dnd_tests {
     use super::*;
+
+    #[gtk::test]
+    fn pane_body_dnd_releases_terminal_widgets() {
+        let stack = gtk::Stack::new();
+        let terminal = vte::Terminal::new();
+        stack.add_child(&terminal);
+        attach_pane_body_dnd(
+            &stack,
+            PaneId::new(),
+            Rc::new(Cell::new(PaneDropZone::None)),
+            gtk::DrawingArea::new(),
+            &PaneCallbacks::noop_for_test(),
+        );
+        let weak_stack = stack.downgrade();
+        let weak_terminal = terminal.downgrade();
+        drop(terminal);
+        drop(stack);
+        assert!(
+            weak_stack.upgrade().is_none(),
+            "pane DnD retained its stack"
+        );
+        assert!(weak_terminal.upgrade().is_none(), "pane DnD retained VTE");
+    }
+
+    #[gtk::test]
+    async fn surface_tab_releases_widget_and_callbacks() {
+        let sentinel = Rc::new(());
+        let weak_sentinel = Rc::downgrade(&sentinel);
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        callbacks.workspace_of_pane = Rc::new(move |_| {
+            let _keep_alive = &sentinel;
+            None
+        });
+        let destination = WorkspaceId::new();
+        callbacks.list_workspaces = Rc::new(move || vec![(destination, "Other workspace".into())]);
+        let moved = Rc::new(Cell::new(false));
+        let moved_for_callback = moved.clone();
+        callbacks.on_move_surface_to_workspace = Rc::new(RefCell::new(move |_, _, workspace| {
+            assert_eq!(workspace, destination);
+            moved_for_callback.set(true);
+        }));
+        let surface = PaneSurface::terminal("test", None);
+        let (tab, label) = build_surface_tab_widget(PaneId::new(), &surface, true, &callbacks);
+        let weak_tab = tab.downgrade();
+        let window = gtk::Window::new();
+        window.set_default_size(640, 480);
+        window.set_child(Some(&tab));
+        window.present();
+        gtk::glib::timeout_future(Duration::from_millis(30)).await;
+        let controllers = tab.observe_controllers();
+        let click = (0..controllers.n_items())
+            .find_map(|i| controllers.item(i).and_downcast::<gtk::GestureClick>())
+            .unwrap();
+        click.emit_by_name::<()>("pressed", &[&1i32, &10.0f64, &10.0f64]);
+        let popover = tab.last_child().and_downcast::<gtk::Popover>().unwrap();
+        let weak_popover = popover.downgrade();
+        let move_button = popover
+            .child()
+            .unwrap()
+            .last_child()
+            .and_downcast::<gtk::Button>()
+            .unwrap();
+        let submenu = move_button
+            .last_child()
+            .and_downcast::<gtk::Popover>()
+            .unwrap();
+        let weak_submenu = submenu.downgrade();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        move_button.emit_clicked();
+        gtk::glib::timeout_future(Duration::from_millis(100)).await;
+        let destination_button = submenu
+            .child()
+            .unwrap()
+            .first_child()
+            .and_downcast::<gtk::Button>()
+            .unwrap();
+        destination_button.emit_clicked();
+        assert!(moved.get());
+        drop(destination_button);
+        drop(submenu);
+        drop(move_button);
+        drop(popover);
+        gtk::glib::timeout_future(Duration::from_millis(30)).await;
+        for _ in 0..40 {
+            if weak_popover.upgrade().is_none() {
+                break;
+            }
+            gtk::glib::timeout_future(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(weak_popover.upgrade().is_none(), "tab menu leaked");
+        assert!(weak_submenu.upgrade().is_none(), "Move submenu leaked");
+        drop(click);
+        drop(controllers);
+        gtk::prelude::GtkWindowExt::set_focus(&window, gtk::Widget::NONE);
+        window.destroy();
+        drop(window);
+        drop(label);
+        drop(tab);
+        drop(callbacks);
+        gtk::glib::timeout_future(Duration::from_millis(30)).await;
+        assert!(
+            weak_tab.upgrade().is_none(),
+            "tab controllers retained the tab"
+        );
+        assert!(
+            weak_sentinel.upgrade().is_none(),
+            "tab retained its callbacks"
+        );
+    }
 
     #[test]
     fn parse_tab_dnd_payload_round_trips() {
@@ -2491,13 +2628,16 @@ fn attach_tab_dnd_handlers(
             &surface_for_payload,
         )))
     });
-    let tab_for_begin = tab.clone();
+    let tab_for_begin = tab.downgrade();
     let saw_target_for_begin = saw_tab_drop_target.clone();
     let committed_for_begin = committed_tab_drop.clone();
     let split_candidate_for_begin = split_candidate.clone();
     let opened_for_begin = opened_new_window.clone();
     let native_views_suspend_for_begin = native_views_suspend.clone();
     drag_source.connect_drag_begin(move |_, _| {
+        let Some(tab_for_begin) = tab_for_begin.upgrade() else {
+            return;
+        };
         saw_target_for_begin.set(false);
         committed_for_begin.set(false);
         split_candidate_for_begin.borrow_mut().take();
@@ -2509,7 +2649,7 @@ fn attach_tab_dnd_handlers(
         }
         set_tab_drag_visual_state(&tab_for_begin, true);
     });
-    let tab_for_end = tab.clone();
+    let tab_for_end = tab.downgrade();
     let saw_target_for_end = saw_tab_drop_target.clone();
     let committed_for_end = committed_tab_drop.clone();
     let opened_for_end = opened_new_window.clone();
@@ -2571,10 +2711,12 @@ fn attach_tab_dnd_handlers(
         }
         split_candidate_for_end.borrow_mut().take();
         saw_target_for_end.set(false);
-        set_tab_drag_visual_state(&tab_for_end, false);
+        if let Some(tab) = tab_for_end.upgrade() {
+            set_tab_drag_visual_state(&tab, false);
+        }
         native_views_suspend_for_end.borrow_mut().take();
     });
-    let tab_for_cancel = tab.clone();
+    let tab_for_cancel = tab.downgrade();
     let saw_target_for_cancel = saw_tab_drop_target.clone();
     let committed_for_cancel = committed_tab_drop.clone();
     let new_window_cb = callbacks.on_tab_drag_to_new_window.clone();
@@ -2586,7 +2728,9 @@ fn attach_tab_dnd_handlers(
     drag_source.connect_drag_cancel(move |_, drag, reason| {
         let selected_action = drag.selected_action();
         let pointer_inside_origin = drag_pointer_is_inside_origin_surface(drag);
-        set_tab_drag_visual_state(&tab_for_cancel, false);
+        if let Some(tab) = tab_for_cancel.upgrade() {
+            set_tab_drag_visual_state(&tab, false);
+        }
         tracing::debug!(
             %pane_id,
             %surface_id,
@@ -2671,8 +2815,11 @@ fn attach_tab_dnd_handlers(
     // indicator. Drop logic uses the same x basis for final_index, so the blue
     // line marks the actual drop position. Hovering the left half of the first
     // tab signals "move to the front".
-    let tab_for_motion = tab.clone();
+    let tab_for_motion = tab.downgrade();
     drop_target.connect_motion(move |_, x, _y| {
+        let Some(tab_for_motion) = tab_for_motion.upgrade() else {
+            return gtk::gdk::DragAction::empty();
+        };
         let width = tab_for_motion.width();
         let after = if width > 0 {
             x > (width as f64) / 2.0
@@ -2688,14 +2835,17 @@ fn attach_tab_dnd_handlers(
         }
         gtk::gdk::DragAction::MOVE
     });
-    let tab_for_leave = tab.clone();
+    let tab_for_leave = tab.downgrade();
     drop_target.connect_leave(move |_| {
+        let Some(tab_for_leave) = tab_for_leave.upgrade() else {
+            return;
+        };
         tab_for_leave.remove_css_class("flowmux-pane-tab-drop-before");
         tab_for_leave.remove_css_class("flowmux-pane-tab-drop-after");
     });
     let target_pane = pane_id;
     let target_surface = surface_id;
-    let tab_for_drop = tab.clone();
+    let tab_for_drop = tab.downgrade();
     let dispatch_tab_drop = callbacks.dispatch_tab_drop.clone();
     let position_of_surface_cb = callbacks.position_of_surface_in_pane.clone();
     let saw_target_for_drop = saw_tab_drop_target.clone();
@@ -2703,6 +2853,9 @@ fn attach_tab_dnd_handlers(
     let split_candidate_for_drop = split_candidate.clone();
     let is_ssh_pane = callbacks.is_ssh_pane.clone();
     drop_target.connect_drop(move |_, value, x, _y| {
+        let Some(tab_for_drop) = tab_for_drop.upgrade() else {
+            return false;
+        };
         tracing::debug!(%target_pane, %target_surface, "tab drop fired");
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-before");
         tab_for_drop.remove_css_class("flowmux-pane-tab-drop-after");
@@ -2863,12 +3016,15 @@ fn install_macos_tab_drag_fallback(
     gesture.set_button(gtk::gdk::BUTTON_PRIMARY);
     let drag_origin = Rc::new(Cell::new(None::<(f64, f64)>));
 
-    let tab_for_begin = tab.clone();
+    let tab_for_begin = tab.downgrade();
     let saw_target_for_begin = saw_tab_drop_target.clone();
     let committed_for_begin = committed_tab_drop.clone();
     let opened_for_begin = opened_new_window.clone();
     let origin_for_begin = drag_origin.clone();
     gesture.connect_drag_begin(move |_, x, y| {
+        let Some(tab_for_begin) = tab_for_begin.upgrade() else {
+            return;
+        };
         // The coordinate fallback owns the pointer sequence from the GTK tab;
         // hiding every native WebView here only blanks unrelated panes.
         saw_target_for_begin.set(false);
@@ -2878,7 +3034,7 @@ fn install_macos_tab_drag_fallback(
         set_tab_drag_visual_state(&tab_for_begin, true);
     });
 
-    let tab_for_end = tab.clone();
+    let tab_for_end = tab.downgrade();
     let resolve_pane = callbacks.pane_at_root_point.clone();
     let resolve_tab = callbacks.tab_at_root_point.clone();
     let workspace_of_pane = callbacks.workspace_of_pane.clone();
@@ -2892,7 +3048,9 @@ fn install_macos_tab_drag_fallback(
     let committed_for_end = committed_tab_drop.clone();
     let opened_for_end = opened_new_window.clone();
     gesture.connect_drag_end(move |_, dx, dy| {
-        set_tab_drag_visual_state(&tab_for_end, false);
+        if let Some(tab) = tab_for_end.upgrade() {
+            set_tab_drag_visual_state(&tab, false);
+        }
         if committed_for_end.get() || opened_for_end.get() {
             origin_for_end.take();
             return;
@@ -2903,6 +3061,9 @@ fn install_macos_tab_drag_fallback(
         if dx.hypot(dy) < 8.0 {
             return;
         }
+        let Some(tab_for_end) = tab_for_end.upgrade() else {
+            return;
+        };
         let Some(window) = tab_for_end.root().and_downcast::<gtk::Window>() else {
             return;
         };
@@ -2983,10 +3144,12 @@ fn install_macos_tab_drag_fallback(
         }
     });
 
-    let tab_for_cancel = tab.clone();
+    let tab_for_cancel = tab.downgrade();
     let origin_for_cancel = drag_origin.clone();
     gesture.connect_cancel(move |_, _| {
-        set_tab_drag_visual_state(&tab_for_cancel, false);
+        if let Some(tab) = tab_for_cancel.upgrade() {
+            set_tab_drag_visual_state(&tab, false);
+        }
         origin_for_cancel.take();
         saw_tab_drop_target.set(false);
         committed_tab_drop.set(false);
@@ -3094,18 +3257,18 @@ fn attach_pane_body_dnd(
     preview: gtk::DrawingArea,
     callbacks: &PaneCallbacks,
 ) {
-    let frame: gtk::Widget = widget.clone().upcast();
-
     // Preview: track the pointer during the drag and repaint the overlay.
     let motion = gtk::DropControllerMotion::new();
     motion.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
-        let frame = frame.clone();
         let zone = zone.clone();
         let preview = preview.clone();
         let saw_drop_target = callbacks.tab_drag_drop_seen.clone();
         let split_candidate = callbacks.tab_drag_split_candidate.clone();
         motion.connect_motion(move |motion, x, y| {
+            let Some(frame) = motion.widget() else {
+                return;
+            };
             if motion
                 .drop()
                 .is_some_and(|drop| tab_dnd_formats_accept_payload(&drop.formats()))
@@ -3168,7 +3331,10 @@ fn attach_pane_body_dnd(
     let committed_drop = callbacks.tab_drag_drop_committed.clone();
     let split_candidate = callbacks.tab_drag_split_candidate.clone();
     let is_ssh_pane = callbacks.is_ssh_pane.clone();
-    drop_target.connect_drop(move |_, value, x, y| {
+    drop_target.connect_drop(move |target, value, x, y| {
+        let Some(frame) = target.widget() else {
+            return false;
+        };
         let (w, h) = (frame.width() as f64, frame.height() as f64);
         let landed = landed_drop_zone(
             zone.get(),
@@ -3376,10 +3542,12 @@ fn pane_menu_button(pane_id: PaneId, callbacks: &PaneCallbacks) -> gtk::MenuButt
         label.set_xalign(0.0);
     }
     {
-        let popover = popover.clone();
+        let popover = popover.downgrade();
         let callback = callbacks.on_close_pane.clone();
         close.connect_clicked(move |_| {
-            popover.popdown();
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
             (callback.borrow_mut())(pane_id);
         });
     }
@@ -3627,16 +3795,18 @@ fn build_panel(
             // Toggle the .focused class on frame focus enter/leave. theme.rs
             // CSS draws a 1px border for the focused pane using the focus
             // border options.
-            let frame_in = frame.clone();
-            let frame_out = frame.clone();
+            let frame_in = frame.downgrade();
+            let frame_out = frame.downgrade();
             let focus = gtk::EventControllerFocus::new();
             focus.connect_enter(move |_| {
-                if !frame_in.has_css_class("focused") {
+                if let Some(frame_in) = frame_in.upgrade() {
                     frame_in.add_css_class("focused");
                 }
             });
             focus.connect_leave(move |_| {
-                frame_out.remove_css_class("focused");
+                if let Some(frame_out) = frame_out.upgrade() {
+                    frame_out.remove_css_class("focused");
+                }
             });
             pane_terminal.add_controller(focus);
 
@@ -3700,20 +3870,22 @@ fn build_panel(
             // row. On root, GTK4 EventControllerFocus emits enter/leave for the
             // widget plus descendants, so focus moves between the chrome row and
             // web_view are ignored and leave fires only when focus exits the pane.
-            let frame_in = frame.clone();
-            let frame_out = frame.clone();
+            let frame_in = frame.downgrade();
+            let frame_out = frame.downgrade();
             let on_focus = callbacks.on_focus.clone();
             let focus = gtk::EventControllerFocus::new();
             focus.connect_enter(move |_| {
                 let pane_id = browser_pane_id.get();
                 tracing::debug!(%pane_id, "browser pane focus enter");
-                if !frame_in.has_css_class("focused") {
+                if let Some(frame_in) = frame_in.upgrade() {
                     frame_in.add_css_class("focused");
                 }
                 (on_focus.borrow_mut())(pane_id);
             });
             focus.connect_leave(move |_| {
-                frame_out.remove_css_class("focused");
+                if let Some(frame_out) = frame_out.upgrade() {
+                    frame_out.remove_css_class("focused");
+                }
             });
             pane.root.add_controller(focus);
 
@@ -3775,19 +3947,21 @@ fn build_panel(
                 });
             }
 
-            let frame_in = frame.clone();
-            let frame_out = frame.clone();
+            let frame_in = frame.downgrade();
+            let frame_out = frame.downgrade();
             let on_focus = callbacks.on_focus.clone();
             let editor_pane_id = editor.clone();
             let focus = gtk::EventControllerFocus::new();
             focus.connect_enter(move |_| {
-                if !frame_in.has_css_class("focused") {
+                if let Some(frame_in) = frame_in.upgrade() {
                     frame_in.add_css_class("focused");
                 }
                 (on_focus.borrow_mut())(editor_pane_id.pane_id());
             });
             focus.connect_leave(move |_| {
-                frame_out.remove_css_class("focused");
+                if let Some(frame_out) = frame_out.upgrade() {
+                    frame_out.remove_css_class("focused");
+                }
             });
             editor.root.add_controller(focus.clone());
 
