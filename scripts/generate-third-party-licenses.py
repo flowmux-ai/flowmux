@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import subprocess
 
+CARGO_ABOUT_VERSION = "0.9.2"
+
 
 def group_licenses(licenses):
     groups = {}
@@ -46,6 +48,12 @@ def render(licenses):
 
 def main():
     root = Path(__file__).resolve().parent.parent
+    version = subprocess.check_output(["cargo", "about", "--version"], text=True).strip()
+    if version != f"cargo-about {CARGO_ABOUT_VERSION}":
+        raise SystemExit(
+            f"Expected cargo-about {CARGO_ABOUT_VERSION}, found {version}. Install with:\n"
+            f"cargo install cargo-about --version {CARGO_ABOUT_VERSION} --locked --features cli"
+        )
     inventory = json.loads(subprocess.check_output([
         "cargo", "about", "generate", "--config", "packaging/licenses/about.toml",
         "--workspace", "--locked", "--fail", "--format", "json",
