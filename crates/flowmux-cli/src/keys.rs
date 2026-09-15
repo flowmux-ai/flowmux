@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Named-key -> escape-byte mapping for the send-key command.
-//!
-//! Split out of `main.rs` (pure move; behavior unchanged).
 
 /// Translate a named terminal key (`Enter`, `Tab`, `ArrowUp`, …) into
 /// the byte sequence a PTY expects. A single character passes through as

@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! JavaScript snippets the controller injects into the page to
-//! implement snapshots, refs, clicks, fills, etc.
-//!
-//! Snapshot policy (cmux-equivalent): walk the DOM looking for nodes
-//! with an interactive role / content role, compute a CSS path for
-//! each, allocate a server-side `eN` token, and return a Markdown
-//! tree + a `refs` map. **The DOM is not mutated** — we never stamp
-//! `data-flowmux-ref` on the page. Subsequent action scripts take a
-//! CSS selector, not a token; the server's [`crate::refs::RefStore`]
-//! does the token→selector mapping before calling these.
-//!
-//! Each builder returns a string ready to hand to
-//! `WebView::evaluate_javascript`. Action helpers always evaluate to
-//! either the literal string `"ok"` on success or `"error: <reason>"`
-//! on a soft failure (e.g. selector matches no element).
+//! JavaScript for DOM snapshots and browser actions. The snapshot allocates
+//! `eN` tokens in page-side JavaScript without modifying the DOM. Rust stores
+//! the returned selector map and resolves tokens before evaluating actions.
 
 /// Walk the document for everything an agent might want to act on
 /// — links, buttons, inputs, headings, anything with an explicit
@@ -207,8 +195,7 @@ pub fn select_option_by_selector(selector: &str, value: &str) -> String {
     )
 }
 
-/// Scroll the element matched by `selector` into view, with a
-/// sub-pixel offset applied to the body afterwards.
+/// Center the element, then scroll the window by the given pixel offsets.
 pub fn scroll_by_selector(selector: &str, x: i32, y: i32) -> String {
     format!(
         r#"(function() {{
@@ -249,7 +236,7 @@ pub fn value_of_selector(selector: &str) -> String {
 }
 
 /// Read an arbitrary attribute. Returns the empty string if the
-/// element exists but the attribute does not (matches DOM behavior).
+/// element exists but the attribute does not.
 pub fn attr_of_selector(selector: &str, name: &str) -> String {
     format!(
         r#"(function() {{
@@ -262,9 +249,9 @@ pub fn attr_of_selector(selector: &str, name: &str) -> String {
     )
 }
 
-/// Send each character of `text` as a `keydown`+`input`+`keyup`
-/// triple to the active element. Mirrors what a user typing into a
-/// focused input would produce.
+/// Dispatch synthetic key events to the active element. Inputs and textareas
+/// append to their value and receive input/change events; native editing
+/// behavior such as selection replacement is not simulated.
 pub fn type_keys(text: &str) -> String {
     format!(
         r#"(function() {{
@@ -361,8 +348,7 @@ pub fn check_by_selector(selector: &str) -> String {
 }
 
 /// Set a checkbox's `checked` to false and dispatch `change`.
-/// (Radio buttons can only be deselected by selecting another radio in
-/// the same group, so this is a no-op for `<input type="radio">`.)
+/// Returns `"error: not a checkbox"` for radios and other element types.
 pub fn uncheck_by_selector(selector: &str) -> String {
     format!(
         r#"(function() {{
@@ -452,9 +438,7 @@ pub fn press_key(key: &str) -> String {
     )
 }
 
-/// Conservative JS string escaper — covers the cases the agent
-/// surfaces actually pass us (URLs, names, free text). Doesn't try
-/// to be a general-purpose JS escaper, but is safe for what we use.
+/// Escape text embedded inside a double-quoted JavaScript string literal.
 fn js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Browser pane placeholder for targets without WebKitGTK.
+//! Browser placeholder for targets other than Linux and macOS.
 
 use crate::ui::pane_terminal::PaneCallbacks;
 use flowmux_browser::{RefScope, RefStore};

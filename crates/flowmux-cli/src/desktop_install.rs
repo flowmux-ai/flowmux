@@ -15,9 +15,8 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Freedesktop application id — must match the launcher Exec target and
-/// `StartupWMClass` so libwayland / mutter associate the running window
-/// with the entry. Mirrors the .deb assets layout.
+/// Freedesktop application id, matching the desktop filename and
+/// `StartupWMClass` so the compositor can associate the running window.
 pub const APP_ID: &str = "com.flowmux.App";
 
 /// `.desktop` template embedded at compile time. Packaged installs use it as

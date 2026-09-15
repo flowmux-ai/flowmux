@@ -2,8 +2,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-# GUI crates require GTK4 system headers; default to headless members so
-# `cargo check` works on a fresh Ubuntu before `apt install libgtk-4-dev`.
+# Default cargo commands select crates that do not require GTK system headers.
 default-members = [
     "crates/flowmux-core",
     "crates/flowmux-config",
@@ -37,10 +36,8 @@ serde_json = "1"
 sha2 = "0.10"
 uuid = { version = "1", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-# `rustls-tls-native-roots` is what makes the usage fetch work behind a
-# TLS-inspecting corporate proxy: the bundled webpki roots alone reject the
-# proxy's private CA with `UnknownIssuer`. Both root sets are enabled so hosts
-# with no system trust store still validate public certificates.
+# Use system roots for private CAs and bundled roots when the system store
+# lacks a public CA needed by a provider endpoint.
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",

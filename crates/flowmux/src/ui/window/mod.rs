@@ -310,20 +310,16 @@ fn custom_command_shell_line(
     Some(parts.join(" "))
 }
 
-/// Agent bar state: the live-agent overview widget plus the set of surfaces
-/// currently flagged for attention. Grouped out of two flat `WindowController`
-/// fields.
+/// Agent overview and surfaces currently flagged for attention.
 #[derive(Clone)]
 struct AgentBarState {
-    /// The agent bar widget shown above the content area.
+    /// The live-agent overview widget.
     bar: AgentBar,
     /// Surfaces flagged for attention (e.g. an agent awaiting input).
     attentions: Rc<RefCell<HashSet<SurfaceId>>>,
 }
 
-/// Cohesive file-browser state, grouped out of five flat `WindowController`
-/// fields. Every terminal pane can reveal an in-pane file browser; this holds
-/// the shared panel plus the per-pane and focus-restore bookkeeping.
+/// Shared file-browser panel and per-pane focus/state bookkeeping.
 #[derive(Clone)]
 struct FileBrowserState {
     /// Pane that had focus when the browser opened, so focus can be restored on close.
@@ -2405,11 +2401,7 @@ impl WindowController {
             .retain(|surface| !surfaces.contains(surface));
     }
 
-    /// Show a modal "Are you sure you want to close this workspace?"
-    /// dialog and resolve to the user's choice. Used by every path that
-    /// can drop a workspace (sidebar X click, last-pane Ctrl+W,
-    /// last-tab close) so the user always confirms an irreversible
-    /// teardown of the workspace's running PTYs and browser state.
+    /// Confirm workspace teardown; callers can skip this for programmatic removal.
     async fn confirm_close_workspace(&self, id: WorkspaceId) -> bool {
         let title = match self.store.get_workspace(id).await {
             Some(ws) => ws.display_title().to_string(),
@@ -3139,17 +3131,7 @@ pub(crate) fn shorten_cwd_path(path: &std::path::Path) -> String {
     format!(".../{}", last3.join("/"))
 }
 
-/// Inject cookies into the default WebKit network session.
-///
-/// Real injection goes through `WebKit.NetworkSession.cookie_manager()`
-/// → `CookieManager.add_cookie(&soup::Cookie, ...)`. The `soup::Cookie`
-/// type is only re-exported from webkit6 when the `soup3` feature is
-/// enabled (which in turn pulls in libsoup-3). To keep the default
-/// build minimal we record the cookies that *would* be injected and
-/// return the count; flipping `flowmux/Cargo.toml` to
-/// `webkit6 = { version = "0.4", features = ["soup3"] }` and replacing
-/// the body below with `manager.add_cookie(...)` calls is the only
-/// change needed when we ship cookie import to users.
+/// Placeholder: log cookie metadata and return the count without injecting cookies.
 fn inject_cookies_into_webkit(cookies: &[flowmux_cookies::Cookie]) -> Result<usize, String> {
     let mut count = 0;
     for c in cookies {
@@ -3466,17 +3448,9 @@ impl ClipboardToast {
     }
 }
 
-/// Evaluate a script on `browser`'s WebView and forward the result
-/// through `ack`. When `ok_string_required` is true, the script's
-/// returned string must be exactly `"ok"` for the ack to resolve to
-/// `BrowserActionResult::Ok` — anything else (including the
-/// `"error: …"` strings flowmux_browser scripts use) becomes an Err.
-/// When false, the raw string is forwarded so the caller can parse
-/// JSON (Snapshot) or read a value back (Text / Value / Attr).
 /// Resolve an agent-supplied ref token (e.g. `e3` or `@e3`) to a CSS
 /// selector via the browser pane's [`flowmux_browser::RefStore`].
-/// Returns a friendly error string when the ref isn't bound — the
-/// agent then knows to take a fresh `snapshot --interactive` first.
+/// Return an error when the ref is absent so the caller can take a fresh snapshot.
 fn resolve_ref(
     browser: &crate::ui::browser_pane::BrowserPane,
     ref_id: &str,
@@ -6294,7 +6268,6 @@ mod tests {
         // surface.title is truncated ("DynamicGenerati...").
         assert!(surface.title.ends_with("..."));
         let surface_id = surface.id;
-        // mut not actually needed, kept for clarity.
         surface.title_locked = false;
         let pane_id = PaneId::new();
         let ws = flowmux_core::Workspace {
@@ -7566,14 +7539,8 @@ mod tests {
         assert!(store.surface_title(dst_pane, moved_surface).await.is_some());
     }
 
-    /// Regression: closing the split sibling must keep the surviving pane's
-    /// underlying terminal widget instance alive. Pane-level widgets (the
-    /// `gtk::Frame` and the `gtk::DrawingArea` it wraps) own the live PTY child
-    /// process, so any path that swaps them out kills running programs like
-    /// claude / codex / shells. The earlier `rerender_workspace` fallback did
-    /// exactly that. This test pins the contract for the incremental path:
-    /// the same widget instance survives split, survives close-of-sibling,
-    /// and the pane's terminal is reachable through the registry.
+    /// Splitting and closing a sibling must preserve the original terminal widget
+    /// and its live PTY rather than rebuilding the pane.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn closing_split_sibling_preserves_surviving_pane_terminal_widget_identity() {
@@ -9560,10 +9527,6 @@ mod tests {
             "rapid push+push+activate must end with an empty unread set",
         );
 
-        // Following no-op activation must keep things at 0 even though
-        // the previous publisher task may still be running in the
-        // background (no D-Bus in tests, so connect fails and the task
-        // exits gracefully).
         controller
             .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
             .await;
@@ -9979,9 +9942,6 @@ mod tests {
             }
         }
 
-        // Final state: every push has been ack'd through the periodic
-        // ActivateWorkspace sweeps, but the very last sweep happened at
-        // i = 199 (when (199+1) % 50 == 0), so unread_count is 0.
         assert_eq!(
             controller.notifications.unread_count(),
             0,
@@ -10185,24 +10145,13 @@ mod tests {
         assert_invariant("at end");
     }
 
-    /// Burst of `RefreshLauncherBadge` commands queued back-to-back
-    /// must not panic, hang, or leave the busy/dirty serialization
-    /// flags wedged. The publisher coalesces overlapping refreshes; if
-    /// it ever loses track of `badge_dirty`, the dock would freeze on a
-    /// stale count under bursty traffic. We can't observe the actual
-    /// LauncherEntry signal in tests (no D-Bus) but we can pin that
-    /// every dispatch returns cleanly and the in-store count never
-    /// drifts from the computed unread set.
+    /// Repeated badge-refresh dispatches must leave local notification counts unchanged.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn stress_refresh_burst_is_safely_coalesced() {
         let (controller, ws_id, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.StressRefreshBurst").await;
         push_notification(&controller, Some(pane), Some(ws_id), "x").await;
-        // 100 back-to-back refresh commands. The publisher's internal
-        // busy/dirty flag must coalesce these into "publish at most a
-        // small fixed number of times" — but we don't peek at the
-        // flags here; we only check the dispatcher itself stays sane.
         for _ in 0..100 {
             controller.dispatch(GtkCommand::RefreshLauncherBadge).await;
         }
@@ -10211,8 +10160,6 @@ mod tests {
             1,
             "no refresh command should ever mutate the store; the count must remain 1",
         );
-        // Now ack and burst again — the publisher must not get stuck
-        // on the previous batch.
         controller
             .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
             .await;

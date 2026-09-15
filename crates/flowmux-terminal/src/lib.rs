@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Headless terminal support for flowmux: the PTY layer, agent env
 //! injection, terminal input-mode parsing, and a shared color type. The GTK
-//! layer renders with VTE, so this crate no longer carries a VT core.
+//! layer renders with VTE.
 
 use flowmux_core::{PaneId, SurfaceId, WorkspaceId};
 use std::os::unix::fs::PermissionsExt;
@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Env vars flowmux injects into every PTY spawn so terminal-side agents
 /// (claude, codex, opencode, …) can discover their own pane and the
-/// daemon socket without explicit flags. Mirrors cmux's
-/// `GhosttyTerminalView` env injection — we only swap the `CMUX_` prefix
-/// for `FLOWMUX_`.
+/// daemon socket without explicit flags.
 ///
 /// Variables produced:
 /// * `FLOWMUX_PANE_ID` — leaf pane (split-tree node). Multiple tab
@@ -237,9 +235,7 @@ mod tests {
 
     #[test]
     fn agent_pty_env_pane_and_surface_can_differ() {
-        // The previous flowmux build aliased pane = surface; that
-        // collapsed multi-tab routing because tab A and tab B in the
-        // same pane shared one env. Now they differ on purpose.
+        // Tabs in one pane need distinct surface IDs for notification routing.
         let pane = PaneId::new();
         let surface = SurfaceId::new();
         let env = agent_pty_env(pane, surface, WorkspaceId::new(), Path::new("/x"), None);

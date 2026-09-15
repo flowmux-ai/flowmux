@@ -34,16 +34,18 @@ FLOWMUX_PANE_ID         <uuid>
 FLOWMUX_SURFACE_ID      <uuid>     (specific tab surface inside the pane)
 FLOWMUX_WORKSPACE_ID    <uuid>
 FLOWMUX_TAB_ID          <uuid>     (alias of FLOWMUX_WORKSPACE_ID)
-FLOWMUX_SOCKET_PATH     /run/user/.../flowmux.sock
+FLOWMUX_SOCKET_PATH     /run/user/.../flowmux-<pid>.sock
 FLOWMUX_BUNDLED_CLI_PATH /usr/local/bin/flowmux   (optional)
 ```
 
-If `FLOWMUX_PANE_ID` is set, you are inside flowmux. Use the flowmux browser
-flow below.
+If `FLOWMUX_PANE_ID` is set, you are inside a local flowmux PTY. Use the
+flowmux browser flow below. SSH remote shells do not inherit this context;
+control their workspace from a local CLI with explicit workspace IDs.
 
 ## Standard workflow
 
-Web work follows the same shape every time:
+The shell examples use `jq` to extract the returned pane ID (`sudo apt
+install jq` on Ubuntu). Web work follows the same shape every time:
 
 ```bash
 # 1. Open a browser pane next to the terminal and capture its id. flowmux
@@ -64,8 +66,9 @@ flowmux browser wait pane:$PANE --ready-state complete
 # when it prints false.
 
 # 3. Take an interactive snapshot. The result is a Markdown tree with
-#    `eN` ref tokens, plus a refs map carrying selectors. Refs are only
-#    valid until the next snapshot for the same pane.
+#    `eN` ref tokens, plus a refs map carrying selectors. Refs belong to
+#    the active browser tab. Take a fresh snapshot after switching tabs,
+#    navigation, page changes, or another snapshot.
 flowmux --json browser snapshot pane:$PANE
 
 # 4. Act on the page using ref tokens.
@@ -119,10 +122,10 @@ the user can see what the agent is doing.
 
 ## Beyond the browser: terminal, layout & context
 
-The same `flowmux` CLI also drives terminals, panes, and tabs. Every
-pane argument accepts `pane:<uuid>` or a bare uuid, and falls back to
-`$FLOWMUX_PANE_ID` when omitted, so these are one-line calls from inside
-a pane. Add `--json` for machine-readable output.
+The same `flowmux` CLI also drives terminals, panes, and tabs. Pane IDs accept
+`pane:<uuid>` or a bare UUID. Commands with optional pane arguments use
+`$FLOWMUX_PANE_ID`; commands such as `send-keys` still require an explicit ID.
+Check `flowmux <command> --help` for each command. Add `--json` for structured output.
 
 ```bash
 # Context discovery — where am I, and what is supported?
@@ -149,12 +152,14 @@ flowmux close-tab  <surface> --pane $P  # close a tab (refuses the last tab of t
 
 The `send-keys` + `read-screen` pair is the core terminal loop: launch
 or feed a command in another pane, then read its output to decide what
-to do next. `close-*` verbs refuse the case that would destroy a
-workspace, so they never pop a confirmation dialog or block your call.
+to do next. `close-pane` and `close-tab` refuse to remove a workspace's final
+pane/tab. A pane containing unsaved editor documents can still display a
+confirmation dialog and wait for a user decision; do not treat a pending
+close request as successful or bypass the unsaved-work prompt.
 
 *`read-screen` reads the viewport directly from the VTE terminal buffer, so
-it works in every build (no feature flag); it only returns not-supported for
-a pane that has no terminal surface (e.g. a browser tab).
+it needs no optional terminal feature. A pane without a terminal surface
+cannot supply terminal output.
 
 ## Claude Code session messaging
 

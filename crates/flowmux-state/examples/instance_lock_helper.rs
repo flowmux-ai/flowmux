@@ -18,8 +18,7 @@ fn main() {
 
     match mode.as_str() {
         "hold" => {
-            // Block until parent closes our stdin so the lock stays
-            // held for the duration of the contender's lock attempt.
+            // Hold the lock until the parent sends a byte or closes stdin.
             let mut buf = [0u8; 1];
             let _ = std::io::stdin().read(&mut buf);
         }

@@ -24,6 +24,9 @@ is not inside a flowmux PTY — fall back to whatever the user expects
 
 ## Standard loop
 
+The shell example uses `jq` to read the returned pane ID; install it first
+if absent (`sudo apt install jq` on Ubuntu).
+
 ```bash
 # Open. If a browser pane already exists to the right, the URL is
 # added there as a tab; otherwise flowmux splits the source pane.

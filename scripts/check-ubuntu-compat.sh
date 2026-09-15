@@ -3,12 +3,9 @@
 #
 # Docker-backed compatibility smoke check for the Ubuntu support matrix.
 #
-# Ubuntu 24.04 and 26.04 have native GTK4 / libadwaita / WebKitGTK 6 packages,
-# so this script builds the GUI and runs it under Xvfb, then verifies CLI and
-# terminal I/O against the live daemon. Ubuntu 22.04 remains the Flatpak target
-# because its native GTK4 / libadwaita floor is too low for the GUI crate (the
-# because its native GTK4 / libadwaita / VTE floor is too low for the GUI crate).
-# the script verifies that expected version gap.
+# Ubuntu 24.04 and 26.04 use distro packages for native GUI smoke checks under
+# Xvfb. On 22.04, check that GTK/libadwaita remain below the native build floor;
+# use the Flatpak GNOME runtime there.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,7 +56,6 @@ curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal >/dev/null
 . "$HOME/.cargo/env"
 echo "rustc $(rustc --version)"
-# The GUI build uses the distro VTE package; no Zig toolchain is required.
 CARGO_HOME=/tmp/cargo CARGO_TARGET_DIR=/tmp/flowmux-target \
     cargo build --manifest-path /workspace/Cargo.toml \
     -p flowmux -p flowmux-cli --locked

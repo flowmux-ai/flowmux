@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Chromium-family browsers (Chrome, Chromium, Brave, Edge, Arc, ...).
-//!
-//! Profile layouts share a SQLite file at:
-//!
-//!   <browser-config>/Default/Cookies
-//!
-//! On Linux the `encrypted_value` BLOB is wrapped with a key the
-//! browser stores in the Secret Service (libsecret). Until we ship a
-//! libsecret-backed unwrapper, this source detects the file but
-//! returns [`Error::EncryptedValuesUnsupported`] from `list_cookies`
-//! so the GUI can show a clear status string instead of silently
-//! exporting empty values.
+//! Chromium-family profile detection. Cookie extraction returns
+//! [`Error::EncryptedValuesUnsupported`] when the cookie database exists.
 
 use crate::cookie::Cookie;
 use crate::source::{BrowserId, Error, Source};

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Background polling: terminal cwd, agent processes, launcher badge.
-//!
-//! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
 
@@ -12,14 +10,8 @@ unsafe extern "C" {
     fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
 }
 
-/// glibc never returns burst-freed main-arena memory to the OS on its own:
-/// long-lived small allocations pin the heap top, and the dynamic mmap
-/// threshold routes multi-MB transients through sbrk, so a single allocation
-/// burst on the GTK main thread leaves RSS pinned at its high-water mark for
-/// the lifetime of the process (observed: 2.6 GB RSS with ~50 KB of live
-/// terminal text). `malloc_trim(0)` also releases free pages in the middle of
-/// the arena, costs about a millisecond, and is a no-op when nothing is
-/// reclaimable.
+/// Release reclaimable glibc arena pages after transient GTK allocation bursts.
+/// Long-lived allocations can otherwise keep RSS above the live allocation size.
 #[cfg(target_env = "gnu")]
 pub(super) fn install_heap_trim() {
     glib::timeout_add_seconds_local(60, || {

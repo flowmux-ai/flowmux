@@ -198,8 +198,7 @@ fi
 echo "==> building flowmux (fast profile)"
 cargo build --profile fast -p flowmux -p flowmux-cli -p flowmux-md-viewer
 
-# The first directory installed to is the one the .desktop entry points at, so
-# launching from the dock runs the same binary a shell on PATH would.
+# The desktop entry uses the first installation directory.
 install -d "$HOME/.local/bin"
 PRIMARY_BIN_DIR=""
 for dir in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
@@ -220,9 +219,8 @@ done
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_ID="com.flowmux.App"
 
-# `Exec=flowmux` relies on the session PATH, which does not always include
-# ~/.local/bin (and never includes ~/.cargo/bin) for launcher-started apps.
-# Rewrite it to the absolute path so the dock entry works regardless.
+# Launcher sessions may omit the user bin directories from PATH. Use an
+# absolute executable path in the desktop entry.
 install -d "$DATA_DIR/applications"
 DESKTOP_EXEC="$PRIMARY_BIN_DIR/flowmux"
 DESKTOP_EXEC=${DESKTOP_EXEC//\\/\\\\\\\\}

@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "GPL-3.0-or-later",
+    "LGPL-2.1-or-later",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MITNFA",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+
+private = { ignore = true }
+
+# Preserve distinct upstream notices that automatic per-license selection drops.
+# Recheck these files and checksums when updating the corresponding crates.
+[ring.clarify]
+license = "Apache-2.0 AND ISC"
+
+[[ring.clarify.files]]
+path = "LICENSE-BoringSSL"
+license = "Apache-2.0"
+checksum = "005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d"
+
+[[ring.clarify.files]]
+path = "src/polyfill/once_cell/LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+
+[[ring.clarify.files]]
+path = "crypto/fipsmodule/ec/ecp_nistz384.h"
+license = "ISC"
+checksum = "7aeb84e1d64b1018d8e0c89b97ae1e603f31f9cd4786104ce5932f4d425bb1d7"
+
+[[ring.clarify.files]]
+path = "src/ec/curve25519/ed25519.rs"
+license = "ISC"
+checksum = "7283a6f5f6a7a69f3a3e3e862ab81b9da49a9a03c3607a167500f3f9ab698a14"
+
+[[ring.clarify.files]]
+path = "src/arithmetic/n0.rs"
+license = "ISC"
+checksum = "209b3cb860fcf5ee59ce3bd9796e0c1efd05b46fda5dab4930ccf892d5234472"
+
+[[ring.clarify.files]]
+path = "src/deprecated_constant_time.rs"
+license = "ISC"
+checksum = "440c891a53710f32659e05bf9b68fb81674aca8fabed6cd590a7a03782161255"
+
+[[ring.clarify.files]]
+path = "src/ec/curve25519.rs"
+license = "ISC"
+checksum = "01b7f21eb84b2bf3e21f20f0dca2a5def2e28bf8cd13b995630fa6667c53694b"
+
+[[ring.clarify.files]]
+path = "src/error/into_unspecified.rs"
+license = "ISC"
+checksum = "11e186cc07b445d008b539216235e29e433e2a319b228c772c7d2fb19c67c488"
+
+[[ring.clarify.files]]
+path = "src/io.rs"
+license = "ISC"
+checksum = "b1b5060b07ca97130a752d3fb7e4a3fb7231bec3526e656c87fe8c028190ffd4"
+
+[[ring.clarify.files]]
+path = "src/digest/sha2/mod.rs"
+license = "ISC"
+checksum = "a00f81158f7fcb1c5e46503512eaecc32f9c67b6a6f60235c0a906756d1d0fd8"
+
+[[ring.clarify.files]]
+path = "src/polyfill/ptr.rs"
+license = "ISC"
+checksum = "f968c293be424b923cba2b82a8ad415d441a732fcef177a0114e3d2a949df52d"
+
+[[ring.clarify.files]]
+path = "src/tests/mod.rs"
+license = "ISC"
+checksum = "2c5791daa813a98bf2aa54bef5263738356784a8db0923550bf29e7b07e71ca1"
+
+[[ring.clarify.files]]
+path = "src/aead/overlapping/mod.rs"
+license = "ISC"
+checksum = "834affb61a8d930b5d05924330239bf783ab65170b8158f88c8fe30e680f712b"
+
+[[ring.clarify.files]]
+path = "src/arithmetic/limbs/aarch64/mod.rs"
+license = "ISC"
+checksum = "2c1631c98c8ff5a32973327f5ab1122ee5692088c529bc893de281113a088adb"
+
+[[ring.clarify.files]]
+path = "src/arithmetic/limbs/x86_64/mod.rs"
+license = "ISC"
+checksum = "d371541e71a20753361ddafc0c52efe955ddccd2b726d6e3462887a31e7d9ccd"
+
+[[ring.clarify.files]]
+path = "src/arithmetic/limbs512/mod.rs"
+license = "ISC"
+checksum = "0caed62cd744cf1a33ddd3ea42f601e95379426cdb2de31efedf3fa7cac37cf1"
+
+[[ring.clarify.files]]
+path = "src/arithmetic/limbs/mod.rs"
+license = "ISC"
+checksum = "2613bdbadb258d99633a16a66218d42ec4527e0ed98c58e3f16b91dfb3e9e1c0"
+
+[[ring.clarify.files]]
+path = "LICENSE-other-bits"
+license = "ISC"
+checksum = "f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f"
+
+[cfg_aliases.clarify]
+license = "MIT"
+
+[[cfg_aliases.clarify.files]]
+path = "NOTICES.md"
+license = "MIT"
+checksum = "1e2b7ade3fb228130408b9990cae6a7618eb314c75aa0b164bfe485d9d9756ee"
+
+[[cfg_aliases.clarify.files]]
+path = "LICENSE"
+license = "MIT"
+checksum = "31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812"
+
+[tracing-core.clarify]
+license = "MIT"
+
+[[tracing-core.clarify.files]]
+path = "LICENSE"
+license = "MIT"
+checksum = "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1"
+
+[[tracing-core.clarify.files]]
+path = "src/spin/LICENSE"
+license = "MIT"
+checksum = "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79"

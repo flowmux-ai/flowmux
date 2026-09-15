@@ -29,6 +29,9 @@ from Cargo metadata.
 Built-in theme colors and the default terminal palette retain their own
 licenses and attribution; see THIRD_PARTY_ASSET_NOTICES.md.
 
-The image viewer links the system ThorVG library (MIT), which is
-installed separately (see scripts/install-thorvg.sh) and, like GTK,
+Both third-party documents are under docs/legal/ in the source checkout
+and alongside this NOTICE in binary distributions.
+
+The optional image viewer loads the system ThorVG library (MIT) at runtime.
+It is installed separately (see scripts/install-thorvg.sh) and, like GTK,
 libadwaita, and WebKitGTK, retains its own distribution license.

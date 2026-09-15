@@ -1,14 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Async trait every concrete browser controller (WebKit pane,
-//! headless mock, future libcef binding, …) implements.
-//!
-//! The methods are deliberately fine-grained — `click`, `fill`,
-//! `type_keys`, `press`, `select`, `scroll`, `text_of`, `value_of`,
-//! `attr_of` — so the IPC and CLI layers can map one flowmux verb to
-//! exactly one trait call.
-//!
-//! `async_trait` is used so the trait object stays usable
-//! (`Box<dyn BrowserController>`) for the IPC dispatcher.
+//! Async browser operations shared by native WebView controllers and test mocks.
 
 use crate::DomSnapshot;
 use async_trait::async_trait;

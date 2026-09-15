@@ -30,9 +30,6 @@ mod keys;
 mod output;
 mod pty_tee;
 mod request;
-// Bring each command module's handlers into crate-root scope so both `main`'s
-// dispatch and the `tests` module (via `use super::*`) reference them unqualified,
-// exactly as when they lived in this file. Glob form avoids per-item churn.
 use cmd_hooks::*;
 use cmd_ops::*;
 use keys::*;
@@ -136,10 +133,8 @@ enum Cmd {
 
     /// Send a desktop notification attached to a pane.
     ///
-    /// When `--pane` is omitted the daemon picks up `FLOWMUX_PANE_ID`
-    /// from the calling PTY (set by flowmux at spawn time), so
-    /// hooks running inside a flowmux pane can omit the flag and still
-    /// have the click-through routed to the right pane.
+    /// When `--pane` is omitted, the CLI reads `FLOWMUX_PANE_ID` from the
+    /// calling PTY so notification clicks can return to that pane.
     Notify {
         #[arg(long)]
         pane: Option<PaneId>,
@@ -393,9 +388,11 @@ enum Cmd {
         name: String,
     },
 
-    /// Import cookies from a host browser into the in-app browser jar.
+    /// Extract and count host-browser cookies. Firefox extraction is supported;
+    /// cookies are not yet inserted into the in-app browser session.
     ImportCookies {
-        /// Browser slug: firefox, chrome, chromium, brave, edge, arc.
+        /// Browser slug. Firefox supports extraction; Chromium-family sources
+        /// currently support profile detection only.
         #[arg(long)]
         from: String,
         /// Optional domain substring filter.
@@ -403,7 +400,7 @@ enum Cmd {
         domain: Option<String>,
     },
 
-    /// List browsers we can import from (and whether we detect them).
+    /// List known host-browser sources and detected profiles.
     ListBrowsers,
 
     /// Theme management.
@@ -446,11 +443,7 @@ enum Cmd {
     Fix,
 }
 
-/// `flowmux browser <op>` — the documented agent-facing browser surface.
-///
-/// Every pane argument accepts `pane:<uuid>` or a bare pane UUID. Refs (`eN`) come from the
-/// most recent `browser snapshot` of the same pane and are resolved
-/// server-side via the daemon's `RefStore`.
+/// Notification listing, navigation, and read-state operations.
 #[derive(Subcommand)]
 enum NotificationOp {
     /// List notifications, oldest first.
@@ -477,8 +470,9 @@ enum NotificationOp {
 
 #[derive(Subcommand)]
 enum BrowserOp {
-    /// Open URL in a new in-app browser pane (splits next to the
-    /// currently focused pane). Default split direction is right.
+    /// Open URL in an in-app browser tab, reusing a right-sibling browser
+    /// pane when available. Otherwise split beside the calling pane (or the
+    /// focused pane outside flowmux); the default split direction is right.
     Open {
         url: String,
         #[arg(long, conflicts_with = "down")]
@@ -645,9 +639,8 @@ enum HooksOp {
         /// Limit installation to specific agents. Omit to do all.
         #[arg(long, value_parser = ["claude", "codex", "opencode", "gemini", "antigravity"])]
         agent: Vec<String>,
-        /// Path of the `flowmux` binary that the installed hook
-        /// commands should invoke. Defaults to the current `flowmux`
-        /// binary on PATH (resolved at install time).
+        /// Executable for the installed hook commands. Defaults to the running
+        /// `flowmuxctl` binary, falling back to `flowmux` on PATH.
         #[arg(long)]
         flowmux_bin: Option<String>,
     },
@@ -723,7 +716,7 @@ enum ClaudeHookEvent {
     SessionStart,
     /// Session ended — clears the agent presence for this surface.
     SessionEnd,
-    /// Claude is about to call a tool — marks the agent Running.
+    /// Claude is about to call a tool — reports activity or an input wait.
     PreToolUse,
     /// Claude finished a tool — clears a resolved input/permission wait.
     PostToolUse,
@@ -972,9 +965,8 @@ async fn main() -> anyhow::Result<()> {
         // is up and from inside `flatpak run` sandboxes.
         Cmd::Identify => return run_identify(cli.json),
         Cmd::Capabilities => return run_capabilities(cli.json),
-        // `Hooks` runtime handlers (Claude / Codex / OpenCode / Gemini events)
-        // talk to the daemon themselves; `Hooks::Setup`, `Uninstall`,
-        // and `Doctor` are pure file edits with no daemon round-trip.
+        // Hook runtime handlers connect to the daemon themselves. Setup and
+        // uninstall only edit configuration; hooks doctor also probes the socket.
         Cmd::Hooks { op } => return run_hooks_op(op, cli.socket.clone()).await,
         // `Doctor` and `Fix` are top-level convenience commands that
         // wrap the per-subsystem doctor/install paths. `Doctor` may
@@ -988,7 +980,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", flowmux_ipc::tmux_compat::SHIM_VERSION_LINE);
             return Ok(());
         }
-        Cmd::PtyTee { .. } => {} // handled below, after the connect block
+        Cmd::PtyTee { .. } => {}
         _ => {}
     }
 

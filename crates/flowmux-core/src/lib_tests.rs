@@ -170,12 +170,7 @@ fn pane_content_normalizes_legacy_terminal_number_titles() {
 
 #[test]
 fn pane_content_resets_stale_terminal_titles_on_normalize() {
-    // Previously this test asserted the opposite — that an unlocked
-    // terminal whose title didn't match the cwd was AUTO-LOCKED.
-    // That kept stale OSC 0/2 titles ("Claude Code", "codex foo")
-    // alive across app restarts. The current behavior resets the
-    // title back to the cwd-derived form and stays unlocked, so the
-    // next process inside the tab can paint a fresh title.
+    // Unlocked process titles must not become permanent user titles on reload.
     let custom = PaneSurface::terminal("server", Some("/tmp/project".into()));
     let custom_id = custom.id;
     let mut content = PaneContent::Tabs {
@@ -949,9 +944,6 @@ fn find_surface_walks_into_split_branches() {
     assert_eq!(found.title, "RBrowser");
 }
 
-/// Pane-internal tab reorder scenarios. Covers preserving the active tab by
-/// surface_id, moving mixed terminal/browser tabs, index clamping, and no-op
-/// branches.
 #[test]
 fn reorder_surface_moves_first_to_last_and_preserves_active() {
     let pane_id = PaneId::new();
@@ -1291,8 +1283,6 @@ fn workspace_loads_legacy_state_without_custom_title() {
     assert_eq!(ws.display_title(), "old-project");
 }
 
-// ----- right-sibling browser reuse (Phase 2) ----------------------
-
 fn term_leaf(id: PaneId) -> Pane {
     Pane::Leaf {
         id,
@@ -1437,8 +1427,8 @@ fn right_sibling_falls_through_to_outer_ancestor_when_immediate_right_is_termina
 
 #[test]
 fn right_sibling_returns_first_browser_in_complex_subtree() {
-    // Right subtree is itself split — pick the leftmost (DFS-first)
-    // browser leaf inside it, which is the visually "closer" one.
+    // DFS selects the first browser leaf in the right subtree; it does not
+    // compare geometric distances.
     let term_id = PaneId::new();
     let browser_a = PaneId::new();
     let browser_b = PaneId::new();
@@ -1494,7 +1484,7 @@ fn placement_strategy_serializes_as_snake_case() {
     assert_eq!(json, r#""reuse_right_sibling""#);
     let json = serde_json::to_string(&PlacementStrategy::SplitRight).unwrap();
     assert_eq!(json, r#""split_right""#);
-    // Round-trip both variants.
+    // Deserialize the reuse variant.
     let back: PlacementStrategy = serde_json::from_str(r#""reuse_right_sibling""#).unwrap();
     assert_eq!(back, PlacementStrategy::ReuseRightSibling);
 }

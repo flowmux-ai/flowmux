@@ -108,11 +108,7 @@ impl WindowController {
                         let _ = ack.send(Err(format!("pane not found: {pane}")));
                     }
                     Some(flowmux_daemon::CloseOutcome::PaneRemoved { workspace }) => {
-                        // Incremental collapse: keep every other pane's
-                        // widget instance (and therefore every running
-                        // PTY shell + browser nav state) intact. This
-                        // path replaces the prior `rerender_workspace`
-                        // that destroyed claude/codex sessions on close.
+                        // Collapse incrementally to preserve sibling PTYs and browser state.
                         self.apply_close_pane_incremental_or_rerender(workspace, pane)
                             .await;
                         self.focus_after_close(workspace, pane).await;
@@ -120,11 +116,7 @@ impl WindowController {
                         let _ = ack.send(Ok(()));
                     }
                     Some(flowmux_daemon::CloseOutcome::SurfaceRemoved { workspace }) => {
-                        // close_pane removed the entire surface (workspace-
-                        // level tab) but the workspace still has at least
-                        // one other surface. Drop the registry pane entry
-                        // and rerender — surface switching is rare and
-                        // not in the user's reset complaint scope.
+                        // A workspace-level surface was removed; render its surviving surface.
                         if let Some(ws) = self.store.get_workspace(workspace).await {
                             self.rerender_workspace(&ws);
                             self.sync_workspace_agent_status_from_store(workspace).await;
@@ -237,13 +229,7 @@ impl WindowController {
                 }
                 self.refresh_agent_screen_status(surface, None).await;
                 self.refresh_file_browser_from_focus().await;
-                // After a surface is activated through click, IPC, or another
-                // path, move keyboard focus to the
-                // newly active widget: the terminal's gtk::DrawingArea or the
-                // browser's WebView. That lets typing go to the new tab's shell
-                // or page and keeps Tab as shell completion instead of tab-bar
-                // traversal. Defer one frame because the widget was just added
-                // to the stack.
+                // Focus the newly active surface after GTK has mounted it.
                 let registry = self.pane_registry.clone();
                 glib::idle_add_local_once(move || {
                     let r = registry.borrow();
@@ -266,11 +252,7 @@ impl WindowController {
                     let _ = ack.send(Err(format!("surface not found: {surface}")));
                     return;
                 }
-                // Closing the only tab in a leaf falls through to
-                // close_pane(pane) inside the store; if that pane is
-                // also the workspace's only pane, the workspace dies.
-                // Confirm in that exact case so an accidental Ctrl+W
-                // on the last tab does not nuke the workspace.
+                // The last tab of the last pane also removes its workspace.
                 let tabs = self.store.tab_count_in_pane(pane).await;
                 let panes = self.store.workspace_pane_count_for(pane).await;
                 if tabs == Some(1) {

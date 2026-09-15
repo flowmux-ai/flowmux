@@ -6,7 +6,7 @@
 //! Finder on macOS, Explorer under WSL, and whatever `xdg-open` resolves
 //! `inode/directory` to on other native builds.
 //!
-//! Two execution paths, picked at runtime:
+//! Execution paths, selected by platform and runtime environment:
 //!
 //! - WSL/WSLg: spawn `explorer.exe <windows-dir>` after translating the
 //!   Linux path through `wslpath -w`.

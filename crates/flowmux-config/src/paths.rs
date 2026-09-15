@@ -70,17 +70,12 @@ pub fn crash_dir() -> Option<PathBuf> {
 }
 
 /// True when the current process runs inside a Flatpak sandbox.
-///
-/// Detection mirrors the helper in `flowmux::ui::terminal_pane` —
-/// `FLATPAK_ID` is exported into every sandbox process and
-/// `/.flatpak-info` is unconditionally present at the sandbox root.
 pub fn is_flatpak_sandbox() -> bool {
     std::env::var_os("FLATPAK_ID").is_some() || std::path::Path::new("/.flatpak-info").exists()
 }
 
 /// `$HOME/.cache/flowmux/` — host-visible cache dir used as the
-/// runtime root for Flatpak builds. Returns `None` only when `$HOME`
-/// is unset, which on Linux desktops never happens in practice.
+/// runtime root for Flatpak builds. Returns `None` when `$HOME` is unset.
 pub fn host_visible_cache_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache").join("flowmux"))
 }
@@ -94,8 +89,7 @@ pub fn host_visible_cache_dir() -> Option<PathBuf> {
 /// It intentionally does not require changing `XDG_RUNTIME_DIR`,
 /// which would hide compositor sockets such as WSLg's Wayland socket.
 ///
-/// Outside Flatpak the legacy `flowmux.sock` under `$XDG_RUNTIME_DIR`
-/// stays in use so non-sandbox installs keep their existing wire-up.
+/// Outside Flatpak the stable filename is `flowmux.sock`.
 pub fn runtime_socket() -> PathBuf {
     if is_flatpak_sandbox() {
         if let Some(cache) = host_visible_cache_dir() {

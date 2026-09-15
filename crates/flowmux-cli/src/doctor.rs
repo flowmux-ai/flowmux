@@ -3,23 +3,13 @@
 //! every flowmux ↔ host integration and (for `fix`) re-applies the
 //! pieces the user is missing.
 //!
-//! Why a separate module: `agent::` covers the SKILL files and
-//! `hook_install::` covers each agent's lifecycle hook config. They
-//! were added incrementally and `flowmux agent doctor` / `flowmux
-//! hooks doctor` only show one half each. After every flowmux upgrade
-//! — and, just as often, after the user installs Claude / Codex /
-//! OpenCode / Antigravity / Cline for the first time on a host that already had flowmux —
-//! the user wants a single "is everything wired?" check plus a single
-//! "wire it" command. That's what this module gives them.
 //!
 //! Doctor never writes; `fix` does. Both share the same in-memory
 //! report shape so callers can render text or JSON.
 //!
-//! Browser-side checks live here too. They cover four things the
-//! user asked for explicitly: WebKitGTK env-var defaults the GUI sets
-//! at startup, the in-app browser data dir, host-browser detection
-//! (for the cookie importer), and a daemon ping that confirms a
-//! browser pane could be spawned at all.
+//! Browser checks inspect WebKit environment overrides, the browser data
+//! directory, and host browsers used for cookie import. A separate daemon
+//! ping checks IPC reachability.
 
 use crate::{agent, desktop_install, hook_install};
 use anyhow::Result;
@@ -91,7 +81,7 @@ fn colorize(s: &str, status: &Status, use_color: bool) -> String {
 }
 
 /// Decide whether to emit ANSI colours. Honours the de-facto `NO_COLOR`
-/// convention (https://no-color.org) and only colours when stdout is
+/// convention (<https://no-color.org>) and only colours when stdout is
 /// an interactive terminal — piping `flowmux doctor | tee` stays
 /// plain text so log files don't get unprintable bytes.
 fn color_enabled() -> bool {
@@ -133,9 +123,8 @@ impl Report {
     }
 }
 
-/// Synchronous slice of the doctor — runs every check that doesn't
-/// require the daemon. Pure file-system inspection, safe to call in
-/// tests with a fake `home`.
+/// Checks that do not need the daemon. Skill checks use the supplied home;
+/// other checks also read process environment, PATH, and platform directories.
 pub fn collect_offline(home: &Path, codex_home: Option<&Path>) -> Report {
     Report {
         sections: vec![
@@ -147,13 +136,10 @@ pub fn collect_offline(home: &Path, codex_home: Option<&Path>) -> Report {
     }
 }
 
-/// Full doctor — adds a daemon ping section if the socket is
-/// reachable. Async because the IPC client is async.
+/// Full doctor report, including a daemon connection and ping check.
 pub async fn collect(home: &Path, codex_home: Option<&Path>, socket: Option<PathBuf>) -> Report {
     let mut report = collect_offline(home, codex_home);
     let daemon_section = section_daemon(socket).await;
-    // Insert daemon section between agents and browser so the
-    // browser-pane check at the bottom can reference it.
     if let Some(idx) = report.sections.iter().position(|s| s.title == "Browser") {
         report.sections.insert(idx, daemon_section);
     } else {
@@ -1026,8 +1012,7 @@ pub fn run_fix(home: &Path, codex_home: Option<&Path>, flowmux_bin: &str) -> Fix
         }),
     }
 
-    // Hooks — install_install handles the "agent home missing → skip"
-    // case itself, so we surface its Skipped status verbatim.
+    // Hook installation handles missing agent homes and reports Skipped.
     for target in hook_install::HookTarget::ALL {
         match hook_install::install(*target, flowmux_bin) {
             Ok(report) => {

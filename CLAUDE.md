@@ -1,255 +1,116 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# CLAUDE.md
+# Developing flowmux
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Rust workspace, edition 2021, declared MSRV 1.93. The toolchain follows the
+`stable` channel. See [setup](docs/setup.md) for native dependencies and
+[contributing](.github/CONTRIBUTING.md) for license checks.
 
-## Build / run / test
+## Build and verify
 
-This is a Rust workspace (edition 2021, rust-toolchain pinned to `stable`,
-MSRV 1.93). All crates live under `crates/`. Most day-to-day commands run
-from the repo root.
+Run from the repository root:
 
-```bash
-# Type-check the headless crates (bare `cargo check` uses the workspace
-# `default-members`, which excludes the GTK GUI crate so this works before
-# `libgtk-4-dev` is installed). NOTE: `default-members` includes
-# `flowmux-terminal`; this only needs the Rust toolchain.
-cargo check
-
-# Type-check the GUI crate too (requires GTK4 + libadwaita + WebKitGTK
-# 6.0 dev packages plus VTE — see README "Build prerequisites").
-cargo check -p flowmux
-
-# Release build of all binaries (`flowmux`, `flowmuxctl`).
+```sh
+cargo check                         # default headless workspace members
+cargo check --workspace             # includes GTK applications
+cargo run -p flowmux                 # debug GUI
 cargo build --release --workspace
-
-# Debug GUI.
-cargo run -p flowmux
-
-# Full test suite. Several crates open GTK/D-Bus, so locally mirror CI:
-xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
-
-# Headless crates (no GTK) run fine without xvfb/dbus:
-cargo test -p flowmux-core
-cargo test -p flowmux-ipc -- --nocapture
-
-# Single test by name (substring match):
-cargo test -p flowmux-core title_is_shell_cwd_echo
-
-# Lint / format (toolchain ships rustfmt + clippy).
-cargo fmt --all
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+xvfb-run -a dbus-run-session -- cargo test --workspace --locked
 ```
 
-### Terminal backend: VTE
+The binaries are `flowmux` (GUI and CLI delegation), `flowmuxctl` (IPC client),
+`flowmux-md-viewer` (Markdown reader), and `flowmux-daemon` (headless handler).
+The GUI embeds its IPC server; normal desktop use needs no separate daemon.
+Runtime/UI fixes require the live verification described in [AGENTS.md](AGENTS.md).
 
-flowmux has a single terminal backend: the GTK VTE widget, wrapped by
-`flowmux/src/ui/ghostty_pane.rs` for compatibility with the existing pane
-wiring. `flowmux-terminal` is now headless support code only: PTY helpers,
-terminal input mode tracking, and shared color types. There is no extra compiler toolchain, C shim, or vendored terminal artifact. `read-screen` reads from VTE's
-text extraction API, enabled through the `v0_76` feature.
+The committed Monaco bundle supports Rust builds without Node.js. Frontend
+changes use `scripts/build-editor-assets.sh`; commit the rebuilt assets with
+the source changes. Preserve upstream license markers in generated bundles.
 
-CJK note: VTE owns terminal rendering and font fallback through the system
-GTK/Pango stack.
+## Implementation map
 
-flowmux targets Ubuntu 24.04 and later (native GTK4/libadwaita/WebKitGTK).
-`flowmux doctor` / `flowmux fix` audit and repair the on-host pieces (agent
-hooks, SKILL files, socket, browser data dir).
+| Area | Source |
+|---|---|
+| Workspace, pane, tab, and SSH domain types | `crates/flowmux-core/` |
+| Configuration, themes, keybindings, XDG paths, diagnostics | `crates/flowmux-config/` |
+| Persistent window state, instance locks, agent sessions | `crates/flowmux-state/` |
+| Shared state transitions and headless request handling | `crates/flowmux-daemon/` |
+| Unix socket protocol and tmux compatibility parsing | `crates/flowmux-ipc/` |
+| CLI commands, hooks, installers, PTY proxy | `crates/flowmux-cli/` |
+| PTY spawning, input modes, terminal environment | `crates/flowmux-terminal/` |
+| Browser operations, snapshots, selector references | `crates/flowmux-browser/` |
+| Editor document I/O, recovery, search, asset server | `crates/flowmux-editor/` |
+| OSC parsing and desktop notification transport | `crates/flowmux-notify/` |
+| Process inspection and Git/worktree operations | `crates/flowmux-procmon/`, `crates/flowmux-vcs/` |
+| Host cookie extraction and profile detection | `crates/flowmux-cookies/` |
+| GTK UI and IPC-to-UI dispatch | `crates/flowmux/` |
 
-### Image viewer: optional runtime ThorVG
+### GTK and async code
 
-The inline image viewer (`flowmux/src/ui/image_viewer.rs`) renders through
-[ThorVG](https://www.thorvg.org/). ThorVG is neither vendored nor link-time
-linked: `crates/flowmux/src/ui/thorvg.rs` is a hand-written `dlopen` shim (via
-`libloading`) binding the subset of the ThorVG C API the viewer uses. The
-library loads lazily on first use; `thorvg::available()` reports whether it was
-found, and `ThorvgEngine::init()` gates every render path — if ThorVG is absent
-it returns a "ThorVG is not installed" error the viewer displays. So flowmux
-builds and runs without ThorVG; only the image viewer is affected. There is no
-thorvg-sys / build-time dependency; to bind another C function add a field +
-`forward!` entry in `thorvg.rs`.
+GTK widgets stay on the main thread. The GUI's tokio IPC handlers send
+`GtkCommand` values over `async_channel`. The bridge types live in
+`crates/flowmux/src/bridge/`; the dispatch loop and handlers live in
+`crates/flowmux/src/ui/window/` and return oneshot replies when requested.
 
-The viewer needs a ThorVG built with the C API (`-Dbindings=capi`) and all
-loaders (`-Dloaders=all`). Distro packages (Debian `libthorvg-dev`, Fedora
-`thorvg`, Homebrew, …) work if built that way; Ubuntu (through 24.04) does not
-package it, so `scripts/install-thorvg.sh` builds v1.0.6 from source. PNG / JPEG
-/ WebP / SVG are decoded and rendered by ThorVG; Lottie plays frame by frame;
-GIF (no ThorVG loader) is decoded with the Rust `image` crate and handed to
-ThorVG to render. Whether a loader is available is a property of the installed
-ThorVG.
+Each GUI process binds a per-PID socket from
+`flowmux_config::paths::runtime_socket_for_pid`. PTYs receive that path in
+`FLOWMUX_SOCKET_PATH`, keeping requests in the originating window. The stable
+fallback path is a pointer for CLI calls made outside a pane. Use the shared
+path helpers, including their Flatpak handling.
 
-## Architecture
+### Surface backends
 
-flowmux is split into focused crates so the GTK GUI and headless tools
-can share core logic. Two binaries fall out of the workspace:
+`ui::ghostty_pane::GhosttyPane` wraps GTK VTE; the name does not indicate a
+Ghostty rendering backend. `ui::pane_terminal::PaneTerminal` aliases it and
+shares callback types. VTE handles rendering, font fallback, IME, and buffer
+text extraction. PTY and input-mode helpers are headless.
 
-- `flowmux` (crate `flowmux/`) — the GTK4 + libadwaita GUI. Also acts
-  as a thin shim: if invoked with a CLI subcommand, it `exec`s
-  `flowmuxctl` so `flowmux browser open …` from inside a pane works
-  without the user knowing two binaries exist.
-- `flowmuxctl` (crate `flowmux-cli/`) — the daemon client. Speaks the
-  IPC protocol over the Unix socket and is what AI-agent hooks invoke.
+Browser and editor views use WebKitGTK on Linux and WKWebView in the macOS
+sources. Neither exposes CDP. Browser engine labels select profiles; they do
+not switch to Chrome or Firefox. Host-cookie extraction is separate from
+WebView insertion, which is not implemented.
 
-### Daemon-in-GUI model
+The image viewer loads ThorVG dynamically through `ui/thorvg.rs`; missing
+ThorVG affects the viewer, not the application build. The helper script builds
+v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
 
-There is no separate long-running daemon process. The GUI binary
-embeds the daemon: on startup it spawns a tokio runtime and starts the
-IPC server (`flowmux-ipc::server`) bound to a Unix socket at
-`$XDG_RUNTIME_DIR/flowmux.sock`. The `flowmux-daemon` crate is the
-shared handler — `flowmux-daemon::DaemonHandler` + `StateStore` are
-embedded by the GUI binary; a headless `flowmux-daemon` binary exists
-mostly for tests and logs verb traffic instead of touching widgets.
+## Agent integration invariants
 
-### tokio ↔ GTK bridge
+- New pane commands accept explicit IDs and use pane context where supported.
+  Distinguish a pane's UUID from its individual tab surface UUID.
+- Snapshot references belong to the latest snapshot of one browser surface.
+  The snapshot must not add tracking attributes to the DOM. Reused token
+  names can point to different elements after a new snapshot.
+- Hooks and browser skill text are embedded in the CLI. Keep `doctor`/`fix`
+  drift detection consistent with changes to installed payloads.
+- Native lifecycle hooks are activity evidence; process inspection establishes
+  identity/liveness; terminal text is fallback evidence. A title or screen
+  scan must not rename a hook/process-owned agent. Turn completion is separate
+  from session teardown or process death.
+- Preserve unrelated agent handlers and notification configuration. Never
+  modify the user's Codex hook trust decisions.
+- Claude permission events lack a tool-use ID. Retain their batch marker until
+  `PostToolBatch`; explicit input-tool waits are correlated by `tool_use_id`.
+  Session-level quota/API/input waits remain separate.
+- Codex permission events lack a per-call resolution. Track their turn scope;
+  ordinary `PostToolUse` must not clear an unrelated parallel permission wait.
+  Match parent Stop against observed child identities; parent and child
+  `turn_id` values differ. Keep this ledger runtime-only and clear it on
+  session/process/surface end.
+- Child-start events can be omitted when a child is reused, and another hook
+  can block Stop. The observed ledger is not a complete process inventory;
+  retain process/screen fallbacks.
 
-GTK widgets are `!Send`, so anything that mutates the widget tree has
-to run on the main thread. The IPC handler runs on tokio and the
-window controller runs on GTK. They are connected via an
-`async_channel` of `GtkCommand` values (`crates/flowmux/src/bridge/`):
-the IPC handler sends commands and awaits a `oneshot::Sender` reply;
-`spawn_dispatch_loop` reads them on the GTK side via
-`glib::MainContext::spawn_local` and dispatches into the
-`WindowController`. New IPC verbs that touch widgets follow that
-pattern — add a `GtkCommand` variant, plumb a `oneshot` reply, and
-handle it in the dispatch loop.
+## Conventions
 
-### Surface model
+Use **side panel**, **workspace**, **pane**, **tab**, **browser tab**, and
+**editor tab** consistently in user-facing text. A workspace owns the pane
+tree; a pane contains tab surfaces. Use **workspace name** and **tab name**
+for their displayed labels. Keep existing code identifiers unless a rename
+is explicitly part of the task.
 
-A `Workspace` (`flowmux-core`) owns a tree of `Pane`s; each `Pane`
-holds one or more `PaneSurface`s of kind `Terminal` or `Browser`.
-Terminal surfaces are stored as `PaneTerminal`
-(`crates/flowmux/src/ui/pane_terminal.rs`), which is a type alias for the sole
-backend `ui::ghostty_pane::GhosttyPane` (a VTE widget plus a flowmux-owned PTY);
-`pane_terminal.rs` also holds the shared `PaneCallbacks` bundle. Browser surfaces
-are backed by a scriptable WebView —
-WebKitGTK 6.0 on Linux, WKWebView on macOS (the platform split lives in
-`flowmux/src/ui/browser_pane_{webkit,macos,stub}.rs`; `flowmux-browser` holds the
-shared controller trait + snapshot types). The IPC protocol and the
-GUI both refer to these by `WorkspaceId` / `PaneId` / `SurfaceId` (UUID newtypes
-in `flowmux-core`).
-
-Terminal support lives across two crates: `flowmux-terminal` (headless PTY and
-terminal compatibility helpers) and `flowmux/src/ui/ghostty_pane.rs` (the GTK
-VTE widget wrapper: spawn, theme, IME, selection, scrollback, cwd/title
-tracking, and app-level shortcut workarounds).
-
-### Crates at a glance
-
-The crate tree under `crates/` matches the architectural seams above.
-The README has a one-line description per crate; the cross-cutting
-points worth knowing when navigating:
-
-- `flowmux-core` — pure domain types (no GTK, no tokio). Shared by
-  every other crate. Has its own unit tests for cwd/title logic.
-- `flowmux-config` — XDG paths and parsers for the user's
-  `cmux.json` / Ghostty config. The canonical entry point for "where
-  on disk does X live".
-- `flowmux-state` — persistent workspace/session JSON store. Reopened
-  on app start so resumed workspaces land on the right pane.
-- `flowmux-terminal` / `flowmux-browser` — surface backends. They do
-  not depend on GTK widgets directly; the GUI crate adapts them.
-  `flowmux-terminal` exposes `pty::Pty`, terminal input mode helpers, and shared
-  color types; its headless tests cover PTY and env plumbing (`cargo test -p
-  flowmux-terminal`).
-- `flowmux-ipc` — wire protocol (Unix socket, newline-delimited JSON).
-  `protocol::Request`/`Response` are the source of truth for verb
-  shape. The verb set mirrors cmux's socket API; unimplemented verbs
-  return `RpcError::Unimplemented` so the CLI surface stays stable.
-- `flowmux-daemon` — IPC handler + state store, embedded by both the
-  GUI and the headless `flowmux-daemon` binary.
-- `flowmux-notify` — OSC 9/99/777 parsing and libnotify D-Bus
-  delivery. `DESKTOP_FILE_BASENAME` is compile-time matched against
-  the GUI's `APP_ID`; do not change one without the other.
-- `flowmux-cli` (`flowmuxctl`) — every CLI subcommand. Reads
-  `FLOWMUX_SOCKET_PATH` / `FLOWMUX_PANE_ID` from env so hooks running
-  inside a pane can omit pane arguments.
-- `flowmux-cookies` — host browser session import (libsecret + sqlite).
-- `flowmux-procmon` / `flowmux-vcs` — auxiliary features (PID watcher
-  and Git/PR sidebar).
-
-### Pane-aware env vars
-
-Every PTY flowmux spawns gets `FLOWMUX_PANE_ID`, `FLOWMUX_SURFACE_ID`,
-`FLOWMUX_WORKSPACE_ID`, `FLOWMUX_TAB_ID` (alias of workspace id),
-`FLOWMUX_SOCKET_PATH`, and optionally `FLOWMUX_BUNDLED_CLI_PATH`. CLI
-verbs and agent hooks look these up as fallbacks for `--pane` / socket
-arguments — see `crates/flowmux-cli/src/main.rs` (`pane_from_env`).
-When adding a new verb that targets a pane, accept an explicit
-`--pane` flag *and* fall back to the env var so agent hooks stay
-one-line invocations.
-
-## Agent / browser integration
-
-`AGENTS.md` is the contract for AI coding agents running *inside* a
-flowmux PTY. Highlights worth remembering when editing browser /
-agent code:
-
-- The in-app browser is the preferred web automation surface for agents
-  in a flowmux pane (over Playwright / Puppeteer / system Chromium).
-  Snapshots return Markdown + an `eN` ref-token map; refs are
-  invalidated by the next snapshot or any navigation.
-- WebKitGTK 6.0 / WKWebView do **not** expose CDP, so CDP-only verbs
-  (network mocking, viewport, screencast) are intentionally `not_supported`; do
-  not stub them as no-ops. `wait` (DOM polling) and `screenshot` (native
-  snapshot) do not need CDP and are supported.
-- Agent hooks (Claude Code, Codex, OpenCode, Gemini CLI, Antigravity CLI) are installed by
-  `flowmux fix` and audited by `flowmux doctor`. Hook payloads ship
-  *inside* the binary, so any change to the on-disk hook format must
-  be paired with a `doctor`/`fix` revision.
-- Treat native lifecycle events as activity truth, process inspection as
-  identity/liveness truth, and terminal text as a fallback. A surface title or
-  screen scan must not rename a hook/process-owned agent. Keep turn completion
-  (`Stop`) distinct from process/session teardown (`SessionEnd` or dead PID).
-- Codex lifecycle hooks live in `~/.codex/hooks.json` and send JSON on stdin.
-  Preserve unrelated hook handlers and notification config, and never write
-  Codex's hook trust state on the user's behalf.
-- Claude `PermissionRequest` has no `tool_use_id`: keep its conservative batch
-  marker until `PostToolBatch`. Correlate only explicit input-tool waits by
-  `tool_use_id`, and keep independent session waits (quota/API/input) scoped.
-- Codex `PermissionRequest` has no call identity or success/denial resolution.
-  Scope it conservatively to the reported root/child turn; ordinary
-  `PostToolUse` must not guess that another parallel request resolved. Correlate
-  parent Stop with the session-wide set of observed `SubagentStart` /
-  `SubagentStop` identities; root and child `turn_id` values are not equal.
-  Keep this ledger runtime-only and clear it on session/process/surface end.
-- Codex may not emit a second `SubagentStart` for a reused child, and Stop hooks
-  can be blocked by another handler. Never describe the observed child ledger
-  as complete ground truth; process/screen signals remain fallback evidence.
-
-## Project conventions
-
-### Terminology (user-facing text)
-
-Use the terms below in **all** human-readable text: UI labels,
-notifications, errors, tooltips, commit messages, README text, and
-user-facing discussion. Keep code identifiers in their existing
-English form.
-
-| Term | Meaning | Matching Code Identifier |
-|---|---|---|
-| side panel | The full left-side panel area | `Sidebar` |
-| workspace | Each side-panel item and unit of work | `Workspace` |
-| workspace name | The name shown for each side-panel item | `Workspace.name` |
-| pane | A split window inside the main content area | `Pane` |
-| tab | A terminal shown inside a pane | `PaneSurface` (`SurfaceKind::Terminal`) |
-| browser tab | A browser shown inside a pane at the same level as a tab | `PaneSurface` (`SurfaceKind::Browser`) |
-| tab name | The name shown in the pane tab bar | `PaneSurface.title` |
-
-Rules:
-
-- Use these terms consistently in user-facing text.
-- Keep existing English code identifiers. Only rename identifiers
-  after an explicit decision.
-- In comments, use the terminology above for behavior descriptions and
-  the exact identifier name when referring to a concrete type, field,
-  or function.
-- Do not mix multiple terms for the same concept in one document or view.
-
-### Licensing
-
-flowmux is GPL-3.0-or-later. Every source file starts with an
-`SPDX-License-Identifier: GPL-3.0-or-later` line — preserve it on
-edits and add it to any new file. Do not import code, assets, or
-documentation from cmux or any other project unless it is
-license-compatible and attribution is added; see `CONTRIBUTING.md`.
+flowmux is GPL-3.0-or-later. Preserve SPDX headers, license texts, attribution,
+and vendored notices. New source files need an SPDX header. Imported code or
+assets must have compatible licenses and attribution.

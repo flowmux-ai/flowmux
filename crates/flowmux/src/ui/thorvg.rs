@@ -8,10 +8,7 @@
 //! and the viewer reports that ThorVG is unavailable or incompatible instead
 //! of showing an image.
 //!
-//! Only the subset of the ThorVG C API used by
-//! [`crate::ui::image_viewer`] is bound here. The type and function names
-//! mirror the C API (and the `thorvg-sys` crate this replaced) so call sites
-//! read the same.
+//! Binds only the ThorVG C API used by [`crate::ui::image_viewer`].
 
 #![allow(non_camel_case_types)]
 // Enums mirror the ThorVG C API in full; not every variant is constructed here.

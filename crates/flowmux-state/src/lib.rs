@@ -5,8 +5,8 @@
 //! Writes go through a tmp-file + rename so a crash mid-write never
 //! leaves a half-serialized file.
 //!
-//! Schema is versioned (`schema_version`) so a future flowmux release can
-//! migrate old state files from this format.
+//! State loading migrates supported older `schema_version` values and
+//! rejects versions newer than this build.
 
 use flowmux_config::paths;
 use flowmux_core::{Pane, PaneContent, SurfaceKind, Workspace};
@@ -311,7 +311,7 @@ fn save_owned_to(path: &Path, mut state: State) -> Result<(), StateError> {
     state.last_saved = chrono::Utc::now();
     let json = serde_json::to_vec_pretty(&state)?;
 
-    // Atomic replace: write to <name>.tmp, fsync, then rename.
+    // Atomic replace: write a PID-suffixed temporary file, fsync, then rename.
     let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
     {
         let mut f = std::fs::File::create(&tmp)?;
@@ -384,7 +384,7 @@ fn current_boot_id() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Every terminal/browser tab id in the workspace's pane trees.
+/// Every tab id in the workspace's pane trees.
 fn workspace_surface_ids(workspace: &Workspace, out: &mut Vec<flowmux_core::SurfaceId>) {
     fn rec(pane: &flowmux_core::Pane, out: &mut Vec<flowmux_core::SurfaceId>) {
         match pane {

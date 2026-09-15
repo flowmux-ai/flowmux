@@ -25,10 +25,10 @@
 //! `flowmux_notify::OscExtractor`, and any parsed OSC notification is
 //! forwarded to the daemon over the existing IPC socket. It also coalesces
 //! output into renderer-independent refresh events, since VTE does not emit
-//! `contents-changed` for hidden tabs and workspaces. The shell's view (its
-//! `tty`, its termios, its environment) is unchanged from a direct terminal
-//! spawn. SSH terminals opt out of local cwd/title synthesis and remove
-//! `FLOWMUX_*` from the inner SSH process while retaining wrapper IPC context.
+//! `contents-changed` for hidden tabs and workspaces. The shell gets its
+//! own controlling PTY with the outer terminal size. SSH terminals opt out
+//! of local cwd/title synthesis and remove `FLOWMUX_*` from the inner SSH
+//! process while retaining wrapper IPC context.
 //!
 //! ## Why a separate process
 //!
@@ -68,9 +68,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 /// Self-pipe write end. Signal handlers wake the I/O loop by writing
-/// one byte here; the loop polls the read end together with the PTY
-/// fds. A self-pipe is the only async-signal-safe way to compose
-/// `poll` with arbitrary signals on stable Rust.
+/// one byte here; the loop polls the read end together with the PTY fds.
 static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
 const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
@@ -812,11 +810,9 @@ fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Sleep in `poll` until `fd` is writable. Spinning on EAGAIN instead
-/// burned a full core for hours when an orphaned pane's reader was gone
-/// for good. POLLERR/POLLHUP surface as an error so callers tear the
-/// session down. The finite timeout is the backstop for a termination
-/// signal landing between the flag check in `write_all` and the poll.
+/// Wait in `poll` instead of spinning on EAGAIN. POLLERR/POLLHUP tear down
+/// the session; the finite timeout lets `write_all` notice termination
+/// even if the signal arrives immediately before the poll.
 fn wait_writable(fd: RawFd) -> std::io::Result<()> {
     let mut pfd = libc::pollfd {
         fd,

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Agent-hook install/doctor ops and hook-event handlers.
-//!
-//! Split out of `main.rs` (pure move; behavior unchanged).
 
 use super::*;
 use flowmux_ipc::protocol::AgentLifecycleEvent;
@@ -131,9 +129,9 @@ pub(crate) fn generic_resume_return_forget_request(
     })
 }
 
-/// Dispatch every `flowmux hooks <op>` invocation. Setup/Doctor/Uninstall
-/// only touch user config files and never need the daemon. The runtime
-/// hook events (Claude/Codex/OpenCode/Gemini/Cline) talk to the daemon themselves.
+/// Dispatch hook setup, removal, diagnostics, and runtime events. Setup and
+/// uninstall only edit configuration; diagnostics and runtime events can
+/// connect to the daemon.
 pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyhow::Result<()> {
     use hook_install::HookInstallStatus;
     match op {
@@ -173,9 +171,6 @@ pub(crate) async fn run_hooks_op(op: &HooksOp, socket: Option<PathBuf>) -> anyho
         }
         HooksOp::Doctor => {
             run_hooks_doctor(socket.clone()).await;
-            // The `let _` pin is intentional: it forces the compiler
-            // to keep the `HookInstallStatus` variants reachable so a
-            // future refactor cannot silently drop them.
             let _ = HookInstallStatus::Installed;
             Ok(())
         }
@@ -254,8 +249,7 @@ pub(crate) async fn run_hooks_doctor(socket: Option<PathBuf>) {
         }
     }
 
-    // Live connect probe through the same path the OpenCode plugin
-    // would take (envless, fallback resolver, scan included).
+    // Probe the same socket resolution and fallback scan used by agent hooks.
     println!("daemon ping      : ...");
     match hooks::connect_daemon(socket).await {
         Some(client) => match client.call(flowmux_ipc::protocol::Request::Ping).await {
@@ -358,10 +352,6 @@ pub(crate) async fn run_claude_hook_event(
     };
     let agent = resolve_hook_agent_name("claude", pid);
     let agent_display_name = hook_agent_display_name(&agent);
-    // Most events carry exactly one request; Stop/Notification carry two
-    // (the user-facing toast *and* the activity flip) so the existing
-    // "ready" notification keeps firing alongside the new live-status
-    // tracking.
     let mut reqs: Vec<_> = Vec::new();
     match event {
         ClaudeHookEvent::Stop => {
@@ -611,8 +601,7 @@ pub(crate) async fn run_claude_hook_event(
                 input.session_id.as_deref(),
             ));
         }
-        // A new prompt or an imminent tool call means the agent is
-        // actively working this turn — and clears any "needs input".
+        // A new prompt starts a root turn and clears waits from the previous turn.
         ClaudeHookEvent::PromptSubmit => {
             if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
                 reqs.push(build_agent_lifecycle_update(

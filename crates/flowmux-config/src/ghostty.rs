@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Read-only loader for `~/.config/ghostty/config`.
-//!
-//! The Ghostty config file is documented as `key = value` lines with `#`
-//! comments and `key = value, value` for lists. We only extract the
-//! subset flowmux needs (font, theme, colors); unknown keys are kept as
-//! raw strings in `extras` so the data round-trips for diagnostics.
+//! Read-only parser for Ghostty-format key/value theme files. Callers supply
+//! the path; this module does not automatically load another terminal's config.
+//! Unknown keys are retained in `extras` for diagnostics.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -26,7 +23,7 @@ pub struct GhosttyConfig {
 }
 
 impl GhosttyConfig {
-    /// Layer `other` on top of self — non-empty fields in `other` win.
+    /// Layer `other` on top of self: present fields in `other` win.
     /// Used when applying the user's config over a resolved theme file.
     pub fn merge(&mut self, other: GhosttyConfig) {
         if other.font_family.is_some() {
@@ -95,9 +92,7 @@ pub fn parse(text: &str) -> GhosttyConfig {
     let mut cfg = GhosttyConfig::default();
     for raw in text.lines() {
         let line = raw.trim();
-        // Ghostty's config format treats `#` at the start of a (trimmed)
-        // line as a comment. We deliberately do NOT split on inline `#`
-        // since values like hex colors (`#1e1e2e`) start with `#`.
+        // Skip whole-line comments before parsing values and inline comments.
         if line.is_empty() || line.starts_with('#') {
             continue;
         }

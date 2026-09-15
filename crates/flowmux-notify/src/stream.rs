@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Byte-stream OSC extractor.
+//! Extract OSC payloads from a byte stream, across arbitrary read boundaries.
+//! `ESC ]` starts a sequence; BEL or `ESC \` ends it. Non-OSC bytes are ignored.
 //!
-//! Some terminal backends (raw PTY readers) hand flowmux raw
-//! bytes from the child process. This module is a tiny state machine
-//! that watches that byte stream, finds OSC sequences (`ESC ] ... ST`
-//! or `ESC ] ... BEL`), and emits the payload to a callback. Other
-//! bytes (CSI, SGR, regular text) are passed through untouched.
-//!
-//! Toolkit-provided OSC signals do not need this module. flowmux uses it
-//! for the PTY-side notification sniffer and for piping `flowmux notify`
-//! output through stdin.
+//! Used by the PTY-side notification sniffer and `flowmux notify-stream`.
 
-/// Maximum OSC payload size we will buffer. Real OSC 9 / OSC 777 messages
-/// from agent CLIs are well under 4 KiB; capping the buffer keeps a
-/// terminal that streams a never-terminated OSC from driving the extractor's
-/// memory unbounded.
+/// Maximum buffered OSC payload. The cap prevents an unterminated sequence
+/// from consuming unbounded memory.
 pub const MAX_OSC_PAYLOAD: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,9 +40,7 @@ impl<F: FnMut(&str)> OscExtractor<F> {
         Self::with_capacity(on_osc, MAX_OSC_PAYLOAD)
     }
 
-    /// Construct an extractor with a custom payload cap. Used in tests so
-    /// the overflow branch can be exercised without allocating MiBs of
-    /// fixture bytes.
+    /// Construct an extractor with a custom payload cap.
     pub fn with_capacity(on_osc: F, max_payload: usize) -> Self {
         Self {
             state: State::Ground,
@@ -107,7 +96,6 @@ impl<F: FnMut(&str)> OscExtractor<F> {
                 0x1B /* ESC */ => {
                     self.state = State::OscEsc;
                 }
-                // Drop control chars except in payload to keep utf8 valid.
                 _ => self.push_or_overflow(b),
             },
             State::OscEsc => {
@@ -116,16 +104,8 @@ impl<F: FnMut(&str)> OscExtractor<F> {
                     self.emit();
                     self.state = State::Ground;
                 } else if b == b']' {
-                    // `ESC ]` inside an open OSC starts a *new* OSC.
-                    // Terminal emulators handle this by aborting the previous,
-                    // unterminated sequence; we mirror that so a
-                    // misbehaving stream like
-                    //   ESC ] 9 ; ESC ] 4 ; 0 ; rgb BEL
-                    // does NOT splice the OSC 4 color-set body into
-                    // the OSC 9 buffer and ship a bogus
-                    // `Terminal / 4;0;rgb...` entry to the bell
-                    // popover. Drop the partial buffer, stay in Osc
-                    // so the fresh payload accumulates cleanly.
+                    // A nested opener discards the unfinished payload. Otherwise a later
+                    // OSC (for example a color query) could be spliced into a notification.
                     self.buf.clear();
                     self.state = State::Osc;
                 } else {
@@ -146,9 +126,7 @@ impl<F: FnMut(&str)> OscExtractor<F> {
                     self.state = State::Ground;
                 }
                 0x1B /* ESC */ => {
-                    // Could be ST: stay in overflow but watch for `\`.
-                    // Reuse OscEsc-with-overflow semantics inline via a
-                    // sentinel: ESC followed by `\` ends the sequence.
+                    // Watch for the second byte of the ST terminator while discarding overflow.
                     self.state = State::OscOverflowEsc;
                 }
                 _ => {}
@@ -203,8 +181,6 @@ mod tests {
         assert!(collect(b"\x1b[31mred\x1b[0m").is_empty());
     }
 
-    // -- variant scenarios ---------------------------------------------
-
     #[test]
     fn back_to_back_osc_sequences_emit_in_order() {
         let s = b"\x1b]9;a\x07\x1b]9;b\x07";
@@ -213,10 +189,7 @@ mod tests {
 
     #[test]
     fn st_terminator_inside_payload_takes_precedence_over_loose_esc() {
-        // Real iTerm2 OSC 9 from Claude Code can include literal ESC
-        // escapes mid-body if the title was logged with ANSI sequences.
-        // We treat ESC \\ as ST exclusively; a stray ESC followed by
-        // anything else is folded back into the body.
+        // ESC followed by an unrelated byte remains payload; ESC \ terminates it.
         let s = b"\x1b]9;part1\x1bXpart2\x1b\\";
         assert_eq!(collect(s), vec!["9;part1\x1bXpart2"]);
     }
@@ -303,13 +276,8 @@ mod tests {
         assert_eq!(collect(s), vec!["9;ok"]);
     }
 
-    /// Regression: an agent left an OSC open and another OSC started
-    /// before BEL/ST. The earlier implementation pushed the inner
-    /// `ESC ]` back into the buffer as data, so the second OSC's
-    /// payload was spliced onto the first one's prefix and the parser
-    /// dropped a malformed `Terminal / 4;0;rgb…` entry into the bell
-    /// popover. We now treat `ESC ]` mid-OSC as a restart, mirroring
-    /// terminal-emulator behaviour: only the second payload survives.
+    /// A nested opener must discard the first payload so a subsequent color OSC
+    /// cannot become part of an OSC 9 notification.
     #[test]
     fn nested_open_bracket_aborts_previous_payload_and_starts_new() {
         let s = b"\x1b]9;\x1b]4;0;rgb:11/22/33\x07";

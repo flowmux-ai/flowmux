@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cmd -> IPC Request builders (send-key, browser, all verbs).
-//!
-//! Split out of `main.rs` (pure move; behavior unchanged).
 
 use super::*;
 

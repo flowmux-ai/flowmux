@@ -781,10 +781,8 @@ impl StateStore {
         store
     }
 
-    /// Same as [`new_lazy`], but the resulting store will never write
-    /// to disk. Used by additional flowmux GUI windows that do not own
-    /// the per-host `state.json` lock; their workspaces live and die
-    /// with the window so they cannot stomp on the lock owner's file.
+    /// Construct a store with disk persistence disabled. Used when GUI startup
+    /// cannot claim persistent state, and by tests that must not write to disk.
     pub fn new_lazy_ephemeral(initial: State) -> Self {
         let mut initial = initial;
         // Still normalize so any in-memory invariants the daemon
@@ -831,7 +829,7 @@ impl StateStore {
         !matches!(self.persistence, PersistenceMode::Disabled)
     }
 
-    /// Spawn the persist loop on `handle`. Pair with [`new_lazy`].
+    /// Spawn the persist loop on `handle`. Pair with [`Self::new_lazy`].
     pub fn spawn_persist(&self, handle: &tokio::runtime::Handle) {
         let bg = self.clone();
         handle.spawn(async move { bg.persist_loop().await });
@@ -1386,10 +1384,8 @@ impl StateStore {
             return None;
         }
 
-        // Treat a same-pane move as an in-place reorder. Without this guard,
-        // moving the pane's only tab removes it, reinserts it, then collapses
-        // the pane based on the stale `src_leaf_empty` value from before the
-        // insertion, deleting the pane (and potentially its workspace).
+        // Treat a same-pane move as a reorder so moving its only tab cannot
+        // collapse the pane while the tab is temporarily removed.
         if src_pane == dst_pane {
             for ws in s.workspaces.iter_mut() {
                 for sf in ws.surfaces.iter_mut() {
@@ -1442,9 +1438,7 @@ impl StateStore {
         let taken = take_surface_locked(&mut s, src_pane, surface_id)?;
         let src_workspace = taken.workspace;
 
-        // Insert directly into the prevalidated destination. Capturing its
-        // location before the take removes the old pending/destination expect
-        // paths entirely.
+        // Insert into the destination validated before removing the source tab.
         let dst_workspace = s.workspaces[dst_ws_idx].id;
         if s.workspaces[dst_ws_idx].surfaces[dst_surface_idx]
             .root_pane
@@ -3383,17 +3377,9 @@ impl StateStore {
         updated
     }
 
-    /// Apply an automatic title from external signals, such as browser page title
-    /// or terminal OSC 0/2, to a surface. User-renamed surfaces (title_locked)
-    /// are left untouched.
-    ///
-    /// Applies cmux's single-panel auto-sync rule in the same call: if the
-    /// workspace has no split (single Leaf), the updated surface is that leaf's
-    /// active tab, and there is no user-provided `custom_title`, the workspace's
-    /// automatic value (`name`) follows the same title. This lets
-    /// [`Workspace::display_title`] naturally reflect active tab OSC titles such
-    /// as "Claude Code". Splits or locked custom titles block automatic workspace
-    /// label changes.
+    /// Apply an automatic surface title from browser or terminal signals.
+    /// User-locked titles are preserved. Workspace names are updated separately
+    /// by the GUI through [`Self::set_workspace_name`].
     pub async fn update_surface_auto_title(
         &self,
         pane: PaneId,
@@ -3423,11 +3409,8 @@ impl StateStore {
         updated
     }
 
-    /// Set the workspace's automatic value (`name`) directly. The GTK side knows
-    /// the focused pane's active surface title, so the new design explicitly
-    /// updates "current focused tab = workspace name" through this setter.
-    /// `custom_title` is left untouched so user-locked labels remain. Returns
-    /// `false` for no changes or missing workspaces.
+    /// Set the workspace's automatic name from the focused tab. Preserve
+    /// `custom_title`; return `false` when the workspace is missing or unchanged.
     pub async fn set_workspace_name(&self, id: WorkspaceId, name: String) -> bool {
         let mut s = self.inner.lock().await;
         let Some(w) = s.workspaces.iter_mut().find(|w| w.id == id) else {
@@ -3728,27 +3711,11 @@ impl StateStore {
         None
     }
 
-    /// Find a leaf pane whose currently-active tab title starts with
-    /// `needle` (ASCII case-insensitive). Used by the Notify dispatcher
-    /// as a fallback when the hook source couldn't pass pane/surface
-    /// info — e.g. the Flatpak OpenCode plugin path, where `flatpak
-    /// run` resets env before the in-sandbox CLI can read
-    /// `FLOWMUX_PANE_ID`, so the hook-driven Notify arrives with
-    /// `pane=None`. Without recovery the daemon stores the entry with
-    /// no workspace, so the sidebar can't blink (`mark_attention`
-    /// needs a workspace id) and the bell click can't navigate
-    /// (`focus_pane` needs a pane id). With this lookup the daemon
-    /// rebuilds the routing context from the pane title flowmux
-    /// already tracks (e.g. the active tab in pane 86ff5134 has title
-    /// "OpenCode" once the agent attaches its PTY, which matches the
-    /// "OpenCode" prefix of the Notify's `title="OpenCode ready"`).
+    /// Find the first leaf whose active tab title starts with `needle`
+    /// (ASCII case-insensitive). Notify uses this when pane context is missing.
     ///
-    /// Returns the first matching `(workspace, pane, surface)` tuple.
-    /// First-match policy is intentional: when only one pane runs the
-    /// agent the answer is unambiguous, and when several do, blinking
-    /// one of them still beats blinking none. We never invent
-    /// associations across workspaces — the candidate must actually
-    /// own a leaf whose active surface title matches.
+    /// Returns `(workspace, pane, surface)`. With several matching agents this
+    /// is an ambiguous fallback; explicit pane/surface context is preferred.
     pub async fn find_pane_by_active_title_prefix(
         &self,
         needle: &str,
@@ -7977,10 +7944,8 @@ mod tests {
 
     #[tokio::test]
     async fn codex_process_presence_survives_idle_after_a_working_turn() {
-        // End-to-end for the reported Codex bug: a process-owned presence must
-        // outlive a working->idle screen transition. Previously the idle scan
-        // (Codex's title is `<spinner> <cwd>`, never "codex", and its composer
-        // has no recognizable idle line) cleared the presence entirely.
+        // A process-owned presence must survive a working-to-unrecognized-screen
+        // transition, even when no idle composer is visible.
         let store = StateStore::new_lazy(State::default());
         let ws_id = store
             .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
@@ -8004,7 +7969,7 @@ mod tests {
         assert_eq!(agent.status, AgentStatus::Working);
         assert_eq!(agent.source.as_deref(), Some("flowmux:proc"));
 
-        // Turn ends: idle codex emits no recognizable status signal.
+        // The next frame has no recognized activity signal.
         store
             .report_agent_screen_signals(surface, Some("~/work $"), Some("scratchpad"))
             .await;
@@ -10207,12 +10172,7 @@ Do you want to continue?";
         assert_eq!(orig_surfaces.len(), 1, "original pane untouched");
     }
 
-    /// Case: add a browser tab to pane A, then add a browser tab to pane B. A's
-    /// existing browser surface must preserve id, title, and initial_url. GTK
-    /// rerender previously recreated BrowserPane and returned to about:blank,
-    /// but daemon state itself should never change, so lock that invariant here.
-    /// If add_browser_surface_to_pane regresses and damages another pane, this
-    /// catches it.
+    /// Adding a browser to pane B must preserve pane A's browser metadata.
     #[tokio::test]
     async fn add_browser_to_one_pane_keeps_other_pane_browser_intact() {
         let store = StateStore::new_lazy(State::default());
@@ -10225,9 +10185,6 @@ Do you want to continue?";
             .await
             .unwrap();
 
-        // Add an https browser tab to pane A. A hypothetical user-navigated URL
-        // lives in the GTK webview while state keeps only initial_url, so verify
-        // the newly added surface metadata is preserved.
         let (_, browser_a) = store
             .add_browser_surface_to_pane(pane_a, "https://docs.a.test".into())
             .await
@@ -11087,7 +11044,6 @@ Do you want to continue?";
     /// set_workspace_name is the setter the GTK side uses to write the focused
     /// pane's active surface title explicitly into ws.name. Repeating the same
     /// value returns false (no-op).
-    /// false (no-op).
     #[tokio::test]
     async fn set_workspace_name_updates_only_on_change() {
         let store = StateStore::new_lazy(State::default());
@@ -11166,7 +11122,7 @@ Do you want to continue?";
         assert_eq!(ws.name, "origin");
     }
 
-    // ----- right-sibling browser reuse (Phase 2) ----------------------
+    // ----- right-sibling browser reuse --------------------------------
 
     /// Workspace with a single terminal pane → no right sibling exists,
     /// so `find_right_sibling_browser_leaf` must return `None`. This is
@@ -11262,9 +11218,7 @@ Do you want to continue?";
             !store.persist_enabled(),
             "ephemeral stores must not persist to disk"
         );
-        // save_now is a no-op on ephemeral stores: it returns Ok
-        // without touching the on-disk state.json shared by the
-        // lock-owning instance.
+        // Saving an ephemeral store succeeds without touching state.json.
         assert!(store.save_now().await.is_ok());
         assert!(store.save_now_blocking().is_ok());
 
@@ -11330,12 +11284,8 @@ Do you want to continue?";
 
     // --- Title-prefix fallback resolver -----------------------------
     //
-    // Pins the Flatpak hook recovery path: when a Notify arrives with
-    // `pane=None surface=None` because the host->sandbox transition
-    // stripped FLOWMUX_PANE_ID, the daemon must rebuild the routing
-    // context by matching the notification title against the pane's
-    // active tab title (which flowmux flips to the agent name as
-    // soon as the agent attaches its PTY).
+    // Missing pane/surface context falls back to matching a notification
+    // prefix against the active tab title.
 
     #[tokio::test]
     async fn title_prefix_resolver_finds_pane_after_rename() {
@@ -11345,8 +11295,7 @@ Do you want to continue?";
             .await;
         let pane = first_pane(&store.get_workspace(ws_id).await.unwrap());
         let surface = first_pane_active_surface(&store.get_workspace(ws_id).await.unwrap());
-        // workspace_view::terminal_title_notify renames the active
-        // surface to the agent name. Re-create that pre-condition here.
+        // Give the active surface an agent title for fallback lookup.
         assert_eq!(
             store.rename_surface(pane, surface, "OpenCode".into()).await,
             Some(ws_id)

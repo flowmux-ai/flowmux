@@ -17,7 +17,5 @@ Actions=new-window;
 
 [Desktop Action new-window]
 Name=New Window
-# `flowmux` with no arguments boots the GUI; build_application() sets
-# `ApplicationFlags::NON_UNIQUE`, so each launch is its own OS process
-# and its own window. No new flag is needed.
+# The application uses NON_UNIQUE, so another launch opens a separate window.
 Exec=flowmux

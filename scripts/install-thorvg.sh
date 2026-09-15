@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Build and install ThorVG with every image loader enabled and the C API
-# exposed, which is what flowmux's image viewer links against.
+# Build and install ThorVG with all image loaders and the C API enabled.
+# flowmux loads the shared library at runtime for its optional image viewer.
 #
-# flowmux does NOT vendor ThorVG. Its hand-written `dlopen` shim loads the
-# system ThorVG C API at runtime, so ThorVG must be installed first.
-# Ubuntu (through 24.04) does not package ThorVG, so this script builds it
-# from source with meson/ninja. ThorVG source is cloned into a temporary
-# directory outside the repo and removed afterwards.
+# Clone the source into a temporary directory outside the repo and remove it
+# after installation. Use this when the distribution has no suitable package.
 #
 # Usage:
 #   scripts/install-thorvg.sh              # build + install to /usr/local (sudo)

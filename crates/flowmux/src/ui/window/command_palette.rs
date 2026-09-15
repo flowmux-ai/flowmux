@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Command palette + project command execution + config reload.
-//!
-//! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
 

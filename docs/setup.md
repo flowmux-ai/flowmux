@@ -16,8 +16,8 @@ sudo apt install build-essential pkg-config git curl ca-certificates \
 ```
 
 Install to the host (builds with the `fast` profile, then installs
-`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` plus the
-desktop entry and icons):
+`flowmux`, `flowmuxctl`, and `flowmux-md-viewer` to `~/.local/bin` and also
+to `~/.cargo/bin` when that directory exists, plus the desktop entry and icons):
 
 ```bash
 ./install.sh
@@ -28,6 +28,10 @@ It leaves agent settings unchanged; run `flowmux fix` to enable hooks.
 Restart any running flowmux GUI to pick up the new binary.
 
 For development:
+
+The display-backed tests also need `xvfb` and a D-Bus session runner.
+Install `dbus-x11`, `openssh-server`, `tmux`, and `python3-xlib` to run the
+SSH and GUI integration checks used by CI.
 
 ```bash
 cargo build --release --workspace   # binaries under target/release/
@@ -42,17 +46,12 @@ so builds do not need Node.js. Only changes to the editor frontend need
 Node.js 20+; rebuild with `scripts/build-editor-assets.sh` and commit the
 updated `dist` directory and `package-lock.json` together.
 
-### macOS (development only)
+### Platform scope
 
-macOS builds use Homebrew GTK / libadwaita and the system WebKit for the
-browser tab. `scripts/install-macos.sh` installs `FlowMux.app` under
-`~/Applications` and the CLI binaries to `~/.local/bin`:
-
-```bash
-brew install pkg-config gtk4 libadwaita
-scripts/install-macos.sh --check
-scripts/install-macos.sh
-```
+Release packaging and CI target Linux. macOS-specific WebKit/IME code and
+[`install-macos.sh`](../scripts/install-macos.sh) are retained for development;
+the script's preflight does not establish that all workspace dependencies
+build on macOS. There is no native Windows build or installer in this tree.
 
 ## Optional runtime dependencies
 
@@ -60,17 +59,16 @@ scripts/install-macos.sh
 
 The image viewer loads ThorVG with `dlopen` at runtime. flowmux builds and
 runs without it; the viewer shows a "ThorVG is unavailable" message until a
-build with the C API and image loaders is present. Ubuntu does not package
-ThorVG, so build it with the helper script (needs `meson` and `ninja-build`):
+build with the C API and image loaders is present. The helper script builds
+the version used by the bindings (needs `meson` and `ninja-build`):
 
 ```bash
 sudo scripts/install-thorvg.sh                 # ThorVG v1.0.6 → /usr/local
 PREFIX=$HOME/.local scripts/install-thorvg.sh  # no sudo
 ```
 
-Restart flowmux afterwards. Distro packages built with `-Dbindings=capi
--Dloaders=all` also work (Debian `libthorvg-dev`, Fedora `thorvg`, Homebrew
-`thorvg`).
+Restart flowmux afterwards. Other builds must expose the compatible ThorVG
+C API and loaders; a package name alone does not establish compatibility.
 
 ### GStreamer (browser media)
 
@@ -84,8 +82,11 @@ sudo apt install gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
 
 ## Verify & repair
 
-flowmux wires into host pieces: agent hooks, agent SKILL files, the browser
-data dir, host browsers for cookie import, and the daemon socket.
+flowmux checks agent hooks, agent SKILL files, the browser data dir,
+host-browser profile detection, and the daemon socket. Detection of a
+host profile does not mean its session can be imported. Firefox cookie
+extraction exists, but insertion into the embedded browser is not implemented;
+Chromium-family encrypted cookie extraction is also unavailable.
 
 ```bash
 flowmux doctor   # read-only audit; non-zero exit if anything needs fixing

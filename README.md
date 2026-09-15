@@ -45,7 +45,8 @@ or Antigravity CLI finishes a task or needs input.
 ### Browser tab
 
 Browse alongside terminal tabs. Agents can read pages, click, and type
-through the CLI; you can import existing browser sessions.
+through the CLI. Browser tabs share WebKit session data within each flowmux
+profile, separately from your host browsers.
 
 <img src="resources/screenshot/video_control_browser.gif" alt="browser control" width="100%" />
 
@@ -116,12 +117,15 @@ support, hook configuration, and logs.
 
 ## Documentation
 
+- [Documentation index](docs/README.md) · [Release history](https://github.com/flowmux-ai/flowmux/releases)
 - [Keyboard shortcuts](docs/keybindings.md) · [Configuration](docs/configuration.md)
-- [Agent CLI and browser automation](AGENTS.md) · [SSH workspaces](docs/ssh-workspace-design.md)
-- [Contributing](CONTRIBUTING.md)
+- [Agent CLI and browser automation](AGENTS.md) · [SSH workspaces](docs/ssh-workspaces.md)
+- [Contributing](.github/CONTRIBUTING.md)
 
 ## License
 
 [GPL-3.0-or-later](LICENSE) · [Notices](NOTICE).
+Third-party [licenses](docs/legal/THIRD_PARTY_LICENSES.md) and
+[asset notices](docs/legal/THIRD_PARTY_ASSET_NOTICES.md).
 Inspired by [cmux](https://cmux.com/); an unofficial reimplementation,
 not affiliated with cmux.

@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! flowmux's own theme config.
-//!
-//! Lives at `$XDG_CONFIG_HOME/flowmux/theme` (typically
-//! `~/.config/flowmux/theme`). Users put whatever color/font values they
-//! want there; flowmux reads it at startup and applies. flowmux itself
-//! ships only built-in fallbacks (in `flowmux::theme`) — no specific
-//! upstream's theme curation lives in this tree.
-//!
-//! The on-disk format reuses the simple `key = value` parser from
-//! [`crate::ghostty`] for convenience (the format is widely
-//! understood by terminal users). The file is flowmux's own,
-//! independent of any other application's config.
+//! User theme overrides at `<config dir>/flowmux/theme`, parsed using the
+//! Ghostty key/value format. Built-in themes are provided by [`crate::presets`].
 
 use crate::ghostty::GhosttyConfig;
 use std::path::PathBuf;

@@ -1,22 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Palette data is MIT-licensed: Copyright (c) 2024 Mitchell Hashimoto and
 # Ghostty contributors; Copyright (C) 2011 Chris Kempson (Tomorrow Theme).
-# Full terms: THIRD_PARTY_ASSET_NOTICES.md in the flowmux source distribution.
+# Full terms: docs/legal/THIRD_PARTY_ASSET_NOTICES.md in the flowmux source distribution.
 # flowmux theme — example
 #
 # Copy this file to `$XDG_CONFIG_HOME/flowmux/theme` (typically
-# `~/.config/flowmux/theme`) and edit the values. flowmux reads it at
-# startup; no restart-and-re-edit cycle is required if you want to
-# tweak — just relaunch flowmux.
+# `~/.config/flowmux/theme`), edit it, then relaunch flowmux. A selected
+# preset replaces this file's colors; appearance overrides take precedence.
 #
 # Format: `key = value` lines, `#` for comments. Hex colors are
 # `#RRGGBB`. The 16-entry palette is `palette = N=#RRGGBB` repeated
 # for N in 0..=15.
 #
-# All keys are optional. Anything you omit falls back to flowmux's
-# built-in default, which mirrors Ghostty's shipped values verbatim so
-# a fresh install looks like Ghostty out of the box. The values below
-# are a snapshot of that built-in default — copy then tweak.
+# All keys are optional. Unset values fall back to flowmux's defaults.
+# The example matches those defaults, including its adjusted ANSI black slots.
 
 # Font ------------------------------------------------------------
 font-family = monospace

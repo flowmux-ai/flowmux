@@ -21,8 +21,7 @@
 //! ```json
 //! {
 //!   "keybindings": {
-//!     "copy":  ["<Ctrl>c"],
-//!     "paste": ["<Ctrl>v"],
+//!     "split-right": ["<Ctrl><Alt>r"],
 //!     "next-workspace": []
 //!   }
 //! }
@@ -74,9 +73,9 @@ pub enum ActionId {
     /// Copy the focused pane's current working directory to the system
     /// clipboard and surface a toast confirming what was copied.
     CopyPanePath,
-    /// Toggle the right-side Git worktree panel for the focused pane.
+    /// Toggle the Git worktree panel for the focused pane.
     ToggleWorktreePanel,
-    /// Toggle the right-side file browser for the focused pane.
+    /// Toggle the file browser for the focused pane.
     ToggleFileBrowser,
     /// Toggle the AI usage popover in the side-panel footer.
     ToggleUsagePopover,
@@ -171,7 +170,7 @@ impl ActionId {
     /// Ordered list of every editable action. The dialog and the
     /// install step iterate this slice instead of pattern-matching on
     /// each variant so a new action only needs entries here, in
-    /// [`Self::as_str`], in [`Self::label`], and in [`DEFAULTS`].
+    /// [`Self::as_str`], in [`Self::label`], and in `DEFAULTS`.
     pub fn all() -> &'static [ActionId] {
         &[
             Self::SplitRight,
@@ -217,13 +216,8 @@ impl ActionId {
         Self::all().iter().copied().find(|a| a.as_str() == s)
     }
 
-    /// User-editable shortcuts. Copy / Paste are intentionally excluded
-    /// because they are universally `Ctrl+Shift+C` / `Ctrl+Shift+V` in
-    /// every modern terminal emulator and rebinding them through the
-    /// dialog would let the user accidentally swap them with `Ctrl+C` —
-    /// the same key that sends SIGINT to the foreground process. The
-    /// install path still applies their hard-coded defaults; only the
-    /// dialog and the override resolution skip them.
+    /// Clipboard actions keep their platform defaults and ignore overrides,
+    /// preserving the terminal distinction between copy and SIGINT.
     pub fn is_user_editable(self) -> bool {
         !matches!(self, Self::Copy | Self::Paste)
     }
@@ -235,11 +229,7 @@ impl ActionId {
     }
 }
 
-/// One action can carry multiple accelerators (e.g. Ctrl+Shift+Tab and
-/// Ctrl+ISO_Left_Tab both move to the previous workspace). The defaults
-/// here mirror what `BINDINGS` used to hold before the table moved into
-/// the config crate — keep changes in lock-step with the regression
-/// tests in `flowmux::keybindings`.
+/// Default Linux accelerators. Each action can have multiple bindings.
 #[cfg(not(target_os = "macos"))]
 const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::SplitRight, &["<Ctrl><Shift>Page_Up"]),
@@ -280,20 +270,9 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::OpenTig, &["<Ctrl><Alt>g"]),
 ];
 
-/// macOS keeps the Linux layout and only substitutes the modifier keys:
-/// `<Ctrl>` becomes `<Meta>` (the Command key on GTK's Quartz backend) and
-/// `<Alt>` stays `<Alt>` (the Option key — the same physical key). Base keys
-/// (Page_Up/Down, arrows, digits, letters) are unchanged, so every binding maps
-/// 1:1 to its Linux counterpart. Two deliberate exceptions:
-///
-/// * Workspace cycling keeps `<Ctrl>Tab` / `<Ctrl><Shift>Tab`. Substituting to
-///   `<Meta>Tab` would collide with the macOS system application switcher, which
-///   the app can never intercept. On macOS plain Ctrl is free (app shortcuts
-///   moved to Command), so `<Ctrl>Tab` is safe to keep.
-/// * Copy / Paste drop Shift to become `<Meta>c` / `<Meta>v` — the universal
-///   macOS copy/paste. The Linux `Ctrl+Shift+C/V` carve-out exists only to keep
-///   plain `Ctrl+C` free for SIGINT; Command can never produce a control code,
-///   so that carve-out does not apply here.
+/// macOS uses Command for most app actions. Workspace cycling keeps Control
+/// to avoid the system app switcher; terminal search, pane zoom, and workspace
+/// overview also retain their Control bindings. Copy/paste use Command+C/V.
 #[cfg(target_os = "macos")]
 const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::SplitRight, &["<Meta><Shift>Page_Up"]),

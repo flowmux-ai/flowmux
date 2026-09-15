@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! IPC protocol between the flowmux GUI process and the `flowmux` CLI.
-//!
-//! Wire format: newline-delimited JSON over a Unix domain socket at
-//! `$XDG_RUNTIME_DIR/flowmux.sock`. Each line is a complete [`Envelope`].
-//!
-//! The verb set mirrors cmux's documented socket API surface. We treat
-//! verbs we have not implemented yet as `Error::Unimplemented` rather
-//! than removing them, so the CLI shape stays stable while features
-//! land.
+//! Newline-delimited JSON between the GUI and CLI over a Unix domain socket.
+//! Each line is a complete [`Envelope`]. The GUI uses a per-PID socket; path
+//! selection and the stable external-CLI fallback live in `flowmux-config`.
 
 pub mod client;
 pub mod protocol;

@@ -34,9 +34,7 @@ pub const FLOWMUX_HOOK_MARKER: &str = "flowmux-hook";
 pub const FLOWMUX_OPENCODE_PLUGIN_MARKER: &str = "flowmux-opencode-session-plugin v5";
 const FLOWMUX_OPENCODE_PLUGIN_MARKER_PREFIX: &str = "flowmux-opencode-session-plugin";
 
-/// One agent flowmux knows how to install hooks for. Same enum shape
-/// as `agent::Target` so future merges can collapse them, but kept
-/// separate today to keep the SKILL installer focused on text payloads.
+/// Supported targets for hook installation and cleanup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HookTarget {
     Claude,
@@ -2175,7 +2173,7 @@ fn opencode_home() -> Option<PathBuf> {
 /// Every OpenCode config root flowmux should install the plugin
 /// into. The primary `~/.config/opencode/` covers the upstream CLI
 /// and any fork that honours the default XDG layout. The
-/// `opencode-anycli` wrapper at https://github.com/JSUYA/opencode-anycli
+/// `opencode-anycli` wrapper at <https://github.com/JSUYA/opencode-anycli>
 /// re-launches opencode with `XDG_CONFIG_HOME=~/.config/opencode-anycli`
 /// so its plugin loader only sees
 /// `~/.config/opencode-anycli/opencode/plugins/`; without an entry
@@ -2236,11 +2234,9 @@ fn opencode_spawn_argv(flowmux_bin: &str) -> Vec<String> {
     host_invocation_argv(flowmux_bin)
 }
 
-/// Shell-command string the Claude / Codex hook entries write into
-/// the agent's config file. Mirrors [`opencode_spawn_argv`] for the
-/// agents that expect a single command string rather than an argv —
-/// Claude's `settings.json` `hooks[*].command` and Codex's
-/// `config.toml` `notify` are both shell strings.
+/// Shell-quoted executable prefix for native hook command entries, including
+/// Claude settings and Codex `hooks.json`. Flatpak builds invoke the CLI
+/// through `flatpak run`, as in [`opencode_spawn_argv`].
 fn host_invocation_shell_command(flowmux_bin: &str) -> String {
     let argv = host_invocation_argv(flowmux_bin);
     argv.iter()
@@ -2268,9 +2264,7 @@ fn host_invocation_argv(flowmux_bin: &str) -> Vec<String> {
     }
 }
 
-/// Conservative POSIX shell quoting for paths and app-ids — wraps
-/// in single quotes and escapes embedded single quotes. Used only by
-/// the hook installer so it stays close to the call site.
+/// Quote a POSIX shell word when needed, escaping embedded single quotes.
 fn shell_quote(s: &str) -> String {
     if !s.is_empty()
         && s.chars()
@@ -3049,8 +3043,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// A tiny fixture that overrides `dirs::home_dir` via env. We just
-    /// use TempDir + explicit paths instead.
     fn tmp() -> TempDir {
         TempDir::new().unwrap()
     }

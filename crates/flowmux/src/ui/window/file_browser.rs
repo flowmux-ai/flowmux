@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! In-pane file browser: show, focus, state save/restore.
-//!
-//! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
 
@@ -192,7 +190,7 @@ impl WindowController {
     /// Single entry point for recomputing workspace label and subtitles.
     ///
     /// Design:
-    ///   * Side-panel main label = active surface title from MRU[0], the most
+    ///   * Side-panel main label = active surface title from `MRU[0]`, the most
     ///     recently focused pane. Use the original OSC title when present;
     ///     otherwise use the cwd folder name at full length, without truncation.
     ///   * Subtitles = active terminal cwd for MRU[0..3], shortened to the last

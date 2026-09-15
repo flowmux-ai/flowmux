@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Response rendering: print_response and the tree view.
-//!
-//! Split out of `main.rs` (pure move; behavior unchanged).
 
 use super::*;
 

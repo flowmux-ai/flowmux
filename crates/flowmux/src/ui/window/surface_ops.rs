@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Surface lifecycle: split, move, tear-off, reattach, import.
-//!
-//! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
 

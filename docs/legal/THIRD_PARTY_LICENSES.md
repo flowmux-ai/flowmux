@@ -28,7 +28,7 @@ and integrity hashes are recorded in
 
 ## License Overview
 
-- Apache License 2.0 (311)
+- Apache License 2.0 (304)
 - MIT License (120)
 - Unicode License v3 (20)
 - ISC License (19)
@@ -703,14 +703,7 @@ Used by:
 ### Apache License 2.0
 
 Used by:
-- io-lifetimes 2.0.4
-- linux-raw-sys 0.12.1
-- rustix 1.1.4
 - target-lexicon 0.13.3
-- wasi 0.11.1+wasi-snapshot-preview1
-- wasip2 1.0.3+wasi-0.2.9
-- wit-bindgen 0.51.0
-- wit-bindgen 0.57.1
 
 ```text
 

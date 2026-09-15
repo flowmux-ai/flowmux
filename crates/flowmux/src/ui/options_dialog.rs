@@ -1,26 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Modal dialog opened by the options button in the side-panel footer.
-//!
-//! It exposes:
-//!
-//! * Global zoom percentage (DropDown of whole-point terminal zoom values)
-//! * Terminal font family (DropDown of installed, curated developer fonts,
-//!   plus a "System default" sentinel that inherits the theme font) and size
-//!   (SpinButton, points). Applied live to every open terminal.
-//! * Default web view engine for new browser tabs (DropDown: WebKit / Chrome / Firefox)
-//! * Focused-pane 1px border color (ColorDialogButton, default pale yellow)
-//! * Browser session persistence toggle (CheckButton, default checked) —
-//!   keeps cookies / localStorage / IndexedDB across flowmux restarts so
-//!   site logins survive a quit/relaunch.
-//! * Agent Bar visibility toggle (Switch, default on).
-//! * Software update status, manual release check, and update action.
-//!
-//! Every option change calls `on_apply` immediately. The header has a single
-//! Close button because there is no pending state to confirm or cancel.
-//!
-//! Layering: this module only owns GTK widgets. Saving options to disk and
-//! applying zoom to terminal/WebView are handled by [`crate::ui::window`]. The
-//! dialog returns the user's intended [`Options`] through the callback.
+//! Non-modal options window. Changes apply immediately through `on_apply`;
+//! the window controller owns persistence and live theme, font, and zoom updates.
 
 use crate::update::origin::{InstallOrigin, UpdateGate};
 use crate::update::{check::Version, BannerState, Stage};
@@ -146,7 +126,6 @@ fn build_dialog(
     let cursor_blink_switch = build_toggle_switch(current.cursor_blink);
     let blink_interval_spin = build_blink_interval_spin(current.cursor_blink_interval_ms);
 
-    // General tab body — the original options dialog contents.
     let general = gtk::Box::new(gtk::Orientation::Vertical, 12);
     general.set_margin_top(16);
     general.set_margin_bottom(16);
@@ -902,8 +881,7 @@ pub(crate) fn row(label_text: &str, value_widget: &impl IsA<gtk::Widget>) -> gtk
     row
 }
 
-/// DropDown restricted to one representative percentage for each distinct
-/// whole-point terminal size produced by the 8f8a941 rendering fix.
+/// One representative zoom percentage per distinct whole-point terminal size.
 #[derive(Clone)]
 struct ZoomPicker {
     drop: gtk::DropDown,
@@ -983,8 +961,7 @@ fn valid_zoom_percentages(font_size: f64) -> Vec<u16> {
     values
 }
 
-/// DropDown for WebKit / Chrome / Firefox. Custom engines are serializable in
-/// `Options` but not exposed in this UI step.
+/// Select a browser storage profile. Custom profiles are not exposed here.
 fn build_engine_drop(initial: &BrowserEngine) -> gtk::DropDown {
     let labels: Vec<String> = engine_options().iter().map(|e| e.label()).collect();
     let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
@@ -1146,15 +1123,11 @@ fn build_font_widgets(
     }
 }
 
-/// Curated free / open-source developer monospace families, ordered by
-/// popularity (web-researched: JetBrains Mono, Fira Code, Cascadia, Source
-/// Code Pro, Hack, IBM Plex Mono, Iosevka, …). The font dropdown shows only
-/// installed families that match one of these prefixes, so the user picks
-/// from known coding fonts instead of every monospace face fontconfig knows.
+/// Preferred installed developer-font families, in display order.
 /// Matching is by lowercase prefix, so foundry variants ("Fira Code Retina",
 /// "Iosevka Term", "JetBrains Mono NL", "Cascadia Code PL") are kept.
 const CURATED_DEV_FONTS: &[&str] = &[
-    // Mainstream coding fonts (all OFL / Apache / BSD — freely redistributable).
+    // Mainstream coding fonts.
     "JetBrains Mono",
     "Fira Code",
     "Cascadia Code",
@@ -1694,10 +1667,6 @@ mod tests {
         );
     }
 
-    /// The persistence checkbox should reflect the seeded value so the
-    /// dialog opens in the correct state when the user reviews their
-    /// existing options. Headless environments without a display skip the
-    /// assertion; when GTK init succeeds, the active state must match.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn persist_check_reflects_initial_value() {
@@ -1707,11 +1676,6 @@ mod tests {
         assert!(!check_off.is_active());
     }
 
-    /// `collect_options` must round-trip the checkbox state into the
-    /// returned [`Options`]. We seed each widget with a known value and
-    /// confirm the collected options match — including the new
-    /// `persist_browser_session` flag — so a regression that drops the
-    /// flag from `collect_options` would fail loudly.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn collect_options_round_trips_persist_browser_session() {
@@ -1919,8 +1883,6 @@ mod tests {
         }
     }
 
-    /// GTK init is needed to verify the DropDown model. Headless environments
-    /// skip this check.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn zoom_picker_only_exposes_whole_point_values() {

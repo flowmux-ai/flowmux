@@ -636,10 +636,8 @@ impl PaneRegistry {
         }
     }
 
-    /// Move the tab identified by `surface` within the same pane to
-    /// `target_index`. Called only after store-side reorder succeeds; it keeps
-    /// the tab bar `gtk::Box` and `surface_tabs` vector in sync. Out-of-range
-    /// or same-position targets are no-ops.
+    /// Reorder the tab bar after the store commits the move. Targets beyond the
+    /// last tab clamp to the end; moving to the current position is a no-op.
     pub fn reorder_surface_widget(
         &mut self,
         pane: PaneId,
@@ -664,9 +662,7 @@ impl PaneRegistry {
         tabs.insert(new_index, entry);
         let order: Vec<gtk::Widget> = tabs.iter().map(|(_, w)| w.clone()).collect();
         if let Some(container) = self.pane_tab_containers.get(&pane).cloned() {
-            // GtkBox has no direct reorder API, so the safest path is to detach
-            // all children and append them in the new order. Widgets are reused,
-            // preserving handlers and state.
+            // Reuse the existing tab widgets in the new order, preserving handlers and state.
             let mut child = container.first_child();
             while let Some(c) = child {
                 let next = c.next_sibling();
@@ -712,8 +708,7 @@ impl PaneRegistry {
         true
     }
 
-    /// Register one split paned widget. If the same split_id already exists,
-    /// update only the widget and keep the workspace mapping.
+    /// Register or replace a split widget and its workspace mapping.
     pub fn register_split(&mut self, split_id: PaneId, workspace: WorkspaceId, paned: gtk::Paned) {
         self.split_paneds.insert(split_id, paned);
         self.split_workspace.insert(split_id, workspace);
@@ -747,8 +742,6 @@ impl PaneRegistry {
         }
     }
 
-    /// Toggle the `has-multi-tabs` class on a pane's tab row so the active
-    /// tab grows a 2px top stripe only when the pane has ≥2 tabs.
     /// Whether `pane` is currently rendered (its surface stack exists).
     pub fn has_pane(&self, pane: PaneId) -> bool {
         self.surface_stacks.contains_key(&pane)
@@ -1185,13 +1178,8 @@ pub enum MovingHandle {
     Editor(EditorPane),
 }
 
-/// Apply a `gtk::Paned` ratio immediately after its first allocation.
-///
-/// At `connect_realize` time the widget is not allocated yet, so paned.width()
-/// or height() is 0 and `set_position` would store a meaningless position for
-/// the next launch. Defer one frame with `idle_add_local`, retry while total is
-/// 0, and give up after 60 tries, about one second, to avoid infinite loops for
-/// inactive workspaces that never map.
+/// Apply the saved split ratio once GTK reports a nonzero size. Retry on a
+/// bounded number of idle callbacks so unmapped workspaces cannot loop forever.
 fn apply_ratio_when_sized(paned: &gtk::Paned, ratio: f32) {
     let weak = paned.downgrade();
     let mut attempts: u32 = 0;
@@ -1224,9 +1212,7 @@ pub enum IncrementalSplitOutcome {
     /// child was replaced by the new `gtk::Paned`. The caller must update the
     /// surfaces map to this new widget for later rerender / drop_workspace paths.
     SucceededRoot { new_root: gtk::Widget },
-    /// Incremental path failed. The caller should safely fall back to
-    /// rerender_workspace, usually because the target is missing from the
-    /// registry or its parent container is unexpected.
+    /// The target is missing or its parent cannot be updated incrementally.
     Failed,
 }
 
@@ -1771,13 +1757,7 @@ pub(crate) fn build_surface_tab_widget(
     (tab, label)
 }
 
-/// Build the secondary-click popover used by surface tabs. Mirrors the
-/// plain `Popover` and `Button` row pattern used by `ghostty_pane.rs`
-/// and `sidebar.rs`. The `connect_clicked` closures route directly to the
-/// per-pane callbacks.
-///
-/// PopoverMenu + `win.*` actions have been observed to drop in some GTK
-/// versions.
+/// Surface-tab context menu using direct callbacks to avoid PopoverMenu action lookup.
 fn attach_tab_context_menu(
     tab: &gtk::Box,
     pane_id: PaneId,
@@ -3792,9 +3772,7 @@ fn build_panel(
             }
             let pane_terminal: PaneTerminal = pane;
 
-            // Toggle the .focused class on frame focus enter/leave. theme.rs
-            // CSS draws a 1px border for the focused pane using the focus
-            // border options.
+            // Theme CSS uses this focus class to highlight the pane header.
             let frame_in = frame.downgrade();
             let frame_out = frame.downgrade();
             let focus = gtk::EventControllerFocus::new();

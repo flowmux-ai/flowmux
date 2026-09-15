@@ -244,8 +244,6 @@ impl Handler for GuiHandler {
     }
 }
 
-// Cargo `Request::Clone` is used above; ensure the type implements Clone.
-// This trait bound is satisfied because the protocol enum derives Clone.
 const _: fn() = || {
     fn assert_clone<T: Clone>() {}
     assert_clone::<Request>();
@@ -468,8 +466,7 @@ impl GuiHandler {
                 }
             }
             Request::SurfaceClose { pane, surface } => {
-                // Refuse the last-tab-of-last-pane case up front so the
-                // agent never trips CloseSurface's confirm dialog.
+                // Refuse workspace teardown here; dirty editors can still prompt below.
                 let workspaces = self.inner.store().ordered_workspaces().await;
                 let tree = flowmux_ipc::protocol::describe_workspaces(&workspaces);
                 let pane_found = tree.iter().flat_map(|w| &w.panes).any(|p| p.id == pane);
@@ -539,10 +536,7 @@ impl GuiHandler {
                 }
             }
             Request::PaneClose { pane } => {
-                // Peek the pane count up front. Closing the workspace's
-                // last pane is what triggers CloseFocused's confirm
-                // dialog; refuse it here (with a clear error) so an
-                // agent's IPC call never blocks on user input.
+                // Refuse the workspace's last pane; dirty editors in other panes can still prompt.
                 match self.inner.store().workspace_pane_count_for(pane).await {
                     None => Response::Error(RpcError::NotFound(format!("pane not found: {pane}"))),
                     Some((_, 1)) => Response::Error(RpcError::InvalidArgument(
@@ -551,7 +545,6 @@ impl GuiHandler {
                             .into(),
                     )),
                     Some((_, _)) => {
-                        // >1 pane: CloseFocused takes the no-dialog path.
                         let (tx, rx) = oneshot::channel();
                         let _ = self
                             .bridge
@@ -653,7 +646,6 @@ impl GuiHandler {
                 }
             }
 
-            // ---- Phase 7: agent session resume mapping --------
             other => unreachable!("browser router got a non-browser verb: {other:?}"),
         }
     }
@@ -1294,8 +1286,7 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
     }
 
     async fn close_pane(&self, pane: flowmux_core::PaneId) -> Result<(), String> {
-        // The orchestrator only closes non-last panes, so this stays on
-        // CloseFocused's no-dialog path.
+        // The orchestrator closes non-last panes; dirty editors can still prompt.
         let (tx, rx) = oneshot::channel();
         let _ = self
             .bridge
@@ -1315,7 +1306,7 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
             .tx
             .send(GtkCommand::RemoveWorkspace {
                 id,
-                // Agent-driven teardown must never block on a modal.
+                // Skip workspace confirmation; dirty-editor checks still apply.
                 confirm: false,
                 ack: tx,
             })

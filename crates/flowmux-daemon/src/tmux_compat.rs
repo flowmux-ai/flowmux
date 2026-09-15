@@ -3,7 +3,7 @@
 //!
 //! This is the daemon half of the Claude Code agent-teams integration:
 //! `flowmuxctl tmux-compat` forwards the argv of a `tmux` shim call as
-//! [`Request::TmuxCompat`], `flowmux_ipc::tmux_compat::parse` turns it
+//! [`flowmux_ipc::Request::TmuxCompat`], `flowmux_ipc::tmux_compat::parse` turns it
 //! into a [`TmuxCommand`], and [`execute`] maps it onto workspaces and
 //! panes. Widget side effects go through [`TmuxCompatUi`], so the same
 //! orchestration runs embedded in the GUI (bridge → GTK) and in the
@@ -23,16 +23,14 @@ use flowmux_ipc::tmux_compat::{
 };
 use std::path::Path;
 
-/// Widget-side effects of tmux-compat execution. [`execute`] owns every
-/// [`StateStore`] mutation except pane close / workspace removal (whose
-/// GUI paths mutate the store themselves); implementations apply the
-/// matching UI change — the GUI sends bridge commands, the headless
-/// daemon logs the verb traffic.
+/// Widget-side effects of tmux-compat execution. [`execute`] mutates the
+/// store for creation, splitting, and focus; tab rename, pane close, and
+/// workspace removal delegate their store changes to this interface.
 // Local trait consumed only by the GUI crate and this crate's tests;
 // the Send-bound subtleties the lint warns about do not apply.
 #[allow(async_fn_in_trait)]
 pub trait TmuxCompatUi {
-    /// A workspace was created in the store; materialize its window.
+    /// A workspace was created in the store; materialize its GUI page.
     async fn workspace_created(&self, id: WorkspaceId, name: &str, root: &Path);
     /// `split_pane` succeeded in the store; materialize the new pane.
     async fn pane_split_applied(

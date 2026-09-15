@@ -85,7 +85,6 @@ pub enum BrowserOp {
         path: PathBuf,
     },
 
-    // ---- Phase 5 P0 action gap ----
     DblClick {
         target: String,
     },
@@ -202,8 +201,7 @@ pub enum WsNav {
     Prev,
 }
 
-/// One-way commands from tokio → GTK main loop. Each variant carries a
-/// `oneshot::Sender` for replies if the caller needs the result.
+/// Commands from tokio to the GTK main loop, with optional oneshot replies.
 #[derive(Debug)]
 pub enum GtkCommand {
     /// Show the options dialog from the GTK side. Changes apply immediately;
@@ -278,9 +276,7 @@ pub enum GtkCommand {
         from: Option<PaneId>,
         dir: FocusDir,
     },
-    /// Open a brand-new terminal surface in the active workspace.
-    /// (Reserved for the planned horizontal surface-tab bar; currently
-    /// unused since the sidebar shows workspaces, not surfaces.)
+    /// Open a new terminal tab in the target pane.
     NewSurface {
         pane: PaneId,
     },
@@ -488,7 +484,7 @@ pub enum GtkCommand {
     PaneFocused {
         pane: PaneId,
     },
-    /// Create a brand-new workspace and add it to the sidebar.
+    /// Show the SSH workspace connection dialog.
     ShowSshDialog,
     Ssh {
         request: flowmux_ipc::protocol::SshRequest,
@@ -512,8 +508,7 @@ pub enum GtkCommand {
     /// Remove a workspace entirely (sidebar row + stack page + state).
     /// Triggered by the hover X button on a sidebar row, and by
     /// tmux-compat teardown (kill-pane of the last pane / kill-server).
-    /// `confirm: false` skips the modal dialog — agent-driven paths
-    /// must never block on user input.
+    /// `confirm: false` skips workspace confirmation; dirty editors still prompt.
     RemoveWorkspace {
         id: WorkspaceId,
         confirm: bool,
@@ -610,13 +605,7 @@ pub enum GtkCommand {
     CloseDesktopNotifications {
         desktop_ids: Vec<String>,
     },
-    /// Historic no-op. Earlier flowmux drove the dock badge directly
-    /// via `com.canonical.Unity.LauncherEntry::Update`; the badge
-    /// counter is now derived by the dock from
-    /// `org.gtk.Notifications` per-app entries, so we don't have to
-    /// publish anything for it to converge. The variant is kept so
-    /// existing dispatch sites compile while the rewrite settles —
-    /// remove together with its handler in a follow-up.
+    /// Publish the current unread count to the desktop launcher badge.
     RefreshLauncherBadge,
     /// User clicked a row in the bell popover. Mark the entry read,
     /// activate its workspace (if known), and grab focus on the source
@@ -746,10 +735,7 @@ pub enum GtkCommand {
     /// withdraw their matching desktop toasts in one sweep. Fired by
     /// the "All Clear" button at the top of the bell popover.
     ClearAllNotifications,
-    /// An AI agent's live activity in `workspace` changed. Drives the
-    /// breathing opacity of the workspace's left color bar.
-    /// `activity: None` clears the presence (session end / dead PID).
-    /// Fire-and-forget — the sidebar render has no reply.
+    /// Refresh the workspace and Agent Bar from current agent presence.
     SetAgentStatus {
         workspace: WorkspaceId,
     },

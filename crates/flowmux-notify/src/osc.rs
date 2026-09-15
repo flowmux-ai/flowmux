@@ -4,11 +4,11 @@
 //! Inputs are the *payload* between `ESC ]` and the terminator (`BEL` or
 //! `ESC \`); the caller is responsible for stripping the framing.
 //!
-//! Format references (all public):
+//! Accepted payload shapes:
 //!
-//! * iTerm2 OSC 9     `9 ; <body>`
-//! * Konsole OSC 99   `99 ; <key=val>;<key=val>... ; <body>`
-//! * urxvt   OSC 777  `777 ; notify ; <summary> [ ; <body> ]`
+//! * OSC 9: `9;<body>`
+//! * OSC 99: `99;<options>;<body>` (options are ignored)
+//! * OSC 777: `777;notify;<summary>[;<body>]`
 
 use flowmux_core::NotificationLevel;
 
@@ -71,12 +71,8 @@ fn parse_osc_777(rest: &str) -> Option<OscNotification> {
     })
 }
 
-/// Strip control characters from an OSC field before it reaches the
-/// user-visible bell popover. Real notification bodies are plain text;
-/// anything else (ESC, BEL, OSC remnants from a misbehaving emitter)
-/// would render as garbled boxes in the GTK label and tripled as the
-/// "Terminal / 4;0;rgb…" entries the user reported. Tab + newline are
-/// kept so multi-line messages survive verbatim.
+/// Remove control characters and surrounding whitespace from a notification
+/// field. Preserve internal tabs and newlines for multiline messages.
 fn sanitize(s: &str) -> String {
     s.chars()
         .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
@@ -85,8 +81,7 @@ fn sanitize(s: &str) -> String {
         .to_string()
 }
 
-/// Heuristic level inference. Agent messages containing "waiting" /
-/// "input" promote to attention.
+/// Infer severity from message text; OSC option fields do not affect it.
 fn infer_level(text: &str) -> NotificationLevel {
     let t = text.to_ascii_lowercase();
     if t.contains("error") || t.contains("failed") {
@@ -132,8 +127,6 @@ mod tests {
     fn unknown_osc_returns_none() {
         assert!(parse_osc("4;0;rgb:11/22/33").is_none());
     }
-
-    // -- 5 variant scenarios per agent + 1 error provoke ------------
 
     #[test]
     fn osc_9_recognizes_claude_style_completion_messages() {

@@ -1,26 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Send desktop notifications via `org.gtk.Notifications`.
+//! Send desktop notifications through `org.gtk.Notifications`, using a UUID
+//! per notification for later withdrawal. This requires a session service
+//! implementing that interface; this sender has no freedesktop fallback.
 //!
-//! On Linux this is the modern, GNOME-backed path. Compared to the
-//! legacy `org.freedesktop.Notifications` interface:
-//!
-//! * GNOME Shell binds every entry to the calling `app_id` (matched
-//!   against the installed `.desktop` basename), so the dock badge
-//!   counter — which Ubuntu Dock derives from the per-app entries in
-//!   `Main.messageTray` — increments / decrements in lockstep with our
-//!   `AddNotification` / `RemoveNotification` calls.
-//! * `RemoveNotification` actually destroys the `MessageTray.Source`
-//!   notification on GNOME 46, so both the entry in the message tray
-//!   (Super+V) **and** the dock badge drop the moment we acknowledge.
-//!   The legacy FDO `CloseNotification` only dismissed the live toast
-//!   on this stack — the history entry persisted and the dock badge
-//!   stayed pinned, which is the exact regression that motivated the
-//!   switch.
-//!
-//! The id type is a client-chosen `String`, not the `u32` the FDO
-//! daemon used to return. We generate a UUID per notification so a
-//! later `close(&id)` round-trip is unambiguous even when several
-//! notifications fly in parallel.
+//! Launcher badge counts are published separately through Unity LauncherEntry.
 
 use flowmux_core::{Notification, NotificationLevel};
 use std::collections::HashMap;
@@ -33,13 +16,8 @@ use zbus::{proxy, zvariant::Value, Connection};
 pub const OPEN_NOTIFICATION_ACTION: &str = "open-notification";
 const OPEN_NOTIFICATION_DETAILED_ACTION: &str = "app.open-notification";
 
-/// Object path the Unity LauncherEntry signal is broadcast on. Ubuntu
-/// Dock, Dash-to-Dock, KDE Plasma and plank all match on the interface
-/// name + `com.canonical.Unity.LauncherEntry::Update` member. GNOME's
-/// `org.gtk.Notifications.RemoveNotification` clears the message-tray
-/// dot, but Ubuntu Dock's per-app *number circle* is still driven by
-/// this Unity-vintage signal — without it the launcher count stays
-/// pinned at the last published value after the user acknowledges.
+/// Object path for Unity LauncherEntry badge updates. Notification withdrawal
+/// and launcher count updates are separate D-Bus operations.
 const LAUNCHER_ENTRY_PATH: &str = "/com/canonical/unity/launcherentry/flowmux";
 const LAUNCHER_ENTRY_INTERFACE: &str = "com.canonical.Unity.LauncherEntry";
 const LAUNCHER_ENTRY_MEMBER: &str = "Update";
@@ -55,12 +33,7 @@ const LAUNCHER_ENTRY_MEMBER: &str = "Update";
 /// and `resources/desktop/com.flowmux.App.desktop`.
 pub const DESKTOP_FILE_BASENAME: &str = "com.flowmux.App";
 
-/// `org.gtk.Notifications` proxy. Implemented by gnome-shell on GNOME
-/// and by the GApplication backend elsewhere. The interface is the
-/// in-process wire `g_application_send_notification` /
-/// `g_application_withdraw_notification` use, so calling it directly
-/// from zbus has the same observable behaviour as routing through a
-/// `Gio.Application`.
+/// Proxy for a session service implementing `org.gtk.Notifications`.
 #[proxy(
     interface = "org.gtk.Notifications",
     default_service = "org.gtk.Notifications",
@@ -89,19 +62,14 @@ impl DesktopNotifier {
         })
     }
 
-    /// Send a notification. Returns the client-chosen id that future
-    /// `close` calls must use; on GNOME this is the same id the
-    /// `MessageTray.Source` records, so a later `RemoveNotification`
-    /// drops both the tray entry and the dock badge in lockstep.
+    /// Send a notification and return the UUID required by [`Self::close`].
+    /// Launcher badge counts require a separate [`Self::update_launcher_count`] call.
     pub async fn send(&self, n: &Notification) -> zbus::Result<String> {
         let proxy = GtkNotificationsProxy::new(&self.conn).await?;
         let id = uuid::Uuid::new_v4().to_string();
         let action_target = format!("{}:{}", std::process::id(), n.id);
         let notif = notification_payload(n, &action_target);
-        // The "icon" hint takes a serialized GIcon. We omit it: GNOME
-        // falls back to the launcher icon (resolved via app_id) which
-        // is exactly the visual association we want, and serializing a
-        // GIcon by hand is more failure surface than this is worth.
+        // Omit the serialized GIcon so the service can use the app's launcher icon.
         proxy
             .add_notification(DESKTOP_FILE_BASENAME, &id, notif)
             .await?;
@@ -159,11 +127,6 @@ fn notification_payload<'a>(
     let mut notif = HashMap::new();
     notif.insert("title", Value::Str(n.title.as_str().into()));
     notif.insert("body", Value::Str(n.body.as_str().into()));
-    // GApplication notification priority maps cleanly to our levels:
-    //   * Info            → "normal"
-    //   * NeedsInput      → "high"   (lifts the banner above the rest)
-    //   * Error           → "urgent" (sticky on GNOME — keeps the toast
-    //                       visible until the user clicks).
     notif.insert("priority", Value::Str(priority_for(n.level).into()));
     notif.insert(
         "default-action",
@@ -198,9 +161,7 @@ mod tests {
         );
     }
 
-    /// Pin the level→priority mapping so a future refactor that flips
-    /// Info/TurnCompleted ↔ NeedsInput does not silently downgrade agent toasts
-    /// to "normal" and lose the elevated banner placement on GNOME.
+    /// Keep completion informational and input/error notifications elevated.
     #[test]
     fn priority_for_levels_maps_to_gtk_notifications_strings() {
         assert_eq!(priority_for(NotificationLevel::Info), "normal");

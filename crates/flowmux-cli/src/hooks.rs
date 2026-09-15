@@ -3,15 +3,9 @@
 //! OpenCode, and Codex CLI when an agent crosses a lifecycle boundary
 //! (Stop / Notification / SessionStart / …).
 //!
-//! Each handler reads a small JSON payload from the agent's hook input,
-//! distills it into a one-line summary, and forwards it
-//! to the daemon via `Request::Notify`. The daemon's GTK side then
-//! shows the system toast and adds it to the bell popover with click
-//! routing back to the originating pane.
-//!
-//! The handler stays fast: hook timeouts in agent settings are 5–10s,
-//! so we resolve the workspace eagerly via the daemon (already done by
-//! `Request::Notify`) and otherwise do minimal work.
+//! Payload helpers extract notification summaries and lifecycle metadata
+//! for the command handlers. Notifications travel through `Request::Notify`;
+//! activity and correlated lifecycle reports use their own IPC requests.
 
 use flowmux_core::{AgentActivity, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{
@@ -522,10 +516,9 @@ async fn send_best_effort_with_timeout(client: &Client, req: Request, timeout: D
     }
 }
 
-/// Connect to the daemon socket using the same fallback chain as
-/// `Cli::socket`. Returns `None` when the daemon is unreachable so a
-/// hook on a host without flowmux running is a silent no-op rather
-/// than a visible error.
+/// Connect using the CLI socket precedence, then scan host-visible per-PID
+/// sockets if the primary connection fails. Return `None` when unreachable
+/// so agent hooks can remain silent.
 pub async fn connect_daemon(socket: Option<PathBuf>) -> Option<Client> {
     connect_daemon_with_timeout(socket, HOOK_CONNECT_TIMEOUT).await
 }

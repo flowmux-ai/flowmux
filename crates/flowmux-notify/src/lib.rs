@@ -1,18 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Two responsibilities:
-//!
-//! 1. Parse OSC notification escape sequences emitted by terminal
-//!    programs into a structured [`OscNotification`].
-//! 2. Send those notifications to the user's desktop via the
-//!    `org.freedesktop.Notifications` D-Bus service (libnotify
-//!    compatible).
-//!
-//! The OSC formats handled are the publicly documented terminal
-//! escapes used by iTerm2, KDE Konsole, and rxvt-unicode:
-//!
-//! * OSC 9    — iTerm2 single-line notification
-//! * OSC 99   — Konsole / KDE notification with options
-//! * OSC 777  — rxvt-unicode `notify;<summary>;<body>`
+//! Parse OSC 9, 99, and 777 notification payloads and send desktop
+//! notifications through `org.gtk.Notifications`. Launcher counts use
+//! the separate Unity LauncherEntry D-Bus signal.
 
 pub mod osc;
 pub mod sender;

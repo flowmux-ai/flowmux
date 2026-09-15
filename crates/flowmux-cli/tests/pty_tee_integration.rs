@@ -5,9 +5,6 @@
 //! tiny shell command that emits normal output and OSC 9 / 99 / 777 escapes,
 //! and asserts that a fake daemon listening on a Unix socket receives the
 //! matching `Request::TerminalOutput` and `Request::Notify` envelopes.
-//!
-//! This is the regression guard the user asked for after we discovered
-//! legacy terminal-widget paths silently swallowed these escapes.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::ffi::OsStrExt;

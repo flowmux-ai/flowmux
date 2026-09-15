@@ -1,60 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! flowmux user options: global zoom and default web view engine for new
-//! browser tabs.
-//!
-//! Stored at `$XDG_CONFIG_HOME/flowmux/options.json`. All fields use
-//! `#[serde(default)]`, so partial user files load safely.
-//!
-//! Zoom is stored as an absolute integer percentage (50..=200), and
-//! [`Options::zoom_factor`] returns the 0.5..=2.0 scale accepted by
-//! GTK/terminal/WebView. Changing the web
-//! view engine option does not affect existing browser tabs; it applies only
-//! to newly created browser tabs.
+//! User options persisted at `<config dir>/flowmux/options.json`. Missing
+//! fields use serde defaults; loading clamps numeric settings.
 
 use crate::keybindings::KeybindingOverrides;
 use flowmux_core::AgentNotificationTarget;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Minimum zoom percentage.
 pub const ZOOM_MIN: u16 = 50;
-/// Maximum zoom percentage.
 pub const ZOOM_MAX: u16 = 200;
-/// Default zoom percentage.
 pub const ZOOM_DEFAULT: u16 = 100;
 
-/// Default 1px border color for the focused pane: pale yellow (Champagne).
-/// Chosen to stay visible on both dark and light themes while keeping the
-/// highlight subtle and distinct from cmux.
 pub const FOCUS_BORDER_COLOR_DEFAULT: &str = "#fff4b3";
 
-/// Focus border opacity (`0..=100` %). 100 = fully opaque, 0 = fully transparent.
-/// The default is 30% so the focus highlight is visible without dominating the
-/// surrounding pane chrome on first launch.
 pub const FOCUS_BORDER_OPACITY_MIN: u8 = 0;
 pub const FOCUS_BORDER_OPACITY_MAX: u8 = 100;
 pub const FOCUS_BORDER_OPACITY_DEFAULT: u8 = 30;
 
-/// Default for [`Options::persist_browser_session`]. The user expectation
-/// modeled after every mainstream browser is that signing into a site once
-/// and quitting flowmux still leaves the user signed in on the next launch,
-/// so the option ships enabled.
 pub const PERSIST_BROWSER_SESSION_DEFAULT: bool = true;
 
 /// Resume supported coding-agent sessions captured by lifecycle hooks when a
 /// persisted terminal tab is rebuilt after relaunch.
 pub const AUTO_RESUME_AGENT_SESSIONS_DEFAULT: bool = true;
 
-/// Persist and replay a bounded plain-text terminal history on relaunch.
+/// Persist and replay bounded terminal scrollback on relaunch.
 pub const RESTORE_TERMINAL_SCROLLBACK_DEFAULT: bool = true;
 
-/// Number of terminal history lines kept by a new terminal tab when the
-/// option is not explicitly configured.
 pub const SCROLLBACK_LINES_DEFAULT: u32 = 5_000;
 pub const SCROLLBACK_LINES_MIN: u32 = 1_000;
 pub const SCROLLBACK_LINES_MAX: u32 = 1_000_000;
 
-/// Show the bounded-memory terminal scrollback minimap by default.
 pub const TERMINAL_MINIMAP_ENABLED_DEFAULT: bool = true;
 pub const TERMINAL_MINIMAP_WIDTH_MIN: u16 = 12;
 pub const TERMINAL_MINIMAP_WIDTH_MAX: u16 = 96;
@@ -63,9 +38,6 @@ pub const TERMINAL_MINIMAP_OPACITY_MIN: u8 = 0;
 pub const TERMINAL_MINIMAP_OPACITY_MAX: u8 = 100;
 pub const TERMINAL_MINIMAP_OPACITY_DEFAULT: u8 = 50;
 
-/// Default for [`Options::system_notifications_enabled`]. Desktop toasts ship
-/// enabled so flowmux behaves like every other notifying app on first launch;
-/// the user can opt out to keep only the in-app bell list.
 pub const SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT: bool = true;
 
 /// Default for [`Options::agent_bar_mode`]. Agent Activity starts in the
@@ -73,35 +45,29 @@ pub const SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT: bool = true;
 /// bottom bar.
 pub const AGENT_BAR_MODE_DEFAULT: bool = false;
 
-/// Default for [`Options::cursor_blink`]. The terminal cursor blinks on first
-/// launch, matching VTE / most terminals.
 pub const CURSOR_BLINK_DEFAULT: bool = true;
 
-/// Show Monaco's code minimap in editor tabs by default.
 pub const EDITOR_MINIMAP_ENABLED_DEFAULT: bool = true;
 
-/// Cursor blink half-period in milliseconds: the time the cursor stays shown
-/// before toggling to hidden (and vice versa). Range clamps to
-/// `[CURSOR_BLINK_INTERVAL_MIN, CURSOR_BLINK_INTERVAL_MAX]`. The default 530ms
-/// matches GTK's historical `gtk-cursor-blink-time` (1060ms full period).
+/// Cursor blink half-period in milliseconds. GTK takes twice this value
+/// for its full blink cycle.
 pub const CURSOR_BLINK_INTERVAL_MIN: u32 = 100;
 pub const CURSOR_BLINK_INTERVAL_MAX: u32 = 2000;
 pub const CURSOR_BLINK_INTERVAL_DEFAULT: u32 = 530;
 
-/// Web view engine to use for new browser tabs. At this stage every variant
-/// falls back to WebKitGTK; external engine spawning is a later step. The
-/// selected value is still persisted so the future wiring can use it.
+/// Profile selection for new browser tabs. Every variant uses the platform
+/// WebKit backend; Chrome/Firefox labels do not launch external engines.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BrowserEngine {
-    /// In-pane WebKitGTK (default).
+    /// Default in-pane WebKit profile.
     #[default]
     Webkit,
     /// Chromium family.
     Chrome,
     /// Firefox family.
     Firefox,
-    /// User-defined external engine.
+    /// User-named browser profile.
     Custom { name: String },
 }
 
@@ -150,8 +116,8 @@ pub struct Options {
     pub auto_resume_agent_sessions: bool,
     #[serde(default = "default_restore_terminal_scrollback")]
     pub restore_terminal_scrollback: bool,
-    /// Scrollback capacity for newly created terminal tabs. `None` preserves
-    /// the built-in 10,000-line default for older option files.
+    /// Scrollback capacity for new terminal tabs. `None` uses
+    /// [`SCROLLBACK_LINES_DEFAULT`].
     #[serde(default)]
     pub scrollback_lines: Option<u32>,
     /// Show a terminal overview on terminal tabs. A single-screen terminal is
@@ -169,7 +135,7 @@ pub struct Options {
     #[serde(default)]
     pub default_shell: Option<String>,
     /// When true, notifications are delivered as system desktop toasts
-    /// (libnotify / D-Bus) in addition to the in-app bell list. When false,
+    /// through the GTK D-Bus notification API, in addition to the in-app bell list. When false,
     /// notifications still appear in the in-app bell list but no system toast
     /// is sent. Default: [`SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT`] (`true`).
     #[serde(default = "default_system_notifications_enabled")]
@@ -849,8 +815,6 @@ mod tests {
 
     #[test]
     fn default_focus_border_opacity_is_thirty() {
-        // First-run default is 30% so the highlight is visible without
-        // overpowering surrounding pane chrome.
         assert_eq!(
             Options::default().focus_border_opacity,
             FOCUS_BORDER_OPACITY_DEFAULT
@@ -926,8 +890,6 @@ mod tests {
 
     #[test]
     fn default_persist_browser_session_is_true() {
-        // The user expectation modeled after every mainstream browser is to
-        // stay signed in across quit/relaunch, so the option ships enabled.
         assert!(Options::default().persist_browser_session);
         assert_eq!(
             Options::default().persist_browser_session,

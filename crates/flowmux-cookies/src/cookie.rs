@@ -7,7 +7,7 @@ pub struct Cookie {
     pub name: String,
     pub value: String,
     pub path: String,
-    /// Microseconds since epoch, RFC 3339 style for portability.
+    /// UTC expiration, serialized as RFC 3339; `None` denotes a session cookie.
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub secure: bool,
     pub http_only: bool,

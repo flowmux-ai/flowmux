@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Firefox stores cookies at:
 //!
-//!   ~/.mozilla/firefox/<profile>/cookies.sqlite
+//!   `~/.mozilla/firefox/<profile>/cookies.sqlite`
 //!
 //! Schema (firefox 100+):
 //!
@@ -45,7 +45,7 @@ impl Source for Firefox {
         if !base.is_dir() {
             return None;
         }
-        // Look for the default profile (or first one with a cookies db).
+        // Use the first profile directory containing a cookies database.
         for entry in std::fs::read_dir(&base).ok()?.flatten() {
             let p = entry.path();
             if !p.is_dir() {
@@ -68,7 +68,7 @@ impl Source for Firefox {
 }
 
 fn list_cookies_from_path(path: &Path, domain_filter: Option<&str>) -> Result<Vec<Cookie>, Error> {
-    // Open read-only to avoid locking the live profile.
+    // Never modify the host browser's cookie database.
     let conn = rusqlite::Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,

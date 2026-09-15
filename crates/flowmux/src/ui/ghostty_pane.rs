@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! VTE-backed terminal pane.
 //!
-//! Spawns the user's shell in a PTY and surfaces:
-//!
-//! * `notification-received` (OSC 99 / Konsole) → forwarded as a
-//!   structured notification to the app handler;
-//! * `bell` (BEL) → optional attention signal;
-//! * `child-exited` → caller decides whether to recycle the pane.
-//!
-//! For OSC 9 / 777 cmux supports, those are not fired by VTE as
-//! distinct signals — agents wishing to use them should pipe through
-//! `flowmux notify-stream` (which uses the same parser the GUI uses).
-//! Add explicit parsing here if those OSC forms need GUI-native signals.
+//! Spawns the user's shell in a PTY. `flowmuxctl pty-tee` forwards OSC
+//! notifications and hidden-tab output events; VTE renders the terminal and
+//! reports focus, title, directory, and child-exit changes.
 
 use crate::ui::pane_terminal::PaneCallbacks;
 use crate::ui::terminal_minimap::TerminalMinimap;
@@ -41,10 +33,8 @@ pub struct GhosttyPane {
     /// main child is `widget` (so the VTE keeps its natural-size
     /// propagation) plus a scrollbar or minimap on the right edge. The
     /// minimap reserves an equal VTE end margin so it never covers text.
-    /// The Overlay deliberately does
-    /// **not** wrap the VTE in a `gtk::Box` — the latter approach
-    /// (commit eb2d176, reverted) broke `gtk::Paned` minimum-size
-    /// propagation and clipped tig / vim / htop in nested splits.
+    /// Avoid a wrapping `gtk::Box`: it breaks Paned minimum-size propagation
+    /// and clips terminal applications in nested splits.
     pub container: gtk::Overlay,
     search_revealer: gtk::Revealer,
     search_entry: gtk::SearchEntry,
@@ -675,12 +665,8 @@ impl GhosttyPane {
                 schedule_agent_content_refresh(refresh_throttle.clone(), refresh.clone(), surface);
             });
         }
-        // Snap the viewport back to the live cursor row whenever the user
-        // types: someone who scrolled up to inspect scrollback should not
-        // end up typing off-screen with no visible echo. VTE's built-in
-        // `scroll-on-keystroke` covers every key-driven input path
-        // (keyboard + IM commit), mirroring the explicit snap-to-bottom the
-        // pure-Rust terminal backend does in `write_child` (commit 9e12edb).
+        // Snap to live output for keyboard and IM input, so typing after scrolling
+        // back does not leave the echoed text off-screen.
         term.set_scroll_on_keystroke(true);
 
         // Snapshot ordinary selections. Agent TUIs repaint constantly and VTE
@@ -700,10 +686,7 @@ impl GhosttyPane {
             });
         }
 
-        // Wrap the VTE in a `gtk::Overlay` so we can pin a vertical
-        // `gtk::Scrollbar` to its right edge without going through a
-        // `gtk::Box` (which broke `gtk::Paned` minimum-size propagation
-        // in commit eb2d176, since reverted).
+        // Overlay the scrollbar without changing VTE's minimum-size propagation.
         //
         // Some VTE builds (notably the 0.78 source build we use in the
         // 22.04 Flatpak path) hand back a fresh `gtk::Adjustment` from
@@ -2001,30 +1984,8 @@ fn env_flag_value_enabled(value: &str) -> bool {
         || value.eq_ignore_ascii_case("on")
 }
 
-/// Make Shift+Left/Right behave like a plain Left/Right cursor move.
-///
-/// VTE's default for a shifted cursor key is the modified xterm form
-/// `CSI 1 ; 2 C` / `CSI 1 ; 2 D`. Line editors that only parse the bare
-/// `CSI C` / `CSI D` (Claude Code's TUI, shell readline) don't recognise
-/// the `1;2` parameters and surface the trailing letter as a literal
-/// "C"/"D" in the input. We can't offer a copyable keyboard selection on
-/// VTE — it exposes no API to set a selection by coordinate — so the
-/// least surprising behaviour is to drop the Shift modifier and feed the
-/// normal-mode cursor escape. `flowmuxctl pty-tee` rewrites it to the
-/// application-cursor form (`SS3 C` / `SS3 D`) while a foreground TUI has
-/// DECCKM enabled, so this stays correct in full-screen apps too.
-///
-/// Scoped to the Shift+Left/Right keysyms via a `ShortcutController`
-/// (like the Enter handler), so letter / jamo keys still reach VTE's IM
-/// path untouched and inline Hangul preedit is unaffected.
-/// Snap the scrollback viewport back to the live cursor row. VTE's
-/// `scroll-on-keystroke` only fires for input routed through VTE's own
-/// key handler; the capture-phase shortcut paths and clipboard paste
-/// reach the PTY through direct `feed_child` / `paste_clipboard` calls
-/// that bypass it. Call this first on those paths so a user who scrolled
-/// up to read history is snapped back before their input is echoed
-/// off-screen. No-op when already pinned to the bottom — mirrors the
-/// pure-Rust backend's `write_child` snap (commit 9e12edb).
+/// Snap back to live output before direct PTY writes and clipboard paste, which
+/// bypass VTE's `scroll-on-keystroke` key handler.
 fn scroll_terminal_to_bottom(term: &vte::Terminal) {
     if let Some(adj) = term.vadjustment() {
         let bottom = adj.upper() - adj.page_size();
@@ -2490,11 +2451,7 @@ fn install_ibus_nav_workaround(term: &vte::Terminal, smart_page_enabled: bool) {
 /// argv used when the caller asks for the default shell (no explicit
 /// command).
 ///
-/// **Outside a sandbox on Linux** — run `$SHELL -l`. The `-l` flag makes
-/// any POSIX-ish shell source the per-shell profile (.bash_profile /
-/// .profile / .zprofile / fish login conf), which in turn pulls .bashrc /
-/// .zshrc so the user's PS1 + helpers are defined before the first prompt.
-/// Same convention xterm / alacritty / kitty use.
+/// **Outside Flatpak** — run `$SHELL -l` to load the shell's login startup files.
 ///
 /// **On macOS** — run the user's shell as a login shell too. Finder-launched
 /// apps do not inherit the user's terminal PATH or UTF-8 locale, so skipping
@@ -2581,11 +2538,7 @@ fn add_macos_gui_env_fallbacks(extra_env: &mut Vec<(String, String)>) {
 }
 
 fn prepend_agent_shim_dir(extra_env: &mut Vec<(String, String)>) {
-    // Prepend the agent shim dir to PATH so `claude` / `codex`
-    // resolve to the PID-capturing wrappers `flowmux fix` installs.
-    // VTE merges these entries over the inherited environment, so a
-    // PATH entry overrides the inherited one; rebuild it as shim-dir-first
-    // using any PATH override already added above.
+    // Put agent wrappers first, retaining any PATH override already supplied.
     if let Some(shim) = flowmux_config::paths::agent_shim_dir() {
         if shim.is_dir() {
             let base = last_env_value(extra_env, "PATH")

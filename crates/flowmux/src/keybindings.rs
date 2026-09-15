@@ -48,10 +48,7 @@ struct UsagePopoverFocus {
 
 type SavedUsagePopoverFocus = Rc<UsagePopoverFocus>;
 
-/// Group prefix for every flowmux window action. `set_accels_for_action`
-/// and `add_action_entries` both need the namespaced name (`win.copy`)
-/// but `flowmux_config::keybindings::ActionId::as_str` returns the bare
-/// form (`copy`), so callers prepend this constant.
+/// Prefix for application accelerator names; window action entries use bare names.
 const ACTION_GROUP: &str = "win.";
 const TOGGLE_USAGE_POPOVER_FULL_ACTION: &str = "win.toggle-usage-popover";
 
@@ -970,7 +967,7 @@ fn make_close_surface_action(
 /// We re-exec `current_exe()` (not just `"flowmux"`) so a build run out of
 /// `target/release/` opens another copy of the same binary rather than
 /// whatever happens to be on `PATH`. If an install replaced that running
-/// inode, fall back to argv[0], which still names the live installed path.
+/// inode, fall back to `argv[0]`, which still names the live installed path.
 /// GDK's launch context carries the compositor activation token, so the new
 /// Wayland window receives keyboard focus instead of leaving input in the old
 /// window.
@@ -1288,9 +1285,7 @@ mod tests {
 
     #[test]
     fn shift_tab_is_reserved_for_terminal_and_agents() {
-        // No default cycle binding may claim Shift+Tab, so it always reaches
-        // the focused terminal / agent. NextSurface keeps its own binding
-        // (<Ctrl><Shift>Right) — the requirement is only that it is not Shift+Tab.
+        // Leave Shift+Tab available to the focused terminal or agent.
         let steals_shift_tab = |action| {
             default_for(action)
                 .iter()
@@ -1422,12 +1417,6 @@ mod tests {
         assert!(resolved_accels(&overrides, ActionId::SplitRight).is_empty());
     }
 
-    /// Ctrl+N must create a workspace inside the current window and
-    /// Ctrl+Shift+N must launch a brand-new flowmux window. These were
-    /// swapped intentionally — the unshifted form is the cheap/local
-    /// action, the shifted form is the heavier "open another app window"
-    /// action. Pinning both so a future shortcut shuffle doesn't quietly
-    /// flip them back.
     #[test]
     fn ctrl_n_opens_new_workspace_and_ctrl_shift_n_opens_new_window() {
         let (new_ws, new_win) = if cfg!(target_os = "macos") {
@@ -1437,9 +1426,6 @@ mod tests {
         };
         assert_eq!(default_for(ActionId::NewWorkspace), vec![new_ws]);
         assert_eq!(default_for(ActionId::NewWindow), vec![new_win]);
-        // The two actions must not share an accelerator — sharing would
-        // collapse "new workspace in this window" and "new window" onto
-        // the same key.
         let ws: std::collections::HashSet<_> = default_for(ActionId::NewWorkspace)
             .iter()
             .copied()
@@ -1494,10 +1480,6 @@ mod tests {
         );
     }
 
-    /// Ctrl+Shift+W must trigger the whole-window quit confirmation,
-    /// distinct from Alt+W (single-pane close). Pinning both bindings
-    /// here so a future shortcut shuffle doesn't silently collapse them
-    /// onto the same key.
     #[test]
     fn ctrl_shift_w_quits_app_distinct_from_alt_w_close_surface() {
         // Close stays Alt+W on both platforms (Option+W on macOS); quit swaps
@@ -1509,10 +1491,6 @@ mod tests {
         };
         assert_eq!(default_for(ActionId::QuitApp), vec![quit]);
         assert_eq!(default_for(ActionId::CloseSurface), vec!["<Alt>w"]);
-        // The two bindings must not share an accelerator — sharing
-        // would mean one key both closes a tab and asks to quit the
-        // whole app, which is exactly the regression the user hit on
-        // Alt+W and the reason quit-app got its own modifier combo.
         let close_set: std::collections::HashSet<_> = default_for(ActionId::CloseSurface)
             .iter()
             .copied()
@@ -1546,12 +1524,7 @@ mod tests {
         assert!(dialog.is_response_enabled("quit"));
     }
 
-    /// Scenario: user presses Ctrl+Shift+W, the dialog appears,
-    /// and picking "Quit" closes the window (NON_UNIQUE GApplication
-    /// → process exit). Picking "Cancel" leaves the window alone.
-    /// We exercise the dialog directly via `build_quit_dialog` +
-    /// `dialog.response(...)` so the test does not depend on
-    /// keyboard-accel routing or widget-tree introspection.
+    /// Exercise the dialog response channel directly, without keyboard routing or window teardown.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn quit_dialog_quit_response_resolves_true_cancel_resolves_false() {
@@ -1657,8 +1630,6 @@ mod tests {
             "Ctrl+Shift+W must wait for the confirm dialog response — it must not close the window before the user picks Quit"
         );
     }
-
-    // ---- copy-pane-path leader chord ----
 
     #[test]
     fn copy_pane_path_default_is_ctrl_shift_k() {

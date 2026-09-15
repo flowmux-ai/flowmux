@@ -61,7 +61,7 @@ const main = await readFile(resolve(root, "dist", "main.js"), "utf8");
 const css = await readFile(resolve(root, "dist", "main.css"), "utf8");
 const notice = await readFile(resolve(root, "THIRD_PARTY_NOTICES.md"), "utf8");
 const licenseInventory = await readFile(
-  resolve(root, "..", "..", "THIRD_PARTY_LICENSES.md"),
+  resolve(root, "..", "..", "docs", "legal", "THIRD_PARTY_LICENSES.md"),
   "utf8",
 );
 if (!notice.includes(`Monaco Editor ${monaco.version}`)) {

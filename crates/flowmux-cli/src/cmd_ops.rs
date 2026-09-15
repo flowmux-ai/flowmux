@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Local command handlers: identify, capabilities, agent, doctor, fix, theme.
-//!
-//! Split out of `main.rs` (pure move; behavior unchanged).
 
 use super::*;
 

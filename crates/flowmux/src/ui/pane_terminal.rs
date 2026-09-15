@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Terminal pane type + the shared per-pane callback bundle.
 //!
-//! flowmux renders terminals with the VTE-backed
-//! [`crate::ui::ghostty_pane::GhosttyPane`], so `PaneTerminal` is an alias for
-//! it. (Historically this was an enum over multiple backends.) The pane registry stores
-//! `PaneTerminal`; spawn-time wiring lives in `workspace_view.rs`.
+//! `PaneTerminal` aliases the VTE-backed [`crate::ui::ghostty_pane::GhosttyPane`].
+//! Spawn-time wiring lives in `workspace_view.rs`.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -128,10 +126,7 @@ pub struct PaneCallbacks {
     /// The terminal grid changed. The VTE backend coalesces rapid repaint
     /// bursts before invoking this callback.
     pub on_terminal_contents_changed: Rc<RefCell<dyn FnMut(SurfaceId)>>,
-    /// Return the current user options. Used when creating a new BrowserPane to
-    /// choose the engine and apply zoom immediately after widget creation. This
-    /// cheaply clones the `Rc<RefCell<Options>>` held by WindowController, so
-    /// dialog updates are visible on the next call.
+    /// Return the current options so new surfaces use the latest settings.
     pub read_options: Rc<dyn Fn() -> flowmux_config::options::Options>,
     /// Return the surface's current 0-based index within the same pane. Tab DnD
     /// uses PaneRegistry::surface_tabs to compute final_index from the source

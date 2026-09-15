@@ -543,10 +543,7 @@ fn parse_notification_action_target(target: &str) -> Option<(u32, flowmux_core::
 /// Refresh the stable "current daemon" pointer used by env-less CLI
 /// invocations and (on Flatpak) by the host-side OpenCode plugin.
 ///
-/// Uses a symlink so a process opening the path follows it to the
-/// real per-PID socket atomically. Falling back to a regular text
-/// file with the path inside would force every consumer to do a
-/// two-step read-then-connect dance.
+/// Uses a symlink so clients can connect directly to the per-process socket.
 ///
 /// Last-writer wins: when two flowmux GUIs are alive at once the
 /// pointer points at whichever started most recently. Per-PID
@@ -567,8 +564,7 @@ fn refresh_runtime_socket_pointer(target: &std::path::Path) {
             return;
         }
     }
-    // Replace any prior pointer atomically. `remove_file` is fine for
-    // both real files and symlinks; ignore NotFound.
+    // Remove the old pointer before creating the symlink; ignore NotFound.
     if let Err(e) = std::fs::remove_file(&pointer) {
         if e.kind() != std::io::ErrorKind::NotFound {
             tracing::warn!(error = %e, path = %pointer.display(), "could not remove stale socket pointer");
@@ -787,13 +783,6 @@ mod tests {
         Ok(())
     }
 
-    /// Regression guard for cross-window workspace navigation: the bug was
-    /// that two `flowmux` launches collapsed into one process under
-    /// GApplication's default singleton behavior, then both windows
-    /// shared a single MPMC `Bridge` and a click in window A activated
-    /// window B's workspace. The fix is `NON_UNIQUE` on the application
-    /// builder; if a future refactor drops it, this test fails before
-    /// the user does.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn application_uses_non_unique_so_each_window_runs_in_its_own_process() {

@@ -83,9 +83,8 @@ impl RefStore {
     }
 
     /// Replace `scope`'s refs with the `token → selector` pairs from a
-    /// fresh snapshot. Clears any prior refs first, so a stale `eN` from
-    /// the previous page can never resolve. This is the one call the GTK
-    /// side makes after running [`crate::scripts::SNAPSHOT_JS`].
+    /// fresh snapshot. Tokens can be reused for different selectors; callers
+    /// must use the latest snapshot. Called after [`crate::scripts::SNAPSHOT_JS`].
     pub fn populate_from_snapshot(
         &mut self,
         scope: RefScope,

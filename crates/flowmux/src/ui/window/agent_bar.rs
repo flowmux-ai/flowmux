@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Agent bar + notification attention tracking and rendering.
-//!
-//! Split out of `window.rs` (pure move; behavior unchanged).
 
 use super::*;
 use vte::prelude::TerminalExt;

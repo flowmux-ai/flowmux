@@ -193,13 +193,7 @@ impl UsagePopover {
             );
         });
 
-        // Warm the usage cache in the background at construction time. An open
-        // popover installs a modal pointer grab, so if the first fetch only
-        // started when the user opened it, they would be held behind a spinning,
-        // undismissable popover for the whole request. Fetching ahead of time
-        // means the popover almost always opens straight to data — no loading
-        // state, no grab while spinning. `begin_refresh` throttles the on-show
-        // refresh, so opening the popover shortly after does not double-fetch.
+        // Warm the cache before the first open; the on-show throttle prevents a duplicate fetch.
         request_refresh(&state, false, &tokio_handle, &result_tx);
 
         let state_for_toggle = state.clone();
@@ -223,8 +217,7 @@ impl UsagePopover {
                 // The periodic refresh must not be postponed by the popover
                 // cache throttle; the in-flight guard still prevents overlap.
                 request_refresh(&state, true, &tokio_handle, &result_tx);
-                // Keep the previous values during collection; a local failure
-                // has already updated the state and must hide unavailable bars.
+                // Render retained values while the refresh is in flight.
                 bar.render(&state.borrow(), true);
             }
             gtk::glib::ControlFlow::Continue
@@ -498,9 +491,7 @@ fn limit_row(window: &UsageWindow, animate: bool) -> gtk::Widget {
 /// microseconds (frame clock time unit).
 const BAR_ANIMATION_US: f64 = 500_000.0;
 
-/// Grow the bar from 0 to `target` over 0.5 s once it appears on screen.
-/// Cards are rebuilt on every render, so each popover open or refresh
-/// result produces fresh bars and replays the animation.
+/// Animate a mapped bar from zero to its target when animations are enabled.
 fn animate_fraction(progress: &gtk::ProgressBar, target: f64) {
     progress.set_fraction(0.0);
     progress.connect_map(move |progress| {

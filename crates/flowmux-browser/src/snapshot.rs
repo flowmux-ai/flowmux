@@ -60,8 +60,7 @@ pub struct PageMeta {
     /// Truncated `body.innerText` so agents have a quick summary
     /// without needing a separate read call.
     pub text: String,
-    /// Optional full HTML — usually omitted for size; populated only
-    /// when callers explicitly ask (`snapshot --include-html`).
+    /// Optional HTML payload; the current snapshot script leaves this unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub html: Option<String>,
 }

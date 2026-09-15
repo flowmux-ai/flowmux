@@ -56,11 +56,9 @@ pub(crate) fn acquire_for_state(state_path: &Path) -> Result<InstanceLock, State
 
 /// Try to take the exclusive `state.json` lock.
 ///
-/// Retained as a non-blocking lock primitive and cross-process regression
-/// check. GUI persistence uses the blocking short-lived lock above. Returns
-/// `Ok(None)` while another process owns the lock and `Err(_)` only for
-/// unexpected I/O failures (missing
-/// `$XDG_STATE_HOME`, permission errors creating the lock file, etc.).
+/// Return `Ok(None)` while another process owns the lock. Path-resolution
+/// and I/O failures return `Err`; an unset `XDG_STATE_HOME` uses the normal
+/// platform fallback. GUI persistence uses a blocking short-lived lock.
 pub fn try_acquire_state_lock() -> Result<Option<InstanceLock>, StateError> {
     let path = lock_path()?;
     if let Some(parent) = path.parent() {

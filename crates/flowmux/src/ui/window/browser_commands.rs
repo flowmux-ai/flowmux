@@ -180,7 +180,6 @@ impl WindowController {
                         }
                     },
 
-                    // ---- Phase 5 P0 action gap ------------------------
                     BrowserOp::Wait {
                         condition,
                         timeout_ms,

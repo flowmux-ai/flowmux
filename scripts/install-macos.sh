@@ -291,8 +291,8 @@ install -m755 "$REPO_ROOT/target/$target_subdir/flowmuxctl" "$macos/flowmuxctl"
 install -m644 \
     "$REPO_ROOT/LICENSE" \
     "$REPO_ROOT/NOTICE" \
-    "$REPO_ROOT/THIRD_PARTY_LICENSES.md" \
-    "$REPO_ROOT/THIRD_PARTY_ASSET_NOTICES.md" \
+    "$REPO_ROOT/docs/legal/THIRD_PARTY_LICENSES.md" \
+    "$REPO_ROOT/docs/legal/THIRD_PARTY_ASSET_NOTICES.md" \
     "$REPO_ROOT/editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md" \
     "$REPO_ROOT/editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt" \
     "$resources/"

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Skeleton daemon that accepts client connections and dispatches
-//! requests via a user-supplied [`Handler`]. The GUI binary owns the
-//! handler implementation; this crate only owns the wire protocol.
+//! Unix socket server dispatching requests through a supplied [`Handler`].
 
 use crate::protocol::{Envelope, Payload, Request, Response, RpcError};
 use std::future::Future;
@@ -12,9 +10,8 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{info, warn};
 
-/// Hard cap on a single envelope. Real envelopes are tiny (KB), so 1 MiB is
-/// generous and still bounds memory if a peer streams without ever sending
-/// `\n`. Without this cap, `read_line` would buffer indefinitely.
+/// Hard cap on a single envelope, including snapshots. Bounds memory when a
+/// peer streams without a terminating `\n`.
 pub(crate) const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 pub trait Handler: Send + Sync + 'static {

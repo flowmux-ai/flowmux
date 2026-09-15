@@ -1,20 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! WebKitGTK 6.0 in-app browser pane.
-//!
-//! Replaces the macOS WKWebView path. Each pane owns:
-//!
-//! * a [`webkit::WebView`] for rendering;
-//! * a small chrome row (back / forward / reload / address bar);
-//! * a scriptable API entry point — `evaluate_javascript_async` is
-//!   already exposed by webkit6, so the Task 15 work mostly involves
-//!   wrapping it in a stable IPC verb shape, not new widgets.
-//!
-//! Options model: upstream cmux uses a single engine (WKWebView) and only
-//! separates `WKWebsiteDataStore` by profile (`Sources/Panels/BrowserPanel.swift:443`).
-//! flowmux follows the same model: every tab renders with the single WebKitGTK
-//! 6.0 engine, while the option labels (WebKit / Chrome / Firefox / Custom)
-//! map to [`BrowserProfile`] values that isolate cookies, localStorage, and
-//! IndexedDB directories.
+//! Linux in-app browser backed by WebKitGTK 6.0. BrowserEngine labels select
+//! isolated [`BrowserProfile`] storage; every profile uses the same renderer.
 
 use crate::ui::browser_bookmarks::BookmarkMenu;
 use crate::ui::browser_downloads::DownloadManager;
@@ -106,10 +92,8 @@ impl BrowserPane {
             std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
         }
 
-        // Build a per-profile NetworkSession. Default reuses WebKit's global
-        // default session and persists in the standard system location. Other
-        // profiles live under `$XDG_DATA_HOME/flowmux/browser/<slug>/` so cookies
-        // and localStorage do not mix inside one flowmux instance.
+        // Share a session per profile and persistence mode; persistent profiles
+        // use their flowmux data directory, including the default profile.
         let network_session = build_network_session(&profile, persist_session);
         let web_view = webkit6::WebView::builder()
             .network_session(&network_session)
@@ -147,28 +131,7 @@ impl BrowserPane {
             });
         }
 
-        // Map the core options from cmux's `configureWebViewConfiguration`
-        // (BrowserPanel.swift:2586-) to WebKitGTK Settings:
-        //   * mediaTypesRequiringUserActionForPlayback = []
-        //         → media-playback-requires-user-gesture = false
-        //         + media-playback-allows-inline = true
-        //   * developerExtrasEnabled = true
-        //         → enable-developer-extras = true
-        //   * isElementFullscreenEnabled = true
-        //         → enable-fullscreen = true
-        //   * defaultWebpagePreferences.allowsContentJavaScript = true
-        //         -> enable-javascript = true (WebKitGTK default)
-        //
-        // Also enable media-related options that WebKitGTK leaves disabled by
-        // default. cmux's WKWebView only omits them because macOS WebKit has
-        // them enabled by default, so set them explicitly for parity:
-        //   * enable-mediasource (adaptive streaming such as HLS / DASH)
-        //   * enable-encrypted-media (DRM, such as Netflix/Disney+)
-        //   * enable-webaudio (audio contexts)
-        //   * hardware-acceleration-policy = ALWAYS (GPU video decode)
-        // A freshly created WebView should always have settings. Unwrap the
-        // Option conservatively; if WebKit ever returns None, media options
-        // fall back to system defaults.
+        // Enable media, developer tools, and fullscreen support when settings exist.
         if let Some(settings) = webkit6::prelude::WebViewExt::settings(&web_view) {
             settings.set_media_playback_requires_user_gesture(false);
             settings.set_media_playback_allows_inline(true);
@@ -1025,14 +988,8 @@ fn build_uncached_network_session(
     }
 }
 
-/// Wire the session's [`webkit6::CookieManager`] to a sqlite file at
-/// [`cookies_sqlite_path`]. WebKitGTK's [`CookieManager`] keeps cookies
-/// in memory until this is called, which is the root cause of the "I had
-/// to log in again after restarting flowmux" report — cookies were the only
-/// piece of site state not persisted by [`webkit6::NetworkSession::new`].
-///
-/// Logs a warning and leaves cookies in-memory if the manager is missing
-/// (should never happen for a freshly created persistent session).
+/// Persist cookies alongside the profile's other site data. WebKit keeps them
+/// in memory unless this is configured; log a warning if no manager is available.
 fn set_cookie_persistent_storage(session: &webkit6::NetworkSession, data_dir: &std::path::Path) {
     match session.cookie_manager() {
         Some(cm) => {

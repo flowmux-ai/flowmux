@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-notice="THIRD_PARTY_ASSET_NOTICES.md"
+notice="docs/legal/THIRD_PARTY_ASSET_NOTICES.md"
 test -s "$notice"
 
 for source in \

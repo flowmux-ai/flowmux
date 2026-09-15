@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Persistent surface ↔ agent-session mapping.
 //!
-//! Mirrors cmux's `~/.cmuxterm/<agent>-hook-sessions.json` — each
-//! supported agent (claude, codex, opencode, …) reports its session id
-//! to flowmux through an IPC verb and we persist
-//! `(agent, surface_id) → session_id`. On the next launch the GUI can
-//! re-spawn the same agent in the same surface with `<agent> --resume
-//! <session-id>` and continue the conversation where it left off.
+//! Persist `(agent, surface_id) → session_id` for supported resumable agents.
+//! The GUI consumes a saved binding on restore and starts the matching
+//! command from [`SavedAgentSession::resume_argv`].
 //!
 //! Storage layout:
 //!
@@ -59,7 +56,7 @@ impl SavedAgentSession {
     }
 
     /// Command used as a shell startup argument while restoring a session. The
-    /// agent and flags are fixed by [`resume_argv`]; the opaque session id is
+    /// agent and flags are fixed by [`Self::resume_argv`]; the opaque session id is
     /// single-quote escaped. When the agent exits or fails to start, erase both
     /// the visible screen and scrollback so the replacement shell starts clean.
     pub fn shell_command(&self) -> Option<String> {
@@ -90,17 +87,15 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// File-backed store. Constructed once on daemon boot from
-/// `$XDG_DATA_HOME/flowmux/agent-sessions/`.
+/// File-backed store under `$XDG_DATA_HOME/flowmux/agent-sessions/`.
 #[derive(Debug, Clone)]
 pub struct AgentSessionStore {
     dir: PathBuf,
 }
 
 impl AgentSessionStore {
-    /// `dir` is the directory that holds `<agent>.json` files. The
-    /// store creates it on the first write — callers don't need to
-    /// pre-create it.
+    /// `dir` holds `<agent>.json` files. Mutating operations create it and
+    /// the shared lock file; callers do not need to pre-create it.
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
     }
@@ -606,8 +601,7 @@ mod tests {
     fn write_is_atomic_no_tmp_left_behind_on_success() {
         let (s, td) = store();
         s.record("claude", SurfaceId::new(), "sess").unwrap();
-        // Atomic-replace policy: only the final `claude.json` exists,
-        // no `claude.tmp.<pid>` lingering.
+        // A successful write leaves no temporary files.
         for entry in std::fs::read_dir(td.path()).unwrap() {
             let name = entry.unwrap().file_name().into_string().unwrap();
             assert!(
@@ -617,10 +611,8 @@ mod tests {
         }
     }
 
-    /// Scenario: cmux-equivalent restart flow. Daemon boot calls
-    /// `lookup` for every recorded (agent, surface) and rehydrates
-    /// the session. Verify the round-trip: write, drop the in-memory
-    /// store, recreate it pointing at the same dir, look up.
+    /// Recorded sessions remain readable from a fresh store using the same
+    /// directory.
     #[test]
     fn scenario_session_survives_daemon_restart_round_trip() {
         let dir = tempfile::tempdir().unwrap();

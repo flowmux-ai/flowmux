@@ -18,17 +18,15 @@ on:
       - Cargo.toml
       - Cargo.lock
       - 'crates/**/Cargo.toml'
-      - deny.toml
-      - about.toml
-      - about.hbs
+      - 'packaging/licenses/**'
       - LICENSE
       - NOTICE
-      - THIRD_PARTY_LICENSES.md
-      - THIRD_PARTY_ASSET_NOTICES.md
+      - 'docs/legal/**'
       - 'crates/flowmux-config/themes/**'
       - 'crates/flowmux-md-viewer/tests/fixtures/**'
       - crates/flowmux-editor/src/web_assets.rs
       - crates/flowmux/src/theme.rs
+      - crates/flowmux/src/builtin_icons.rs
       - 'resources/themes/**'
       - packaging/flatpak/com.flowmux.App.yml
       - scripts/generate-third-party-licenses.sh
@@ -68,12 +66,12 @@ jobs:
         run: cargo install cargo-about --locked --features cli
 
       - name: Check dependency licenses and sources
-        run: cargo deny --locked check licenses sources
+        run: cargo deny --locked --config packaging/licenses/deny.toml check licenses sources
 
       - name: Check third-party license notice
         run: |
           scripts/generate-third-party-licenses.sh
-          git diff --exit-code THIRD_PARTY_LICENSES.md
+          git diff --exit-code docs/legal/THIRD_PARTY_LICENSES.md
 
       - name: Check asset license notices
         run: scripts/check-license-assets.sh

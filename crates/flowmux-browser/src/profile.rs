@@ -1,26 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Browser profile model.
-//!
-//! Each profile maps to a separate WebKit `WebsiteDataManager` data
-//! directory under `$XDG_DATA_HOME/flowmux/browser/<slug>`. That gives
-//! per-profile cookie / localStorage / IndexedDB persistence
-//! independent of the rest of the user's GTK apps and survives
-//! flowmux restarts.
-//!
-//! Built-in profiles:
-//!
-//! * [`BrowserProfile::Default`] — vanilla persistent WebKit profile.
-//! * [`BrowserProfile::FirefoxImport`] — same data dir as Default by
-//!   default, but the cookie-import command pushes Firefox cookies
-//!   into it. (Selecting this profile from the right-click "Choose
-//!   browser" menu does not by itself import; it just labels the
-//!   profile so the user knows where their import lands.)
-//! * [`BrowserProfile::ChromeImport`] — placeholder slot for the
-//!   Chromium-family cookie import path. The actual decryption
-//!   needs libsecret and lands in a follow-up commit; selecting this
-//!   profile today gives an empty WebKit data dir alongside the
-//!   default one so the user can wire it up later.
-//! * [`BrowserProfile::Custom`] — arbitrary user-named slot.
+//! Persistent browser profile identifiers. Each slug has its own data directory.
+//! Selecting a profile does not import host-browser cookies.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -66,9 +46,7 @@ impl BrowserProfile {
         }
     }
 
-    /// `$XDG_DATA_HOME/flowmux/browser/<slug>/` — the directory passed
-    /// to `WebsiteDataManager::with_data_directory`. The directory
-    /// is created if it doesn't exist yet.
+    /// Create `<platform data dir>/flowmux/browser/<slug>/` if absent.
     pub fn data_dir(&self) -> Result<PathBuf, ProfileError> {
         let base = dirs::data_dir().ok_or(ProfileError::NoDataDir)?;
         let dir = base.join("flowmux").join("browser").join(self.slug());

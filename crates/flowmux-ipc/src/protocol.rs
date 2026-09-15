@@ -47,7 +47,8 @@ pub const BROWSER_VERBS: &[&str] = &[
 /// Protocol, which WebKitGTK 6.0 does not expose (see `AGENTS.md`).
 pub const UNSUPPORTED_FEATURES: &[&str] = &["viewport", "network-mock", "screencast"];
 
-/// Host browsers whose cookies flowmux can currently import.
+/// Recognized host-browser source names. This is not a working-import list:
+/// Chromium extraction and insertion into the WebView are not implemented.
 pub const COOKIE_IMPORT_BROWSERS: &[&str] =
     &["firefox", "chrome", "chromium", "brave", "edge", "arc"];
 
@@ -80,7 +81,7 @@ pub fn capabilities() -> Capabilities {
 pub struct TreeTab {
     pub id: SurfaceId,
     pub title: String,
-    /// `"terminal"`, `"browser"`, or `"editor"`.
+    /// `"terminal"`, `"ssh_terminal"`, `"browser"`, or `"editor"`.
     pub kind: String,
     /// True for the tab currently shown in this pane.
     pub active: bool,
@@ -399,13 +400,13 @@ pub enum Request {
         shell: Option<String>,
     },
 
-    /// `flowmux pane split <pane> --right|--down`
+    /// `flowmux split <pane> --right|--down`
     PaneSplit {
         pane: PaneId,
         direction: SplitDirection,
     },
 
-    /// `flowmux pane send-keys <pane> "<keys>"`
+    /// `flowmux send-keys <pane> "<keys>"`
     PaneSendKeys {
         pane: PaneId,
         keys: String,
@@ -441,9 +442,8 @@ pub enum Request {
         ratio: f32,
     },
 
-    /// `flowmux close-pane <pane>` — close a pane. Refuses (without a
-    /// dialog) when it is the workspace's last pane, so an agent's call
-    /// never blocks on a GUI confirmation.
+    /// `flowmux close-pane <pane>` — refuse the workspace's last pane.
+    /// Other panes can require confirmation for unsaved editor documents.
     PaneClose {
         pane: PaneId,
     },
@@ -455,9 +455,8 @@ pub enum Request {
         surface: SurfaceId,
     },
 
-    /// `flowmux close-tab <surface> [--pane]` — close a tab. Refuses
-    /// (without a dialog) when it is the last tab of the workspace's
-    /// last pane, so an agent's call never blocks on confirmation.
+    /// `flowmux close-tab <surface> [--pane <pane>]` — refuse the last tab
+    /// of the last pane. Unsaved editor documents can require confirmation.
     SurfaceClose {
         pane: PaneId,
         surface: SurfaceId,
@@ -500,10 +499,9 @@ pub enum Request {
     /// `flowmux notifications clear`
     NotificationsClear,
 
-    /// `flowmux browser open <url> [--right|--down]` — split a target
-    /// terminal/browser pane and put a browser pane in the new
-    /// sibling. `target_pane = None` means "use the currently
-    /// focused pane"; the daemon resolves it on the GTK side.
+    /// `flowmux browser open <url> [--right|--down]` — reuse a right-sibling
+    /// browser pane when eligible, otherwise split beside the target.
+    /// `target_pane = None` resolves to the focused pane on the GTK side.
     BrowserOpen {
         url: String,
         target_pane: Option<PaneId>,
@@ -585,9 +583,7 @@ pub enum Request {
         path: PathBuf,
     },
 
-    // ---- Phase 5 P0 action gap: cmux-equivalent verbs that round
-    // out the agent-browser surface. Selectors come from the most
-    // recent `BrowserSnapshot` (resolved via the daemon's RefStore).
+    // Element targets resolve through the latest browser snapshot's RefStore.
     BrowserDblClick {
         pane: PaneId,
         target: String,
@@ -629,13 +625,10 @@ pub enum Request {
         selector: String,
     },
 
-    // ---- Phase 7: agent session resume mapping ----
     /// Record (or overwrite) the session id an agent (claude/codex/…)
     /// is currently using inside `surface`. Persisted at
     /// `$XDG_DATA_HOME/flowmux/agent-sessions/<agent>.json` so the next
-    /// app launch can `<agent> --resume <session_id>` in the same
-    /// surface. Mirrors cmux's hook → `~/.cmuxterm/<agent>-hook-sessions.json`
-    /// flow.
+    /// app launch can resume it using that agent's command syntax.
     AgentSessionUpdate {
         agent: String,
         surface: SurfaceId,
@@ -716,22 +709,21 @@ pub enum Request {
         root: std::path::PathBuf,
     },
 
-    /// `flowmux browser snapshot --pane <id>` — return a JSON snapshot
+    /// `flowmux browser snapshot <pane>` — return a JSON snapshot
     /// of the page DOM/a11y tree (for agent automation).
     BrowserSnapshot {
         pane: PaneId,
     },
 
-    /// `flowmux browser eval --pane <id> <js>` — evaluate JS, return result.
+    /// `flowmux browser eval <pane> <js>` — evaluate JS, return result.
     BrowserEval {
         pane: PaneId,
         source: String,
     },
 
     /// `flowmux import-cookies --from firefox [--domain example.com]`
-    /// Imports cookies from a host browser into the in-app browser's
-    /// cookie jar. Chromium-family browsers return Unimplemented until
-    /// libsecret-backed value unwrapping lands.
+    /// Extract host cookies and return their count. Chromium extraction and
+    /// WebView insertion are not implemented.
     ImportCookies {
         source: String,
         domain: Option<String>,

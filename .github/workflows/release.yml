@@ -95,7 +95,7 @@ jobs:
           cp target/release/flowmuxctl         "$stage/"
           cp target/release/flowmux-daemon     "$stage/"
           cp LICENSE NOTICE README.md \
-            THIRD_PARTY_LICENSES.md THIRD_PARTY_ASSET_NOTICES.md "$stage/"
+            docs/legal/THIRD_PARTY_LICENSES.md docs/legal/THIRD_PARTY_ASSET_NOTICES.md "$stage/"
           cp editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md \
             "$stage/EDITOR_THIRD_PARTY_NOTICES.md"
           cp editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt "$stage/"
@@ -155,9 +155,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.ver.outputs.tag }}"
-          # Pick the highest v* tag that isn't this one. Sorting by
-          # version:refname keeps SemVer ordering correct (0.1.10 > 0.1.9),
-          # which `--sort=-creatordate` would not.
+          # Select the highest other v* tag using Git's version sort. This
+          # does not restrict selection to tags older than the requested release.
           prev=$(git tag --list 'v*' --sort=-version:refname \
             | grep -vFx "$tag" \
             | head -n1 || true)
@@ -183,17 +182,14 @@ jobs:
           tag  = os.environ["TAG"]
           repo = os.environ["REPO"]
 
-          # When there's no previous tag (very first release), include the
-          # whole reachable history. Otherwise diff against the predecessor.
+          # Compare against the selected tag, or use all reachable history if none exists.
           rev_range = f"{prev}..{tag}" if prev else tag
           log = subprocess.check_output(
               ["git", "log", "--no-merges", "--pretty=format:%h%x09%s", rev_range],
               text=True,
           ).strip()
 
-          # Conventional Commits buckets, ordered as they should appear in
-          # the release body. The leading regex strips the type/scope so the
-          # printed line reads as a plain bullet.
+          # Classify commit subjects by Conventional Commits prefix.
           categories = [
               ("Features",      re.compile(r"^feat(\([^)]+\))?!?:\s*", re.I)),
               ("Bug fixes",     re.compile(r"^fix(\([^)]+\))?!?:\s*",  re.I)),
@@ -270,10 +266,7 @@ jobs:
           name: ${{ steps.ver.outputs.tag }}
           draft: false
           prerelease: ${{ contains(steps.ver.outputs.tag, '-') }}
-          # Custom body built from the commit log; we deliberately turn off
-          # the GitHub auto-generated PR section because the project pushes
-          # directly to main, so the auto section would duplicate the same
-          # commits without the conventional-commits grouping.
+          # Publish the categorized commit log generated above.
           body_path: RELEASE_NOTES.md
           files: |
             dist/*.tar.gz

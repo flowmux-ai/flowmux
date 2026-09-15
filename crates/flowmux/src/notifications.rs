@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! In-process notification log shown in the sidebar's bell popover.
 //!
-//! flowmux already forwards every `Request::Notify` to the desktop via
-//! `org.gtk.Notifications` (flowmux-notify). The GUI also keeps
-//! a small in-memory transcript so the user can scroll past
-//! notifications even after the OS toast fades — pressing the bell
-//! button at the top of the sidebar opens a popover listing them.
+//! Accepted notifications also reach the desktop through flowmux-notify. This
+//! in-memory transcript keeps them available after the OS toast fades.
 //!
 //! Each entry remembers the source `PaneId` / `WorkspaceId`, so
 //! clicking a popover row routes back to that pane (cmux parity:
@@ -21,18 +18,8 @@ use std::rc::Rc;
 /// 9 stream) can otherwise grow this unbounded over a long session.
 const MAX_RETAINED: usize = 50;
 
-/// Suppress a fresh entry when an entry with the same `(pane, surface,
-/// level)` arrived within this window. Codex / Claude Code emit Stop
-/// twice per agent turn from our perspective — once as OSC 9/99 (snooped
-/// by `flowmuxctl pty-tee`) and once as the lifecycle hook spawn
-/// (`flowmuxctl hooks <agent> stop`). Both legitimately fire the
-/// daemon's `Request::Notify`, so the bell popover would otherwise show
-/// two rows per completion. Eight seconds covers the worst observed
-/// skew between the in-band OSC and the hook process spawn (cold-start
-/// node / python interpreter on the first call of a session). Genuine
-/// back-to-back completions on the same tab are rare on that scale, so
-/// the wider window is the cheaper trade-off than the user-visible
-/// double toast.
+/// Deduplicate the same pane and surface within eight seconds unless attention
+/// priority increases. OSC notifications and lifecycle hooks can report the same turn.
 const DUP_WINDOW: chrono::Duration = chrono::Duration::milliseconds(8000);
 
 fn attention_priority(level: NotificationLevel) -> u8 {
@@ -122,10 +109,7 @@ impl NotificationStore {
         // the only key that catches the duplicate; including level
         // re-introduced the 2× toast we are trying to suppress.
         //
-        // Pane-less notifications (`flowmuxctl notify` with no --pane,
-        // global toasts) skip the dedupe — they can legitimately fire
-        // back-to-back from unrelated callers, and we have no other
-        // signal to tell them apart.
+        // Without both pane and surface, unrelated callers cannot be deduplicated safely.
         if pane.is_some() && surface.is_some() {
             if let Some(last) = entries
                 .iter()
@@ -361,10 +345,7 @@ impl NotificationStore {
         self.inner.borrow().iter().cloned().collect()
     }
 
-    /// Number of unread entries. Surfaced to tests and the UI for
-    /// invariants ("after I acked, this is 0"). The dock badge is now
-    /// derived by the desktop from `org.gtk.Notifications` per-app
-    /// state, so this value does not need to be re-published anywhere.
+    /// Number of unread entries, used by the UI and desktop launcher badge.
     pub fn unread_count(&self) -> usize {
         self.inner.borrow().iter().filter(|e| !e.read).count()
     }

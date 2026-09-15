@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Watch a process tree under a workspace's root PID and report which
-//! TCP ports it has bound in LISTEN state. On Linux, mirrors cmux's
-//! sidebar "listening ports" pill by parsing `/proc/<pid>/net/tcp[6]`
-//! and `/proc/<pid>/fd/*` socket inodes. Other Unix platforms still
-//! support PID liveness, but report no descendants or listening ports.
+//! Process liveness and agent identity detection. Linux uses procfs; macOS
+//! uses process APIs for names, arguments, and descendants. Other targets
+//! expose limited liveness and name information.
 //!
-//! No platform command dependencies — procfs reads on Linux, `kill(0)`
-//! liveness elsewhere.
+//! Listening-port detection is Linux-only. It matches `/proc/net/tcp[6]`
+//! LISTEN entries against socket inodes owned by the supplied PIDs.
 
 use std::collections::HashSet;
 #[cfg(target_os = "linux")]
@@ -43,9 +41,8 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Return all PIDs descended from `root` (inclusive). Walks
-/// `/proc/<pid>/status` PPid edges. O(n_procs); cheap enough to call
-/// per-second on the GTK main loop.
+/// Return all PIDs descended from `root` (inclusive), using `/proc/<pid>/status`
+/// PPid edges. Scans all processes; the returned root is not checked for liveness.
 #[cfg(target_os = "linux")]
 pub fn descendants(root: u32) -> Result<HashSet<u32>, ProcError> {
     let mut by_parent: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
@@ -153,23 +150,14 @@ fn match_agent_comm(comm: &str) -> Option<&'static str> {
     KNOWN_AGENT_COMMS.iter().copied().find(|name| *name == c)
 }
 
-/// Script interpreters that host an agent as a file argument, so the kernel
-/// `comm` is the interpreter (`node`, `python`, …) rather than the agent. For
-/// these, the agent identity lives in the script path inside
-/// `/proc/<pid>/cmdline`. Cline ships as a Node CLI (`node …/cline --tui`) that
-/// never sets `process.title`, so its `comm` stays `node` and
-/// [`match_agent_comm`] can't see it — unlike `claude` (sets `process.title`)
-/// or `codex` (native binary). Lowercase for case-insensitive comparison.
+/// Script interpreters whose argv may identify an agent when the executable
+/// name identifies only the interpreter. Lowercase for comparison.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_SCRIPT_INTERPRETERS: &[&str] = &["node", "bun", "deno", "python", "python3"];
 
-/// Resolve an agent name from a process's argv when `argv[0]` is a known script
-/// interpreter: the first non-flag argument is the script path, whose basename
-/// (minus a `.js`/`.mjs`/`.cjs` suffix) is matched against [`KNOWN_AGENT_COMMS`]
-/// — e.g. `["node", "/home/u/.local/bin/cline", "--tui"]` → `Some("cline")`.
-/// A non-interpreter `argv[0]` returns `None`: native binaries are matched by
-/// `comm` instead, so a shell merely touching a file named `cline` can't
-/// false-match.
+/// For a known interpreter, scan non-flag arguments for a basename matching an
+/// agent name after removing `.js`, `.mjs`, or `.cjs`. Non-interpreter argv
+/// returns `None`; native binaries are matched by `comm` instead.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
     let interpreter = std::path::Path::new(argv.first()?)
@@ -283,7 +271,7 @@ fn parse_macos_procargs(raw: &[u8]) -> Vec<String> {
 /// Canonical agent name for a single PID: the kernel `comm` first (covers
 /// native binaries and agents that set `process.title`), falling back to the
 /// argv script name for interpreter-hosted agents like Cline. See
-/// [`agent_from_argv`].
+/// `agent_from_argv`.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn agent_name_for_pid(pid: u32) -> Option<&'static str> {
     let comm = comm_of(pid)?;
@@ -359,8 +347,8 @@ fn child_pids(pid: u32) -> Vec<u32> {
         .collect()
 }
 
-/// Cap on process-tree nodes visited per detection, a defensive bound so a
-/// pathological tree can never turn one poll into an unbounded `/proc` walk.
+/// Limit candidate visits on the direct-child traversal and parent-chain
+/// depth checks. The procfs fallback still scans all processes.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const AGENT_TREE_NODE_CAP: usize = 512;
 
@@ -394,21 +382,16 @@ fn rank_agent_tree_matches(mut matches: Vec<AgentTreeMatch>) -> Vec<&'static str
         .collect()
 }
 
-/// Detect every AI coding agent running in the process tree rooted at `root`
-/// (inclusive). Names are unique and ordered deepest-first; a lower PID breaks
-/// same-depth ties. Returning all identities lets lifecycle reconciliation
-/// preserve a hook-confirmed nested agent even while its parent agent remains
-/// alive in the same pane.
+/// Detect agent identities in `root`'s process tree, ordered deepest-first with
+/// lower PIDs breaking ties. Repeated names are returned once.
 ///
-/// Cost: walks only `root`'s own subtree (typically 2–6 processes) via the
-/// kernel `children` file, so a poll's cost is proportional to the pane's
-/// descendants — not to the total number of system processes, and not
-/// multiplied when several panes are polled. Falls back to a full `/proc`
-/// parent-map scan only on kernels without `CONFIG_PROC_CHILDREN`.
+/// Direct-child traversal considers at most `AGENT_TREE_NODE_CAP` distinct
+/// processes. If the root children files cannot be read, fall back to a full
+/// procfs parent-map scan. Concurrent exits or unreadable processes can be missed.
 #[cfg(target_os = "linux")]
 pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
     if read_children(root).is_none() {
-        // Feature unavailable: one full scan, matching the old behaviour.
+        // No readable root children file: fall back to a full procfs scan.
         let Ok(descendants) = descendants(root) else {
             return Vec::new();
         };
@@ -728,8 +711,7 @@ mod tests {
 
     #[test]
     fn agent_name_in_tree_is_none_for_a_tree_without_an_agent() {
-        // The test runner's own tree contains cargo/rustc/the test binary,
-        // none of which are in KNOWN_AGENT_COMMS.
+        // The test process has no agent descendants.
         assert_eq!(agent_name_in_tree(std::process::id()), None);
     }
 
@@ -803,15 +785,12 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn listening_ports_filters_to_pids_owning_the_socket() {
-        // A second process's listener should not show up under our PID.
+        // Both listeners belong to this process; a nonexistent PID owns neither.
         let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let other_port = other.local_addr().unwrap().port();
         let our = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let our_port = our.local_addr().unwrap().port();
 
-        // Pretend a different (synthetic) PID owns nothing — the result
-        // must not include either port. Only our own pid set should
-        // surface our_port.
         let other_pids = HashSet::from([u32::MAX - 1]);
         let ports = listening_ports(&other_pids).unwrap();
         assert!(!ports.contains(&our_port));
@@ -827,9 +806,7 @@ mod tests {
     fn comm_of_returns_basename_of_self() {
         let comm = comm_of(std::process::id()).expect("comm should be readable");
         assert!(!comm.is_empty());
-        // The current binary is one of the cargo test runners. The comm
-        // must not include a path separator (kernel truncates to basename
-        // and 16 chars).
+        // Process names must not contain path separators; Linux comm is truncated.
         assert!(!comm.contains('/'));
         #[cfg(target_os = "linux")]
         assert!(comm.len() <= 16);

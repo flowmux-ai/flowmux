@@ -329,9 +329,7 @@ impl Sidebar {
         header.pack_start(&new_btn);
         header.pack_end(&bell_button);
 
-        // ---- Bottom footer: small left options button ----
-        // Click dispatches ShowOptionsDialog through the bridge so the window
-        // dispatcher can present the modal dialog.
+        // Route options through the bridge so the controller can present the window.
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         footer.set_margin_top(2);
         footer.set_margin_bottom(4);
@@ -1763,7 +1761,6 @@ fn row_widget(
     // that read as dead blank space whenever it was hidden. On hover the
     // button fades in and overlaps the tail of the text.
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    // User-requested vertical margin reduction from 6 to 3px; keep start/end.
     content.set_margin_top(3);
     content.set_margin_bottom(3);
     content.set_margin_start(4);
@@ -3070,8 +3067,6 @@ mod tests {
             .any(|label| label.label().starts_with("Reviewing patch")));
     }
 
-    /// Smoke test that row_widget can build a stable widget tree with a name
-    /// and subtitle lines. Requires GTK init, so headless environments skip it.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     fn row_widget_builds_with_one_to_three_subtitle_lines() {

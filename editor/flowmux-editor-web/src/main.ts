@@ -100,7 +100,7 @@ interface OpenDocument {
   suppressChanges: boolean;
   diskStatus: DocumentDiskStatus;
   restoreViewPending: boolean;
-  /** Last save failure that was not a disk conflict; cleared on edit or save. */
+  /** Non-conflict save or size-limit error; cleared on edit, replacement, or save. */
   saveError: string | null;
   /** Content edits not yet sent to the host (throttled, see syncDocument). */
   pendingChanges: boolean;

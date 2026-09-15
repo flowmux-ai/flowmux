@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Visual theme.
 //!
-//! Resolution order:
-//!
-//! 1. flowmux's own theme config at `$XDG_CONFIG_HOME/flowmux/theme`,
-//!    if the file exists.
-//! 2. flowmux's built-in defaults, authored in this file. Background and
-//!    foreground mirror Ghostty's shipped defaults verbatim (`#282c34` /
-//!    `#ffffff`) so flowmux looks like Ghostty out of the box without
-//!    reading any external config file at runtime.
+//! Resolution combines the selected preset or user theme file, explicit color
+//! overrides, and built-in fallbacks; see [`ResolvedTheme::resolve`].
 //!
 //! Applied to:
 //!
@@ -447,15 +441,8 @@ paned > separator {{
 .navigation-sidebar row.activatable:selected .flowmux-sidebar-tree-gutter {{
     color: alpha(@sidebar_fg_color, 0.34);
 }}
-/* Suppress libadwaita selected-row tint on workspace rows. The ListBox
-   keeps SelectionMode::Single so navigation helpers can read
-   selected_workspace(), but flowmux does not paint active-workspace
-   as a separate visual state — focus and .flowmux-attention are the
-   only highlights users see. libadwaita ships rules whose selectors
-   include row.activatable plus :selected combined with :hover, :active,
-   .has-open-popup, and a child-combinator variant with a 1px inset
-   border. Plain row:selected loses on specificity, so each variant is
-   matched explicitly with .activatable below and the border is cleared too. */
+/* Suppress libadwaita selected-row tint while retaining selection for navigation.
+   Match its selector specificity before adding the active-workspace stripe below. */
 .navigation-sidebar row.activatable:selected,
 .navigation-sidebar row.activatable:selected:focus,
 .navigation-sidebar row.activatable:selected.has-open-popup,
@@ -765,8 +752,7 @@ paned > separator {{
     }
 }
 
-/// The whole-point terminal zoom rule introduced by 8f8a941. At 100% the
-/// configured font size is preserved; other zoom levels are rounded to avoid
+/// Preserve the configured size at 100%; round other zoom levels to avoid
 /// VTE's fractional scaling damage path.
 pub(crate) fn terminal_zoom_points(points: f64, zoom_percent: u16) -> f64 {
     if zoom_percent == flowmux_config::options::ZOOM_DEFAULT {

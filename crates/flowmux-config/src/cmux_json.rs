@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `cmux.json` parser. Schema follows the public documentation at
-//! cmux.com/docs/custom-commands.
-//!
-//! Only the fields flowmux actually uses are deserialized — additional
-//! upstream keys are silently ignored so user files written for cmux
-//! still load. Fields specific to macOS-only behavior (e.g. dock badge
-//! tweaks) are accepted but no-op.
+//! Project-local `cmux.json` settings and custom commands. Unknown keys are
+//! ignored. JSON line/block comments are accepted outside strings.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

@@ -2,8 +2,8 @@
 
 # Keyboard shortcuts
 
-Shortcuts are the built-in defaults from `flowmux-config` and can be changed
-under Options → Keybindings. Action names are the keys used in
+Shortcuts are the built-in defaults from `flowmux-config`. Except for copy
+and paste, they can be changed under Options → Keybindings. Action names are the keys used in
 `options.json`. Linux and macOS use the platform-specific accelerators below.
 
 | ActionId | Linux | macOS |
@@ -27,9 +27,11 @@ under Options → Keybindings. Action names are the keys used in
 | toggle-usage-popover | Ctrl+Alt+U | Cmd+Alt+U |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
 
-The terminal IME and scroll workarounds are intentionally fixed: Shift+Enter
-flushes composed Hangul input, and PgUp/PgDn use smart scrollback behavior.
-They are not editable keybindings.
+Shift+Enter in a terminal commits pending IME composition before sending
+the agent newline sequence (Escape followed by carriage return). This is
+not an editable action. PgUp/PgDn normally follow VTE and the foreground
+application. The legacy smart-scrollback handler is opt-in through
+`FLOWMUX_ENABLE_VTE_CAPTURE_KEYS=1`, not a default keybinding.
 
 When the embedded editor has focus, it also provides its local editing
 shortcuts: Ctrl/Cmd+S saves, Ctrl/Cmd+Shift+S opens Save As,
@@ -53,9 +55,9 @@ the editor for word selection instead of switching tabs.
 | Arrow, PageUp/PageDown, Home/End | Remains local to the focused surface | Moves the editor cursor or viewport; Shift extends the selection |
 | Text input, Enter, Tab, Backspace, Delete, and IME composition | Remains local to the focused surface | Remains entirely inside the editor |
 
-The editor only overrides local editing input. Modifier chords assigned to a
-flowmux action are handled at the window level in both contexts, so focusing an
-editor does not disable pane, tab, workspace, or panel control.
+Editor-local chords such as Linux Ctrl+Shift+Left/Right take precedence over
+tab switching. The other layout, workspace, and panel shortcuts remain
+available while editing.
 
 See the [configuration reference](configuration.md) for the JSON shape.
 

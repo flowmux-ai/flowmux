@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Domain types shared across flowmux crates.
 //!
-//! Types here are deliberately backend-agnostic: they describe the shape
-//! of a workspace, a surface (terminal/browser pane), a notification, and
-//! the IPC verbs — not how any of them are rendered or executed.
+//! Backend-agnostic workspace, pane, surface, notification, and agent state.
+//! Rendering and IPC request types live in their respective crates.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -195,16 +194,9 @@ pub mod id {
 
             impl std::str::FromStr for $name {
                 type Err = uuid::Error;
-                /// Accepts a bare UUID (`<uuid>`) and the cmux-style
-                /// prefixed forms (`surface:<uuid>`, `pane:<uuid>`,
-                /// `workspace:<uuid>`, …). Anything before the first
-                /// `:` is treated as a label and ignored, so an agent
-                /// that learned the cmux CLI shape ports unchanged.
-                ///
-                /// (`surface:<integer>` numeric refs in cmux require a
-                /// daemon-side index lookup; those are not parsed
-                /// here — the CLI surfaces them as a separate IPC
-                /// verb when implemented.)
+                /// Accept a bare UUID or a labeled UUID such as `pane:<uuid>`.
+                /// Any label before the first colon is ignored; numeric references
+                /// are not supported by this parser.
                 fn from_str(s: &str) -> Result<Self, Self::Err> {
                     let inner = s.split_once(':').map(|(_, rest)| rest).unwrap_or(s);
                     Ok(Self(inner.parse()?))
@@ -227,23 +219,17 @@ pub use ssh::{SshForwardSpec, SshTarget, SshWorkspaceConfig, WorkspaceLocation};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: WorkspaceId,
-    /// Automatically determined workspace name. It starts as the last folder of
-    /// root_dir when the workspace is created and may update from daemon-side
-    /// automatic signals such as PTY OSC or cwd changes. This corresponds to
-    /// cmux's `processTitle`: the latest system-observed value, not user intent.
+    /// Automatic workspace name, used when [`Self::custom_title`] is unset.
     pub name: String,
-    /// Name entered by the user through the right-click "Change tab name" menu.
-    /// `None` means automatic mode, showing `name`. Saving an empty string resets
-    /// to `None` and returns to automatic mode, matching cmux
-    /// `customTitle: String?` semantics. [`Workspace::display_title`] computes
-    /// the final name shown in the side panel.
+    /// Optional user-provided title. [`Self::display_title`] falls back to
+    /// [`Self::name`] when it is absent or empty.
     #[serde(default)]
     pub custom_title: Option<String>,
     pub location: WorkspaceLocation,
-    /// Resolved when the workspace's root_dir is a git checkout.
+    /// Git metadata for a local workspace root.
     pub git: Option<GitInfo>,
-    /// Ports observed listening on localhost from any process descendant of
-    /// the workspace's root pane (populated by the daemon, not stored).
+    /// Listening-port metadata shown in the sidebar. Defaults to empty.
+    /// The current runtime does not populate it through process monitoring.
     #[serde(default)]
     pub listening_ports: Vec<u16>,
     pub surfaces: Vec<Surface>,
@@ -521,9 +507,8 @@ pub struct PaneSurface {
     /// Bounded by [`TERMINAL_SCROLLBACK_MAX_BYTES`] before it reaches state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scrollback: Option<TerminalScrollback>,
-    /// Live AI-agent activity, set from agent lifecycle hooks. Runtime
-    /// state only — never persisted, so resumed workspaces start with no
-    /// agent presence until the next hook fires.
+    /// Live agent presence from hooks, process monitoring, or screen signals.
+    /// Never persisted; a restored tab starts without agent presence.
     #[serde(skip)]
     pub agent: Option<AgentPresence>,
 }
@@ -554,9 +539,8 @@ pub enum SplitDirection {
     Vertical,
 }
 
-/// How `flowmux browser open` placed its new browser surface relative to
-/// the requesting terminal pane. Mirrors cmux's `placement_strategy`
-/// response field (`reuse_right_sibling` / `split_right` / `external`).
+/// How `flowmux browser open` placed its browser surface relative to the
+/// requesting pane.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlacementStrategy {
@@ -697,15 +681,8 @@ impl Pane {
         }
     }
 
-    /// Pick a cwd to seed a newly spawned terminal next to `target`.
-    ///
-    /// Used by split and add-tab so the new terminal opens where the user is
-    /// looking. Resolution:
-    ///   1. If the active surface is a terminal with a tracked cwd, use it.
-    ///   2. If the active surface is a browser, walk earlier tabs in this
-    ///      pane and use the most recent terminal's cwd. Browsers do not
-    ///      have a cwd of their own, so this preserves the user's prior
-    ///      location instead of dropping to the workspace root.
+    /// Pick a local cwd for a new terminal beside `target`. See
+    /// [`PaneContent::cwd_for_new_terminal`] for active-tab and fallback rules.
     pub fn terminal_surface_cwd(&self, target: PaneId) -> Option<PathBuf> {
         match self {
             Pane::Leaf { id, content } if *id == target => content.cwd_for_new_terminal(),
@@ -1327,9 +1304,8 @@ impl Pane {
         changed
     }
 
-    /// Auto-rename a surface from an external signal (browser page title,
-    /// terminal OSC, etc. Surfaces with title_locked = true were user-renamed and
-    /// are skipped. Empty or identical titles return false.
+    /// Auto-rename a surface from an external title signal. User-locked titles,
+    /// empty or identical titles, and local shell cwd echoes are ignored.
     pub fn set_surface_title_auto(
         &mut self,
         target: PaneId,
@@ -1418,12 +1394,9 @@ impl Pane {
         true
     }
 
-    /// Move the terminal or browser tab identified by `surface_id` within the
-    /// same pane to `target_index`. `target_index` is the final index after the
-    /// move and clamps to the last tab when too large. The active tab SurfaceId
-    /// is preserved, so the same tab remains active after moving. Missing
-    /// surfaces or same-position moves return `false` so callers can skip dirty
-    /// marking and GTK widget moves.
+    /// Move `surface_id` within its pane to `target_index`, clamped to the last
+    /// index. Preserve the active surface; missing or unchanged positions return
+    /// `false` so callers can skip state and widget updates.
     pub fn reorder_surface_in_leaf(
         &mut self,
         target: PaneId,
@@ -1619,12 +1592,7 @@ impl Pane {
         }
     }
 
-    /// Mutable sibling of [`Self::find_surface`]: locate the surface `target`
-    /// (a tab of pane `target_pane`) for in-place mutation, walking into split
-    /// branches. Returns `None` when the pane is absent, is not a `Tabs` leaf,
-    /// or holds no surface with that id. Centralizing this descent lets the
-    /// payload setters (rename / url / title / cwd) mutate the found surface
-    /// directly instead of each re-implementing the tree walk.
+    /// Borrow a tab for mutation, returning `None` if the pane or surface is absent.
     fn find_surface_mut(
         &mut self,
         target_pane: PaneId,
@@ -1961,8 +1929,7 @@ pub enum CloseSurfaceOutcome {
 
 /// Outcome of [`Pane::remove_leaf`].
 pub enum RemoveOutcome {
-    /// Returned only at the root: the entire tree was a single leaf
-    /// matching the target, so the surface is now empty.
+    /// This subtree was a single matching leaf and is now empty.
     EntirelyRemoved,
     /// The tree mutated; this is the new root.
     Replaced(Pane),
@@ -1973,7 +1940,7 @@ pub enum RemoveOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PaneContent {
-    /// New cmux-compatible shape: pane-local tabs.
+    /// Pane-local tabs with one active surface.
     Tabs {
         active: SurfaceId,
         surfaces: Vec<PaneSurface>,
@@ -2262,18 +2229,9 @@ impl AgentStatus {
     }
 }
 
-/// Live activity state of an AI coding agent (Claude Code, Codex,
-/// OpenCode, Gemini CLI, Antigravity) running inside a surface. Driven by the
-/// agent's lifecycle hooks. Runtime-only — never persisted (see
-/// [`PaneSurface::agent`]).
-///
-/// State machine mirrors cmux: `UserPromptSubmit` → [`Running`], `Stop`
-/// → [`Idle`], `Notification` → [`NeedsInput`]; `SessionEnd` or the
-/// daemon's PID liveness sweep clears the presence entirely.
-///
-/// [`Running`]: AgentActivity::Running
-/// [`Idle`]: AgentActivity::Idle
-/// [`NeedsInput`]: AgentActivity::NeedsInput
+/// Coarse runtime activity for an agent. Hooks, process monitoring, and screen
+/// signals refine the public [`AgentStatus`]. Never persisted through
+/// [`PaneSurface::agent`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentActivity {
@@ -2495,9 +2453,8 @@ pub fn agent_bar_color_for_surface(surface: SurfaceId) -> String {
     WORKSPACE_PALETTE[idx].to_string()
 }
 
-/// Presence source tag for agents discovered by the process-tree sweep
-/// (`flowmux_procmon::agent_name_in_tree`), as opposed to `flowmux:hook`
-/// (agent hook reports) or `flowmux:screen` (terminal text heuristics).
+/// Presence source tag for process-tree detections, distinct from
+/// `flowmux:hook` reports and `flowmux:screen` heuristics.
 pub const AGENT_SOURCE_PROC: &str = "flowmux:proc";
 
 /// Select the process-derived identity to reconcile for a surface. Native hook
@@ -2582,8 +2539,7 @@ fn reconcile_surface_process_agent(
 /// (when known) the agent process PID used for liveness sweeps.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentPresence {
-    /// Agent identity as reported by its hook (`claude`, `codex`,
-    /// `opencode`, `gemini`, `antigravity`). Lowercase CLI name.
+    /// Agent identity from a hook, process detection, or screen heuristic.
     pub name: String,
     pub activity: AgentActivity,
     pub status: AgentStatus,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Unit tests for the CLI, split out of `main.rs` via #[path].
+//! Unit tests for CLI parsing, request construction, and output.
 
 use super::*;
 
@@ -262,8 +262,7 @@ fn browser_open_namespace_uses_pane_env_fallback() {
     ));
 }
 
-/// Every Phase-5 verb that previously existed only in IPC must now be
-/// reachable from the CLI namespace and map to its request 1:1.
+/// Browser automation verbs must map to their IPC requests.
 #[test]
 fn browser_namespace_exposes_phase5_verbs() {
     let pane = PaneId::new();

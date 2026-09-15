@@ -24,9 +24,7 @@ use std::path::{Path, PathBuf};
 /// `<repo>/.agents/skills/flowmux-browser/SKILL.md`.
 pub const SKILL_BODY: &str = include_str!("../../../.agents/skills/flowmux-browser/SKILL.md");
 
-/// One agent we know how to wire up. The `Target` enum stays small —
-/// adding a new agent means adding a variant + its
-/// `resolved_install_path` arm + a doctor entry.
+/// Supported agent skill-install targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
     /// `~/.claude/skills/flowmux-browser/SKILL.md`. Claude Code loads
@@ -255,9 +253,8 @@ pub fn doctor_all(targets: &[Target], home: &Path, codex_home: Option<&Path>) ->
         .collect()
 }
 
-/// Idempotent uninstall. Removes the file (and the empty
-/// `flowmux-browser` parent directory for Claude/OpenCode skill
-/// layouts, but never the agent's top-level dir).
+/// Idempotently remove the skill file and its `flowmux-browser` directory
+/// when empty. The agent's top-level directory is preserved.
 pub fn uninstall_one(path: &Path) -> Result<UninstallOutcome> {
     if !path.exists() {
         return Ok(UninstallOutcome::AlreadyAbsent);
@@ -468,11 +465,6 @@ mod tests {
 
     #[test]
     fn every_target_writes_into_a_skills_directory() {
-        // Why: previously Codex got a sibling `~/.codex/flowmux-browser.md`
-        // that the user had to `@import`. Recent Codex CLI loads
-        // `$CODEX_HOME/skills/<name>/SKILL.md` natively — assert all
-        // targets resolve to the agent's skills dir so the
-        // SKILL is auto-discovered everywhere.
         let home = fake_home();
         for t in Target::ALL {
             let p = t.resolved_install_path(home.path(), None);
