@@ -3,7 +3,7 @@
 # flowmux
 ![icon](resources/icons/flowmux-180.png)
 
-**A Linux terminal for AI coding agents.**
+**Agent Workflow Multiplexer Terminal** — *Go with the agents' flow.*
 
 [![Build](https://img.shields.io/github/actions/workflow/status/flowmux-ai/flowmux/release.yml?label=build)](https://github.com/flowmux-ai/flowmux/actions/workflows/release.yml)
 [![Test](https://img.shields.io/github/actions/workflow/status/flowmux-ai/flowmux/test.yml?branch=main&label=test)](https://github.com/flowmux-ai/flowmux/actions/workflows/test.yml)
