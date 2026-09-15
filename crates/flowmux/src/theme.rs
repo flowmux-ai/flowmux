@@ -27,20 +27,15 @@ pub struct ResolvedTheme {
     pub cursor: gdk::RGBA,
     pub selection_bg: Option<gdk::RGBA>,
     pub selection_fg: Option<gdk::RGBA>,
-    /// Always 16 entries. Indices missing from the user's theme file
-    /// fall back to Ghostty's default ANSI palette (Tomorrow), so a
-    /// fresh install renders prompts / ls output with Ghostty's
-    /// shipped colors instead of toolkit defaults.
+    /// Always 16 entries. Missing or invalid colors use [`DEFAULT_PALETTE`].
     pub palette: Vec<gdk::RGBA>,
 }
 
-/// Ghostty's default ANSI 16-color palette, based on the Tomorrow
-/// scheme. The two black slots are raised slightly for flowmux's
-/// `#282c34` default background so ANSI black text remains legible on a
-/// fresh install.
 pub(crate) const DEFAULT_BG: &str = "#282c34";
 pub(crate) const DEFAULT_FG: &str = "#ffffff";
 
+/// Tomorrow-based ANSI palette adapted from Ghostty, with both black slots
+/// raised for contrast against flowmux's default background.
 pub(crate) const DEFAULT_PALETTE: [&str; 16] = [
     "#5c6370", "#cc6666", "#b5bd68", "#f0c674", "#81a2be", "#b294bb", "#8abeb7", "#c5c8c6",
     "#7f848e", "#d54e53", "#b9ca4a", "#e7c547", "#7aa6da", "#c397d8", "#70c0b1", "#eaeaea",
@@ -95,10 +90,8 @@ impl ResolvedTheme {
     }
 
     fn from_ghostty(cfg: &flowmux_config::ghostty::GhosttyConfig) -> Self {
-        // Built-in fallbacks kick in only when the user's flowmux theme
-        // file does not supply a value. `bg`/`fg` mirror Ghostty's shipped
-        // defaults verbatim; `cursor` follows `fg` because Ghostty leaves
-        // cursor-color unset, which on Ghostty's side resolves to fg too.
+        // Missing or invalid resolved colors use flowmux's defaults;
+        // the cursor falls back to the resolved foreground.
         let bg = cfg
             .background
             .as_deref()

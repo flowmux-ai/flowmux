@@ -2180,9 +2180,9 @@ fn opencode_home() -> Option<PathBuf> {
 /// there the hook never reaches OpenCode and the in-app bell stays
 /// silent.
 ///
-/// Only existing roots are returned — we never create the
-/// `opencode-anycli` tree on machines that don't have the wrapper
-/// installed. The Flatpak build still installs into the anycli root
+/// The primary root is returned when its path can be resolved; callers filter
+/// out missing directories. The optional `opencode-anycli` root is returned
+/// only when it exists. The Flatpak build still installs into the anycli root
 /// because the wrapper always runs on the host, and its
 /// `$HOME/.config/opencode-anycli/` tree is bind-mounted into the
 /// sandbox via the manifest's `--filesystem=home`, so the same write

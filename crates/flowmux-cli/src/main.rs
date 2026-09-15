@@ -281,7 +281,7 @@ enum Cmd {
     /// a GUI terminal signal.
     ///
     /// Hidden because end users should never invoke it directly —
-    /// `terminal_pane::spawn` wraps the shell with it automatically.
+    /// `GhosttyPane::spawn` wraps the shell with it automatically.
     #[command(name = "pty-tee", alias = "ssh-pty-tee", hide = true)]
     PtyTee {
         /// Pane id this terminal belongs to. Forwarded as the

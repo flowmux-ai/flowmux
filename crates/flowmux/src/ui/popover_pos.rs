@@ -1,29 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Anchor a context-menu Popover with its top-left corner at the
-//! click point — Windows/GNOME context-menu convention.
+//! Position a context-menu Popover at the click point, shifting its anchor
+//! up or left when the measured size would overflow the window.
 //!
-//! The menu always opens **bottom-right** of the cursor. If part of
-//! the menu would land outside the toplevel window we *shift* it up
-//! and/or left by exactly the overflow, never flipping orientation.
-//! That keeps the cursor at (or near) the menu's top-left in the
-//! common case while still guaranteeing the whole menu is visible.
-//!
-//! Mechanics:
-//!
-//!   1. translate click coords into the toplevel window's local space,
-//!   2. measure the popover's natural size (set_child / set_parent
-//!      have already been called, so the layout system can answer),
-//!   3. clamp the desired top-left anchor so anchor + size fits in
-//!      the window,
-//!   4. translate the clamped anchor back into the popover's parent
-//!      widget coords and feed it to GTK as a 1×1 pointing-rect
-//!      whose center lands `width/2` to the right of the anchor —
-//!      the popover, centered horizontally on the rect, then has
-//!      its left edge at the anchor.
-//!
-//! `set_position(Bottom)` keeps the popover below the rect; we do
-//! not touch halign because horizontal placement is encoded into the
-//! rect itself.
+//! The pointing rectangle encodes horizontal placement. `set_position(Bottom)`
+//! requests placement below it, and `set_halign(Fill)` resets prior alignment.
 
 use gtk::graphene;
 use gtk::prelude::*;

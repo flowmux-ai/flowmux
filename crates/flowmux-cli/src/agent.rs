@@ -1,49 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `flowmux agent install / doctor / uninstall` — make the
-//! flowmux-browser SKILL discoverable to Claude Code, OpenCode,
-//! Codex CLI, Antigravity, and Cline installed locally for the current user.
+//! `flowmux agent install / doctor / uninstall` manages the embedded
+//! flowmux-browser skill in each supported agent's user-level skills directory.
 //!
-//! Strategy: every supported agent has a documented user-level skills
-//! directory under `$HOME` (`~/.claude/skills/`, `~/.config/opencode/skills/`,
-//! `~/.agents/skills/`, `~/.gemini/config/skills/`, `~/.cline/skills/`). We mirror
-//! our embedded `SKILL.md` into each one idempotently so it auto-loads as a real skill in
-//! every agent. `doctor` walks the same paths and reports presence /
-//! content drift so the user can verify a fresh install or update
-//! without leaving the terminal.
-//!
-//! Embedded payload comes straight from this repo via `include_str!`,
-//! so a `cargo install --path crates/flowmux-cli --force` rebuild
-//! always ships the latest workflow text — no separate package /
-//! resource step needed.
+//! [`Target::resolved_install_path`] defines the install paths. `doctor` checks
+//! the same paths for missing files and content drift against [`SKILL_BODY`].
 
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// SKILL body embedded into the binary at compile time. Lives at
-/// `<repo>/.agents/skills/flowmux-browser/SKILL.md`.
+/// Repository skill embedded at compile time; rebuilding includes updated text.
 pub const SKILL_BODY: &str = include_str!("../../../.agents/skills/flowmux-browser/SKILL.md");
 
 /// Supported agent skill-install targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
-    /// `~/.claude/skills/flowmux-browser/SKILL.md`. Claude Code loads
-    /// every directory under `~/.claude/skills/<name>/` automatically.
+    /// `~/.claude/skills/flowmux-browser/SKILL.md`.
     ClaudeCode,
-    /// `~/.config/opencode/skills/flowmux-browser/SKILL.md`. OpenCode
-    /// follows the same skill convention as Claude Code (see
-    /// <https://opencode.ai/docs/skills>).
+    /// `~/.config/opencode/skills/flowmux-browser/SKILL.md`.
+    /// See <https://opencode.ai/docs/skills> for discovery rules.
     OpenCode,
-    /// `~/.agents/skills/flowmux-browser/SKILL.md`. Codex CLI auto-discovers every
-    /// `SKILL.md` under its skills dir — same shape as Claude / OpenCode
-    /// — so the user does not have to import anything by hand. See
-    /// <https://learn.chatgpt.com/docs/build-skills>.
+    /// `~/.agents/skills/flowmux-browser/SKILL.md`.
+    /// See <https://learn.chatgpt.com/docs/build-skills> for discovery rules.
     Codex,
-    /// `~/.gemini/config/skills/flowmux-browser/SKILL.md`. Antigravity CLI
-    /// discovers machine-local skills from the shared Gemini config root.
+    /// `~/.gemini/config/skills/flowmux-browser/SKILL.md` (shared Gemini config root).
     Antigravity,
-    /// `~/.cline/skills/flowmux-browser/SKILL.md`. Cline discovers
-    /// user-level skills from `~/.cline/skills/`.
+    /// `~/.cline/skills/flowmux-browser/SKILL.md`.
     Cline,
 }
 

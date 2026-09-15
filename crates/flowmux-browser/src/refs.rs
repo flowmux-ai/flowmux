@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Server-side ref token → CSS selector store.
 //!
-//! cmux's policy: the snapshot script computes a CSS path for every
-//! interactable / labeled DOM node, allocates a token (`@e1`, `@e2`,
-//! …), and the *server* (flowmux daemon, in our case) keeps the
-//! `(surface_id, ref_token) → selector` map. Action calls (`click`,
-//! `fill`, `text_of`, …) take a ref token, the store resolves it to
-//! a CSS selector, and the action JS runs `document.querySelector(...)`.
+//! The snapshot script returns `e1`, `e2`, … tokens and CSS selectors.
+//! Each browser surface stores that map for subsequent actions; [`RefStore::resolve`]
+//! also accepts cmux-style `@eN` input. A new snapshot replaces the old map.
 //!
-//! The DOM is never modified — no `data-flowmux-ref` attribute is
-//! injected — so SPAs that mount MutationObservers / React strict
-//! mode see no surprise mutations. (cmux's reasoning, mirrored here.)
+//! Following cmux's approach, snapshots do not add attributes to the DOM,
+//! so reference tracking does not trigger page mutation observers.
 //!
-//! `RefStore` is *not* thread-safe by itself; callers wrap it in
-//! `Rc<RefCell<…>>` (single-threaded GTK side) or `Arc<Mutex<…>>`
-//! (tokio side) as needed.
+//! Browser panes share the store through `Rc<RefCell<RefStore>>` on the GTK thread.
 
 use std::collections::HashMap;
 
@@ -51,9 +45,7 @@ impl RefStore {
         Self::default()
     }
 
-    /// Drop every ref the given scope has accumulated. Callers invoke
-    /// this at the start of each new snapshot so stale refs from a
-    /// prior page don't shadow fresh ones.
+    /// Drop all refs for a scope on navigation or before populating a new snapshot.
     pub fn clear(&mut self, scope: RefScope) {
         self.scopes.remove(&scope);
     }

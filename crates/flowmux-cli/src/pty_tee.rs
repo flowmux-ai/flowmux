@@ -8,7 +8,7 @@
 //! a PTY-side sniffer instead of tying it to a toolkit-specific signal.
 //!
 //! `pty-tee` is that sniffer. It is invoked transparently as the
-//! "shell" command by `terminal_pane::spawn`, runs as the terminal pane's
+//! "shell" command by `GhosttyPane::spawn`, runs as the terminal pane's
 //! child process, and sits between the pane's outer PTY and the user's real
 //! shell:
 //!
