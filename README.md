@@ -35,12 +35,63 @@ Uninstall: `sudo apt remove flowmux`.
 
 ## Features
 
-- **Agent notifications** — know when Claude Code, Codex, OpenCode, Gemini CLI,
-  or Antigravity CLI finishes or needs input.
-- **Workspaces and split panes** — organize tasks and switch between them in overview mode.
-- **Built-in browser** — let agents browse, click, and type through the CLI.
-- **Repository tools** — browse files and Git worktrees, edit code, and check AI usage.
-- **SSH workspaces** — work on remote hosts with the same tabs and splits.
+### Agent notifications
+
+Get desktop notifications when Claude Code, Codex, OpenCode, Gemini CLI,
+or Antigravity CLI finishes a task or needs input.
+
+<img src="resources/screenshot/claude_notification.gif" alt="agent notification" width="100%" />
+
+### Browser tab
+
+Browse alongside terminal tabs. Agents can read pages, click, and type
+through the CLI; you can import existing browser sessions.
+
+<img src="resources/screenshot/video_control_browser.gif" alt="browser control" width="100%" />
+
+### Split panes and overview mode
+
+Split and resize panes to work side by side. Use overview mode to see all
+active workspaces and jump between tasks.
+
+<img src="resources/screenshot/view_split.gif" alt="split panes" width="100%" />
+<img src="resources/screenshot/overview_mode.gif" alt="overview mode" width="100%" />
+
+### Files, worktrees, and AI usage
+
+Browse files, manage Git worktrees, and edit code without leaving flowmux.
+Check agent usage with **Ctrl+Alt+U** or the usage bar below the terminal.
+
+<img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
+
+### Search terminal output
+
+Search all terminal tabs with **Ctrl+Alt+Shift+F**.
+
+### Themes and keybindings
+
+Choose a light or dark theme, customize colors and fonts, and rebind
+shortcuts in **Options** without restarting.
+
+<img src="resources/screenshot/setting_theme.gif" alt="theme settings" width="100%" />
+
+### Image and Markdown viewers
+
+Ctrl+click image paths to preview them inline, or open Markdown as a
+formatted preview. Images require [ThorVG](docs/setup.md#thorvg-image-viewer).
+
+<img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />
+<img src="resources/screenshot/md_viewer.gif" alt="markdown viewer" width="100%" />
+
+### Agent CLI
+
+Control browser tabs, panes, and terminals through `flowmux` commands.
+See the [CLI guide](AGENTS.md) for automation and JSON output.
+
+### SSH workspaces
+
+Work on remote hosts with the same tabs and splits. Right-click the side
+panel → **New SSH Workspace**, or run `flowmux ssh connect user@host`.
 
 ## Build from source
 
