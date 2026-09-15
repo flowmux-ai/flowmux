@@ -63,7 +63,7 @@ jobs:
         run: cargo install cargo-deny --locked
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
+        run: cargo install cargo-about --version 0.9.2 --locked --features cli
 
       - name: Check dependency licenses and sources
         run: cargo deny --locked --config packaging/licenses/deny.toml check licenses sources
