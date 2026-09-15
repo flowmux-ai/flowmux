@@ -14,10 +14,7 @@
 ## Licenses
 
 - [Project license](../LICENSE) and [copyright notices](../NOTICE)
-- [Third-party licenses](legal/THIRD_PARTY_LICENSES.md)
-- [Third-party asset notices](legal/THIRD_PARTY_ASSET_NOTICES.md)
-- [Editor notices](../editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md)
-- [Monaco notices](../editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt)
+- [Third-party licenses and notices](legal/THIRD_PARTY_LICENSES.md)
 
 Keep current usage and maintenance instructions here. Completed plans and
 one-off investigation records belong in Git history. License generation

@@ -95,10 +95,7 @@ jobs:
           cp target/release/flowmuxctl         "$stage/"
           cp target/release/flowmux-daemon     "$stage/"
           cp LICENSE NOTICE README.md \
-            docs/legal/THIRD_PARTY_LICENSES.md docs/legal/THIRD_PARTY_ASSET_NOTICES.md "$stage/"
-          cp editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md \
-            "$stage/EDITOR_THIRD_PARTY_NOTICES.md"
-          cp editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt "$stage/"
+            docs/legal/THIRD_PARTY_LICENSES.md "$stage/"
           tar -C dist -czf "dist/${stage_name}.tar.gz" "$stage_name"
           (cd dist && sha256sum "${stage_name}.tar.gz" > "${stage_name}.tar.gz.sha256")
 

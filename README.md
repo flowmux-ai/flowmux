@@ -125,7 +125,6 @@ support, hook configuration, and logs.
 ## License
 
 [GPL-3.0-or-later](LICENSE) · [Notices](NOTICE).
-Third-party [licenses](docs/legal/THIRD_PARTY_LICENSES.md) and
-[asset notices](docs/legal/THIRD_PARTY_ASSET_NOTICES.md).
+[Third-party licenses and notices](docs/legal/THIRD_PARTY_LICENSES.md).
 Inspired by [cmux](https://cmux.com/); an unofficial reimplementation,
 not affiliated with cmux.

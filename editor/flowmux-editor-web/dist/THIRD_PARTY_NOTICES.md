@@ -1,15 +1,59 @@
-# flowmux Editor Web Third-Party Notices
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-The compiled editor assets include Monaco Editor 0.53.0 and components bundled
-by Monaco. The package version is pinned in `package-lock.json`. Monaco's
-complete upstream component notices are distributed verbatim in
-`MONACO_THIRD_PARTY_NOTICES.txt`.
+## Bundled assets and editor
 
-## Monaco Editor
+### Agent icons
 
-The MIT License (MIT)
+- Codex, Claude Code, OpenCode, Cline, Gemini CLI, Antigravity, and Goose icon
+  paths and native color variants: Lobe Icons, Copyright (c) 2023 LobeHub,
+  distributed under the MIT License.
+  Source: <https://github.com/lobehub/lobe-icons/tree/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/packages/static-svg/icons>
+- OpenCode, Cline, and Goose square-avatar colors and scaling: Lobe Icons.
+  Sources: <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/OpenCode/style.ts>,
+  <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/Cline/style.ts>, and
+  <https://github.com/lobehub/lobe-icons/blob/4aaf4ee1fb2678a7f989ea570f0f6ce14a9abf75/src/Goose/style.ts>.
+- Aider icon path and website-logo green: Aider, distributed under the Apache
+  License 2.0 and adapted from its pinned-tab icon and website logo.
+  Source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/icons/safari-pinned-tab.svg>
+  Color source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg>
 
-Copyright (c) 2016 - present Microsoft Corporation
+The Apache License 2.0 text is reproduced in `THIRD_PARTY_LICENSES.md`.
+
+### Themes and palette
+
+The following color data is distributed under the MIT License:
+
+- Catppuccin Latte and Mocha: Copyright (c) 2021 Catppuccin.
+  Source: <https://github.com/catppuccin/catppuccin>
+- Dracula: Copyright (c) 2023 Dracula Theme.
+  Source: <https://github.com/dracula/dracula-theme>
+- GitHub Light: Copyright (c) 2020 Primer.
+  Source: <https://github.com/primer/github-vscode-theme>
+- Gruvbox Dark: Pavel Pertsev (morhetz).
+  Source: <https://github.com/morhetz/gruvbox>
+- Nord: Copyright (c) 2016-present Sven Greb.
+  Source: <https://github.com/nordtheme/nord>
+- One Dark: Copyright (c) 2016 GitHub Inc.
+  Source: <https://github.com/atom/one-dark-syntax>
+- Solarized Dark and Light: Copyright (c) 2011 Ethan Schoonover.
+  Source: <https://github.com/altercation/solarized>
+- Tokyo Night: Copyright (c) 2018-present Enkia.
+  Source: <https://github.com/tokyo-night/tokyo-night-vscode-theme>
+- Ghostty default foreground/background values: Copyright (c) 2024 Mitchell
+  Hashimoto, Ghostty contributors.
+  Source: <https://github.com/ghostty-org/ghostty>
+- Tomorrow ANSI palette: Copyright (C) 2011 Chris Kempson.
+  Source: <https://github.com/chriskempson/tomorrow-theme>
+
+### Monaco Editor 0.53.0
+
+MIT License. Copyright (c) 2016 - present Microsoft Corporation.
+Monaco's upstream component notices are included in `THIRD_PARTY_LICENSES.md`
+and embedded in the editor bundle as `MONACO_THIRD_PARTY_NOTICES.txt`.
+
+### MIT terms
+
+These terms apply to the MIT components identified above.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,10 +73,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## DOMPurify
+### DOMPurify
 
 Monaco includes DOMPurify 3.1.7, Copyright 2024 Dr.-Ing. Mario Heiderich,
 Cure53. DOMPurify offers Apache-2.0 OR MPL-2.0; flowmux distributes the bundled
 copy under Apache-2.0. Its license marker is retained in `main.js`, and the
-full Apache 2.0 text is included in the distribution's
-`THIRD_PARTY_LICENSES.md`.
+full Apache 2.0 text is included in `THIRD_PARTY_LICENSES.md`.

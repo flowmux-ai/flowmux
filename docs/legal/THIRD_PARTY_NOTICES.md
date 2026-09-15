@@ -1,12 +1,8 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# Third-Party Asset Notices
+## Bundled assets and editor
 
-This file covers third-party visual assets distributed with flowmux. Rust and
-editor dependencies are documented separately in `THIRD_PARTY_LICENSES.md`
-and the editor notice files.
-
-## AI agent icons
+### Agent icons
 
 - Codex, Claude Code, OpenCode, Cline, Gemini CLI, Antigravity, and Goose icon
   paths and native color variants: Lobe Icons, Copyright (c) 2023 LobeHub,
@@ -21,11 +17,9 @@ and the editor notice files.
   Source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/icons/safari-pinned-tab.svg>
   Color source: <https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg>
 
-The Apache License 2.0 text is reproduced in `THIRD_PARTY_LICENSES.md`. Agent
-names and marks remain the property of their respective owners and are shown
-only to identify the corresponding locally running agent.
+The Apache License 2.0 text is reproduced in `THIRD_PARTY_LICENSES.md`.
 
-## Built-in themes and default palette
+### Themes and palette
 
 The following color data is distributed under the MIT License:
 
@@ -51,7 +45,15 @@ The following color data is distributed under the MIT License:
 - Tomorrow ANSI palette: Copyright (C) 2011 Chris Kempson.
   Source: <https://github.com/chriskempson/tomorrow-theme>
 
-### MIT License
+### Monaco Editor 0.53.0
+
+MIT License. Copyright (c) 2016 - present Microsoft Corporation.
+Monaco's upstream component notices are included in `THIRD_PARTY_LICENSES.md`
+and embedded in the editor bundle as `MONACO_THIRD_PARTY_NOTICES.txt`.
+
+### MIT terms
+
+These terms apply to the MIT components identified above.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -70,3 +72,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+### DOMPurify
+
+Monaco includes DOMPurify 3.1.7, Copyright 2024 Dr.-Ing. Mario Heiderich,
+Cure53. DOMPurify offers Apache-2.0 OR MPL-2.0; flowmux distributes the bundled
+copy under Apache-2.0. Its license marker is retained in `main.js`, and the
+full Apache 2.0 text is included in `THIRD_PARTY_LICENSES.md`.

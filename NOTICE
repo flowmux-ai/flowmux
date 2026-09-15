@@ -1,37 +1,11 @@
-flowmux
-=====
+flowmux — Copyright (C) 2026 The flowmux Authors.
+Licensed under GPL-3.0-or-later; see LICENSE.
 
-Copyright (C) 2026 The flowmux Authors.
+Browser automation compatibility was reimplemented with reference to cmux
+(https://github.com/manaflow-ai/cmux), Copyright (c) 2024-present Manaflow, Inc.,
+under GPL-3.0-or-later. Modified for Rust/WebKitGTK in 2026.
 
-This program is free software: you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation, either version 3 of the License, or (at your
-option) any later version. See the LICENSE file for the full text.
-
-Browser automation compatibility
---------------------------------
-
-The browser automation compatibility layer in crates/flowmux-browser was
-reimplemented with reference to cmux's GPL-3.0-or-later implementation
-(https://github.com/manaflow-ai/cmux):
-
-    Copyright (c) 2024-present Manaflow, Inc.
-
-It was modified for Rust/WebKitGTK in 2026.
-
-Third-party components
-----------------------
-
-Runtime dependencies retain their own licenses; see
-THIRD_PARTY_LICENSES.md for the dependency license inventory generated
-from Cargo metadata.
-
-Built-in theme colors and the default terminal palette retain their own
-licenses and attribution; see THIRD_PARTY_ASSET_NOTICES.md.
-
-Both third-party documents are under docs/legal/ in the source checkout
-and alongside this NOTICE in binary distributions.
-
-The optional image viewer loads the system ThorVG library (MIT) at runtime.
-It is installed separately (see scripts/install-thorvg.sh) and, like GTK,
-libadwaita, and WebKitGTK, retains its own distribution license.
+Third-party licenses, copyrights, and bundled asset/editor notices are in
+THIRD_PARTY_LICENSES.md (docs/legal/ in the source checkout).
+Separately installed GTK, libadwaita, WebKitGTK, and optional ThorVG retain
+their own licenses.

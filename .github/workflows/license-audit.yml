@@ -29,14 +29,14 @@ on:
       - crates/flowmux/src/builtin_icons.rs
       - 'resources/themes/**'
       - packaging/flatpak/com.flowmux.App.yml
-      - scripts/generate-third-party-licenses.sh
+      - scripts/generate-third-party-licenses.py
+      - scripts/test-license-notices.py
       - scripts/check-license-assets.sh
       - scripts/install-macos.sh
       - scripts/install-thorvg.sh
       - editor/flowmux-editor-web/package.json
       - editor/flowmux-editor-web/package-lock.json
       - editor/flowmux-editor-web/MONACO_THIRD_PARTY_NOTICES.txt
-      - editor/flowmux-editor-web/THIRD_PARTY_NOTICES.md
       - 'editor/flowmux-editor-web/dist/*NOTICE*'
       - editor/flowmux-editor-web/dist/main.js
       - 'editor/flowmux-editor-web/scripts/**'
@@ -70,7 +70,8 @@ jobs:
 
       - name: Check third-party license notice
         run: |
-          scripts/generate-third-party-licenses.sh
+          python3 scripts/test-license-notices.py
+          scripts/generate-third-party-licenses.py
           git diff --exit-code docs/legal/THIRD_PARTY_LICENSES.md
 
       - name: Check asset license notices

@@ -35,7 +35,7 @@ await build({
 
 await cp(resolve(root, "index.html"), resolve(output, "index.html"));
 await cp(
-  resolve(root, "THIRD_PARTY_NOTICES.md"),
+  resolve(root, "..", "..", "docs", "legal", "THIRD_PARTY_NOTICES.md"),
   resolve(output, "THIRD_PARTY_NOTICES.md"),
 );
 await cp(

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Preference order for dependencies offering a choice (for example MIT OR Apache).
 accepted = [
     "0BSD",
+    "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-1-Clause",
@@ -11,7 +13,6 @@ accepted = [
     "GPL-3.0-or-later",
     "LGPL-2.1-or-later",
     "ISC",
-    "MIT",
     "MIT-0",
     "MITNFA",
     "MPL-2.0",
@@ -22,6 +23,7 @@ accepted = [
 ]
 
 private = { ignore = true }
+ignore-dev-dependencies = true
 
 # Preserve distinct upstream notices that automatic per-license selection drops.
 # Recheck these files and checksums when updating the corresponding crates.

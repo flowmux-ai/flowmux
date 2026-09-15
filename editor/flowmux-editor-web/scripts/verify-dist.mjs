@@ -59,7 +59,10 @@ if (
 
 const main = await readFile(resolve(root, "dist", "main.js"), "utf8");
 const css = await readFile(resolve(root, "dist", "main.css"), "utf8");
-const notice = await readFile(resolve(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+const notice = await readFile(
+  resolve(root, "..", "..", "docs", "legal", "THIRD_PARTY_NOTICES.md"),
+  "utf8",
+);
 const licenseInventory = await readFile(
   resolve(root, "..", "..", "docs", "legal", "THIRD_PARTY_LICENSES.md"),
   "utf8",
@@ -91,6 +94,13 @@ if (monacoNotice !== upstreamMonacoNotice) {
 }
 if (distributedMonacoNotice !== monacoNotice) {
   throw new Error("The distributed Monaco notice is out of date");
+}
+const words = (text) => text.replace(/\s+/g, " ").trim();
+if (
+  !words(licenseInventory).includes(words(notice)) ||
+  !words(licenseInventory).includes(words(monacoNotice))
+) {
+  throw new Error("The combined distribution notice is missing asset or editor notices");
 }
 if (
   !notice.includes("DOMPurify 3.1.7") ||
