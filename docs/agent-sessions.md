@@ -18,6 +18,8 @@ color palette and stripe style. Sessions with the same project path share a
 color, including across agents; colors stay stable while the window is open.
 The list takes the remaining height above a compact conversation preview.
 Drag the divider to give either section more space.
+On first opening, the panel uses about a quarter of the window width. Resizing
+the panel is retained when closing and reopening it within the same window.
 
 To resume a session, select it and click **Resume in new tab**:
 

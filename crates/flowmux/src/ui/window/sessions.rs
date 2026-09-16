@@ -249,6 +249,11 @@ impl WindowController {
                 if panel.root.is_visible() {
                     self.close_session_panel();
                 } else {
+                    if let Some(split) = panel.root.parent().and_downcast::<gtk::Paned>() {
+                        if !split.is_position_set() {
+                            split.set_position((split.width() - self.window.width() / 4).max(0));
+                        }
+                    }
                     panel.root.set_visible(true);
                     self.refresh_session_panel(true).await;
                 }

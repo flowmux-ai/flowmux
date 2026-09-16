@@ -1824,7 +1824,6 @@ impl WindowController {
             .resize_end_child(false)
             .shrink_start_child(false)
             .shrink_end_child(false)
-            .position(680)
             .build();
         let file_browser_split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
