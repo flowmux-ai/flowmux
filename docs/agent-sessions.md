@@ -33,7 +33,9 @@ To resume a session, finish the current agent task and select a session:
 - **Cline CLI:** `cline --id <UUID> --tui`.
 
 All five agents open a new tab in the saved project directory and preserve the
-original tab and draft. On Linux, OpenCode retains its XDG/config overrides,
+original tab and draft. The new tab uses the normal configured terminal shell;
+exiting the agent returns to that shell in the selected project directory.
+On Linux, OpenCode retains its XDG/config overrides,
 Antigravity retains its home, and Cline retains its directory overrides and
 `--config` / `--data-dir` arguments, including isolated sandbox storage.
 

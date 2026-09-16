@@ -377,11 +377,8 @@ impl WindowController {
         };
         let Some((workspace, surface)) = self
             .store
-            .add_terminal_surface_to_pane_with_shell(
-                target.pane,
-                Some(session.cwd),
-                Some("/bin/sh".into()),
-            )
+            // Keep the normal configured shell and prompt after the agent exits.
+            .add_terminal_surface_to_pane(target.pane, Some(session.cwd))
             .await
         else {
             panel
