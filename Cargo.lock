@@ -1125,10 +1125,12 @@ dependencies = [
  "flowmux-core",
  "flowmux-procmon",
  "fs2",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "url",
  "uuid",
 ]
 

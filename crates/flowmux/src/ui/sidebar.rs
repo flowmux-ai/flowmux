@@ -1991,7 +1991,7 @@ fn row_widget(
     }
 }
 
-fn color_bar(color: &str) -> gtk::Widget {
+pub(super) fn color_bar(color: &str) -> gtk::Widget {
     let bar = gtk::DrawingArea::new();
     bar.set_size_request(4, -1);
     bar.set_vexpand(true);

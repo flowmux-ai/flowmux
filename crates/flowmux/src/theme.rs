@@ -394,6 +394,44 @@ paned > separator {{
 .flowmux-workspace-agent-icon {{
     -gtk-icon-size: 1em;
 }}
+.flowmux-session-panel {{
+    color: @sidebar_fg_color;
+}}
+.flowmux-session-panel .caption {{
+    font-size: {sidebar_caption_font:.2}pt;
+}}
+.flowmux-session-list {{
+    background-color: @sidebar_bg_color;
+    border: 1px solid alpha(@sidebar_fg_color, 0.10);
+    border-radius: 8px;
+}}
+.flowmux-session-row {{
+    padding: 7px 8px;
+    border-bottom: 1px solid alpha(@sidebar_fg_color, 0.08);
+}}
+.flowmux-session-row:last-child {{
+    border-bottom: 0;
+}}
+.flowmux-session-row:hover {{
+    background-color: alpha(@sidebar_fg_color, 0.06);
+}}
+.flowmux-session-row:selected {{
+    background-color: alpha(@accent_bg_color, 0.18);
+    color: @sidebar_fg_color;
+}}
+.flowmux-session-row:focus-visible {{
+    outline: 2px solid @accent_bg_color;
+    outline-offset: -2px;
+}}
+.flowmux-session-title {{
+    font-size: {sidebar_body_font:.2}pt;
+    font-weight: 600;
+}}
+#flowmux-session-preview, #flowmux-session-preview text {{
+    background-color: @sidebar_bg_color;
+    color: @sidebar_fg_color;
+    font-size: {sidebar_caption_font:.2}pt;
+}}
 .flowmux-sidebar-shell headerbar {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;

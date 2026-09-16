@@ -4,50 +4,52 @@
 use super::*;
 use crate::ui::session_panel::{SessionPanel, SessionPanelAction};
 use flowmux_state::session_history::{list_sessions, HistorySession, SessionAgent};
-use vte::prelude::TerminalExt;
 
-/// A conservative guard, not a terminal parser. Unknown layouts stay untouched.
-/// Submission remains in the native TUI so its own resume checks still apply.
-fn empty_resume_prompt(
-    agent: SessionAgent,
-    column: i64,
-    text: &str,
-    colored_placeholder: bool,
-) -> bool {
-    if column > 3 {
-        return false;
+struct SessionHome {
+    path: PathBuf,
+    environment: std::collections::BTreeMap<String, String>,
+    arguments: Vec<String>,
+}
+
+fn resume_shell_line(session: &HistorySession, home: &SessionHome) -> Result<String, String> {
+    let cwd = session
+        .cwd
+        .to_str()
+        .ok_or("Project directory is not UTF-8")?;
+    if !session.cwd.is_absolute()
+        || cwd
+            .chars()
+            .chain(home.environment.values().flat_map(|v| v.chars()))
+            .chain(home.arguments.iter().flat_map(|v| v.chars()))
+            .any(char::is_control)
+    {
+        return Err("Cannot safely open this session's directory in a terminal".into());
     }
-    let mut lines = text.lines();
-    let Some(prompt) = lines.next() else {
-        return false;
-    };
-    match agent {
-        SessionAgent::Claude => {
-            prompt.trim() == "❯"
-                && lines.next().is_some_and(|line| {
-                    let line = line.trim();
-                    line.chars().count() >= 5 && line.chars().all(|c| c == '─')
-                })
-        }
-        SessionAgent::Codex => {
-            // Codex's idle particle animation can overlap its placeholder.
-            let plain: String = prompt
-                .chars()
-                .filter(|c| !('\u{2800}'..='\u{28ff}').contains(c))
-                .collect();
-            let Some(input) = plain.trim_start().strip_prefix('›') else {
-                return false;
-            };
-            let placeholder = colored_placeholder && input.trim() == "Ask Codex to do anything";
-            let empty = prompt.trim() == "›";
-            (placeholder || empty)
-                && lines.next().is_some_and(|line| {
-                    line.chars()
-                        .all(|c| c.is_whitespace() || ('\u{2800}'..='\u{28ff}').contains(&c))
-                })
-                && lines.next().is_some_and(|line| line.contains('·'))
-        }
-    }
+    let unset = session
+        .agent
+        .home_variables()
+        .iter()
+        .filter(|key| **key != "HOME")
+        .map(|key| format!("-u {key}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let environment = home
+        .environment
+        .iter()
+        .map(|(key, value)| shell_quote(&format!("{key}={value}")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let arguments = home
+        .arguments
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "cd {} && env {unset} {environment} {} {arguments}",
+        shell_quote(cwd),
+        session.resume_command().map_err(|e| e.to_string())?
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,7 +77,7 @@ impl SessionPanelState {
 }
 
 /// Resolve the actual agent's home, including overrides set inside the shell.
-fn session_home(target: &SessionTarget) -> Result<PathBuf, String> {
+fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
     let pids = flowmux_procmon::descendants(target.root_pid).map_err(|e| e.to_string())?;
     let mut matching: Vec<_> = pids
         .into_iter()
@@ -88,40 +90,85 @@ fn session_home(target: &SessionTarget) -> Result<PathBuf, String> {
     let pid = matching
         .first()
         .ok_or("The agent is no longer running in this tab")?;
+    let mut environment = std::collections::BTreeMap::new();
+    let mut arguments = Vec::new();
     #[cfg(target_os = "linux")]
     {
-        use std::os::unix::ffi::OsStringExt;
-        let environment =
-            std::fs::read(format!("/proc/{pid}/environ")).map_err(|e| e.to_string())?;
-        let variable = if target.agent == SessionAgent::Codex {
-            b"CODEX_HOME=".as_slice()
-        } else {
-            b"CLAUDE_CONFIG_DIR=".as_slice()
-        };
-        let value = |key: &[u8]| {
-            environment
+        let bytes = std::fs::read(format!("/proc/{pid}/environ")).map_err(|e| e.to_string())?;
+        for key in target
+            .agent
+            .home_variables()
+            .iter()
+            .copied()
+            .chain(["PATH"])
+        {
+            let prefix = format!("{key}=");
+            if let Some(value) = bytes
                 .split(|b| *b == 0)
-                .find_map(|entry| entry.strip_prefix(key))
+                .find_map(|entry| entry.strip_prefix(prefix.as_bytes()))
                 .filter(|v| !v.is_empty())
-        };
-        if let Some(home) = value(variable) {
-            return Ok(PathBuf::from(std::ffi::OsString::from_vec(home.to_vec())));
+            {
+                environment.insert(
+                    key.to_string(),
+                    String::from_utf8(value.to_vec()).map_err(|e| e.to_string())?,
+                );
+            }
         }
-        if let Some(home) = value(b"HOME=") {
-            let directory = if target.agent == SessionAgent::Codex {
-                ".codex"
-            } else {
-                ".claude"
-            };
-            return Ok(PathBuf::from(std::ffi::OsString::from_vec(home.to_vec())).join(directory));
+        if target.agent == SessionAgent::Cline {
+            let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).map_err(|e| e.to_string())?;
+            let argv: Vec<_> = bytes
+                .split(|b| *b == 0)
+                .filter_map(|v| std::str::from_utf8(v).ok())
+                .collect();
+            for (flag, variable) in [("--config", "CLINE_DIR"), ("--data-dir", "CLINE_DATA_DIR")] {
+                if let Some(value) = argv.iter().enumerate().find_map(|(i, arg)| {
+                    arg.strip_prefix(&format!("{flag}="))
+                        .or_else(|| (*arg == flag).then(|| argv.get(i + 1).copied()).flatten())
+                }) {
+                    let path = PathBuf::from(value);
+                    let path = if path.is_absolute() {
+                        path
+                    } else {
+                        std::fs::read_link(format!("/proc/{pid}/cwd"))
+                            .map_err(|e| e.to_string())?
+                            .join(path)
+                    };
+                    let value = path
+                        .to_str()
+                        .ok_or("Agent directory is not UTF-8")?
+                        .to_string();
+                    environment.insert(variable.into(), value.clone());
+                    if flag == "--data-dir" {
+                        environment.insert(
+                            "CLINE_DB_DATA_DIR".into(),
+                            path.join("db").to_string_lossy().into_owned(),
+                        );
+                    }
+                    arguments.extend([flag.to_string(), value]);
+                }
+            }
         }
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = pid;
-    target
+    {
+        let _ = pid;
+        for key in target.agent.home_variables() {
+            if let Ok(value) = std::env::var(key) {
+                if !value.is_empty() {
+                    environment.insert((*key).into(), value);
+                }
+            }
+        }
+    }
+    let path = target
         .agent
-        .default_home()
-        .ok_or_else(|| "Agent home directory is unavailable".into())
+        .history_home(|key| environment.get(key).map(PathBuf::from))
+        .ok_or("Agent home directory is unavailable")?;
+    Ok(SessionHome {
+        path,
+        environment,
+        arguments,
+    })
 }
 
 impl WindowController {
@@ -161,7 +208,7 @@ impl WindowController {
         let Some(target) = target else {
             panel
                 .status
-                .set_text("Focus a local Claude or Codex terminal tab to browse sessions.");
+                .set_text("Focus a local Claude, Codex, OpenCode, Antigravity, or Cline terminal tab to browse sessions.");
             return;
         };
         let controller = self.clone();
@@ -169,7 +216,7 @@ impl WindowController {
             let worker_target = target.clone();
             let result = gtk::gio::spawn_blocking(move || {
                 let home = session_home(&worker_target)?;
-                list_sessions(worker_target.agent, &home).map_err(|e| e.to_string())
+                list_sessions(worker_target.agent, &home.path).map_err(|e| e.to_string())
             })
             .await;
             let panel = &controller.sessions.panel;
@@ -233,14 +280,11 @@ impl WindowController {
                     }
                     match result {
                         Ok(Ok(text)) => {
-                            let modified: chrono::DateTime<chrono::Local> = session.modified.into();
                             panel.preview.buffer().set_text(&format!(
-                                "{}\n{}\n{}\nUpdated {}\n\n{}\n\n{}",
+                                "{}\n{}\n{}\n\n{}",
                                 session.title,
-                                session.id,
                                 session.cwd.display(),
-                                modified.format("%Y-%m-%d %H:%M"),
-                                session.summary,
+                                session.id,
                                 text
                             ));
                             panel.resume.set_sensitive(true);
@@ -304,55 +348,64 @@ impl WindowController {
                 .set_text("This session is already active in the focused tab.");
             return;
         }
-        let command = match session.resume_command() {
-            Ok(command) => command,
-            Err(error) => {
-                panel.status.set_text(&error.to_string());
-                return;
-            }
-        };
-        // Stage a native slash command; the user submits it in the agent TUI.
-        // Never synthesize Enter: terminal input can be a draft or a native dialog.
         let valid_target = target.clone();
-        let home_check = gtk::gio::spawn_blocking(move || session_home(&valid_target)).await;
-        if !matches!(home_check, Ok(Ok(_)))
-            || self.session_target().await.as_ref() != Some(&target)
+        let Ok(Ok(home)) = gtk::gio::spawn_blocking(move || session_home(&valid_target)).await
+        else {
+            panel
+                .status
+                .set_text("The agent is no longer available. Refresh sessions and try again.");
+            return;
+        };
+        if self.session_target().await.as_ref() != Some(&target)
             || panel.generation.get() != generation
         {
             return;
         }
-        let terminal = self
-            .pane_registry
-            .borrow()
-            .active_terminal(target.pane)
-            .cloned();
-        if let Some(terminal) = terminal {
-            let (column, row) = terminal.widget.cursor_position();
-            let prompt = terminal
-                .widget
-                .text_range_format(vte::Format::Text, row, 0, row + 3, 0)
-                .0;
-            let colored_placeholder = target.agent == SessionAgent::Codex
-                && terminal
-                    .widget
-                    .text_range_format(vte::Format::Html, row, 0, row + 1, 0)
-                    .0
-                    .is_some_and(|html| {
-                        crate::ui::terminal_scrollback::vte_html_has_colored_text(
-                            &html,
-                            "Ask Codex to do anything",
-                        )
-                    });
-            if !prompt.as_deref().is_some_and(|text| {
-                empty_resume_prompt(target.agent, column, text, colored_placeholder)
-            }) {
-                panel.status.set_text("Clear the agent's input and close any open picker, then try Resume again. Existing input was kept.");
+        // Start the native CLI in its own tab; never write into the existing agent.
+        let line = match resume_shell_line(&session, &home) {
+            Ok(line) if session.cwd.is_dir() => line,
+            Ok(_) => {
+                panel
+                    .status
+                    .set_text("This session's project directory no longer exists.");
                 return;
             }
-            let _ = terminal.write_input(format!("\x1b[200~{command}\x1b[201~").as_bytes());
-            panel.resume.set_sensitive(false);
-            panel.status.set_text("Resume command inserted. Check the input, then press Enter in the agent to switch sessions.");
-            self.focus_pane(target.pane);
+            Err(error) => {
+                panel.status.set_text(&error);
+                return;
+            }
+        };
+        let Some((workspace, surface)) = self
+            .store
+            .add_terminal_surface_to_pane_with_shell(
+                target.pane,
+                Some(session.cwd),
+                Some("/bin/sh".into()),
+            )
+            .await
+        else {
+            panel
+                .status
+                .set_text("Cannot create a terminal tab for this session.");
+            return;
+        };
+        self.attach_or_rerender_surface(workspace, target.pane, surface)
+            .await;
+        let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
+        if let Some(terminal) = terminal {
+            match terminal.write_input(format!("{line}\r").as_bytes()) {
+                Ok(()) => {
+                    panel.resume.set_sensitive(false);
+                    panel.status.set_text(&format!(
+                        "Opening {} in a new tab in the session's project directory.",
+                        session.agent.name()
+                    ));
+                    self.focus_pane(target.pane);
+                }
+                Err(error) => panel
+                    .status
+                    .set_text(&format!("Cannot start {}: {error}", session.agent.name())),
+            }
         }
     }
 }
@@ -362,85 +415,140 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resume_input_guard_preserves_drafts_multiline_prompts_and_native_dialogs() {
-        assert!(command_dismisses_workspace_overview(
-            &GtkCommand::SessionPanel(SessionPanelAction::Toggle)
-        ));
-        assert!(!command_dismisses_workspace_overview(
-            &GtkCommand::SessionPanel(SessionPanelAction::Refresh)
-        ));
-        // A draft identical to the placeholder is still a draft, even at Home.
-        let draft = "› Ask Codex to do anything\n\nmodel · /repo";
-        assert!(!empty_resume_prompt(SessionAgent::Codex, 2, draft, false));
-        let placeholder = crate::ui::terminal_scrollback::vte_html_has_colored_text(
-            "<pre><b>›</b> <font color=\"#AAAAAA\">Ask Codex to do anything</font></pre>",
-            "Ask Codex to do anything",
-        );
-        assert!(empty_resume_prompt(
-            SessionAgent::Codex,
-            2,
-            draft,
-            placeholder
-        ));
-        assert!(!crate::ui::terminal_scrollback::vte_html_has_colored_text(
-            "<pre><b>›</b> Ask Codex to do anything</pre>",
-            "Ask Codex to do anything"
-        ));
-        assert!(empty_resume_prompt(
-            SessionAgent::Claude,
-            2,
-            "❯\u{a0}\n─────────\nshortcuts",
-            true
-        ));
-        assert!(empty_resume_prompt(
-            SessionAgent::Codex,
-            2,
-            "› Ask Codex to do anything\n\nmodel · /repo",
-            true
-        ));
-        assert!(empty_resume_prompt(
-            SessionAgent::Codex,
-            2,
-            "›⠁Ask Codex to do anything ⠄\n ⠠\nmodel · /repo",
-            true
-        ));
-        for text in [
-            "❯ draft\n─────────",
-            "❯\nsecond draft line\n─────────",
-            "❯ /resume abc\n─────────",
-            "❯ 1. Allow\n─────────",
-            "$ \n─────────",
+    fn native_resume_uses_selected_project_and_config_without_shell_expansion() {
+        for (agent, binary, variable, flag, directory) in [
+            (
+                SessionAgent::Claude,
+                "claude",
+                "CLAUDE_CONFIG_DIR",
+                "--resume",
+                ".claude",
+            ),
+            (
+                SessionAgent::Codex,
+                "codex",
+                "CODEX_HOME",
+                "resume",
+                ".codex",
+            ),
+            (
+                SessionAgent::OpenCode,
+                "opencode",
+                "XDG_DATA_HOME",
+                "--session",
+                ".local/share",
+            ),
+            (
+                SessionAgent::Antigravity,
+                "agy",
+                "HOME",
+                "--conversation",
+                ".gemini",
+            ),
+            (
+                SessionAgent::Cline,
+                "cline",
+                "CLINE_DATA_DIR",
+                "--id",
+                ".cline",
+            ),
         ] {
-            assert!(
-                !empty_resume_prompt(SessionAgent::Claude, 2, text, true),
-                "{text}"
+            let root = tempfile::tempdir().unwrap();
+            let cwd = root.path().join("other project ' 한글 $(exit 9)");
+            std::fs::create_dir(&cwd).unwrap();
+            let home = SessionHome {
+                path: root.path().join("config ' $(exit 8)"),
+                environment: [(
+                    variable.into(),
+                    root.path()
+                        .join("config ' $(exit 8)")
+                        .to_string_lossy()
+                        .into_owned(),
+                )]
+                .into(),
+                arguments: if agent == SessionAgent::Cline {
+                    vec!["--data-dir".into(), "data ' $(exit 7)".into()]
+                } else {
+                    Vec::new()
+                },
+            };
+            let mut session = HistorySession {
+                agent,
+                id: if agent == SessionAgent::OpenCode {
+                    "ses_abc123"
+                } else {
+                    "12345678-1234-4234-8234-123456789abc"
+                }
+                .into(),
+                title: String::new(),
+                summary: String::new(),
+                cwd: cwd.clone(),
+                path: "/unused".into(),
+                modified: std::time::SystemTime::now(),
+            };
+            let bin = root.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            let executable = bin.join(binary);
+            std::fs::write(
+                &executable,
+                format!("#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"${variable}\" \"$@\"\n"),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(resume_shell_line(&session, &home).unwrap())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                format!(
+                    "{}\n{}\n{flag}\n{}\n{}",
+                    cwd.display(),
+                    home.path.display(),
+                    session.id,
+                    if agent == SessionAgent::Cline {
+                        "--tui\n--data-dir\ndata ' $(exit 7)\n"
+                    } else {
+                        ""
+                    }
+                )
             );
-        }
-        for text in [
-            "› draft\n\nmodel · /repo",
-            "›\nsecond draft line\nmodel · /repo",
-            "› ⠁\n\nmodel · /repo",
-            "› Ask Codex to do anything\ntext\nmodel · /repo",
-            "› Allow once\n\nmodel · /repo",
-            "$\n\nmodel · /repo",
-        ] {
-            assert!(
-                !empty_resume_prompt(SessionAgent::Codex, 2, text, true),
-                "{text}"
+            let default_home = SessionHome {
+                path: root.path().join(directory),
+                environment: [("HOME".into(), root.path().to_string_lossy().into_owned())].into(),
+                arguments: Vec::new(),
+            };
+            std::fs::write(
+                &executable,
+                format!("#!/bin/sh\nprintf '%s\\n' \"$HOME\" \"${{{variable}-unset}}\"\n"),
+            )
+            .unwrap();
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(resume_shell_line(&session, &default_home).unwrap())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env(variable, "/wrong/inherited/config")
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                if variable == "HOME" {
+                    format!("{0}\n{0}\n", root.path().display())
+                } else {
+                    format!("{}\nunset\n", root.path().display())
+                }
             );
+            session.cwd = "/tmp/unsafe\ncommand".into();
+            assert!(resume_shell_line(&session, &home).is_err());
+            session.cwd = cwd;
+            session.id = "bad\rcommand".into();
+            assert!(resume_shell_line(&session, &home).is_err());
         }
-        assert!(!empty_resume_prompt(
-            SessionAgent::Codex,
-            28,
-            "› Ask Codex to do anything\n\nmodel · /repo",
-            true
-        ));
-        assert!(!empty_resume_prompt(
-            SessionAgent::Claude,
-            10,
-            "❯\n─────────",
-            true
-        ));
     }
 
     #[cfg(not(target_os = "macos"))]

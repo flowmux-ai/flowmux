@@ -72,16 +72,6 @@ impl ParsedSnapshot {
     }
 }
 
-/// Distinguish a TUI placeholder's explicit color from default-colored input.
-pub(crate) fn vte_html_has_colored_text(html: &str, text: &str) -> bool {
-    parse_vte_html(html).is_ok_and(|parsed| {
-        parsed
-            .runs
-            .iter()
-            .any(|run| run.style.foreground.is_some() && run.text.contains(text))
-    })
-}
-
 pub(crate) fn normalize_plain_text_snapshot(text: &str) -> String {
     let lines: Vec<_> = text.lines().collect();
     let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {

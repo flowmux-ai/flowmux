@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Read-only discovery of native Claude Code and Codex resume transcripts.
+//! Read-only discovery of native agent session histories.
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -8,10 +8,15 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+mod sqlite;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionAgent {
     Claude,
     Codex,
+    OpenCode,
+    Antigravity,
+    Cline,
 }
 
 impl SessionAgent {
@@ -19,6 +24,9 @@ impl SessionAgent {
         match name.to_ascii_lowercase().as_str() {
             "claude" | "claude code" => Some(Self::Claude),
             "codex" => Some(Self::Codex),
+            "opencode" => Some(Self::OpenCode),
+            "agy" | "antigravity" => Some(Self::Antigravity),
+            "cline" => Some(Self::Cline),
             _ => None,
         }
     }
@@ -27,18 +35,65 @@ impl SessionAgent {
         match self {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
+            Self::OpenCode => "OpenCode",
+            Self::Antigravity => "Antigravity",
+            Self::Cline => "Cline",
         }
     }
 
     pub fn default_home(self) -> Option<PathBuf> {
-        let (variable, directory) = match self {
-            Self::Claude => ("CLAUDE_CONFIG_DIR", ".claude"),
-            Self::Codex => ("CODEX_HOME", ".codex"),
-        };
-        std::env::var_os(variable)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(directory)))
+        self.history_home(|key| {
+            std::env::var_os(key)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        })
+    }
+
+    pub fn home_variables(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &["HOME", "CLAUDE_CONFIG_DIR"],
+            Self::Codex => &["HOME", "CODEX_HOME"],
+            Self::OpenCode => &[
+                "HOME",
+                "XDG_DATA_HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_STATE_HOME",
+                "XDG_CACHE_HOME",
+                "OPENCODE_CONFIG",
+                "OPENCODE_CONFIG_DIR",
+            ],
+            Self::Antigravity => &["HOME"],
+            Self::Cline => &[
+                "HOME",
+                "CLINE_DIR",
+                "CLINE_DATA_DIR",
+                "CLINE_DB_DATA_DIR",
+                "CLINE_SESSION_DATA_DIR",
+            ],
+        }
+    }
+
+    pub fn history_home(self, value: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+        let home = || value("HOME");
+        match self {
+            Self::Claude => {
+                value("CLAUDE_CONFIG_DIR").or_else(|| home().map(|p| p.join(".claude")))
+            }
+            Self::Codex => value("CODEX_HOME").or_else(|| home().map(|p| p.join(".codex"))),
+            Self::OpenCode => value("XDG_DATA_HOME")
+                .or_else(|| home().map(|p| p.join(".local/share")))
+                .map(|p| p.join("opencode")),
+            Self::Antigravity => home().map(|p| p.join(".gemini/antigravity-cli")),
+            Self::Cline => value("CLINE_DB_DATA_DIR").or_else(|| {
+                value("CLINE_DATA_DIR")
+                    .or_else(|| {
+                        value("CLINE_DIR")
+                            .or_else(|| home().map(|p| p.join(".cline")))
+                            .map(|p| p.join("data"))
+                    })
+                    .map(|p| p.join("db"))
+            }),
+        }
     }
 }
 
@@ -54,14 +109,39 @@ pub struct HistorySession {
 }
 
 impl HistorySession {
-    /// Only canonical UUIDs can become terminal input; transcript text never can.
+    /// Only validated native IDs can become terminal input; transcript text never can.
     pub fn resume_command(&self) -> io::Result<String> {
+        if self.agent == SessionAgent::OpenCode {
+            if !self.id.starts_with("ses_")
+                || self.id.len() > 128
+                || self.id.len() <= 4
+                || !self
+                    .id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            {
+                return Err(invalid("Invalid OpenCode session ID"));
+            }
+            return Ok(format!("opencode --session {}", self.id));
+        }
         let id = uuid::Uuid::parse_str(&self.id)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid session ID"))?;
-        Ok(format!("/resume {id}"))
+        Ok(match self.agent {
+            SessionAgent::Claude => format!("claude --resume {id}"),
+            SessionAgent::Codex => format!("codex resume {id}"),
+            SessionAgent::Antigravity => format!("agy --conversation {id}"),
+            SessionAgent::Cline => format!("cline --id {id} --tui"),
+            SessionAgent::OpenCode => unreachable!(),
+        })
     }
 
     pub fn preview(&self) -> io::Result<String> {
+        if matches!(
+            self.agent,
+            SessionAgent::OpenCode | SessionAgent::Antigravity | SessionAgent::Cline
+        ) {
+            return sqlite::preview(self);
+        }
         // ponytail: bound GTK preview memory to the latest 2 MiB; use paged
         // transcript loading if browsing older messages becomes necessary.
         let (bytes, partial) = read_window(&self.path, 2 * 1024 * 1024, true)?;
@@ -165,6 +245,7 @@ fn message(record: &Value, agent: SessionAgent) -> Option<(&'static str, String)
             }
             &record["payload"]
         }
+        _ => return None,
     };
     let role = match body["role"].as_str()? {
         "user" => "You",
@@ -261,9 +342,16 @@ fn session(path: PathBuf, agent: SessionAgent) -> io::Result<Option<HistorySessi
 /// Discover only native top-level sessions, never archives or subagent logs.
 /// Call on a worker thread. A missing store is a valid empty history.
 pub fn list_sessions(agent: SessionAgent, home: &Path) -> io::Result<Vec<HistorySession>> {
+    if matches!(
+        agent,
+        SessionAgent::OpenCode | SessionAgent::Antigravity | SessionAgent::Cline
+    ) {
+        return sqlite::list_sessions(agent, home);
+    }
     let root = home.join(match agent {
         SessionAgent::Claude => "projects",
         SessionAgent::Codex => "sessions",
+        _ => unreachable!(),
     });
     let mut paths = Vec::new();
     collect(
@@ -326,6 +414,40 @@ fn collect(directory: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> io::Resu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_history_directories_follow_override_precedence() {
+        let mut env = std::collections::HashMap::from([("HOME", PathBuf::from("/home/test"))]);
+        for (agent, path) in [
+            (SessionAgent::OpenCode, "/home/test/.local/share/opencode"),
+            (
+                SessionAgent::Antigravity,
+                "/home/test/.gemini/antigravity-cli",
+            ),
+            (SessionAgent::Cline, "/home/test/.cline/data/db"),
+        ] {
+            assert_eq!(
+                agent.history_home(|key| env.get(key).cloned()),
+                Some(path.into())
+            );
+        }
+        env.insert("XDG_DATA_HOME", "/custom/data".into());
+        assert_eq!(
+            SessionAgent::OpenCode.history_home(|key| env.get(key).cloned()),
+            Some("/custom/data/opencode".into())
+        );
+        for (key, value, expected) in [
+            ("CLINE_DIR", "/config", "/config/data/db"),
+            ("CLINE_DATA_DIR", "/data", "/data/db"),
+            ("CLINE_DB_DATA_DIR", "/database", "/database"),
+        ] {
+            env.insert(key, value.into());
+            assert_eq!(
+                SessionAgent::Cline.history_home(|key| env.get(key).cloned()),
+                Some(expected.into())
+            );
+        }
+    }
+
     use super::*;
     use serde_json::json;
 
@@ -367,7 +489,7 @@ mod tests {
         assert_eq!(item.title, "새 이름");
         assert_eq!(item.summary, "답변 두 번째 줄");
         assert_eq!(item.cwd, Path::new("/한글 path"));
-        assert_eq!(item.resume_command().unwrap(), format!("/resume {ID}"));
+        assert_eq!(item.resume_command().unwrap(), format!("codex resume {ID}"));
         assert_eq!(
             item.preview().unwrap(),
             "You\n한글 질문 🦀\n[Image]\n\nAssistant\n답변\n두 번째 줄\n\n"
@@ -408,6 +530,10 @@ mod tests {
         let items = list_sessions(SessionAgent::Claude, home.path()).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Title");
+        assert_eq!(
+            items[0].resume_command().unwrap(),
+            format!("claude --resume {ID}")
+        );
         assert_eq!(
             items[0].preview().unwrap(),
             "You\nquestion\n\nAssistant\nanswer[31m\n\n"

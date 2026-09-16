@@ -6,6 +6,7 @@ use adw::prelude::*;
 use flowmux_state::session_history::HistorySession;
 use gtk::glib;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
@@ -41,12 +42,14 @@ pub struct SessionPanel {
     rows: Rc<RefCell<Vec<HistorySession>>>,
     list: gtk::ListBox,
     search: gtk::SearchEntry,
+    colors: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl SessionPanel {
     pub fn new(bridge: Bridge) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         root.set_widget_name("flowmux-session-panel");
+        root.add_css_class("flowmux-session-panel");
         root.set_size_request(200, -1);
         root.set_visible(false);
         root.set_vexpand(true);
@@ -84,39 +87,53 @@ impl SessionPanel {
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
         status.set_wrap(true);
+        status.add_css_class("caption");
+        status.add_css_class("dim-label");
         root.append(&status);
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some("Search sessions, paths, or IDs"));
         root.append(&search);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
-        list.add_css_class("boxed-list");
+        list.add_css_class("flowmux-session-list");
         let scroll = gtk::ScrolledWindow::builder()
             .child(&list)
             .hscrollbar_policy(gtk::PolicyType::Never)
             .min_content_height(140)
+            .vexpand(true)
             .build();
         let preview = gtk::TextView::new();
         preview.set_widget_name("flowmux-session-preview");
         preview.set_editable(false);
         preview.set_cursor_visible(false);
         preview.set_wrap_mode(gtk::WrapMode::WordChar);
+        preview.set_left_margin(10);
+        preview.set_right_margin(10);
+        preview.set_top_margin(8);
+        preview.set_bottom_margin(8);
         let preview_scroll = gtk::ScrolledWindow::builder()
             .child(&preview)
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .min_content_height(120)
+            .min_content_height(150)
+            .max_content_height(150)
+            .propagate_natural_height(true)
             .build();
         let split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Vertical)
             .start_child(&scroll)
             .end_child(&preview_scroll)
-            .position(260)
+            .resize_start_child(true)
+            .resize_end_child(false)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
             .vexpand(true)
             .build();
         root.append(&split);
-        let resume = gtk::Button::with_label("Resume in focused tab");
+        let resume = gtk::Button::with_label("Resume in new tab");
         resume.set_widget_name("flowmux-session-resume");
-        resume.set_tooltip_text(Some("Insert the native resume command into an empty agent prompt, then press Enter there to confirm."));
+        resume.set_tooltip_text(Some(
+            "Open the selected session in its project directory in a new terminal tab.",
+        ));
         resume.set_sensitive(false);
         root.append(&resume);
         let generation = Rc::new(Cell::new(0));
@@ -192,6 +209,7 @@ impl SessionPanel {
             generation,
             rows,
             selection: Rc::new(RefCell::new(None)),
+            colors: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -214,27 +232,73 @@ impl SessionPanel {
             return;
         }
         *self.rows.borrow_mut() = sessions;
+        let mut colors = self.colors.borrow_mut();
+        let mut used: Vec<_> = self
+            .rows
+            .borrow()
+            .iter()
+            .filter_map(|session| colors.get(&session.id).cloned())
+            .collect();
         for session in self.rows.borrow().iter() {
             let row = gtk::ListBoxRow::new();
+            row.add_css_class("flowmux-session-row");
             row.set_tooltip_text(Some(&format!(
-                "{}\n{}\n{}\n{}",
+                "{} · {}\n{}\n{}\n{}",
+                session.agent.name(),
                 session.title,
                 session.summary,
                 session.cwd.display(),
                 session.id
             )));
-            let content = gtk::Box::new(gtk::Orientation::Vertical, 3);
-            for text in [
-                &session.title,
-                &session.summary,
-                &session.cwd.to_string_lossy().into_owned(),
-            ] {
-                let label = gtk::Label::new(Some(text));
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_max_width_chars(44);
-                content.append(&label);
-            }
+            let color = colors.entry(session.id.clone()).or_insert_with(|| {
+                use std::hash::{Hash, Hasher};
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                session.id.hash(&mut hash);
+                let seed = uuid::Uuid::parse_str(&session.id)
+                    .map(|id| id.as_u128())
+                    .unwrap_or(hash.finish() as u128);
+                let color = flowmux_core::pick_workspace_color(&used, seed);
+                used.push(color.clone());
+                color
+            });
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            content.append(&super::sidebar::color_bar(color));
+            let icon = super::agent_icon(session.agent.name());
+            icon.set_pixel_size(16);
+            icon.set_valign(gtk::Align::Start);
+            icon.set_margin_top(2);
+            icon.set_tooltip_text(Some(session.agent.name()));
+            icon.update_property(&[gtk::accessible::Property::Label(session.agent.name())]);
+            content.append(&icon);
+            let text = gtk::Box::new(gtk::Orientation::Vertical, 3);
+            text.set_hexpand(true);
+            let title = gtk::Label::new(Some(&session.title));
+            title.add_css_class("flowmux-session-title");
+            title.set_xalign(0.0);
+            title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            title.set_max_width_chars(44);
+            text.append(&title);
+            let metadata = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            metadata.add_css_class("caption");
+            metadata.add_css_class("dim-label");
+            let project = gtk::Label::new(Some(
+                &session
+                    .cwd
+                    .file_name()
+                    .unwrap_or(session.cwd.as_os_str())
+                    .to_string_lossy(),
+            ));
+            project.set_xalign(0.0);
+            project.set_hexpand(true);
+            project.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            project.set_max_width_chars(24);
+            metadata.append(&project);
+            let modified: chrono::DateTime<chrono::Local> = session.modified.into();
+            metadata.append(&gtk::Label::new(Some(
+                &modified.format("%m-%d %H:%M").to_string(),
+            )));
+            text.append(&metadata);
+            content.append(&text);
             row.set_child(Some(&content));
             self.list.append(&row);
         }
