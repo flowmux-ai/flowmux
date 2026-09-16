@@ -14,6 +14,7 @@ pub mod options_dialog;
 pub mod overlay_menu;
 pub mod pane_terminal;
 pub mod popover_pos;
+pub mod session_panel;
 pub mod show_in_folder;
 pub mod sidebar;
 mod terminal_minimap;

@@ -45,6 +45,7 @@ impl WindowController {
     }
 
     pub(super) async fn refresh_agent_displays(&self) {
+        self.refresh_session_panel(false).await;
         let model = self.store.agent_bar_model().await;
         if self.options.borrow().agent_bar_mode {
             self.render_agent_bar(&model);

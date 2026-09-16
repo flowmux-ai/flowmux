@@ -104,6 +104,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
+            | GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
             | GtkCommand::ToggleWorktreePanel { .. }
             | GtkCommand::ToggleFileBrowser { .. }
             | GtkCommand::OpenFileInEditor { .. }
@@ -585,6 +586,7 @@ pub struct WindowController {
     /// Its position is saved to the store on exit and restored on next launch.
     sidebar_split: gtk::Paned,
     worktrees: WorktreePanelState,
+    sessions: sessions::SessionPanelState,
     file_browser: FileBrowserState,
     agent_bar: AgentBarState,
     pane_zoom: PaneZoomState,
@@ -1227,6 +1229,7 @@ mod notification_coordinator;
 mod pane_callbacks;
 mod pane_commands;
 mod polling;
+mod sessions;
 pub(crate) mod ssh;
 mod surface_ops;
 mod terminal_output_search;
@@ -1812,9 +1815,20 @@ impl WindowController {
             .position(680)
             .build();
 
-        let file_browser_split = gtk::Paned::builder()
+        let session_panel = crate::ui::session_panel::SessionPanel::new(bridge.clone());
+        let session_split = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
             .start_child(&worktree_split)
+            .end_child(&session_panel.root)
+            .resize_start_child(true)
+            .resize_end_child(false)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .position(680)
+            .build();
+        let file_browser_split = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .start_child(&session_split)
             .end_child(file_browser.widget())
             .resize_start_child(true)
             .resize_end_child(false)
@@ -1869,6 +1883,7 @@ impl WindowController {
                 pane_registry,
             ),
             sidebar_split: split,
+            sessions: sessions::SessionPanelState::new(session_panel),
             worktrees: WorktreePanelState {
                 source_pane: worktree_source_pane,
                 source_directory: worktree_source_directory,
@@ -1923,7 +1938,7 @@ impl WindowController {
 
     #[cfg(test)]
     #[cfg_attr(target_os = "macos", allow(dead_code))]
-    fn right_tool_order_for_test(&self) -> [&'static str; 3] {
+    fn right_tool_order_for_test(&self) -> [&'static str; 4] {
         let sidebar_view = self
             .sidebar_split
             .start_child()
@@ -1941,9 +1956,20 @@ impl WindowController {
             content_view.content(),
             Some(self.file_browser.split.clone().upcast())
         );
+        let sessions = self
+            .file_browser
+            .split
+            .start_child()
+            .unwrap()
+            .downcast::<gtk::Paned>()
+            .unwrap();
         assert_eq!(
-            self.file_browser.split.start_child(),
+            sessions.start_child(),
             Some(self.worktrees.split.clone().upcast())
+        );
+        assert_eq!(
+            sessions.end_child(),
+            Some(self.sessions.panel.root.clone().upcast())
         );
         assert_eq!(
             self.file_browser.split.end_child(),
@@ -1954,7 +1980,7 @@ impl WindowController {
             self.worktrees.split.end_child(),
             Some(self.worktrees.panel.widget().clone().upcast())
         );
-        ["content", "worktrees", "files"]
+        ["content", "worktrees", "sessions", "files"]
     }
 
     /// Replace the lazily-initialized notifier cell with one shared
@@ -2736,6 +2762,7 @@ impl WindowController {
             | GtkCommand::ResizePane { .. }) => {
                 self.dispatch_pane_command(command).await;
             }
+            GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
             command @ (GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
@@ -5581,7 +5608,7 @@ mod tests {
             build_single_workspace_controller("com.flowmux.App.UiTest.WorktreeLayout").await;
         assert_eq!(
             controller.right_tool_order_for_test(),
-            ["content", "worktrees", "files"]
+            ["content", "worktrees", "sessions", "files"]
         );
     }
 

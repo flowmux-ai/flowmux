@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 pub mod agent_sessions;
 pub mod instance_lock;
+pub mod session_history;
 pub use agent_sessions::{default_agent_session_store, AgentSessionStore, SavedAgentSession};
 pub use instance_lock::{try_acquire_state_lock, InstanceLock};
 

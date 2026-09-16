@@ -302,6 +302,7 @@ pub enum GtkCommand {
     ToggleFileBrowser {
         pane: Option<PaneId>,
     },
+    SessionPanel(crate::ui::session_panel::SessionPanelAction),
     /// Toggle the right-side Git worktree panel for the focused pane.
     ToggleWorktreePanel {
         pane: Option<PaneId>,

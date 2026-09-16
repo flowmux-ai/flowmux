@@ -448,6 +448,27 @@ impl Sidebar {
         search_btn.set_action_name(Some("win.search-all-terminals"));
         footer.append(&search_btn);
 
+        let session_btn = gtk::Button::from_icon_name("document-open-recent-symbolic");
+        session_btn.add_css_class("flat");
+        session_btn.add_css_class("flowmux-sidebar-options");
+        session_btn.set_tooltip_text(Some("Agent sessions"));
+        session_btn.update_property(&[gtk::accessible::Property::Label("Agent sessions")]);
+        session_btn.set_focus_on_click(false);
+        session_btn.set_widget_name("flowmux-session-button");
+        let session_bridge = bridge.clone();
+        session_btn.connect_clicked(move |_| {
+            let bridge = session_bridge.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::SessionPanel(
+                        crate::ui::session_panel::SessionPanelAction::Toggle,
+                    ))
+                    .await;
+            });
+        });
+        footer.append(&session_btn);
+
         // Self-update banner. Hidden until the background release check
         // finds a newer tag; the banner owns its own check/install wiring.
         let update_banner = UpdateBanner::new(tokio_handle);
