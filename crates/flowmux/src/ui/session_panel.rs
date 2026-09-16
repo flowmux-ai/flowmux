@@ -7,6 +7,7 @@ use flowmux_state::session_history::HistorySession;
 use gtk::glib;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
@@ -42,7 +43,7 @@ pub struct SessionPanel {
     rows: Rc<RefCell<Vec<HistorySession>>>,
     list: gtk::ListBox,
     search: gtk::SearchEntry,
-    colors: Rc<RefCell<HashMap<String, String>>>,
+    colors: Rc<RefCell<HashMap<PathBuf, String>>>,
 }
 
 impl SessionPanel {
@@ -58,6 +59,8 @@ impl SessionPanel {
         root.set_margin_start(8);
         root.set_margin_end(8);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        header.set_margin_start(8);
+        header.set_margin_end(8);
         let title = gtk::Label::new(Some("Agent sessions"));
         title.add_css_class("heading");
         title.set_hexpand(true);
@@ -85,12 +88,16 @@ impl SessionPanel {
         }
         root.append(&header);
         let status = gtk::Label::new(None);
+        status.set_margin_start(8);
+        status.set_margin_end(8);
         status.set_xalign(0.0);
         status.set_wrap(true);
         status.add_css_class("caption");
         status.add_css_class("dim-label");
         root.append(&status);
         let search = gtk::SearchEntry::new();
+        search.set_margin_start(8);
+        search.set_margin_end(8);
         search.set_placeholder_text(Some("Search sessions, paths, or IDs"));
         root.append(&search);
         let list = gtk::ListBox::new();
@@ -233,12 +240,7 @@ impl SessionPanel {
         }
         *self.rows.borrow_mut() = sessions;
         let mut colors = self.colors.borrow_mut();
-        let mut used: Vec<_> = self
-            .rows
-            .borrow()
-            .iter()
-            .filter_map(|session| colors.get(&session.id).cloned())
-            .collect();
+        let mut used: Vec<_> = colors.values().cloned().collect();
         for session in self.rows.borrow().iter() {
             let row = gtk::ListBoxRow::new();
             row.add_css_class("flowmux-session-row");
@@ -250,14 +252,11 @@ impl SessionPanel {
                 session.cwd.display(),
                 session.id
             )));
-            let color = colors.entry(session.id.clone()).or_insert_with(|| {
+            let color = colors.entry(session.cwd.clone()).or_insert_with(|| {
                 use std::hash::{Hash, Hasher};
                 let mut hash = std::collections::hash_map::DefaultHasher::new();
-                session.id.hash(&mut hash);
-                let seed = uuid::Uuid::parse_str(&session.id)
-                    .map(|id| id.as_u128())
-                    .unwrap_or(hash.finish() as u128);
-                let color = flowmux_core::pick_workspace_color(&used, seed);
+                session.cwd.hash(&mut hash);
+                let color = flowmux_core::pick_workspace_color(&used, hash.finish() as u128);
                 used.push(color.clone());
                 color
             });
@@ -328,7 +327,7 @@ mod tests {
             modified: std::time::SystemTime::now(),
         };
         panel.set_rows(vec![item.clone()], generation);
-        assert!(panel.root.measure(gtk::Orientation::Horizontal, -1).0 <= 220);
+        assert!(panel.root.measure(gtk::Orientation::Horizontal, -1).0 <= 236);
         let row = panel.list.row_at_index(0).unwrap();
         panel.list.select_row(Some(&row));
         match rx.recv().await.unwrap() {
@@ -348,8 +347,24 @@ mod tests {
         panel.search.emit_by_name::<()>("search-changed", &[]);
         assert!(!row.is_visible());
         panel.clear("Different pane");
-        panel.set_rows(vec![item], generation);
+        panel.set_rows(vec![item.clone()], generation);
         assert!(panel.list.row_at_index(0).is_none());
         assert!(!panel.resume.is_sensitive());
+
+        let original_color = panel.colors.borrow()[&item.cwd].clone();
+        let mut same_project = item.clone();
+        same_project.agent = SessionAgent::Claude;
+        same_project.id = uuid::Uuid::new_v4().to_string();
+        let mut other_project = item.clone();
+        other_project.id = uuid::Uuid::new_v4().to_string();
+        other_project.cwd = "/other/project with spaces".into();
+        panel.set_rows(
+            vec![other_project.clone(), same_project, item.clone()],
+            panel.generation.get(),
+        );
+        let colors = panel.colors.borrow();
+        assert_eq!(colors.len(), 2, "sessions share their project's color");
+        assert_eq!(colors[&item.cwd], original_color);
+        assert_ne!(colors[&other_project.cwd], original_color);
     }
 }

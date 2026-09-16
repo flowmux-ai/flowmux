@@ -14,7 +14,8 @@ reloads the on-disk history.
 
 Compact rows show the agent icon, title, project name, and modification time.
 Hover for the full path, summary, and session ID. Each row uses the workspace
-color palette and stripe style; colors stay stable while the window is open.
+color palette and stripe style. Sessions with the same project path share a
+color, including across agents; colors stay stable while the window is open.
 The list takes the remaining height above a compact conversation preview.
 Drag the divider to give either section more space.
 
