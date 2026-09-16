@@ -141,19 +141,16 @@ fn truncate_tab_title(title: &str) -> String {
     format!("{prefix}...")
 }
 
-fn normalize_unlocked_terminal_title(surface: &mut PaneSurface) -> bool {
+/// Restore a local terminal's cwd title after its program has ended.
+/// User-renamed titles and non-local terminal surfaces are preserved.
+pub fn normalize_unlocked_terminal_title(surface: &mut PaneSurface) -> bool {
     if surface.title_locked {
         return false;
     }
     let SurfaceKind::Terminal { cwd, .. } = &surface.kind else {
         return false;
     };
-    // At state-load time the running process that emitted the
-    // last OSC 0/2 title is gone, so any unlocked title that
-    // doesn't match the cwd-derived form is stale (e.g. "Claude
-    // Code", "codex", "vim foo"). Reset it to the cwd-based title
-    // — and never auto-promote to locked, because the title was
-    // never the user's intent in the first place.
+    // State restore and agent teardown both invalidate the last program's OSC title.
     let next_title = match cwd.as_deref() {
         Some(cwd) => terminal_tab_title_for_cwd(Some(cwd)),
         None => FALLBACK_TERMINAL_TAB_TITLE.to_string(),
@@ -987,10 +984,11 @@ impl Pane {
                 ..
             } => {
                 let surface = surfaces.iter_mut().find(|s| s.id == surface_id)?;
-                Some(reconcile_surface_process_agent(
-                    &mut surface.agent,
-                    detected,
-                ))
+                let changed = reconcile_surface_process_agent(&mut surface.agent, detected);
+                if changed && surface.agent.is_none() {
+                    normalize_unlocked_terminal_title(surface);
+                }
+                Some(changed)
             }
             Pane::Leaf { .. } => None,
             Pane::Split { first, second, .. } => first

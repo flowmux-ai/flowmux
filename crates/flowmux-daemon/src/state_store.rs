@@ -1762,6 +1762,7 @@ impl StateStore {
             }
         }
         if removed.is_some() {
+            self.mark_dirty();
             if suppress_screen_restore {
                 self.suppress_agent_screen_restore(surface_id).await;
             } else {
@@ -2991,6 +2992,9 @@ impl StateStore {
             self.allow_agent_screen_restore(surface_id).await;
         }
         drop(lifecycle);
+        if !changed.is_empty() {
+            self.mark_dirty();
+        }
         changed
     }
 
@@ -4409,10 +4413,10 @@ fn take_current_agent_from_pane(
             {
                 return None;
             }
-            surface
-                .agent
-                .take()
-                .map(|presence| (*id, surface.title.clone(), presence))
+            let presence = surface.agent.take()?;
+            let title = surface.title.clone();
+            flowmux_core::normalize_unlocked_terminal_title(surface);
+            Some((*id, title, presence))
         }
         Pane::Leaf { .. } => None,
         Pane::Split { first, second, .. } => {
@@ -7495,6 +7499,72 @@ mod tests {
         let state = store.snapshot().await;
         let tree = flowmux_ipc::protocol::describe_workspaces(&state.workspaces);
         assert!(tree[0].panes[0].tabs[0].agent.is_none());
+    }
+
+    #[tokio::test]
+    async fn agent_teardown_restores_cwd_title_and_preserves_manual_names() {
+        for teardown in ["process", "session", "dead_pid"] {
+            for locked in [false, true] {
+                let store = StateStore::new_lazy(State::default());
+                let ws_id = store.create_workspace(None, "/tmp/demo".into()).await;
+                let ws = store.get_workspace(ws_id).await.unwrap();
+                let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
+                let surface = first_pane_active_surface(&ws);
+                store.rename_workspace(ws_id, "My workspace".into()).await;
+                store
+                    .report_agent_status(
+                        surface,
+                        AgentStatusReport {
+                            name: "codex".into(),
+                            status: Some(AgentStatus::Idle),
+                            activity: None,
+                            pid: (teardown == "dead_pid").then_some(42),
+                            source: Some("flowmux:hook".into()),
+                            seq: Some(1),
+                            message: None,
+                            custom_status: None,
+                            session_id: Some("title-test".into()),
+                            session_name: None,
+                            messaging_socket: None,
+                        },
+                    )
+                    .await;
+                store
+                    .update_surface_auto_title(pane, surface, "Implementing a feature".into())
+                    .await;
+                if locked {
+                    store
+                        .rename_surface(pane, surface, "My terminal".into())
+                        .await;
+                }
+                match teardown {
+                    "process" => assert_eq!(
+                        store.reconcile_process_agents(&[(surface, None)]).await,
+                        vec![(ws_id, None)]
+                    ),
+                    "session" => {
+                        assert!(store
+                            .end_agent_session(surface, "codex", Some(2), Some("old-session"), None)
+                            .await
+                            .is_none());
+                        assert!(store
+                            .end_agent_session(surface, "codex", Some(2), Some("title-test"), None)
+                            .await
+                            .is_some());
+                    }
+                    _ => assert!(store.clear_dead_agent_presence(surface, 42).await.is_some()),
+                }
+                assert_eq!(
+                    store.surface_title(pane, surface).await.as_deref(),
+                    Some(if locked { "My terminal" } else { "demo" }),
+                    "{teardown}"
+                );
+                assert_eq!(
+                    store.get_workspace(ws_id).await.unwrap().display_title(),
+                    "My workspace"
+                );
+            }
+        }
     }
 
     #[tokio::test]

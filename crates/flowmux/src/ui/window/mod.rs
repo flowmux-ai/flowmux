@@ -5191,7 +5191,9 @@ mod tests {
     /// that path must never touch `surface.title`.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn program_title_persists_across_cwd_polling() {
+    async fn program_title_persists_until_agent_exit_without_cwd_change() {
+        use vte::prelude::TerminalExt;
+
         adw::init().expect("libadwaita should initialize in GTK test");
         let cwd = std::env::temp_dir().join("flowmux-program-title-poll");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -5201,7 +5203,7 @@ mod tests {
         let pane = ws.surfaces[0].root_pane.first_leaf_id().unwrap();
         let surface = ws.surfaces[0].root_pane.active_surface_id(pane).unwrap();
 
-        let (bridge, _rx) = Bridge::new();
+        let (bridge, rx) = Bridge::new();
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.ProgramTitlePoll")
             .build();
@@ -5218,14 +5220,18 @@ mod tests {
         controller.focused_pane.set(Some(pane));
         controller.dispatch(GtkCommand::RefreshWindowTitle).await;
 
-        // Enter an external program (claude): OSC 2 emits "Claude Code".
-        controller
-            .dispatch(GtkCommand::TerminalTitleChanged {
-                pane,
-                surface,
-                title: "Claude Code".into(),
-            })
+        store
+            .reconcile_process_agents(&[(surface, Some("claude"))])
             .await;
+        // Use actual VTE OSC parsing, including its duplicate-title coalescer.
+        let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
+        terminal.widget.feed(b"\x1b]2;Claude Code\x07");
+        glib::timeout_future(Duration::from_millis(600)).await;
+        while let Ok(command) = rx.try_recv() {
+            if matches!(command, GtkCommand::TerminalTitleChanged { .. }) {
+                controller.dispatch(command).await;
+            }
+        }
         assert_eq!(
             store.surface_title(pane, surface).await.as_deref(),
             Some("Claude Code")
@@ -5249,7 +5255,77 @@ mod tests {
             Some("flowmux - Claude Code")
         );
 
-        // After claude exits, moving to another folder naturally restores a folder label.
+        // Ctrl+C may not emit OSC titles or leave an alternate screen. Process
+        // teardown must restore every displayed name even though cwd is unchanged.
+        assert_eq!(
+            store.reconcile_process_agents(&[(surface, None)]).await,
+            vec![(ws_id, None)]
+        );
+        controller
+            .dispatch(GtkCommand::SetAgentStatus { workspace: ws_id })
+            .await;
+        let restored = flowmux_core::terminal_tab_title_for_cwd(Some(&cwd));
+        assert_eq!(
+            store.surface_title(pane, surface).await.as_deref(),
+            Some(restored.as_str())
+        );
+        assert_eq!(
+            controller
+                .pane_registry
+                .borrow()
+                .surface_title_text(surface)
+                .as_deref(),
+            Some(restored.as_str())
+        );
+        assert_eq!(
+            controller.window.title().as_deref(),
+            Some(format!("flowmux - {restored}").as_str())
+        );
+        assert_eq!(
+            store.get_workspace(ws_id).await.unwrap().name,
+            "flowmux-program-title-poll"
+        );
+        assert!(controller
+            .sidebar
+            .workspace_titles()
+            .borrow()
+            .iter()
+            .any(|(id, title)| *id == ws_id && title == "flowmux-program-title-poll"));
+
+        glib::timeout_future(Duration::from_millis(600)).await;
+        assert_eq!(
+            terminal.widget.window_title().as_deref(),
+            Some(restored.as_str())
+        );
+        while rx.try_recv().is_ok() {}
+
+        // The same agent title must be delivered again on restart.
+        store
+            .reconcile_process_agents(&[(surface, Some("claude"))])
+            .await;
+        terminal.widget.feed(b"\x1b]2;Claude Code\x07");
+        glib::timeout_future(Duration::from_millis(600)).await;
+        let mut delivered = false;
+        while let Ok(command) = rx.try_recv() {
+            if matches!(command, GtkCommand::TerminalTitleChanged { .. }) {
+                delivered = true;
+                controller.dispatch(command).await;
+            }
+        }
+        assert!(
+            delivered,
+            "restarting the same agent must emit its title again"
+        );
+        assert_eq!(
+            store.get_workspace(ws_id).await.unwrap().name,
+            "Claude Code"
+        );
+        store.reconcile_process_agents(&[(surface, None)]).await;
+        controller
+            .dispatch(GtkCommand::SetAgentStatus { workspace: ws_id })
+            .await;
+
+        // A later cd continues to update the restored folder label.
         let next = std::env::temp_dir().join("flowmux-program-title-after");
         std::fs::create_dir_all(&next).unwrap();
         controller

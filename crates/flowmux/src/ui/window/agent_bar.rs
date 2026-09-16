@@ -85,6 +85,43 @@ impl WindowController {
     pub(super) async fn sync_workspace_agent_status(&self, workspace: WorkspaceId) {
         let attention = self.store.workspace_agent_attention_status(workspace).await;
         self.sidebar.set_agent_status(workspace, attention);
+        // Teardown can restore titles without a cwd change or a new OSC title.
+        if let Some(ws) = self.store.get_workspace_without_scrollback(workspace).await {
+            let registry = self.pane_registry.borrow();
+            for surface in &ws.surfaces {
+                surface.root_pane.for_each_leaf(|pane| {
+                    if let Some(PaneContent::Tabs { surfaces, .. }) =
+                        surface.root_pane.find_leaf_content(pane)
+                    {
+                        for tab in surfaces {
+                            registry.set_surface_title(tab.id, &tab.title);
+                            if let flowmux_core::SurfaceKind::Terminal { cwd, .. } = &tab.kind {
+                                if tab.agent.is_none()
+                                    && !tab.title_locked
+                                    && tab.title
+                                        == flowmux_core::terminal_tab_title_for_cwd(cwd.as_deref())
+                                {
+                                    if let Some(terminal) = registry.terminals.get(&tab.id) {
+                                        // Reset VTE and its title coalescer too: otherwise a
+                                        // restarted agent's identical OSC title is deduplicated.
+                                        let title: String =
+                                            tab.title.chars().filter(|c| !c.is_control()).collect();
+                                        if terminal.widget.window_title().as_deref()
+                                            != Some(title.as_str())
+                                        {
+                                            terminal
+                                                .widget
+                                                .feed(format!("\x1b]2;{title}\x07").as_bytes());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        self.refresh_window_title().await;
         self.sync_workspace_label(workspace).await;
     }
     pub(super) async fn sync_workspace_agent_status_from_store(&self, workspace: WorkspaceId) {
