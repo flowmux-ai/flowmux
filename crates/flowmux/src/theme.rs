@@ -430,7 +430,7 @@ paned > separator {{
 #flowmux-session-preview, #flowmux-session-preview text {{
     background-color: @sidebar_bg_color;
     color: @sidebar_fg_color;
-    font-size: {sidebar_caption_font:.2}pt;
+    font-size: {sidebar_body_font:.2}pt;
 }}
 .flowmux-sidebar-shell headerbar {{
     background-color: @sidebar_bg_color;
