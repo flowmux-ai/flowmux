@@ -79,16 +79,13 @@ impl SessionPanelState {
 /// Resolve the actual agent's home, including overrides set inside the shell.
 fn session_home(target: &SessionTarget) -> Result<SessionHome, String> {
     let pids = flowmux_procmon::descendants(target.root_pid).map_err(|e| e.to_string())?;
-    let mut matching: Vec<_> = pids
+    let pid = pids
         .into_iter()
         .filter(|pid| {
             flowmux_procmon::agent_name_for_pid(*pid).and_then(SessionAgent::from_name)
                 == Some(target.agent)
         })
-        .collect();
-    matching.sort_unstable();
-    let pid = matching
-        .first()
+        .min()
         .ok_or("The agent is no longer running in this tab")?;
     let mut environment = std::collections::BTreeMap::new();
     let mut arguments = Vec::new();
@@ -330,18 +327,6 @@ impl WindowController {
         {
             return;
         }
-        let Some(located) = self.store.located_agent_presence(target.surface).await else {
-            return;
-        };
-        if !matches!(
-            located.presence.public_status(),
-            flowmux_core::AgentStatus::Idle | flowmux_core::AgentStatus::Done
-        ) {
-            panel.status.set_text(
-                "Wait for the agent to finish and return to its input prompt before resuming.",
-            );
-            return;
-        }
         if target.session_id.as_deref() == Some(&session.id) {
             panel
                 .status
@@ -550,7 +535,7 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn panel_keeps_other_panels_and_blocks_busy_current_and_stale_targets() {
+    async fn panel_keeps_other_panels_and_blocks_current_and_stale_targets() {
         let (controller, _, pane) = super::super::tests::build_single_workspace_controller(
             "com.flowmux.App.UiTest.SessionSafety",
         )
@@ -628,11 +613,7 @@ mod tests {
             controller
                 .resume_history_session(session.clone(), generation)
                 .await;
-            if status == flowmux_core::AgentStatus::Idle {
-                assert!(panel.status.text().contains("already active"));
-            } else {
-                assert!(panel.status.text().contains("Wait for the agent"));
-            }
+            assert!(panel.status.text().contains("already active"));
         }
         controller.focused_pane.set(None);
         let panel = &controller.sessions.panel;

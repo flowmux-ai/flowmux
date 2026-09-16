@@ -19,7 +19,7 @@ color, including across agents; colors stay stable while the window is open.
 The list takes the remaining height above a compact conversation preview.
 Drag the divider to give either section more space.
 
-To resume a session, finish the current agent task and select a session:
+To resume a session, select it and click **Resume in new tab**:
 
 - **Claude: Resume in new tab** starts `claude --resume <UUID>` in the selected
   session's project directory, preserving the running agent's configuration
@@ -40,7 +40,9 @@ On Linux, OpenCode retains its XDG/config overrides,
 Antigravity retains its home, and Cline retains its directory overrides and
 `--config` / `--data-dir` arguments, including isolated sandbox storage.
 
-Busy agents are left untouched. The session ID remains visible for manual use.
+Another session can be opened while the focused agent is working or waiting for
+input; the original tab remains untouched. The currently active session cannot
+be opened again from that tab. The session ID remains visible for manual use.
 
 ## Implementation and limits
 

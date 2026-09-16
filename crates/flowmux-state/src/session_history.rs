@@ -41,14 +41,6 @@ impl SessionAgent {
         }
     }
 
-    pub fn default_home(self) -> Option<PathBuf> {
-        self.history_home(|key| {
-            std::env::var_os(key)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        })
-    }
-
     pub fn home_variables(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &["HOME", "CLAUDE_CONFIG_DIR"],
