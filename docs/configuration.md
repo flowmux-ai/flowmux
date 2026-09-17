@@ -21,9 +21,10 @@ precedence, then `$SHELL` is used. Invalid commands fall back safely.
 `agent_bar_mode` switches Agent Activity from the resizable lower side-panel
 area to the compact bottom bar.
 
-`default_browser_engine` selects a profile for new browser tabs; all choices
-use the platform WebKit backend. Chrome/Firefox labels do not launch those
-browsers or import their cookies. `scrollback_lines` defaults to 5,000 and is
+The browser uses the platform WebKit backend; Options shows a fixed `WebKit`
+label. Legacy `default_browser_engine` values are preserved for existing profile
+storage compatibility and do not launch Chrome/Firefox or import their cookies.
+`scrollback_lines` defaults to 5,000 and is
 clamped to `1,000..=1,000,000` for newly created terminal tabs.
 
 `terminal_minimap_enabled` defaults to `true`. It reserves a right gutter and

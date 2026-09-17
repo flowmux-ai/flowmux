@@ -105,7 +105,6 @@ fn build_dialog(
 
     let font_widgets = build_font_widgets(parent, current, &default_font_family, default_font_size);
     let zoom_picker = ZoomPicker::new(current.zoom_percent, font_widgets.size_spin.value());
-    let engine_drop = build_engine_drop(&current.default_browser_engine);
     let focus_color_btn = build_focus_color_button(current.focus_border_color_or_default());
     let opacity_widgets = build_focus_opacity_row(current.focus_border_opacity);
     let persist_check = build_persist_check(current.persist_browser_session);
@@ -134,7 +133,7 @@ fn build_dialog(
     general.append(&row("Global zoom (%)", &zoom_picker.drop));
     general.append(&row("Terminal font", &font_widgets.family_drop));
     general.append(&row("Font size (pt)", &font_widgets.size_spin));
-    general.append(&row("Browser web view", &engine_drop));
+    general.append(&row("Browser web view", &gtk::Label::new(Some("WebKit"))));
     general.append(&row("Focus border color", &focus_color_btn));
     general.append(&row("Focus border opacity (%)", &opacity_widgets.row));
     general.append(&row("Keep browser session data", &persist_check));
@@ -158,17 +157,6 @@ fn build_dialog(
     general.append(&row("Cursor blink", &cursor_blink_switch));
     general.append(&row("Cursor blink interval (ms)", &blink_interval_spin));
 
-    let hint = gtk::Label::new(Some(
-        "The selected label isolates the cookie/session directory for new \
-         browser tabs. All labels currently render through WebKitGTK. \
-         Already-open browser tabs are unchanged.",
-    ));
-    hint.set_wrap(true);
-    hint.set_max_width_chars(46);
-    hint.add_css_class("dim-label");
-    hint.set_xalign(0.0);
-    general.append(&hint);
-
     // Keep the footer actions reachable when the compositor gives the window
     // less vertical space than requested. The General page is the only page
     // whose contents can exceed the dialog height as options are added, so
@@ -188,7 +176,8 @@ fn build_dialog(
     let on_apply = Rc::new(on_apply);
     let apply_options: Rc<dyn Fn()> = {
         let zoom_picker = zoom_picker.clone();
-        let engine_drop = engine_drop.clone();
+        // Preserve legacy profile storage when unrelated options change.
+        let browser_engine = current.default_browser_engine.clone();
         let focus_color_btn = focus_color_btn.clone();
         let opacity_spin = opacity_widgets.spin.clone();
         let persist_check = persist_check.clone();
@@ -223,7 +212,7 @@ fn build_dialog(
             }
             on_apply(collect_options(
                 &zoom_picker,
-                &engine_drop,
+                &browser_engine,
                 &focus_color_btn,
                 &opacity_spin,
                 &persist_check,
@@ -290,7 +279,6 @@ fn build_dialog(
         });
     }
     connect_selected_notify(&font_widgets.family_drop, apply_current.clone());
-    connect_selected_notify(&engine_drop, apply_current.clone());
     {
         let apply_current = apply_current.clone();
         focus_color_btn.connect_rgba_notify(move |_| apply_current());
@@ -961,23 +949,13 @@ fn valid_zoom_percentages(font_size: f64) -> Vec<u16> {
     values
 }
 
-/// Select a browser storage profile. Custom profiles are not exposed here.
-fn build_engine_drop(initial: &BrowserEngine) -> gtk::DropDown {
-    let labels: Vec<String> = engine_options().iter().map(|e| e.label()).collect();
-    let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
-    let drop = gtk::DropDown::from_strings(&label_refs);
-    let idx = engine_index_of(initial);
-    drop.set_selected(idx as u32);
-    drop
-}
-
 /// Collect the user's intent from dialog widgets into [`Options`]. Clamp zoom
 /// and opacity again before persistence. [`color_button_hex`] normalizes the
 /// focus color from GdkRGBA to six-digit `#rrggbb`.
 #[allow(clippy::too_many_arguments)]
 fn collect_options(
     zoom_picker: &ZoomPicker,
-    drop: &gtk::DropDown,
+    browser_engine: &BrowserEngine,
     focus_color: &gtk::ColorDialogButton,
     opacity_spin: &gtk::SpinButton,
     persist_check: &gtk::CheckButton,
@@ -1003,10 +981,6 @@ fn collect_options(
     theme_selection: &crate::ui::theme_tab::ThemeSelection,
 ) -> Options {
     let zoom = zoom_picker.selected();
-    let engine = engine_options()
-        .get(drop.selected() as usize)
-        .cloned()
-        .unwrap_or(BrowserEngine::Webkit);
     let color_hex = color_button_hex(focus_color);
     let opacity =
         Options::clamp_focus_border_opacity(opacity_spin.value_as_int().clamp(0, 255) as u8);
@@ -1026,7 +1000,7 @@ fn collect_options(
     };
     Options {
         zoom_percent: zoom,
-        default_browser_engine: engine,
+        default_browser_engine: browser_engine.clone(),
         focus_border_color: color_hex,
         focus_border_opacity: opacity,
         persist_browser_session: persist_check.is_active(),
@@ -1385,23 +1359,6 @@ fn build_focus_color_button(initial_hex: &str) -> gtk::ColorDialogButton {
     button
 }
 
-/// Built-in engine order exposed in the DropDown. Serialization uses
-/// [`BrowserEngine`] itself, so this array only controls UI display order.
-fn engine_options() -> [BrowserEngine; 3] {
-    [
-        BrowserEngine::Webkit,
-        BrowserEngine::Chrome,
-        BrowserEngine::Firefox,
-    ]
-}
-
-fn engine_index_of(engine: &BrowserEngine) -> usize {
-    engine_options()
-        .iter()
-        .position(|e| e == engine)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1429,7 +1386,7 @@ mod tests {
         let applied_from_dialog = applied.clone();
         let dialog = build_dialog(
             &parent,
-            &Options::default(),
+            &Options::default().with_engine(BrowserEngine::Firefox),
             "monospace".into(),
             12.0,
             move |opts| applied_from_dialog.borrow_mut().push(opts),
@@ -1439,6 +1396,17 @@ mod tests {
             |_| false,
         );
         let widgets = widget_tree(dialog.upcast_ref());
+        let browser_label = widgets
+            .iter()
+            .filter_map(|widget| widget.clone().downcast::<gtk::Label>().ok())
+            .find(|label| label.text() == "Browser web view")
+            .unwrap();
+        let browser_value = browser_label
+            .parent()
+            .and_then(|row| row.last_child())
+            .and_then(|widget| widget.downcast::<gtk::Label>().ok())
+            .expect("browser engine must be a fixed label, not a selector");
+        assert_eq!(browser_value.text(), "WebKit");
         let button_labels: Vec<String> = widgets
             .iter()
             .filter_map(|widget| widget.clone().downcast::<gtk::Button>().ok())
@@ -1472,6 +1440,11 @@ mod tests {
         font_size.set_value(14.0);
         assert_eq!(applied.borrow().len(), calls_before + 1);
         assert_eq!(applied.borrow().last().unwrap().font_size, Some(14.0));
+        assert_eq!(
+            applied.borrow().last().unwrap().default_browser_engine,
+            BrowserEngine::Firefox,
+            "editing options must preserve the legacy browser profile"
+        );
 
         let minimap_label = widgets
             .iter()
@@ -1542,30 +1515,6 @@ mod tests {
             context.iteration(false);
         }
         assert!(ran.get());
-    }
-
-    #[test]
-    fn engine_options_lists_three_builtin_variants_in_label_order() {
-        let engines = engine_options();
-        assert_eq!(engines.len(), 3);
-        assert_eq!(engines[0], BrowserEngine::Webkit);
-        assert_eq!(engines[1], BrowserEngine::Chrome);
-        assert_eq!(engines[2], BrowserEngine::Firefox);
-    }
-
-    #[test]
-    fn engine_index_of_returns_zero_for_unknown_custom_engine() {
-        let idx = engine_index_of(&BrowserEngine::Custom {
-            name: "Brave".into(),
-        });
-        assert_eq!(idx, 0);
-    }
-
-    #[test]
-    fn engine_index_of_matches_each_builtin() {
-        assert_eq!(engine_index_of(&BrowserEngine::Webkit), 0);
-        assert_eq!(engine_index_of(&BrowserEngine::Chrome), 1);
-        assert_eq!(engine_index_of(&BrowserEngine::Firefox), 2);
     }
 
     #[test]
@@ -1680,7 +1629,7 @@ mod tests {
     #[gtk::test]
     fn collect_options_round_trips_persist_browser_session() {
         let zoom = ZoomPicker::new(117, 12.0);
-        let engine = build_engine_drop(&BrowserEngine::Firefox);
+        let engine = BrowserEngine::Firefox;
         let focus_color = build_focus_color_button("#abcdef");
         let opacity = build_focus_opacity_row(40);
         let persist_off = build_persist_check(false);
