@@ -52,6 +52,19 @@ def unused_port():
         return listener.getsockname()[1]
 
 
+def wait_for_sshd(sshd, port, log_path):
+    def ready():
+        if sshd.poll() is not None:
+            raise RuntimeError(log_path.read_text())
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                return True
+        except OSError:
+            return False
+
+    wait_for(ready, "sshd listener")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sshd", default=shutil.which("sshd"))
@@ -138,9 +151,7 @@ LogLevel VERBOSE
                 sshd = subprocess.Popen([str(Path(args.sshd).resolve()), "-D", "-e", "-f", str(config)],
                                         env=env, stdout=log, stderr=log, start_new_session=True)
                 children.append(sshd)
-            time.sleep(0.2)
-            if sshd.poll() is not None:
-                raise RuntimeError((root / "sshd.log").read_text())
+            wait_for_sshd(sshd, port, root / "sshd.log")
             master = subprocess.Popen(base + ["-M", "-N", "-T", "-o", "ControlPersist=no", host],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             children.append(master)

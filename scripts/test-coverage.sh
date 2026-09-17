@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+python3 scripts/test-ssh-workspace-fixture.py
+
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 cargo llvm-cov clean --workspace
 eval "$(CARGO_TARGET_DIR="$PWD/target/llvm-cov-target" cargo llvm-cov show-env --export-prefix)"
