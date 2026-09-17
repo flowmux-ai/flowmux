@@ -338,6 +338,18 @@ impl WindowController {
                 .set_text("This session is already active in the focused tab.");
             return;
         }
+        if !session.cwd.is_dir() {
+            let error = format!(
+                "The project directory does not exist or cannot be opened:\n\n{}",
+                session.cwd.display()
+            );
+            panel.status.set_text(&error);
+            let window = self.window.clone();
+            glib::MainContext::default().spawn_local(async move {
+                show_error_dialog(&window, "Cannot resume session", &error).await;
+            });
+            return;
+        }
         let valid_target = target.clone();
         let Ok(Ok(home)) = gtk::gio::spawn_blocking(move || session_home(&valid_target)).await
         else {
@@ -353,13 +365,7 @@ impl WindowController {
         }
         // Start the native CLI in its own tab; never write into the existing agent.
         let line = match resume_shell_line(&session, &home) {
-            Ok(line) if session.cwd.is_dir() => line,
-            Ok(_) => {
-                panel
-                    .status
-                    .set_text("This session's project directory no longer exists.");
-                return;
-            }
+            Ok(line) => line,
             Err(error) => {
                 panel.status.set_text(&error);
                 return;
@@ -620,6 +626,31 @@ mod tests {
                 .await;
             assert!(panel.status.text().contains("already active"));
         }
+        let directory = tempfile::tempdir().unwrap();
+        let mut missing = session.clone();
+        missing.id = "23456789-1234-4234-8234-123456789abc".into();
+        missing.cwd = directory.path().join("missing project");
+        let tab_count = controller.pane_registry.borrow().terminals.len();
+        let generation = controller.sessions.panel.generation.get();
+        controller
+            .resume_history_session(missing.clone(), generation)
+            .await;
+        for _ in 0..100 {
+            if controller.window.visible_dialog().is_some() {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+        let dialog = controller
+            .window
+            .visible_dialog()
+            .expect("missing project directory must show an error popup")
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        assert_eq!(dialog.heading().as_deref(), Some("Cannot resume session"));
+        assert!(dialog.body().contains(missing.cwd.to_str().unwrap()));
+        assert_eq!(controller.pane_registry.borrow().terminals.len(), tab_count);
+        dialog.close();
         controller.focused_pane.set(None);
         let panel = &controller.sessions.panel;
         let generation = panel.clear("focus moved");
