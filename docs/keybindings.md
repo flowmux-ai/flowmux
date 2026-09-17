@@ -25,6 +25,7 @@ and paste, they can be changed under Options → Keybindings. Action names are t
 | copy-pane-path | Ctrl+Shift+K | Cmd+Shift+K |
 | toggle-worktree-panel / toggle-file-browser | Ctrl+Alt+W / Ctrl+Alt+F | Cmd+Alt+W / Cmd+Alt+F |
 | toggle-usage-popover | Ctrl+Alt+U | Cmd+Alt+U |
+| toggle-session-panel | Ctrl+Alt+J | Ctrl+Alt+J |
 | open-tig | Ctrl+Alt+G | Cmd+Alt+G |
 
 Shift+Enter in a terminal commits pending IME composition before sending

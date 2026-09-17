@@ -327,6 +327,7 @@ pub fn install_actions(
         }),
     );
     let toggle_workspace_overview = make_toggle_workspace_overview_action(bridge.clone());
+    let toggle_session_panel = make_toggle_session_panel_action(bridge.clone());
     let new_surface = make_pane_action(
         "new-surface",
         focused.clone(),
@@ -500,6 +501,7 @@ pub fn install_actions(
         search_all_terminals,
         toggle_pane_zoom,
         toggle_workspace_overview,
+        toggle_session_panel,
         next_workspace,
         prev_workspace,
         w1,
@@ -517,6 +519,24 @@ pub fn install_actions(
         toggle_file_browser,
         toggle_usage_popover,
     ]);
+}
+
+fn make_toggle_session_panel_action(
+    bridge: Bridge,
+) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
+    gtk::gio::ActionEntry::builder("toggle-session-panel")
+        .activate(move |_, _, _| {
+            let bridge = bridge.clone();
+            glib::MainContext::default().spawn_local(async move {
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::SessionPanel(
+                        crate::ui::session_panel::SessionPanelAction::Toggle,
+                    ))
+                    .await;
+            });
+        })
+        .build()
 }
 
 fn make_toggle_workspace_overview_action(
@@ -1357,6 +1377,45 @@ mod tests {
             rx.recv().await.unwrap(),
             GtkCommand::ToggleWorkspaceOverview
         ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn ctrl_alt_j_dispatches_session_panel_and_can_be_rebound() {
+        adw::init().expect("libadwaita should initialize in GTK test");
+        let action = ActionId::ToggleSessionPanel;
+        assert!(action.is_user_editable());
+        assert_eq!(ActionId::from_wire("toggle-session-panel"), Some(action));
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.SessionPanelAction")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let window = adw::ApplicationWindow::builder().application(&app).build();
+        let (bridge, rx) = Bridge::new();
+        window.add_action_entries([make_toggle_session_panel_action(bridge)]);
+        let mut options = Options::default();
+        install_accels(&app, &options);
+        let registered = app.accels_for_action(&full_action_name(action));
+        assert_eq!(registered.len(), 1);
+        assert_eq!(
+            gtk::accelerator_parse(&registered[0]),
+            Some((
+                gtk::gdk::Key::j,
+                gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK,
+            ))
+        );
+        gtk::prelude::WidgetExt::activate_action(&window, &full_action_name(action), None).unwrap();
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::SessionPanel(crate::ui::session_panel::SessionPanelAction::Toggle)
+        ));
+        options.keybindings.set(action, vec!["<Alt>j".into()]);
+        install_accels(&app, &options);
+        assert_eq!(app.accels_for_action(&full_action_name(action)), ["<Alt>j"]);
+        options.keybindings.set(action, vec![]);
+        install_accels(&app, &options);
+        assert!(app.accels_for_action(&full_action_name(action)).is_empty());
     }
 
     #[test]

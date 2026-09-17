@@ -451,22 +451,11 @@ impl Sidebar {
         let session_btn = gtk::Button::from_icon_name("document-open-recent-symbolic");
         session_btn.add_css_class("flat");
         session_btn.add_css_class("flowmux-sidebar-options");
-        session_btn.set_tooltip_text(Some("Agent sessions"));
+        session_btn.set_tooltip_text(Some("Agent sessions (Ctrl+Alt+J)"));
         session_btn.update_property(&[gtk::accessible::Property::Label("Agent sessions")]);
         session_btn.set_focus_on_click(false);
         session_btn.set_widget_name("flowmux-session-button");
-        let session_bridge = bridge.clone();
-        session_btn.connect_clicked(move |_| {
-            let bridge = session_bridge.clone();
-            gtk::glib::MainContext::default().spawn_local(async move {
-                let _ = bridge
-                    .tx
-                    .send(GtkCommand::SessionPanel(
-                        crate::ui::session_panel::SessionPanelAction::Toggle,
-                    ))
-                    .await;
-            });
-        });
+        session_btn.set_action_name(Some("win.toggle-session-panel"));
         footer.append(&session_btn);
 
         // Self-update banner. Hidden until the background release check
@@ -3407,6 +3396,20 @@ mod tests {
             .expect("file browser button must exist");
         assert_eq!(overview + 1, worktrees);
         assert_eq!(worktrees + 1, folder);
+        let session_button =
+            std::iter::successors(footer.first_child(), |widget| widget.next_sibling())
+                .find(|widget| widget.widget_name() == "flowmux-session-button")
+                .unwrap()
+                .downcast::<gtk::Button>()
+                .unwrap();
+        assert_eq!(
+            session_button.tooltip_text().as_deref(),
+            Some("Agent sessions (Ctrl+Alt+J)")
+        );
+        assert_eq!(
+            session_button.action_name().as_deref(),
+            Some("win.toggle-session-panel")
+        );
     }
 
     #[cfg(not(target_os = "macos"))]

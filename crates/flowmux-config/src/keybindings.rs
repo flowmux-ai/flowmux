@@ -79,6 +79,8 @@ pub enum ActionId {
     ToggleFileBrowser,
     /// Toggle the AI usage popover in the side-panel footer.
     ToggleUsagePopover,
+    /// Toggle the agent session history panel.
+    ToggleSessionPanel,
     /// Open tig in a new tab in the focused pane.
     OpenTig,
 }
@@ -121,6 +123,7 @@ impl ActionId {
             Self::ToggleWorktreePanel => "toggle-worktree-panel",
             Self::ToggleFileBrowser => "toggle-file-browser",
             Self::ToggleUsagePopover => "toggle-usage-popover",
+            Self::ToggleSessionPanel => "toggle-session-panel",
             Self::OpenTig => "open-tig",
         }
     }
@@ -163,6 +166,7 @@ impl ActionId {
             Self::ToggleWorktreePanel => "Toggle worktree panel",
             Self::ToggleFileBrowser => "Toggle file browser",
             Self::ToggleUsagePopover => "Toggle AI usage",
+            Self::ToggleSessionPanel => "Toggle agent sessions",
             Self::OpenTig => "Open tig",
         }
     }
@@ -208,6 +212,7 @@ impl ActionId {
             Self::ToggleWorktreePanel,
             Self::ToggleFileBrowser,
             Self::ToggleUsagePopover,
+            Self::ToggleSessionPanel,
             Self::OpenTig,
         ]
     }
@@ -267,6 +272,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleWorktreePanel, &["<Ctrl><Alt>w"]),
     (ActionId::ToggleFileBrowser, &["<Ctrl><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Ctrl><Alt>u"]),
+    (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
     (ActionId::OpenTig, &["<Ctrl><Alt>g"]),
 ];
 
@@ -310,6 +316,7 @@ const DEFAULTS: &[(ActionId, &[&str])] = &[
     (ActionId::ToggleWorktreePanel, &["<Meta><Alt>w"]),
     (ActionId::ToggleFileBrowser, &["<Meta><Alt>f"]),
     (ActionId::ToggleUsagePopover, &["<Meta><Alt>u"]),
+    (ActionId::ToggleSessionPanel, &["<Ctrl><Alt>j"]),
     (ActionId::OpenTig, &["<Meta><Alt>g"]),
 ];
 

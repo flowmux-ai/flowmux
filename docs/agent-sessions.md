@@ -2,10 +2,10 @@
 
 # Agent sessions
 
-Click **Agent sessions** in the side-panel footer to open the right-side session
-panel. While open, it follows the focused terminal tab's Claude Code, Codex,
-OpenCode, Antigravity (`agy`), or Cline identity. Closing it leaves the file and
-worktree panels as they were.
+Click **Agent sessions** in the side-panel footer or press **Ctrl+Alt+J** to toggle
+the right-side session panel. While open, it follows the focused terminal tab's
+Claude Code, Codex, OpenCode, Antigravity (`agy`), or Cline identity. Closing it
+leaves the file and worktree panels as they were.
 
 The list includes local sessions from all projects, ordered by saved
 modification time. Search matches titles, recent-message summaries, directories,
