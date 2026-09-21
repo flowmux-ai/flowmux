@@ -505,6 +505,91 @@ fn process_exists(pid: libc::pid_t) -> bool {
 }
 
 #[test]
+fn pty_tee_keeps_input_and_resize_live_under_output_backpressure() {
+    use std::os::fd::AsRawFd;
+    let tmp = tempfile::tempdir().unwrap();
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+    let events = tmp.path().join("events");
+    let outer = nix::pty::openpty(None, None).unwrap();
+    let mut master = std::fs::File::from(outer.master);
+    let script = r#"
+import os, signal, sys, threading, tty
+tty.setraw(0)
+events = open(sys.argv[1], 'w', buffering=1)
+signal.signal(signal.SIGWINCH, lambda *args: events.write('resize\n'))
+def flood():
+    for _ in range(128):
+        os.write(1, b'x' * 8192)
+writer = threading.Thread(target=flood)
+writer.start()
+events.write(str(os.getpid()) + '\n')
+assert os.read(0, 1) == b'q'
+events.write('input\n')
+writer.join()
+sys.exit(17)
+"#;
+    let child = Command::new(flowmuxctl_path())
+        .args(["pty-tee", "--", "python3", "-c", script])
+        .arg(&events)
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_SSH_TERMINAL", "1")
+        .stdin(Stdio::from(outer.slave))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(pid) = std::fs::read_to_string(&events)
+            .ok()
+            .and_then(|s| s.lines().next()?.parse().ok())
+        {
+            guard.inner_pgid = Some(pid);
+            break;
+        }
+        assert!(Instant::now() < deadline, "inner child did not start");
+        thread::sleep(Duration::from_millis(10));
+    }
+    // Neither the pipe nor the bounded proxy queue can hold the whole flood.
+    thread::sleep(Duration::from_millis(300));
+    master.write_all(b"q").unwrap();
+    let size = libc::winsize {
+        ws_row: 31,
+        ws_col: 95,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    unsafe {
+        assert_eq!(libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &size), 0);
+        libc::kill(guard.child.id() as i32, libc::SIGWINCH);
+    }
+    thread::sleep(Duration::from_millis(500));
+    let observed = std::fs::read_to_string(&events).unwrap();
+    assert!(observed.contains("input\n"), "input stalled: {observed}");
+    assert!(observed.contains("resize\n"), "resize stalled: {observed}");
+    let mut output = Vec::new();
+    guard
+        .child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut output)
+        .unwrap();
+    assert_eq!(
+        output,
+        vec![b'x'; 128 * 8192],
+        "queued output must remain lossless"
+    );
+    assert_eq!(guard.child.wait().unwrap().code(), Some(17));
+    guard.inner_pgid = None;
+}
+
+#[test]
 fn pty_tee_preserves_input_queued_before_startup() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let socket = tmp.path().join("flowmux.sock");

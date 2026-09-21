@@ -53,6 +53,7 @@ use nix::sys::termios::{self, SetArg, Termios};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, setsid, ForkResult, Pid};
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::Write;
 use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
@@ -73,6 +74,7 @@ static SIGNAL_PIPE_WRITE: AtomicI32 = AtomicI32::new(-1);
 static TERMINATION_REQUESTED: AtomicBool = AtomicBool::new(false);
 const OUTPUT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const EVENT_QUEUE_CAPACITY: usize = 16;
+const PENDING_BYTES: usize = 256 * 1024;
 
 extern "C" fn signal_wakeup_handler(sig: libc::c_int) {
     if matches!(sig, libc::SIGHUP | libc::SIGTERM | libc::SIGINT) {
@@ -252,6 +254,7 @@ fn run_pty_pump(
     let master_fd = master.as_raw_fd();
     set_nonblocking(master_fd)?;
     set_nonblocking(libc::STDIN_FILENO)?;
+    set_nonblocking(libc::STDOUT_FILENO)?;
 
     // 6. Pending-OSC queue lives behind a RefCell so the OscExtractor
     //    closure can push into it while the outer loop drains it
@@ -267,7 +270,9 @@ fn run_pty_pump(
         local: !ssh_terminal,
         last: None,
     };
-    cwd_tracker.emit_if_changed(child_pid);
+    let mut to_outer = VecDeque::new();
+    let mut to_inner = VecDeque::new();
+    cwd_tracker.emit_if_changed(child_pid, &mut to_outer);
 
     // 7. Pump loop.
     let mut buf = [0u8; 8192];
@@ -275,18 +280,43 @@ fn run_pty_pump(
     loop {
         let mut fds = [
             libc::pollfd {
-                fd: libc::STDIN_FILENO,
+                fd: if to_inner.len() < PENDING_BYTES {
+                    libc::STDIN_FILENO
+                } else {
+                    -1
+                },
                 events: libc::POLLIN,
                 revents: 0,
             },
             libc::pollfd {
-                fd: master_fd,
-                events: libc::POLLIN,
+                fd: if to_outer.len() < PENDING_BYTES || !to_inner.is_empty() {
+                    master_fd
+                } else {
+                    -1
+                },
+                events: if to_outer.len() < PENDING_BYTES {
+                    libc::POLLIN
+                } else {
+                    0
+                } | if !to_inner.is_empty() {
+                    libc::POLLOUT
+                } else {
+                    0
+                },
                 revents: 0,
             },
             libc::pollfd {
                 fd: sig_r.as_raw_fd(),
                 events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: if to_outer.is_empty() {
+                    -1
+                } else {
+                    libc::STDOUT_FILENO
+                },
+                events: libc::POLLOUT,
                 revents: 0,
             },
         ];
@@ -311,7 +341,7 @@ fn run_pty_pump(
                     break;
                 }
             }
-            if TERMINATION_REQUESTED.swap(false, Ordering::Relaxed) {
+            if TERMINATION_REQUESTED.load(Ordering::Relaxed) {
                 exit_code = terminate_inner_group(
                     child_pid,
                     master_fd,
@@ -328,20 +358,57 @@ fn run_pty_pump(
             if let Some(ws) = winsize_from_fd(libc::STDIN_FILENO) {
                 let _ = set_winsize(master_fd, &ws);
             }
-            cwd_tracker.emit_if_changed(child_pid);
+            if to_outer.len() < PENDING_BYTES {
+                cwd_tracker.emit_if_changed(child_pid, &mut to_outer);
+            }
             // Reap the child non-blockingly. If it's gone we drain the
             // remaining inner-master bytes below and break.
             if let Some(code) = try_reap(child_pid) {
+                let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
+                to_outer.clear();
                 let alternate_screen_exited =
                     drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
                 flush_pending(&pending, &event_tx);
                 queue_output_refresh(&event_tx, &output_refresh);
                 if alternate_screen_exited {
-                    cwd_tracker.emit_shell_title(child_pid);
+                    cwd_tracker.emit_shell_title(child_pid, &mut to_outer);
                 }
                 exit_code = code;
                 break;
             }
+        }
+
+        // Writable destinations participate in the same poll as input and
+        // signals. A full terminal must not stall keystrokes or SIGWINCH.
+        let write_result = if fds[3].revents & (libc::POLLERR | libc::POLLHUP) != 0 {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        } else {
+            (if fds[3].revents & libc::POLLOUT != 0 {
+                write_pending(libc::STDOUT_FILENO, &mut to_outer)
+            } else {
+                Ok(())
+            })
+            .and_then(|()| {
+                if fds[1].revents & libc::POLLOUT != 0 {
+                    write_pending(master_fd, &mut to_inner)
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        if let Err(error) = write_result {
+            tracing::warn!(%error, "PTY write failed; exiting");
+            TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
+            exit_code = terminate_inner_group(
+                child_pid,
+                master_fd,
+                &mut extractor,
+                &mut input_modes,
+                &pending,
+                &event_tx,
+                &output_refresh,
+            );
+            break;
         }
 
         // 7b. Outer (user keystrokes / terminal input) → inner shell.
@@ -349,19 +416,7 @@ fn run_pty_pump(
             match read_some(libc::STDIN_FILENO, &mut buf) {
                 ReadOutcome::Data(slice) => {
                     let input = input_modes.rewrite_input(slice);
-                    if let Err(e) = write_all(master_fd, input.as_ref()) {
-                        tracing::warn!(error = %e, "write to inner master failed; exiting");
-                        exit_code = terminate_inner_group(
-                            child_pid,
-                            master_fd,
-                            &mut extractor,
-                            &mut input_modes,
-                            &pending,
-                            &event_tx,
-                            &output_refresh,
-                        );
-                        break;
-                    }
+                    to_inner.extend(input.as_ref());
                 }
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof => {
@@ -401,41 +456,33 @@ fn run_pty_pump(
                     let alternate_screen_exited =
                         observe_terminal_output(slice, &mut input_modes, &output_refresh);
                     extractor.feed(slice);
-                    if let Err(e) = write_all(libc::STDOUT_FILENO, slice) {
-                        tracing::warn!(error = %e, "write to outer stdout failed; exiting");
-                        exit_code = terminate_inner_group(
-                            child_pid,
-                            master_fd,
-                            &mut extractor,
-                            &mut input_modes,
-                            &pending,
-                            &event_tx,
-                            &output_refresh,
-                        );
-                        break;
-                    }
+                    to_outer.extend(slice);
                     // Full-screen TUIs often restore a blank or stale OSC title.
                     // Re-entering the normal screen is the event that lets the
                     // existing title pipeline restore tab/workspace/window names.
                     if alternate_screen_exited {
-                        cwd_tracker.emit_shell_title(child_pid);
+                        cwd_tracker.emit_shell_title(child_pid, &mut to_outer);
                     }
                     flush_pending(&pending, &event_tx);
                     // Preserve notification latency: OSC notifications enter
                     // the IPC queue before the debounced screen refresh for
                     // the same output chunk.
                     queue_output_refresh(&event_tx, &output_refresh);
-                    cwd_tracker.emit_if_changed(child_pid);
+                    if to_outer.len() < PENDING_BYTES {
+                        cwd_tracker.emit_if_changed(child_pid, &mut to_outer);
+                    }
                 }
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
                     let code = wait_blocking(child_pid).unwrap_or(0);
+                    let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
+                    to_outer.clear();
                     let alternate_screen_exited =
                         drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
                     flush_pending(&pending, &event_tx);
                     queue_output_refresh(&event_tx, &output_refresh);
                     if alternate_screen_exited {
-                        cwd_tracker.emit_shell_title(child_pid);
+                        cwd_tracker.emit_shell_title(child_pid, &mut to_outer);
                     }
                     exit_code = code;
                     break;
@@ -445,18 +492,22 @@ fn run_pty_pump(
         if fds[1].revents & (libc::POLLHUP | libc::POLLERR) != 0
             && fds[1].revents & libc::POLLIN == 0
         {
+            let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
+            to_outer.clear();
             let alternate_screen_exited =
                 drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
             flush_pending(&pending, &event_tx);
             queue_output_refresh(&event_tx, &output_refresh);
             if alternate_screen_exited {
-                cwd_tracker.emit_shell_title(child_pid);
+                cwd_tracker.emit_shell_title(child_pid, &mut to_outer);
             }
             let code = wait_blocking(child_pid).unwrap_or(0);
             exit_code = code;
             break;
         }
     }
+
+    let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
 
     // 8. Cleanup. _saved_termios restores via Drop on the way out.
     SIGNAL_PIPE_WRITE.store(-1, Ordering::Relaxed);
@@ -475,6 +526,8 @@ fn terminate_inner_group<F: FnMut(&str)>(
     event_tx: &mpsc::SyncSender<PtyEvent>,
     output_refresh: &OutputRefreshState,
 ) -> i32 {
+    // Shutdown must not wait for an outer terminal that has stopped reading.
+    TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
         termination_grace("FLOWMUX_PTY_TEE_SIGTERM_GRACE_MS", Duration::from_secs(2));
@@ -786,6 +839,26 @@ fn read_some<'a>(fd: RawFd, buf: &'a mut [u8]) -> ReadOutcome<'a> {
     }
 }
 
+fn write_pending(fd: RawFd, pending: &mut VecDeque<u8>) -> std::io::Result<()> {
+    let (bytes, _) = pending.as_slices();
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    let n = unsafe { libc::write(fd, bytes.as_ptr() as *const _, bytes.len()) };
+    if n > 0 {
+        pending.drain(..n as usize);
+        return Ok(());
+    }
+    if n == 0 {
+        return Err(std::io::ErrorKind::WriteZero.into());
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::EAGAIN | libc::EINTR) => Ok(()),
+        _ => Err(error),
+    }
+}
+
 fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
     while !data.is_empty() {
         // A blocked write must still honor SIGHUP/SIGTERM/SIGINT: the
@@ -841,7 +914,7 @@ struct CwdOscTracker {
 }
 
 impl CwdOscTracker {
-    fn emit_if_changed(&mut self, pid: Pid) {
+    fn emit_if_changed(&mut self, pid: Pid, output: &mut VecDeque<u8>) {
         if !self.local {
             return;
         }
@@ -852,19 +925,17 @@ impl CwdOscTracker {
             return;
         }
 
-        let seq = osc7_for_path(&cwd);
-        if write_all(libc::STDOUT_FILENO, &seq).is_ok() {
-            self.last = Some(cwd);
-        }
+        output.extend(osc7_for_path(&cwd));
+        self.last = Some(cwd);
     }
 
-    fn emit_shell_title(&self, pid: Pid) {
+    fn emit_shell_title(&self, pid: Pid, output: &mut VecDeque<u8>) {
         if !self.local {
             return;
         }
         let cwd = child_cwd(pid).or_else(|| self.last.clone());
         let title = terminal_tab_title_for_cwd(cwd.as_deref());
-        let _ = write_all(libc::STDOUT_FILENO, &osc0_for_title(&title));
+        output.extend(osc0_for_title(&title));
     }
 }
 
@@ -1015,8 +1086,8 @@ mod tests {
             local: false,
             last: None,
         };
-        tracker.emit_if_changed(Pid::this());
-        tracker.emit_shell_title(Pid::this());
+        tracker.emit_if_changed(Pid::this(), &mut VecDeque::new());
+        tracker.emit_shell_title(Pid::this(), &mut VecDeque::new());
         assert_eq!(tracker.last, None);
     }
 

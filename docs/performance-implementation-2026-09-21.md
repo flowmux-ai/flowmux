@@ -13,7 +13,7 @@
 | 미니맵 작업량/그리기 비용 | 구현 및 실제 GUI A/B 완료 |
 | 워크스페이스 pane/surface 복원 | 구현 및 실제 GUI 검증 완료 |
 | 전체 스크롤백 저장 | 구현 및 실제 GUI 검증 완료 |
-| PTY backpressure 중 입력/resize | 대기 |
+| PTY backpressure 중 입력/resize | 구현 및 실제 PTY 검증 완료 |
 | IME focus cycle 및 redraw | 대기 |
 | synchronized output | 대기 |
 | 최종 통합 A/B·회귀·설치 | 대기 |
@@ -52,3 +52,10 @@
 - 결과: `/tmp/flowmux-perf-20260921/{baseline,updated}-fast-results.json`, `{baseline,updated}-native-fast-results.json`. 실제 GUI 스크린샷 `/tmp/fm-gui-4wy8l6j5/colored.png`에서 컬러 미니맵 표시 확인.
 - 검증: minimap 13개 + scrollback/parser 10개 테스트 통과. 한글 cell 폭, 배경색, 화면 전환, resize/reflow, clear-scrollback, 숨김/다시 표시 범위 포함.
 - 판단: 두 renderer 환경에서 CPU 감소 확인(컬러 출력 약 30%/36% 감소), 유지. VTE HTML extraction 자체 비용은 남는다.
+
+**PTY backpressure**
+
+- 변경: 실행 중인 pump의 blocking write를 제거하고 양방향 bounded queue와 POLLOUT를 기존 poll에 통합했다. 합성 cwd/title OSC도 같은 출력 queue를 거쳐 순서를 유지한다. 종료 시에는 읽지 않는 outer terminal을 기다리지 않는다.
+- 기준: 출력 소비를 500ms 중단하면 입력 500.39ms, resize 500.34ms 지연. 수정: 출력 소비를 멈춘 동안에도 입력 0.065ms, resize 0.069ms 도착. `/tmp/flowmux-implementation-20260921/backpressure-{before,after}.json`.
+- 검증: 실제 outer/inner PTY 재현, CLI integration 11개 및 관련 unit 8개 통과. 추가 integration은 출력 소비 전 입력/resize 수신, 1MiB 출력의 바이트 무손실, 자식 종료 코드 17 보존을 함께 검사한다. 기존 알림, OSC 제목/cwd, 시작 전 입력, EOF process-group 종료 검사도 통과.
+- 판단: 같은 정체 조건에서 양방향 처리가 분리됨을 확인, 유지.
