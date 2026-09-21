@@ -1,0 +1,111 @@
+{
+  "checked_at": "2026-09-21",
+  "source_commit": "28ae700254ae06d8db0ef5781eae3b1855312b0c",
+  "scope": "Feasibility and implementation-plan validation; not a released or fully tested Ubuntu 22.04 Flatpak",
+  "host": "Ubuntu 24.04.5 amd64; live user GUI PID 6619 untouched",
+  "jammy_rootfs": {
+    "url": "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-amd64.tar.gz",
+    "sha256": "242cd8898b33ea806ef5f13b1076ed7c76f9f989d18384452f7166692438ff1a",
+    "verified_against_official_sha256sums": true,
+    "execution": "PRoot 5.1.0; Ubuntu 22.04 userspace on host kernel, not a 22.04 VM"
+  },
+  "jammy_packages": {
+    "glibc": "2.35",
+    "gtk": "4.6.9+ds-0ubuntu0.22.04.2",
+    "libadwaita": "1.1.7-0ubuntu0.22.04.1",
+    "gtk4_vte_dev": null,
+    "gtk3_vte_dev": "0.68.0-1ubuntu0.1",
+    "webkitgtk_6_dev": "2.50.4-0ubuntu0.22.04.1",
+    "flatpak": "1.12.7-1ubuntu0.1",
+    "python_runtime": "3.10.12"
+  },
+  "existing_native_cli_on_jammy": {
+    "passed": false,
+    "error": "GLIBC_2.39 not found"
+  },
+  "flatpak": {
+    "probe_tool_version": "1.14.6 (locally extracted, not installed system-wide)",
+    "gnome48_eol": "2026-03-24 (remote-info metadata)",
+    "gnome50_commit": "93d500c1a9e7efe8b3ea2d8112301c6192a852cdc6faeb6cf95643e67c4232ce",
+    "sdk50_commit": "13a6133ae1414dd8f5103e7c87620950818736a2840f458f8913e53567a59088",
+    "rust_stable_extension_branch": "25.08",
+    "rust_stable_extension_commit": "09784a9989ae5a7fda6a2280033ca9aa32aac6907961da8b18be4590dd261507",
+    "platform_downloaded_and_files_inspected": true,
+    "platform_components": {
+      "bootstrap/glibc.bst": "2.42",
+      "sdk/gtk.bst": "4.22.4",
+      "components/flatpak-xdg-utils.bst": "1.0.6",
+      "components/fmtlib.bst": "11.2.0",
+      "sdk/libadwaita.bst": "1.9.3",
+      "sdk/webkitgtk-6.0.bst": "2.54.0"
+    },
+    "vte_library_present": false,
+    "thorvg_library_present": false,
+    "schema_validation": {
+      "current_manifest": true,
+      "temporary_runtime50_and_rust_extension_proposal": true,
+      "meaning": "schema only; not a build"
+    },
+    "sandbox_run_passed": false,
+    "sandbox_run_error": "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted; error: ldconfig failed, exit status 256"
+  },
+  "vte_proposed_source": {
+    "version": "0.84.1",
+    "url": "https://download.gnome.org/sources/vte/0.84/vte-0.84.1.tar.xz",
+    "sha256": "aca1caa8478aebcdbb1d67897fb3511eb7601debae6810e16a15b6fa25f31ac8",
+    "source_archive_downloaded_and_hash_verified": true,
+    "requirements": {
+      "gtk4": ">=4.14",
+      "glib": ">=2.72",
+      "fmt": ">=11.0",
+      "simdutf": ">=6.2",
+      "meson": ">=1.3.2"
+    },
+    "source_fallback_refs": {
+      "fast_float": "v8.1.0",
+      "simdutf": "v8.2.0",
+      "fmt": "12.1.0"
+    },
+    "built": false
+  },
+  "host_bridge_probe": {
+    "method": "original Rust inline Python extracted unchanged; actual Jammy Python 3.10 under PTYs; input consumer on separate thread, output drain paused",
+    "original": {
+      "controlling_tty": true,
+      "resize": true,
+      "ctrl_c": true,
+      "writer_ready": true,
+      "input_delivered_while_output_blocked": false,
+      "input_delivered_after_drain": true,
+      "exit_code": 23
+    },
+    "temporary_nonblocking_prototype": {
+      "controlling_tty": true,
+      "resize": true,
+      "ctrl_c": true,
+      "writer_ready": true,
+      "input_delivered_while_output_blocked": true,
+      "input_delivered_after_drain": true,
+      "exit_code": 23
+    },
+    "limitation": "No real Flatpak host-spawn/portal boundary. Prototype proves duplex input feasibility only; EOF losslessness, queue bounds with OSC, signal status and forced teardown still need production implementation/tests."
+  },
+  "plan_revisions": [
+    "replace EOL GNOME 48 with verified available GNOME 50",
+    "add VTE, subproject sources and ThorVG; do not assume runtime provides them",
+    "declare Rust SDK extension and frozen offline Cargo sources",
+    "preserve custom shell, host env, cwd and bidirectional PTY progress",
+    "design sandbox-safe instance identities and host process observations",
+    "require real Jammy desktop release gate; package-floor check is not a support test"
+  ],
+  "not_verified": [
+    "complete Flatpak build and install",
+    "GNOME 50 execution under Jammy Flatpak 1.12.7",
+    "Jammy 5.15/HWE kernel and GPU behavior",
+    "actual X11/Wayland/IBus portals",
+    "host shell/hooks/SSH/worktree feature parity across real sandbox",
+    "upgrade rollback and official signed distribution"
+  ],
+  "raw_artifacts": "/tmp/flowmux-ubuntu2204-plan",
+  "ubuntu_standard_security_maintenance_end": "May 2027 (official Ubuntu release-cycle page)"
+}
