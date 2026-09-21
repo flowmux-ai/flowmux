@@ -1167,12 +1167,45 @@ impl GhosttyPane {
     /// Styled terminal history for persistence. VTE exposes cell attributes
     /// only through its HTML format; `read-screen` continues to use plain text.
     pub fn scrollback_snapshot(&self) -> Option<TerminalScrollback> {
-        let html = self.widget.text_format(vte::Format::Html)?.to_string();
+        let (lower, last) = self.output_search_range();
+        let mut first = last;
+        let html = if self.terminal_alternate_screen.get() {
+            self.widget.text_format(vte::Format::Html)?.to_string()
+        } else {
+            // text_format exports only the viewport. Walk retained absolute
+            // rows backwards, stopping at the existing persistence budget so
+            // a large, richly styled history is never exported in full.
+            let mut chunks = Vec::new();
+            let mut bytes = 0;
+            while first > lower && bytes < flowmux_core::TERMINAL_SCROLLBACK_MAX_BYTES {
+                let end = first;
+                first = first.saturating_sub(64).max(lower);
+                let (html, _) = self
+                    .widget
+                    .text_range_format(vte::Format::Html, first, 0, end, 0);
+                let html = html?;
+                let body = html.strip_prefix("<pre>")?.strip_suffix("</pre>")?;
+                bytes += body.len();
+                chunks.push(body.to_string());
+            }
+            let mut html = String::with_capacity(bytes + 11);
+            html.push_str("<pre>");
+            for chunk in chunks.iter().rev() {
+                html.push_str(chunk);
+            }
+            html.push_str("</pre>");
+            html
+        };
         match snapshot_from_vte_html(&html) {
             Ok(snapshot) => Some(snapshot),
             Err(error) => {
                 tracing::warn!(%error, "failed to parse VTE styled scrollback; saving plain text");
-                self.screen_text().map(|text| {
+                let text = if self.terminal_alternate_screen.get() {
+                    self.screen_text()
+                } else {
+                    self.output_search_text(first, last)
+                };
+                text.map(|text| {
                     TerminalScrollback::plain_text(normalize_plain_text_snapshot(&text))
                 })
             }

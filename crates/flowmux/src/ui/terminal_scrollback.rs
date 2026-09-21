@@ -512,7 +512,6 @@ fn with_terminal_line_endings(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk::prelude::*;
 
     #[test]
     fn plain_snapshot_drops_viewport_padding_and_an_idle_prompt() {
@@ -639,6 +638,7 @@ mod tests {
 
     #[gtk::test]
     async fn vte_styled_export_can_be_replayed_with_display_attributes() {
+        use vte::prelude::*;
         let pane = crate::ui::ghostty_pane::GhosttyPane::spawn(
             flowmux_core::PaneId::new(),
             flowmux_core::SurfaceId::new(),
@@ -683,6 +683,38 @@ mod tests {
             "VTE foreground, background, and bold attributes must survive replay; snapshot: {}; replay: {replay:?}",
             snapshot.content()
         );
+        let history: String = (0..500).map(|i| format!("H{i:04} 한글\r\n")).collect();
+        pane.widget.feed(history.as_bytes());
+        gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+        let adjustment = pane.widget.vadjustment().unwrap();
+        adjustment.set_value(adjustment.lower() + 100.0);
+        gtk::glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        let position = adjustment.value();
+        let snapshot = pane.scrollback_snapshot().unwrap();
+        assert!(snapshot.content().contains("H0000"));
+        assert!(snapshot.content().contains("H0499"));
+        assert!(snapshot.content().len() <= TERMINAL_SCROLLBACK_MAX_BYTES);
+        assert_eq!(adjustment.value(), position, "saving must not scroll VTE");
+        let replay = String::from_utf8(replay_bytes(&snapshot).unwrap().unwrap()).unwrap();
+        assert!(replay.contains("H0000 한글\r\n"));
+        assert!(replay.contains("H0499 한글\r\n"));
+        // Cross multiple export chunks inside one soft-wrapped logical line.
+        let wrapped = "한글abcd".repeat(pane.widget.column_count() as usize * 20);
+        pane.widget
+            .feed(format!("\r\n{wrapped}\r\nEND\r\n").as_bytes());
+        gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
+        let snapshot = pane.scrollback_snapshot().unwrap();
+        let replay = String::from_utf8(replay_bytes(&snapshot).unwrap().unwrap()).unwrap();
+        assert!(
+            replay.contains(&wrapped),
+            "chunk boundaries must preserve soft wraps"
+        );
+        let large = "colored history\r\n".repeat(25_000);
+        pane.widget.feed(large.as_bytes());
+        gtk::glib::timeout_future(std::time::Duration::from_millis(200)).await;
+        let snapshot = pane.scrollback_snapshot().unwrap();
+        assert!(snapshot.content().len() <= TERMINAL_SCROLLBACK_MAX_BYTES);
+        assert!(!snapshot.content().contains("H0000"));
         pane.close_pty();
         window.close();
     }

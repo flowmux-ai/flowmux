@@ -26,7 +26,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--gui", default=str(repo / "target/debug/flowmux"))
 parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
 parser.add_argument("--baseline", action="store_true")
-parser.add_argument("--case", choices=["geometry", "workspace"], default="geometry")
+parser.add_argument("--case", choices=["geometry", "workspace", "scrollback"], default="geometry")
 args = parser.parse_args()
 args.protected_pid = []
 for entry in Path("/proc").iterdir():
@@ -48,6 +48,7 @@ shell.chmod(0o755)
         "terminal_minimap_enabled": True,
         "terminal_minimap_width": 60,
         "cursor_blink": False,
+        "restore_terminal_scrollback": True,
         "usage_bar_enabled": False,
         "system_notifications_enabled": False,
     })
@@ -84,7 +85,7 @@ try:
         if not args.baseline:
             assert stable, f"Screen mode changed PTY geometry: {sizes}"
             h.pass_check("Normal/alternate transitions preserve terminal geometry")
-    else:
+    elif args.case == "workspace":
         from Xlib import X, XK, display
         from Xlib.ext import xtest
 
@@ -120,6 +121,54 @@ try:
         if not args.baseline:
             assert preserved_tab and preserved_focus, result
             h.pass_check("Workspace return preserves active tabs and last focused pane")
+    else:
+        from Xlib import X, XK, display
+        from Xlib.ext import xtest
+
+        emit = h.root / "history.py"
+        emit.write_text("for i in range(500):print('H%04d 한글 history'%i)\n")
+        h.send(sock, pane, f"/usr/bin/python3 {emit}")
+        fixture.wait_for(lambda: "H0499" in h.screen(sock, pane), "history generated")
+        d = display.Display(h.env["DISPLAY"])
+        window = fixture.wait_for(lambda: next((w for w in d.screen().root.query_tree().children
+            if w.get_attributes().map_state == X.IsViewable
+            and (pid := w.get_full_property(d.intern_atom("_NET_WM_PID"), X.AnyPropertyType)) is not None
+            and int(pid.value[0]) == process.pid), None), "test window")
+        window.set_input_focus(X.RevertToParent, X.CurrentTime)
+        d.sync()
+        for _ in range(4):
+            codes = [d.keysym_to_keycode(XK.string_to_keysym(k)) for k in ("Shift_L", "Page_Up")]
+            for code in codes:
+                xtest.fake_input(d, X.KeyPress, code)
+            for code in reversed(codes):
+                xtest.fake_input(d, X.KeyRelease, code)
+            d.sync()
+            time.sleep(.1)
+        assert "H0499" not in h.screen(sock, pane), "Precondition: scrolled away from tail"
+        h.close_window(process)
+        state = json.loads(h.state_path.read_text())
+        def snapshots(value):
+            if isinstance(value, dict):
+                if value.get("scrollback"):
+                    yield value["scrollback"]["content"]
+                for child in value.values():
+                    yield from snapshots(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from snapshots(child)
+        saved = list(snapshots(state))
+        assert len(saved) == 1, saved
+        result = {"old_retained": "H0000" in saved[0], "latest_retained": "H0499" in saved[0]}
+        process, sock = h.window("restored-scrollback")
+        fixture.wait_for(lambda: h.tree(sock), "workspace restored")
+        pane = h.tree(sock)[0]["panes"][0]["id"]
+        time.sleep(.5)
+        result["latest_restored"] = "H0499" in h.screen(sock, pane)
+        (h.root / "scrollback.json").write_text(json.dumps(result))
+        print(json.dumps(result), flush=True)
+        if not args.baseline:
+            assert all(result.values()), result
+            h.pass_check("Off-screen history survives saving while scrolled back and GUI restart")
     h.close_window(process)
 finally:
     for child in reversed(h.children):

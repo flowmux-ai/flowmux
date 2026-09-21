@@ -12,7 +12,7 @@
 | alternate 화면 전환 시 geometry 고정 | 구현 및 실제 GUI 검증 완료 |
 | 미니맵 작업량/그리기 비용 | 대기 |
 | 워크스페이스 pane/surface 복원 | 구현 및 실제 GUI 검증 완료 |
-| 전체 스크롤백 저장 | 대기 |
+| 전체 스크롤백 저장 | 구현 및 실제 GUI 검증 완료 |
 | PTY backpressure 중 입력/resize | 대기 |
 | IME focus cycle 및 redraw | 대기 |
 | synchronized output | 대기 |
@@ -36,3 +36,11 @@
 - 판단: 기존 active tab과 키보드 대상이 유지되므로 변경 유지.
 
 다음 항목들은 구현 후 기준 바이너리와 동일 조건으로 비교하고, 효과 부재나 회귀가 확인된 후보는 수정하거나 되돌린 뒤 결과를 기록한다. 이 문서는 진행 기록이며 전체 작업 완료를 뜻하지 않는다.
+
+**전체 스크롤백 저장**
+
+- 변경: viewport export 대신 기존 absolute-row 범위를 뒤에서 64행씩 읽고 256KiB 저장 한도에서 중단한다. 스타일·soft wrap·현재 스크롤 위치를 보존한다.
+- 기준: 위로 스크롤한 뒤 저장하면 첫/마지막 행과 복원 화면의 마지막 행 모두 누락. `/tmp/fm-gui-zwg2leuz/scrollback.json`.
+- 수정: 세 조건 모두 true. `/tmp/fm-gui-6cl85fbe/scrollback.json`. 테스트 전용 창을 실제 저장·종료·복원해 확인했다.
+- 회귀: styled replay, 한글, 64행 경계를 넘는 soft wrap, 대량 출력의 저장 용량 제한을 포함한 관련 10개 테스트 통과.
+- 판단: 화면 밖의 기록이 기존 용량 한도 안에서 복원되므로 유지.
