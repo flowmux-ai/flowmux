@@ -74,7 +74,7 @@ jobs:
         run: sudo ./scripts/install-thorvg.sh
 
       - name: Run test suite
-        run: xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
+        run: GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
 
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked

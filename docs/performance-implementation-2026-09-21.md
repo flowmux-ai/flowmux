@@ -16,7 +16,7 @@
 | PTY backpressure 중 입력/resize | 구현 및 실제 PTY 검증 완료 |
 | IME focus cycle 및 redraw | 불필요한 UI 작업 제거·실제 IBus 검증 완료 |
 | synchronized output | 후보 구현·실제 GUI 비교 후 회귀로 revert |
-| 최종 통합 A/B·회귀·설치 | 비교·설치 완료; 전체 GUI suite 제한 기록 |
+| 최종 통합 A/B·회귀·설치 | 비교·설치 완료; 후속 전체 workspace 1,696개 통과 |
 
 **alternate 화면 geometry**
 
@@ -80,7 +80,7 @@
 - 동일 fast 빌드 최종 native A/B: minimap ON 컬러 CPU 47.8% → 26.4%(약 45% 감소), OFF는 양쪽 8.2%. ON 일반 출력은 양쪽 10.6%로 이번 최종 표본에서는 차이가 없었다. 별도 첫 비교에서도 컬러 42.8% → 27.2%로 감소했다. 짧은 표본의 수치는 환경 영향을 받으므로 전체 성능 보장으로 일반화하지 않는다.
 - 최종 fast 실제 GUI: geometry `/tmp/fm-gui-tsbgqzny`, workspace `/tmp/fm-gui-z8olnb25`, scrollback `/tmp/fm-gui-x46b4b4c`, IBus `/tmp/fm-gui-_ek7bcdi` 모두 기대 조건 통과. revert 뒤 DSR 응답 9.17ms 확인(`/tmp/fm-gui-d6ff9uzv`).
 - 정적 검사: 전체 workspace/all-targets Clippy `-D warnings`, fmt 통과. GTK 변경 관련 64개, CLI/기타 workspace 682개, browser navigation integration 1개 통과.
-- 전체 GUI suite는 깨끗하지 않다. 첫 실행 682/685 통과(에디터·사이드바·제목 3개 실패), 재실행은 다른 타이밍/selection 실패 뒤 GTK teardown SIGSEGV. 기준 소스도 minimap assertion 2개 실패 뒤 GTK teardown SIGSEGV였다. 문제 3개 격리 비교는 기준 3/3, 수정 2/3 통과였고 수정의 에디터 테스트는 다음 전체 실행에서 통과했다. 전체 통과나 모든 미확인 회귀의 부재를 주장하지 않는다.
+- 최초 검증 당시 전체 GUI suite는 깨끗하지 않았다(아래 후속 재검증에서 실행 환경 원인을 확인하고 정정). 첫 실행 682/685 통과(에디터·사이드바·제목 3개 실패), 재실행은 다른 타이밍/selection 실패 뒤 GTK teardown SIGSEGV. 기준 소스도 minimap assertion 2개 실패 뒤 GTK teardown SIGSEGV였다. 문제 3개 격리 비교는 기준 3/3, 수정 2/3 통과였고 수정의 에디터 테스트는 다음 전체 실행에서 통과했다. 전체 통과나 모든 미확인 회귀의 부재를 주장하지 않는다.
 - 측정값, 최종 GUI 결과, 비교 바이너리 SHA256은 [구현 검증 JSON](performance-implementation-evidence-2026-09-21.json)에 보존했다.
 
 - 추가 실패 추적: viewport-shift와 hidden-tab search는 격리 검사 통과. chunk/alternate search는 다른 GTK 검사 직후 실패했지만 새 프로세스 단독 실행은 통과했다. 전체 GUI suite의 순서/수명 관련 불안정성은 이번 변경 범위 밖의 미해결 검증 제한이다.
@@ -90,4 +90,17 @@
 - `install.sh --check` 후 `install.sh --yes` 완료. `/home/junsu/.local/bin`과 `/home/junsu/.cargo/bin`의 GUI/CLI/viewer 총 6개 파일 SHA256이 전후 비교에서 사용한 fast 바이너리와 정확히 일치한다.
 - 설치 경로로 별도 GUI를 실행한 geometry 검증도 13개 샘플 전부 92×37(`/tmp/fm-gui-4hk29z0f/geometry.json`).
 - 기존 창 PID **6619**, 시작 시각 **2026-09-15 09:50:42** 유지 확인. 기존 창을 닫거나 재시작하지 않았다. GUI 변경은 새로 실행되는 창부터 적용된다.
-- 최종 상태: 구현 변경 6개 유지, 동기화 출력 후보 1개 revert, 변경 관련 실제 시나리오 검증 및 설치 완료. VTE synchronized rendering, IME focus-report 바이트, legacy Hangul Backspace 분해, 전체 GTK suite 불안정성은 남은 제한이다.
+- 최종 상태: 구현 변경 6개 유지, 동기화 출력 후보 1개 revert, 변경 관련 실제 시나리오 검증 및 설치 완료. VTE synchronized rendering, IME focus-report 바이트, legacy Hangul Backspace 분해는 남은 제한이다. 당시 전체 GTK suite 불안정성 판단은 아래 후속 재검증으로 정정한다.
+
+
+**실패 테스트 후속 재검증 — 2026-09-21**
+
+- 원인 정정: 직접 실행한 Cargo GUI 테스트가 `WAYLAND_DISPLAY=wayland-0`를 상속했다. `xvfb-run`만으로 GTK가 X11을 선택하지 않으며, 실제 display probe도 `GdkWaylandDisplay wayland-0`를 반환했다. `GDK_BACKEND=x11`을 명시하자 소스 수정 전에도 GUI 685/685개가 통과했다. 따라서 이전 결과를 제품 고유의 전체 suite 불안정성으로 해석한 판단은 잘못됐다. 기존 Python live-GUI harness는 이미 X11·D-Bus·XDG를 격리했으므로 앞선 실제 기능/성능 비교 기록은 이 문제의 영향을 받지 않는다.
+- `51c48d4` — AI Usage 팝오버: 표시되지 않은 창에서 팝오버를 열던 테스트를 수정했다. GDB의 fatal-critical backtrace로 해당 경로를 확인했다. 추가 해제 검사에서 창 누수를 재현했고, accelerator controller의 창/버튼 참조와 action의 버튼 참조를 약한 참조로 바꿨다. 변경 전 창 해제 실패 → controller 수정 후 버튼 해제 실패 → 두 경로 수정 후 모두 해제. 관련 10개 테스트와 실제 단축키·focus 복귀 검증 통과.
+- `e5a7c42` — PTY 회수: VTE의 child watch와 flowmux의 `waitpid`가 경쟁했다. 외부 watcher가 등록된 PTY에서는 VTE만 exit status를 회수하고 flowmux는 기존 SIGHUP/5초 뒤 SIGKILL 및 process-group 정리를 유지한다. 실제 PTY 검사로 종료 코드 23 보존, SIGHUP을 무시하는 자식의 SIGKILL 종료, 비동기 close를 확인했다.
+- 테스트 환경/준비: 문서와 release workflow에 X11을 명시했다. 접근성 테스트는 `GTK_A11Y=none`에서 GTK critical을 내고도 통과하던 상태였으므로 `GTK_A11Y=test`와 context 존재 검사를 적용했다. 파일 메뉴 테스트는 실제 mapping/allocation을 기다린 뒤 창 중앙에서 메뉴를 연다. CI와 문서에는 `G_DEBUG=fatal-criticals`도 적용해 GTK 오류를 실패로 처리한다.
+- 최종 전체 검사: `cargo test --workspace --locked -- --test-threads=1`, Xvfb/private D-Bus, `GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals GSK_RENDERER=cairo`; `FLOWMUX_*` 상속 제거. **1,696 passed / 0 failed / 7 ignored**, GUI unit **685/685**, browser integration **1/1**. 제외 7개는 기존 수동 benchmark/stress 검사이며 새로 제외한 검사는 없다. 변경 전 X11 실행의 GTK critical 9건 및 이중 회수 경고 21건 → 최종 둘 다 0건. 시스템 portal/secret 서비스 경고는 별도이며 남아 있다.
+- 정적 검사: `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo fmt --all -- --check`, `git diff --check` 통과.
+- 실제 새 fast GUI: `/tmp/fm-gui-hnz1sakn`에서 AI Usage 열기/닫기 화면 캡처와 XTest 키 입력의 터미널 복귀, 4회의 탭 종료/자연 종료 후 shell 회수, 정상 창 종료를 확인했다. 자연 종료한 로컬 탭은 현재 제품 설계대로 유지되므로 이후 명시적으로 닫았다. GTK critical/이중 회수 경고 없음. 스크립트·검사 로그는 `/tmp/flowmux-gui-review-20260921/`, 수치와 설치 SHA256은 검증 JSON의 `gui_followup`에 기록했다.
+- 설치: `install.sh --check` 및 `install.sh --yes` 완료. 두 설치 경로의 GUI/CLI/viewer 6개 파일이 검증한 fast 빌드 SHA256과 일치한다. 기존 사용자 PID 6619(9월 15일 09:50:42 시작)는 그대로 살아 있으며 재시작하지 않았다. 변경은 새로 실행하는 창부터 적용된다.
+- 남는 범위: VTE native synchronized rendering과 IME 조합 확정 focus 왕복/focus-report 바이트, legacy Hangul Backspace 분해는 이번 수정 대상 경로와 별개이며 해결됐다고 주장하지 않는다. 앞선 buffering 후보를 다시 도입하지 않았다.

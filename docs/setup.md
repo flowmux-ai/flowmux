@@ -37,9 +37,13 @@ SSH and GUI integration checks used by CI.
 cargo build --release --workspace   # binaries under target/release/
 cargo run -p flowmux                # debug GUI
 cargo check --workspace             # type-check everything
-xvfb-run -a dbus-run-session -- cargo test --workspace --locked
+GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked
 scripts/check-ubuntu-compat.sh      # Docker smoke check for 24.04 / 26.04
 ```
+
+`GDK_BACKEND=x11` keeps GTK on Xvfb even in a Wayland session;
+`GTK_A11Y=test` enables the accessibility assertions without a desktop service.
+`G_DEBUG=fatal-criticals` turns invalid GTK calls into test failures.
 
 The Monaco editor bundle under `editor/flowmux-editor-web/dist` is committed,
 so builds do not need Node.js. Only changes to the editor frontend need

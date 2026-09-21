@@ -754,6 +754,10 @@ mod tests {
     }
 
     fn assert_accessible_description(button: &gtk::Button, expected: &str) {
+        assert!(
+            !unsafe { gtk::ffi::gtk_accessible_get_at_context(button.as_ptr().cast()) }.is_null(),
+            "run GTK tests with GTK_A11Y=test"
+        );
         let expected = CString::new(expected).expect("accessible description");
         let mismatch = unsafe {
             gtk::ffi::gtk_test_accessible_check_property(

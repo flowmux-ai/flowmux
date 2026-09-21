@@ -17,8 +17,12 @@ cargo run -p flowmux                 # debug GUI
 cargo build --release --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-xvfb-run -a dbus-run-session -- cargo test --workspace --locked
+GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked
 ```
+
+`GDK_BACKEND=x11` keeps GTK on Xvfb even in a Wayland session;
+`GTK_A11Y=test` enables the accessibility assertions without a desktop service.
+`G_DEBUG=fatal-criticals` turns invalid GTK calls into test failures.
 
 The binaries are `flowmux` (GUI and CLI delegation), `flowmuxctl` (IPC client),
 `flowmux-md-viewer` (Markdown reader), and `flowmux-daemon` (headless handler).

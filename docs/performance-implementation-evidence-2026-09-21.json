@@ -435,5 +435,72 @@
         ]
       ]
     }
+  },
+  "gui_followup": {
+    "baseline_commit": "41efa1f",
+    "commits": {
+      "usage_popover_lifecycle": "51c48d4",
+      "vte_child_reaping": "e5a7c42"
+    },
+    "root_cause": "xvfb-run inherited WAYLAND_DISPLAY; GTK selected the real Wayland display unless GDK_BACKEND=x11 was explicit",
+    "unchanged_source_x11_gui_tests": {
+      "passed": 685,
+      "failed": 0,
+      "gtk_criticals": 9,
+      "double_reaper_warnings": 21
+    },
+    "final_workspace": {
+      "passed": 1696,
+      "failed": 0,
+      "ignored": 7,
+      "gui_unit_passed": 685,
+      "gtk_criticals": 0,
+      "double_reaper_warnings": 0,
+      "environment": {
+        "GDK_BACKEND": "x11",
+        "GTK_A11Y": "test",
+        "G_DEBUG": "fatal-criticals"
+      },
+      "log": "/tmp/flowmux-gui-review-20260921/workspace-after.log",
+      "ignored_tests": [
+        "test pane_tree_deep_chain_stays_traversable ... ignored, stress: deep split chain memory probe",
+        "test auto_title_burst_meets_throughput_budget ... ignored, stress: throughput burst",
+        "test auto_title_scales_with_workspace_count_linearly ... ignored, stress: scaling probe across workspace count",
+        "test search::tests::benchmark_search_columns ... ignored, manual long-line benchmark; run with --profile fast --ignored --nocapture",
+        "test search::tests::benchmark_workspace_traversal ... ignored, manual traversal benchmark; run with --profile fast --ignored --nocapture",
+        "test session::tests::benchmark_session_metadata ... ignored, manual metadata benchmark; run with --profile fast --ignored --nocapture",
+        "test osc_extractor_handles_megabytes_of_healthy_traffic ... ignored, stress: osc extractor healthy throughput"
+      ]
+    },
+    "clippy": "workspace/all-targets -D warnings passed",
+    "fmt": "passed",
+    "live": {
+      "artifacts": "/tmp/fm-gui-hnz1sakn",
+      "script": "/tmp/flowmux-gui-review-20260921/live-lifecycle.py",
+      "popup_keyboard_focus": true,
+      "tab_close_and_natural_exit_cycles": 4,
+      "clean_shutdown": true
+    },
+    "installed_binary_sha256": [
+      {
+        "binary": "flowmux",
+        "sha256": "7fcb6e6cd42a0922a19d5287ccfc81335c54c8af625c60d53f88010a3923bff9"
+      },
+      {
+        "binary": "flowmuxctl",
+        "sha256": "52e66d7abd85c5f0b5233f5a3f1b24b36f7e939bfb92ae07ffd03f6a7984ac4e"
+      },
+      {
+        "binary": "flowmux-md-viewer",
+        "sha256": "25409c02c4fd5c1a957d204ffc5c722ae1980d48d0a8db88c717f70432dbc466"
+      }
+    ],
+    "protected_gui_pid": 6619,
+    "protected_gui_restarted": false,
+    "remaining_limits": [
+      "VTE native synchronized rendering",
+      "IME commit focus cycle and focus-report bytes",
+      "legacy Hangul Backspace decomposition"
+    ]
   }
 }

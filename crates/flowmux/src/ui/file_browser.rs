@@ -2766,15 +2766,21 @@ mod tests {
         let anchor = gtk::Box::new(gtk::Orientation::Vertical, 0);
         window.set_child(Some(&anchor));
         window.present();
-        glib::timeout_future(Duration::from_millis(30)).await;
+        for _ in 0..100 {
+            if anchor.is_mapped() && anchor.width() > 0 {
+                break;
+            }
+            glib::timeout_future(Duration::from_millis(10)).await;
+        }
+        assert!(anchor.is_mapped() && anchor.width() > 0);
         for activate in [false, true] {
             let called = Rc::new(Cell::new(false));
             let weak_called = Rc::downgrade(&called);
             show_context_menu(
                 &anchor,
                 Path::new("/tmp/example.txt"),
-                0.0,
-                0.0,
+                f64::from(anchor.width()) / 2.0,
+                f64::from(anchor.height()) / 2.0,
                 Rc::new(RefCell::new(Box::new(move |path| {
                     assert_eq!(path, Path::new("/tmp/example.txt"));
                     called.set(true);
