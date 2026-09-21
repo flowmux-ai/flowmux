@@ -88,10 +88,6 @@ impl TerminalMinimap {
         }
     }
 
-    pub(crate) fn is_enabled(&self) -> bool {
-        self.state.enabled.get()
-    }
-
     pub(crate) fn set_width(&self, width: u16) {
         self.area.set_width_request(i32::from(width));
     }

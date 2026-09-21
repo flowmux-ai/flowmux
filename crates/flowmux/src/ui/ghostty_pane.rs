@@ -395,12 +395,10 @@ impl GhosttyPane {
         self.terminal_minimap.set_width(width);
         self.terminal_minimap
             .set_opacity(flowmux_config::options::Options::clamp_terminal_minimap_opacity(opacity));
+        // Keep PTY geometry independent of normal/alternate screen mode.
+        // The minimap and scrollbar swap overlays without resizing the TUI.
         self.widget
-            .set_margin_end(if enabled && !self.terminal_alternate_screen.get() {
-                i32::from(width)
-            } else {
-                0
-            });
+            .set_margin_end(if enabled { i32::from(width) } else { 0 });
         self.terminal_minimap.set_enabled(enabled);
         self.terminal_scrollbar_enabled.set(!enabled);
         sync_terminal_scrollbar_visibility(
@@ -413,12 +411,6 @@ impl GhosttyPane {
     pub fn set_alternate_screen(&self, active: bool) {
         self.terminal_alternate_screen.set(active);
         self.terminal_minimap.set_alternate_screen(active);
-        self.widget
-            .set_margin_end(if !active && self.terminal_minimap.is_enabled() {
-                self.terminal_minimap.widget().width_request().max(0)
-            } else {
-                0
-            });
         sync_terminal_scrollbar_visibility(
             &self.terminal_scrollbar,
             self.terminal_scrollbar_enabled.get(),
@@ -3499,7 +3491,9 @@ mod tests {
         pane.set_alternate_screen(true);
         assert!(!pane.terminal_minimap.widget().is_visible());
         assert!(pane.terminal_scrollbar.is_visible());
-        assert_eq!(pane.widget.margin_end(), 0);
+        assert_eq!(pane.widget.margin_end(), 24);
+        pane.set_minimap(true, 24, 20);
+        assert_eq!(pane.widget.margin_end(), 24);
         pane.set_alternate_screen(false);
         assert!(pane.terminal_minimap.widget().is_visible());
         assert!(!pane.terminal_scrollbar.is_visible());
