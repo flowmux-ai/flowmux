@@ -707,8 +707,12 @@ fn make_toggle_usage_popover_action(
     usage_button: gtk::MenuButton,
     saved_focus: SavedUsagePopoverFocus,
 ) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
+    let usage_button = usage_button.downgrade();
     gtk::gio::ActionEntry::builder("toggle-usage-popover")
         .activate(move |window, _, _| {
+            let Some(usage_button) = usage_button.upgrade() else {
+                return;
+            };
             tracing::debug!(action = "toggle-usage-popover", "key action fired");
             if usage_button.is_active() {
                 saved_focus.restore_on_close.set(true);
@@ -761,9 +765,12 @@ fn install_usage_popover_accel_capture(
             saved_focus_for_closed.widget.borrow_mut().take();
         }
     });
-    let window = window.clone();
-    let usage_button = usage_button.clone();
+    let window = window.downgrade();
+    let usage_button = usage_button.downgrade();
     key.connect_key_pressed(move |_, keyval, _keycode, state| {
+        let (Some(window), Some(usage_button)) = (window.upgrade(), usage_button.upgrade()) else {
+            return glib::Propagation::Proceed;
+        };
         let Some(app) = window.application() else {
             return glib::Propagation::Proceed;
         };
@@ -1784,7 +1791,7 @@ mod tests {
     /// press closes it.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn toggle_usage_popover_action_opens_and_closes_the_menu_button() {
+    async fn toggle_usage_popover_action_opens_and_closes_the_menu_button() {
         adw::init().expect("libadwaita should initialize in GTK test");
         let window = adw::ApplicationWindow::builder()
             .default_width(320)
@@ -1798,6 +1805,18 @@ mod tests {
             usage_button.clone(),
             saved_focus,
         )]);
+
+        window.present();
+        for _ in 0..100 {
+            if usage_button.is_mapped() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            usage_button.is_mapped(),
+            "usage button should finish mapping"
+        );
 
         assert!(!usage_button.is_active());
         gtk::prelude::WidgetExt::activate_action(&window, "win.toggle-usage-popover", None)
@@ -1813,6 +1832,7 @@ mod tests {
             !usage_button.is_active(),
             "second activation must close AI Usage"
         );
+        window.destroy();
     }
 
     /// The open popover's modal grab bypasses the normal application action,
@@ -1821,7 +1841,7 @@ mod tests {
     /// of hard-coding the built-in Ctrl+Alt+U default.
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn open_usage_popover_closes_with_the_current_accelerator() {
+    async fn open_usage_popover_closes_with_the_current_accelerator() {
         adw::init().expect("libadwaita should initialize in GTK test");
         let app = adw::Application::builder()
             .application_id("com.flowmux.App.UiTest.UsagePopoverCurrentAccelerator")
@@ -1845,6 +1865,18 @@ mod tests {
 
         app.set_accels_for_action(TOGGLE_USAGE_POPOVER_FULL_ACTION, &["<Ctrl><Alt>x"]);
         let ctrl_alt = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK;
+
+        window.present();
+        for _ in 0..100 {
+            if usage_button.is_mapped() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            usage_button.is_mapped(),
+            "usage button should finish mapping"
+        );
 
         usage_button.set_active(true);
         assert_eq!(
@@ -1875,6 +1907,34 @@ mod tests {
         assert!(
             !usage_button.is_active(),
             "the current accelerator must close the open popover even with CapsLock enabled"
+        );
+        let popover = usage_button.popover().unwrap();
+        for _ in 0..100 {
+            if !popover.is_visible() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(!popover.is_visible(), "popover should finish closing");
+        drop(popover);
+        window.destroy();
+        let weak_window = window.downgrade();
+        let weak_button = usage_button.downgrade();
+        drop(window);
+        drop(usage_button);
+        for _ in 0..100 {
+            if weak_window.upgrade().is_none() && weak_button.upgrade().is_none() {
+                break;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            weak_window.upgrade().is_none(),
+            "usage capture retained window"
+        );
+        assert!(
+            weak_button.upgrade().is_none(),
+            "usage capture retained button"
         );
     }
 
