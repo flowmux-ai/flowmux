@@ -1,0 +1,353 @@
+{
+  "baseline_commit": "9d5b903",
+  "profile": "fast",
+  "protected_gui_pid": 6619,
+  "native_cpu": {
+    "before": [
+      {
+        "minimap": false,
+        "phase": "idle",
+        "pid": 3201343,
+        "cpu_pct": 3.0,
+        "start_mono": 546813.72513,
+        "end_mono": 546818.725385899,
+        "artifacts": "/tmp/fm-gui-zbplxemx"
+      },
+      {
+        "minimap": false,
+        "phase": "plain",
+        "pid": 3201343,
+        "cpu_pct": 0.4,
+        "start_mono": 546819.226173115,
+        "end_mono": 546824.226490016,
+        "artifacts": "/tmp/fm-gui-zbplxemx"
+      },
+      {
+        "minimap": false,
+        "phase": "colored",
+        "pid": 3201343,
+        "cpu_pct": 8.2,
+        "start_mono": 546826.227333149,
+        "end_mono": 546831.227613065,
+        "artifacts": "/tmp/fm-gui-zbplxemx"
+      },
+      {
+        "minimap": true,
+        "phase": "idle",
+        "pid": 3203743,
+        "cpu_pct": 2.6,
+        "start_mono": 546835.272923179,
+        "end_mono": 546840.273186878,
+        "artifacts": "/tmp/fm-gui-mm_v8i1u"
+      },
+      {
+        "minimap": true,
+        "phase": "plain",
+        "pid": 3203743,
+        "cpu_pct": 10.6,
+        "start_mono": 546840.773863994,
+        "end_mono": 546845.774142372,
+        "artifacts": "/tmp/fm-gui-mm_v8i1u"
+      },
+      {
+        "minimap": true,
+        "phase": "colored",
+        "pid": 3203743,
+        "cpu_pct": 47.8,
+        "start_mono": 546847.77495058,
+        "end_mono": 546852.775242463,
+        "artifacts": "/tmp/fm-gui-mm_v8i1u"
+      }
+    ],
+    "after": [
+      {
+        "minimap": false,
+        "phase": "idle",
+        "pid": 3205347,
+        "cpu_pct": 5.2,
+        "start_mono": 546856.935902968,
+        "end_mono": 546861.936124282,
+        "artifacts": "/tmp/fm-gui-x_mr2cv0"
+      },
+      {
+        "minimap": false,
+        "phase": "plain",
+        "pid": 3205347,
+        "cpu_pct": 7.2,
+        "start_mono": 546862.436785471,
+        "end_mono": 546867.437053031,
+        "artifacts": "/tmp/fm-gui-x_mr2cv0"
+      },
+      {
+        "minimap": false,
+        "phase": "colored",
+        "pid": 3205347,
+        "cpu_pct": 8.2,
+        "start_mono": 546869.438144184,
+        "end_mono": 546874.438426024,
+        "artifacts": "/tmp/fm-gui-x_mr2cv0"
+      },
+      {
+        "minimap": true,
+        "phase": "idle",
+        "pid": 3206440,
+        "cpu_pct": 3.8,
+        "start_mono": 546878.506995515,
+        "end_mono": 546883.507204196,
+        "artifacts": "/tmp/fm-gui-6r2qonoo"
+      },
+      {
+        "minimap": true,
+        "phase": "plain",
+        "pid": 3206440,
+        "cpu_pct": 10.6,
+        "start_mono": 546884.008183968,
+        "end_mono": 546889.008444003,
+        "artifacts": "/tmp/fm-gui-6r2qonoo"
+      },
+      {
+        "minimap": true,
+        "phase": "colored",
+        "pid": 3206440,
+        "cpu_pct": 26.4,
+        "start_mono": 546891.009413129,
+        "end_mono": 546896.009701668,
+        "artifacts": "/tmp/fm-gui-6r2qonoo"
+      }
+    ]
+  },
+  "verified_binary_sha256": {
+    "flowmux": "5aec7f3e1fe863fc74e338a35ef66b6148e349ad2b480db43af6b8a4b1f367e4",
+    "flowmuxctl": "5d017b51fef240c2014aabbe5bcad801d9b7b917750c173f2f00048aa38812cc",
+    "flowmux-md-viewer": "25409c02c4fd5c1a957d204ffc5c722ae1980d48d0a8db88c717f70432dbc466"
+  },
+  "pty_backpressure": {
+    "before": {
+      "sent_mono": 546156.860265787,
+      "resumed_output_read_mono": 546157.360737702,
+      "events_before_resume": [
+        {
+          "time": 546156.555812778,
+          "kind": "ready"
+        }
+      ],
+      "events_after_resume": [
+        {
+          "time": 546156.555812778,
+          "kind": "ready"
+        },
+        {
+          "time": 546157.361130481,
+          "kind": "resize"
+        },
+        {
+          "time": 546157.361198965,
+          "kind": "input"
+        }
+      ]
+    },
+    "after": {
+      "sent_mono": 546047.041153282,
+      "resumed_output_read_mono": 546047.541401343,
+      "events_before_resume": [
+        {
+          "time": 546046.739509479,
+          "kind": "ready"
+        },
+        {
+          "time": 546047.041221935,
+          "kind": "resize"
+        },
+        {
+          "time": 546047.041218618,
+          "kind": "input"
+        }
+      ],
+      "events_after_resume": [
+        {
+          "time": 546046.739509479,
+          "kind": "ready"
+        },
+        {
+          "time": 546047.041221935,
+          "kind": "resize"
+        },
+        {
+          "time": 546047.041218618,
+          "kind": "input"
+        }
+      ]
+    }
+  },
+  "final_live_checks": {
+    "geometry": {
+      "artifacts": "/tmp/fm-gui-tsbgqzny",
+      "result": [
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ]
+      ]
+    },
+    "workspace": {
+      "artifacts": "/tmp/fm-gui-z8olnb25",
+      "result": {
+        "preserved_tab": true,
+        "preserved_focus": true
+      }
+    },
+    "scrollback": {
+      "artifacts": "/tmp/fm-gui-x46b4b4c",
+      "result": {
+        "old_retained": true,
+        "latest_retained": true,
+        "latest_restored": true
+      }
+    },
+    "ime": {
+      "artifacts": "/tmp/fm-gui-_ek7bcdi",
+      "result": {
+        "received": "abc\r\r\r\r가나\r하?가\u001b\r",
+        "expected": "abc\r\r\r\r가나\r하?가\u001b\r",
+        "focus_out": 7,
+        "sync": "1",
+        "navigation_workaround": false
+      }
+    }
+  },
+  "sync_candidate": {
+    "before": {
+      "artifacts": "/tmp/fm-gui-leyr_za1",
+      "result": {
+        "small": {
+          "old_text_retained": false,
+          "pixels_retained": false
+        },
+        "query": {
+          "old_text_retained": false,
+          "pixels_retained": false,
+          "latency_ms": 9.293365990743041,
+          "reply": "1b5b313b3152"
+        },
+        "large": {
+          "old_text_retained": false,
+          "pixels_retained": false
+        }
+      }
+    },
+    "candidate": {
+      "artifacts": "/tmp/fm-gui-d94__pni",
+      "result": {
+        "small": {
+          "old_text_retained": true,
+          "pixels_retained": true
+        },
+        "query": {
+          "old_text_retained": true,
+          "pixels_retained": true,
+          "latency_ms": 242.18083289451897,
+          "reply": "1b5b313b3152"
+        },
+        "large": {
+          "old_text_retained": false,
+          "pixels_retained": false
+        }
+      }
+    },
+    "reverted_final": {
+      "artifacts": "/tmp/fm-gui-d6ff9uzv",
+      "result": {
+        "small": {
+          "old_text_retained": false,
+          "pixels_retained": false
+        },
+        "query": {
+          "old_text_retained": false,
+          "pixels_retained": false,
+          "latency_ms": 9.167790994979441,
+          "reply": "1b5b313b3152"
+        },
+        "large": {
+          "old_text_retained": false,
+          "pixels_retained": false
+        }
+      }
+    },
+    "candidate_commit": "c0ea359",
+    "revert_commit": "03e901a"
+  },
+  "checks": {
+    "clippy_workspace_all_targets": "passed (-D warnings)",
+    "fmt": "passed",
+    "non_gui_workspace_tests": {
+      "passed": 682,
+      "failed": 0
+    },
+    "browser_navigation_integration": "passed",
+    "focused_changed_gtk_tests": 64,
+    "initial_gui_suite": {
+      "passed": 682,
+      "failed": [
+        "shipped_editor_edits_saves_detects_conflicts_and_recovers_web_process",
+        "activity_panel_and_agents_bar_switch_remain_available_and_navigable",
+        "program_title_persists_until_agent_exit_without_cwd_change"
+      ]
+    },
+    "baseline_gui_suite": "failed minimap timing assertions, then SIGSEGV in GTK teardown",
+    "repeat_gui_suite": "different timing/selection failures, then SIGSEGV in GTK teardown",
+    "limitation": "Full GUI suite is not clean in either revision. Do not treat focused live verification as a full-suite pass.",
+    "focused_followup": {
+      "viewport_shift_schedules_refresh": "passed",
+      "output_search_finds_hidden_tabs_and_navigates_to_retained_wrapped_output": "passed",
+      "output_search_chunks_preserve_wraps_duplicates_and_alternate_screen": "failed after another GTK test, passed alone in fresh process"
+    }
+  }
+}

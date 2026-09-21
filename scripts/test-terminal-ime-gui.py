@@ -10,7 +10,14 @@ sys.dont_write_bytecode=True
 repo=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('fixture',repo/'scripts/test-ssh-workspace-gui.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-h=m.Harness(SimpleNamespace(gui=os.environ.get('AUDIT_GUI',str(repo/'target/debug/flowmux')),cli=os.environ.get('AUDIT_CLI',str(repo/'target/debug/flowmuxctl')),protected_pid=[int(p.name) for p in Path('/proc').iterdir() if p.name.isdigit() and (p/'comm').exists() and (p/'comm').read_text().strip()=='flowmux']))
+protected=[]
+for entry in Path('/proc').iterdir():
+    try:
+        if entry.name.isdigit() and (entry/'comm').read_text().strip()=='flowmux':
+            protected.append(int(entry.name))
+    except OSError:
+        pass
+h=m.Harness(SimpleNamespace(gui=os.environ.get('AUDIT_GUI',str(repo/'target/debug/flowmux')),cli=os.environ.get('AUDIT_CLI',str(repo/'target/debug/flowmuxctl')),protected_pid=protected))
 h.env.update(GTK_USE_PORTAL='0',GTK_IM_MODULE='ibus',IBUS_ENABLE_SYNC_MODE=os.environ.get('AUDIT_SYNC','1'),GSETTINGS_BACKEND='memory',IBUS_ADDRESS='unix:path='+str(h.root/'ibus.sock'))
 if os.environ.get('AUDIT_NAV'):h.env['FLOWMUX_ENABLE_IBUS_NAV_WORKAROUND']='1'
 shell=h.root/'shell';shell.write_text('#!/bin/sh\nexec /bin/bash --noprofile --norc\n');shell.chmod(0o755)

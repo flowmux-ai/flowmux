@@ -74,3 +74,13 @@
 - 실제 GUI 기준 `/tmp/fm-gui-leyr_za1/sync.json`, 후보 `/tmp/fm-gui-d94__pni/sync.json`. `scripts/test-terminal-sync-gui.py`에 작은 frame, frame 중간 DSR cursor-position query, 330KB frame 재현과 pixel 캡처를 남겼다.
 - 작은 frame은 begin→end 사이 OLD FRAME의 text/pixel 보존 false → true로 개선됐다. 그러나 DSR 응답은 9.29ms → 242.18ms로 지연됐고, 330KB frame은 buffer 한도를 넘으면서 여전히 중간 화면을 표시했다.
 - 판단: 회귀 때문에 `03e901a`에서 후보 전체를 revert했다. 최종 제품에는 buffering이나 지원을 허위 광고하는 응답이 없다. query를 바로 처리하려면 미완성 frame을 VTE에 전달해야 하므로, proxy buffer만으로는 parser 진행과 화면 표시를 분리할 수 없다. VTE backend의 native synchronized-rendering 지원이 필요한 항목으로 남긴다. 시스템 VTE 변경·업그레이드는 하지 않았다.
+
+**최종 적용 전 비교**
+
+- 동일 fast 빌드 최종 native A/B: minimap ON 컬러 CPU 47.8% → 26.4%(약 45% 감소), OFF는 양쪽 8.2%. ON 일반 출력은 양쪽 10.6%로 이번 최종 표본에서는 차이가 없었다. 별도 첫 비교에서도 컬러 42.8% → 27.2%로 감소했다. 짧은 표본의 수치는 환경 영향을 받으므로 전체 성능 보장으로 일반화하지 않는다.
+- 최종 fast 실제 GUI: geometry `/tmp/fm-gui-tsbgqzny`, workspace `/tmp/fm-gui-z8olnb25`, scrollback `/tmp/fm-gui-x46b4b4c`, IBus `/tmp/fm-gui-_ek7bcdi` 모두 기대 조건 통과. revert 뒤 DSR 응답 9.17ms 확인(`/tmp/fm-gui-d6ff9uzv`).
+- 정적 검사: 전체 workspace/all-targets Clippy `-D warnings`, fmt 통과. GTK 변경 관련 64개, CLI/기타 workspace 682개, browser navigation integration 1개 통과.
+- 전체 GUI suite는 깨끗하지 않다. 첫 실행 682/685 통과(에디터·사이드바·제목 3개 실패), 재실행은 다른 타이밍/selection 실패 뒤 GTK teardown SIGSEGV. 기준 소스도 minimap assertion 2개 실패 뒤 GTK teardown SIGSEGV였다. 문제 3개 격리 비교는 기준 3/3, 수정 2/3 통과였고 수정의 에디터 테스트는 다음 전체 실행에서 통과했다. 전체 통과나 모든 미확인 회귀의 부재를 주장하지 않는다.
+- 측정값, 최종 GUI 결과, 비교 바이너리 SHA256은 [구현 검증 JSON](performance-implementation-evidence-2026-09-21.json)에 보존했다.
+
+- 추가 실패 추적: viewport-shift와 hidden-tab search는 격리 검사 통과. chunk/alternate search는 다른 GTK 검사 직후 실패했지만 새 프로세스 단독 실행은 통과했다. 전체 GUI suite의 순서/수명 관련 불안정성은 이번 변경 범위 밖의 미해결 검증 제한이다.

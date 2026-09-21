@@ -28,6 +28,8 @@ parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
 parser.add_argument("--baseline", action="store_true")
 parser.add_argument("--case", choices=["geometry", "workspace", "scrollback"], default="geometry")
 args = parser.parse_args()
+args.gui = str(Path(args.gui).resolve())
+args.cli = str(Path(args.cli).resolve())
 args.protected_pid = []
 for entry in Path("/proc").iterdir():
     if entry.name.isdigit():
