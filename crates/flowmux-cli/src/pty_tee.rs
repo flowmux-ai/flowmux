@@ -38,9 +38,6 @@
 //! * The same binary works on Ubuntu 22.04 and 24.04 because we never
 //!   touch a renderer-version-specific API.
 
-mod synchronized_output;
-use synchronized_output::SynchronizedOutput;
-
 use anyhow::{anyhow, Context};
 use flowmux_core::{terminal_tab_title_for_cwd, NotificationLevel, PaneId, SurfaceId};
 use flowmux_ipc::{
@@ -275,7 +272,6 @@ fn run_pty_pump(
     };
     let mut to_outer = VecDeque::new();
     let mut to_inner = VecDeque::new();
-    let mut synchronized = SynchronizedOutput::default();
     cwd_tracker.emit_if_changed(child_pid, &mut to_outer);
 
     // 7. Pump loop.
@@ -325,23 +321,13 @@ fn run_pty_pump(
             },
         ];
 
-        let rc = unsafe {
-            libc::poll(
-                fds.as_mut_ptr(),
-                fds.len() as libc::nfds_t,
-                synchronized.timeout(),
-            )
-        };
+        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
         if rc < 0 {
             let err = std::io::Error::last_os_error();
             if err.raw_os_error() == Some(libc::EINTR) {
                 continue;
             }
             return Err(err).context("poll on outer/inner/signal fds");
-        }
-
-        if synchronized.timeout() == 0 {
-            synchronized.flush(&mut to_outer);
         }
 
         // 7a. Drain self-pipe and react to signals.
@@ -378,7 +364,6 @@ fn run_pty_pump(
             // Reap the child non-blockingly. If it's gone we drain the
             // remaining inner-master bytes below and break.
             if let Some(code) = try_reap(child_pid) {
-                synchronized.flush(&mut to_outer);
                 let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
                 to_outer.clear();
                 let alternate_screen_exited =
@@ -471,7 +456,7 @@ fn run_pty_pump(
                     let alternate_screen_exited =
                         observe_terminal_output(slice, &mut input_modes, &output_refresh);
                     extractor.feed(slice);
-                    synchronized.feed(slice, &mut to_outer);
+                    to_outer.extend(slice);
                     // Full-screen TUIs often restore a blank or stale OSC title.
                     // Re-entering the normal screen is the event that lets the
                     // existing title pipeline restore tab/workspace/window names.
@@ -490,7 +475,6 @@ fn run_pty_pump(
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
                     let code = wait_blocking(child_pid).unwrap_or(0);
-                    synchronized.flush(&mut to_outer);
                     let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
                     to_outer.clear();
                     let alternate_screen_exited =
@@ -508,7 +492,6 @@ fn run_pty_pump(
         if fds[1].revents & (libc::POLLHUP | libc::POLLERR) != 0
             && fds[1].revents & libc::POLLIN == 0
         {
-            synchronized.flush(&mut to_outer);
             let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
             to_outer.clear();
             let alternate_screen_exited =
@@ -524,7 +507,6 @@ fn run_pty_pump(
         }
     }
 
-    synchronized.flush(&mut to_outer);
     let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
 
     // 8. Cleanup. _saved_termios restores via Drop on the way out.
