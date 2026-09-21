@@ -1,0 +1,1337 @@
+{
+  "source_commit": "9d5b903",
+  "date": "2026-09-21",
+  "runtime": {
+    "gtk": "4.14.5",
+    "vte": "0.76.0",
+    "desktop": "Wayland",
+    "protected_gui_backend": "XWayland",
+    "protected_pid": 6619,
+    "running_sha256": "483736a40b528338d1c77f036d0ecd18b0c0645c25edad62226569144cddd3c1",
+    "installed_sha256": "c494d6b2a36fd81e263a619175d2147f083948cffcbd99fd6c940e737087021b"
+  },
+  "vte_probe": {
+    "gtk": "4.14.5",
+    "vte": "0.76.0",
+    "initial": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 42.0,
+      "page": 42.0,
+      "value": 0.0,
+      "cursor": [
+        0,
+        0
+      ],
+      "first_line": [
+        ""
+      ]
+    },
+    "filled": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 5000.0,
+      "page": 42.0,
+      "value": 4958.0,
+      "cursor": [
+        0,
+        5100
+      ],
+      "first_line": [
+        "05059 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "visible_html": {
+      "median_ms": 1.019,
+      "max_ms": 1.079,
+      "bytes": 124488,
+      "lines": 42
+    },
+    "minimap_760_html": {
+      "median_ms": 16.285,
+      "max_ms": 22.519,
+      "bytes": 2307370,
+      "lines": 759
+    },
+    "agent_80_text": {
+      "median_ms": 0.217,
+      "max_ms": 0.269,
+      "bytes": 8559,
+      "lines": 79
+    },
+    "scrolled": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 5000.0,
+      "page": 42.0,
+      "value": 3958.0,
+      "cursor": [
+        0,
+        5100
+      ],
+      "first_line": [
+        "04059 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "scrolled_after_output": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 5000.0,
+      "page": 42.0,
+      "value": 3958.0,
+      "cursor": [
+        0,
+        5110
+      ],
+      "first_line": [
+        "04059 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "scrolled_narrow": {
+      "cols": 77,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 5000.0,
+      "page": 42.0,
+      "value": 2949.0,
+      "cursor": [
+        0,
+        9988
+      ],
+      "first_line": [
+        "04080 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "scrolled_wide_again": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 2506.0,
+      "page": 42.0,
+      "value": 1454.0,
+      "cursor": [
+        0,
+        2505
+      ],
+      "first_line": [
+        "04059 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "normal_minimap": {
+      "cols": 115,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 2506.0,
+      "page": 42.0,
+      "value": 2464.0,
+      "cursor": [
+        0,
+        2505
+      ],
+      "first_line": [
+        "05069 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "alternate_before_ipc": {
+      "cols": 115,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 42.0,
+      "page": 42.0,
+      "value": 0.0,
+      "cursor": [
+        0,
+        83
+      ],
+      "first_line": [
+        ""
+      ]
+    },
+    "alternate_after_ipc": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 42.0,
+      "page": 42.0,
+      "value": 0.0,
+      "cursor": [
+        0,
+        83
+      ],
+      "first_line": [
+        ""
+      ]
+    },
+    "normal_before_ipc": {
+      "cols": 122,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 2506.0,
+      "page": 42.0,
+      "value": 2464.0,
+      "cursor": [
+        0,
+        2505
+      ],
+      "first_line": [
+        "05069 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "normal_after_ipc": {
+      "cols": 115,
+      "rows": 42,
+      "lower": 0.0,
+      "upper": 2506.0,
+      "page": 42.0,
+      "value": 2464.0,
+      "cursor": [
+        0,
+        2505
+      ],
+      "first_line": [
+        "05069 ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUV"
+      ]
+    },
+    "flush_focus_notifications": [
+      false,
+      true
+    ],
+    "sync_during_text": "",
+    "sync_begin_changed_pixels": [
+      1,
+      4,
+      82,
+      15
+    ],
+    "sync_end_changed_pixels": [
+      2,
+      4,
+      82,
+      15
+    ],
+    "dec2026_reply": "'\\x1b[?2026;4$y'"
+  },
+  "benchmarks": {
+    "debug_xvfb": [
+      {
+        "minimap": false,
+        "phase": "idle",
+        "pid": 3047972,
+        "cpu_pct": 0.0,
+        "start_mono": 544100.574616156,
+        "end_mono": 544105.574876229,
+        "artifacts": "/tmp/fm-gui-2uj9b84x"
+      },
+      {
+        "minimap": false,
+        "phase": "plain",
+        "pid": 3047972,
+        "cpu_pct": 6.6,
+        "start_mono": 544106.128171024,
+        "end_mono": 544111.128357522,
+        "artifacts": "/tmp/fm-gui-2uj9b84x"
+      },
+      {
+        "minimap": false,
+        "phase": "colored",
+        "pid": 3047972,
+        "cpu_pct": 8.2,
+        "start_mono": 544113.1658229,
+        "end_mono": 544118.166044251,
+        "artifacts": "/tmp/fm-gui-2uj9b84x"
+      },
+      {
+        "minimap": true,
+        "phase": "idle",
+        "pid": 3048742,
+        "cpu_pct": 0.0,
+        "start_mono": 544122.222700408,
+        "end_mono": 544127.223079795,
+        "artifacts": "/tmp/fm-gui-dg52tk9e"
+      },
+      {
+        "minimap": true,
+        "phase": "plain",
+        "pid": 3048742,
+        "cpu_pct": 12.8,
+        "start_mono": 544127.748890855,
+        "end_mono": 544132.749149776,
+        "artifacts": "/tmp/fm-gui-dg52tk9e"
+      },
+      {
+        "minimap": true,
+        "phase": "colored",
+        "pid": 3048742,
+        "cpu_pct": 60.0,
+        "start_mono": 544134.789679649,
+        "end_mono": 544139.789899392,
+        "artifacts": "/tmp/fm-gui-dg52tk9e"
+      }
+    ],
+    "installed_xvfb": [
+      {
+        "minimap": false,
+        "phase": "idle",
+        "pid": 3056744,
+        "cpu_pct": 0.0,
+        "start_mono": 544266.351339348,
+        "end_mono": 544271.351558745,
+        "artifacts": "/tmp/fm-gui-kneukj84"
+      },
+      {
+        "minimap": false,
+        "phase": "plain",
+        "pid": 3056744,
+        "cpu_pct": 4.4,
+        "start_mono": 544271.885561869,
+        "end_mono": 544276.885803325,
+        "artifacts": "/tmp/fm-gui-kneukj84"
+      },
+      {
+        "minimap": false,
+        "phase": "colored",
+        "pid": 3056744,
+        "cpu_pct": 6.8,
+        "start_mono": 544278.921822306,
+        "end_mono": 544283.922060681,
+        "artifacts": "/tmp/fm-gui-kneukj84"
+      },
+      {
+        "minimap": true,
+        "phase": "idle",
+        "pid": 3059057,
+        "cpu_pct": 0.0,
+        "start_mono": 544288.026455999,
+        "end_mono": 544293.026780506,
+        "artifacts": "/tmp/fm-gui-hgiw01su"
+      },
+      {
+        "minimap": true,
+        "phase": "plain",
+        "pid": 3059057,
+        "cpu_pct": 10.2,
+        "start_mono": 544293.56006451,
+        "end_mono": 544298.560280904,
+        "artifacts": "/tmp/fm-gui-hgiw01su"
+      },
+      {
+        "minimap": true,
+        "phase": "colored",
+        "pid": 3059057,
+        "cpu_pct": 30.0,
+        "start_mono": 544300.600219767,
+        "end_mono": 544305.600504284,
+        "artifacts": "/tmp/fm-gui-hgiw01su"
+      }
+    ],
+    "installed_native_desktop": [
+      {
+        "minimap": false,
+        "phase": "idle",
+        "pid": 3068737,
+        "cpu_pct": 0.2,
+        "start_mono": 544527.910526866,
+        "end_mono": 544532.91079603,
+        "artifacts": "/tmp/fm-gui-0n7rawqf"
+      },
+      {
+        "minimap": false,
+        "phase": "plain",
+        "pid": 3068737,
+        "cpu_pct": 7.0,
+        "start_mono": 544533.412150208,
+        "end_mono": 544538.412393779,
+        "artifacts": "/tmp/fm-gui-0n7rawqf"
+      },
+      {
+        "minimap": false,
+        "phase": "colored",
+        "pid": 3068737,
+        "cpu_pct": 7.6,
+        "start_mono": 544540.413144665,
+        "end_mono": 544545.413361805,
+        "artifacts": "/tmp/fm-gui-0n7rawqf"
+      },
+      {
+        "minimap": true,
+        "phase": "idle",
+        "pid": 3069863,
+        "cpu_pct": 0.0,
+        "start_mono": 544549.455348184,
+        "end_mono": 544554.455573594,
+        "artifacts": "/tmp/fm-gui-eb0qcoy6"
+      },
+      {
+        "minimap": true,
+        "phase": "plain",
+        "pid": 3069863,
+        "cpu_pct": 10.8,
+        "start_mono": 544554.956150772,
+        "end_mono": 544559.956352409,
+        "artifacts": "/tmp/fm-gui-eb0qcoy6"
+      },
+      {
+        "minimap": true,
+        "phase": "colored",
+        "pid": 3069863,
+        "cpu_pct": 44.6,
+        "start_mono": 544561.957141865,
+        "end_mono": 544566.957350747,
+        "artifacts": "/tmp/fm-gui-eb0qcoy6"
+      }
+    ]
+  },
+  "ime": [
+    {
+      "mode": "sync",
+      "artifact_dir": "/tmp/fm-gui-b1knx_af",
+      "input_without_focus_events": "abc\r\r\r\r가나\r하?",
+      "focus_out_count": 6,
+      "events": [
+        {
+          "time": 544279.480128175,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544279.974292804,
+          "hex": "61",
+          "text": "a"
+        },
+        {
+          "time": 544280.054597523,
+          "hex": "62",
+          "text": "b"
+        },
+        {
+          "time": 544280.135420478,
+          "hex": "63",
+          "text": "c"
+        },
+        {
+          "time": 544280.398924209,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544280.399122538,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544280.403108727,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544280.660276862,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544280.660580719,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544280.66226365,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544280.662354359,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544280.663634306,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544280.663820808,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544280.66588679,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544280.666043871,
+          "hex": "0d0d",
+          "text": "\r\r"
+        },
+        {
+          "time": 544281.623882924,
+          "hex": "eab080",
+          "text": "가"
+        },
+        {
+          "time": 544281.885350275,
+          "hex": "1b5b4feb8298",
+          "text": "\u001b[O나"
+        },
+        {
+          "time": 544281.885677336,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544281.890140539,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544282.648021897,
+          "hex": "1b5b4fed9598",
+          "text": "\u001b[O하"
+        },
+        {
+          "time": 544282.648077822,
+          "hex": "1b5b493f",
+          "text": "\u001b[I?"
+        }
+      ],
+      "phases": [
+        {
+          "name": "english",
+          "start": 544279.972683719,
+          "end": 544280.36395273
+        },
+        {
+          "name": "single_enter",
+          "start": 544280.398472379,
+          "end": 544280.629163455
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 544280.659316569,
+          "end": 544280.813618696
+        },
+        {
+          "name": "hangul_preedit",
+          "start": 544281.38052214,
+          "end": 544281.852080473
+        },
+        {
+          "name": "hangul_enter",
+          "start": 544281.884549032,
+          "end": 544282.114931026
+        },
+        {
+          "name": "hangul_backspace",
+          "start": 544282.144201386,
+          "end": 544282.61538401
+        },
+        {
+          "name": "hangul_symbol",
+          "start": 544282.646254147,
+          "end": 544282.878877358
+        }
+      ]
+    },
+    {
+      "mode": "async",
+      "artifact_dir": "/tmp/fm-gui-b7clhun2",
+      "input_without_focus_events": "abc\r\r\r\r가나\r하?",
+      "focus_out_count": 6,
+      "events": [
+        {
+          "time": 544313.876324654,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544314.389542202,
+          "hex": "61",
+          "text": "a"
+        },
+        {
+          "time": 544314.469131931,
+          "hex": "62",
+          "text": "b"
+        },
+        {
+          "time": 544314.548874135,
+          "hex": "63",
+          "text": "c"
+        },
+        {
+          "time": 544314.814706728,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544314.814984568,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544314.816878133,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.073155242,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544315.073226868,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544315.075222722,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.075751152,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544315.075880318,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544315.076526115,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.077438205,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544315.077600157,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544315.078506459,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544316.043153563,
+          "hex": "eab080",
+          "text": "가"
+        },
+        {
+          "time": 544316.302898781,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544316.303120458,
+          "hex": "eb8298",
+          "text": "나"
+        },
+        {
+          "time": 544316.303353103,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544316.306585849,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544317.061348628,
+          "hex": "1b5b4fed9598",
+          "text": "\u001b[O하"
+        },
+        {
+          "time": 544317.061626571,
+          "hex": "1b5b493f",
+          "text": "\u001b[I?"
+        }
+      ],
+      "phases": [
+        {
+          "name": "english",
+          "start": 544314.386851755,
+          "end": 544314.778111018
+        },
+        {
+          "name": "single_enter",
+          "start": 544314.813971887,
+          "end": 544315.044644319
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 544315.072571792,
+          "end": 544315.228123974
+        },
+        {
+          "name": "hangul_preedit",
+          "start": 544315.800525374,
+          "end": 544316.27171158
+        },
+        {
+          "name": "hangul_enter",
+          "start": 544316.301582129,
+          "end": 544316.533294638
+        },
+        {
+          "name": "hangul_backspace",
+          "start": 544316.560518815,
+          "end": 544317.032824047
+        },
+        {
+          "name": "hangul_symbol",
+          "start": 544317.060755003,
+          "end": 544317.293191792
+        }
+      ]
+    },
+    {
+      "mode": "navigation_workaround",
+      "artifact_dir": "/tmp/fm-gui-30dqgtan",
+      "input_without_focus_events": "abc\r\r\r\r가나\r한?",
+      "focus_out_count": 7,
+      "events": [
+        {
+          "time": 544313.888480857,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544314.397130309,
+          "hex": "61",
+          "text": "a"
+        },
+        {
+          "time": 544314.477630389,
+          "hex": "62",
+          "text": "b"
+        },
+        {
+          "time": 544314.557917759,
+          "hex": "63",
+          "text": "c"
+        },
+        {
+          "time": 544314.832052879,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544314.832228997,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544314.833807094,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.083870939,
+          "hex": "1b5b4f1b5b49",
+          "text": "\u001b[O\u001b[I"
+        },
+        {
+          "time": 544315.086318444,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544315.086332397,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544315.087756499,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544315.08792816,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544315.091778131,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.091840656,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544315.091904665,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544316.041900173,
+          "hex": "eab080",
+          "text": "가"
+        },
+        {
+          "time": 544316.302168568,
+          "hex": "1b5b4feb8298",
+          "text": "\u001b[O나"
+        },
+        {
+          "time": 544316.302322851,
+          "hex": "1b5b49",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544316.306847245,
+          "hex": "0d",
+          "text": "\r"
+        },
+        {
+          "time": 544316.805418421,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544316.805491085,
+          "hex": "ed959c",
+          "text": "한"
+        },
+        {
+          "time": 544316.805874271,
+          "hex": "1b5b497f",
+          "text": "\u001b[I"
+        },
+        {
+          "time": 544317.070940841,
+          "hex": "1b5b4f",
+          "text": "\u001b[O"
+        },
+        {
+          "time": 544317.07126245,
+          "hex": "1b5b493f",
+          "text": "\u001b[I?"
+        }
+      ],
+      "phases": [
+        {
+          "name": "english",
+          "start": 544314.395867334,
+          "end": 544314.787053335
+        },
+        {
+          "name": "single_enter",
+          "start": 544314.826257835,
+          "end": 544315.057100696
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 544315.083181149,
+          "end": 544315.238838952
+        },
+        {
+          "name": "hangul_preedit",
+          "start": 544315.798024058,
+          "end": 544316.269267125
+        },
+        {
+          "name": "hangul_enter",
+          "start": 544316.301355778,
+          "end": 544316.531712924
+        },
+        {
+          "name": "hangul_backspace",
+          "start": 544316.562540499,
+          "end": 544317.035024263
+        },
+        {
+          "name": "hangul_symbol",
+          "start": 544317.067833152,
+          "end": 544317.299822261
+        }
+      ]
+    }
+  ],
+  "tests": {
+    "minimap": 13,
+    "ghostty_pane": 41
+  },
+  "backpressure": {
+    "sent_mono": 544587.436651104,
+    "resumed_output_read_mono": 544587.936870659,
+    "events_before_resume": [
+      {
+        "time": 544587.132240628,
+        "kind": "ready"
+      }
+    ],
+    "events_after_resume": [
+      {
+        "time": 544587.132240628,
+        "kind": "ready"
+      },
+      {
+        "time": 544587.936998333,
+        "kind": "resize"
+      },
+      {
+        "time": 544587.937069039,
+        "kind": "input"
+      }
+    ]
+  },
+  "layout": {
+    "fm-gui-tg47i1ti": {
+      "scrolled": {
+        "first": [
+          "H0816"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 37
+      },
+      "tab_roundtrip": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36
+      },
+      "workspace_roundtrip": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "narrow": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "wide_again": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "split": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "split_resize": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "unsplit": {
+        "first": [],
+        "last": [],
+        "count": 0
+      },
+      "alternate": [
+        [
+          "before",
+          [
+            94,
+            36
+          ]
+        ],
+        [
+          "immediate_enter",
+          [
+            94,
+            36
+          ]
+        ],
+        [
+          "settled_enter",
+          [
+            98,
+            36
+          ]
+        ],
+        [
+          "immediate_exit",
+          [
+            98,
+            36
+          ]
+        ],
+        [
+          "settled_exit",
+          [
+            94,
+            36
+          ]
+        ]
+      ],
+      "persisted_history_markers": [
+        [
+          "H0817",
+          "H0818",
+          "H0819",
+          "H0820",
+          "H0821",
+          "H0822",
+          "H0823",
+          "H0824",
+          "H0825",
+          "H0826",
+          "H0827",
+          "H0828",
+          "H0829",
+          "H0830",
+          "H0831",
+          "H0832",
+          "H0833",
+          "H0834",
+          "H0835",
+          "H0836",
+          "H0837",
+          "H0838",
+          "H0839",
+          "H0840",
+          "H0841",
+          "H0842",
+          "H0843",
+          "H0844",
+          "H0845",
+          "H0846",
+          "H0847",
+          "H0848",
+          "H0849",
+          "H0850",
+          "H0851",
+          "H0852"
+        ],
+        []
+      ]
+    },
+    "fm-gui-fyr1a18g": {
+      "scrolled": {
+        "first": [
+          "H0816"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 37,
+        "original_active": true
+      },
+      "tab_roundtrip": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "workspace_roundtrip": {
+        "first": [],
+        "last": [],
+        "count": 0,
+        "original_active": false
+      },
+      "original_restored": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "narrow": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "wide_again": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "split": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "split_resize": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "unsplit": {
+        "first": [
+          "H0817"
+        ],
+        "last": [
+          "H0852"
+        ],
+        "count": 36,
+        "original_active": true
+      },
+      "alternate": [
+        [
+          "before",
+          [
+            94,
+            36
+          ]
+        ],
+        [
+          "immediate_enter",
+          [
+            94,
+            36
+          ]
+        ],
+        [
+          "settled_enter",
+          [
+            98,
+            36
+          ]
+        ],
+        [
+          "immediate_exit",
+          [
+            98,
+            36
+          ]
+        ],
+        [
+          "settled_exit",
+          [
+            94,
+            36
+          ]
+        ]
+      ],
+      "persisted_history_markers": [
+        [
+          "H0966",
+          "H0967",
+          "H0968",
+          "H0969",
+          "H0970",
+          "H0971",
+          "H0972",
+          "H0973",
+          "H0974",
+          "H0975",
+          "H0976",
+          "H0977",
+          "H0978",
+          "H0979",
+          "H0980",
+          "H0981",
+          "H0982",
+          "H0983",
+          "H0984",
+          "H0985",
+          "H0986",
+          "H0987",
+          "H0988",
+          "H0989",
+          "H0990",
+          "H0991",
+          "H0992",
+          "H0993",
+          "H0994",
+          "H0995",
+          "H0996",
+          "H0997",
+          "H0998",
+          "H0999"
+        ]
+      ]
+    }
+  },
+  "idle_65s": {
+    "seconds": 65.1157592330128,
+    "cpu_percent": 1.6739419348540514,
+    "changes": [
+      {
+        "seconds": 0.524,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 1.038,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 1.808,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 2.32,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 2.834,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 3.605,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 4.119,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 4.632,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 5.405,
+        "bbox": [
+          292,
+          91,
+          857,
+          793
+        ]
+      },
+      {
+        "seconds": 5.916,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 6.431,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 7.199,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 7.713,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 8.227,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      },
+      {
+        "seconds": 8.997,
+        "bbox": [
+          387,
+          91,
+          397,
+          110
+        ]
+      }
+    ],
+    "size": [
+      1280,
+      800
+    ]
+  },
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later",
+  "protected_window_verified": {
+    "pid": 6619,
+    "original_pane_and_surface_present": true,
+    "running_exe": "/home/junsu/.local/bin/flowmux (deleted)"
+  }
+}
