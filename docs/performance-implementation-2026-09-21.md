@@ -16,7 +16,7 @@
 | PTY backpressure 중 입력/resize | 구현 및 실제 PTY 검증 완료 |
 | IME focus cycle 및 redraw | 불필요한 UI 작업 제거·실제 IBus 검증 완료 |
 | synchronized output | 후보 구현·실제 GUI 비교 후 회귀로 revert |
-| 최종 통합 A/B·회귀·설치 | 대기 |
+| 최종 통합 A/B·회귀·설치 | 비교·설치 완료; 전체 GUI suite 제한 기록 |
 
 **alternate 화면 geometry**
 
@@ -35,7 +35,7 @@
 - 회귀: 새 workspace 진입의 focus fallback 및 Agent Bar/activity의 명시적 pane/surface 목적지 테스트 통과. 포맷 검사 통과.
 - 판단: 기존 active tab과 키보드 대상이 유지되므로 변경 유지.
 
-다음 항목들은 구현 후 기준 바이너리와 동일 조건으로 비교하고, 효과 부재나 회귀가 확인된 후보는 수정하거나 되돌린 뒤 결과를 기록한다. 이 문서는 진행 기록이며 전체 작업 완료를 뜻하지 않는다.
+각 후보를 구현 후 기준 바이너리와 비교했다. 검증된 여섯 변경은 유지했고, synchronized-output buffering 후보는 실제 회귀를 확인해 되돌렸다. 검증 한계와 남은 문제는 아래에 구분한다.
 
 **전체 스크롤백 저장**
 
@@ -84,3 +84,10 @@
 - 측정값, 최종 GUI 결과, 비교 바이너리 SHA256은 [구현 검증 JSON](performance-implementation-evidence-2026-09-21.json)에 보존했다.
 
 - 추가 실패 추적: viewport-shift와 hidden-tab search는 격리 검사 통과. chunk/alternate search는 다른 GTK 검사 직후 실패했지만 새 프로세스 단독 실행은 통과했다. 전체 GUI suite의 순서/수명 관련 불안정성은 이번 변경 범위 밖의 미해결 검증 제한이다.
+
+**설치 및 기존 창 보존**
+
+- `install.sh --check` 후 `install.sh --yes` 완료. `/home/junsu/.local/bin`과 `/home/junsu/.cargo/bin`의 GUI/CLI/viewer 총 6개 파일 SHA256이 전후 비교에서 사용한 fast 바이너리와 정확히 일치한다.
+- 설치 경로로 별도 GUI를 실행한 geometry 검증도 13개 샘플 전부 92×37(`/tmp/fm-gui-4hk29z0f/geometry.json`).
+- 기존 창 PID **6619**, 시작 시각 **2026-09-15 09:50:42** 유지 확인. 기존 창을 닫거나 재시작하지 않았다. GUI 변경은 새로 실행되는 창부터 적용된다.
+- 최종 상태: 구현 변경 6개 유지, 동기화 출력 후보 1개 revert, 변경 관련 실제 시나리오 검증 및 설치 완료. VTE synchronized rendering, IME focus-report 바이트, legacy Hangul Backspace 분해, 전체 GTK suite 불안정성은 남은 제한이다.

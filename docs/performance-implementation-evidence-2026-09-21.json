@@ -349,5 +349,91 @@
       "output_search_finds_hidden_tabs_and_navigates_to_retained_wrapped_output": "passed",
       "output_search_chunks_preserve_wraps_duplicates_and_alternate_screen": "failed after another GTK test, passed alone in fresh process"
     }
+  },
+  "installation": {
+    "paths": {
+      "/home/junsu/.local/bin/flowmux": {
+        "sha256": "5aec7f3e1fe863fc74e338a35ef66b6148e349ad2b480db43af6b8a4b1f367e4",
+        "matches_tested": true
+      },
+      "/home/junsu/.local/bin/flowmuxctl": {
+        "sha256": "5d017b51fef240c2014aabbe5bcad801d9b7b917750c173f2f00048aa38812cc",
+        "matches_tested": true
+      },
+      "/home/junsu/.local/bin/flowmux-md-viewer": {
+        "sha256": "25409c02c4fd5c1a957d204ffc5c722ae1980d48d0a8db88c717f70432dbc466",
+        "matches_tested": true
+      },
+      "/home/junsu/.cargo/bin/flowmux": {
+        "sha256": "5aec7f3e1fe863fc74e338a35ef66b6148e349ad2b480db43af6b8a4b1f367e4",
+        "matches_tested": true
+      },
+      "/home/junsu/.cargo/bin/flowmuxctl": {
+        "sha256": "5d017b51fef240c2014aabbe5bcad801d9b7b917750c173f2f00048aa38812cc",
+        "matches_tested": true
+      },
+      "/home/junsu/.cargo/bin/flowmux-md-viewer": {
+        "sha256": "25409c02c4fd5c1a957d204ffc5c722ae1980d48d0a8db88c717f70432dbc466",
+        "matches_tested": true
+      }
+    },
+    "existing_gui": "PID                  STARTED COMMAND\n   6619 Tue Sep 15 09:50:42 2026 flowmux",
+    "installed_geometry": {
+      "artifacts": "/tmp/fm-gui-4hk29z0f",
+      "result": [
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ],
+        [
+          92,
+          37
+        ]
+      ]
+    }
   }
 }
