@@ -72,6 +72,12 @@ const AGENT_CONTENT_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 const AGENT_STATUS_TEXT_ROWS: i64 = 80;
 const TERMINAL_SELECTION_CACHE_MAX_BYTES: usize = 256 * 1024;
 
+thread_local! {
+    // GTK focus signals run synchronously on this thread. An IME commit is
+    // not a pane switch and must not refresh the workspace side panels.
+    static PREEDIT_FOCUS_CYCLE: Cell<bool> = const { Cell::new(false) };
+}
+
 #[derive(Default)]
 struct AgentContentRefreshThrottle {
     callback_pending: Cell<bool>,
@@ -852,7 +858,11 @@ impl GhosttyPane {
             let cb = callbacks.on_focus.clone();
             let pane_id = pane_id.clone();
             let focus_ctrl = gtk::EventControllerFocus::new();
-            focus_ctrl.connect_enter(move |_| (cb.borrow_mut())(pane_id.get()));
+            focus_ctrl.connect_enter(move |_| {
+                if !PREEDIT_FOCUS_CYCLE.get() {
+                    (cb.borrow_mut())(pane_id.get());
+                }
+            });
             term.add_controller(focus_ctrl);
         }
 
@@ -1717,16 +1727,26 @@ fn install_terminal_key_capture(container: &gtk::Overlay, term: &vte::Terminal) 
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     let term_widget = term.clone();
+    let redraw_pending = Rc::new(Cell::new(false));
     key.connect_key_pressed(move |_, keyval, _keycode, state| {
-        if term_widget.has_focus() && is_shift_enter(keyval, state) {
+        if !term_widget.has_focus() {
+            return glib::Propagation::Proceed;
+        }
+        if is_shift_enter(keyval, state) {
             feed_after_preedit_commit(&term_widget, INSERT_NEWLINE_BYTES);
             return glib::Propagation::Stop;
         }
         term_widget.queue_draw();
-        let term_follow = term_widget.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(16), move || {
-            term_follow.queue_draw();
-        });
+        if !redraw_pending.replace(true) {
+            let term_follow = term_widget.downgrade();
+            let redraw_pending = redraw_pending.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(16), move || {
+                redraw_pending.set(false);
+                if let Some(term) = term_follow.upgrade().filter(|term| term.has_focus()) {
+                    term.queue_draw();
+                }
+            });
+        }
         glib::Propagation::Proceed
     });
     container.add_controller(key);
@@ -1895,8 +1915,10 @@ fn flush_pending_preedit(term: &vte::Terminal) {
     let Some(window) = root.dynamic_cast_ref::<gtk::Window>() else {
         return;
     };
+    let previous = PREEDIT_FOCUS_CYCLE.replace(true);
     gtk::prelude::GtkWindowExt::set_focus(window, gtk::Widget::NONE);
     term.grab_focus();
+    PREEDIT_FOCUS_CYCLE.set(previous);
 }
 
 /// True when the active GTK IM module is the ibus immodule — the only
@@ -3504,6 +3526,10 @@ mod tests {
 
     #[gtk::test]
     async fn closing_terminal_releases_widget_graph() {
+        let focus_calls = Rc::new(Cell::new(0));
+        let mut callbacks = PaneCallbacks::noop_for_test();
+        let counted = focus_calls.clone();
+        callbacks.on_focus = Rc::new(RefCell::new(move |_| counted.set(counted.get() + 1)));
         let pane = GhosttyPane::spawn(
             PaneId::new(),
             SurfaceId::new(),
@@ -3511,7 +3537,7 @@ mod tests {
             None,
             Vec::new(),
             5_000,
-            PaneCallbacks::noop_for_test(),
+            callbacks,
         );
         let terminal = pane.widget.downgrade();
         let container = pane.container.downgrade();
@@ -3538,6 +3564,24 @@ mod tests {
         window.set_child(Some(&pane.container));
         window.present();
         glib::timeout_future(std::time::Duration::from_millis(30)).await;
+        pane.widget.grab_focus();
+        let before = focus_calls.get();
+        assert!(before > 0);
+        for _ in 0..6 {
+            flush_pending_preedit(&pane.widget);
+        }
+        assert_eq!(
+            focus_calls.get(),
+            before,
+            "IME commits must not switch panes"
+        );
+        gtk::prelude::GtkWindowExt::set_focus(&window, gtk::Widget::NONE);
+        pane.widget.grab_focus();
+        assert_eq!(
+            focus_calls.get(),
+            before + 1,
+            "real focus must still be reported"
+        );
         for activate in [false, true] {
             let controllers = pane.widget.observe_controllers();
             let click = (0..controllers.n_items())
