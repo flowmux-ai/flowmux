@@ -26,6 +26,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--gui", default=str(repo / "target/debug/flowmux"))
 parser.add_argument("--cli", default=str(repo / "target/debug/flowmuxctl"))
 parser.add_argument("--baseline", action="store_true")
+parser.add_argument("--case", choices=["geometry", "workspace"], default="geometry")
 args = parser.parse_args()
 args.protected_pid = []
 for entry in Path("/proc").iterdir():
@@ -59,29 +60,66 @@ try:
         sock, "workspace_create", name="Terminal rendering test", root=str(h.root)
     )["workspace_created"]["id"]
     pane = h.workspace(sock, workspace)["panes"][0]["id"]
-    probe = h.root / "geometry.py"
-    result_path = h.root / "geometry.json"
-    probe.write_text(
-        "import json,os,time\n"
-        "sizes=[]\n"
-        "def record():sizes.append(list(os.get_terminal_size()))\n"
-        "time.sleep(.2)\n"
-        "record()\n"
-        "for _ in range(3):\n"
-        " os.write(1,b'\\x1b[?1049h\\x1b[2JALT SCREEN')\n"
-        " record();time.sleep(.3);record()\n"
-        " os.write(1,b'\\x1b[?1049l')\n"
-        " record();time.sleep(.3);record()\n"
-        f"open({str(result_path)!r},'w').write(json.dumps(sizes))\n"
-    )
-    h.send(sock, pane, f"/usr/bin/python3 {probe}")
-    fixture.wait_for(result_path.exists, "three alternate-screen round trips")
-    sizes = json.loads(result_path.read_text())
-    stable = all(size == sizes[0] for size in sizes)
-    print(json.dumps({"sizes": sizes, "stable": stable}), flush=True)
-    if not args.baseline:
-        assert stable, f"Screen mode changed PTY geometry: {sizes}"
-        h.pass_check("Normal/alternate transitions preserve terminal geometry")
+    if args.case == "geometry":
+        probe = h.root / "geometry.py"
+        result_path = h.root / "geometry.json"
+        probe.write_text(
+            "import json,os,time\n"
+            "sizes=[]\n"
+            "def record():sizes.append(list(os.get_terminal_size()))\n"
+            "time.sleep(.2)\n"
+            "record()\n"
+            "for _ in range(3):\n"
+            " os.write(1,b'\\x1b[?1049h\\x1b[2JALT SCREEN')\n"
+            " record();time.sleep(.3);record()\n"
+            " os.write(1,b'\\x1b[?1049l')\n"
+            " record();time.sleep(.3);record()\n"
+            f"open({str(result_path)!r},'w').write(json.dumps(sizes))\n"
+        )
+        h.send(sock, pane, f"/usr/bin/python3 {probe}")
+        fixture.wait_for(result_path.exists, "three alternate-screen round trips")
+        sizes = json.loads(result_path.read_text())
+        stable = all(size == sizes[0] for size in sizes)
+        print(json.dumps({"sizes": sizes, "stable": stable}), flush=True)
+        if not args.baseline:
+            assert stable, f"Screen mode changed PTY geometry: {sizes}"
+            h.pass_check("Normal/alternate transitions preserve terminal geometry")
+    else:
+        from Xlib import X, XK, display
+        from Xlib.ext import xtest
+
+        original = h.workspace(sock, workspace)["panes"][0]["tabs"][0]["id"]
+        h.rpc(sock, "surface_create", workspace=workspace, cwd=str(h.root), shell=str(shell))
+        h.rpc(sock, "surface_focus", pane=pane, surface=original)
+        right = h.rpc(sock, "pane_split", pane=pane, direction="vertical")["pane_split_done"]["new_pane"]
+        h.rpc(sock, "pane_focus", pane=right)
+        time.sleep(.3)
+        h.rpc(sock, "workspace_create", name="Other workspace", root=str(h.root))
+        h.rpc(sock, "workspace_focus", workspace=workspace)
+        time.sleep(.3)
+        tabs = next(p["tabs"] for p in h.workspace(sock, workspace)["panes"] if p["id"] == pane)
+        preserved_tab = any(t["id"] == original and t["active"] for t in tabs)
+        d = display.Display(h.env["DISPLAY"])
+        window = fixture.wait_for(lambda: next((w for w in d.screen().root.query_tree().children
+            if w.get_attributes().map_state == X.IsViewable
+            and (pid := w.get_full_property(d.intern_atom("_NET_WM_PID"), X.AnyPropertyType)) is not None
+            and int(pid.value[0]) == process.pid), None), "test window")
+        window.set_input_focus(X.RevertToParent, X.CurrentTime)
+        d.sync()
+        time.sleep(.2)
+        for char in "mrumarker":
+            code = d.keysym_to_keycode(XK.string_to_keysym(char))
+            xtest.fake_input(d, X.KeyPress, code)
+            xtest.fake_input(d, X.KeyRelease, code)
+        d.sync()
+        time.sleep(.3)
+        preserved_focus = "mrumarker" in h.screen(sock, right)
+        result = {"preserved_tab": preserved_tab, "preserved_focus": preserved_focus}
+        (h.root / "workspace.json").write_text(json.dumps(result))
+        print(json.dumps(result), flush=True)
+        if not args.baseline:
+            assert preserved_tab and preserved_focus, result
+            h.pass_check("Workspace return preserves active tabs and last focused pane")
     h.close_window(process)
 finally:
     for child in reversed(h.children):

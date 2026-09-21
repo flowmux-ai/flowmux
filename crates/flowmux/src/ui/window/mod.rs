@@ -2861,10 +2861,20 @@ impl WindowController {
         }
     }
 
-    /// Bring `id`'s workspace to the foreground, persist it as the
-    /// active workspace, and grab focus on its first leaf so keyboard
-    /// shortcuts work immediately.
+    /// Restore the workspace's active tabs and most recently focused pane.
+    /// A new workspace (or one whose remembered panes were removed) falls
+    /// back to its first leaf.
     async fn activate_workspace(&self, id: WorkspaceId) {
+        // Capture MRU before mapping: GTK focus-enter signals can update it.
+        let remembered_pane = {
+            let registry = self.pane_registry.borrow();
+            self.focus_mru.borrow().get(&id).and_then(|panes| {
+                panes
+                    .iter()
+                    .copied()
+                    .find(|pane| registry.workspace_of_pane(*pane) == Some(id))
+            })
+        };
         self.clear_pane_zoom();
         if self.surfaces.borrow().contains_key(&id) {
             self.stack.set_visible_child_name(&id.to_string());
@@ -2877,29 +2887,9 @@ impl WindowController {
         self.acknowledge_workspace_notifications(id);
         self.store.set_active_workspace(Some(id)).await;
         self.sync_workspace_agent_status_from_store(id).await;
-        if let Some(ws) = self.store.get_workspace(id).await {
-            // Selecting a workspace lands on the last tab of its first pane.
-            if let Some(leaf) = ws
-                .surfaces
-                .first()
-                .and_then(|s| s.root_pane.first_leaf_id())
-            {
-                let last =
-                    ws.surfaces
-                        .first()
-                        .and_then(|s| match s.root_pane.find_leaf_content(leaf) {
-                            Some(flowmux_core::PaneContent::Tabs { surfaces, .. }) => {
-                                surfaces.last().map(|surface| surface.id)
-                            }
-                            _ => None,
-                        });
-                if let Some(last) = last {
-                    self.store.set_active_surface(leaf, last).await;
-                    self.pane_registry.borrow_mut().activate_surface(leaf, last);
-                    self.sync_workspace_agent_status_from_store(id).await;
-                    self.refresh_agent_screen_status(last, None).await;
-                }
-            }
+        if let Some(pane) = remembered_pane {
+            self.focus_pane(pane);
+        } else if let Some(ws) = self.store.get_workspace_without_scrollback(id).await {
             self.focus_first_leaf_of(&ws);
         }
     }
