@@ -15,7 +15,7 @@
 | 전체 스크롤백 저장 | 구현 및 실제 GUI 검증 완료 |
 | PTY backpressure 중 입력/resize | 구현 및 실제 PTY 검증 완료 |
 | IME focus cycle 및 redraw | 불필요한 UI 작업 제거·실제 IBus 검증 완료 |
-| synchronized output | 대기 |
+| synchronized output | 후보 구현·실제 GUI 비교 후 회귀로 revert |
 | 최종 통합 A/B·회귀·설치 | 대기 |
 
 **alternate 화면 geometry**
@@ -67,3 +67,10 @@
 - 실제 IBus: 기준 `/tmp/fm-gui-s99tgi6o`, 수정 sync `/tmp/fm-gui-21zue41v`, async `/tmp/fm-gui-89vsb0oc`, 강제 legacy navigation `/tmp/fm-gui-cr18p34w`. 각 `result.json`과 화면 캡처 보존. `scripts/test-terminal-ime-gui.py`로 재현 가능.
 - 기준/수정 모두 `abc\r\r\r\r가나\r하?가\x1b\r`로 Enter 연타·한글·Backspace·문장부호·ShiftEnter 순서 일치. legacy 분기는 기존 `한\x7f` 동작 유지.
 - 제한: VTE가 IMContext를 공개하지 않아 조합 확정에 필요한 focus cycle 자체는 남는다. 따라서 focus-out 바이트(일반 7/legacy 8) 감소나 legacy Hangul 분해 문제 해결을 주장하지 않는다. 검증된 UI 중복 작업 제거만 유지한다.
+
+**synchronized output 후보 — 되돌림**
+
+- 후보 `c0ea359`: PTY에서 split된 DEC2026 begin/end를 인식해 최대 256KiB/250ms 동안 frame을 보류했다. 누락된 end와 큰 출력에서도 byte를 버리지 않고 한도 도달 시 flush한다. parser/lossless/bound 단위 검사 통과.
+- 실제 GUI 기준 `/tmp/fm-gui-leyr_za1/sync.json`, 후보 `/tmp/fm-gui-d94__pni/sync.json`. `scripts/test-terminal-sync-gui.py`에 작은 frame, frame 중간 DSR cursor-position query, 330KB frame 재현과 pixel 캡처를 남겼다.
+- 작은 frame은 begin→end 사이 OLD FRAME의 text/pixel 보존 false → true로 개선됐다. 그러나 DSR 응답은 9.29ms → 242.18ms로 지연됐고, 330KB frame은 buffer 한도를 넘으면서 여전히 중간 화면을 표시했다.
+- 판단: 회귀 때문에 `03e901a`에서 후보 전체를 revert했다. 최종 제품에는 buffering이나 지원을 허위 광고하는 응답이 없다. query를 바로 처리하려면 미완성 frame을 VTE에 전달해야 하므로, proxy buffer만으로는 parser 진행과 화면 표시를 분리할 수 없다. VTE backend의 native synchronized-rendering 지원이 필요한 항목으로 남긴다. 시스템 VTE 변경·업그레이드는 하지 않았다.
