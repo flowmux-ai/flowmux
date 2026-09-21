@@ -19,6 +19,7 @@ pub struct Pty {
     master: RawFd,
     child: libc::pid_t,
     reaped: bool,
+    external_child_watch: bool,
 }
 
 impl Pty {
@@ -125,6 +126,7 @@ impl Pty {
             master,
             child: pid,
             reaped: false,
+            external_child_watch: false,
         })
     }
 
@@ -200,8 +202,21 @@ impl Pty {
         Ok(())
     }
 
+    /// Give an external watcher (such as VTE) sole ownership of waitpid.
+    /// Drop still hangs up and eventually kills the process group, but leaves
+    /// the exit status for that watcher, which must outlive the child.
+    pub fn set_external_child_watch(&mut self) {
+        self.external_child_watch = true;
+    }
+
     /// Non-blocking reap: returns `Some(status)` if the child has exited.
     pub fn try_wait(&mut self) -> io::Result<Option<i32>> {
+        if self.external_child_watch {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "child exit status belongs to an external watcher",
+            ));
+        }
         if self.reaped {
             return Ok(Some(0));
         }
@@ -245,10 +260,11 @@ impl Pty {
             return;
         }
         let child = self.child;
+        let external_child_watch = self.external_child_watch;
         self.reaped = true;
         if let Err(error) = std::thread::Builder::new()
             .name("flowmux-pty-reaper".into())
-            .spawn(move || reap_process_group(child, CLOSE_GRACE))
+            .spawn(move || reap_process_group(child, CLOSE_GRACE, external_child_watch))
         {
             signal_process_group(child, libc::SIGKILL);
             eprintln!("failed to start PTY reaper: {error}");
@@ -276,9 +292,11 @@ fn process_group_exists(pid: libc::pid_t) -> bool {
     rc == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-fn reap_process_group(pid: libc::pid_t, grace: Duration) {
+fn reap_process_group(pid: libc::pid_t, grace: Duration, external_child_watch: bool) {
     let deadline = Instant::now() + grace;
-    let mut child_reaped = false;
+    // External watchers consume the status even after the pane is destroyed.
+    // In that case only monitor/terminate the group here; never call waitpid.
+    let mut child_reaped = external_child_watch;
     loop {
         if !child_reaped {
             let mut status = 0;
@@ -474,6 +492,63 @@ mod tests {
             row.contains("30") && row.contains("100"),
             "stty size output was {row:?}"
         );
+    }
+
+    #[test]
+    fn external_watcher_keeps_exit_status_after_close_and_forced_kill() {
+        for ignore_hup in [false, true] {
+            let script = if ignore_hup {
+                "trap '' HUP TERM; printf ready; while :; do sleep 1; done"
+            } else {
+                "trap 'exit 23' HUP; printf ready; while :; do sleep 1; done"
+            };
+            let mut pty = Pty::spawn(&["sh", "-c", script], None, &[], 80, 24).unwrap();
+            let child = pty.child_pid();
+            let mut ready = [0; 5];
+            let mut received = 0;
+            while received < ready.len() {
+                let n = pty.read(&mut ready[received..]).unwrap();
+                assert!(n > 0, "child exited before readiness");
+                received += n;
+            }
+            assert_eq!(&ready, b"ready");
+            pty.set_external_child_watch();
+            assert_eq!(
+                pty.try_wait().unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+            pty.close_async();
+            // Let the cleanup thread run first: it must not steal the status.
+            std::thread::sleep(Duration::from_millis(100));
+            let deadline = Instant::now() + CLOSE_GRACE + Duration::from_secs(3);
+            let mut status = 0;
+            loop {
+                let rc = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
+                assert!(
+                    rc >= 0,
+                    "exit status was stolen: {}",
+                    io::Error::last_os_error()
+                );
+                if rc == child {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    unsafe {
+                        libc::kill(-child, libc::SIGKILL);
+                        libc::waitpid(child, &mut status, 0);
+                    }
+                    panic!("PTY cleanup did not terminate child");
+                }
+                std::thread::sleep(REAP_POLL_INTERVAL);
+            }
+            if ignore_hup {
+                assert!(libc::WIFSIGNALED(status));
+                assert_eq!(libc::WTERMSIG(status), libc::SIGKILL);
+            } else {
+                assert!(libc::WIFEXITED(status));
+                assert_eq!(libc::WEXITSTATUS(status), 23);
+            }
+        }
     }
 
     #[test]

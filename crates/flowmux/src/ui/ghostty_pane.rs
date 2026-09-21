@@ -1051,7 +1051,7 @@ impl GhosttyPane {
         // lifecycle); `watch_child` lets VTE reap the child and fire
         // `child-exited` with the real status.
         let (init_cols, init_rows): (u16, u16) = (80, 24);
-        let pty = flowmux_terminal::pty::Pty::spawn(
+        let mut pty = flowmux_terminal::pty::Pty::spawn(
             &argv_refs,
             cwd.as_deref(),
             &extra_env,
@@ -1071,6 +1071,7 @@ impl GhosttyPane {
         let vpty =
             vte::Pty::foreign_sync(owned, gtk::gio::Cancellable::NONE).expect("vte foreign pty");
         term.set_pty(Some(&vpty));
+        pty.set_external_child_watch();
         term.watch_child(glib::Pid(child_pid));
 
         Self {
