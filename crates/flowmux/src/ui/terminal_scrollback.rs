@@ -186,12 +186,11 @@ pub(crate) fn vte_html_pixel_rows(
     html: &str,
     columns: usize,
 ) -> Result<Vec<Vec<VtePixelRun>>, String> {
-    let parsed = parse_vte_html(html)?;
     let columns = columns.max(1);
     let mut rows: Vec<Vec<VtePixelRun>> = vec![Vec::new()];
     let mut column: usize = 0;
-    for run in parsed.runs {
-        for ch in run.text.chars() {
+    visit_vte_html(html, |style, text| {
+        for ch in text.chars() {
             if ch == '\n' {
                 rows.push(Vec::new());
                 column = 0;
@@ -204,11 +203,9 @@ pub(crate) fn vte_html_pixel_rows(
                     rows.push(Vec::new());
                     column = 0;
                 }
-                let color = run.style.background.or_else(|| {
-                    (!ch.is_whitespace())
-                        .then_some(run.style.foreground)
-                        .flatten()
-                });
+                let color = style
+                    .background
+                    .or_else(|| (!ch.is_whitespace()).then_some(style.foreground).flatten());
                 if color.is_some() || !ch.is_whitespace() {
                     let row = rows.last_mut().expect("rows always contains one entry");
                     if row.last().is_some_and(|previous| {
@@ -226,7 +223,7 @@ pub(crate) fn vte_html_pixel_rows(
                 column += width;
             }
         }
-    }
+    })?;
     Ok(rows)
 }
 
@@ -241,10 +238,15 @@ pub(crate) fn terminal_cell_width(ch: char) -> usize {
 }
 
 fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
+    let mut runs = Vec::new();
+    visit_vte_html(html, |style, text| push_run(&mut runs, style, text))?;
+    Ok(ParsedSnapshot { runs })
+}
+
+fn visit_vte_html(html: &str, mut visit: impl FnMut(TextStyle, &str)) -> Result<(), String> {
     let mut reader = Reader::from_str(html);
     reader.config_mut().trim_text(false);
     let mut styles = vec![TextStyle::default()];
-    let mut runs = Vec::new();
     let mut saw_pre = false;
     let mut inside_pre = false;
 
@@ -276,8 +278,7 @@ fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
             Event::Text(text) => {
                 let text = text.decode().map_err(|error| error.to_string())?;
                 if inside_pre {
-                    push_run(
-                        &mut runs,
+                    visit(
                         *styles.last().expect("style stack is never empty"),
                         text.as_ref(),
                     );
@@ -300,19 +301,14 @@ fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
                         .ok_or_else(|| format!("unsupported VTE HTML entity: &{name};"))?
                         .to_string()
                 };
-                push_run(
-                    &mut runs,
-                    *styles.last().expect("style stack is never empty"),
-                    &value,
-                );
+                visit(*styles.last().expect("style stack is never empty"), &value);
             }
             Event::CData(text) => {
                 if !inside_pre {
                     return Err("VTE HTML contained CDATA outside <pre>".into());
                 }
                 let text = text.decode().map_err(|error| error.to_string())?;
-                push_run(
-                    &mut runs,
+                visit(
                     *styles.last().expect("style stack is never empty"),
                     text.as_ref(),
                 );
@@ -328,7 +324,7 @@ fn parse_vte_html(html: &str) -> Result<ParsedSnapshot, String> {
     if !saw_pre || inside_pre || styles.len() != 1 {
         return Err("VTE HTML had an incomplete <pre> root".into());
     }
-    Ok(ParsedSnapshot { runs })
+    Ok(())
 }
 
 fn style_for_start(parent: TextStyle, start: &BytesStart<'_>) -> Result<TextStyle, String> {

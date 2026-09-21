@@ -23,6 +23,7 @@ struct MinimapState {
     columns: Cell<usize>,
     text_row_offset: Cell<i64>,
     pixel_rows: RefCell<Vec<Vec<VtePixelRun>>>,
+    raster: RefCell<Option<(gtk::cairo::ImageSurface, gtk::gdk::RGBA)>>,
 }
 
 /// A cell-level preview of a movable VTE scrollback window.
@@ -74,6 +75,7 @@ impl TerminalMinimap {
                 source.remove();
             }
             *self.state.pixel_rows.borrow_mut() = Vec::new();
+            self.state.raster.borrow_mut().take();
             self.state.preview_offset.set(0);
             self.state.preview_rows.set(0);
             self.area.set_visible(false);
@@ -137,47 +139,74 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         let _ = cr.paint();
 
         let color = area.color();
-        let columns = state.columns.get().max(1);
-        let cell_width = f64::from(width) / columns as f64;
-        cr.set_antialias(gtk::cairo::Antialias::None);
-        for (row, runs) in state
-            .pixel_rows
-            .borrow()
-            .iter()
-            .take(state.preview_rows.get())
-            .enumerate()
-        {
-            for run in runs {
-                let start = run.column.min(columns);
-                let end = run.column.saturating_add(run.len).min(columns);
-                if start == end {
-                    continue;
+        let scale = area.scale_factor().max(1);
+        let mut raster = state.raster.borrow_mut();
+        let rebuild = raster.as_ref().is_none_or(|(surface, foreground)| {
+            surface.width() != width * scale
+                || surface.height() != height * scale
+                || surface.device_scale().0 != f64::from(scale)
+                || *foreground != color
+        });
+        if rebuild {
+            let Ok(surface) = gtk::cairo::ImageSurface::create(
+                gtk::cairo::Format::ARgb32,
+                width * scale,
+                height * scale,
+            ) else {
+                return;
+            };
+            surface.set_device_scale(f64::from(scale), f64::from(scale));
+            let Ok(cr) = gtk::cairo::Context::new(&surface) else {
+                return;
+            };
+            let columns = state.columns.get().max(1);
+            let cell_width = f64::from(width) / columns as f64;
+            cr.set_antialias(gtk::cairo::Antialias::None);
+            for (row, runs) in state
+                .pixel_rows
+                .borrow()
+                .iter()
+                .take(state.preview_rows.get())
+                .enumerate()
+            {
+                for run in runs {
+                    let start = run.column.min(columns);
+                    let end = run.column.saturating_add(run.len).min(columns);
+                    if start == end {
+                        continue;
+                    }
+                    let (red, green, blue) = run.color.map_or_else(
+                        || {
+                            (
+                                color.red() as f64,
+                                color.green() as f64,
+                                color.blue() as f64,
+                            )
+                        },
+                        |[red, green, blue]| {
+                            (
+                                f64::from(red) / 255.0,
+                                f64::from(green) / 255.0,
+                                f64::from(blue) / 255.0,
+                            )
+                        },
+                    );
+                    cr.set_source_rgb(red, green, blue);
+                    cr.rectangle(
+                        start as f64 * cell_width,
+                        row as f64,
+                        (end - start) as f64 * cell_width,
+                        1.0,
+                    );
+                    let _ = cr.fill();
                 }
-                let (red, green, blue) = run.color.map_or_else(
-                    || {
-                        (
-                            color.red() as f64,
-                            color.green() as f64,
-                            color.blue() as f64,
-                        )
-                    },
-                    |[red, green, blue]| {
-                        (
-                            f64::from(red) / 255.0,
-                            f64::from(green) / 255.0,
-                            f64::from(blue) / 255.0,
-                        )
-                    },
-                );
-                cr.set_source_rgb(red, green, blue);
-                cr.rectangle(
-                    start as f64 * cell_width,
-                    row as f64,
-                    (end - start) as f64 * cell_width,
-                    1.0,
-                );
-                let _ = cr.fill();
             }
+
+            *raster = Some((surface, color));
+        }
+        if let Some((surface, _)) = raster.as_ref() {
+            let _ = cr.set_source_surface(surface, 0.0, 0.0);
+            let _ = cr.paint();
         }
 
         let Some(adj) = term.vadjustment() else {
@@ -328,6 +357,7 @@ fn install_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
                 source.remove();
             }
             *state.pixel_rows.borrow_mut() = Vec::new();
+            state.raster.borrow_mut().take();
             state.preview_rows.set(0);
         });
     }
@@ -509,6 +539,7 @@ fn refresh_visible_screen(
 fn replace_pixel_rows(state: &MinimapState, mut rows: Vec<Vec<VtePixelRun>>, limit: usize) {
     rows.truncate(limit);
     *state.pixel_rows.borrow_mut() = rows;
+    state.raster.borrow_mut().take();
 }
 
 fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height: f64) -> bool {
@@ -535,7 +566,7 @@ fn scroll_to_pointer(term: &vte::Terminal, state: &MinimapState, y: f64, height:
 fn scroll_preview(
     term: &vte::Terminal,
     area: &gtk::DrawingArea,
-    state: &MinimapState,
+    state: &Rc<MinimapState>,
     delta_y: f64,
 ) -> bool {
     if state.alternate_screen.get() || delta_y == 0.0 {
@@ -555,7 +586,7 @@ fn scroll_preview(
     let offset =
         (window.offset - delta_y.signum() as i64 * PREVIEW_SCROLL_ROWS).clamp(0, window.max_offset);
     if offset != state.preview_offset.replace(offset) {
-        refresh_now(term, area, state);
+        schedule_refresh(term, area, state.clone());
     }
     true
 }

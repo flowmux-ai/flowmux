@@ -10,7 +10,7 @@
 | 개선안 | 진행 상태 |
 |---|---|
 | alternate 화면 전환 시 geometry 고정 | 구현 및 실제 GUI 검증 완료 |
-| 미니맵 작업량/그리기 비용 | 대기 |
+| 미니맵 작업량/그리기 비용 | 구현 및 실제 GUI A/B 완료 |
 | 워크스페이스 pane/surface 복원 | 구현 및 실제 GUI 검증 완료 |
 | 전체 스크롤백 저장 | 구현 및 실제 GUI 검증 완료 |
 | PTY backpressure 중 입력/resize | 대기 |
@@ -44,3 +44,11 @@
 - 수정: 세 조건 모두 true. `/tmp/fm-gui-6cl85fbe/scrollback.json`. 테스트 전용 창을 실제 저장·종료·복원해 확인했다.
 - 회귀: styled replay, 한글, 64행 경계를 넘는 soft wrap, 대량 출력의 저장 용량 제한을 포함한 관련 10개 테스트 통과.
 - 판단: 화면 밖의 기록이 기존 용량 한도 안에서 복원되므로 유지.
+
+**미니맵 CPU**
+
+- 변경: HTML을 visitor로 읽어 중간 StyledRun 문자열 할당을 없앴다. 내용은 device scale/크기/foreground를 반영한 Cairo 이미지에 캐시하고 viewport highlight만 다시 그린다. wheel preview도 기존 100ms 스케줄러로 합친다. 표시하는 행 수와 색상 정보는 유지한다.
+- 동일 fast 최적화 빌드, 30Hz 컬러 출력: Xvfb/Cairo CPU 29.8% → 21.0%, 실제 데스크톱 42.8% → 27.2%. 일반 출력은 각각 9.2% → 6.6%, 10.6% → 7.0%. OFF 컬러 기준은 6.0% → 6.0%, 7.2% → 7.6%.
+- 결과: `/tmp/flowmux-perf-20260921/{baseline,updated}-fast-results.json`, `{baseline,updated}-native-fast-results.json`. 실제 GUI 스크린샷 `/tmp/fm-gui-4wy8l6j5/colored.png`에서 컬러 미니맵 표시 확인.
+- 검증: minimap 13개 + scrollback/parser 10개 테스트 통과. 한글 cell 폭, 배경색, 화면 전환, resize/reflow, clear-scrollback, 숨김/다시 표시 범위 포함.
+- 판단: 두 renderer 환경에서 CPU 감소 확인(컬러 출력 약 30%/36% 감소), 유지. VTE HTML extraction 자체 비용은 남는다.
