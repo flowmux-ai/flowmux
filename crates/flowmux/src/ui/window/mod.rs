@@ -5210,6 +5210,27 @@ mod tests {
     async fn program_title_persists_until_agent_exit_without_cwd_change() {
         use vte::prelude::TerminalExt;
 
+        async fn dispatch_title_event(
+            controller: &WindowController,
+            rx: &crate::bridge::BridgeReceiver,
+            expected: &str,
+        ) {
+            glib::future_with_timeout(Duration::from_secs(5), async {
+                loop {
+                    let command = rx.recv().await.expect("title bridge must stay open");
+                    if let GtkCommand::TerminalTitleChanged { title, .. } = &command {
+                        let matched = title == expected;
+                        controller.dispatch(command).await;
+                        if matched {
+                            break;
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for OSC title {expected:?}"));
+        }
+
         adw::init().expect("libadwaita should initialize in GTK test");
         let cwd = std::env::temp_dir().join("flowmux-program-title-poll");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -5232,6 +5253,9 @@ mod tests {
             gtk::CssProvider::new(),
             None,
         );
+        // Keep a live child for /proc cwd polling without login-shell startup
+        // OSC titles racing the synthetic program titles below.
+        controller.options.borrow_mut().default_shell = Some("/bin/cat".into());
         controller.render_workspace(&ws);
         controller.focused_pane.set(Some(pane));
         controller.dispatch(GtkCommand::RefreshWindowTitle).await;
@@ -5242,12 +5266,7 @@ mod tests {
         // Use actual VTE OSC parsing, including its duplicate-title coalescer.
         let terminal = controller.pane_registry.borrow().terminals[&surface].clone();
         terminal.widget.feed(b"\x1b]2;Claude Code\x07");
-        glib::timeout_future(Duration::from_millis(600)).await;
-        while let Ok(command) = rx.try_recv() {
-            if matches!(command, GtkCommand::TerminalTitleChanged { .. }) {
-                controller.dispatch(command).await;
-            }
-        }
+        dispatch_title_event(&controller, &rx, "Claude Code").await;
         assert_eq!(
             store.surface_title(pane, surface).await.as_deref(),
             Some("Claude Code")
@@ -5308,30 +5327,18 @@ mod tests {
             .iter()
             .any(|(id, title)| *id == ws_id && title == "flowmux-program-title-poll"));
 
-        glib::timeout_future(Duration::from_millis(600)).await;
+        dispatch_title_event(&controller, &rx, &restored).await;
         assert_eq!(
             terminal.widget.window_title().as_deref(),
             Some(restored.as_str())
         );
-        while rx.try_recv().is_ok() {}
 
         // The same agent title must be delivered again on restart.
         store
             .reconcile_process_agents(&[(surface, Some("claude"))])
             .await;
         terminal.widget.feed(b"\x1b]2;Claude Code\x07");
-        glib::timeout_future(Duration::from_millis(600)).await;
-        let mut delivered = false;
-        while let Ok(command) = rx.try_recv() {
-            if matches!(command, GtkCommand::TerminalTitleChanged { .. }) {
-                delivered = true;
-                controller.dispatch(command).await;
-            }
-        }
-        assert!(
-            delivered,
-            "restarting the same agent must emit its title again"
-        );
+        dispatch_title_event(&controller, &rx, "Claude Code").await;
         assert_eq!(
             store.get_workspace(ws_id).await.unwrap().name,
             "Claude Code"

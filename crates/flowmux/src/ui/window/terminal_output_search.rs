@@ -608,12 +608,37 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
+    async fn wait_for_retained_output(
+        terminal: &crate::ui::ghostty_pane::GhosttyPane,
+        ready: impl Fn(&str) -> bool,
+    ) {
+        // VTE processes feed asynchronously, including for never-mapped tabs.
+        // A search snapshot taken before then stays empty after output arrives.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let (first, last) = terminal.output_search_range();
+            let retained = terminal.output_search_text(first, last);
+            if retained.as_deref().is_some_and(&ready) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "VTE did not retain the search fixture: rows {first}..{last}, text {retained:?}"
+            );
+            glib::timeout_future(Duration::from_millis(25)).await;
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     #[gtk::test]
     async fn output_search_finds_hidden_tabs_and_navigates_to_retained_wrapped_output() {
         let (controller, foreground, _) = super::super::tests::build_single_workspace_controller(
             "com.flowmux.App.UiTest.OutputSearch",
         )
         .await;
+        // The fixture supplies output directly; an interactive shell's startup
+        // or prompt output must not overwrite it.
+        controller.options.borrow_mut().default_shell = Some("/bin/cat".into());
         let background = controller
             .store
             .create_workspace(Some("Background".into()), std::env::temp_dir())
@@ -649,7 +674,10 @@ mod tests {
                 .collect::<String>()
         );
         terminal.widget.feed(output.as_bytes());
-        glib::timeout_future(Duration::from_millis(100)).await;
+        wait_for_retained_output(&terminal, |text| {
+            text.contains("first NEEDLE") && text.contains(&long) && text.contains("filler 149")
+        })
+        .await;
         controller.activate_workspace(foreground).await;
         controller.show_terminal_output_search();
         let dialog = gtk::Window::list_toplevels()
@@ -725,7 +753,13 @@ mod tests {
                 .collect::<String>()
                 .as_bytes(),
         );
-        glib::timeout_future(Duration::from_millis(100)).await;
+        wait_for_retained_output(&terminal, |text| {
+            text.lines()
+                .filter(|line| line.starts_with("MORE_ITEM "))
+                .count()
+                == 510
+        })
+        .await;
         controller.show_terminal_output_search();
         let expanded_dialog = gtk::Window::list_toplevels()
             .into_iter()
@@ -767,7 +801,11 @@ mod tests {
         terminal
             .widget
             .feed(format!("{}CANCEL_TARGET\r\n", "padding\r\n".repeat(4000)).as_bytes());
-        glib::timeout_future(Duration::from_millis(100)).await;
+        wait_for_retained_output(&terminal, |text| {
+            text.contains("CANCEL_TARGET")
+                && text.lines().filter(|line| *line == "padding").count() == 4000
+        })
+        .await;
         controller.activate_workspace(foreground).await;
         controller.show_terminal_output_search();
         let cancel_dialog = gtk::Window::list_toplevels()
