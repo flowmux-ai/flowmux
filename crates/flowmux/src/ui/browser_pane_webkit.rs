@@ -31,6 +31,7 @@ pub struct BrowserPane {
     zoom: Rc<Cell<f64>>,
     zoom_label: gtk::Button,
     find_entry: gtk::SearchEntry,
+    _downloads: DownloadManager,
     _download_signal: Rc<NetworkSessionSignal>,
     pub refs: Rc<RefCell<RefStore>>,
     /// Scope key — derived from the surface id so multiple browser
@@ -614,6 +615,7 @@ impl BrowserPane {
             zoom,
             zoom_label,
             find_entry,
+            _downloads: downloads,
             _download_signal: download_signal,
             refs,
             ref_scope,
@@ -1110,6 +1112,11 @@ mod tests {
         );
         let root = pane.root.downgrade();
         let web_view = pane.web_view.downgrade();
+        let downloads = pane._downloads.downgrade();
+        assert!(
+            downloads.upgrade().is_some(),
+            "live browser tab must retain its download manager"
+        );
 
         drop(pane);
 
@@ -1120,6 +1127,10 @@ mod tests {
         assert!(
             web_view.upgrade().is_none(),
             "closed browser tab retained its WebView"
+        );
+        assert!(
+            downloads.upgrade().is_none(),
+            "closed browser tab retained its download manager"
         );
     }
 
