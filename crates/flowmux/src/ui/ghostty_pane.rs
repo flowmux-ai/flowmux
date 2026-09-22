@@ -1276,7 +1276,9 @@ fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -
 /// before dispatch.
 const URL_REGEX_PATTERN: &str = r#"(?i)(?:https?|ftp|file)://[^\s<>"'`]+"#;
 const IMAGE_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`])(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:gif|svg|png|jpe?g|webp?|lottie|json)"#;
-const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`])(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:md|markdown|mdown|mkd|mkdn)"#;
+// An opening parenthesis can delimit a link, but parentheses inside a path
+// remain valid filename characters.
+const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`(])(?!\()(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:md|markdown|mdown|mkd|mkdn)"#;
 
 /// PCRE2 compile flags.
 ///   * PCRE2_MULTILINE (0x400): keep matches working across wrapped terminal output.
@@ -3189,6 +3191,49 @@ mod tests {
     fn markdown_path_regex_compiles() {
         vte::Regex::for_match(MARKDOWN_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
             .expect("markdown path regex compiles");
+    }
+
+    #[gtk::test]
+    async fn markdown_links_exclude_surrounding_parentheses() {
+        let term = vte::Terminal::new();
+        let regex = vte::Regex::for_match(MARKDOWN_PATH_REGEX_PATTERN, URL_REGEX_COMPILE_FLAGS)
+            .expect("markdown path regex compiles");
+        term.match_add_regex(&regex, 0);
+        let window = gtk::Window::new();
+        window.set_default_size(800, 600);
+        window.set_child(Some(&term));
+        window.present();
+
+        let cases = [
+            ("(somepath/file.md)", "somepath/file.md"),
+            ("(/tmp/file.md)", "/tmp/file.md"),
+            ("(~/file.md)", "~/file.md"),
+            ("((../file.md)),", "../file.md"),
+            ("(docs(v2)/file(draft).md)", "docs(v2)/file(draft).md"),
+            ("docs(v2)/file(draft).md", "docs(v2)/file(draft).md"),
+            ("README.md", "README.md"),
+        ];
+        for (line, _) in cases {
+            term.feed(format!("{line}\r\n").as_bytes());
+        }
+        glib::timeout_future(Duration::from_millis(100)).await;
+
+        for (row, (line, expected)) in cases.iter().enumerate() {
+            let start = line.find(expected).unwrap();
+            for column in 0..line.len() {
+                let (matched, _) = term.check_match_at(
+                    (column as f64 + 0.5) * term.char_width() as f64,
+                    (row as f64 + 0.5) * term.char_height() as f64,
+                );
+                let in_path = (start..start + expected.len()).contains(&column);
+                assert_eq!(
+                    matched.as_deref(),
+                    in_path.then_some(*expected),
+                    "{line}: column {column}"
+                );
+            }
+        }
+        window.close();
     }
 
     #[test]
