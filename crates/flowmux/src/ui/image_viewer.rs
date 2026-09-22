@@ -21,6 +21,7 @@ const MAX_VIEW_WIDTH: u32 = 1200;
 const MAX_VIEW_HEIGHT: u32 = 900;
 const DEFAULT_LOTTIE_WIDTH: u32 = 640;
 const DEFAULT_LOTTIE_HEIGHT: u32 = 480;
+const MAX_LOTTIE_BYTES: u64 = 16 * 1024 * 1024;
 
 pub fn open_image_viewer(parent: &adw::ApplicationWindow, path: PathBuf) {
     let content = match load_viewer_content(&path) {
@@ -402,12 +403,22 @@ fn render_native_with_size(
 }
 
 struct ThorvgAnimationRenderer {
+    // Fields drop in declaration order: the canvas releases its picture
+    // reference before the animation, and the engine outlives both.
     canvas: ThorvgCanvas,
-    animation: tvg::Tvg_Animation,
+    animation: ThorvgAnimation,
     current_frame: f32,
     total_frames: f32,
     duration: f32,
     _engine: ThorvgEngine,
+}
+
+struct ThorvgAnimation(tvg::Tvg_Animation);
+
+impl Drop for ThorvgAnimation {
+    fn drop(&mut self) {
+        unsafe { tvg::tvg_animation_del(self.0) };
+    }
 }
 
 impl ThorvgAnimationRenderer {
@@ -417,12 +428,10 @@ impl ThorvgAnimationRenderer {
         if animation.is_null() {
             return Err("failed to allocate ThorVG animation".to_string());
         }
+        let animation = ThorvgAnimation(animation);
 
-        let picture = unsafe { tvg::tvg_animation_get_picture(animation) };
+        let picture = unsafe { tvg::tvg_animation_get_picture(animation.0) };
         if picture.is_null() {
-            unsafe {
-                tvg::tvg_animation_del(animation);
-            }
             return Err("ThorVG animation has no picture".to_string());
         }
 
@@ -438,58 +447,33 @@ impl ThorvgAnimationRenderer {
                 true,
             )
         };
-        if let Err(err) = check(load, "load Lottie") {
-            unsafe {
-                tvg::tvg_animation_del(animation);
-            }
-            return Err(err);
-        }
+        check(load, "load Lottie")?;
 
         let (source_width, source_height) = picture_size(picture)
             .unwrap_or((DEFAULT_LOTTIE_WIDTH as f32, DEFAULT_LOTTIE_HEIGHT as f32));
         let (width, height) = fit_size(source_width as u32, source_height as u32);
-        if let Err(err) = check(
+        check(
             unsafe { tvg::tvg_picture_set_size(picture, width as f32, height as f32) },
             "set Lottie size",
-        ) {
-            unsafe {
-                tvg::tvg_animation_del(animation);
-            }
-            return Err(err);
-        }
+        )?;
 
-        let mut canvas = match ThorvgCanvas::new(width, height) {
-            Ok(canvas) => canvas,
-            Err(err) => {
-                unsafe {
-                    tvg::tvg_animation_del(animation);
-                }
-                return Err(err);
-            }
-        };
-        unsafe {
-            tvg::tvg_paint_ref(picture);
-        }
-        if let Err(err) = check(
+        let mut canvas = ThorvgCanvas::new(width, height)?;
+        // The animation and canvas each own a reference; an extra ref here
+        // survives both destructors and retains the picture and renderer.
+        check(
             unsafe { tvg::tvg_canvas_add(canvas.raw, picture) },
             "add Lottie",
-        ) {
-            unsafe {
-                tvg::tvg_paint_unref(picture, false);
-                tvg::tvg_animation_del(animation);
-            }
-            return Err(err);
-        }
+        )?;
 
-        let total_frames = animation_float(animation, tvg::tvg_animation_get_total_frame)
+        let total_frames = animation_float(animation.0, tvg::tvg_animation_get_total_frame)
             .unwrap_or(0.0)
             .max(1.0);
-        let duration = animation_float(animation, tvg::tvg_animation_get_duration)
+        let duration = animation_float(animation.0, tvg::tvg_animation_get_duration)
             .unwrap_or(0.0)
             .max(0.0);
 
         check_frame_set(
-            unsafe { tvg::tvg_animation_set_frame(animation, 0.0) },
+            unsafe { tvg::tvg_animation_set_frame(animation.0, 0.0) },
             "set initial Lottie frame",
         )?;
         canvas.render()?;
@@ -522,18 +506,9 @@ impl ThorvgAnimationRenderer {
         if self.current_frame >= self.total_frames {
             self.current_frame = 0.0;
         }
-        let set = unsafe { tvg::tvg_animation_set_frame(self.animation, self.current_frame) };
+        let set = unsafe { tvg::tvg_animation_set_frame(self.animation.0, self.current_frame) };
         check_frame_set(set, "set Lottie frame")?;
         self.canvas.render()
-    }
-}
-
-impl Drop for ThorvgAnimationRenderer {
-    fn drop(&mut self) {
-        self.canvas.destroy();
-        unsafe {
-            tvg::tvg_animation_del(self.animation);
-        }
     }
 }
 
@@ -664,8 +639,30 @@ fn read_lottie_data(path: &Path) -> Result<Vec<u8>, String> {
     {
         read_dotlottie_json(path)
     } else {
-        std::fs::read(path).map_err(|err| format!("read failed: {err}"))
+        let file = File::open(path).map_err(|err| format!("open Lottie JSON failed: {err}"))?;
+        let size = file
+            .metadata()
+            .map_err(|err| format!("inspect Lottie JSON failed: {err}"))?
+            .len();
+        read_lottie_json(file, size)
     }
+}
+
+fn read_lottie_json(reader: impl Read, size: u64) -> Result<Vec<u8>, String> {
+    let too_large = || "Lottie JSON exceeds the 16 MiB limit".to_string();
+    if size > MAX_LOTTIE_BYTES {
+        return Err(too_large());
+    }
+    let mut data = Vec::new();
+    // Check actual bytes too: a file can grow, or ZIP metadata can be wrong.
+    reader
+        .take(MAX_LOTTIE_BYTES + 1)
+        .read_to_end(&mut data)
+        .map_err(|err| format!("read Lottie JSON failed: {err}"))?;
+    if data.len() as u64 > MAX_LOTTIE_BYTES {
+        return Err(too_large());
+    }
+    Ok(data)
 }
 
 fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
@@ -675,7 +672,7 @@ fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
 
     let mut fallback = None;
     for index in 0..archive.len() {
-        let mut entry = archive
+        let entry = archive
             .by_index(index)
             .map_err(|err| format!("read .lottie entry failed: {err}"))?;
         let name = entry.name().to_string();
@@ -683,10 +680,8 @@ fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
             continue;
         }
 
-        let mut data = Vec::new();
-        entry
-            .read_to_end(&mut data)
-            .map_err(|err| format!("read .lottie JSON failed: {err}"))?;
+        let size = entry.size();
+        let data = read_lottie_json(entry, size)?;
         if name.starts_with("animations/") {
             return Ok(data);
         }
@@ -943,10 +938,67 @@ mod tests {
         .expect("write lottie");
 
         let mut renderer = ThorvgAnimationRenderer::new(&path).expect("render lottie");
+        let picture = unsafe { tvg::tvg_animation_get_picture(renderer.animation.0) };
+        let references = unsafe { tvg::tvg_paint_ref(picture) };
+        unsafe { tvg::tvg_paint_unref(picture, false) };
+        assert_eq!(
+            references, 3,
+            "only the animation and canvas retain the picture"
+        );
         let frame = renderer.advance().expect("advance lottie");
 
         assert_eq!((frame.width, frame.height), (10, 10));
         assert_eq!(frame.buffer.len(), 100);
+    }
+
+    #[test]
+    fn lottie_renderer_releases_native_resources_on_read_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing.json");
+        let corrupt = dir.path().join("corrupt.lottie");
+        std::fs::write(&corrupt, b"not a zip archive").expect("write corrupt archive");
+
+        // Repeated failures exercise native ownership under LeakSanitizer.
+        for _ in 0..16 {
+            assert!(ThorvgAnimationRenderer::new(&missing).is_err());
+            assert!(ThorvgAnimationRenderer::new(&corrupt).is_err());
+        }
+    }
+
+    #[test]
+    fn lottie_json_size_limit_covers_plain_compressed_and_growing_inputs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plain = dir.path().join("large.json");
+        File::create(&plain)
+            .unwrap()
+            .set_len(MAX_LOTTIE_BYTES + 1)
+            .unwrap();
+        assert!(read_lottie_data(&plain).unwrap_err().contains("16 MiB"));
+
+        let compressed = dir.path().join("large.lottie");
+        let mut zip = zip::ZipWriter::new(File::create(&compressed).unwrap());
+        zip.start_file(
+            "animations/a.json",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
+        std::io::copy(
+            &mut std::io::repeat(b' ').take(MAX_LOTTIE_BYTES + 1),
+            &mut zip,
+        )
+        .unwrap();
+        zip.finish().unwrap();
+        assert!(compressed.metadata().unwrap().len() < MAX_LOTTIE_BYTES / 100);
+        assert!(read_lottie_data(&compressed)
+            .unwrap_err()
+            .contains("16 MiB"));
+
+        // Do not trust the initial size when the stream produces more bytes.
+        assert!(read_lottie_json(std::io::repeat(b' '), 0)
+            .unwrap_err()
+            .contains("16 MiB"));
+        assert_eq!(read_lottie_json(&b"{}"[..], 2).unwrap(), b"{}");
     }
 
     #[test]
