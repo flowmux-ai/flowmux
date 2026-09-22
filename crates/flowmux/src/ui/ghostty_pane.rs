@@ -1276,9 +1276,15 @@ fn wrap_argv_with_pty_tee(argv: Vec<String>, pane: PaneId, surface: SurfaceId) -
 /// before dispatch.
 const URL_REGEX_PATTERN: &str = r#"(?i)(?:https?|ftp|file)://[^\s<>"'`]+"#;
 const IMAGE_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`])(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:gif|svg|png|jpe?g|webp?|lottie|json)"#;
-// An opening parenthesis can delimit a link, but parentheses inside a path
-// remain valid filename characters.
-const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?i)(?<![^\s<>"'`(])(?!\()(?:/|~/|\.{1,2}/)?(?:[^\s<>"'`:]+/)*[^\s<>"'`:]+\.(?:md|markdown|mdown|mkd|mkdn)"#;
+// A leading parenthesis belongs to the filename only when its balanced group
+// ends before the extension. Otherwise start inside the surrounding delimiter.
+// The recursive group also preserves names such as `(draft(v2)).md`.
+// Possessive inner text avoids exhausting VTE's match limit on wrappers.
+const MARKDOWN_PATH_REGEX_PATTERN: &str = r#"(?ix)
+    (?<![^\s<>"'`(])
+    (?:(?<paren>\((?:[^()\s<>"'`:]++|(?&paren))*\))|[^\s<>"'`:(])
+    [^\s<>"'`:]*\.(?:md|markdown|mdown|mkd|mkdn)
+"#;
 
 /// PCRE2 compile flags.
 ///   * PCRE2_MULTILINE (0x400): keep matches working across wrapped terminal output.
@@ -3211,6 +3217,11 @@ mod tests {
             ("((../file.md)),", "../file.md"),
             ("(docs(v2)/file(draft).md)", "docs(v2)/file(draft).md"),
             ("docs(v2)/file(draft).md", "docs(v2)/file(draft).md"),
+            ("(draft).md", "(draft).md"),
+            ("((draft).md)", "(draft).md"),
+            ("(draft)/file.md", "(draft)/file.md"),
+            ("((draft(v2)).md)", "(draft(v2)).md"),
+            ("(somepath/file.md", "somepath/file.md"),
             ("README.md", "README.md"),
         ];
         for (line, _) in cases {
