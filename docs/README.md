@@ -9,6 +9,7 @@
 - [Claude and Codex session history](agent-sessions.md)
 - [Agent CLI and browser automation](../AGENTS.md)
 - [Development guide](../CLAUDE.md)
+- [Memory sanitizer checks](sanitizers.md)
 - [Contributing](../.github/CONTRIBUTING.md)
 - [Release history](https://github.com/flowmux-ai/flowmux/releases)
 

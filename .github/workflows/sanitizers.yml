@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Sanitizers
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  address:
+    name: Linux ASan and LSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned Rust sanitizer toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-21
+          components: rust-src
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
+            libvte-2.91-gtk4-dev libwebkitgtk-6.0-dev libssl-dev \
+            libssh2-1-dev libdbus-1-dev meson ninja-build dbus-x11 xvfb tmux llvm-18
+          sudo ./scripts/install-thorvg.sh
+      - name: Headless ASan and leak checks
+        run: bash scripts/test-sanitizers.sh headless
+      - name: Native Lottie ASan and leak checks
+        run: bash scripts/test-sanitizers.sh lottie -- --test-threads=1
+      - name: GUI ASan checks
+        run: bash scripts/test-sanitizers.sh gui -- --test-threads=1

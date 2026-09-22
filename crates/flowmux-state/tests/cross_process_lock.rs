@@ -12,25 +12,19 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 fn helper_path() -> PathBuf {
-    // Examples land in the same target dir as the test binary.
-    // Walk up from the test exe (`target/debug/deps/<test>-HASH`) to
-    // find the example next door (`target/debug/examples/`).
+    // Cargo 1.100 puts test executables below debug/build/<crate>/<hash>/out;
+    // older versions use debug/deps. Examples remain below debug/examples.
     let test_exe = std::env::current_exe().expect("current_exe");
-    let target_debug = test_exe
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("target/debug");
-    target_debug.join("examples").join("instance_lock_helper")
+    test_exe
+        .ancestors()
+        .map(|dir| dir.join("examples/instance_lock_helper"))
+        .find(|path| path.is_file())
+        .expect("examples binary missing — run cargo test -p flowmux-state")
 }
 
 #[test]
 fn second_process_observes_lock_held_by_first() {
     let helper = helper_path();
-    assert!(
-        helper.exists(),
-        "examples binary missing — run with `cargo test -p flowmux-state` so cargo builds it: {}",
-        helper.display()
-    );
     let dir = tempfile::tempdir().unwrap();
 
     let mut holder = Command::new(&helper)
@@ -51,6 +45,7 @@ fn second_process_observes_lock_held_by_first() {
         .env("XDG_STATE_HOME", dir.path())
         .output()
         .expect("spawn probe");
+    assert!(probe.status.success(), "{probe:?}");
     assert_eq!(
         String::from_utf8_lossy(&probe.stdout).trim(),
         "none",
@@ -61,13 +56,14 @@ fn second_process_observes_lock_held_by_first() {
     let mut stdin = holder.stdin.take().unwrap();
     stdin.write_all(b"x").ok();
     drop(stdin);
-    let _ = holder.wait();
+    assert!(holder.wait().expect("wait for holder").success());
 
     let after = Command::new(&helper)
         .arg("probe")
         .env("XDG_STATE_HOME", dir.path())
         .output()
         .expect("re-spawn probe");
+    assert!(after.status.success(), "{after:?}");
     assert_eq!(
         String::from_utf8_lossy(&after.stdout).trim(),
         "owner",
