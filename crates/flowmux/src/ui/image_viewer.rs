@@ -670,7 +670,7 @@ fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
     let mut archive =
         ZipArchive::new(file).map_err(|err| format!("read .lottie archive failed: {err}"))?;
 
-    let mut fallback = None;
+    let mut selected = None;
     for index in 0..archive.len() {
         let entry = archive
             .by_index(index)
@@ -680,15 +680,19 @@ fn read_dotlottie_json(path: &Path) -> Result<Vec<u8>, String> {
             continue;
         }
 
-        let size = entry.size();
-        let data = read_lottie_json(entry, size)?;
+        // Select before reading so unused JSON cannot trip the size limit.
+        selected = Some(index);
         if name.starts_with("animations/") {
-            return Ok(data);
+            break;
         }
-        fallback = Some(data);
     }
 
-    fallback.ok_or_else(|| "no Lottie JSON found in .lottie archive".to_string())
+    let index = selected.ok_or_else(|| "no Lottie JSON found in .lottie archive".to_string())?;
+    let entry = archive
+        .by_index(index)
+        .map_err(|err| format!("read .lottie entry failed: {err}"))?;
+    let size = entry.size();
+    read_lottie_json(entry, size)
 }
 
 fn picture_size(picture: tvg::Tvg_Paint) -> Option<(f32, f32)> {
@@ -976,29 +980,64 @@ mod tests {
         assert!(read_lottie_data(&plain).unwrap_err().contains("16 MiB"));
 
         let compressed = dir.path().join("large.lottie");
-        let mut zip = zip::ZipWriter::new(File::create(&compressed).unwrap());
-        zip.start_file(
-            "animations/a.json",
-            zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated),
-        )
-        .unwrap();
-        std::io::copy(
-            &mut std::io::repeat(b' ').take(MAX_LOTTIE_BYTES + 1),
-            &mut zip,
-        )
-        .unwrap();
-        zip.finish().unwrap();
-        assert!(compressed.metadata().unwrap().len() < MAX_LOTTIE_BYTES / 100);
-        assert!(read_lottie_data(&compressed)
-            .unwrap_err()
-            .contains("16 MiB"));
+        for name in ["animations/a.json", "a.json"] {
+            let mut zip = zip::ZipWriter::new(File::create(&compressed).unwrap());
+            zip.start_file(
+                name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated),
+            )
+            .unwrap();
+            std::io::copy(
+                &mut std::io::repeat(b' ').take(MAX_LOTTIE_BYTES + 1),
+                &mut zip,
+            )
+            .unwrap();
+            zip.finish().unwrap();
+            assert!(compressed.metadata().unwrap().len() < MAX_LOTTIE_BYTES / 100);
+            assert!(read_lottie_data(&compressed)
+                .unwrap_err()
+                .contains("16 MiB"));
+        }
 
         // Do not trust the initial size when the stream produces more bytes.
         assert!(read_lottie_json(std::io::repeat(b' '), 0)
             .unwrap_err()
             .contains("16 MiB"));
         assert_eq!(read_lottie_json(&b"{}"[..], 2).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn dotlottie_reader_ignores_oversized_unselected_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("sample.lottie");
+        let animation = br#"{"v":"5.7.4","fr":30}"#;
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        for names in [
+            ["themes/large.json", "animations/a.json"],
+            ["animations/a.json", "themes/large.json"],
+            // Without animations/, preserve selection of the last fallback.
+            ["themes/large.json", "a.json"],
+        ] {
+            let mut zip = zip::ZipWriter::new(File::create(&path).unwrap());
+            for name in names {
+                zip.start_file(name, options).unwrap();
+                if name == "themes/large.json" {
+                    std::io::copy(
+                        &mut std::io::repeat(b' ').take(MAX_LOTTIE_BYTES + 1),
+                        &mut zip,
+                    )
+                    .unwrap();
+                } else {
+                    zip.write_all(animation).unwrap();
+                }
+            }
+            zip.finish().unwrap();
+
+            assert_eq!(read_dotlottie_json(&path).unwrap(), animation, "{names:?}");
+        }
     }
 
     #[test]
