@@ -672,6 +672,147 @@ fn pty_tee_preserves_input_queued_before_startup() {
 }
 
 #[test]
+fn pty_tee_delivers_input_that_arrives_with_outer_eof() {
+    let tmp = tempfile::tempdir().unwrap();
+    let socket = tmp.path().join("flowmux.sock");
+    let output = tmp.path().join("received-input");
+    let _rx = spawn_fake_daemon(socket.clone());
+    let script = r#"
+import os, select, signal, sys, time, tty
+from pathlib import Path
+tty.setraw(0)
+def hup(*args):
+    data = os.read(0, 4096) if select.select([0], [], [], .3)[0] else b''
+    Path(sys.argv[1]).write_bytes(data)
+    sys.exit(0)
+signal.signal(signal.SIGHUP, hup)
+os.write(1, b'ready')
+while True: time.sleep(1)
+"#;
+    let mut child = Command::new(flowmuxctl_path())
+        .args(["pty-tee", "--", "python3", "-c", script])
+        .arg(&output)
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_SSH_TERMINAL", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+    let mut ready = [0; 5];
+    stdout.read_exact(&mut ready).unwrap();
+    assert_eq!(&ready, b"ready");
+
+    // Stop only the proxy so the next poll sees POLLIN and POLLHUP together.
+    let pid = nix::unistd::Pid::from_raw(guard.child.id() as i32);
+    nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGSTOP).unwrap();
+    assert!(matches!(
+        nix::sys::wait::waitpid(pid, Some(nix::sys::wait::WaitPidFlag::WUNTRACED)).unwrap(),
+        nix::sys::wait::WaitStatus::Stopped(..)
+    ));
+    stdin.write_all(b"last-input\n").unwrap();
+    drop(stdin);
+    nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGCONT).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = guard.child.try_wait().unwrap() {
+            assert!(status.success(), "pty-tee failed: {status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "pty-tee did not finish on EOF");
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read(output).unwrap(), b"last-input\n");
+}
+
+#[test]
+fn pty_tee_delivers_final_output_in_order_after_outer_eof() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+    // The inner shell prints its farewell only while the proxy is already
+    // shutting down; it must still follow the earlier output on stdout.
+    let script = "trap 'printf bye; exit 0' HUP; printf hello; while :; do sleep 1; done";
+
+    let mut child = Command::new(flowmuxctl_path())
+        .args(["pty-tee", "--", "sh", "-c", script])
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_SSH_TERMINAL", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn pty-tee");
+    let stdin = child.stdin.take().expect("piped stdin");
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+
+    let mut output = vec![0; 5];
+    stdout.read_exact(&mut output).expect("initial output");
+    assert_eq!(output, b"hello");
+
+    drop(stdin);
+    stdout.read_to_end(&mut output).expect("final output");
+    // The shell may report the interrupted `sleep` in between.
+    assert!(
+        output.starts_with(b"hello") && output.ends_with(b"bye"),
+        "output drained during shutdown was lost: {output:?}"
+    );
+    assert!(guard.child.wait().expect("wait pty-tee").success());
+    guard.inner_pgid = None;
+}
+
+#[test]
+fn pty_tee_shutdown_does_not_wait_for_a_stalled_outer_terminal() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+
+    let mut child = Command::new(flowmuxctl_path())
+        .args(["pty-tee", "--", "sh", "-c", "yes"])
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_SSH_TERMINAL", "1")
+        .env("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", "50")
+        .env("FLOWMUX_PTY_TEE_SIGTERM_GRACE_MS", "50")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("spawn pty-tee");
+    let _stdin = child.stdin.take();
+    // Never read stdout: the pipe and the proxy queue both fill up.
+    let _stalled_stdout = child.stdout.take();
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+    thread::sleep(Duration::from_millis(300));
+    unsafe {
+        libc::kill(guard.child.id() as i32, libc::SIGHUP);
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if guard.child.try_wait().expect("try_wait pty-tee").is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "pty-tee hung on a stalled stdout during shutdown"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
 fn pty_tee_outer_eof_kills_signal_ignoring_inner_group() {
     const POLL_STEP: Duration = Duration::from_millis(20);
     const PID_TIMEOUT: Duration = Duration::from_secs(3);

@@ -272,6 +272,7 @@ fn run_pty_pump(
     };
     let mut to_outer = VecDeque::new();
     let mut to_inner = VecDeque::new();
+    let mut outer_eof = false;
     cwd_tracker.emit_if_changed(child_pid, &mut to_outer);
 
     // 7. Pump loop.
@@ -280,7 +281,7 @@ fn run_pty_pump(
     loop {
         let mut fds = [
             libc::pollfd {
-                fd: if to_inner.len() < PENDING_BYTES {
+                fd: if !outer_eof && to_inner.len() < PENDING_BYTES {
                     libc::STDIN_FILENO
                 } else {
                     -1
@@ -350,6 +351,7 @@ fn run_pty_pump(
                     &pending,
                     &event_tx,
                     &output_refresh,
+                    &mut to_outer,
                 );
                 break;
             }
@@ -364,10 +366,13 @@ fn run_pty_pump(
             // Reap the child non-blockingly. If it's gone we drain the
             // remaining inner-master bytes below and break.
             if let Some(code) = try_reap(child_pid) {
-                let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
-                to_outer.clear();
-                let alternate_screen_exited =
-                    drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
+                let alternate_screen_exited = drain_inner(
+                    master_fd,
+                    &mut extractor,
+                    &mut input_modes,
+                    &output_refresh,
+                    &mut to_outer,
+                );
                 flush_pending(&pending, &event_tx);
                 queue_output_refresh(&event_tx, &output_refresh);
                 if alternate_screen_exited {
@@ -380,7 +385,8 @@ fn run_pty_pump(
 
         // Writable destinations participate in the same poll as input and
         // signals. A full terminal must not stall keystrokes or SIGWINCH.
-        let write_result = if fds[3].revents & (libc::POLLERR | libc::POLLHUP) != 0 {
+        let write_result = if fds[3].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
+        {
             Err(std::io::ErrorKind::BrokenPipe.into())
         } else {
             (if fds[3].revents & libc::POLLOUT != 0 {
@@ -407,6 +413,7 @@ fn run_pty_pump(
                 &pending,
                 &event_tx,
                 &output_refresh,
+                &mut to_outer,
             );
             break;
         }
@@ -420,23 +427,21 @@ fn run_pty_pump(
                 }
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof => {
-                    exit_code = terminate_inner_group(
-                        child_pid,
-                        master_fd,
-                        &mut extractor,
-                        &mut input_modes,
-                        &pending,
-                        &event_tx,
-                        &output_refresh,
-                    );
-                    break;
+                    outer_eof = true;
                 }
                 ReadOutcome::Err(e) => {
                     tracing::warn!(error = %e, "read on outer stdin failed");
                 }
             }
         }
-        if fds[0].revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+        // A pipe can report readable bytes and HUP together. Drain those
+        // bytes, then deliver queued input before hanging up the child.
+        if fds[0].revents & libc::POLLERR != 0
+            || (fds[0].revents & libc::POLLHUP != 0 && fds[0].revents & libc::POLLIN == 0)
+        {
+            outer_eof = true;
+        }
+        if outer_eof && to_inner.is_empty() {
             exit_code = terminate_inner_group(
                 child_pid,
                 master_fd,
@@ -445,6 +450,7 @@ fn run_pty_pump(
                 &pending,
                 &event_tx,
                 &output_refresh,
+                &mut to_outer,
             );
             break;
         }
@@ -475,10 +481,13 @@ fn run_pty_pump(
                 ReadOutcome::WouldBlock => {}
                 ReadOutcome::Eof | ReadOutcome::Err(_) => {
                     let code = wait_blocking(child_pid).unwrap_or(0);
-                    let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
-                    to_outer.clear();
-                    let alternate_screen_exited =
-                        drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
+                    let alternate_screen_exited = drain_inner(
+                        master_fd,
+                        &mut extractor,
+                        &mut input_modes,
+                        &output_refresh,
+                        &mut to_outer,
+                    );
                     flush_pending(&pending, &event_tx);
                     queue_output_refresh(&event_tx, &output_refresh);
                     if alternate_screen_exited {
@@ -492,10 +501,13 @@ fn run_pty_pump(
         if fds[1].revents & (libc::POLLHUP | libc::POLLERR) != 0
             && fds[1].revents & libc::POLLIN == 0
         {
-            let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
-            to_outer.clear();
-            let alternate_screen_exited =
-                drain_inner(master_fd, &mut extractor, &mut input_modes, &output_refresh);
+            let alternate_screen_exited = drain_inner(
+                master_fd,
+                &mut extractor,
+                &mut input_modes,
+                &output_refresh,
+                &mut to_outer,
+            );
             flush_pending(&pending, &event_tx);
             queue_output_refresh(&event_tx, &output_refresh);
             if alternate_screen_exited {
@@ -507,6 +519,8 @@ fn run_pty_pump(
         }
     }
 
+    // Deliver queued and drained output in order. After a termination
+    // request this stops at the first write that would block.
     let _ = write_all(libc::STDOUT_FILENO, to_outer.make_contiguous());
 
     // 8. Cleanup. _saved_termios restores via Drop on the way out.
@@ -517,6 +531,7 @@ fn run_pty_pump(
     Ok(exit_code)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn terminate_inner_group<F: FnMut(&str)>(
     child_pid: Pid,
     master_fd: RawFd,
@@ -525,8 +540,11 @@ fn terminate_inner_group<F: FnMut(&str)>(
     pending: &Rc<RefCell<Vec<String>>>,
     event_tx: &mpsc::SyncSender<PtyEvent>,
     output_refresh: &OutputRefreshState,
+    to_outer: &mut VecDeque<u8>,
 ) -> i32 {
     // Shutdown must not wait for an outer terminal that has stopped reading.
+    // Drained output still queues behind earlier bytes and is flushed after
+    // the pump loop as far as the terminal accepts it without blocking.
     TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
@@ -548,7 +566,7 @@ fn terminate_inner_group<F: FnMut(&str)>(
         }
     }
 
-    drain_inner(master_fd, extractor, input_modes, output_refresh);
+    drain_inner(master_fd, extractor, input_modes, output_refresh, to_outer);
     flush_pending(pending, event_tx);
     queue_output_refresh(event_tx, output_refresh);
     exit_code.unwrap_or(128 + libc::SIGKILL)
@@ -803,13 +821,14 @@ fn drain_inner<F: FnMut(&str)>(
     extractor: &mut OscExtractor<F>,
     input_modes: &mut TerminalInputModes,
     output_refresh: &OutputRefreshState,
+    output: &mut VecDeque<u8>,
 ) -> bool {
     let mut buf = [0u8; 4096];
     let mut alternate_screen_exited = false;
     while let ReadOutcome::Data(slice) = read_some(master_fd, &mut buf) {
         alternate_screen_exited |= observe_terminal_output(slice, input_modes, output_refresh);
         extractor.feed(slice);
-        let _ = write_all(libc::STDOUT_FILENO, slice);
+        output.extend(slice);
     }
     alternate_screen_exited
 }
@@ -861,12 +880,6 @@ fn write_pending(fd: RawFd, pending: &mut VecDeque<u8>) -> std::io::Result<()> {
 
 fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
     while !data.is_empty() {
-        // A blocked write must still honor SIGHUP/SIGTERM/SIGINT: the
-        // pump loop only checks this flag between polls, so a tee stuck
-        // here would otherwise be immune to graceful termination.
-        if TERMINATION_REQUESTED.load(Ordering::Relaxed) {
-            return Err(std::io::ErrorKind::Interrupted.into());
-        }
         let n = unsafe { libc::write(fd, data.as_ptr() as *const _, data.len()) };
         if n > 0 {
             data = &data[n as usize..];
@@ -875,8 +888,17 @@ fn write_all(fd: RawFd, mut data: &[u8]) -> std::io::Result<()> {
         let err = std::io::Error::last_os_error();
         match err.raw_os_error() {
             Some(libc::EINTR) => {}
-            // EAGAIN == EWOULDBLOCK on every Linux libc.
-            Some(libc::EAGAIN) => wait_writable(fd)?,
+            // EAGAIN == EWOULDBLOCK on every Linux libc. A blocked write
+            // must still honor SIGHUP/SIGTERM/SIGINT: the pump loop only
+            // checks this flag between polls, so a tee stuck here would
+            // otherwise be immune to graceful termination. Bytes the
+            // kernel accepts without waiting are still delivered.
+            Some(libc::EAGAIN) => {
+                if TERMINATION_REQUESTED.load(Ordering::Relaxed) {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                wait_writable(fd)?;
+            }
             _ => return Err(err),
         }
     }
@@ -1184,13 +1206,16 @@ mod tests {
         drop(pipe_w);
 
         let mut extractor = OscExtractor::new(|_| {});
+        let mut output = VecDeque::from(b"before".to_vec());
         assert!(drain_inner(
             pipe_r.as_raw_fd(),
             &mut extractor,
             &mut modes,
             &state,
+            &mut output,
         ));
         assert!(!state.alternate_screen.load(Ordering::Acquire));
+        assert_eq!(output.make_contiguous(), b"beforel");
     }
 
     #[test]
