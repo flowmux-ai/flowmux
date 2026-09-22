@@ -1269,14 +1269,20 @@ impl FileBrowserPanel {
         content.append(&buttons);
         popup.set_child(Some(&content));
 
-        let popup_for_cancel = popup.clone();
-        cancel.connect_clicked(move |_| popup_for_cancel.close());
+        let popup_for_cancel = popup.downgrade();
+        cancel.connect_clicked(move |_| {
+            if let Some(popup) = popup_for_cancel.upgrade() {
+                popup.close();
+            }
+        });
 
         let panel = self.clone();
-        let popup_for_yes = popup.clone();
+        let popup_for_yes = popup.downgrade();
         yes.connect_clicked(move |_| {
             panel.delete_paths_permanently(paths.clone());
-            popup_for_yes.close();
+            if let Some(popup) = popup_for_yes.upgrade() {
+                popup.close();
+            }
         });
 
         popup.present();
@@ -1427,16 +1433,23 @@ impl FileBrowserPanel {
         content.append(&buttons);
         popup.set_child(Some(&content));
 
-        let popup_for_cancel = popup.clone();
-        cancel.connect_clicked(move |_| popup_for_cancel.close());
+        let popup_for_cancel = popup.downgrade();
+        cancel.connect_clicked(move |_| {
+            if let Some(popup) = popup_for_cancel.upgrade() {
+                popup.close();
+            }
+        });
         let panel = self.clone();
         let entry_for_rename = entry.clone();
         let error_for_rename = error.clone();
-        let popup_for_rename = popup.clone();
+        let popup_for_rename = popup.downgrade();
         rename.connect_clicked(move |_| {
+            let Some(popup) = popup_for_rename.upgrade() else {
+                return;
+            };
             let new_name = entry_for_rename.text().to_string();
             match panel.rename_focused_entry(&new_name) {
-                Ok(()) => popup_for_rename.close(),
+                Ok(()) => popup.close(),
                 Err(err) => {
                     error_for_rename.set_text(&format!("{err}"));
                     error_for_rename.set_visible(true);
@@ -1444,8 +1457,12 @@ impl FileBrowserPanel {
             }
         });
 
-        let rename_for_entry = rename.clone();
-        entry.connect_activate(move |_| rename_for_entry.emit_clicked());
+        let rename_for_entry = rename.downgrade();
+        entry.connect_activate(move |_| {
+            if let Some(rename) = rename_for_entry.upgrade() {
+                rename.emit_clicked();
+            }
+        });
 
         popup.present();
         entry.grab_focus();
@@ -2461,8 +2478,14 @@ fn show_context_menu(
 fn install_rename_popup_escape(popup: &gtk::Window) {
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let popup_for_key = popup.clone();
-    key.connect_key_pressed(move |_, keyval, _, _| handle_rename_popup_key(&popup_for_key, keyval));
+    let popup_for_key = popup.downgrade();
+    key.connect_key_pressed(move |_, keyval, _, _| {
+        popup_for_key
+            .upgrade()
+            .map_or(glib::Propagation::Proceed, |popup| {
+                handle_rename_popup_key(&popup, keyval)
+            })
+    });
     popup.add_controller(key);
 }
 
@@ -3943,30 +3966,49 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn behavior_f2_opens_rename_popup_for_focused_entry() {
+    fn behavior_rename_popup_actions_release_widgets() {
         let tmp = TestDir::new("behavior-f2");
         tmp.file("old.txt");
 
         let panel = FileBrowserPanel::new();
         panel.show_for_root(tmp.path.clone());
 
-        assert_eq!(
-            panel.handle_key(gdk::Key::F2, gdk::ModifierType::empty()),
-            glib::Propagation::Stop
-        );
-
-        let rename = gtk::Window::list_toplevels()
-            .into_iter()
-            .filter_map(|widget| widget.downcast::<gtk::Window>().ok())
-            .find(|window| window.title().as_deref() == Some("Rename"))
-            .expect("F2 should open a Rename popup");
-        let entry = find_entry(rename.upcast_ref()).expect("Rename popup should include an entry");
-        assert_eq!(entry.text().as_str(), "old.txt");
-        assert_eq!(
-            handle_rename_popup_key(&rename, gdk::Key::Escape),
-            glib::Propagation::Stop
-        );
-        assert!(!rename.is_visible());
+        for action in ["escape", "cancel", "rename"] {
+            assert_eq!(
+                panel.handle_key(gdk::Key::F2, gdk::ModifierType::empty()),
+                glib::Propagation::Stop
+            );
+            let popup = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|widget| widget.downcast::<gtk::Window>().ok())
+                .find(|window| window.title().as_deref() == Some("Rename"))
+                .expect("F2 should open a Rename popup");
+            let entry =
+                find_entry(popup.upcast_ref()).expect("Rename popup should include an entry");
+            wait_until(|| popup.is_mapped());
+            let weak_popup = popup.downgrade();
+            let weak_entry = entry.downgrade();
+            assert_eq!(entry.text().as_str(), "old.txt");
+            match action {
+                "escape" => assert_eq!(
+                    handle_rename_popup_key(&popup, gdk::Key::Escape),
+                    glib::Propagation::Stop
+                ),
+                "cancel" => find_button(popup.upcast_ref(), "Cancel")
+                    .unwrap()
+                    .emit_clicked(),
+                _ => {
+                    entry.set_text("new.txt");
+                    entry.emit_activate();
+                    wait_until(|| tmp.path.join("new.txt").exists());
+                }
+            }
+            assert_eq!(tmp.path.join("old.txt").exists(), action != "rename");
+            assert!(!popup.is_visible());
+            drop(entry);
+            drop(popup);
+            wait_until(|| weak_popup.upgrade().is_none() && weak_entry.upgrade().is_none());
+        }
         close_rename_windows();
     }
 
@@ -4560,6 +4602,8 @@ mod tests {
             .expect("Shift+Delete should open a permanent delete confirmation popup");
         let yes = find_button(popup.upcast_ref(), "Yes")
             .expect("permanent delete confirmation should include a Yes button");
+        let weak_popup = popup.downgrade();
+        let weak_yes = yes.downgrade();
 
         yes.emit_clicked();
 
@@ -4567,6 +4611,9 @@ mod tests {
         assert!(!file.exists());
         assert_eq!(panel_row_names(&panel), vec!["b.txt"]);
         assert_eq!(panel_focused_path(&panel), Some(tmp.path.join("b.txt")));
+        drop(yes);
+        drop(popup);
+        wait_until(|| weak_popup.upgrade().is_none() && weak_yes.upgrade().is_none());
         close_delete_windows();
     }
 
