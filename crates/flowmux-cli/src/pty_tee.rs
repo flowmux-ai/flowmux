@@ -542,10 +542,10 @@ fn terminate_inner_group<F: FnMut(&str)>(
     output_refresh: &OutputRefreshState,
     to_outer: &mut VecDeque<u8>,
 ) -> i32 {
-    // Shutdown must not wait for an outer terminal that has stopped reading.
-    // Drained output still queues behind earlier bytes and is flushed after
-    // the pump loop as far as the terminal accepts it without blocking.
-    TERMINATION_REQUESTED.store(true, Ordering::Relaxed);
+    // Keep EOF distinct from an explicit termination request: stdin can close
+    // while a slow stdout consumer still expects every queued byte. Signal
+    // and write-error callers set TERMINATION_REQUESTED to avoid waiting for
+    // an outer terminal that has stopped reading.
     let sighup_grace = termination_grace("FLOWMUX_PTY_TEE_SIGHUP_GRACE_MS", Duration::from_secs(2));
     let sigterm_grace =
         termination_grace("FLOWMUX_PTY_TEE_SIGTERM_GRACE_MS", Duration::from_secs(2));

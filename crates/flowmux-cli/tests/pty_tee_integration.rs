@@ -772,6 +772,64 @@ fn pty_tee_delivers_final_output_in_order_after_outer_eof() {
 }
 
 #[test]
+fn pty_tee_preserves_queued_output_after_stdin_eof_with_a_slow_reader() {
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+    let ready = tmp.path().join("ready");
+    let output = vec![b'x'; 128 * 1024];
+    let (reader, writer) = nix::unistd::pipe().unwrap();
+    #[cfg(target_os = "linux")]
+    assert!(unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETPIPE_SZ, 4096) } > 0);
+    let mut stdout = std::fs::File::from(reader);
+    let script = r#"
+import os, signal, sys, time
+signal.signal(signal.SIGHUP, lambda *args: os._exit(0))
+data = b'x' * (128 * 1024)
+while data:
+    data = data[os.write(1, data):]
+open(sys.argv[1], 'w').close()
+while True: time.sleep(1)
+"#;
+    let mut child = Command::new(flowmuxctl_path())
+        .args(["pty-tee", "--", "/usr/bin/python3", "-c", script])
+        .arg(&ready)
+        .env("FLOWMUX_SOCKET_PATH", &socket)
+        .env("FLOWMUX_SSH_TERMINAL", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(writer))
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let mut guard = PtyTeeGuard {
+        child,
+        inner_pgid: None,
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "child could not queue output");
+        thread::sleep(Duration::from_millis(20));
+    }
+    drop(stdin);
+    // EOF is not a request to discard stdout: let shutdown run before the
+    // consumer resumes. The explicit-SIGHUP test below covers forced exit.
+    thread::sleep(Duration::from_millis(200));
+    let mut received = Vec::new();
+    stdout.read_to_end(&mut received).unwrap();
+    assert_eq!(
+        received.len(),
+        output.len(),
+        "shutdown truncated queued output"
+    );
+    assert_eq!(received, output);
+    assert!(guard.child.wait().unwrap().success());
+}
+
+#[test]
 fn pty_tee_shutdown_does_not_wait_for_a_stalled_outer_terminal() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let socket = tmp.path().join("flowmux.sock");
