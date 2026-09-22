@@ -253,8 +253,8 @@ fn run_pty_pump(
 
     let master_fd = master.as_raw_fd();
     set_nonblocking(master_fd)?;
-    set_nonblocking(libc::STDIN_FILENO)?;
-    set_nonblocking(libc::STDOUT_FILENO)?;
+    let _stdin_flags = SavedFdFlags::nonblocking(libc::STDIN_FILENO)?;
+    let _stdout_flags = SavedFdFlags::nonblocking(libc::STDOUT_FILENO)?;
 
     // 6. Pending-OSC queue lives behind a RefCell so the OscExtractor
     //    closure can push into it while the outer loop drains it
@@ -1022,6 +1022,28 @@ fn set_nonblocking(fd: RawFd) -> anyhow::Result<()> {
     let new = OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK;
     fcntl(fd, FcntlArg::F_SETFL(new)).context("fcntl F_SETFL O_NONBLOCK")?;
     Ok(())
+}
+
+// Standard streams share their open file descriptions with the caller.
+// Restore in reverse order: stdin and stdout may also alias each other.
+struct SavedFdFlags {
+    fd: RawFd,
+    flags: nix::fcntl::OFlag,
+}
+
+impl SavedFdFlags {
+    fn nonblocking(fd: RawFd) -> anyhow::Result<Self> {
+        use nix::fcntl::{fcntl, FcntlArg, OFlag};
+        let flags = OFlag::from_bits_retain(fcntl(fd, FcntlArg::F_GETFL)?);
+        set_nonblocking(fd)?;
+        Ok(Self { fd, flags })
+    }
+}
+
+impl Drop for SavedFdFlags {
+    fn drop(&mut self) {
+        let _ = nix::fcntl::fcntl(self.fd, nix::fcntl::FcntlArg::F_SETFL(self.flags));
+    }
 }
 
 fn winsize_from_fd(fd: RawFd) -> Option<libc::winsize> {

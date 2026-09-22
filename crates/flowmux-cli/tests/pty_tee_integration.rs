@@ -590,6 +590,43 @@ sys.exit(17)
 }
 
 #[test]
+fn pty_tee_restores_shared_stdout_flags() {
+    use nix::fcntl::{fcntl, FcntlArg, OFlag};
+    use std::os::fd::AsRawFd;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let socket = tmp.path().join("flowmux.sock");
+    let _rx = spawn_fake_daemon(socket.clone());
+    for nonblocking in [false, true] {
+        let (_reader, writer) = nix::unistd::pipe().unwrap();
+        let writer = std::fs::File::from(writer);
+        let flags = OFlag::from_bits_retain(fcntl(writer.as_raw_fd(), FcntlArg::F_GETFL).unwrap());
+        let flags = if nonblocking {
+            flags | OFlag::O_NONBLOCK
+        } else {
+            flags
+        };
+        fcntl(writer.as_raw_fd(), FcntlArg::F_SETFL(flags)).unwrap();
+        let mut child = Command::new(flowmuxctl_path())
+            .args(["pty-tee", "--", "/bin/true"])
+            .env("FLOWMUX_SOCKET_PATH", &socket)
+            .env("FLOWMUX_SSH_TERMINAL", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(writer.try_clone().unwrap()))
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let _stdin = child.stdin.take();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            fcntl(writer.as_raw_fd(), FcntlArg::F_GETFL).unwrap(),
+            flags.bits(),
+            "pty-tee must not change the next pipeline command's stdout mode"
+        );
+    }
+}
+
+#[test]
 fn pty_tee_preserves_input_queued_before_startup() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let socket = tmp.path().join("flowmux.sock");
