@@ -1,0 +1,277 @@
+{
+  "checked_at": "2026-09-22",
+  "source_commit": "28ae700254ae06d8db0ef5781eae3b1855312b0c",
+  "scope": "Native Ubuntu 22.04 implementation-plan research; not a completed GUI build or supported release",
+  "decision": "Jammy-built native deb with app-private GUI libraries under /opt/flowmux; no Flatpak dependency",
+  "supersedes_plan_commit": "6fbe226",
+  "jammy_rootfs": {
+    "url": "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-amd64.tar.gz",
+    "sha256": "242cd8898b33ea806ef5f13b1076ed7c76f9f989d18384452f7166692438ff1a",
+    "verified_against_official_sha256sums": true,
+    "execution": "PRoot 5.1.0 for initial package/source queries; locally built PRoot 5.4.0 for file-stat and build verification; Jammy userspace on host kernel, not a 22.04 VM"
+  },
+  "jammy_packages": {
+    "glibc": "2.35",
+    "gtk": "4.6.9+ds-0ubuntu0.22.04.2",
+    "libadwaita": "1.1.7-0ubuntu0.22.04.1",
+    "gtk4_vte_dev": null,
+    "gtk3_vte_dev": "0.68.0-1ubuntu0.1",
+    "webkitgtk_6_dev": "2.50.4-0ubuntu0.22.04.1",
+    "python_runtime": "3.10.12"
+  },
+  "existing_native_cli_on_jammy": {
+    "passed": false,
+    "error": "GLIBC_2.39 not found"
+  },
+  "additional_jammy_candidates": {
+    "glib_dev": "2.72.4-0ubuntu2.9",
+    "pango_dev": "1.50.6+ds-2ubuntu1",
+    "wayland_dev": "1.20.0-1ubuntu0.1",
+    "wayland_protocols": "1.25-1",
+    "graphene_dev": "1.10.8-1",
+    "epoxy_dev": "1.5.10-1"
+  },
+  "upstream_source_inspection": {
+    "purpose": "Dependency inspection only; these unpatched tarballs are not approved release pins",
+    "archives": [
+      {
+        "component": "glib",
+        "version": "2.80.5",
+        "url": "https://download.gnome.org/sources/glib/2.80/glib-2.80.5.tar.xz",
+        "sha256": "9f23a9de803c695bbfde7e37d6626b18b9a83869689dd79019bf3ae66c3e6771"
+      },
+      {
+        "component": "gtk",
+        "version": "4.14.5",
+        "url": "https://download.gnome.org/sources/gtk/4.14/gtk-4.14.5.tar.xz",
+        "sha256": "5547f2b9f006b133993e070b87c17804e051efda3913feaca1108fa2be41e24d"
+      },
+      {
+        "component": "libadwaita",
+        "version": "1.5.5",
+        "url": "https://download.gnome.org/sources/libadwaita/1.5/libadwaita-1.5.5.tar.xz",
+        "sha256": "2322c49333b22a3bb2e0c8edc4b2d214a11abd3bfad2234f0685553bf9d2c427"
+      },
+      {
+        "component": "vte",
+        "version": "0.76.6",
+        "url": "https://download.gnome.org/sources/vte/0.76/vte-0.76.6.tar.xz",
+        "sha256": "9ac739ad73b63e109269088a6d27029b6d45700b0993977c1e00ed1bcb1a3d39"
+      }
+    ],
+    "gtk_4_14_5_requires": {
+      "glib": ">=2.76",
+      "pango": ">=1.50",
+      "wayland_client": ">=1.21",
+      "wayland_protocols": ">=1.31",
+      "meson": ">=0.63"
+    },
+    "glib_2_80_5_requires": {
+      "meson": ">=1.2"
+    },
+    "glib_gio_module_dir_option_exists": true,
+    "adwaita_1_5_5_requires": {
+      "glib": ">=2.76",
+      "gtk": ">=4.13.4",
+      "appstream": "required; Jammy compatibility pending"
+    },
+    "introspection_can_be_disabled": "GLib, GTK and libadwaita expose options; complete build not yet verified"
+  },
+  "noble_patched_source_candidates": [
+    {
+      "package": "glib2.0",
+      "version": "2.80.0-6ubuntu3.9",
+      "index": "https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/source/Sources.xz",
+      "directory": "pool/main/g/glib2.0",
+      "source_files": [
+        {
+          "file": "glib2.0_2.80.0.orig-unicode-data.tar.xz",
+          "size": 263364,
+          "sha256": "38680f78a0ae6258826418cb5096c19ae3566ba8fee0a2112a0ec40056e58729"
+        },
+        {
+          "file": "glib2.0_2.80.0.orig.tar.xz",
+          "size": 5510536,
+          "sha256": "8228a92f92a412160b139ae68b6345bd28f24434a7b5af150ebe21ff587a561d"
+        },
+        {
+          "file": "glib2.0_2.80.0-6ubuntu3.9.debian.tar.xz",
+          "size": 178288,
+          "sha256": "b86a66201ce7957256126e4cd69248848ce61a9330891f24df3bc0859d1ca542"
+        },
+        {
+          "file": "glib2.0_2.80.0-6ubuntu3.9.dsc",
+          "size": 4542,
+          "sha256": "b70034bf6d40d9e1386c31e1cae6ce224a95660e473521aa065d163bdd491722"
+        }
+      ],
+      "source_built_on_jammy": false
+    },
+    {
+      "package": "gtk4",
+      "version": "4.14.5+ds-0ubuntu0.10",
+      "index": "https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/source/Sources.xz",
+      "directory": "pool/main/g/gtk4",
+      "source_files": [
+        {
+          "file": "gtk4_4.14.5+ds.orig.tar.xz",
+          "size": 14173448,
+          "sha256": "bd52b294cd18784339b105e2f25d2569e3db94411c64b9b141b23fe39118a0e5"
+        },
+        {
+          "file": "gtk4_4.14.5+ds-0ubuntu0.10.debian.tar.xz",
+          "size": 3805968,
+          "sha256": "17692a86b96fa9bc930f744694c02a43f7a048abdfb1f9864fe2b9925f649d00"
+        },
+        {
+          "file": "gtk4_4.14.5+ds-0ubuntu0.10.dsc",
+          "size": 4248,
+          "sha256": "04ace1e47b9d3a94c876f34c10b0e7d8507dc58e5517e8951f30932afcb12126"
+        }
+      ],
+      "source_built_on_jammy": false
+    },
+    {
+      "package": "vte2.91",
+      "version": "0.76.0-1ubuntu0.1",
+      "index": "https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/source/Sources.xz",
+      "directory": "pool/main/v/vte2.91",
+      "source_files": [
+        {
+          "file": "vte2.91_0.76.0.orig.tar.xz",
+          "size": 956648,
+          "sha256": "bbce30b8f504370b12d6439c07a82993e97d7e9afe2dd367817cd58ff029ffda"
+        },
+        {
+          "file": "vte2.91_0.76.0-1ubuntu0.1.debian.tar.xz",
+          "size": 27164,
+          "sha256": "d2650d47324c13da8bc48f3b0e9c77ccc1e66d6043f3fae4a708a4d1a07f28c5"
+        },
+        {
+          "file": "vte2.91_0.76.0-1ubuntu0.1.dsc",
+          "size": 3225,
+          "sha256": "698d505538112b5e8b483efe28f803f269857fc48cbfc61b7285cfe1b98b2660"
+        }
+      ],
+      "source_built_on_jammy": false
+    },
+    {
+      "package": "wayland-protocols",
+      "version": "1.45-1~ubuntu0.24.04.2",
+      "index": "https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/source/Sources.xz",
+      "directory": "pool/main/w/wayland-protocols",
+      "source_files": [
+        {
+          "file": "wayland-protocols_1.45.orig.tar.xz",
+          "size": 130040,
+          "sha256": "4d2b2a9e3e099d017dc8107bf1c334d27bb87d9e4aff19a0c8d856d17cd41ef0"
+        },
+        {
+          "file": "wayland-protocols_1.45.orig.tar.xz.asc",
+          "size": 833,
+          "sha256": "bd7c8c4822692a336ca6afd2dd38bd1ec0a81186c2250752bae25cc43431eb99"
+        },
+        {
+          "file": "wayland-protocols_1.45-1~ubuntu0.24.04.2.debian.tar.xz",
+          "size": 7412,
+          "sha256": "84e0addc33d1bdf0863d08fceb40eecab395744b34a4bf8ea70fa93852d8b104"
+        },
+        {
+          "file": "wayland-protocols_1.45-1~ubuntu0.24.04.2.dsc",
+          "size": 2609,
+          "sha256": "6a1075c6444fb13caa4fecf70f8fbb0f236d830228c8e6b8e27e0668c5085b49"
+        }
+      ],
+      "source_built_on_jammy": false
+    }
+  ],
+  "native_design_pending_validation": [
+    "System Jammy WebKit and matched helper processes with private GTK/GLib in GUI",
+    "Per-DSO RUNPATH closure, private schemas and system GIO TLS/dconf modules",
+    "Patched GTK with Jammy Pango 1.50.6; Noble packaging requires >=1.52",
+    "Complete private library closure including AppStream, VTE dependencies and renderer/media tools",
+    "Host child environment restoration without discarding user-provided values"
+  ],
+  "not_verified": [
+    "Full GUI and private libraries built on Jammy",
+    "Installable native deb and complete ELF dependency audit",
+    "Real Jammy GNOME X11/Wayland, GA 5.15/HWE, IBus focus round trips and GPU",
+    "Full GUI regression suite including VTE synchronized output",
+    "Installed host tools, agents, SSH, update and rollback acceptance"
+  ],
+  "host_protection": {
+    "gui_pid": 6619,
+    "start_time": "2026-09-15 09:50:42",
+    "gui_restarted": false,
+    "host_gui_packages_modified": false
+  },
+  "raw_artifacts": "/tmp/flowmux-ubuntu2204-native-plan",
+  "rootfs_artifacts": "/tmp/flowmux-ubuntu2204-plan",
+  "raw_artifact_retention": "Temporary local files may be removed; key observations and source hashes are retained in this JSON",
+  "ubuntu_standard_security_maintenance_end": "May 2027 (official Ubuntu release-cycle page)",
+  "raw_file_sha256": {
+    "jammy-dependencies.log": "2d061a6a725bb6dd3de053fd54bb242239c040156e1f6d3f26dcb3d82942ef3a",
+    "source-metadata.json": "46cb613fb0cd38f0c37c18e8a64eb73366cbad7a9cc3dafefd1cc59ea4b2cf64",
+    "noble-patched-sources.json": "4add062686c664b1211e768e2d5afee9b572d19dc40bc37accc9078205ee0101",
+    "/tmp/flowmux-ubuntu2204-plan/rootfs/tmp/native-dev-install.log": "fe2bc666680becb4f131f3b2486d0057e4c0145c5d7ef3e1d21ec262d1ca5279",
+    "/tmp/flowmux-ubuntu2204-plan/rootfs/tmp/native-dev-install-retry.log": "ee8d317da9f16d865e2f1e411af1ca824c80da95cf18ff6dc7a7a466ac078a7d",
+    "cli-build.log": "ca172475a0852313851092a51568071089ceef317398e99ccc513cceaf89141b",
+    "cli-build-proot540.log": "acbbb0f97dfade2ea5d8d2f44dd28147621d24b4e252ec1ca800d2483551d15b",
+    "cli-build-bfd.log": "f2a97a2c4aa52234563b668b63a182513a1fbdf7ff9657d079c71298ecc99c4b",
+    "build-cli.sh": "5a8c13be4816758ad8b7357615bbe0488b0c944d08f6fc49d042f703c94f52ad"
+  },
+  "build_environment": {
+    "proot_540_commit": "bd5a5f63d72f8210d8cee76195eb9f0749e5bd70",
+    "proot_540_host_build": "libtalloc-dev extracted locally; nothing installed into host system",
+    "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+    "jammy_dev_install_exit_code": 0,
+    "dpkg_audit": "empty; no incomplete package configuration reported",
+    "installed_pkg_config_versions": {
+      "gtk4": "4.6.9",
+      "glib-2.0": "2.72.4",
+      "webkitgtk-6.0": "2.50.4",
+      "pango": "1.50.6",
+      "wayland-client": "1.20.0"
+    },
+    "rootfs_only_adjustments": [
+      "policy-rc.d exit 101 suppresses service starts",
+      "No-op notify-reboot-required in temporary rootfs to recover libc postinst notification failure"
+    ],
+    "failed_attempts": [
+      "PRoot 5.1.0: statx Cargo.toml failed while read succeeded; locally built PRoot 5.4.0 resolves file-stat failure",
+      "Rust default rust-lld crashed while linking serde_derive under PRoot 5.4.0; retry with Jammy GNU bfd linker"
+    ]
+  },
+  "native_cli_rebuild": {
+    "passed": true,
+    "profile": "dev; unoptimized; debug info disabled; incremental disabled",
+    "command": "cargo build --offline --locked -p flowmux-cli -j 4",
+    "rustflags": "-C linker=cc -C link-arg=-fuse-ld=bfd",
+    "target_dir_inside_rootfs": "/tmp/flowmux-native-cli-target",
+    "host_target_cache_reused": false,
+    "version_command": "/tmp/flowmux-native-cli-target/debug/flowmuxctl --version",
+    "version_exit_code": 0,
+    "version_output": "flowmux 0.10.0",
+    "maximum_required_glibc": "2.34",
+    "jammy_glibc": "2.35",
+    "dynamic_dependencies": [
+      "libgcc_s.so.1",
+      "libm.so.6",
+      "libc.so.6",
+      "ld-linux-x86-64.so.2"
+    ],
+    "all_dynamic_dependencies_resolved_from_jammy": true,
+    "binary_sha256": "0d092b1e3c84991de30b15b1521ee6ebd6b342770739f6e617f6ef889f9dff5f",
+    "limitation": "Proves CLI build and basic startup in Jammy userspace only; not full CLI functionality, release profile, GUI, native deb or a real Jammy desktop",
+    "reproduction": {
+      "proot": "/tmp/flowmux-ubuntu2204-native-plan/proot-src/src/proot",
+      "rootfs": "/tmp/flowmux-ubuntu2204-plan/rootfs",
+      "binds": {
+        "/home/junsu/dev/os/flowmux": "/workspace",
+        "/home/junsu/.rustup/toolchains/stable-x86_64-unknown-linux-gnu": "/toolchain",
+        "/home/junsu/.cargo": "/cargo"
+      },
+      "build_script": "#!/bin/bash\nset -eu\ncd /workspace\nexport PATH=/toolchain/bin:/usr/bin:/bin\nexport CARGO_HOME=/cargo CARGO_TARGET_DIR=/tmp/flowmux-native-cli-target\nexport CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0\nunset LD_LIBRARY_PATH RUSTFLAGS RUSTC_WRAPPER\nexport RUSTFLAGS=\"-C linker=cc -C link-arg=-fuse-ld=bfd\"\nfor flowmux_build_var in ${!FLOWMUX_@}; do unset \"$flowmux_build_var\"; done\n/toolchain/bin/rustc --version\ngetconf GNU_LIBC_VERSION\n/toolchain/bin/cargo build --offline --locked -p flowmux-cli -j 4\n/tmp/flowmux-native-cli-target/debug/flowmuxctl --version\nreadelf --version-info /tmp/flowmux-native-cli-target/debug/flowmuxctl\n"
+    }
+  }
+}
