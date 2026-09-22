@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -192,7 +193,7 @@ pub(super) struct EditorHostState {
     session: RefCell<Result<EditorSession, String>>,
     zoom_percent: Cell<u16>,
     startup_messages: RefCell<Vec<HostMessage>>,
-    recovery_sender: Option<Sender<RecoveryOperation>>,
+    recovery_sender: Option<RecoverySender>,
     recovery_worker: Option<JoinHandle<()>>,
     pending_recovery: RefCell<HashMap<PathBuf, RecoveryOperation>>,
     recovery_flush_pending: Cell<bool>,
@@ -831,16 +832,42 @@ fn schedule_recovery_flush(host: &Rc<EditorHostState>) {
     });
 }
 
-fn start_recovery_worker(
-    store: RecoveryStore,
-) -> Option<(Sender<RecoveryOperation>, JoinHandle<()>)> {
-    let (sender, receiver) = mpsc::channel::<RecoveryOperation>();
+struct RecoverySender {
+    pending: Arc<Mutex<HashMap<PathBuf, RecoveryOperation>>>,
+    wake: SyncSender<()>,
+}
+
+impl RecoverySender {
+    fn send(&self, operation: RecoveryOperation) -> Result<(), TrySendError<()>> {
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(operation.identity_path().to_path_buf(), operation);
+        match self.wake.try_send(()) {
+            Err(TrySendError::Full(())) => Ok(()),
+            result => result,
+        }
+    }
+}
+
+fn start_recovery_worker(store: RecoveryStore) -> Option<(RecoverySender, JoinHandle<()>)> {
+    // Only the latest operation for each document waits behind slow disk I/O.
+    // A bounded wake-up channel never blocks GTK or retains document copies.
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let (wake, receiver) = mpsc::sync_channel(1);
+    let sender = RecoverySender {
+        pending: pending.clone(),
+        wake,
+    };
     let result = std::thread::Builder::new()
         .name("flowmux-editor-recovery".into())
         .spawn(move || {
-            for operation in receiver {
-                if let Err(error) = store.apply(&operation) {
-                    tracing::warn!(%error, "failed to update editor recovery snapshot");
+            for () in receiver {
+                let operations = std::mem::take(&mut *pending.lock().unwrap());
+                for operation in operations.into_values() {
+                    if let Err(error) = store.apply(&operation) {
+                        tracing::warn!(%error, "failed to update editor recovery snapshot");
+                    }
                 }
             }
         });
@@ -1173,6 +1200,66 @@ mod tests {
 
         assert_eq!(first.session_state().zoom_percent, Some(80));
         assert_eq!(second.session_state().zoom_percent, Some(150));
+    }
+
+    #[test]
+    fn recovery_sender_coalesces_stalled_writes_and_preserves_removals() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (wake, receiver) = mpsc::sync_channel(1);
+        let sender = RecoverySender {
+            pending: pending.clone(),
+            wake,
+        };
+        let first = PathBuf::from("/workspace/first.txt");
+        let second = PathBuf::from("/workspace/second.txt");
+        let mut snapshot = flowmux_editor::RecoverySnapshot::new(
+            "workspace".into(),
+            first.clone(),
+            b"base",
+            1,
+            "unsaved".into(),
+            flowmux_editor::TextEncoding::Utf8,
+            flowmux_editor::LineEnding::Lf,
+        );
+
+        // The disk worker cannot receive anything until after this burst.
+        for version in 1..=100 {
+            snapshot.document_version = version;
+            sender
+                .send(RecoveryOperation::Write(snapshot.clone()))
+                .unwrap();
+        }
+        snapshot.identity_path = second.clone();
+        sender
+            .send(RecoveryOperation::Write(snapshot.clone()))
+            .unwrap();
+        sender
+            .send(RecoveryOperation::Remove(first.clone()))
+            .unwrap();
+        {
+            let pending = pending.lock().unwrap();
+            assert_eq!(
+                pending.len(),
+                2,
+                "old document versions must not accumulate"
+            );
+            assert_eq!(pending[&first], RecoveryOperation::Remove(first.clone()));
+            assert_eq!(pending[&second], RecoveryOperation::Write(snapshot.clone()));
+        }
+        // Reopening and editing a saved document supersedes its queued removal.
+        sender
+            .send(RecoveryOperation::Remove(second.clone()))
+            .unwrap();
+        snapshot.document_version = 101;
+        sender
+            .send(RecoveryOperation::Write(snapshot.clone()))
+            .unwrap();
+        assert_eq!(
+            pending.lock().unwrap()[&second],
+            RecoveryOperation::Write(snapshot)
+        );
+        assert_eq!(receiver.try_recv(), Ok(()));
+        assert_eq!(receiver.try_recv(), Err(TryRecvError::Empty));
     }
 
     #[test]
