@@ -60,8 +60,7 @@ impl NotificationCoordinator {
         let store = self.store.clone();
         let busy = self.badge_publisher_busy.clone();
         let dirty = self.badge_dirty.clone();
-        glib::MainContext::default().spawn_local(async move {
-            let _enter = handle.enter();
+        glib::MainContext::default().spawn_local(in_tokio_runtime(handle, async move {
             let app_uri = format!(
                 "application://{}.desktop",
                 flowmux_notify::DESKTOP_FILE_BASENAME
@@ -82,7 +81,7 @@ impl NotificationCoordinator {
                 }
                 dirty.set(false);
             }
-        });
+        }));
     }
 
     pub(super) fn close_desktop_notifications(&self, desktop_ids: Vec<String>) {
@@ -93,8 +92,7 @@ impl NotificationCoordinator {
             return;
         };
         let notifier_cell = self.notifier.clone();
-        glib::MainContext::default().spawn_local(async move {
-            let _enter = handle.enter();
+        glib::MainContext::default().spawn_local(in_tokio_runtime(handle, async move {
             let Some(notifier) = ensure_desktop_notifier(&notifier_cell).await else {
                 return;
             };
@@ -103,13 +101,63 @@ impl NotificationCoordinator {
                     tracing::debug!(%error, %desktop_id, "close notification failed");
                 }
             }
-        });
+        }));
     }
+}
+
+// GLib futures can finish in a different order from their first poll. Never
+// keep Tokio's thread-local EnterGuard alive while another future is polled.
+async fn in_tokio_runtime<F: std::future::Future>(
+    handle: tokio::runtime::Handle,
+    future: F,
+) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(move |context| {
+        let _enter = handle.enter();
+        future.as_mut().poll(context)
+    })
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk::test]
+    async fn desktop_tasks_can_finish_in_entry_order() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let context = glib::MainContext::default();
+        let (first_started, first_ready) = tokio::sync::oneshot::channel();
+        let (second_started, second_ready) = tokio::sync::oneshot::channel();
+        let (finish_first, first_finish) = tokio::sync::oneshot::channel();
+        let (finish_second, second_finish) = tokio::sync::oneshot::channel();
+        let first = context.spawn_local(in_tokio_runtime(runtime.handle().clone(), async move {
+            assert!(tokio::runtime::Handle::try_current().is_ok());
+            first_started.send(()).unwrap();
+            first_finish.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }));
+        first_ready.await.unwrap();
+        let second = context.spawn_local(in_tokio_runtime(runtime.handle().clone(), async move {
+            assert!(tokio::runtime::Handle::try_current().is_ok());
+            second_started.send(()).unwrap();
+            second_finish.await.unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }));
+        second_ready.await.unwrap();
+        assert!(tokio::runtime::Handle::try_current().is_err());
+        finish_first.send(()).unwrap();
+        first
+            .await
+            .expect("the first task must finish before the second");
+        finish_second.send(()).unwrap();
+        second.await.unwrap();
+        assert!(tokio::runtime::Handle::try_current().is_err());
+    }
 
     #[gtk::test]
     async fn local_only_controller_does_not_start_desktop_delivery() {
