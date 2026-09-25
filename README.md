@@ -37,31 +37,35 @@ Uninstall: `sudo apt remove flowmux`.
 
 ### Agent notifications
 
-Get desktop notifications when Claude Code, Codex, OpenCode, Gemini CLI,
-or Antigravity CLI finishes a task or needs input.
+Know which agent needs you. When Claude Code, Codex, OpenCode, Gemini CLI,
+or Antigravity CLI finishes a task or stops for approval, its workspace
+lights up, the bell keeps the list, and a desktop notification pops up.
+Click a notification to jump straight back to that agent.
 
-<img src="resources/screenshot/claude_notification.gif" alt="agent notification" width="100%" />
+<img src="resources/screenshot/claude_notification.gif" alt="agent notifications" width="100%" />
 
 ### Browser tab
 
-Browse alongside terminal tabs. Agents can read pages, click, and type
-through the CLI. Browser tabs share WebKit session data within each flowmux
-profile, separately from your host browsers.
+Browse next to your terminals, or let your agents do it. With the
+`flowmux browser` CLI an agent can open a page, read it, fill in fields,
+and click through it in a pane you can watch. Browser tabs share WebKit
+session data within each flowmux profile, separately from your host browsers.
 
 <img src="resources/screenshot/video_control_browser.gif" alt="browser control" width="100%" />
 
 ### Split panes and overview mode
 
-Split and resize panes to work side by side. Use overview mode to see all
-active workspaces and jump between tasks.
+Split right or down, zoom into one pane when you need focus, and start
+another agent in a new tab. Overview mode (**Ctrl+Alt+K**) shows every
+workspace at once so you can jump between tasks.
 
-<img src="resources/screenshot/view_split.gif" alt="split panes" width="100%" />
-<img src="resources/screenshot/overview_mode.gif" alt="overview mode" width="100%" />
+<img src="resources/screenshot/view_split.gif" alt="split panes and overview mode" width="100%" />
 
 ### Files, worktrees, and AI usage
 
-Browse files, manage Git worktrees, and edit code without leaving flowmux.
-Check agent usage with **Ctrl+Alt+U** or the usage bar below the terminal.
+Browse the repository and open files in the built-in editor. The worktree
+panel lists every Git worktree with its branch and path. **Ctrl+Alt+U** shows
+Claude and Codex usage, which also stays in the bar below the terminal.
 
 <img src="resources/screenshot/usage_fileview_worktreeview.gif" alt="file and worktree views" width="100%" />
 
@@ -71,18 +75,21 @@ Search all terminal tabs with **Ctrl+Alt+Shift+F**.
 
 ### Themes and keybindings
 
-Choose a light or dark theme, customize colors and fonts, and rebind
-shortcuts in **Options** without restarting.
+Pick a built-in theme, from Dracula to GitHub Light, or set your own colors
+and fonts. Every shortcut can be rebound in **Options**, and the change works
+right away without a restart.
 
 <img src="resources/screenshot/setting_theme.gif" alt="theme settings" width="100%" />
 
 ### Image and Markdown viewers
 
-Ctrl+click image paths to preview them inline, or open Markdown as a
-formatted preview. Images require [ThorVG](docs/setup.md#thorvg-image-viewer).
+Ctrl+click image paths to preview them inline. Markdown opens as a formatted
+preview that refreshes every time you save, so you can write in the built-in
+editor and watch the result side by side. Images require
+[ThorVG](docs/setup.md#thorvg-image-viewer).
 
 <img src="resources/screenshot/image_viewer.gif" alt="image viewer" width="100%" />
-<img src="resources/screenshot/md_viewer.gif" alt="markdown viewer" width="100%" />
+<img src="resources/screenshot/md_viewer.gif" alt="markdown live preview" width="100%" />
 
 ### Agent CLI
 
