@@ -997,16 +997,16 @@ fn make_close_surface_action(
 /// inode, fall back to `argv[0]`, which still names the live installed path.
 /// GDK's launch context carries the compositor activation token, so the new
 /// Wayland window receives keyboard focus instead of leaving input in the old
-/// window.
+/// window. macOS uses a subprocess because GAppInfo cannot launch command lines.
 fn new_window_executable(current_exe: Option<PathBuf>, argv0: Option<PathBuf>) -> Option<PathBuf> {
     current_exe.filter(|path| path.exists()).or(argv0)
 }
 
 fn make_new_window_action(
-    launch_timestamp: Rc<Cell<u32>>,
+    _launch_timestamp: Rc<Cell<u32>>,
 ) -> gtk::gio::ActionEntry<adw::ApplicationWindow> {
     gtk::gio::ActionEntry::builder("new-window")
-        .activate(move |window: &adw::ApplicationWindow, _, _| {
+        .activate(move |_window: &adw::ApplicationWindow, _, _| {
             tracing::debug!(action = "new-window", "key action fired");
             let exe = match new_window_executable(
                 std::env::current_exe().ok(),
@@ -1018,20 +1018,30 @@ fn make_new_window_action(
                     return;
                 }
             };
-            let app_info = match gtk::gio::AppInfo::create_from_commandline(
-                glib::shell_quote(&exe),
-                Some("flowmux"),
-                gtk::gio::AppInfoCreateFlags::SUPPORTS_STARTUP_NOTIFICATION,
-            ) {
-                Ok(app_info) => app_info,
-                Err(e) => {
-                    tracing::warn!(error = %e, exe = %exe.display(), "new-window: could not create app info");
-                    return;
-                }
+            #[cfg(target_os = "macos")]
+            let launched = gtk::gio::Subprocess::newv(
+                &[exe.as_os_str()],
+                gtk::gio::SubprocessFlags::NONE,
+            )
+            .map(|_| ());
+            #[cfg(not(target_os = "macos"))]
+            let launched = {
+                let app_info = match gtk::gio::AppInfo::create_from_commandline(
+                    glib::shell_quote(&exe),
+                    Some("flowmux"),
+                    gtk::gio::AppInfoCreateFlags::SUPPORTS_STARTUP_NOTIFICATION,
+                ) {
+                    Ok(app_info) => app_info,
+                    Err(e) => {
+                        tracing::warn!(error = %e, exe = %exe.display(), "new-window: could not create app info");
+                        return;
+                    }
+                };
+                let context = gtk::prelude::WidgetExt::display(_window).app_launch_context();
+                context.set_timestamp(_launch_timestamp.replace(gtk::gdk::CURRENT_TIME));
+                app_info.launch(&[], Some(&context))
             };
-            let context = gtk::prelude::WidgetExt::display(window).app_launch_context();
-            context.set_timestamp(launch_timestamp.replace(gtk::gdk::CURRENT_TIME));
-            match app_info.launch(&[], Some(&context)) {
+            match launched {
                 Ok(()) => tracing::info!(exe = %exe.display(), "spawned new flowmux window"),
                 Err(e) => {
                     tracing::warn!(error = %e, exe = %exe.display(), "new-window: failed to spawn");

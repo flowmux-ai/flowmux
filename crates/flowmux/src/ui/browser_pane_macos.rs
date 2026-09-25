@@ -150,9 +150,11 @@ define_class!(
 define_class!(
     // SAFETY: NSObject has no subclassing requirements. WebKit invokes both
     // delegate protocols on the main thread.
+    // Box the state because RefScope's u128 needs 16-byte alignment, while
+    // objc2 only supports inline ivars with alignment up to 8 bytes.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = BrowserNavigationDelegateIvars]
+    #[ivars = Box<BrowserNavigationDelegateIvars>]
     struct BrowserNavigationDelegate;
 
     unsafe impl NSObjectProtocol for BrowserNavigationDelegate {}
@@ -906,13 +908,13 @@ fn install_navigation_delegate(
     ref_scope: RefScope,
 ) -> Retained<BrowserNavigationDelegate> {
     let delegate =
-        BrowserNavigationDelegate::alloc(mtm).set_ivars(BrowserNavigationDelegateIvars {
+        BrowserNavigationDelegate::alloc(mtm).set_ivars(Box::new(BrowserNavigationDelegateIvars {
             refs,
             ref_scope,
             download_manager,
             download_directory: download_directory(),
             downloads: RefCell::new(HashMap::new()),
-        });
+        }));
     let delegate: Retained<BrowserNavigationDelegate> = unsafe { msg_send![super(delegate), init] };
     unsafe {
         web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&*delegate)));
@@ -1290,6 +1292,11 @@ fn uuid_for_profile_slug(slug: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_delegate_class_registers_with_native_ivar_alignment() {
+        let _ = BrowserNavigationDelegate::class();
+    }
 
     #[test]
     fn native_focus_reports_each_browser_entry() {
