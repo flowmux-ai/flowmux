@@ -49,6 +49,13 @@ explicit or inherited pipe returns its connection error; it never redirects the
 command to another window. Connecting and disconnecting before sending a request
 does not stop the listener. See [IPC verification](evidence/2026-09-28/ipc.md)
 for coverage and remaining limits.
+Each window admits up to 16 pipe clients and 16 outstanding GUI requests. IPC
+uses fixed deadlines: 3 seconds to acquire a connection, 5 seconds to send/receive
+a request or write a reply, 15 seconds for the GUI command, and 25 seconds for
+the CLI to receive its reply. A completed reply waits up to 2 seconds for client
+closure. A timeout after dispatch does not prove a command was cancelled; check
+the window state before repeating a mutation. Commands are never automatically
+retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
 The side panel's **Workspace…** menu (also available by right-clicking a workspace)

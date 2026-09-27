@@ -1,0 +1,88 @@
+{
+  "started": "2026-09-28T01:54:56.1705548+09:00",
+  "mode": "background",
+  "hosts": [
+    {
+      "launchedUtc": "2026-09-27T16:54:56.1755577Z",
+      "pid": 27276,
+      "pipe": "\\\\.\\pipe\\flowmux-27276-291d289e-968b-41d6-80f3-a76113674197",
+      "discoveryWrittenUtc": "2026-09-27T16:54:56.2930930Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:54:57.1903897Z",
+      "pid": 32612,
+      "pipe": "\\\\.\\pipe\\flowmux-32612-d8ce227d-0ea6-4a9e-afc0-0909bb934df2",
+      "discoveryWrittenUtc": "2026-09-27T16:54:57.2408009Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:54:58.7605024Z",
+      "pid": 23380,
+      "pipe": "\\\\.\\pipe\\flowmux-23380-92fbd9f9-16f2-4117-a429-4efba1963734",
+      "discoveryWrittenUtc": "2026-09-27T16:54:58.8065341Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:54:59.2031872Z",
+      "pid": 14244,
+      "pipe": "\\\\.\\pipe\\flowmux-14244-dbba9d0d-51ed-49a1-8373-5eb11f9dbfd8",
+      "discoveryWrittenUtc": "2026-09-27T16:54:59.2494200Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:54:59.6703988Z",
+      "pid": 32348,
+      "pipe": "\\\\.\\pipe\\flowmux-32348-71463640-8fed-458b-8eba-3104658787c4",
+      "discoveryWrittenUtc": "2026-09-27T16:54:59.7209164Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:55:00.1359476Z",
+      "pid": 34840,
+      "pipe": "\\\\.\\pipe\\flowmux-34840-c10df656-0d0c-4b6f-b98a-f73a32bfdef8",
+      "discoveryWrittenUtc": "2026-09-27T16:55:00.1858857Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:55:00.6224480Z",
+      "pid": 33088,
+      "pipe": "\\\\.\\pipe\\flowmux-33088-5a94f170-a60a-47e4-b480-50d34a06d03c",
+      "discoveryWrittenUtc": "2026-09-27T16:55:00.6786539Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:55:01.0757711Z",
+      "pid": 17148,
+      "pipe": "\\\\.\\pipe\\flowmux-17148-3a3cbd0e-76e1-4f8d-b90e-d9ff60e4fd32",
+      "discoveryWrittenUtc": "2026-09-27T16:55:01.1177497Z"
+    }
+  ],
+  "checks": [
+    {
+      "pids": [
+        27276,
+        32612
+      ],
+      "roundTrips": 40,
+      "name": "two_hidden_windows_keep_unicode_metadata_and_explicit_process_routing"
+    },
+    {
+      "name": "four_hundred_empty_or_truncated_disconnects_and_malformed_request_keep_listener_alive",
+      "connections": 400
+    },
+    {
+      "idleClients": 8,
+      "name": "eight_idle_clients_do_not_block_other_requests"
+    },
+    {
+      "explicitError": "flowmuxctl: Could not connect to requested Windows flowmux pipe \\\\.\\pipe\\flowmux-27276-a2971aa4-4325-4b4b-9781-1341ce5e1997: opening the requested pipe: 지정된 파일을 찾을 수 없습니다. (os error 2)",
+      "inheritedError": "flowmuxctl: Could not connect to requested Windows flowmux pipe \\\\.\\pipe\\flowmux-27276-a2971aa4-4325-4b4b-9781-1341ce5e1997: opening the requested pipe: 지정된 파일을 찾을 수 없습니다. (os error 2)",
+      "name": "stale_explicit_and_inherited_endpoints_fail_without_mutating_either_window"
+    },
+    {
+      "name": "quit_reply_and_discovery_cleanup_preserve_other_window",
+      "staleError": "flowmuxctl: Could not connect to requested Windows flowmux pipe \\\\.\\pipe\\flowmux-27276-291d289e-968b-41d6-80f3-a76113674197: opening the requested pipe: 지정된 파일을 찾을 수 없습니다. (os error 2)"
+    },
+    {
+      "additionalDisconnects": 240,
+      "name": "six_fresh_start_quit_cycles_publish_complete_records_and_survive_early_disconnects",
+      "cycles": 6
+    }
+  ],
+  "status": "passed_ipc_subset",
+  "finished": "2026-09-28T01:55:01.5870819+09:00"
+}

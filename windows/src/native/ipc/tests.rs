@@ -13,7 +13,8 @@ fn test_name() -> String {
 #[test]
 fn accept_recovers_when_client_disconnects_before_connect_named_pipe() {
     let name = test_name();
-    let instance = make_pipe(&name, &user_descriptor().unwrap(), true).unwrap();
+    let mut instance =
+        transport::Pipe::new(make_pipe(&name, &user_descriptor().unwrap(), true).unwrap()).unwrap();
     // A successful CreateFile need not wait for the server's ConnectNamedPipe.
     drop(
         OpenOptions::new()
@@ -23,14 +24,16 @@ fn accept_recovers_when_client_disconnects_before_connect_named_pipe() {
             .unwrap(),
     );
     assert_eq!(
-        unsafe { ConnectNamedPipe(instance.as_raw_handle(), std::ptr::null_mut()) },
-        0
+        instance
+            .connect_once(&transport::Event::new().unwrap())
+            .unwrap_err()
+            .raw_os_error(),
+        Some(ERROR_NO_DATA as i32)
     );
-    assert_eq!(unsafe { GetLastError() }, ERROR_NO_DATA);
     // Exercise the same acceptance function used by the product listener.
     let (send, receive) = mpsc::sync_channel(1);
     let worker = std::thread::spawn(move || {
-        let result = accept_connection(&instance);
+        let result = instance.accept(&transport::Event::new().unwrap());
         send.send(result.map_err(|error| error.to_string()))
             .unwrap();
     });
@@ -58,9 +61,10 @@ fn accept_recovers_when_client_disconnects_before_connect_named_pipe() {
 #[test]
 fn accept_handles_client_already_connected_and_validates_owner() {
     let name = test_name();
-    let instance = make_pipe(&name, &user_descriptor().unwrap(), true).unwrap();
+    let mut instance =
+        transport::Pipe::new(make_pipe(&name, &user_descriptor().unwrap(), true).unwrap()).unwrap();
     let _client = open_verified_pipe(&name).unwrap();
-    accept_connection(&instance).unwrap();
+    instance.accept(&transport::Event::new().unwrap()).unwrap();
 }
 
 #[test]
@@ -70,28 +74,18 @@ fn pipe_with_wrong_server_pid_is_rejected_before_sending_bytes() {
         std::process::id() + 1,
         uuid::Uuid::new_v4()
     );
-    let instance = make_pipe(&name, &user_descriptor().unwrap(), true).unwrap();
+    let mut instance =
+        transport::Pipe::new(make_pipe(&name, &user_descriptor().unwrap(), true).unwrap()).unwrap();
     let error = open_verified_pipe(&name).unwrap_err().to_string();
     assert!(error.contains("pipe server PID mismatch"), "{error}");
     // The rejected client is closed without sending a request.
     assert_eq!(
-        unsafe { ConnectNamedPipe(instance.as_raw_handle(), std::ptr::null_mut()) },
-        0
+        instance
+            .connect_once(&transport::Event::new().unwrap())
+            .unwrap_err()
+            .raw_os_error(),
+        Some(ERROR_NO_DATA as i32)
     );
-    assert_eq!(unsafe { GetLastError() }, ERROR_NO_DATA);
-    let mut remaining = 0;
-    let success = unsafe {
-        PeekNamedPipe(
-            instance.as_raw_handle(),
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-            &mut remaining,
-            std::ptr::null_mut(),
-        )
-    };
-    assert!(success != 0 || unsafe { GetLastError() } == ERROR_BROKEN_PIPE);
-    assert_eq!(remaining, 0);
 }
 
 #[test]

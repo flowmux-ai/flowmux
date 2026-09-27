@@ -213,10 +213,26 @@ security quality of service permits identification without impersonation.
 Hidden live hosts survived 640 empty/truncated disconnects, eight idle clients,
 two-window routing, six fresh start/quit cycles and normal discovery cleanup.
 The earlier workspace restart failure remains unexplained; these reproductions
-do not establish its historical cause. Read/write deadlines, bounded client
-resource use, coordinated listener cancellation, failure recovery after pipe
-allocation errors and full multi-user/deployment coverage remain pending.
-See [IPC evidence](evidence/2026-09-28/ipc.md); O02 is partial.
+do not establish its historical cause. See [IPC evidence](evidence/2026-09-28/ipc.md).
+
+IPC now uses a fixed pool of 16 reusable overlapped pipes and workers. Request
+reads and reply writes have 5-second whole-frame deadlines; the GUI command wait
+is 15 seconds. A reply is retained until peer closure or a 2-second deadline,
+replacing blocking flush. The CLI has bounded connection/write/reply waits and
+never retransmits an already submitted request. Sixteen GUI command permits
+remain attached to the UI's reply handles even when callers time out, preventing
+an unresponsive UI queue from growing through repeated timeout/reconnect cycles.
+Native host teardown cancels IPC before releasing terminal surfaces and joins all
+workers. CancelIoEx is followed by completion observation before buffers or
+OVERLAPPED values are released. Native tests cover cancellation in accept/read/
+write/GUI waits, reused instances, oversized/fragmented Unicode frames, queue
+permits, unread replies, and repeated pool lifetimes without handle growth.
+Hidden live tests verify capacity, idle expiration, CLI reply timeout and quit
+with an unread reply and 15 idle peers. Fault injection during partial startup,
+automatic recovery after a fatal pool error, process-crash record cleanup,
+sustained load/fairness, full discovery/multi-user/deployment coverage and real
+IME remain pending. See [IPC limits evidence](evidence/2026-09-28/ipc-limits.md).
+O02 remains partial.
 
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the

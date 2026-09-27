@@ -9,14 +9,14 @@ use anyhow::Context;
 use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     os::windows::{
         fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
     },
     path::PathBuf,
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -26,130 +26,9 @@ use windows_sys::Win32::{
 };
 
 mod discovery;
-
-pub type Reply = mpsc::SyncSender<Value>;
-
-pub struct Server {
-    pub name: String,
-    discovery: PathBuf,
-}
-impl Server {
-    pub fn start(
-        emit: impl Fn(Request, Reply) + Send + Sync + 'static,
-        shutdown: impl Fn() + Send + Sync + 'static,
-    ) -> anyhow::Result<Self> {
-        let name = format!(
-            r"\\.\pipe\flowmux-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        );
-        let descriptor = user_descriptor()?;
-        // Create the first instance synchronously: startup cannot advertise an unbound endpoint.
-        let first = make_pipe(&name, &descriptor, true)?;
-        let discovery = discovery::publish(&data_dir()?.join("instances"), &name)?;
-        // The guard removes the record if thread creation fails. The bound first
-        // instance can already accept clients while the listener starts.
-        let server = Self { name, discovery };
-        let emit = Arc::new(emit);
-        let shutdown = Arc::new(shutdown);
-        let server_name = server.name.clone();
-        let discovery = server.discovery.clone();
-        std::thread::Builder::new()
-            .name("flowmux-ipc".into())
-            .spawn(move || {
-                let mut instance = first;
-                loop {
-                    if let Err(error) = accept_connection(&instance) {
-                        super::host::report(&format!("IPC listener stopped: {error:#}"));
-                        break;
-                    }
-                    let next = match make_pipe(&server_name, &descriptor, false) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            super::host::report(&format!(
-                                "IPC instance creation failed: {error:#}"
-                            ));
-                            break;
-                        }
-                    };
-                    let emit = emit.clone();
-                    let shutdown = shutdown.clone();
-                    // Each client has its own instance; a stalled caller does not block acceptance.
-                    let worker = std::thread::Builder::new()
-                        .name("flowmux-ipc-client".into())
-                        .spawn(move || {
-                            let mut pipe = File::from(instance);
-                            let mut quitting = false;
-                            let response = (|| -> anyhow::Result<Value> {
-                                let mut reader = BufReader::new(
-                                    (&mut pipe).take((MAX_MESSAGE_BYTES + 1) as u64),
-                                );
-                                let mut line = String::new();
-                                reader.read_line(&mut line)?;
-                                anyhow::ensure!(
-                                    line.len() <= MAX_MESSAGE_BYTES && line.ends_with('\n'),
-                                    "invalid IPC frame"
-                                );
-                                let command: Request = serde_json::from_str(&line)?;
-                                quitting = matches!(command.command, Command::Quit { .. });
-                                let (send, receive) = mpsc::sync_channel(1);
-                                emit(command, send);
-                                receive
-                                    .recv_timeout(Duration::from_secs(15))
-                                    .context("window did not answer within 15 seconds")
-                            })()
-                            .unwrap_or_else(|error| json!({"error":error.to_string()}));
-                            if let Ok(mut bytes) = serde_json::to_vec(&response) {
-                                bytes.push(b'\n');
-                                let _ = pipe.write_all(&bytes);
-                                // Client reads the reply before closing. Flush waits only in this worker.
-                                unsafe {
-                                    FlushFileBuffers(pipe.as_raw_handle());
-                                    DisconnectNamedPipe(pipe.as_raw_handle());
-                                }
-                            }
-                            if quitting && response.get("error").is_none() {
-                                shutdown();
-                            }
-                        });
-                    if let Err(error) = worker {
-                        super::host::report(&format!("IPC client thread creation failed: {error}"));
-                    }
-                    instance = next;
-                }
-                discovery::remove_if_current(&discovery, &server_name);
-            })?;
-        Ok(server)
-    }
-}
-impl Drop for Server {
-    fn drop(&mut self) {
-        discovery::remove_if_current(&self.discovery, &self.name);
-    }
-}
-
-fn accept_connection(instance: &OwnedHandle) -> anyhow::Result<()> {
-    loop {
-        let connected = unsafe { ConnectNamedPipe(instance.as_raw_handle(), std::ptr::null_mut()) };
-        if connected != 0 {
-            return Ok(());
-        }
-        let error = unsafe { GetLastError() };
-        match error {
-            ERROR_PIPE_CONNECTED => return Ok(()),
-            // A client can open and close this instance before ConnectNamedPipe.
-            // Reset that abandoned connection, preserving the listener and name.
-            ERROR_NO_DATA => unsafe {
-                checked(DisconnectNamedPipe(instance.as_raw_handle()))
-                    .context("could not reset abandoned IPC connection")?;
-            },
-            _ => {
-                return Err(std::io::Error::from_raw_os_error(error as i32))
-                    .context("ConnectNamedPipe failed")
-            }
-        }
-    }
-}
+mod server;
+mod transport;
+pub use server::{Reply, Server};
 
 #[cfg(test)]
 mod tests;
@@ -208,6 +87,7 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
         bInheritHandle: 0,
     };
     let flags = PIPE_ACCESS_DUPLEX
+        | FILE_FLAG_OVERLAPPED
         | if first {
             FILE_FLAG_FIRST_PIPE_INSTANCE
         } else {
@@ -218,7 +98,7 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
             wide(name).as_ptr(),
             flags,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_UNLIMITED_INSTANCES,
+            server::MAX_CLIENTS,
             65536,
             65536,
             5000,
@@ -299,11 +179,19 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     })?;
     anyhow::ensure!(bytes.len() < MAX_MESSAGE_BYTES, "command is too large");
     bytes.push(b'\n');
-    file.write_all(&bytes)?;
-    let mut line = String::new();
-    BufReader::new((&mut file).take(16 * MAX_MESSAGE_BYTES as u64)).read_line(&mut line)?;
-    anyhow::ensure!(line.ends_with('\n'), "incomplete or oversized IPC reply");
-    let value: Value = serde_json::from_str(&line)?;
+    let stop = transport::Event::new()?;
+    file.write_all(&bytes, Instant::now() + Duration::from_secs(5), &stop)
+        .context("sending IPC request; command outcome may be unknown (not retried)")?;
+    let frame = file
+        .read_frame(
+            server::MAX_REPLY_BYTES,
+            Instant::now() + Duration::from_secs(25),
+            &stop,
+        )
+        .context("waiting for IPC reply; command may already have executed (not retried)")?;
+    // Close before printing: slow redirected stdout must not hold a server slot.
+    drop(file);
+    let value: Value = serde_json::from_slice(&frame)?;
     if let Some(error) = value.get("error") {
         anyhow::bail!("{}", error.as_str().unwrap_or("IPC error"));
     }
@@ -317,23 +205,37 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 
 // Validate the OS-reported owner before sending any command bytes. A syntactically
 // valid discovery record or pipe name alone is not process identity evidence.
-fn open_verified_pipe(name: &str) -> anyhow::Result<File> {
+fn open_verified_pipe(name: &str) -> anyhow::Result<transport::Pipe> {
     let expected = discovery::pipe_pid(name)?;
     let mut options = OpenOptions::new();
     options
         .read(true)
         .write(true)
-        .security_qos_flags(SECURITY_IDENTIFICATION);
-    let mut file = options.open(name);
-    if file
-        .as_ref()
-        .is_err_and(|error| error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32))
-    {
-        unsafe { checked(WaitNamedPipeW(wide(name).as_ptr(), 3000)) }
-            .context("waiting for the requested pipe")?;
-        file = options.open(name);
-    }
-    let file = file.context("opening the requested pipe")?;
+        .security_qos_flags(SECURITY_IDENTIFICATION)
+        .custom_flags(FILE_FLAG_OVERLAPPED);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let file = loop {
+        match options.open(name) {
+            Ok(file) => break file,
+            Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => {
+                let left = deadline.saturating_duration_since(Instant::now());
+                anyhow::ensure!(
+                    !left.is_zero(),
+                    "IPC connection capacity wait exceeded 3 seconds"
+                );
+                unsafe {
+                    checked(WaitNamedPipeW(
+                        wide(name).as_ptr(),
+                        left.as_millis().max(1) as u32,
+                    ))
+                }
+                .context("waiting for free IPC capacity (3-second limit)")?;
+                // Another caller can take the released slot before CreateFile.
+                // Retry only connection acquisition, never a transmitted request.
+            }
+            Err(error) => return Err(error).context("opening the requested pipe"),
+        }
+    };
     let mut actual = 0;
     unsafe {
         checked(GetNamedPipeServerProcessId(
@@ -346,5 +248,5 @@ fn open_verified_pipe(name: &str) -> anyhow::Result<File> {
         actual == expected,
         "pipe server PID mismatch: expected {expected}, found {actual}"
     );
-    Ok(file)
+    Ok(transport::Pipe::new(file.into())?)
 }

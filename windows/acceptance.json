@@ -699,9 +699,15 @@
         "evidence/2026-09-28/native-rust-tests-ipc.txt",
         "evidence/2026-09-28/native-ipc-background.json",
         "evidence/2026-09-28/native-state-ipc-background.json",
-        "evidence/2026-09-28/native-workspaces-ipc-background.json"
+        "evidence/2026-09-28/native-workspaces-ipc-background.json",
+        "evidence/2026-09-28/ipc-limits.md",
+        "evidence/2026-09-28/native-ipc-limits-before.json",
+        "evidence/2026-09-28/native-ipc-limits-background.json",
+        "evidence/2026-09-28/native-rust-tests-ipc-limits.txt",
+        "evidence/2026-09-28/native-state-ipc-limits-background.json",
+        "evidence/2026-09-28/native-ipc-routing-limits-background.json"
       ],
-      "notes": "A native pre-accept disconnect reproduced ERROR_NO_DATA and listener termination; the same regression now accepts the next client. Atomic discovery replacement, record/name/PID validation and OS-reported pipe PID checks were added. Hidden hosts passed 640 empty/truncated disconnects, two-window routing, stale explicit/inherited target rejection, eight idle clients, quit cleanup and six fresh startup cycles. The earlier workspace restart failure remains historically unexplained. Synchronous read/write/flush deadlines, bounded client resources, coordinated cancellation, pipe-allocation failure recovery, crash-record cleanup and complete discovery/multi-user/deployment acceptance remain pending."
+      "notes": "Abandoned-client recovery, atomic discovery and OS-reported pipe PID validation remain verified. IPC now uses 16 reusable overlapped pipes/workers, at most 16 outstanding GUI command permits, whole-frame deadlines, bounded peer-close waits and coordinated cancellation/join before terminal teardown. Native tests cover fragmented Unicode, oversized frames, pending accept/read/write/GUI cancellation, instance reuse, command permit lifetime and repeated pool handle release. Live hidden tests verify 16-of-24 idle admission, idle expiry, CLI reply timeout, unread quit shutdown, multiwindow routing, 640 disconnects and persistence regressions. Commands are not retransmitted after dispatch; a timed-out command may still execute later. The earlier workspace restart failure remains unexplained. Partial startup fault injection, fatal-pool recovery, crash-record cleanup, sustained load/fairness, complete discovery/multi-user/deployment acceptance remain pending."
     },
     {
       "id": "O03",

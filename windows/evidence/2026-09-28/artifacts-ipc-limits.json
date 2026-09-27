@@ -1,0 +1,30 @@
+{
+  "verification": "Fixed 16-worker overlapped IPC pool, 16 outstanding GUI-command permits, whole-frame deadlines and cancellation/join before terminal teardown. 38 native Windows tests, 15 isolated Linux crate tests, hidden live capacity/idle-expiry/CLI-timeout/unread-quit checks, existing 640 disconnect/multiwindow routing checks and 8 persistence groups passed. Release build and Clippy passed. Installer compiled but never executed. Startup fault injection, fatal-pool recovery, crash-record cleanup, sustained load/fairness, broader platform/deployment and real IME acceptance remain pending.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 6974976,
+      "sha256": "98af2172624a4f51d6128be2562fb0e614e1308a7ff4d76dca25175a22f6e117"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2655232,
+      "sha256": "359a3198328406f0a3956bac7d2acb02c9b2dfa79c2be20209ab687b3350aff7"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 3220480,
+      "sha256": "a29d40b5803c1791acd93a112afd38daf93ec03c936646cdbe1a18fa0578b259"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 1193984,
+      "sha256": "30b3fa96a2a2f9f5a91409e290d4c2b55117afff58b087ea34b7303c39b778d5"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1672746,
+      "sha256": "a90c33cf770eb64fc2a4bf930700cc298f7eeaf1ba7f2e9e58ebff64ef973da0"
+    }
+  ]
+}

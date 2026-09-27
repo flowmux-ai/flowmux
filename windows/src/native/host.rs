@@ -430,6 +430,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         }
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app._ipc.shutdown(); // Stop accepting commands before terminal teardown.
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
@@ -1811,7 +1812,8 @@ impl App {
                 self.begin_save(Some(reply))?;
                 return Ok(None);
             }
-            // The pipe worker closes only after the save succeeds and the client receives its reply.
+            // After a successful save, the pipe worker attempts the reply and
+            // waits for peer closure within a deadline before requesting exit.
             Command::Quit {
                 discard_state: true,
             } => {

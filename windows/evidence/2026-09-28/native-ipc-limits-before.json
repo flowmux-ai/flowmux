@@ -1,0 +1,21 @@
+{
+  "started": "2026-09-28T01:41:53.0565113+09:00",
+  "mode": "background",
+  "legacyObservation": true,
+  "checks": [
+    {
+      "threadsWhileOccupied": 38,
+      "name": "idle_connection_capacity_and_expiration",
+      "rejected": 0,
+      "writableAfterSixSeconds": 24,
+      "accepted": 24,
+      "attempted": 24,
+      "threadsBefore": 14
+    }
+  ],
+  "pid": 32676,
+  "pipe": "\\\\.\\pipe\\flowmux-32676-02c19ef1-0d06-4880-82de-7af7c96ad88c",
+  "shellPids": 30600,
+  "status": "observed_legacy_unbounded_waits",
+  "finished": "2026-09-28T01:42:00.5718248+09:00"
+}
