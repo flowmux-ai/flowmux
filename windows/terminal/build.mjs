@@ -14,4 +14,4 @@ for (const name of ['xterm', 'addon-fit', 'addon-search', 'addon-serialize']) {
     .catch(() => readFile('node_modules/@xterm/xterm/LICENSE', 'utf8'));
   notices += `@xterm/${name}\n${license}\n\n`;
 }
-await writeFile('../assets/THIRD_PARTY.txt', notices);
+await writeFile('../assets/THIRD_PARTY.txt', notices.replace(/[ \t]+$/gm, '').trimEnd() + '\n');

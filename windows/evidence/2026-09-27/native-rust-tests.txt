@@ -7,4 +7,3 @@ test protocol::tests::parser_ack_releases_only_output_already_sent ... ok
 test protocol::tests::stale_surface_and_foreign_origin_cannot_write_to_a_terminal ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
-
