@@ -20,13 +20,17 @@ fn main() {
     };
     if let Err(error) = result {
         host::report(&format!("{error:#}"));
-        unsafe {
-            MessageBoxW(
-                std::ptr::null_mut(),
-                wide(format!("{error:#}")).as_ptr(),
-                wide("flowmux").as_ptr(),
-                MB_OK | MB_ICONERROR,
-            );
+        if !(cfg!(debug_assertions)
+            && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1"))
+        {
+            unsafe {
+                MessageBoxW(
+                    std::ptr::null_mut(),
+                    wide(format!("{error:#}")).as_ptr(),
+                    wide("flowmux").as_ptr(),
+                    MB_OK | MB_ICONERROR,
+                );
+            }
         }
         std::process::exit(1);
     }

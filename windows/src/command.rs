@@ -19,6 +19,15 @@ pub struct Cli {
     pub command: Command,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Request {
+    #[serde(flatten)]
+    pub command: Command,
+    /// The surface remains stable when its inherited pane/workspace IDs become stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_surface: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
@@ -62,6 +71,16 @@ pub enum Command {
         #[arg(value_parser = parse_id)]
         surface: Uuid,
     },
+    /// Move a running tab without restarting its process or terminal view.
+    MoveTab {
+        #[arg(value_parser = parse_id)]
+        surface: Uuid,
+        #[arg(long, value_parser = parse_id)]
+        to_pane: Uuid,
+        /// Zero-based destination position; omitted means append.
+        #[arg(long)]
+        index: Option<usize>,
+    },
     /// Close this Windows window and terminate its terminal process trees.
     Quit,
 }
@@ -101,4 +120,27 @@ pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
         _ => anyhow::bail!("unsupported named key: {key}"),
     };
     Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_preserves_old_ipc_commands_and_roundtrips_stable_surface() {
+        let old: Request = serde_json::from_str(r#"{"method":"identify"}"#).unwrap();
+        assert!(old.caller_surface.is_none());
+        let id = Uuid::new_v4();
+        let original = Request {
+            command: Command::ReadScreen { pane: None },
+            caller_surface: Some(id),
+        };
+        let decoded: Request =
+            serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+        assert_eq!(decoded.caller_surface, Some(id));
+        assert!(matches!(
+            decoded.command,
+            Command::ReadScreen { pane: None }
+        ));
+    }
 }

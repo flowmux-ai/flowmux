@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+use anyhow::Context;
 use flowmux_core::{
     CloseSurfaceOutcome, Pane, PaneContent, PaneId, PaneSurface, RemoveOutcome, SplitDirection,
     SurfaceId, WorkspaceId,
@@ -114,6 +115,65 @@ impl Workspace {
     }
 }
 
+/// Relocate domain state only. The host retains the existing view and PTY by SurfaceId.
+/// Validate both endpoints before removing anything; moving the final source tab
+/// collapses its empty pane/workspace without creating a replacement process.
+pub fn move_surface(
+    workspaces: &mut Vec<Workspace>,
+    surface: SurfaceId,
+    target: PaneId,
+    index: usize,
+) -> anyhow::Result<usize> {
+    let (source_ws, source_pane) = workspaces
+        .iter()
+        .enumerate()
+        .find_map(|(i, ws)| {
+            ws.leaves().into_iter().find_map(|(pane, _, tabs)| {
+                tabs.iter()
+                    .any(|tab| tab.id == surface)
+                    .then_some((i, pane))
+            })
+        })
+        .context("source surface not found")?;
+    let mut target_ws = workspaces
+        .iter()
+        .position(|ws| {
+            matches!(
+                ws.root.find_leaf_content(target),
+                Some(PaneContent::Tabs { .. })
+            )
+        })
+        .context("destination pane not found")?;
+    let (tab, empty) = workspaces[source_ws]
+        .root
+        .take_surface_from_leaf(source_pane, surface)
+        .expect("validated source");
+    workspaces[target_ws]
+        .root
+        .insert_surface_into_leaf(target, tab, index)
+        .expect("validated destination");
+    workspaces[target_ws].focused = target;
+    if empty && source_pane != target {
+        match workspaces[source_ws].root.clone().remove_leaf(source_pane) {
+            RemoveOutcome::Replaced(root) => {
+                let ws = &mut workspaces[source_ws];
+                ws.root = root;
+                if ws.focused == source_pane {
+                    ws.focused = ws.root.first_leaf_id().expect("remaining pane");
+                }
+            }
+            RemoveOutcome::EntirelyRemoved => {
+                workspaces.remove(source_ws);
+                if source_ws < target_ws {
+                    target_ws -= 1;
+                }
+            }
+            RemoveOutcome::NotFound(_) => unreachable!("validated source"),
+        }
+    }
+    Ok(target_ws)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
@@ -162,6 +222,43 @@ pub fn layout(pane: &Pane, area: Rect, gap: i32, out: &mut Vec<(PaneId, Rect)>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_tab_move_preserves_surface_and_cwd_and_collapses_empty_sources() {
+        let mut workspaces = vec![
+            Workspace::new("source".into()),
+            Workspace::new("target".into()),
+        ];
+        let surface = workspaces[0].active();
+        let destination = workspaces[1].focused;
+        assert_eq!(
+            move_surface(&mut workspaces, surface, destination, 0).unwrap(),
+            0
+        );
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].active(), surface);
+        assert_eq!(
+            workspaces[0].root.terminal_surface_cwd(destination),
+            Some("source".into())
+        );
+        let other = workspaces[0].split(SplitDirection::Vertical);
+        let moved = workspaces[0].active();
+        move_surface(&mut workspaces, moved, destination, 0).unwrap();
+        assert_eq!(workspaces[0].leaves().len(), 1);
+        assert_ne!(workspaces[0].focused, other);
+        assert_eq!(workspaces[0].leaves()[0].2[0].id, moved);
+        move_surface(&mut workspaces, moved, destination, usize::MAX).unwrap();
+        assert_eq!(workspaces[0].leaves()[0].2.last().unwrap().id, moved);
+    }
+
+    #[test]
+    fn invalid_move_leaves_layout_and_focus_unchanged() {
+        let mut workspaces = vec![Workspace::new("source".into())];
+        let before = serde_json::to_value(&workspaces).unwrap();
+        let surface = workspaces[0].active();
+        assert!(move_surface(&mut workspaces, surface, PaneId::new(), 0).is_err());
+        assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+    }
 
     #[test]
     fn split_keeps_original_surface_and_closing_never_removes_last_pane() {

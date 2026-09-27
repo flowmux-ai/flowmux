@@ -1,18 +1,27 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Exercises only the newly launched native window. Never addresses the WSL instance.
-param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [int]$Cycles = 0)
+param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [int]$Cycles = 0, [switch]$Interactive)
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
 $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $gui = Join-Path $BuildDirectory 'flowmux.exe'
+$doctor = (& $cli doctor | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or (-not $Interactive -and -not $doctor.background_testing)) {
+    throw 'Background verification requires a working debug build; no window was launched.'
+}
 if ($Cycles -gt 0) { Add-Type -Path (Join-Path $PSScriptRoot 'HandleProbe.cs') }
+Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
 $evidenceDirectory = Join-Path $PSScriptRoot '..\dist\evidence'
 New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
-$process = Start-Process -FilePath $gui -PassThru
+$previousBackground = $env:FLOWMUX_TEST_BACKGROUND
+try {
+    $env:FLOWMUX_TEST_BACKGROUND = $(if ($Interactive) { $null } else { '1' })
+    $process = Start-Process -FilePath $gui -PassThru
+} finally { $env:FLOWMUX_TEST_BACKGROUND = $previousBackground }
 $discovery = Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json"
 $pipeName = $null
-$evidence = [ordered]@{ pid = $process.Id; started = (Get-Date).ToString('o'); checks = @(); ime = 'not tested' }
+$evidence = [ordered]@{ pid = $process.Id; started = (Get-Date).ToString('o'); checks = @(); ime = 'not tested'; mode = $(if ($Interactive) { 'interactive' } else { 'background' }) }
 function Invoke-Flowmux([string[]]$Arguments) {
     $output = & $cli --pipe $script:pipeName --json @Arguments
     if ($LASTEXITCODE -ne 0) { throw "flowmuxctl failed: $Arguments" }
@@ -37,6 +46,8 @@ try {
     $pipeName = (Get-Content -Raw $discovery | ConvertFrom-Json).pipe
     $evidence.pipe = $pipeName
     $tree = Wait-Ready
+    $window = [IntPtr]::new([long]$tree.window_handle)
+    if (-not $Interactive -and (-not $tree.background_testing -or [NativeInput]::IsWindowVisible($window) -or [NativeInput]::GetForegroundWindow() -eq $window)) { throw 'Background host unexpectedly exposed a window' }
     $identity = Invoke-Flowmux @('identify')
     $pane = $identity.pane
     $originalSurface = $identity.surface
@@ -102,6 +113,7 @@ try {
         if (-not $bounded) { throw 'Native host handle count grew during repeated tab close' }
     }
     $evidence.tree = Invoke-Flowmux @('tree')
+    if (-not $Interactive -and ([NativeInput]::IsWindowVisible($window) -or [NativeInput]::GetForegroundWindow() -eq $window)) { throw 'Background host took desktop focus' }
     $evidence.status = 'passed_smoke_only'
 } catch {
     $evidence.status = 'failed'

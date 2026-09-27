@@ -1,0 +1,36 @@
+{
+  "pid": 35516,
+  "started": "2026-09-27T22:07:37.6909360+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "pid": 29508,
+      "name": "pane_move_preserves_pid_surface_and_history",
+      "passed": true
+    },
+    {
+      "context": {
+        "pane": "87607018-c62e-46d3-84a3-3849dfc91e21",
+        "pid": 35516,
+        "pipe": "\\\\.\\pipe\\flowmux-35516-95f6d9d4-983a-4a5b-b132-1bce61f6ed21",
+        "platform": "windows",
+        "surface": "4b5f023d-8270-4679-b0d8-8c3fe3869d31",
+        "workspace": "fdaa8ddb-b76b-493f-9da1-df4e379c051d"
+      },
+      "name": "hidden_moved_child_cli_uses_stable_surface_and_preserves_cwd",
+      "passed": true
+    },
+    {
+      "name": "workspace_move_preserves_pid_and_history",
+      "passed": true
+    },
+    {
+      "name": "hidden_host_reorder_and_40_workspace_moves_preserve_sessions_and_output",
+      "cycles": 20,
+      "passed": true
+    }
+  ],
+  "interactive": "Native menu and real IME remain pending; desktop input was not injected.",
+  "status": "passed_background_move_subset",
+  "finished": "2026-09-27T22:07:42.1898620+09:00"
+}

@@ -75,7 +75,8 @@
       "id": "I09",
       "feature": "조합 중 탭·pane·창 이동",
       "status": "pending",
-      "evidence": []
+      "evidence": [],
+      "notes": "Interactive move trial was contaminated by concurrent user desktop input. Redundant native focus is avoided in code, but real IME validation of that change remains pending. User requested background-only work."
     },
     {
       "id": "I10",
@@ -254,8 +255,11 @@
     {
       "id": "U03",
       "feature": "tab 생성·focus·이름·닫기·재정렬",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-tab-move-background.json"
+      ],
+      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain."
     },
     {
       "id": "U04",
@@ -266,8 +270,11 @@
     {
       "id": "U05",
       "feature": "tab을 pane/workspace 사이로 이동",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-tab-move-background.json"
+      ],
+      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain."
     },
     {
       "id": "U06",
@@ -662,8 +669,11 @@
     {
       "id": "O04",
       "feature": "send-keys/send-key/read-screen·pane/tab 제어",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-tab-move-background.json"
+      ],
+      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain."
     },
     {
       "id": "O05",
@@ -758,8 +768,11 @@
     {
       "id": "G07",
       "gate": "tab 이동·다중 창",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-tab-move-background.json"
+      ],
+      "notes": "Same-window pane/workspace moves verified in a hidden host. Controlled real IME, full TUI/scrollback and cross-window ownership remain pending."
     },
     {
       "id": "G08",

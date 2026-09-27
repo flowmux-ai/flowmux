@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\release")
+param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [switch]$Interactive)
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
@@ -12,9 +12,17 @@ Add-Type -Path (Join-Path $PSScriptRoot 'ProcessTreeProbe.cs') -OutputAssembly $
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
 Add-Type -AssemblyName System.Drawing
 $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
-$process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+$doctor = (& $cli doctor | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0 -or (-not $Interactive -and -not $doctor.background_testing)) {
+    throw 'Background verification requires a working debug build; no window was launched.'
+}
+$previousBackground = $env:FLOWMUX_TEST_BACKGROUND
+try {
+    $env:FLOWMUX_TEST_BACKGROUND = $(if ($Interactive) { $null } else { '1' })
+    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+} finally { $env:FLOWMUX_TEST_BACKGROUND = $previousBackground }
 $script:pipeName = $null
-$evidence = [ordered]@{ pid = $process.Id; started = (Get-Date).ToString('o'); checks = @() }
+$evidence = [ordered]@{ pid = $process.Id; started = (Get-Date).ToString('o'); checks = @(); mode = $(if ($Interactive) { 'interactive' } else { 'background' }) }
 function Invoke-Flowmux([string[]]$Arguments) {
     $output = & $cli --pipe $script:pipeName --json @Arguments
     if ($LASTEXITCODE -ne 0) { throw "flowmuxctl failed: $Arguments" }
@@ -62,7 +70,9 @@ try {
         Start-Sleep -Milliseconds 100
     }
     $script:pipeName = (Get-Content -Raw $discovery | ConvertFrom-Json).pipe
-    Wait-Ready | Out-Null
+    $initial = Wait-Ready
+    $window = [IntPtr]::new([long]$initial.window_handle)
+    if (-not $Interactive -and (-not $initial.background_testing -or [NativeInput]::IsWindowVisible($window) -or [NativeInput]::GetForegroundWindow() -eq $window)) { throw 'Background host unexpectedly exposed a window' }
     $identity = Invoke-Flowmux @('identify')
     $marker = 'FLOWMUX_NORMAL_EXIT_' + [char]0xD55C + [char]0xAE00
     # The full marker must occur in actual output, never just in the echoed command.
@@ -79,14 +89,16 @@ try {
     $screen = Invoke-Flowmux @('read-screen', $identity.pane)
     if (-not $screen.text.Contains($marker)) { throw 'Final Korean output was lost after process exit' }
     $evidence.checks += @{ name = 'natural_exit_preserves_final_screen_and_exit_code'; passed = $true; surface = $surface }
-    $process.Refresh()
-    $rect = New-Object NativeInput+Rect
-    [NativeInput]::GetWindowRect($process.MainWindowHandle, [ref]$rect) | Out-Null
-    $bitmap = New-Object Drawing.Bitmap(($rect.Right-$rect.Left), ($rect.Bottom-$rect.Top))
-    $graphics = [Drawing.Graphics]::FromImage($bitmap); $dc = $graphics.GetHdc()
-    try { [NativeInput]::PrintWindow($process.MainWindowHandle, $dc, 2) | Out-Null }
-    finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-    $bitmap.Save((Join-Path $directory 'normal-exit.png')); $bitmap.Dispose()
+    if ($Interactive) {
+        $process.Refresh()
+        $rect = New-Object NativeInput+Rect
+        [NativeInput]::GetWindowRect($process.MainWindowHandle, [ref]$rect) | Out-Null
+        $bitmap = New-Object Drawing.Bitmap(($rect.Right-$rect.Left), ($rect.Bottom-$rect.Top))
+        $graphics = [Drawing.Graphics]::FromImage($bitmap); $dc = $graphics.GetHdc()
+        try { [NativeInput]::PrintWindow($process.MainWindowHandle, $dc, 2) | Out-Null }
+        finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+        $bitmap.Save((Join-Path $directory 'normal-exit.png')); $bitmap.Dispose()
+    }
     $childTree = Start-Tree 'tab-close'
     Invoke-Flowmux @('close-tab', $childTree.surface) | Out-Null
     Assert-Stopped $childTree.pids

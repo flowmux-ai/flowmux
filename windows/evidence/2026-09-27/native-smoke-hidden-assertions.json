@@ -1,0 +1,191 @@
+{
+  "pid": 32996,
+  "started": "2026-09-27T22:13:50.4157297+09:00",
+  "checks": [
+    {
+      "pid": 5968,
+      "name": "native_conpty_start",
+      "passed": true
+    },
+    {
+      "name": "korean_utf8_roundtrip_via_cli_not_ime",
+      "sequence": 85,
+      "passed": true
+    },
+    {
+      "name": "four_splits_keep_original_process",
+      "passed": true
+    },
+    {
+      "name": "tab_close_terminates_shell",
+      "passed": true
+    }
+  ],
+  "ime": "not tested",
+  "mode": "background",
+  "pipe": "\\\\.\\pipe\\flowmux-32996-a4c4edca-8e1d-4122-b472-77aeaf69daa9",
+  "cycleSamples": [],
+  "tree": {
+    "active_workspace": "858de13b-559c-4931-a818-ccf8a81f433f",
+    "background_testing": true,
+    "surfaces": [
+      {
+        "cols": 57,
+        "exit_code": null,
+        "id": "aba7b4b4-43a5-4ff4-8731-99fc9564e960",
+        "output_sequence": 86,
+        "parsed_sequence": 86,
+        "pid": 5968,
+        "ready": true,
+        "resources_released": false,
+        "rows": 42,
+        "running": true
+      },
+      {
+        "cols": 26,
+        "exit_code": null,
+        "id": "19ae069c-8406-4c10-9594-b94f98d64257",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 26636,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      },
+      {
+        "cols": 26,
+        "exit_code": null,
+        "id": "3fc657bd-8df0-410b-a84c-79b4dbd62a73",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 34252,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      },
+      {
+        "cols": 57,
+        "exit_code": null,
+        "id": "84380150-6562-4c10-9294-a8383209d0f9",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 32964,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      }
+    ],
+    "window_handle": 3344940,
+    "workspaces": [
+      {
+        "cwd": "C:\\Users\\jundu",
+        "focused": "5875bb90-13b8-47eb-bf27-3349e493b8e0",
+        "id": "858de13b-559c-4931-a818-ccf8a81f433f",
+        "name": "jundu",
+        "root": {
+          "direction": "vertical",
+          "first": {
+            "content": {
+              "active": "aba7b4b4-43a5-4ff4-8731-99fc9564e960",
+              "surfaces": [
+                {
+                  "id": "aba7b4b4-43a5-4ff4-8731-99fc9564e960",
+                  "kind": {
+                    "cwd": "C:\\Users\\jundu",
+                    "shell": null,
+                    "type": "terminal"
+                  },
+                  "title": "PowerShell",
+                  "title_locked": false
+                }
+              ],
+              "type": "tabs"
+            },
+            "id": "798b9e9a-dc08-4a74-8236-57bbedc9a53d",
+            "kind": "leaf"
+          },
+          "id": "2bebfab1-8132-4781-96dd-98ab8ad06de9",
+          "kind": "split",
+          "ratio": 0.5,
+          "second": {
+            "direction": "horizontal",
+            "first": {
+              "content": {
+                "active": "84380150-6562-4c10-9294-a8383209d0f9",
+                "surfaces": [
+                  {
+                    "id": "84380150-6562-4c10-9294-a8383209d0f9",
+                    "kind": {
+                      "cwd": "C:\\Users\\jundu",
+                      "shell": null,
+                      "type": "terminal"
+                    },
+                    "title": "PowerShell",
+                    "title_locked": false
+                  }
+                ],
+                "type": "tabs"
+              },
+              "id": "b3f3aa0a-8d30-4809-aedb-af00cd3aa60d",
+              "kind": "leaf"
+            },
+            "id": "066104d2-5d9c-4f5a-9f75-72d4c0c0fc61",
+            "kind": "split",
+            "ratio": 0.5,
+            "second": {
+              "direction": "vertical",
+              "first": {
+                "content": {
+                  "active": "3fc657bd-8df0-410b-a84c-79b4dbd62a73",
+                  "surfaces": [
+                    {
+                      "id": "3fc657bd-8df0-410b-a84c-79b4dbd62a73",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "PowerShell",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "5525172b-68e2-4316-9152-a92efa1da902",
+                "kind": "leaf"
+              },
+              "id": "a4377849-b6c8-409f-90de-27fafdc34633",
+              "kind": "split",
+              "ratio": 0.5,
+              "second": {
+                "content": {
+                  "active": "19ae069c-8406-4c10-9594-b94f98d64257",
+                  "surfaces": [
+                    {
+                      "id": "19ae069c-8406-4c10-9594-b94f98d64257",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "jundu",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "5875bb90-13b8-47eb-bf27-3349e493b8e0",
+                "kind": "leaf"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "status": "passed_smoke_only",
+  "finished": "2026-09-27T22:13:52.8130775+09:00"
+}

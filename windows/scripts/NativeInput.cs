@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 public static class NativeInput {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct GuiInfo {
         public uint Size, Flags;
         public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
@@ -22,6 +23,7 @@ public static class NativeInput {
     }
     [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Union Value; }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
@@ -30,6 +32,10 @@ public static class NativeInput {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GuiInfo info);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr LoadKeyboardLayout(string name, uint flags);
@@ -43,13 +49,18 @@ public static class NativeInput {
     [DllImport("imm32.dll")] static extern bool ImmSetConversionStatus(IntPtr context, uint conversion, uint sentence);
     [DllImport("imm32.dll")] static extern bool ImmSetOpenStatus(IntPtr context, bool open);
     public static void Foreground(IntPtr window) {
-        uint owner;
-        uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out owner);
-        uint current = GetCurrentThreadId();
-        bool attached = foreground != current && AttachThreadInput(current, foreground, true);
-        try { ShowWindow(window, 9); BringWindowToTop(window); SetForegroundWindow(window); }
-        finally { if (attached) AttachThreadInput(current, foreground, false); }
-        Thread.Sleep(200);
+        // Newly created WebView/console windows can still be settling. No input
+        // is injected during these bounded focus attempts; every batch rechecks.
+        for (int attempt=0; attempt<3; attempt++) {
+            uint owner;
+            uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), out owner);
+            uint current = GetCurrentThreadId();
+            bool attached = foreground != current && AttachThreadInput(current, foreground, true);
+            try { ShowWindow(window, 9); BringWindowToTop(window); SetForegroundWindow(window); }
+            finally { if (attached) AttachThreadInput(current, foreground, false); }
+            Thread.Sleep(250);
+            if (GetForegroundWindow() == window) return;
+        }
         RequireForeground(window);
     }
     public static IntPtr Focused(IntPtr window) {
@@ -82,6 +93,35 @@ public static class NativeInput {
     }
     public static void RequireForeground(IntPtr window) {
         if (GetForegroundWindow() != window) throw new Exception("Refusing keyboard input: target window lost foreground");
+    }
+    public static void ClickButton(IntPtr window, string title) {
+        RequireForeground(window);
+        IntPtr button = FindWindowEx(window, IntPtr.Zero, "BUTTON", title);
+        if (button == IntPtr.Zero) throw new Exception("Native button not found: " + title);
+        IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try {
+            Rect rect;
+            if (!GetWindowRect(button, out rect)) throw new Exception("GetWindowRect failed");
+            var point = new Point { X=(rect.Left + rect.Right) / 2, Y=(rect.Top + rect.Bottom) / 2 };
+            if (WindowFromPoint(point) != button) throw new Exception("Refusing mouse input: native button is obscured");
+            SetCursorPos(point.X, point.Y);
+        } finally { if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous); }
+        RequireForeground(window);
+        var inputs = new[] {
+            new Input { Type=0, Value=new Union { Mouse=new Mouse { Flags=2 } } },
+            new Input { Type=0, Value=new Union { Mouse=new Mouse { Flags=4 } } }
+        };
+        if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2)
+            throw new Exception("Mouse SendInput failed");
+    }
+    public static IntPtr MenuWindow(IntPtr window) {
+        uint owner; GetWindowThreadProcessId(window, out owner);
+        IntPtr found = IntPtr.Zero;
+        while ((found = FindWindowEx(IntPtr.Zero, found, "#32768", null)) != IntPtr.Zero) {
+            uint process; GetWindowThreadProcessId(found, out process);
+            if (process == owner) return found;
+        }
+        return IntPtr.Zero;
     }
     public static void Key(IntPtr window, ushort key, bool shift) {
         RequireForeground(window);

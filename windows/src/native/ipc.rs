@@ -2,7 +2,7 @@
 //! Per-window local IPC. A protected DACL restricts clients to the owning user.
 use super::{checked, data_dir, wide};
 use crate::{
-    command::{Cli, Command},
+    command::{Cli, Command, Request},
     protocol::MAX_MESSAGE_BYTES,
 };
 use anyhow::Context;
@@ -30,7 +30,7 @@ pub struct Server {
 }
 impl Server {
     pub fn start(
-        emit: impl Fn(Command, Reply) + Send + Sync + 'static,
+        emit: impl Fn(Request, Reply) + Send + Sync + 'static,
         shutdown: impl Fn() + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
         let name = format!(
@@ -73,8 +73,8 @@ impl Server {
                                 line.len() <= MAX_MESSAGE_BYTES && line.ends_with('\n'),
                                 "invalid IPC frame"
                             );
-                            let command: Command = serde_json::from_str(&line)?;
-                            quitting = matches!(command, Command::Quit);
+                            let command: Request = serde_json::from_str(&line)?;
+                            quitting = matches!(command.command, Command::Quit);
                             let (send, receive) = mpsc::sync_channel(1);
                             emit(command, send);
                             receive
@@ -205,7 +205,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         );
         println!(
             "{}",
-            json!({"platform":"windows","webview2":version,"status":"ok"})
+            json!({"platform":"windows","webview2":version,"status":"ok", "background_testing":cfg!(debug_assertions)})
         );
         return Ok(());
     }
@@ -240,7 +240,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         for _ in 0..2 {
             match OpenOptions::new().read(true).write(true).open(&name) {
                 Ok(file) => {
-                    connected = Some(file);
+                    connected = Some((file, name.clone()));
                     break;
                 }
                 Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => unsafe {
@@ -253,9 +253,22 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             break;
         }
     }
-    let mut file =
+    let (mut file, connected_name) =
         connected.context("No running Windows flowmux window; launch flowmux.exe first")?;
-    let mut bytes = serde_json::to_vec(&cli.command)?;
+    let caller_surface =
+        if std::env::var("FLOWMUX_PIPE_NAME").as_deref() == Ok(connected_name.as_str()) {
+            std::env::var("FLOWMUX_SURFACE_ID")
+                .ok()
+                .map(|value| uuid::Uuid::parse_str(&value))
+                .transpose()
+                .context("invalid FLOWMUX_SURFACE_ID")?
+        } else {
+            None
+        };
+    let mut bytes = serde_json::to_vec(&Request {
+        command: cli.command,
+        caller_surface,
+    })?;
     anyhow::ensure!(bytes.len() < MAX_MESSAGE_BYTES, "command is too large");
     bytes.push(b'\n');
     file.write_all(&bytes)?;

@@ -1,0 +1,30 @@
+{
+  "verification": "Debug host verified in hidden mode. Release unit tests and Clippy passed; rebuilt installer payload has no new interactive IME/menu acceptance.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 5275136,
+      "sha256": "13207600d4795d8f61cacdeffd8af8f419c516a2ef9bde77f8f6a38e3b595153"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2377728,
+      "sha256": "e217c8a91b0a33814b10f9f52988044515f2a8b17ed7cbf0d8e583bd12276998"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 2317824,
+      "sha256": "c0e16a5ff9c88908fa5de022bc1f7773a233a296d6e697fa311be8cdf972436d"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 985600,
+      "sha256": "0d656b2b058550e804dc3304bf98591cfa8017f02777a8c46b3ba1c000d7924e"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1428559,
+      "sha256": "65eaef22396a3aef7099c461dba4f56cf18c196c0ace4b4b1390f0cbeba24bc3"
+    }
+  ]
+}

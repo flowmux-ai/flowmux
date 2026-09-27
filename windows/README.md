@@ -45,18 +45,40 @@ SYSTEM, and remote pipe clients are rejected. Terminals receive
 The discovery files live under `%LOCALAPPDATA%\flowmux\windows\instances`.
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
+Move an existing terminal between panes or workspaces in the same window:
+
+```powershell
+flowmuxctl.exe move-tab surface:<id> --to-pane pane:<id> --index 0
+```
+
+The native **Move tab…** menu exposes destinations and left/right reordering.
+Moving retains the process and WebView. An empty source pane/workspace collapses.
+Inside a terminal, commands with an omitted target resolve its stable surface ID,
+including after a move or while hidden. `identify` returns its current location;
+the shell's inherited pane/workspace environment variables still describe spawn
+time and cannot be rewritten in a running child process.
+
 The app loads the pinned Microsoft ConPTY DLL from its own installation
 directory, with the SDK's `x64/OpenConsole.exe` layout. It does not fall back
 silently to an older system implementation. A native stress test reproduced
 one leaked process handle per closed session in the validation machine's
 inbox ConPTY. See `conpty.lock.json` for the package hash and version.
 
-Native smoke and IME checks launch and close their own window:
+Native smoke, lifecycle and tab-move checks default to a hidden debug host. They
+do not display a window or take keyboard focus. A release build is rejected before
+launch because the background test switch is deliberately absent from it:
 
 ```powershell
 powershell -NoProfile -File windows/scripts/verify-native.ps1 -BuildDirectory windows/target/debug
-powershell -NoProfile -File windows/scripts/verify-korean-ime.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-lifecycle.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-tab-move.ps1 -BuildDirectory windows/target/debug
+```
+
+Adding `-Interactive` opts these scripts into visible-window verification. Real
+IME tests additionally require an idle desktop and explicit `-Interactive`:
+
+```powershell
+powershell -NoProfile -File windows/scripts/verify-korean-ime.ps1 -BuildDirectory windows/target/debug -Interactive
 ```
 
 The IME script requires an unlocked interactive Windows desktop and the

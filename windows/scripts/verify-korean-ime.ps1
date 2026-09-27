@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Uses the real Microsoft Korean IME and virtual-key SendInput, not JS text injection.
-param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [switch]$Interactive)
 $ErrorActionPreference = 'Stop'
+if (-not $Interactive) {
+    throw 'Real IME verification requires -Interactive and an idle desktop; no window or input was created.'
+}
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
 $directory = Join-Path $PSScriptRoot '..\dist\evidence\ime'

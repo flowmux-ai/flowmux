@@ -5,7 +5,7 @@ use super::{
     wide,
 };
 use crate::{
-    command::{key_bytes, Command, Direction},
+    command::{key_bytes, Command, Direction, Request},
     model::{self, Workspace},
     protocol::{ClientMessage, HostMessage, Identity, TERMINAL_ORIGIN},
 };
@@ -28,9 +28,9 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::{Com::*, LibraryLoader::*},
-    UI::{HiDpi::*, WindowsAndMessaging::*},
+    UI::{HiDpi::*, Input::KeyboardAndMouse::SetFocus, WindowsAndMessaging::*},
 };
-use wry::{WebContext, WebView, WebViewBuilder};
+use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 
 const WAKE: u32 = WM_APP + 1;
 thread_local! { static EVENTS: RefCell<Option<EventSender>> = const { RefCell::new(None) }; }
@@ -41,7 +41,7 @@ enum Event {
     Button(u16),
     Bridge(SurfaceId, String, String),
     Session(SurfaceId, SessionEvent),
-    Command(Command, ipc::Reply),
+    Command(Request, ipc::Reply),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -154,6 +154,7 @@ enum Action {
     Vertical,
     Horizontal,
     CloseTab,
+    MoveTabMenu,
     Tab(PaneId, SurfaceId),
 }
 struct Control {
@@ -177,6 +178,7 @@ struct App {
     controls: Vec<Control>,
     pending_reads: HashMap<Uuid, PendingRead>,
     closing: bool,
+    background_test: bool,
 }
 
 pub fn run(cwd: Option<PathBuf>) -> anyhow::Result<()> {
@@ -253,9 +255,15 @@ pub fn run(cwd: Option<PathBuf>) -> anyhow::Result<()> {
             controls: vec![],
             pending_reads: HashMap::new(),
             closing: false,
+            // Automated IPC verification can run without exposing a window or
+            // taking desktop focus. Production builds ignore this test switch.
+            background_test: cfg!(debug_assertions)
+                && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1"),
         };
         app.rebuild()?;
-        ShowWindow(window, SW_SHOW);
+        if !app.background_test {
+            ShowWindow(window, SW_SHOW);
+        }
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
@@ -325,6 +333,7 @@ impl App {
             ("Split right", Action::Vertical),
             ("Split down", Action::Horizontal),
             ("Close tab", Action::CloseTab),
+            ("Move tab…", Action::MoveTabMenu),
         ] {
             self.button(name, action)?;
         }
@@ -394,10 +403,11 @@ impl App {
         #[cfg(debug_assertions)]
         let init = if std::env::var_os("FLOWMUX_TEST_INPUT_TRACE").is_some() {
             format!("{init} (() => {{ const identity=window.__flowmuxIdentity;
-                for (const type of ['keydown','keyup','compositionstart','compositionend']) {{
+                for (const type of ['keydown','keyup','compositionstart','compositionupdate','compositionend','focus','blur','input']) {{
                     window.addEventListener(type, e => window.ipc.postMessage(JSON.stringify({{
                         ...identity, message: {{type:'diagnostic', event: {{type:e.type, key:e.key,
-                            code:e.code, keyCode:e.keyCode, shift:e.shiftKey, composing:e.isComposing, data:e.data}} }}
+                            code:e.code, keyCode:e.keyCode, shift:e.shiftKey, composing:e.isComposing, data:e.data,
+                            value:e.target?.value, active:document.activeElement === e.target}} }}
                     }})), true);
                 }} }})();")
         } else {
@@ -560,9 +570,26 @@ impl App {
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
+        if self.background_test {
+            return Ok(());
+        }
         if let Some(surface) = self.surfaces.get(&self.active()) {
             if surface.ready {
-                surface.view.focus()?;
+                let mut info = GUITHREADINFO {
+                    cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                    ..GUITHREADINFO::default()
+                };
+                let child = surface.view.hwnd().0;
+                let already_focused = unsafe {
+                    let thread = GetWindowThreadProcessId(self.window, std::ptr::null_mut());
+                    GetGUIThreadInfo(thread, &mut info) != 0
+                        && (info.hwndFocus == child || IsChild(child, info.hwndFocus) != 0)
+                };
+                // Repeating WebView2 MoveFocus can blur the already focused textarea.
+                // xterm clears its value on blur, which discards live IME composition.
+                if !already_focused {
+                    surface.view.focus()?;
+                }
                 surface.send(&HostMessage::Focus)?;
             }
         }
@@ -784,14 +811,15 @@ impl App {
     fn locate(&self, surface: SurfaceId) -> Option<(usize, PaneId, PathBuf)> {
         for (index, workspace) in self.workspaces.iter().enumerate() {
             for (pane, _, tabs) in workspace.leaves() {
-                if tabs.iter().any(|tab| tab.id == surface) {
+                if let Some(tab) = tabs.iter().find(|tab| tab.id == surface) {
                     return Some((
                         index,
                         pane,
-                        workspace
-                            .root
-                            .terminal_surface_cwd(pane)
-                            .unwrap_or_else(|| workspace.cwd.clone()),
+                        match &tab.kind {
+                            flowmux_core::SurfaceKind::Terminal { cwd, .. } => cwd.clone(),
+                            _ => None,
+                        }
+                        .unwrap_or_else(|| workspace.cwd.clone()),
                     ));
                 }
             }
@@ -806,15 +834,99 @@ impl App {
         anyhow::ensure!(surface.exit_code.is_none(), "terminal process has exited");
         surface.session.as_ref().context("terminal is not ready")
     }
-    fn target(&self, pane: Option<Uuid>) -> anyhow::Result<SurfaceId> {
+    fn target(&self, pane: Option<Uuid>, caller: Option<SurfaceId>) -> anyhow::Result<SurfaceId> {
         if let Some(pane) = pane {
             self.workspaces
                 .iter()
                 .find_map(|ws| ws.root.active_surface_id(PaneId(pane)))
                 .context("pane not found")
         } else {
-            Ok(self.active())
+            let id = caller.unwrap_or_else(|| self.active());
+            anyhow::ensure!(
+                self.locate(id).is_some(),
+                "calling surface no longer exists"
+            );
+            Ok(id)
         }
+    }
+    fn select(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        let (workspace, pane, _) = self.locate(id).context("surface not found")?;
+        self.active_workspace = workspace;
+        self.workspace_mut().focused = pane;
+        self.workspace_mut().root.set_active_surface(pane, id);
+        Ok(())
+    }
+    fn move_tab(&mut self, surface: SurfaceId, target: PaneId, index: usize) -> anyhow::Result<()> {
+        self.active_workspace = model::move_surface(&mut self.workspaces, surface, target, index)?;
+        // No surface is removed or recreated: its WebView, parser, IME target and
+        // native process stay attached to the same identity throughout the move.
+        self.rebuild()
+    }
+    fn move_menu(&mut self) -> anyhow::Result<()> {
+        let surface = self.active();
+        let pane = self.workspace().focused;
+        let tabs = self
+            .workspace()
+            .leaves()
+            .into_iter()
+            .find(|(id, _, _)| *id == pane)
+            .unwrap()
+            .2;
+        let at = tabs.iter().position(|tab| tab.id == surface).unwrap();
+        let mut destinations = Vec::new();
+        if at > 0 {
+            destinations.push(("Move left".to_owned(), pane, at - 1));
+        }
+        if at + 1 < tabs.len() {
+            destinations.push(("Move right".to_owned(), pane, at + 1));
+        }
+        for workspace in &self.workspaces {
+            for (i, (target, _, _)) in workspace.leaves().iter().enumerate() {
+                if *target != pane {
+                    destinations.push((
+                        format!("{} — pane {}", workspace.name.replace('&', "&&"), i + 1),
+                        *target,
+                        usize::MAX,
+                    ));
+                }
+            }
+        }
+        unsafe {
+            let menu = CreatePopupMenu();
+            anyhow::ensure!(!menu.is_null(), "cannot create tab move menu");
+            // WebView2 has its own input thread. Move native focus to the host
+            // while its popup owns keyboard navigation, then restore the terminal.
+            SetFocus(self.window);
+            for (index, (label, _, _)) in destinations.iter().enumerate() {
+                AppendMenuW(menu, MF_STRING, index + 1, wide(label).as_ptr());
+            }
+            if destinations.is_empty() {
+                AppendMenuW(
+                    menu,
+                    MF_STRING | MF_GRAYED,
+                    0,
+                    wide("Create another pane or workspace first").as_ptr(),
+                );
+            }
+            let mut point = POINT::default();
+            GetCursorPos(&mut point);
+            let choice = TrackPopupMenu(
+                menu,
+                TPM_RETURNCMD | TPM_NONOTIFY,
+                point.x,
+                point.y,
+                0,
+                self.window,
+                std::ptr::null(),
+            ) as usize;
+            DestroyMenu(menu);
+            if choice > 0 {
+                if let Some((_, target, index)) = destinations.get(choice - 1) {
+                    self.move_tab(surface, *target, *index)?;
+                }
+            }
+        }
+        self.focus_active()
     }
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
         match action {
@@ -850,6 +962,7 @@ impl App {
                     }
                 });
             }
+            Action::MoveTabMenu => return self.move_menu(),
             Action::Tab(pane, surface) => {
                 self.workspace_mut().focused = pane;
                 self.workspace_mut().root.set_active_surface(pane, surface);
@@ -857,18 +970,22 @@ impl App {
         }
         self.rebuild()
     }
-    fn command(&mut self, command: Command, reply: ipc::Reply) -> anyhow::Result<Option<Value>> {
+    fn command(&mut self, request: Request, reply: ipc::Reply) -> anyhow::Result<Option<Value>> {
+        let caller = request.caller_surface.map(SurfaceId);
+        let command = request.command;
         match command {
             Command::Doctor => anyhow::bail!("doctor is a local CLI operation"),
             Command::Identify => {
+                let surface = self.target(None, caller)?;
+                let (workspace, pane, _) = self.locate(surface).unwrap();
                 return Ok(Some(json!({"pid":std::process::id(),"pipe":self._ipc.name,
-                "workspace":self.workspace().id,"pane":self.workspace().focused,"surface":self.active(),"platform":"windows"})))
+                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"platform":"windows"})));
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","quit"],
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","quit"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -878,11 +995,12 @@ impl App {
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "cols":surface.cols,"rows":surface.rows})).collect();
                 return Ok(Some(
-                    json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces}),
+                    json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
+                        "background_testing":self.background_test,"window_handle":self.window as usize}),
                 ));
             }
             Command::ReadScreen { pane } => {
-                let id = self.target(pane)?;
+                let id = self.target(pane, caller)?;
                 let surface = self
                     .surfaces
                     .get(&id)
@@ -906,25 +1024,32 @@ impl App {
                 return Ok(None);
             }
             Command::SendKeys { pane, text } => self
-                .session(self.target(Some(pane))?)?
+                .session(self.target(Some(pane), caller)?)?
                 .input(text.into_bytes())?,
-            Command::SendKey { key, pane } => {
-                self.session(self.target(pane)?)?.input(key_bytes(&key)?)?
+            Command::SendKey { key, pane } => self
+                .session(self.target(pane, caller)?)?
+                .input(key_bytes(&key)?)?,
+            Command::Split { direction } => {
+                self.select(self.target(None, caller)?)?;
+                self.action(match direction {
+                    Direction::Vertical => Action::Vertical,
+                    Direction::Horizontal => Action::Horizontal,
+                })?;
             }
-            Command::Split { direction } => self.action(match direction {
-                Direction::Vertical => Action::Vertical,
-                Direction::Horizontal => Action::Horizontal,
-            })?,
-            Command::NewTab => self.action(Action::NewTab)?,
+            Command::NewTab => {
+                self.select(self.target(None, caller)?)?;
+                self.action(Action::NewTab)?;
+            }
             Command::NewWorkspace { cwd } => {
-                let cwd = cwd.unwrap_or_else(|| self.workspace().cwd.clone());
+                let id = self.target(None, caller)?;
+                let cwd = cwd.unwrap_or_else(|| self.locate(id).unwrap().2);
                 anyhow::ensure!(cwd.is_dir(), "working directory does not exist");
                 self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
                 self.rebuild()?;
             }
             Command::FocusPane { pane } => {
-                let id = self.target(Some(pane))?;
+                let id = self.target(Some(pane), caller)?;
                 let (workspace, pane, _) = self.locate(id).unwrap();
                 self.active_workspace = workspace;
                 self.workspace_mut().focused = pane;
@@ -941,6 +1066,17 @@ impl App {
                 } else {
                     self.rebuild()?;
                 }
+            }
+            Command::MoveTab {
+                surface,
+                to_pane,
+                index,
+            } => {
+                self.move_tab(
+                    SurfaceId(surface),
+                    PaneId(to_pane),
+                    index.unwrap_or(usize::MAX),
+                )?;
             }
             // The pipe worker requests close only after the client receives this reply.
             Command::Quit => {}

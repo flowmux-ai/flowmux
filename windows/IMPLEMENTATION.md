@@ -83,6 +83,21 @@ IME and WebView2 112.0.1722.48 established these **partial** results:
   processes. Twenty failed spawns and twenty direct PTY closes have bounded
   handle counts. Repeating 100 live tab cycles after this change kept process
   handles at 13 and total handles at 295/295/294/294.
+- Same-window tab reordering and moves between panes/workspaces preserve the
+  existing surface, PTY and WebView. A hidden native host completed 40 workspace
+  moves with the original PID, output and cwd retained. Commands invoked by the
+  moved, hidden child resolve its current location from its stable surface ID.
+- Background verification after tab moves also repeated all 100 create/close
+  cycles (process handles 13; total 260/260/261/261) and the lifecycle checks.
+  Test scripts now default to a hidden debug host; interactive input is opt-in.
+
+The user is working on the Windows desktop and requested background-only work.
+Native menu/IME move trials were interrupted by concurrent desktop input, so they
+are not acceptance evidence. The focus path avoids repeating WebView2 MoveFocus
+when the same view already owns focus, but the real IME move case still needs a
+controlled interactive rerun. The earlier eleven IME cases validate the lifecycle
+build, not this newer focus change. Moving to another window, drag/drop, broader
+TUI/scrollback and all other pending gates remain separate work.
 
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,

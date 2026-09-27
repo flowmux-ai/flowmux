@@ -23,6 +23,11 @@ WebView2 112.0.1722.48이다. Rust/Win32 창과 WebView2 터미널을 실제 실
 | Linux에서 독립 모델/프로토콜 테스트 | 4개 통과 | `linux-rust-tests.txt` |
 | 프런트엔드 바이트/입력 순서 테스트 | 3개 통과 | `terminal/src/*.test.mjs` 재실행 가능 |
 | Windows release Clippy | 경고 없이 통과 | `release-clippy.txt` |
+| 창을 숨긴 상태의 pane/workspace 이동·재정렬 | PID·출력·cwd·CLI 대상 보존, workspace 이동 40회 | `native-tab-move-background.json` |
+| 이동 구현 후 백그라운드 100회 생성·종료 | process handle 13 유지, 전체 260/260/261/261 | `native-smoke-move-background.json` |
+| 이동 구현 후 백그라운드 lifecycle | 정상 종료·자손 정리 통과 | `native-lifecycle-move-background.json` |
+| 이동 구현 후 모델/IPC 및 네이티브 테스트 | Linux 7개, Windows 10개 통과 | `linux-rust-tests-move.txt`, `native-rust-tests-move.txt` |
+| 이동 구현 후 Windows release Clippy | 경고 없이 통과 | `release-clippy-move.txt` |
 
 `artifacts.json`은 첫 구현, `artifacts-lifecycle.json`은 세션 종료 개선 후 검증한
 실행 파일과 설치 파일의 크기·SHA-256을 기록한다. 개선 후 실제 IME 11개 사례와
@@ -52,6 +57,26 @@ WebView2 112.0.1722.48이다. Rust/Win32 창과 WebView2 터미널을 실제 실
 `native-ime-debug.json`은 ConPTY 전달 전 바이트도 비교한 초기 디버그 검증이다.
 최종 동봉 패키지 검증은 `native-ime-bundled-conpty.json`을 기준으로 한다.
 `*-initial.json`은 교체 이전의 제한된 스모크 기록이며 최종 게이트 판정에 쓰지 않는다.
+
+`artifacts-tab-move.json`은 이후 이동 구현의 debug/release 실행 파일과
+재생성한 개발용 설치 파일을 구분해 기록한다. 이 단계는 숨김 debug 호스트
+검증이며 최신 설치 파일의 실제 IME 검증을 의미하지 않는다.
+
+## 탭 이동 검증의 경계
+
+새 이동 기능은 같은 창에서 기존 PTY와 WebView를 유지한다. 이동 전 환경 변수에
+남은 pane ID 대신 surface ID로 현재 위치를 조회하며, 다른 탭이 활성 상태일 때
+이동한 셸이 직접 호출한 `identify`와 `read-screen`도 자신의 터미널을 반환했다.
+
+Windows 데스크톱을 동시에 사용하던 사용자의 입력이 실기 시험에 섞였다는
+확인이 있어 이후 검증은 백그라운드로 전환했다. 메뉴 및 조합 중 이동 시험은
+완료 판정에 사용하지 않는다. 같은 WebView에 중복으로 포커스를 주지 않도록
+보완했지만, 이 경로의 실제 IME 결과는 재검증 전이다. 앞선 IME 11개 합격 결과를
+최신 focus 변경의 합격 근거로 확장하지 않는다.
+
+숨김 모드에서는 최상위 창을 표시하지 않고 native focus를 요청하지 않는다.
+표시 상태/foreground 여부와 40회 이동 후 출력 보존을 실제 Windows에서 확인했다.
+화면을 가상으로 채우거나 문자열 전송을 IME 검증으로 간주하지 않았다.
 
 ## 아직 검증하지 못했거나 구현 중인 범위
 
