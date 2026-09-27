@@ -62,6 +62,41 @@ time and cannot be rewritten in a running child process.
 waits for xterm to parse the captured output sequence; physical row breaks are
 preserved, including wraps in narrow panes.
 
+Window layout and styled normal-buffer history are saved every 30 seconds and
+before a normal close under `%LOCALAPPDATA%\flowmux\windows\state`. Each window
+holds an exclusive OS file lease; another process cannot restore or overwrite
+its state while it is open. A normal launch restores the latest available closed
+window. These options control startup and checkpoints:
+
+```powershell
+flowmux.exe --new-window
+flowmux.exe --cwd C:\projects
+flowmux.exe --restore-window <window-uuid>
+flowmux.exe --temporary
+flowmuxctl.exe save-state
+flowmuxctl.exe quit
+flowmuxctl.exe quit --discard-state
+```
+
+`--cwd` starts a fresh persistent window. `--temporary` neither reads nor saves
+window state. `tree` reports the window UUID, state path, save activity and last
+save error. Failed saves retain the previous file and leave the window open;
+`quit --discard-state` explicitly closes without taking a new checkpoint.
+The native close dialog offers that choice on a save error. Corrupt or unknown
+state files are preserved; automatic startup skips them, while an explicit
+restore reports the error.
+
+Restoration retains workspace/pane/tab identities, order, focus, titles and
+recorded startup directories, and creates fresh PowerShell processes. History
+is rendered before spawning the new process; historical commands and terminal
+replies never become shell input. The old display is moved into scrollback so
+ConPTY's initial clear does not erase it. Scroll up to read or search it.
+Each history is bounded to 128 KiB of complete serialized rows (oldest rows are
+removed), with a 32 MiB file limit and at most 128 saved terminals. Alternate
+screens, running programs, agent resumption, changed shell directories, window
+geometry and terminal settings are not yet restored. Crash recovery uses the
+last completed checkpoint; later output can be lost.
+
 The app loads the pinned Microsoft ConPTY DLL from its own installation
 directory, with the SDK's `x64/OpenConsole.exe` layout. It does not fall back
 silently to an older system implementation. A native stress test reproduced
@@ -77,9 +112,15 @@ powershell -NoProfile -File windows/scripts/verify-native.ps1 -BuildDirectory wi
 powershell -NoProfile -File windows/scripts/verify-lifecycle.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-tab-move.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-output-load.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-state.ps1 -BuildDirectory windows/target/debug
 ```
 
-Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load script always uses a hidden host. Real
+Ordinary test hosts use `--temporary`; the state verifier uses a unique directory
+via the debug-only `FLOWMUX_TEST_STATE_DIR`, including for crash/restart tests.
+Hidden debug hosts without an explicit test state directory also disable
+persistence. These tests cannot restore or overwrite a user's saved window.
+
+Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load and state scripts always use hidden hosts. Real
 IME tests additionally require an idle desktop and explicit `-Interactive`:
 
 ```powershell

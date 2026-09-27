@@ -5,13 +5,20 @@
 fn main() {
     use clap::Parser;
     use flowmux_windows::{
-        command::Cli,
+        command::{Cli, Launch},
         native::{host, ipc, wide},
     };
     use windows_sys::Win32::{System::Console::*, UI::WindowsAndMessaging::*};
     let arguments: Vec<_> = std::env::args_os().collect();
-    let result = if arguments.len() == 1 || arguments.get(1).is_some_and(|arg| arg == "--cwd") {
-        host::run(arguments.get(2).map(std::path::PathBuf::from))
+    let result = if arguments.len() == 1
+        || arguments.get(1).is_some_and(|arg| {
+            ["--cwd", "--new-window", "--restore-window", "--temporary"]
+                .iter()
+                .any(|s| arg == s)
+        }) {
+        Launch::try_parse_from(arguments)
+            .map_err(anyhow::Error::from)
+            .and_then(host::run)
     } else {
         unsafe {
             AttachConsole(ATTACH_PARENT_PROCESS);

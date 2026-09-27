@@ -19,7 +19,7 @@ if ($LASTEXITCODE -ne 0 -or (-not $Interactive -and -not $doctor.background_test
 $previousBackground = $env:FLOWMUX_TEST_BACKGROUND
 try {
     $env:FLOWMUX_TEST_BACKGROUND = $(if ($Interactive) { $null } else { '1' })
-    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -ArgumentList '--temporary' -PassThru
 } finally { $env:FLOWMUX_TEST_BACKGROUND = $previousBackground }
 $script:pipeName = $null
 $evidence = [ordered]@{ pid = $process.Id; started = (Get-Date).ToString('o'); checks = @(); mode = $(if ($Interactive) { 'interactive' } else { 'background' }) }

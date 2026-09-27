@@ -92,7 +92,35 @@ Rust 호스트만 측정한 수치가 아니며 peak나 장기 안정성 결과�
 다수의 셸과 WebView를 유지하는 현재 구조의 메모리 비용은 추가 개선 대상이다.
 최소화·잠금·복귀 및 release 빌드의 같은 부하 검증은 별도로 남아 있다.
 
-## 아직 검증하지 못했거나 구현 중인 범위
+## Windows 상태 저장·복원
+
+`native-state-background.json`은 고유한 테스트 폴더와 숨김 호스트만 사용했다.
+2개 workspace의 터미널 4개(비활성 tab 포함)를 저장하고 재시작하여 ID·배치·
+선택 상태·시작 cwd·한글 문자열·초록색 SGR 보존과 새 셸 PID를 확인했다.
+명령처럼 보이는 기록과 VT 응답 요청을 넣어도 해당 명령의 파일 생성은 발생하지
+않았다. 복원 기록은 새 ConPTY의 초기 화면 지우기 이후에도 scrollback에 남았다.
+
+같은 창 상태의 중복 복원 거부, 다른 창의 독립 저장, 강제 종료 후 잠금 해제와
+복원, 30초 주기 자동 저장, 최신 닫힌 창 자동 선택도 통과했다. 파일 교체를
+거부하는 핸들을 열어 저장 실패를 유도했을 때 이전 파일의 SHA-256이 유지됐고
+창이 열린 채 남았다. 명시적 저장 취소 종료 및 임시 실행도 기존 파일을 보존했다.
+
+셸 프로세스·agent 실행 상태를 이어가는 기능은 아니다. 시작 cwd를 복원하며
+셸 내부 `cd` 추적은 남아 있다. 정상 buffer의 색상 기록만 저장하며 alternate
+screen, 창 위치·크기·설정, 모든 Unicode/줄바꿈 조합, 자동 저장 중/복원 직후 실제 IME 입력과
+네이티브 저장 실패 대화상자는 아직 검증하지 않았다. 기록은 terminal별
+128KiB로 제한되며 마지막 저장 이후 출력은 강제 종료 시 유실될 수 있다.
+
+저장·복원 구현 후 Windows 네이티브 Rust 테스트 12개, Linux 독립 테스트
+8개, 프런트엔드 테스트 6개와 release Clippy를 통과했다
+(`native-rust-tests-state.txt`, `linux-rust-tests-state.txt`,
+`frontend-tests-state.txt`, `release-clippy-state.txt`).
+기존 탭 이동 40회·lifecycle·생성/종료 20회도 숨김 모드로 재검증했다
+(`native-tab-move-state-background.json`, `native-lifecycle-state-background.json`,
+`native-smoke-state-background.json`). `artifacts-state.json`은 이 단계의 실행 파일과
+다시 만든 개발용 설치 파일을 기록한다. 새 설치 파일의 실제 IME/설치 합격 증거는 아니다.
+
+## 남은 검증 범위
 
 한자 후보창·다중 DPI·모니터 이동·조합 중 탭/창 이동, clipboard와 NFC/NFD/emoji
 폭 일치, editor/search/rename IME 전체, thread 생성 실패 등 추가 실패 경로,

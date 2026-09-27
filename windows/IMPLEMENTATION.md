@@ -111,6 +111,20 @@ Post-output private memory for the owned process tree was approximately
 not peak usage or a leak test. Memory efficiency, repeated sustained load,
 minimize/lock/resume and release-build desktop evidence remain pending.
 
+Windows state now uses versioned per-window files with exclusive OS leases and
+atomic replacement on a worker thread. Parser barriers capture bounded styled
+normal-buffer history for visible and hidden tabs. Clean close, explicit save
+and 30-second checkpoints persist layout, tab identity, focus and recorded
+startup cwd. Restore renders history into scrollback before starting fresh
+ConPTY processes; historical VT responses are suppressed while parsing it.
+A hidden native test verified four surfaces over two workspaces, Korean and
+green SGR round trips, duplicate-restore rejection, independent window saves,
+forced termination/recovery, periodic checkpoints, temporary mode, and failed
+atomic replacement retaining the old file and live window. Geometry/settings,
+current shell cwd tracking, alternate-screen snapshots, live-process/agent
+resumption, broader Unicode/wrap fidelity and restore-time real IME remain
+pending. This is partial persistence coverage, not full session recovery.
+
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,
 DPI, clipboard/Unicode-width coverage, broader TUI compatibility, additional

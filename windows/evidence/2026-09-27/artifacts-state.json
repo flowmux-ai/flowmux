@@ -1,0 +1,30 @@
+{
+  "verification": "Hidden debug host persistence/restart evidence. Release build and Clippy passed. Installer rebuilt; interactive IME, dialogs and new installer acceptance remain pending.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 6052352,
+      "sha256": "ed7b27002517166dd5d806c22701a16f5a3f41490aca251f5d9cef6ab69572c9"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2383360,
+      "sha256": "519ea2f5cab6a0b55b71144dd05b99d6b912f10138c6c8673cfb19655e61f20a"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 2676224,
+      "sha256": "b0895f96533298aad7f0bd023db29b09f4f8a5c5ab9a29a4a7ab70314542474e"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 995328,
+      "sha256": "24236826d767260113c8979de6f1935e275bb351d9cbc220c079fffff9146420"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1526113,
+      "sha256": "d260e04e255d430c816c8b08587a4a043fe5f4a820a88256e89d840b06209948"
+    }
+  ]
+}

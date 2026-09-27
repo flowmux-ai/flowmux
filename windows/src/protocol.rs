@@ -26,6 +26,7 @@ pub struct Envelope {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
     Ready,
+    Restored,
     Input {
         data: String,
     },
@@ -54,7 +55,11 @@ pub enum ClientMessage {
     Snapshot {
         request: Uuid,
         sequence: u64,
-        data: String,
+        screen: crate::state::SavedScreen,
+    },
+    SnapshotError {
+        request: Uuid,
+        message: String,
     },
     Fault {
         message: String,
@@ -70,6 +75,7 @@ pub enum HostMessage {
     Output { sequence: u64, data: String },
     ReadScreen { request: Uuid, after: u64 },
     Snapshot { request: Uuid, after: u64 },
+    Restore { screen: crate::state::SavedScreen },
     Focus,
     Paste { text: String },
     Exit { code: u32 },

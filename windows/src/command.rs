@@ -5,6 +5,20 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Parser)]
+#[command(name = "flowmux", about = "Open a native Windows flowmux window")]
+pub struct Launch {
+    #[arg(long, conflicts_with = "restore_window")]
+    pub cwd: Option<PathBuf>,
+    #[arg(long, conflicts_with = "restore_window")]
+    pub new_window: bool,
+    /// Open without reading or saving persistent window state.
+    #[arg(long, conflicts_with = "restore_window")]
+    pub temporary: bool,
+    #[arg(long)]
+    pub restore_window: Option<Uuid>,
+}
+
+#[derive(Debug, Parser)]
 #[command(
     name = "flowmuxctl",
     version,
@@ -85,7 +99,14 @@ pub enum Command {
         index: Option<usize>,
     },
     /// Close this Windows window and terminate its terminal process trees.
-    Quit,
+    Quit {
+        /// Close even when saving fails; keep the last completed checkpoint.
+        #[arg(long)]
+        #[serde(default)]
+        discard_state: bool,
+    },
+    /// Save layout and styled terminal history without closing the window.
+    SaveState,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
@@ -133,6 +154,13 @@ mod tests {
     fn context_preserves_old_ipc_commands_and_roundtrips_stable_surface() {
         let old: Request = serde_json::from_str(r#"{"method":"identify"}"#).unwrap();
         assert!(old.caller_surface.is_none());
+        let old_quit: Request = serde_json::from_str(r#"{"method":"quit"}"#).unwrap();
+        assert!(matches!(
+            old_quit.command,
+            Command::Quit {
+                discard_state: false
+            }
+        ));
         let old_read: Request =
             serde_json::from_str(r#"{"method":"read_screen","pane":null}"#).unwrap();
         assert!(matches!(

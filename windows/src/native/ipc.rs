@@ -74,7 +74,7 @@ impl Server {
                                 "invalid IPC frame"
                             );
                             let command: Request = serde_json::from_str(&line)?;
-                            quitting = matches!(command.command, Command::Quit);
+                            quitting = matches!(command.command, Command::Quit { .. });
                             let (send, receive) = mpsc::sync_channel(1);
                             emit(command, send);
                             receive

@@ -189,8 +189,11 @@
     {
       "id": "T16",
       "feature": "스타일 scrollback 저장·복원",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-state-background.json"
+      ],
+      "notes": "Hidden Windows restart preserves Korean and green SGR normal-buffer history across fresh ConPTY startup, including inactive tabs; bounded to complete rows within 128 KiB. Alternate screen, broader style/Unicode/wrap fidelity and restoration IME remain pending."
     },
     {
       "id": "T17",
@@ -315,8 +318,11 @@
     {
       "id": "U12",
       "feature": "재시작 후 layout·scrollback·agent 복원",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-state-background.json"
+      ],
+      "notes": "Hidden Windows hosts preserve workspace/pane/surface identity, layout, focus, titles and recorded startup cwd. Clean close, periodic checkpoint, independent window leases and forced termination/recovery verified. Geometry/settings, changed shell cwd, live processes and agent resumption remain pending."
     },
     {
       "id": "U13",
@@ -684,8 +690,11 @@
     {
       "id": "O06",
       "feature": "config/state/log/cache·theme import",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-state-background.json"
+      ],
+      "notes": "Versioned Windows window state with exclusive OS lease and atomic replacement; explicit failure preserves old file and leaves host alive. Configuration/theme import and remaining data/log/cache parity are pending."
     },
     {
       "id": "O07",
@@ -767,18 +776,20 @@
       "gate": "화면 소비 기능",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-output-load-background.json"
+        "evidence/2026-09-27/native-output-load-background.json",
+        "evidence/2026-09-27/native-state-background.json"
       ],
-      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending."
+      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending."
     },
     {
       "id": "G07",
       "gate": "tab 이동·다중 창",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-tab-move-background.json"
+        "evidence/2026-09-27/native-tab-move-background.json",
+        "evidence/2026-09-27/native-state-background.json"
       ],
-      "notes": "Same-window pane/workspace moves verified in a hidden host. Controlled real IME, full TUI/scrollback and cross-window ownership remain pending."
+      "notes": "Same-window pane/workspace moves verified in a hidden host. Controlled real IME, full TUI/scrollback and cross-window ownership remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending."
     },
     {
       "id": "G08",

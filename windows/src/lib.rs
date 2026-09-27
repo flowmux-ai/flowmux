@@ -5,3 +5,4 @@ pub mod model;
 #[cfg(windows)]
 pub mod native;
 pub mod protocol;
+pub mod state;

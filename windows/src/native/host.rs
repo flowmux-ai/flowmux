@@ -2,12 +2,14 @@
 use super::{
     checked, data_dir, ipc,
     session::{Session, SessionEvent},
+    state_store::{self, Store},
     wide,
 };
 use crate::{
-    command::{key_bytes, Command, Direction, Request},
+    command::{key_bytes, Command, Direction, Launch, Request},
     model::{self, Workspace},
     protocol::{ClientMessage, HostMessage, Identity, TERMINAL_ORIGIN},
+    state::{SavedScreen, WindowState},
 };
 use anyhow::Context;
 use base64::Engine;
@@ -20,7 +22,10 @@ use std::{
     collections::HashMap,
     num::NonZeroIsize,
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -38,6 +43,8 @@ enum Event {
     Layout,
     Tick,
     Close,
+    ExitAfterReply,
+    Saved(Result<(), String>),
     Button(u16),
     Bridge(SurfaceId, String, String),
     Session(SurfaceId, SessionEvent),
@@ -130,6 +137,7 @@ struct Surface {
     cols: u16,
     rows: u16,
     ready: bool,
+    restoring: bool,
     visible: bool,
     process_pid: Option<u32>,
     exit_code: Option<u32>,
@@ -167,6 +175,19 @@ struct PendingRead {
     reply: ipc::Reply,
     started: Instant,
 }
+enum CloseRequest {
+    Native,
+    Ipc(ipc::Reply),
+}
+struct PendingSave {
+    id: Uuid,
+    state: WindowState,
+    waiting: HashMap<SurfaceId, u64>,
+    started: Instant,
+    writing: bool,
+    closing: bool,
+    reply: Option<ipc::Reply>,
+}
 struct App {
     window: HWND,
     sender: EventSender,
@@ -179,9 +200,71 @@ struct App {
     pending_reads: HashMap<Uuid, PendingRead>,
     closing: bool,
     background_test: bool,
+    store: Option<Arc<Store>>,
+    restore_screens: HashMap<SurfaceId, SavedScreen>,
+    pending_save: Option<PendingSave>,
+    close_request: Option<CloseRequest>,
+    last_save_attempt: Instant,
+    state_error: Option<String>,
 }
 
-pub fn run(cwd: Option<PathBuf>) -> anyhow::Result<()> {
+pub fn run(launch: Launch) -> anyhow::Result<()> {
+    let background_test =
+        cfg!(debug_assertions) && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1");
+    let (store, restored) = if launch.temporary {
+        (None, None)
+    } else {
+        state_store::open(
+            launch.new_window || launch.cwd.is_some(),
+            launch.restore_window,
+            background_test,
+        )?
+    };
+    let cwd = launch
+        .cwd
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+        .context("No initial working directory")?;
+    anyhow::ensure!(
+        cwd.is_dir(),
+        "Working directory does not exist: {}",
+        cwd.display()
+    );
+    let (mut workspaces, active_workspace, restore_screens) = match restored {
+        Some(state) => {
+            let active = state
+                .workspaces
+                .iter()
+                .position(|w| w.id == state.active_workspace)
+                .unwrap();
+            (state.workspaces, active, state.screens)
+        }
+        None => (vec![Workspace::new(cwd.clone())], 0, HashMap::new()),
+    };
+    // Deleted/unmounted directories cannot prevent recovery of the other tabs.
+    for workspace in &mut workspaces {
+        if !workspace.cwd.is_dir() {
+            workspace.cwd = cwd.clone();
+        }
+        for (pane, _, tabs) in workspace.leaves() {
+            for tab in tabs {
+                if let flowmux_core::SurfaceKind::Terminal {
+                    cwd: Some(path), ..
+                } = &tab.kind
+                {
+                    if !path.is_dir() {
+                        report(&format!(
+                            "Restored cwd {} is unavailable; using {}",
+                            path.display(),
+                            workspace.cwd.display()
+                        ));
+                        workspace
+                            .root
+                            .set_surface_cwd(pane, tab.id, workspace.cwd.clone());
+                    }
+                }
+            }
+        }
+    }
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let result = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
@@ -234,31 +317,28 @@ pub fn run(cwd: Option<PathBuf>) -> anyhow::Result<()> {
         let shutdown = sender.clone();
         let ipc = ipc::Server::start(
             move |command, reply| dispatch.send(Event::Command(command, reply)),
-            move || shutdown.send(Event::Close),
+            move || shutdown.send(Event::ExitAfterReply),
         )?;
-        let cwd = cwd
-            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-            .context("No initial working directory")?;
-        anyhow::ensure!(
-            cwd.is_dir(),
-            "Working directory does not exist: {}",
-            cwd.display()
-        );
         let mut app = App {
             window,
             sender,
             _ipc: ipc,
             context: WebContext::new(Some(data_dir()?.join("terminal-profile"))),
-            workspaces: vec![Workspace::new(cwd)],
-            active_workspace: 0,
+            workspaces,
+            active_workspace,
             surfaces: HashMap::new(),
             controls: vec![],
             pending_reads: HashMap::new(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
-            background_test: cfg!(debug_assertions)
-                && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1"),
+            background_test,
+            store,
+            restore_screens,
+            pending_save: None,
+            close_request: None,
+            last_save_attempt: Instant::now(),
+            state_error: None,
         };
         app.rebuild()?;
         if !app.background_test {
@@ -477,6 +557,7 @@ impl App {
                 cols: 80,
                 rows: 24,
                 ready: false,
+                restoring: false,
                 visible: false,
                 process_pid: None,
                 exit_code: None,
@@ -598,7 +679,9 @@ impl App {
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Layout => self.layout()?,
-            Event::Close => self.closing = true,
+            Event::Close => self.request_close(CloseRequest::Native)?,
+            Event::ExitAfterReply => self.closing = true,
+            Event::Saved(result) => self.finish_save(result),
             Event::Tick => {
                 self.pending_reads.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
@@ -610,6 +693,23 @@ impl App {
                         true
                     }
                 });
+                if self
+                    .pending_save
+                    .as_ref()
+                    .is_some_and(|s| !s.writing && s.started.elapsed() > Duration::from_secs(12))
+                {
+                    self.finish_save(Err("terminal parser did not answer the history barrier; previous save preserved".into()));
+                }
+                if self.store.is_some()
+                    && self.pending_save.is_none()
+                    && self.close_request.is_none()
+                    && self.last_save_attempt.elapsed() > Duration::from_secs(30)
+                {
+                    self.last_save_attempt = Instant::now();
+                    if let Err(error) = self.begin_save(None) {
+                        self.state_error = Some(error.to_string());
+                    }
+                }
             }
             Event::Button(id) => {
                 if let Some(control) = self.controls.get(id.saturating_sub(100) as usize) {
@@ -666,30 +766,22 @@ impl App {
         let message = surface.identity.decode(origin, body)?;
         match message {
             ClientMessage::Ready => {
-                if surface.ready {
+                if surface.ready || surface.restoring {
                     return Ok(());
                 }
-                let (workspace, pane, cwd) =
-                    self.locate(id).context("terminal has no workspace")?;
-                let workspace_id = self.workspaces[workspace].id;
-                let sender = self.sender.clone();
-                let session = Session::spawn(
-                    &cwd,
-                    pane,
-                    id,
-                    workspace_id,
-                    &self._ipc.name,
-                    surface.cols,
-                    surface.rows,
-                    move |event| sender.send(Event::Session(id, event)),
-                )?;
-                let surface = self.surfaces.get_mut(&id).unwrap();
-                surface.process_pid = Some(session.pid);
-                surface.session = Some(session);
-                surface.ready = true;
-                if self.active() == id {
-                    self.focus_active()?;
+                if let Some(screen) = self.restore_screens.remove(&id) {
+                    surface.send(&HostMessage::Restore { screen })?;
+                    self.surfaces.get_mut(&id).unwrap().restoring = true;
+                } else {
+                    self.start_session(id)?;
                 }
+            }
+            ClientMessage::Restored => {
+                anyhow::ensure!(
+                    surface.restoring && !surface.ready,
+                    "unexpected history restore acknowledgement"
+                );
+                self.start_session(id)?;
             }
             ClientMessage::Resize { cols, rows } => {
                 let surface = self.surfaces.get_mut(&id).unwrap();
@@ -725,7 +817,8 @@ impl App {
             ClientMessage::Focus => {
                 if let Some((workspace, pane, _)) = self.locate(id) {
                     // A delayed hidden-view focus event must not switch the workspace back.
-                    if workspace == self.active_workspace
+                    if self.close_request.is_none()
+                        && workspace == self.active_workspace
                         && self.workspaces[workspace].root.active_surface_id(pane) == Some(id)
                         && self
                             .surfaces
@@ -786,7 +879,35 @@ impl App {
                 }
             }
             ClientMessage::Fault { message } => anyhow::bail!("terminal frontend: {message}"),
-            ClientMessage::Snapshot { .. } => {}
+            ClientMessage::Snapshot {
+                request,
+                sequence,
+                screen,
+            } => {
+                if let Some(pending) = &mut self.pending_save {
+                    if pending.id == request && !pending.writing {
+                        if let Some(after) = pending.waiting.get(&id) {
+                            anyhow::ensure!(
+                                sequence >= *after && sequence <= surface.output_sequence,
+                                "invalid history response"
+                            );
+                            screen.validate()?;
+                            pending.state.screens.insert(id, screen);
+                            pending.waiting.remove(&id);
+                            self.write_save()?;
+                        }
+                    }
+                }
+            }
+            ClientMessage::SnapshotError { request, message } => {
+                if self
+                    .pending_save
+                    .as_ref()
+                    .is_some_and(|s| s.id == request && s.waiting.contains_key(&id) && !s.writing)
+                {
+                    self.finish_save(Err(format!("terminal history: {message}")));
+                }
+            }
             ClientMessage::Diagnostic { event } => {
                 #[cfg(debug_assertions)]
                 if let Some(path) = std::env::var_os("FLOWMUX_TEST_INPUT_TRACE") {
@@ -807,6 +928,170 @@ impl App {
             }
         }
         Ok(())
+    }
+    fn start_session(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        let (workspace, pane, cwd) = self.locate(id).context("terminal has no workspace")?;
+        let sender = self.sender.clone();
+        let surface = &self.surfaces[&id];
+        let session = Session::spawn(
+            &cwd,
+            pane,
+            id,
+            self.workspaces[workspace].id,
+            &self._ipc.name,
+            surface.cols,
+            surface.rows,
+            move |event| sender.send(Event::Session(id, event)),
+        )?;
+        let surface = self.surfaces.get_mut(&id).unwrap();
+        surface.process_pid = Some(session.pid);
+        surface.session = Some(session);
+        surface.ready = true;
+        surface.restoring = false;
+        if self.active() == id {
+            self.focus_active()?;
+        }
+        Ok(())
+    }
+    fn begin_save(&mut self, reply: Option<ipc::Reply>) -> anyhow::Result<()> {
+        let store = self
+            .store
+            .as_ref()
+            .context("state persistence is disabled for this test host")?;
+        anyhow::ensure!(
+            self.pending_save.is_none(),
+            "a state save is already in progress"
+        );
+        anyhow::ensure!(
+            self.surfaces.values().all(|s| s.ready && !s.restoring),
+            "wait for all terminals to finish loading before saving"
+        );
+        let request = Uuid::new_v4();
+        let mut waiting = HashMap::new();
+        for (id, surface) in &self.surfaces {
+            let after = surface
+                .session
+                .as_ref()
+                .map_or(surface.output_sequence, Session::barrier);
+            surface.send(&HostMessage::Snapshot { request, after })?;
+            waiting.insert(*id, after);
+        }
+        self.pending_save = Some(PendingSave {
+            id: request,
+            state: WindowState {
+                version: 1,
+                window: store.id,
+                workspaces: self.workspaces.clone(),
+                active_workspace: self.workspace().id,
+                screens: HashMap::new(),
+            },
+            waiting,
+            started: Instant::now(),
+            writing: false,
+            closing: self.close_request.is_some(),
+            reply,
+        });
+        self.last_save_attempt = Instant::now();
+        Ok(())
+    }
+    fn write_save(&mut self) -> anyhow::Result<()> {
+        let pending = self.pending_save.as_mut().unwrap();
+        if !pending.waiting.is_empty() || pending.writing {
+            return Ok(());
+        }
+        let store = self.store.as_ref().unwrap().clone();
+        let state = pending.state.clone();
+        let sender = self.sender.clone();
+        std::thread::Builder::new()
+            .name("flowmux-state-save".into())
+            .spawn(move || {
+                sender.send(Event::Saved(
+                    store.write(&state).map_err(|e| format!("{e:#}")),
+                ));
+            })?;
+        pending.writing = true;
+        Ok(())
+    }
+    fn request_close(&mut self, request: CloseRequest) -> anyhow::Result<()> {
+        anyhow::ensure!(self.close_request.is_none(), "window is already closing");
+        if self.store.is_none() {
+            match request {
+                CloseRequest::Native => self.closing = true,
+                CloseRequest::Ipc(reply) => {
+                    if reply.try_send(json!({"ok":true})).is_err() {
+                        self.closing = true;
+                    }
+                }
+            }
+            return Ok(());
+        }
+        self.close_request = Some(request);
+        if self.pending_save.is_none() {
+            if let Err(error) = self.begin_save(None) {
+                self.state_error = Some(error.to_string());
+                self.close_failed(&error.to_string());
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+    fn finish_save(&mut self, result: Result<(), String>) {
+        let Some(pending) = self.pending_save.take() else {
+            return;
+        };
+        self.state_error = result.as_ref().err().cloned();
+        let response = match &result {
+            Ok(()) => {
+                json!({"ok":true,"window":pending.state.window,"path":self.store.as_ref().map(|s| &s.path),
+                "surfaces":pending.state.screens.len(),"truncated":pending.state.screens.values().filter(|s| s.truncated).count()})
+            }
+            Err(error) => {
+                report(error);
+                json!({"error":error})
+            }
+        };
+        if let Some(reply) = pending.reply {
+            let _ = reply.try_send(response.clone());
+        }
+        if pending.closing {
+            match result {
+                Ok(()) => match &self.close_request {
+                    Some(CloseRequest::Native) => self.closing = true,
+                    Some(CloseRequest::Ipc(reply)) => {
+                        // A slow save can outlive the IPC caller's deadline. Its
+                        // successful close request must not leave the UI frozen.
+                        self.closing |= reply.try_send(response).is_err();
+                    }
+                    None => {}
+                },
+                Err(error) => self.close_failed(&error),
+            }
+        } else if self.close_request.is_some() {
+            // A checkpoint captured an older layout. Closing always captures again
+            // after structural changes have stopped, even if that checkpoint failed.
+            if let Err(error) = self.begin_save(None) {
+                self.close_failed(&error.to_string());
+            }
+        }
+    }
+    fn close_failed(&mut self, error: &str) {
+        match self.close_request.take() {
+            Some(CloseRequest::Ipc(reply)) => {
+                let _ = reply.try_send(json!({"error":error}));
+            }
+            Some(CloseRequest::Native) if !self.background_test => unsafe {
+                if MessageBoxW(
+                    self.window,
+                    wide(format!(
+                        "The window state could not be saved. Close without saving changes? The last completed checkpoint will be kept.\n\n{error}"
+                    ))
+                    .as_ptr(),
+                    wide("flowmux").as_ptr(),
+                    MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING,
+                ) == IDYES { self.closing = true; }
+            },
+            _ => {}
+        }
     }
     fn locate(&self, surface: SurfaceId) -> Option<(usize, PaneId, PathBuf)> {
         for (index, workspace) in self.workspaces.iter().enumerate() {
@@ -929,6 +1214,10 @@ impl App {
         self.focus_active()
     }
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.close_request.is_none(),
+            "window is saving before close"
+        );
         match action {
             Action::NewWorkspace => {
                 self.workspaces
@@ -951,6 +1240,15 @@ impl App {
                     .close_active()
                     .context("cannot close the final tab")?;
                 self.surfaces.remove(&surface);
+                if self
+                    .pending_save
+                    .as_ref()
+                    .is_some_and(|s| !s.writing && s.waiting.contains_key(&surface))
+                {
+                    self.finish_save(Err(
+                        "terminal closed during checkpoint; previous save preserved".into(),
+                    ));
+                }
                 self.pending_reads.retain(|_, request| {
                     if request.surface == surface {
                         let _ = request
@@ -973,6 +1271,20 @@ impl App {
     fn command(&mut self, request: Request, reply: ipc::Reply) -> anyhow::Result<Option<Value>> {
         let caller = request.caller_surface.map(SurfaceId);
         let command = request.command;
+        anyhow::ensure!(
+            self.close_request.is_none()
+                || matches!(
+                    command,
+                    Command::Tree
+                        | Command::Identify
+                        | Command::Capabilities
+                        | Command::ReadScreen { .. }
+                        | Command::Quit {
+                            discard_state: true
+                        }
+                ),
+            "window is saving before close"
+        );
         match command {
             Command::Doctor => anyhow::bail!("doctor is a local CLI operation"),
             Command::Identify => {
@@ -985,7 +1297,7 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","quit"],
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -996,7 +1308,9 @@ impl App {
                     "cols":surface.cols,"rows":surface.rows})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
-                        "background_testing":self.background_test,"window_handle":self.window as usize}),
+                        "background_testing":self.background_test,"window_handle":self.window as usize,
+                        "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
+                            "saving":self.pending_save.is_some(),"error":self.state_error}}),
                 ));
             }
             Command::ReadScreen { pane, surface } => {
@@ -1082,8 +1396,23 @@ impl App {
                     index.unwrap_or(usize::MAX),
                 )?;
             }
-            // The pipe worker requests close only after the client receives this reply.
-            Command::Quit => {}
+            Command::SaveState => {
+                self.begin_save(Some(reply))?;
+                return Ok(None);
+            }
+            // The pipe worker closes only after the save succeeds and the client receives its reply.
+            Command::Quit {
+                discard_state: true,
+            } => {
+                // Explicit recovery escape hatch. A completed checkpoint is never deleted.
+                return Ok(Some(json!({"ok":true})));
+            }
+            Command::Quit {
+                discard_state: false,
+            } => {
+                self.request_close(CloseRequest::Ipc(reply))?;
+                return Ok(None);
+            }
         }
         Ok(Some(json!({"ok":true})))
     }

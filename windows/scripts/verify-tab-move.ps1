@@ -25,7 +25,7 @@ $previousBackground = $env:FLOWMUX_TEST_BACKGROUND
 try {
     $env:FLOWMUX_TEST_INPUT_TRACE = $trace
     $env:FLOWMUX_TEST_BACKGROUND = $(if ($Interactive) { $null } else { '1' })
-    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -ArgumentList '--temporary' -PassThru
 } finally {
     $env:FLOWMUX_TEST_INPUT_TRACE = $previousTrace
     $env:FLOWMUX_TEST_BACKGROUND = $previousBackground

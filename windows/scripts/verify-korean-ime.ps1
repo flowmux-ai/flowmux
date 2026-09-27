@@ -21,7 +21,7 @@ if (Test-Path $trace) { Remove-Item $trace }
 $previousTrace = $env:FLOWMUX_TEST_INPUT_TRACE
 try {
     $env:FLOWMUX_TEST_INPUT_TRACE = $trace
-    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -ArgumentList '--temporary' -PassThru
 } finally { $env:FLOWMUX_TEST_INPUT_TRACE = $previousTrace }
 $discovery = Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json"
 $script:pipeName = $null

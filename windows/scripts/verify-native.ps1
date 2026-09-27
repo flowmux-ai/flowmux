@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
 $previousBackground = $env:FLOWMUX_TEST_BACKGROUND
 try {
     $env:FLOWMUX_TEST_BACKGROUND = $(if ($Interactive) { $null } else { '1' })
-    $process = Start-Process -FilePath $gui -PassThru
+    $process = Start-Process -FilePath $gui -ArgumentList '--temporary' -PassThru
 } finally { $env:FLOWMUX_TEST_BACKGROUND = $previousBackground }
 $discovery = Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json"
 $pipeName = $null

@@ -37,7 +37,11 @@ export class Output {
         }
         this.send({ type: 'screen', request: message.request, sequence: this.parsed, text: lines.join('\n') });
       } else {
-        this.send({ type: 'snapshot', request: message.request, sequence: this.parsed, data: this.serialize() });
+        try {
+          this.send({ type: 'snapshot', request: message.request, sequence: this.parsed, screen: this.serialize() });
+        } catch (error) {
+          this.send({ type: 'snapshot_error', request: message.request, message: String(error) });
+        }
       }
     }
     this.pending = waiting;

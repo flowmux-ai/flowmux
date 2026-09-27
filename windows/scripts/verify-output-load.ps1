@@ -15,7 +15,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
 $previous = $env:FLOWMUX_TEST_BACKGROUND
 try {
     $env:FLOWMUX_TEST_BACKGROUND = '1'
-    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -PassThru
+    $process = Start-Process -FilePath (Join-Path $BuildDirectory 'flowmux.exe') -ArgumentList '--temporary' -PassThru
 } finally { $env:FLOWMUX_TEST_BACKGROUND = $previous }
 $process.PriorityClass = 'BelowNormal'
 $script:pipeName = $null

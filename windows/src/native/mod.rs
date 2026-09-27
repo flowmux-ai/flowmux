@@ -3,6 +3,7 @@ mod conpty;
 pub mod host;
 pub mod ipc;
 mod session;
+mod state_store;
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;

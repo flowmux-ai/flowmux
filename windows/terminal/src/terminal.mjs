@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { Output } from './output.mjs';
 import { Input } from './input.mjs';
+import { snapshot, restore } from './history.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -18,12 +19,13 @@ const terminal = new Terminal({
 const fit = new FitAddon(), search = new SearchAddon(), serialize = new SerializeAddon();
 terminal.loadAddon(fit); terminal.loadAddon(search); terminal.loadAddon(serialize);
 terminal.open(document.getElementById('terminal'));
-const output = new Output(terminal, send, () => serialize.serialize());
+const output = new Output(terminal, send, () => snapshot(terminal, serialize));
 const input = new Input(data => send({ type: 'input', data }));
-terminal.onData(data => input.data(data));
-terminal.onBinary(data => send({ type: 'binary_input', data }));
+let restoring = false;
+terminal.onData(data => { if (!restoring) input.data(data); });
+terminal.onBinary(data => { if (!restoring) send({ type: 'binary_input', data }); });
 terminal.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
-terminal.onTitleChange(title => send({ type: 'title', title }));
+terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title }); });
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
 
 let composing = false;
@@ -48,11 +50,20 @@ query.addEventListener('keydown', event => {
   if (event.key === 'Escape') { document.getElementById('search').hidden = true; terminal.focus(); }
   if (event.key === 'Enter') { event.preventDefault(); search[event.shiftKey ? 'findPrevious' : 'findNext'](query.value); }
 });
-new ResizeObserver(() => { if (document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit(); })
+new ResizeObserver(() => { if (!restoring && document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit(); })
   .observe(document.getElementById('terminal'));
 window.flowmuxHost = message => {
   try {
-    if (message.type === 'focus') { fit.fit(); terminal.focus(); }
+    if (message.type === 'restore') {
+      restoring = true;
+      terminal.options.disableStdin = true;
+      restore(terminal, message.screen, () => {
+        fit.fit();
+        restoring = false;
+        terminal.options.disableStdin = false;
+        send({ type: 'restored' });
+      });
+    } else if (message.type === 'focus') { if (!restoring) { fit.fit(); terminal.focus(); } }
     else if (message.type === 'paste') terminal.paste(message.text);
     else if (message.type === 'exit') {
       document.getElementById('status').textContent = `Process exited (${message.code})`;
