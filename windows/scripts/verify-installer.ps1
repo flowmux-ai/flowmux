@@ -18,6 +18,8 @@ try {
     $cli = Join-Path $installDirectory 'flowmuxctl.exe'
     $doctor = & $cli doctor
     if ($LASTEXITCODE -ne 0) { throw 'Installed CLI doctor failed' }
+    $consoleDoctor = & (Join-Path $installDirectory 'flowmux.com') --json doctor
+    if ($LASTEXITCODE -ne 0 -or ($consoleDoctor | ConvertFrom-Json).status -ne 'ok') { throw 'Installed console entry point failed' }
     $evidence.checks += @{ name = 'installed_native_binaries_and_runtime'; passed = $true; doctor = ($doctor -join "`n") }
     if (-not (Test-Path $registry)) { throw 'Uninstall registration missing' }
     if (-not (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\flowmux (Windows)\flowmux.lnk'))) { throw 'Start menu entry missing' }

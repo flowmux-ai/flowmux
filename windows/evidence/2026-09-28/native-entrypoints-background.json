@@ -1,0 +1,73 @@
+{
+  "started": "2026-09-28T03:28:41.0138950+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "three_entrypoints_help_version_parse_error_and_doctor_use_standard_streams",
+      "passed": true
+    },
+    {
+      "name": "runtime_errors_are_nonzero_json_stderr_without_dialogs_and_mixed_launch_cli_is_rejected",
+      "passed": true
+    },
+    {
+      "name": "leading_shell_equals_options_and_console_spawn_receipt_start_distinct_hidden_native_shells",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\entrypoints-a783721d-d0a5-4c9e-b323-2c1ddbbe73c9\\한글 한 😀 space & #",
+      "passed": true
+    },
+    {
+      "name": "cmd_and_powershell_resolve_bare_flowmux_to_console_and_preserve_exit_codes_and_pipeline_json",
+      "passed": true
+    },
+    {
+      "name": "unicode_argv_plain_and_json_screen_output_and_multiwindow_commands_preserve_target",
+      "passed": true
+    },
+    {
+      "name": "cmd_file_redirection_keeps_json_and_stderr_separate",
+      "passed": true
+    },
+    {
+      "name": "gui_cli_preserves_nul_redirection_inside_real_owned_conpty",
+      "passed": true
+    },
+    {
+      "argv": [
+        "",
+        "한글 한 😀 quote\" slash\\",
+        "C:\\trailing space\\",
+        "& echo should-be-an-argument"
+      ],
+      "name": "console_to_gui_to_conpty_preserves_unicode_executable_empty_quotes_backslashes_and_literal_metacharacters",
+      "passed": true
+    },
+    {
+      "name": "missing_and_invalid_sibling_gui_return_errors_without_system_dialogs",
+      "passed": true
+    },
+    {
+      "name": "closed_stdout_returns_error_without_panic_or_retransmission_for_all_entrypoints",
+      "passed": true
+    }
+  ],
+  "hosts": [
+    {
+      "pid": 35324,
+      "pipe": "\\\\.\\pipe\\flowmux-35324-7bdfd16f-8eb1-41b8-aad2-0ca5efa659d1",
+      "via": "gui"
+    },
+    {
+      "pid": 38372,
+      "pipe": "\\\\.\\pipe\\flowmux-38372-29fba4ed-c218-49b9-89f0-b1dfe9d0cee4",
+      "via": "console"
+    },
+    {
+      "pid": 33732,
+      "pipe": "\\\\.\\pipe\\flowmux-33732-7111cd16-d6c5-4e09-982d-60a108eecfbd",
+      "via": "console"
+    }
+  ],
+  "pathext": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL",
+  "status": "passed_entrypoint_subset",
+  "finished": "2026-09-28T03:28:46.1574331+09:00"
+}

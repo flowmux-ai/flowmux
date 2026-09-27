@@ -1,0 +1,19 @@
+{
+  "observed": "2026-09-28T03:21:15.2320320+09:00",
+  "note": "Console launcher process is gone; verifier is waiting for redirected output EOF while the launched hidden GUI remains alive.",
+  "gui": {
+    "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\entrypoints-c8c4ef1b-7837-4533-92f9-9e6abbab4636\\한글 한 😀 space & #",
+    "pane": "be8a3084-6796-49d2-8596-6336b1875504",
+    "pid": 34216,
+    "pipe": "\\\\.\\pipe\\flowmux-34216-8f529f16-6fd3-4f44-abf5-13cdfac3305b",
+    "platform": "windows",
+    "shell": {
+      "args": [],
+      "program": "powershell"
+    },
+    "surface": "f716a8fa-683b-433d-a412-30e24f9f90f8",
+    "workspace": "716180d6-b563-4bfe-9048-8b585513dbc3"
+  },
+  "launcherPid": 17036,
+  "launcherAlive": false
+}

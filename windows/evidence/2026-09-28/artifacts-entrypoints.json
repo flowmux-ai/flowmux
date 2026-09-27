@@ -1,0 +1,46 @@
+{
+  "verification": "Ten hidden native entry-point groups, 48 native Windows Rust tests and 21 isolated Linux crate tests passed. The existing nine-group shell regression passed before the final NUL-redirection guard; the final entry-point run includes that guard. Shared parser, native console entry, Unicode argv and cwd, stream/exit behavior, no-inheritance GUI launch, file/NUL redirection and broken stdout are covered. Release build, Clippy and NSIS build passed. The installer was not executed; clean-machine deployment, parent-job shutdown lifetime, full command parity and desktop/IME acceptance remain pending.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 7535104,
+      "sha256": "b676e5cc45c2fabad5a3596a6794d07f243c58d9219ed154962eea99a6d1bd48",
+      "pe_subsystem": "Windows GUI"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2698752,
+      "sha256": "fba2da94e34319341a5af4ae40ace901598545169fb8c08a07a93013297d30d8",
+      "pe_subsystem": "Windows console"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.com",
+      "bytes": 2742272,
+      "sha256": "24455369d7f02e1228492ab03cd3a06d4346748f215cf980774535903aa7336d",
+      "pe_subsystem": "Windows console"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 3554304,
+      "sha256": "ae3abdf0e7db798e2b8e044967556e851c7c833f05b702a17418440d2fcb753f",
+      "pe_subsystem": "Windows GUI"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 1250816,
+      "sha256": "8f6ec1a64edb16aef648f8aa4b791cb9e5484fb2b43717e2b6075460c17b8279",
+      "pe_subsystem": "Windows console"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.com",
+      "bytes": 1281536,
+      "sha256": "4703bbe3501d6291e2ff99937c07f3a241fe0fd583b2719243cf8d0b458c4a86",
+      "pe_subsystem": "Windows console"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1843737,
+      "sha256": "130e547241a5566505174e28082db3e5e0cad260bae4f786c00e177570a10b40"
+    }
+  ]
+}

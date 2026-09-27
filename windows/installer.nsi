@@ -50,6 +50,7 @@ Section "flowmux" Main
   ; NSIS prompts if an existing executable is in use. Never kill a running user session.
   File "${BINARY_DIR}/flowmux.exe"
   File "${BINARY_DIR}/flowmuxctl.exe"
+  File /oname=flowmux.com "${BINARY_DIR}/flowmux-command.exe"
   File "${BINARY_DIR}/conpty.dll"
   SetOutPath "$INSTDIR\x64"
   File "${BINARY_DIR}/x64/OpenConsole.exe"
@@ -109,6 +110,7 @@ Section "Uninstall"
   ; Remove only installed payloads. User profiles, workspace files and settings remain.
   Delete "$INSTDIR\flowmux.exe"
   Delete "$INSTDIR\flowmuxctl.exe"
+  Delete "$INSTDIR\flowmux.com"
   Delete "$INSTDIR\conpty.dll"
   Delete "$INSTDIR\x64\OpenConsole.exe"
   RMDir "$INSTDIR\x64"

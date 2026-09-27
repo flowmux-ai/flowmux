@@ -27,9 +27,9 @@ use windows_sys::Win32::{
     System::{Console::*, JobObjects::*, Pipes::*, Threading::*},
 };
 
-struct ErrorMode(u32);
+pub(super) struct ErrorMode(u32);
 impl ErrorMode {
-    fn suppress_dialogs() -> anyhow::Result<Self> {
+    pub(super) fn suppress_dialogs() -> anyhow::Result<Self> {
         let mut previous = 0;
         unsafe {
             checked(SetThreadErrorMode(

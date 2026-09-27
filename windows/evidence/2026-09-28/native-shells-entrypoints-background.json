@@ -1,0 +1,98 @@
+{
+  "started": "2026-09-28T03:25:26.3465573+09:00",
+  "mode": "background",
+  "hosts": [
+    {
+      "launchedUtc": "2026-09-27T18:25:26.3566027Z",
+      "pid": 3544,
+      "pipe": "\\\\.\\pipe\\flowmux-3544-e6d2e8b2-7fff-4939-88dc-a3fcac39df4c"
+    },
+    {
+      "launchedUtc": "2026-09-27T18:25:31.8220569Z",
+      "pid": 25612,
+      "pipe": "\\\\.\\pipe\\flowmux-25612-2931b479-0335-4bf6-b0b6-309d0d080592"
+    },
+    {
+      "launchedUtc": "2026-09-27T18:25:34.3756048Z",
+      "pid": 38716,
+      "pipe": "\\\\.\\pipe\\flowmux-38716-a1b4c556-81e8-4847-8801-2a2710b51d68"
+    },
+    {
+      "launchedUtc": "2026-09-27T18:25:36.3521227Z",
+      "pid": 15800,
+      "pipe": "\\\\.\\pipe\\flowmux-15800-05ff5194-44ed-47fe-ac59-0f4e27f61e2a"
+    },
+    {
+      "launchedUtc": "2026-09-27T18:25:36.8873834Z",
+      "pid": 35880,
+      "pipe": "\\\\.\\pipe\\flowmux-35880-46dee564-b72b-4787-8340-571d73c26fe8"
+    }
+  ],
+  "checks": [
+    {
+      "cmdPid": 30628,
+      "name": "default_shell_only_changes_future_tabs_and_cmd_reports_exact_unicode_startup_directory",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\shells-47b228b2-7fe1-43e0-a101-8e398ef6e866\\cwd 한글 한 😀 & #",
+      "powershellPid": 36024
+    },
+    {
+      "marker": "CMD_한글_한_😀",
+      "split": "416697d1-a7cb-48d9-8580-c9a658267d9b",
+      "name": "cmd_prompt_tracks_changed_unicode_cwd_split_inherits_shell_and_tab_override_starts_powershell"
+    },
+    {
+      "name": "invalid_program_directory_default_running_retry_and_oversized_utf8_settings_preserve_file_layout_and_focus"
+    },
+    {
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\shells-47b228b2-7fe1-43e0-a101-8e398ef6e866\\relative",
+      "name": "relative_cli_cwd_resolves_at_invocation_instead_of_gui_or_source_directory"
+    },
+    {
+      "exitCode": 17,
+      "argv": [
+        "",
+        "한글 한 😀 quote\" slash\\",
+        "C:\\trailing space\\",
+        "& echo bad > \"C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\shells-47b228b2-7fe1-43e0-a101-8e398ef6e866\\must-not-execute.txt\""
+      ],
+      "name": "unicode_executable_path_empty_quoted_backslash_and_metacharacter_argv_arrive_exactly_without_command_interpretation",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\shells-47b228b2-7fe1-43e0-a101-8e398ef6e866\\cwd 한글 한 😀 & #"
+    },
+    {
+      "surface": "97d6764f-2b13-4c40-a0fd-6dd216a3d739",
+      "name": "failed_createprocess_retains_saveable_terminal_and_explicit_command_prompt_retry_keeps_identity",
+      "failure": "Cannot start C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\shells-47b228b2-7fe1-43e0-a101-8e398ef6e866\\invalid-image.exe in ConPTY: %1의 버전이 실행 중인 Windows 버전과 호환되지 않습니다. 컴퓨터의 시스템 정보를 확인하고 소프트웨어 게시자에게 문의하십시오. (os error 216)",
+      "newPid": 27704
+    },
+    {
+      "window": "8c2cf41c-6fec-4a20-96d4-5e1c12c76a02",
+      "name": "restart_preserves_each_terminal_shell_argv_cwd_identity_and_korean_history"
+    },
+    {
+      "name": "missing_restored_executable_leaves_other_shells_running_and_history_available_after_explicit_retry"
+    },
+    {
+      "name": "legacy_checkpoint_defaults_to_original_powershell_while_new_tabs_use_shared_cmd_default"
+    }
+  ],
+  "profiles": [
+    {
+      "available": true,
+      "executable": "C:\\WINDOWS\\System32\\WindowsPowerShell/v1.0/powershell.exe",
+      "program": "powershell"
+    },
+    {
+      "available": true,
+      "executable": "C:\\WINDOWS\\System32\\cmd.exe",
+      "program": "cmd"
+    },
+    {
+      "available": false,
+      "program": "pwsh",
+      "reason": "PowerShell 7 is not installed or discoverable: shell executable pwsh.exe was not found on the host PATH"
+    }
+  ],
+  "pwsh": "Not installed/discoverable on this machine; actual PowerShell 7 remains pending.",
+  "status": "passed_shell_subset",
+  "finished": "2026-09-28T03:25:38.5055672+09:00"
+}

@@ -8,6 +8,7 @@ try {
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
     & cargo build --manifest-path "$root\Cargo.toml" --target x86_64-pc-windows-msvc --release --locked
     if ($LASTEXITCODE -ne 0) { throw 'Windows release build failed' }
+    Copy-Item "$root\target\x86_64-pc-windows-msvc\release\flowmux-command.exe" "$root\target\x86_64-pc-windows-msvc\release\flowmux.com"
     & python "$PSScriptRoot\fetch-conpty.py" --output "$root\target\x86_64-pc-windows-msvc\release"
     if ($LASTEXITCODE -ne 0) { throw 'ConPTY support files could not be verified' }
     if ($Installer) {

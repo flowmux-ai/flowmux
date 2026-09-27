@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #[cfg(windows)]
 fn main() {
-    use clap::Parser;
-    if let Err(error) = flowmux_windows::native::ipc::run(flowmux_windows::command::Cli::parse()) {
-        eprintln!("flowmuxctl: {error:#}");
-        std::process::exit(1);
-    }
+    std::process::exit(flowmux_windows::native::entry::control_main());
 }
 
 #[cfg(not(windows))]

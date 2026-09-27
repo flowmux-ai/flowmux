@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 mod conpty;
+pub mod entry;
 pub mod host;
 pub mod ipc;
 mod session;

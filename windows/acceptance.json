@@ -700,8 +700,11 @@
     {
       "id": "O01",
       "feature": "`flowmux` CLI 위임·`flowmuxctl`·JSON 결과",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-entrypoints-background.json"
+      ],
+      "notes": "Installed console flowmux.com, GUI flowmux.exe and command-only flowmuxctl.exe share parsing/client paths. Leading shell/equals launch flags, CMD/PowerShell resolution and waiting, stdout/stderr, JSON runtime errors, Unicode/empty/quoted argv, two-window targeting, file/NUL redirection and closed stdout verified with hidden native processes. GUI launch explicitly forbids handle inheritance after a reproduced redirected-EOF hang. The JSON launch receipt establishes process creation only. Full legacy command parity, altered PATHEXT/custom shells, clean install/update and interactive desktop coverage remain pending."
     },
     {
       "id": "O02",

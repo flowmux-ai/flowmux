@@ -268,6 +268,20 @@ restart, unavailable restored executables and old-state compatibility. PowerShel
 custom script parsers, physical menu/IME/DPI and broader failures remain pending.
 T01 and T23 are partial. See [shell evidence](evidence/2026-09-28/shells.md).
 
+The installed `flowmux.com` console entry point shares a unified launch/command
+grammar with the GUI and executes CLI operations synchronously. `flowmuxctl.exe`
+remains command-only; shortcuts still target `flowmux.exe`. Launch flags are no
+longer inferred from the first argument, fixing leading `--shell` and `--cwd=`.
+The console launcher starts its sibling GUI without inheriting any handles:
+the initial redirected-pipe hang was reproduced and removed in a hidden native
+run. CLI help, version, exit codes, JSON/text results, runtime stderr and closed
+stdout behavior are consistent across entry points. GUI command mode retains
+file/pipe/NUL redirection on console attachment and never opens error dialogs.
+The installer includes/removes the console payload but has only been rebuilt
+in this stage. Full command parity, custom shell resolution, clean-machine
+installation/update and desktop acceptance remain open. O01 is partial; see
+[entry-point evidence](evidence/2026-09-28/entrypoints.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

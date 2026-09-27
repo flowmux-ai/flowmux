@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -18,6 +18,67 @@ pub struct Launch {
     pub temporary: bool,
     #[arg(long, conflicts_with_all = ["shell", "shell_args"])]
     pub restore_window: Option<Uuid>,
+}
+
+/// One grammar for both GUI and console entry points. Do not classify an
+/// invocation using its first argument: options can use `=` or change order.
+#[derive(Debug, Parser)]
+#[command(
+    name = "flowmux",
+    version,
+    about = "Open or control native Windows flowmux"
+)]
+struct Entry {
+    #[command(flatten)]
+    launch: Launch,
+    #[arg(long, global = true)]
+    pipe: Option<String>,
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug)]
+pub enum Invocation {
+    Launch { options: Launch, json: bool },
+    Client(Cli),
+}
+
+pub fn parse_entry(
+    arguments: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+) -> Result<Invocation, clap::Error> {
+    let entry = Entry::try_parse_from(arguments)?;
+    if let Some(command) = entry.command {
+        let launch = &entry.launch;
+        if launch.cwd.is_some()
+            || launch.new_window
+            || launch.temporary
+            || launch.restore_window.is_some()
+            || launch.shell.shell.is_some()
+            || !launch.shell.shell_args.is_empty()
+        {
+            return Err(Entry::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "window launch options cannot be combined with a CLI command",
+            ));
+        }
+        Ok(Invocation::Client(Cli {
+            pipe: entry.pipe,
+            json: entry.json,
+            command,
+        }))
+    } else if entry.pipe.is_some() {
+        Err(Entry::command().error(
+            clap::error::ErrorKind::MissingSubcommand,
+            "--pipe requires a CLI command",
+        ))
+    } else {
+        Ok(Invocation::Launch {
+            options: entry.launch,
+            json: entry.json,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, clap::Args, Serialize, Deserialize)]
@@ -356,6 +417,46 @@ pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unified_entry_parses_launch_options_and_commands_without_first_argument_routing() {
+        for args in [
+            vec!["flowmux"],
+            vec!["flowmux", "--shell", "cmd", "--temporary"],
+            vec!["flowmux", "--shell=cmd", "--temporary"],
+            vec!["flowmux", "--cwd=C:\\한글 한 😀", "--json", "--shell=cmd"],
+            vec!["flowmux", "--json", "--new-window"],
+        ] {
+            assert!(matches!(
+                parse_entry(args).unwrap(),
+                Invocation::Launch { .. }
+            ));
+        }
+        for args in [
+            vec!["flowmux", "--json", "tree", "--pipe", "example"],
+            vec!["flowmux", "--pipe=example", "tree", "--json"],
+            vec!["flowmux", "new-tab", "--shell=cmd", "--cwd=C:\\한글"],
+        ] {
+            assert!(matches!(parse_entry(args).unwrap(), Invocation::Client(_)));
+        }
+        for args in [
+            vec!["flowmux", "--shell=cmd", "tree"],
+            vec!["flowmux", "--temporary", "tree"],
+            vec!["flowmux", "--pipe=example"],
+            vec!["flowmux", "--shell-arg=orphan"],
+            vec!["flowmux", "unknown-command"],
+        ] {
+            assert_eq!(parse_entry(args).unwrap_err().exit_code(), 2);
+        }
+        for args in [
+            vec!["flowmux", "--help"],
+            vec!["flowmux", "--version"],
+            vec!["flowmux", "help", "new-tab"],
+        ] {
+            assert_eq!(parse_entry(args).unwrap_err().exit_code(), 0);
+        }
+        let help = parse_entry(["flowmux", "--help"]).unwrap_err().to_string();
+        assert!(help.contains("--shell") && help.contains("read-screen"));
+    }
     #[test]
     fn shell_cli_and_legacy_requests_keep_each_argv_item_separate() {
         let launch = Launch::try_parse_from(["flowmux", "--shell", "cmd"]).unwrap();

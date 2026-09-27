@@ -15,6 +15,7 @@ Build on Windows with Rust MSVC, the Windows SDK, and WebView2 Runtime 109+:
 
 ```powershell
 cargo build --manifest-path windows/Cargo.toml --locked
+Copy-Item windows/target/debug/flowmux-command.exe windows/target/debug/flowmux.com
 python windows/scripts/fetch-conpty.py --output windows/target/debug
 windows/target/debug/flowmux.exe
 windows/target/debug/flowmuxctl.exe doctor
@@ -34,6 +35,7 @@ To cross-build from Linux with cargo-xwin and Clang/lld installed:
 
 ```sh
 cargo xwin build --manifest-path windows/Cargo.toml --target x86_64-pc-windows-msvc --locked
+cp windows/target/x86_64-pc-windows-msvc/debug/flowmux-command.exe windows/target/x86_64-pc-windows-msvc/debug/flowmux.com
 python3 windows/scripts/fetch-conpty.py --output windows/target/x86_64-pc-windows-msvc/debug
 cargo test --manifest-path windows/Cargo.toml --locked
 cargo xwin clippy --manifest-path windows/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings
@@ -57,6 +59,41 @@ closure. A timeout after dispatch does not prove a command was cancelled; check
 the window state before repeating a mutation. Commands are never automatically
 retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
+
+The installer includes three entry points. **flowmux.exe** is the GUI target
+for desktop shortcuts. **flowmux.com** is a console executable: with a command
+it uses the same IPC client as **flowmuxctl.exe**, and without a command it
+starts the sibling GUI and returns. With the normal Windows PATHEXT ordering,
+typing `flowmux` in CMD or PowerShell selects `flowmux.com`. The installer does
+not modify PATHEXT. If your shell changes that ordering, call `flowmux.com` or
+`flowmuxctl.exe` explicitly for scripts and pipelines. An explicitly invoked
+GUI `.exe` remains subject to the shell's GUI-process waiting behavior.
+
+```powershell
+flowmux --help
+flowmux --version
+flowmux --json tree
+flowmux new-tab --shell cmd
+flowmux --shell=cmd --cwd='C:\Projects'
+flowmux --json --new-window --shell powershell
+```
+
+GUI and console launchers use one grammar: launch options accept both separated
+and `=` values, and cannot be combined with a CLI command. The unified help lists
+both launch options and commands. The console launcher's `--json` response is
+`{"spawned_pid":1234}`: it confirms process creation, not WebView/PTY readiness.
+The new host handles its own startup errors. `flowmuxctl.exe` always requires a
+command and never opens a GUI. No entry point replays an IPC command.
+
+CLI success/help/version exit with 0, argument errors with 2, and runtime/output
+errors with 1. Successful responses use stdout; diagnostics use stderr. With
+`--json`, runtime errors are JSON objects containing `error`; argument errors
+remain clap's textual usage diagnostics. `read-screen` without `--json` emits
+plain text. Pipes and redirected files use UTF-8. The GUI's CLI mode preserves
+redirected streams when attaching to its parent's console. Closed output pipes
+return an error instead of panicking; a command may already have taken effect.
+CLI errors do not open message boxes. See
+[entry-point verification](evidence/2026-09-28/entrypoints.md).
 
 Windows PowerShell remains the initial default. Use **Settings…** to choose
 Windows PowerShell, Command Prompt, or installed PowerShell 7 for future tabs
@@ -376,6 +413,7 @@ powershell -NoProfile -File windows/scripts/verify-find.ps1 -BuildDirectory wind
 powershell -NoProfile -File windows/scripts/verify-output-search.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-settings.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-shells.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-entrypoints.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

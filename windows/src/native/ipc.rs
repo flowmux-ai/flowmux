@@ -114,9 +114,18 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
 }
 
 pub fn run(cli: Cli) -> anyhow::Result<()> {
+    let response = response(cli)?;
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(response.as_bytes())
+        .context("writing CLI stdout")?;
+    stdout.flush().context("flushing CLI stdout")?;
+    Ok(())
+}
+
+fn response(cli: Cli) -> anyhow::Result<String> {
     if matches!(cli.command, Command::ShellIntegration) {
-        print!("{}", include_str!("../../shell/powershell.ps1"));
-        return Ok(());
+        return Ok(include_str!("../../shell/powershell.ps1").into());
     }
     if matches!(cli.command, Command::Doctor) {
         super::conpty::api()?;
@@ -127,11 +136,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
             major >= 109,
             "WebView2 Runtime 109 or newer is required (found {version})"
         );
-        println!(
-            "{}",
+        return Ok(format!(
+            "{}\n",
             json!({"platform":"windows","webview2":version,"status":"ok", "background_testing":cfg!(debug_assertions)})
-        );
-        return Ok(());
+        ));
     }
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
     let candidates = if let Some(name) = &explicit {
@@ -207,11 +215,10 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         anyhow::bail!("{}", error.as_str().unwrap_or("IPC error"));
     }
     if !cli.json && value["text"].is_string() {
-        println!("{}", value["text"].as_str().unwrap());
+        Ok(format!("{}\n", value["text"].as_str().unwrap()))
     } else {
-        println!("{}", serde_json::to_string_pretty(&value)?);
+        Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
     }
-    Ok(())
 }
 
 // Validate the OS-reported owner before sending any command bytes. A syntactically
