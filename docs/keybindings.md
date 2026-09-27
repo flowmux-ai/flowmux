@@ -34,6 +34,12 @@ not an editable action. PgUp/PgDn normally follow VTE and the foreground
 application. The legacy smart-scrollback handler is opt-in through
 `FLOWMUX_ENABLE_VTE_CAPTURE_KEYS=1`, not a default keybinding.
 
+Shift+Tab remains available to terminal applications, including Claude Code's
+mode switch. On WSL/WSLg, flowmux commits pending IME composition and sends
+the back-tab sequence (`ESC [ Z`) directly to avoid dropped IBus input.
+This workaround applies only to the focused terminal; Ctrl+Shift+Tab still
+switches workspaces, and other platforms keep their native terminal handling.
+
 When the embedded editor has focus, it also provides its local editing
 shortcuts: Ctrl/Cmd+S saves, Ctrl/Cmd+Shift+S opens Save As,
 Ctrl/Cmd+Alt+S saves all, Ctrl/Cmd+F and Ctrl/Cmd+H find and replace,
