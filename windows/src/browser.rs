@@ -134,6 +134,16 @@ pub enum Op {
         #[serde(flatten)]
         options: crate::browser_wait::Options,
     },
+    Click(crate::browser_action::TargetArgs),
+    Dblclick(crate::browser_action::TargetArgs),
+    Hover(crate::browser_action::TargetArgs),
+    Focus(crate::browser_action::TargetArgs),
+    Blur(crate::browser_action::TargetArgs),
+    Scroll(crate::browser_action::ScrollArgs),
+    Fill(crate::browser_action::ValueArgs),
+    Select(crate::browser_action::ValueArgs),
+    Check(crate::browser_action::TargetArgs),
+    Uncheck(crate::browser_action::TargetArgs),
     /// Evaluate synchronous JavaScript in the active browser document.
     Eval {
         #[arg(value_parser = crate::command::parse_id)]
@@ -146,6 +156,23 @@ pub struct Opened {
     pub pane: PaneId,
     pub surface: SurfaceId,
     pub placement: &'static str,
+}
+impl Op {
+    pub fn is_action(&self) -> bool {
+        matches!(
+            self,
+            Self::Click(..)
+                | Self::Dblclick(..)
+                | Self::Hover(..)
+                | Self::Focus(..)
+                | Self::Blur(..)
+                | Self::Scroll(..)
+                | Self::Fill(..)
+                | Self::Select(..)
+                | Self::Check(..)
+                | Self::Uncheck(..)
+        )
+    }
 }
 /// Update a candidate workspace. Native view creation can fail without changing
 /// the live layout; callers install this candidate only after the view exists.

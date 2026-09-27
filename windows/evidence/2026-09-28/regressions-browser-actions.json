@@ -1,0 +1,55 @@
+{
+  "mode": "background",
+  "nativeRust": {
+    "exitCode": 0,
+    "pid": 5944,
+    "mode": "hidden"
+  },
+  "linuxRustPassed": 95,
+  "nativeRustPassed": 122,
+  "actionGroups": 8,
+  "regressions": [
+    {
+      "name": "browser-dom",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-actions-browser-dom-regression.json"
+      ],
+      "groups": 6
+    },
+    {
+      "name": "browser-wait",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-actions-browser-wait-regression.json"
+      ],
+      "groups": 6
+    },
+    {
+      "name": "keys",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-actions-keys-regression.json"
+      ],
+      "groups": 7
+    }
+  ],
+  "debugEntryPointsPassed": 3,
+  "releaseEntryPointsPassed": 3,
+  "debugBuild": "passed",
+  "releaseBuild": "passed",
+  "releaseClippy": "passed",
+  "nsisPackageBuild": "passed",
+  "installerExecuted": false,
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "scope": "windows/ only; no changes to root/shared/Linux/macOS files",
+  "existingPlatformSourceDiffSince": "73b2e6e",
+  "existingPlatformSourceDiff": [],
+  "physicalImeAcceptance": "not performed",
+  "physicalFocusBlurAcceptance": "not performed; explicitly refused in hidden test hosts",
+  "rustFmt": "passed",
+  "remainingRecordedOwnedProcesses": [],
+  "userWslFlowmuxPid787": "running at read-only audit"
+}

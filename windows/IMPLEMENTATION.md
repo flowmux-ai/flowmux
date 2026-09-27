@@ -384,7 +384,7 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B03/B06/B07/B09 and G09 are partial. DOM actions/screenshots, downloads,
+B01/B02/B03/B04/B05/B06/B07/B09 and G09 are partial. Screenshots, downloads,
 popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
@@ -399,7 +399,7 @@ and callbacks without stamping the DOM. Read-only text/value/attr/state/count
 commands support structured JSON and plain scalar output. Output/traversal bounds,
 Unicode excerpts, duplicate/deep selectors, reference lifetime and failure recovery
 are checked in a hidden WebView2 fixture. Frames/shadow trees, full accessibility,
-DOM actions, screenshots and actual browser IME remain pending. See
+Active-element type/press, screenshots and actual browser IME remain pending. See
 [DOM evidence](evidence/2026-09-28/browser-dom.md).
 
 Windows browser waits now cover selector/text/URL/ready-state/synchronous JS
@@ -411,3 +411,13 @@ the validated 120-second wait plus transport margin. Existing terminal/state tim
 frequency and non-wait IPC limits remain unchanged. B07/G09 remain partial because
 client-disconnect cancellation, broader page semantics and complete race/physical
 UI acceptance remain open. See [wait evidence](evidence/2026-09-28/browser-wait.md).
+
+Windows now has ten ref-based DOM action commands. Ref binding validates the
+current snapshot/DOM before execution, and per-surface admission prevents actions
+and snapshots overtaking a pending action. Existing refs remain valid for explicit
+repeats when the DOM is unchanged. Input values use native DOM setters with Unicode
+preservation and beforeinput cancellation; OS input is never injected. Focus/blur
+are blocked in background test hosts, so actual focus acceptance remains pending.
+Clap action argument structs share their builders to avoid a reproduced Windows
+debug main-thread stack overflow without changing CLI/JSON grammar or stack size.
+B04/B05/G09 remain partial. See [action evidence](evidence/2026-09-28/browser-actions.md).

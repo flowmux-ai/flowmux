@@ -1,0 +1,30 @@
+{
+  "started": "2026-09-28T08:13:04.1324651+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "exact_unicode_fill_native_setter_events_empty_and_idempotent_values",
+      "passed": true
+    },
+    {
+      "name": "disabled_readonly_file_cancel_replacement_and_reentrant_disable_rejected",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "status": "failed",
+  "error": "CLI browser select 79af85f0-d411-4147-ba97-6a7934ef90b4 e244 우선 exit 1: {\"error\":\"Error: option not found; action may have executed (not retried)\"}\n ",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "hosts": [
+    28796
+  ],
+  "shells": [
+    39068
+  ],
+  "actionClientPids": [],
+  "finished": "2026-09-28T08:13:08.3086664+09:00"
+}

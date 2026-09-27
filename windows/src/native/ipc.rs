@@ -142,6 +142,7 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         ));
     }
     let json = cli.json;
+    let action_output = matches!(&cli.command,Command::Browser{op} if op.is_action());
     let dom_output = matches!(
         &cli.command,
         Command::Browser {
@@ -162,6 +163,10 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         }
     );
     let value = request(cli)?;
+    if !json && action_output {
+        anyhow::ensure!(value["ok"] == true, "invalid browser action response");
+        return Ok("ok\n".into());
+    }
     if !json && dom_output {
         let result = &value["result"];
         return Ok(format!(

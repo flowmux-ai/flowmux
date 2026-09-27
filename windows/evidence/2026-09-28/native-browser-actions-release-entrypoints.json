@@ -1,0 +1,35 @@
+[
+  {
+    "exitCode": 0,
+    "pid": 14484,
+    "name": "flowmux.exe",
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  },
+  {
+    "exitCode": 0,
+    "pid": 36744,
+    "name": "flowmuxctl.exe",
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  },
+  {
+    "exitCode": 0,
+    "pid": 27520,
+    "name": "flowmux.com",
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  }
+]

@@ -744,8 +744,8 @@ callback deadline. Promises, navigation in progress, closed/replaced documents
 and invalid/non-JSON results are rejected. A timeout does not cancel JavaScript
 already executing, and rejected asynchronous scripts may already have started
 side effects; do not automatically retry them. Navigation IDs protect callbacks
-from earlier documents. Snapshot/ref queries are described below; DOM action
-commands and asynchronous eval remain pending.
+from earlier documents. Snapshot/ref queries and DOM actions are described below; active-element
+`type`/`press`, screenshots and asynchronous eval remain pending.
 
 New-window requests and downloads are currently denied; DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
@@ -808,7 +808,7 @@ Full text/value queries retain the original Unicode within their result limit
 and the element's normal DOM value semantics. Browser script execution/memory
 budgets and complete timeout/navigation race coverage remain open. The existing
 16-pending-request and 12-second callback limits apply to these commands too.
-DOM actions and screenshots are still pending; waits are described below. The
+DOM actions and waits are described below; screenshots remain pending. The
 [hidden DOM verifier](scripts/verify-browser-dom.ps1) uses only owned loopback
 pages; it does not simulate OS keyboard/IME input.
 
@@ -855,3 +855,57 @@ Closing a CLI currently leaves its wait bounded by the requested timeout; prompt
 cancellation on client disconnect and exhaustive race coverage remain pending.
 The [hidden wait verifier](scripts/verify-browser-wait.ps1) uses isolated local
 pages and does not establish physical IME or desktop interaction acceptance.
+
+### Browser element actions (partial)
+
+`click`, `dblclick`, `hover`, `focus`, `blur`, `scroll`, `fill`, `select`, `check`
+and `uncheck` use `eN` or `@eN` from the latest snapshot of the target browser.
+For example, after inspecting `browser snapshot`:
+
+```powershell
+flowmux browser fill pane:<uuid> e1 "한글 한 😀"
+flowmux browser select pane:<uuid> e2 "option-value"
+flowmux browser check pane:<uuid> e3
+flowmux browser scroll pane:<uuid> e4 0 -20
+```
+
+Plain output is `ok`; JSON returns `{ "ok": true, "surface": "<uuid>" }`.
+A successful action reports synchronous DOM execution, not completion of a
+listener's asynchronous work or a resulting navigation. `browser status` exposes
+`action_pending`. A single action may be pending per surface; another action or
+snapshot is rejected until its callback completes. Refs remain usable while the
+same snapshot, DOM revision and URL are current, including explicit repeated
+clicks or idempotent checks/fills. Changes to the DOM tree, attributes or text,
+new snapshots, tab hiding and navigation retain their existing invalidation rules.
+
+`fill` uses the native input/textarea value setter and a cancelable `beforeinput`
+with `insertReplacementText`, followed by `input` and `change` when the value
+changes. It does not focus the control, type keys or simulate IME composition.
+Unicode is not normalized; native value rules still apply (for example, a
+single-line input removes newlines). Read-only/disabled controls, file inputs,
+checkbox/radio/button inputs and contenteditable targets are rejected. A
+beforeinput listener that cancels, replaces or disables the target stops the fill.
+
+`select` prefers an exact option value, then trimmed label text. It rejects
+missing/disabled options. On a multiple select it adds that option to the current
+selection. `check` supports checkboxes/radios; `uncheck` supports only checkboxes.
+Selection/check changes dispatch `input` and `change`, with no events for an
+already satisfied state. Disabled/inert/aria-disabled elements are rejected.
+
+These are DOM operations. `click` calls the element's click method; `dblclick`
+dispatches one synthetic double-click event; `hover` dispatches mouseenter and
+mouseover without moving the OS pointer or establishing CSS `:hover`. Double-click
+does not synthesize two clicks or native text selection. `scroll` centers the
+element and offsets the viewport instantly. Native hit testing, occlusion and
+trusted physical mouse/keyboard behavior are not simulated.
+
+Focus/blur use the element's DOM methods in normal builds. Background test hosts
+reject both before dispatch; actual focus/IME interactions remain unverified.
+Value inputs are limited to 64 KiB UTF-8 and the encoded script to 128 KiB; the
+Windows command-line length limit may be lower. Existing
+16-script/12-second callback limits also apply. Errors after dispatch warn that the
+action may have executed. No mutation is automatically retried. An error or an
+expired `action_pending` flag cannot prove that page side effects were undone;
+inspect the current page state before an intentional repeat. Page JS and event
+handlers are not sandboxed by these commands. `type`, `press`, screenshot, full
+framework/custom-widget coverage and physical IME acceptance remain pending.

@@ -141,6 +141,27 @@ impl Refs {
         op: &str,
         name: Option<&str>,
     ) -> anyhow::Result<(Uuid, String)> {
+        let (id, mut args) = self.binding(key, target)?;
+        if let Some(name) = name {
+            ensure!(
+                !name.is_empty() && name.len() <= 256 && !name.chars().any(char::is_control),
+                "invalid attribute name"
+            );
+        }
+        args["op"] = json!(op);
+        args["name"] = json!(name);
+        Ok((id, format!("({QUERY_SCRIPT})({args})")))
+    }
+    pub fn action(
+        &self,
+        key: &str,
+        target: &str,
+        action: &crate::browser_action::Action,
+    ) -> anyhow::Result<String> {
+        let (_, args) = self.binding(key, target)?;
+        action.script(args)
+    }
+    fn binding(&self, key: &str, target: &str) -> anyhow::Result<(Uuid, Value)> {
         ensure!(target.len() <= 32, "invalid browser ref");
         let id = self
             .current
@@ -149,14 +170,10 @@ impl Refs {
             .store
             .resolve(self.scope, target)
             .context("browser ref not found in the latest snapshot of this surface")?;
-        if let Some(name) = name {
-            ensure!(
-                !name.is_empty() && name.len() <= 256 && !name.chars().any(char::is_control),
-                "invalid attribute name"
-            );
-        }
-        let args = json!({"key":key,"revision":self.revision,"url":self.url,"selector":selector,"op":op,"name":name});
-        Ok((id, format!("({QUERY_SCRIPT})({args})")))
+        Ok((
+            id,
+            json!({"key":key,"revision":self.revision,"url":self.url,"selector":selector}),
+        ))
     }
 }
 pub fn selector(value: &str) -> anyhow::Result<()> {
@@ -196,13 +213,22 @@ mod tests {
         let second = b.begin();
         b.publish(second, payload(), &mut tokens).unwrap();
         assert!(b.query("k", "e1", "text", None).is_err());
+        assert!(b
+            .action("k", "e1", &crate::browser_action::Action::Click)
+            .is_err());
         assert!(b.query("k", "e2", "text", None).is_ok());
         let new = a.begin();
         a.publish(new, payload(), &mut tokens).unwrap();
         assert!(a.query("k", "e1", "text", None).is_err());
         assert!(a.query("k", "e3", "text", None).is_ok());
+        assert!(a
+            .action("k", "e3", &crate::browser_action::Action::Click)
+            .is_ok());
         a.clear();
         assert!(a.query("k", "e3", "text", None).is_err());
+        assert!(a
+            .action("k", "e3", &crate::browser_action::Action::Click)
+            .is_err());
         assert!(a.publish(new, payload(), &mut tokens).is_err());
     }
     #[test]

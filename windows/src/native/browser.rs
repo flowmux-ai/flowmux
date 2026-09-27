@@ -21,6 +21,7 @@ pub(super) enum Signal {
 }
 enum Response {
     Eval,
+    Action,
     Snapshot(Uuid),
     Query {
         snapshot: Option<Uuid>,
@@ -34,6 +35,22 @@ pub(super) struct Pending {
     epoch: u64,
     reply: ipc::Reply,
     started: Instant,
+}
+fn action_outcome(mut value: Value, action: bool) -> Value {
+    if action {
+        if let Some(error) = value["error"].as_str() {
+            value["error"] = json!(format!("{error}; action may have executed (not retried)"));
+        }
+    }
+    value
+}
+impl Pending {
+    fn error(&self, reason: &str) -> Value {
+        action_outcome(
+            json!({"error":reason}),
+            matches!(self.response, Response::Action),
+        )
+    }
 }
 pub(super) struct Browser {
     // Drop the view before its chrome/context/parent HWND.
@@ -317,7 +334,7 @@ impl App {
         self.browser_wait_cancel(id, reason);
         self.pending_browser.retain(|_, pending| {
             if pending.surface == id {
-                let _ = pending.reply.try_send(json!({"error":reason}));
+                let _ = pending.reply.try_send(pending.error(reason));
                 false
             } else {
                 true
@@ -328,7 +345,7 @@ impl App {
         self.pending_browser.retain(|_, p| {
             if p.started.elapsed() > Duration::from_secs(12) {
                 let _ = p.reply.try_send(
-                    json!({"error":"browser script callback timed out; script may have executed"}),
+                    p.error("browser script callback timed out; script may have executed"),
                 );
                 false
             } else {
@@ -365,7 +382,7 @@ impl App {
                     if p.surface == id && Some(p.epoch) != epoch {
                         let _ = p
                             .reply
-                            .try_send(json!({"error":"browser navigated during script request"}));
+                            .try_send(p.error("browser navigated during script request"));
                         false
                     } else {
                         true
@@ -410,6 +427,7 @@ impl App {
             }
             Signal::Eval(request, epoch, result) => {
                 if let Some(p) = self.pending_browser.remove(&request) {
+                    let action = matches!(p.response, Response::Action);
                     let reply = if p.started.elapsed() > Duration::from_secs(12) {
                         json!({"error":"browser script callback timed out; script may have executed"})
                     } else if epoch != p.epoch
@@ -429,7 +447,7 @@ impl App {
                             _ => json!({"error":"invalid browser script result"}),
                         }
                     };
-                    let _ = p.reply.try_send(reply);
+                    let _ = p.reply.try_send(action_outcome(reply, action));
                 }
             }
         }
@@ -450,6 +468,10 @@ impl App {
             .clone();
         match response {
             Response::Eval => Ok(value),
+            Response::Action => {
+                anyhow::ensure!(result == "ok", "invalid browser action result");
+                Ok(json!({"ok":true,"surface":id}))
+            }
             Response::Snapshot(request) => {
                 let browser = self.browsers.get_mut(&id).context("browser was closed")?;
                 let mut result = browser
@@ -563,6 +585,15 @@ impl App {
             | Op::IsChecked { pane, .. }
             | Op::Count { pane, .. }
             | Op::Wait { pane, .. } => *pane,
+            Op::Click(args)
+            | Op::Dblclick(args)
+            | Op::Hover(args)
+            | Op::Focus(args)
+            | Op::Blur(args)
+            | Op::Check(args)
+            | Op::Uncheck(args) => args.pane,
+            Op::Fill(args) | Op::Select(args) => args.pane,
+            Op::Scroll(args) => args.pane,
             Op::Open { .. } => unreachable!(),
         };
         let id = self.target(Some(pane), None)?;
@@ -570,7 +601,30 @@ impl App {
             self.browsers.contains_key(&id),
             "pane has no active browser tab"
         );
+        let action_pending = self
+            .pending_browser
+            .values()
+            .any(|p| p.surface == id && matches!(p.response, Response::Action));
+        if op.is_action() || matches!(op, Op::Snapshot { .. }) {
+            anyhow::ensure!(
+                !action_pending,
+                "wait for the pending browser action before taking a snapshot or another action"
+            );
+        }
         self.browser_refresh(id)?;
+        if let Some((target, action)) = crate::browser_action::from_op(&op) {
+            anyhow::ensure!(
+                !self.background_test || action.allowed_in_background(),
+                "DOM focus/blur is disabled in background test hosts"
+            );
+            let browser = &self.browsers[&id];
+            let source = browser.refs.action(&browser.dom_key, target, &action)?;
+            self.browser_script(id, source, Response::Action, MAX_SCRIPT, reply)?;
+            // DOM revision checks preserve the existing ref contract: explicit
+            // repeated actions remain valid while the same snapshot/DOM is current.
+            // The transport never retries an action after an uncertain response.
+            return Ok(None);
+        }
         let browser = self.browsers.get_mut(&id).unwrap();
         let query_kind = match &op {
             Op::Text { .. } => Some(("text", None)),
@@ -593,7 +647,11 @@ impl App {
             Op::Stop { .. } => browser.operation(4)?,
             Op::Url { .. } => return Ok(Some(json!({"url":browser.url}))),
             Op::Title { .. } => return Ok(Some(json!({"title":browser.title}))),
-            Op::Status { .. } => return Ok(Some(browser.status(id))),
+            Op::Status { .. } => {
+                let mut status = browser.status(id);
+                status["action_pending"] = json!(action_pending);
+                return Ok(Some(status));
+            }
             Op::Zoom { scale, .. } => browser.zoom(scale)?,
             Op::Eval { source, .. } => {
                 self.browser_script(id, source, Response::Eval, MAX_SCRIPT, reply)?;
@@ -648,6 +706,16 @@ impl App {
                 return Ok(None);
             }
             Op::Open { .. } => unreachable!(),
+            Op::Click(..)
+            | Op::Dblclick(..)
+            | Op::Hover(..)
+            | Op::Focus(..)
+            | Op::Blur(..)
+            | Op::Scroll(..)
+            | Op::Fill(..)
+            | Op::Select(..)
+            | Op::Check(..)
+            | Op::Uncheck(..) => unreachable!(),
         }
         self.browser_refresh(id)?;
         Ok(Some(json!({"ok":true,"surface":id})))

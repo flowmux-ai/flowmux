@@ -450,14 +450,22 @@
     {
       "id": "B04",
       "feature": "click/dblclick/hover/focus/blur/scroll",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-actions.md",
+        "evidence/2026-09-28/native-browser-actions-background.json"
+      ],
+      "notes": "DOM click/dblclick/hover/scroll and focus/blur commands implemented with current-ref validation, per-surface admission and no automatic replay. Hidden live tests cover synthetic pointer events, scroll, stale DOM/tab/navigation refs and pending status. Focus/blur are intentionally refused in background test hosts; real focus, CSS hover, physical hit testing/selection, IME and exhaustive races remain pending."
     },
     {
       "id": "B05",
       "feature": "fill/select/type/press/check/uncheck",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-actions.md",
+        "evidence/2026-09-28/native-browser-actions-background.json"
+      ],
+      "notes": "Ref-based fill/select/check/uncheck implemented using native DOM setters and synthetic events. Hidden tests cover ordinal Unicode, newline/value rules, beforeinput cancellation/replacement/disable, readonly/file rejection, option precedence/multiple select and checkbox/radio idempotence. Active-element type/press, contenteditable/custom widgets, broad framework behavior and physical IME remain pending."
     },
     {
       "id": "B06",
@@ -950,9 +958,10 @@
         "evidence/2026-09-28/native-browser-ordinal-background.json",
         "evidence/2026-09-28/browser-dom.md",
         "evidence/2026-09-28/native-browser-dom-background.json",
-        "evidence/2026-09-28/native-browser-wait-background.json"
+        "evidence/2026-09-28/native-browser-wait-background.json",
+        "evidence/2026-09-28/native-browser-actions-background.json"
       ],
-      "notes": "Native browser foundation and twenty CLI operations have hidden loopback evidence, including DOM snapshots, read-only queries and five-condition waits. Actions/screenshots, complete browser UI parity and physical IME/DPI/accessibility acceptance remain pending."
+      "notes": "Thirty Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based actions now have hidden evidence, except actual focus/blur. Type/press/screenshot, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending."
     },
     {
       "id": "G10",
