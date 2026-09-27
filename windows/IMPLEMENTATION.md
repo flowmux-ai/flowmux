@@ -322,6 +322,17 @@ tests are separate from physical clipboard, mouse, accessibility and IME
 acceptance, which remains open. T08 stays partial; see
 [selection evidence](evidence/2026-09-28/selection.md).
 
+Windows `capture-pane` now aliases the parser-barrier viewport read.
+`read-screen --recent` extracts the latest 80 normal-buffer physical rows, or
+all alternate-screen rows including footers below the cursor, without changing
+selection, scrolling or focus. Responses preserve text/sequence compatibility
+and add buffer/range/cursor metadata. Exact UTF-8 text is bounded to 128 KiB;
+oversized results return an error instead of partial text or a bridge timeout.
+Ten hidden native tests cover Unicode, wraps, redraws, old scroll positions,
+hidden/moved/exited tabs and buffer transitions. Native oversized-grid and race
+acceptance, sustained load and agent status polling/classification remain open.
+T12/T13 are partial; see [screen evidence](evidence/2026-09-28/screen.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

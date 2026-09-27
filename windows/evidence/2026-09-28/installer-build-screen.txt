@@ -1,0 +1,23 @@
+MakeNSIS v3.09-4 - Copyright 1999-2023 Contributors
+See the file COPYING for license details.
+Credits can be found in the Users Manual.
+
+Processing script file: "windows/installer.nsi" (UTF8)
+
+Processed 1 file, writing output (x86-unicode):
+
+Output: "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/flowmux-windows-0.10.1-dev-x64-setup.exe"
+Install: 5 pages (320 bytes), 1 section (4120 bytes), 476 instructions (13328 bytes), 305 strings (81698 bytes), 2 language tables (644 bytes).
+Uninstall: 2 pages (192 bytes), 1 section (4120 bytes), 71 instructions (1988 bytes), 160 strings (4630 bytes), 2 language tables (500 bytes).
+Datablock optimizer saved 26498 bytes (~0.3%).
+
+Using lzma (compress whole) compression.
+
+EXE header size:              115712 / 100864 bytes
+Install code:                          (98526 bytes)
+Install data:                          (8657733 bytes)
+Uninstall code+data:                   (23746 bytes)
+Compressed data:             1815121 / 8780005 bytes
+CRC (0xCBFE9BCB):                  4 / 4 bytes
+
+Total size:                  1930837 / 8880873 bytes (21.7%)

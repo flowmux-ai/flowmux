@@ -168,12 +168,19 @@ pub enum Command {
         op: SettingsOp,
     },
     Tree,
+    /// Read parsed physical rows without changing focus, selection or scrolling.
+    #[command(visible_alias = "capture-pane")]
+    #[serde(alias = "capture_pane")]
     ReadScreen {
         #[arg(value_parser = parse_id)]
         pane: Option<Uuid>,
         /// Read a specific tab, including an inactive tab, without changing focus.
         #[arg(long, value_parser = parse_id, conflicts_with = "pane")]
         surface: Option<Uuid>,
+        /// Read the latest 80 normal-buffer rows, or the entire alternate screen.
+        #[arg(long)]
+        #[serde(default)]
+        recent: bool,
     },
     /// Find in a terminal's retained output without activating an inactive tab.
     Find {
@@ -440,6 +447,35 @@ pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
 mod tests {
     use super::*;
     #[test]
+    fn capture_alias_and_recent_reads_preserve_targeting_and_legacy_wire_requests() {
+        let id = Uuid::new_v4().to_string();
+        for verb in ["read-screen", "capture-pane"] {
+            let cli =
+                Cli::try_parse_from(["flowmuxctl", verb, "--surface", &id, "--recent"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Command::ReadScreen {
+                    pane: None,
+                    surface: Some(_),
+                    recent: true
+                }
+            ));
+            assert!(Cli::try_parse_from(["flowmuxctl", verb, &id, "--surface", &id]).is_err());
+            assert!(matches!(
+                parse_entry(["flowmux", verb, &id]).unwrap(),
+                Invocation::Client(_)
+            ));
+        }
+        for method in ["read_screen", "capture_pane"] {
+            let request: Request =
+                serde_json::from_value(serde_json::json!({"method":method})).unwrap();
+            assert!(matches!(
+                request.command,
+                Command::ReadScreen { recent: false, .. }
+            ));
+        }
+    }
+    #[test]
     fn unified_entry_parses_launch_options_and_commands_without_first_argument_routing() {
         for args in [
             vec!["flowmux"],
@@ -544,7 +580,8 @@ mod tests {
             old_read.command,
             Command::ReadScreen {
                 pane: None,
-                surface: None
+                surface: None,
+                recent: false
             }
         ));
         let id = Uuid::new_v4();
@@ -552,6 +589,7 @@ mod tests {
             command: Command::ReadScreen {
                 pane: None,
                 surface: None,
+                recent: false,
             },
             caller_surface: Some(id),
             caller_cwd: Some("C:\\한글 folder".into()),
@@ -564,7 +602,8 @@ mod tests {
             decoded.command,
             Command::ReadScreen {
                 pane: None,
-                surface: None
+                surface: None,
+                recent: false
             }
         ));
     }

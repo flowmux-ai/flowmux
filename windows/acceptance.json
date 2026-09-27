@@ -188,14 +188,22 @@
     {
       "id": "T12",
       "feature": "`read-screen` / `capture-pane`",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-screen-background.json",
+        "evidence/2026-09-28/frontend-tests-screen.txt"
+      ],
+      "notes": "read-screen and capture-pane share parser-barrier viewport reads with stable surface targeting, bounded exact text and buffer/range metadata. Hidden native WebView2/ConPTY checks cover Unicode, soft wraps, overwrite/CR/erase, retained selection/scroll position, hidden and moved tabs, alternate isolation and process exit. 128 KiB limits, error recovery and split-byte barriers are covered by frontend/Rust tests. Native oversized-grid/timeout/close races, sustained load, broader TUI/Unicode/reflow and full capture compatibility remain pending; tmux capture flags are not implemented."
     },
     {
       "id": "T13",
       "feature": "상태 감지용 최근 화면 추출",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-screen-background.json",
+        "evidence/2026-09-28/frontend-tests-screen.txt"
+      ],
+      "notes": "--recent reads at most 80 latest normal-buffer physical rows independently of viewport/cursor, or the full alternate screen including footer rows. On-demand extraction avoids copying full history on every output. Ten hidden native screen checks include these ranges and inactive parsing. Agent status polling/classification is not wired yet; sustained-load budgets, rate limiting and broader TUI/Unicode acceptance remain pending."
     },
     {
       "id": "T14",
@@ -757,9 +765,10 @@
       "feature": "send-keys/send-key/read-screen·pane/tab 제어",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-tab-move-background.json"
+        "evidence/2026-09-27/native-tab-move-background.json",
+        "evidence/2026-09-28/native-screen-background.json"
       ],
-      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain."
+      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain. capture-pane aliases the parser-barrier viewport read; --recent and read-only range metadata are available. Full command parity remains pending."
     },
     {
       "id": "O05",
@@ -862,9 +871,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-27/native-output-load-background.json",
-        "evidence/2026-09-27/native-state-background.json"
+        "evidence/2026-09-27/native-state-background.json",
+        "evidence/2026-09-28/native-screen-background.json"
       ],
-      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending."
+      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending. Bounded viewport/recent reads now have hidden native Unicode/scroll/alternate/exit evidence; agent detection and other screen consumers remain pending."
     },
     {
       "id": "G07",

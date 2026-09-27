@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Read barriers resolve only after xterm's parser callback, including hidden tabs.
+import { readScreen } from './screen.mjs';
 export class Output {
   constructor(terminal, send, serialize, find, changed, outputSearch, paste, selection) {
     this.terminal = terminal;
@@ -39,12 +40,10 @@ export class Output {
     for (const message of this.pending) {
       if (message.after > this.parsed) { waiting.push(message); continue; }
       if (message.type === 'read_screen') {
-        const buffer = this.terminal.buffer.active;
-        const lines = [];
-        for (let y = buffer.viewportY; y < buffer.viewportY + this.terminal.rows; y++) {
-          lines.push(buffer.getLine(y)?.translateToString(true) ?? '');
-        }
-        this.send({ type: 'screen', request: message.request, sequence: this.parsed, text: lines.join('\n') });
+        let outcome;
+        try { outcome = { status: 'ok', snapshot: readScreen(this.terminal, message.recent) }; }
+        catch (error) { outcome = { status: 'error', message: String(error) }; }
+        this.send({ type: 'screen', request: message.request, sequence: this.parsed, outcome });
       } else if (message.type === 'paste') {
         const outcome = this.paste.run(message.text);
         if (outcome.status === 'ok' && message.text) this.selection?.forget();

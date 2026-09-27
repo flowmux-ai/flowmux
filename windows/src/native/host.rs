@@ -258,6 +258,10 @@ struct PendingRead {
     reply: ipc::Reply,
     started: Instant,
 }
+struct PendingScreen {
+    read: PendingRead,
+    mode: crate::screen::Mode,
+}
 enum CloseRequest {
     Native,
     Ipc(ipc::Reply),
@@ -289,7 +293,7 @@ struct App {
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
     metadata: Option<workspaces::Panel>,
-    pending_reads: HashMap<Uuid, PendingRead>,
+    pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
     pending_selections: HashMap<Uuid, PendingRead>,
@@ -932,6 +936,7 @@ impl App {
                     }
                 });
                 self.pending_reads.retain(|_, request| {
+                    let request = &request.read;
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
                             json!({"error":"terminal parser did not answer the screen barrier"}),
@@ -1164,17 +1169,25 @@ impl App {
             ClientMessage::Screen {
                 request,
                 sequence,
-                text,
+                outcome,
             } => {
                 if let Some(pending) = self.pending_reads.get(&request) {
                     anyhow::ensure!(
-                        pending.surface == id && sequence >= pending.after,
+                        pending.read.surface == id
+                            && sequence >= pending.read.after
+                            && sequence <= surface.output_sequence,
                         "invalid screen response"
                     );
+                    outcome.validate(pending.mode)?;
                     let pending = self.pending_reads.remove(&request).unwrap();
-                    let _ = pending
-                        .reply
-                        .try_send(json!({"surface":id,"sequence":sequence,"text":text}));
+                    let value = match outcome {
+                        crate::screen::Outcome::Ok { snapshot } => {
+                            json!({"surface":id,"sequence":sequence,
+                            "text":snapshot.text,"screen":snapshot.metadata})
+                        }
+                        crate::screen::Outcome::Error { message } => json!({"error":message}),
+                    };
+                    let _ = pending.read.reply.try_send(value);
                 }
             }
             ClientMessage::Found {
@@ -1688,6 +1701,7 @@ impl App {
             ));
         }
         self.pending_reads.retain(|_, request| {
+            let request = &request.read;
             if request.surface == surface {
                 let _ = request
                     .reply
@@ -1857,7 +1871,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
-                "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
+                "commands":["identify","capabilities","tree","read-screen","capture-pane","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -1881,7 +1895,15 @@ impl App {
                             "saving":self.pending_save.is_some(),"error":self.state_error}}),
                 ));
             }
-            Command::ReadScreen { pane, surface } => {
+            Command::ReadScreen {
+                pane,
+                surface,
+                recent,
+            } => {
+                anyhow::ensure!(
+                    self.pending_reads.len() < 16,
+                    "too many pending screen reads"
+                );
                 anyhow::ensure!(
                     pane.is_none() || surface.is_none(),
                     "choose either pane or surface"
@@ -1897,14 +1919,21 @@ impl App {
                     .as_ref()
                     .map_or(surface.output_sequence, Session::barrier);
                 let request = Uuid::new_v4();
-                self.surfaces[&id].send(&HostMessage::ReadScreen { request, after })?;
+                self.surfaces[&id].send(&HostMessage::ReadScreen {
+                    request,
+                    after,
+                    recent,
+                })?;
                 self.pending_reads.insert(
                     request,
-                    PendingRead {
-                        surface: id,
-                        after,
-                        reply,
-                        started: Instant::now(),
+                    PendingScreen {
+                        read: PendingRead {
+                            surface: id,
+                            after,
+                            reply,
+                            started: Instant::now(),
+                        },
+                        mode: crate::screen::Mode::from_recent(recent),
                     },
                 );
                 return Ok(None);

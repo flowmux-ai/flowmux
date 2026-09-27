@@ -8,6 +8,7 @@ pub mod native;
 pub mod output_search;
 pub mod paste;
 pub mod protocol;
+pub mod screen;
 pub mod selection;
 pub mod settings;
 pub mod shell;

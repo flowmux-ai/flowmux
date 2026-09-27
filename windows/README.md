@@ -365,9 +365,38 @@ controller visibility (a hidden test host's parent window still stays hidden).
 Native drag, keyboard/IME transitions and DPI acceptance remain pending;
 `scripts/verify-panes.ps1` tests the shared behavior through a hidden native host.
 
-`read-screen --surface` reads an inactive tab without activating it. Its result
-waits for xterm to parse the captured output sequence; physical row breaks are
-preserved, including wraps in narrow panes.
+`read-screen --surface` reads an inactive tab without activating it.
+`capture-pane` is an alias with the same arguments; it does not implement tmux's
+capture flags. Both wait for xterm to parse the captured output sequence and
+read the **current scrolled viewport**, preserving physical row breaks including
+soft wraps. Trailing row spaces are trimmed; blank rows are kept. Unicode is
+not normalized. Reads do not change selection, scrolling or focus.
+
+```powershell
+flowmuxctl.exe capture-pane --surface surface:<id>
+flowmuxctl.exe read-screen --surface surface:<id> --recent --json
+```
+
+`--recent` instead reads the latest 80 physical normal-buffer rows (including
+blank bottom rows), regardless of scrolling or cursor position. In the alternate
+buffer it reads the whole screen, including status/footer rows below the cursor.
+This provides bounded input for future agent status detection; it does not yet
+classify agents or automatically poll their screens. No full history is copied
+on each output event. Reads still work after process exit until the tab is closed.
+
+JSON keeps `surface`, `sequence` and `text`, and adds `screen` metadata: mode,
+normal/alternate buffer, dimensions, buffer length, first row, row count, viewport
+and base rows, and cursor position. Rows/columns are zero-based cells in the
+current buffer; they are not stable references after eviction or reflow.
+`sequence` is the completed parser sequence at extraction, at least the request's
+barrier. Later output may already have been parsed; it is not a historical replay
+at the exact barrier or a synchronized snapshot of several terminals.
+
+A text response is limited to 128 KiB UTF-8 including newlines. Oversized reads
+fail with a CLI error rather than returning truncated text or waiting for the
+bridge deadline. Extraction checks each row and stops on the first exceeding the
+limit. The bound does not constrain a single row's temporary string allocation.
+Plain CLI output remains text with a final newline; JSON exposes metadata.
 
 PowerShell reports its current local drive directory after each prompt. New
 tabs, splits and workspaces inherit that directory, including after a tab move.

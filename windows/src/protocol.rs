@@ -74,7 +74,7 @@ pub enum ClientMessage {
     Screen {
         request: Uuid,
         sequence: u64,
-        text: String,
+        outcome: crate::screen::Outcome,
     },
     Found {
         request: Uuid,
@@ -139,6 +139,7 @@ pub enum HostMessage {
     ReadScreen {
         request: Uuid,
         after: u64,
+        recent: bool,
     },
     Find {
         request: Uuid,
