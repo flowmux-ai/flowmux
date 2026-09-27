@@ -1,0 +1,17 @@
+[
+  {
+    "file": "flowmux.exe",
+    "bytes": 2291712,
+    "sha256": "3b40b36a7091c38eb4fb48ccec1a8c51eed44076930587020f06925f1050d2ad"
+  },
+  {
+    "file": "flowmuxctl.exe",
+    "bytes": 966144,
+    "sha256": "13d6107d2e5ef1ed573f284eef7ce4d81ecb4b19115115e3e5bbd7b442e2a03f"
+  },
+  {
+    "file": "flowmux-windows-0.10.1-dev-x64-setup.exe",
+    "bytes": 1412145,
+    "sha256": "8a32ce59f3c5d9959018da397fed50c81f6ca09f0a834c2b5e3f0371ecac5c29"
+  }
+]

@@ -1,0 +1,801 @@
+{
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later; tracking ledger, never evidence by itself",
+  "baseline": "91f9a0922736619fca9d514418f77f1d69865981",
+  "features": [
+    {
+      "id": "I01",
+      "feature": "한글 완성형 표시·붙여넣기",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I02",
+      "feature": "`ㅎ → 하 → 한` 조합 중 표시",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I03",
+      "feature": "종성 이동·연속 타이핑",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I04",
+      "feature": "조합 중 Backspace",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I05",
+      "feature": "조합 직후 Enter",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I06",
+      "feature": "Shift+Enter 줄바꿈",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I07",
+      "feature": "한/영·한자 키, 후보 선택",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "I08",
+      "feature": "TUI가 커서를 숨긴 상태의 한글",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+      ],
+      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+    },
+    {
+      "id": "I09",
+      "feature": "조합 중 탭·pane·창 이동",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "I10",
+      "feature": "한글 폭·자모·이모지·복사",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "I11",
+      "feature": "DPI·줌·다중 모니터",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "I12",
+      "feature": "에디터·검색창·이름 변경의 한글",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T01",
+      "feature": "기본 셸·tab별 셸·작업 디렉터리",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T02",
+      "feature": "ANSI 색·truecolor·커서·화면 지우기",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T03",
+      "feature": "alternate screen·application cursor·mouse TUI",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T04",
+      "feature": "Ctrl+C·Ctrl+D·Ctrl+Z·프로세스 종료",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T05",
+      "feature": "대량 출력·다중 agent 반응성",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T06",
+      "feature": "셀 크기·창 resize·줄 재배치",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T07",
+      "feature": "scrollback 용량·일반 scrollbar",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T08",
+      "feature": "선택·더블클릭·복사·붙여넣기",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T09",
+      "feature": "bracketed paste",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T10",
+      "feature": "단일 터미널 찾기",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T11",
+      "feature": "모든 터미널 출력 검색",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T12",
+      "feature": "`read-screen` / `capture-pane`",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T13",
+      "feature": "상태 감지용 최근 화면 추출",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T14",
+      "feature": "터미널 미니맵",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T15",
+      "feature": "미니맵 크기·투명도·alternate 전환",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T16",
+      "feature": "스타일 scrollback 저장·복원",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T17",
+      "feature": "URL·OSC 8·이미지/Markdown 경로 클릭",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T18",
+      "feature": "cwd/제목·새 tab 위치 상속",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T19",
+      "feature": "OSC 9/99/777 알림·출력 활동",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T20",
+      "feature": "폰트·테마·줌·커서 점멸",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T21",
+      "feature": "focus reporting·키 반복·named key",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T22",
+      "feature": "동기화 출력·고급 keyboard protocol",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T23",
+      "feature": "pane 닫기·child exit·GPU/WebView 장애",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "T24",
+      "feature": "접근성·키보드만으로 조작",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U01",
+      "feature": "workspace 생성·이름·색·순서·닫기",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U02",
+      "feature": "가로·세로 중첩 split·경계 resize",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U03",
+      "feature": "tab 생성·focus·이름·닫기·재정렬",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U04",
+      "feature": "pane 방향 이동·zoom/maximize",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U05",
+      "feature": "tab을 pane/workspace 사이로 이동",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U06",
+      "feature": "tab을 새 창으로 떼기",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U07",
+      "feature": "workspace overview",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U08",
+      "feature": "메뉴·popover·dialog·drag preview",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U09",
+      "feature": "키 재설정·37개 ActionId·편집기 우선순위",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U10",
+      "feature": "옵션·테마·font·zoom 실시간 반영",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U11",
+      "feature": "`cmux.json` 프로젝트 명령",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U12",
+      "feature": "재시작 후 layout·scrollback·agent 복원",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U13",
+      "feature": "여러 창의 상태 공유·락·소유권",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "U14",
+      "feature": "알림 bell·활동 표시·usage bar·panel 전환",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B01",
+      "feature": "browser tab 열기·right sibling 재사용·split",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B02",
+      "feature": "주소·title·back/forward/reload/stop·zoom",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B03",
+      "feature": "DOM snapshot·refs",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B04",
+      "feature": "click/dblclick/hover/focus/blur/scroll",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B05",
+      "feature": "fill/select/type/press/check/uncheck",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B06",
+      "feature": "text/value/attr/count·상태 조회·eval",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B07",
+      "feature": "selector/text/url/ready-state/JS wait",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B08",
+      "feature": "visible viewport PNG screenshot",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B09",
+      "feature": "session 지속/비지속·profile·북마크",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B10",
+      "feature": "다운로드·취소·파일명 충돌",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B11",
+      "feature": "페이지 찾기·새 창/탭·DevTools·사이트 권한",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B12",
+      "feature": "미디어·fullscreen·웹앱 로그인",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B13",
+      "feature": "호스트 브라우저 쿠키 import",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "B14",
+      "feature": "viewport/network-mock/screencast",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F01",
+      "feature": "Monaco 편집·syntax·선택·undo/redo·minimap",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F02",
+      "feature": "파일 열기·저장·Save As·Save All",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F03",
+      "feature": "UTF-8/BOM·CRLF/LF",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F04",
+      "feature": "외부 수정·diff·Keep Mine/Reload",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F05",
+      "feature": "dirty close·crash recovery·다중 문서",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F06",
+      "feature": "editor find/replace·Quick Open·workspace search",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F07",
+      "feature": "파일 트리·확장·다중 선택·추가 500행",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F08",
+      "feature": "파일 복사·잘라내기·붙여넣기·이름 변경",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F09",
+      "feature": "Delete 휴지통·Shift+Delete 영구 삭제",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F10",
+      "feature": "외부 앱 열기·Show in folder·경로 복사",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F11",
+      "feature": "Git branch·dirty·commit 정보·PR 표시",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F12",
+      "feature": "worktree 목록·정보·안전/강제 제거",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F13",
+      "feature": "tig 실행",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F14",
+      "feature": "PNG/JPEG/WebP/GIF·SVG·Lottie viewer",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F15",
+      "feature": "Markdown preview·저장 시 갱신·font/zoom·링크",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F16",
+      "feature": "Markdown `--render-png` 전체 문서 export",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "F17",
+      "feature": "Windows 경로·권한·원자적 저장",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A01",
+      "feature": "Claude/Codex/OpenCode/Gemini/agy/Cline 실행",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A02",
+      "feature": "working/blocked/done/idle·미확인 완료 표시",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A03",
+      "feature": "hook 설치·doctor·fix·uninstall",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A04",
+      "feature": "CLI별 lifecycle·permission·child agent 추적",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A05",
+      "feature": "process 이름·argv·자손·생존 추적",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A06",
+      "feature": "screen fallback·숨은 tab 활동",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A07",
+      "feature": "bell list·desktop toast·click 복귀·배지",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A08",
+      "feature": "Claude/Codex session 목록·preview·검색",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A09",
+      "feature": "OpenCode/Antigravity/Cline native history",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A10",
+      "feature": "선택 session을 새 tab에서 resume",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A11",
+      "feature": "앱 재시작 시 자동 agent resume",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A12",
+      "feature": "Claude/Codex 사용량·quota UI",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A13",
+      "feature": "Claude Teams·tmux compatibility shim",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "A14",
+      "feature": "pane→agent session 이름·메시징 정보",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S01",
+      "feature": "접속·ssh alias·user/port/key/config",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S02",
+      "feature": "password·host key·MFA 인증 pane",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S03",
+      "feature": "한 workspace 내 연결 공유·여러 terminal",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S04",
+      "feature": "disconnect/reconnect·상태·일회성 명령",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S05",
+      "feature": "원격 tmux session 유지·재접속",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S06",
+      "feature": "명시적 port forward 추가·목록·제거",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S07",
+      "feature": "forwarded service browser preview·만료",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "S08",
+      "feature": "저장 후 disconnected 복원·원격 기능 경계",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O01",
+      "feature": "`flowmux` CLI 위임·`flowmuxctl`·JSON 결과",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O02",
+      "feature": "CLI↔GUI 통신·다중 창 endpoint",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O03",
+      "feature": "환경 context·identify·tree·capabilities",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O04",
+      "feature": "send-keys/send-key/read-screen·pane/tab 제어",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O05",
+      "feature": "notify-stream·pty-tee",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O06",
+      "feature": "config/state/log/cache·theme import",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O07",
+      "feature": "설치·업데이트·uninstall·파일 연결",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O08",
+      "feature": "update banner·버전 조회·실패 복구",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O09",
+      "feature": "CI·패키지 검증·진단",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O10",
+      "feature": "sleep/resume·화면 잠금·multiwindow 종료",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "O11",
+      "feature": "browser engine asset·폰트·DLL·라이선스",
+      "status": "pending",
+      "evidence": []
+    }
+  ],
+  "gates": [
+    {
+      "id": "G01",
+      "gate": "Windows host와 WebView 혼합 UI",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/README.md"
+      ]
+    },
+    {
+      "id": "G02",
+      "gate": "한글 IME 전체",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/README.md"
+      ]
+    },
+    {
+      "id": "G03",
+      "gate": "PTY lifecycle",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/README.md"
+      ]
+    },
+    {
+      "id": "G04",
+      "gate": "VT 및 TUI 호환",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G05",
+      "gate": "출력 부하·background",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G06",
+      "gate": "화면 소비 기능",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G07",
+      "gate": "tab 이동·다중 창",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G08",
+      "gate": "파일·editor·viewer",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G09",
+      "gate": "30개 browser 명령 + UI",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G10",
+      "gate": "모든 agent 통합",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G11",
+      "gate": "SSH 계약",
+      "status": "pending",
+      "evidence": []
+    },
+    {
+      "id": "G12",
+      "gate": "실제 설치·업데이트",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/README.md"
+      ]
+    },
+    {
+      "id": "G13",
+      "gate": "기존 플랫폼 회귀",
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/README.md"
+      ]
+    }
+  ]
+}

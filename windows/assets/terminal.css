@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #17191f; color: #e2e5ed; }
+#terminal { position: absolute; inset: 5px; }
+#search { position: absolute; top: 6px; right: 20px; padding: 8px; background: #292e3e; font: 13px "Segoe UI", sans-serif; }
+#query { background: #17191f; color: #e2e5ed; border: 1px solid #8ea4fa; padding: 4px; }
+#status:empty { display: none; }
+#status { position: absolute; bottom: 8px; right: 20px; padding: 6px; background: #292e3e; font: 12px "Segoe UI", sans-serif; }

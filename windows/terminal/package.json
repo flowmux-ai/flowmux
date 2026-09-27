@@ -1,0 +1,20 @@
+{
+  "name": "flowmux-windows-terminal",
+  "private": true,
+  "version": "0.10.1",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "@xterm/xterm": "6.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/addon-serialize": "0.14.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

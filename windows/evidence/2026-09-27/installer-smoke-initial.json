@@ -1,0 +1,26 @@
+{
+  "started": "2026-09-27T21:00:59.8337865+09:00",
+  "installDirectory": "C:\\Users\\jundu\\AppData\\Local\\Programs\\flowmux-native-test-0cf02b8f-84b8-40b1-a475-7ff4473c4150",
+  "checks": [
+    {
+      "doctor": "{\"platform\":\"windows\",\"status\":\"ok\",\"webview2\":\"112.0.1722.48\"}",
+      "name": "installed_native_binaries_and_runtime",
+      "passed": true
+    },
+    {
+      "name": "start_menu_uninstall_registration_user_path",
+      "passed": true
+    },
+    {
+      "name": "repeat_install_is_idempotent",
+      "passed": true
+    },
+    {
+      "name": "uninstall_restores_exact_user_path_and_value_type",
+      "passed": true
+    }
+  ],
+  "status": "passed_install_subset",
+  "uninstallExitCode": 0,
+  "finished": "2026-09-27T21:01:07.1604932+09:00"
+}

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "flowmux-windows"
+version = "0.10.1"
+edition = "2021"
+rust-version = "1.93"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Deliberately separate: Windows dependencies never enter the existing GTK
+# workspace or its lockfile. Shared domain models are read-only dependencies.
+[workspace]
+resolver = "2"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+flowmux-core = { path = "../crates/flowmux-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "=0.6.2"
+wry = { version = "=0.57.0", default-features = false, features = ["os-webview"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security",
+    "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console",
+    "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_LibraryLoader",
+    "Win32_System_Pipes", "Win32_System_Threading", "Win32_UI_Controls",
+    "Win32_Security_Authorization", "Win32_System_Memory",
+    "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",
+] }
+
+[[bin]]
+name = "flowmux"
+path = "src/main.rs"
+
+[[bin]]
+name = "flowmuxctl"
+path = "src/bin/flowmuxctl.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
