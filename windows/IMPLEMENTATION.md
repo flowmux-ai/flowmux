@@ -333,6 +333,19 @@ hidden/moved/exited tabs and buffer transitions. Native oversized-grid and race
 acceptance, sustained load and agent status polling/classification remain open.
 T12/T13 are partial; see [screen evidence](evidence/2026-09-28/screen.md).
 
+Windows terminals now include a cell-based canvas minimap with separate preview
+wheel scrolling and viewport click/drag/keyboard navigation. Shared settings
+persist enable/width/opacity and retain the gutter across alternate-screen
+transitions. Hidden tabs release their raster while output parsing continues.
+Public cell APIs preserve wide-cell alignment and styled foreground/background
+colors within a bounded row window; updates retain their first 100 ms deadline.
+Parser-barrier CLI operations inspect the actual raster or navigate without
+keyboard focus. Nine hidden native checks cover pixels/cells, Unicode/color,
+selection, settings, ConPTY dimensions and hidden/moved/exited surfaces.
+Physical pointer/keyboard/IME/accessibility, high-DPI visual fidelity, sustained
+multi-pane budgets and OSC palette mutation remain open. T14/T15 are partial;
+see [minimap evidence](evidence/2026-09-28/minimap.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

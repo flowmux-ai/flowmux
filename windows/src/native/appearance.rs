@@ -115,6 +115,9 @@ impl App {
                 "New tab with shell… (default: {})",
                 self.settings.default_shell.program.replace('&', "&&")
             ),
+            format!("Terminal minimap: {} (toggle)", value.minimap_enabled),
+            format!("Minimap width… ({})", value.minimap_width),
+            format!("Minimap opacity… ({}%)", value.minimap_opacity),
         ];
         let mut rect = RECT::default();
         let hwnd = self
@@ -148,6 +151,8 @@ impl App {
             1 => Some(SettingKey::FontFamily),
             2 => Some(SettingKey::FontSize),
             12 => Some(SettingKey::Scrollback),
+            20 => Some(SettingKey::MinimapWidth),
+            21 => Some(SettingKey::MinimapOpacity),
             _ => None,
         };
         if let Some(key) = edit {
@@ -170,6 +175,10 @@ impl App {
             10 => (SettingKey::CursorStyle, "underline".into()),
             11 => (SettingKey::CursorStyle, "bar".into()),
             13 => return self.settings_submit(SettingsOp::Reset, None, None),
+            19 => (
+                SettingKey::MinimapEnabled,
+                (!value.minimap_enabled).to_string(),
+            ),
             _ => return self.focus_active(),
         };
         self.settings_submit(

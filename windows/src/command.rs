@@ -168,6 +168,13 @@ pub enum Command {
         op: SettingsOp,
     },
     Tree,
+    /// Inspect or navigate a terminal minimap without changing keyboard focus.
+    Minimap {
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
+        #[command(subcommand)]
+        action: crate::minimap::Action,
+    },
     /// Read parsed physical rows without changing focus, selection or scrolling.
     #[command(visible_alias = "capture-pane")]
     #[serde(alias = "capture_pane")]

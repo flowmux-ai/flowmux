@@ -81,3 +81,14 @@ test('selection actions wait for parsed output and return the exact completed se
   assert.deepEqual(actions, [{ kind: 'all' }]);
   assert.deepEqual(replies.at(-1), { type: 'selected', request: 'select', sequence: 1, result: { text: '한글' } });
 });
+
+test('minimap reads wait for preceding output before sampling cells', () => {
+  const replies = [], callbacks = [], actions = [];
+  const terminal = { write: (_, done) => callbacks.push(done) };
+  const minimap = { run: action => { actions.push(action); return { status: 'ok' }; } };
+  const output = new Output(terminal, reply => replies.push(reply), null, null, null, null, null, null, minimap);
+  output.receive({ type: 'minimap', request: 'map', after: 1, action: { kind: 'read' } });
+  output.receive({ type: 'output', sequence: 1, data: 'QQ==' });
+  assert.equal(actions.length, 0); callbacks[0]();
+  assert.deepEqual(replies.at(-1), { type: 'minimap', request: 'map', sequence: 1, outcome: { status: 'ok' } });
+});

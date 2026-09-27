@@ -297,6 +297,7 @@ struct App {
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
     pending_selections: HashMap<Uuid, PendingRead>,
+    pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
     closing: bool,
     background_test: bool,
@@ -472,6 +473,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
             pending_selections: HashMap::new(),
+            pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
@@ -946,6 +948,16 @@ impl App {
                         true
                     }
                 });
+                self.pending_minimaps.retain(|_, request| {
+                    if request.started.elapsed() > Duration::from_secs(12) {
+                        let _ = request.reply.try_send(
+                            json!({"error":"terminal did not answer the minimap request"}),
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.pending_finds.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request
@@ -1164,6 +1176,29 @@ impl App {
                     let _ = pending
                         .reply
                         .try_send(json!({"surface":id,"sequence":sequence,"result":result}));
+                }
+            }
+            ClientMessage::Minimap {
+                request,
+                sequence,
+                outcome,
+            } => {
+                if let Some(pending) = self.pending_minimaps.get(&request) {
+                    anyhow::ensure!(
+                        pending.surface == id
+                            && sequence >= pending.after
+                            && sequence <= surface.output_sequence,
+                        "invalid minimap response"
+                    );
+                    outcome.validate()?;
+                    let pending = self.pending_minimaps.remove(&request).unwrap();
+                    let value = match outcome {
+                        crate::minimap::Outcome::Ok { snapshot } => {
+                            json!({"surface":id,"sequence":sequence,"result":snapshot})
+                        }
+                        crate::minimap::Outcome::Error { message } => json!({"error":message}),
+                    };
+                    let _ = pending.reply.try_send(value);
                 }
             }
             ClientMessage::Screen {
@@ -1711,6 +1746,16 @@ impl App {
                 true
             }
         });
+        self.pending_minimaps.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed during minimap request"}));
+                false
+            } else {
+                true
+            }
+        });
         self.pending_pastes.retain(|_, request| {
             if request.surface == surface {
                 let _ = request
@@ -1871,7 +1916,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
-                "commands":["identify","capabilities","tree","read-screen","capture-pane","send-keys","send-key","split","new-tab",
+                "commands":["identify","capabilities","tree","read-screen","capture-pane","minimap","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -1934,6 +1979,38 @@ impl App {
                             started: Instant::now(),
                         },
                         mode: crate::screen::Mode::from_recent(recent),
+                    },
+                );
+                return Ok(None);
+            }
+            Command::Minimap { surface, action } => {
+                anyhow::ensure!(
+                    self.pending_minimaps.len() < 16,
+                    "too many pending minimap requests"
+                );
+                let id = self.target(None, surface.map(SurfaceId).or(caller))?;
+                let surface = self
+                    .surfaces
+                    .get(&id)
+                    .context("terminal surface not found")?;
+                anyhow::ensure!(surface.ready, "terminal is not ready");
+                let after = surface
+                    .session
+                    .as_ref()
+                    .map_or(surface.output_sequence, Session::barrier);
+                let request = Uuid::new_v4();
+                surface.send(&HostMessage::Minimap {
+                    request,
+                    after,
+                    action,
+                })?;
+                self.pending_minimaps.insert(
+                    request,
+                    PendingRead {
+                        surface: id,
+                        after,
+                        reply,
+                        started: Instant::now(),
                     },
                 );
                 return Ok(None);

@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/xterm.css"><link rel="stylesheet" href="/terminal.css">
 <title>flowmux terminal</title></head><body>
 <div id="terminal" aria-label="Terminal"></div>
+<div id="minimap" role="scrollbar" aria-label="Terminal scrollback minimap" aria-controls="terminal" aria-orientation="vertical" tabindex="0" title="Wheel previews history; click or drag scrolls the terminal" hidden><canvas aria-hidden="true"></canvas><div class="viewport" aria-hidden="true"></div></div>
 <div id="terminal-menu" role="menu" aria-label="Terminal actions" hidden>
 <button type="button" role="menuitem" data-action="copy">Copy <span>Ctrl+Shift+C</span></button>
 <button type="button" role="menuitem" data-action="paste">Paste <span>Ctrl+Shift+V</span></button>

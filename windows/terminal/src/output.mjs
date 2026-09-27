@@ -2,7 +2,7 @@
 // Read barriers resolve only after xterm's parser callback, including hidden tabs.
 import { readScreen } from './screen.mjs';
 export class Output {
-  constructor(terminal, send, serialize, find, changed, outputSearch, paste, selection) {
+  constructor(terminal, send, serialize, find, changed, outputSearch, paste, selection, minimap) {
     this.terminal = terminal;
     this.send = send;
     this.serialize = serialize;
@@ -11,6 +11,7 @@ export class Output {
     this.outputSearch = outputSearch;
     this.paste = paste;
     this.selection = selection;
+    this.minimap = minimap;
     this.received = 0;
     this.parsed = 0;
     this.pending = [];
@@ -30,7 +31,7 @@ export class Output {
     } else if (message.type === 'cancel_search') {
       this.outputSearch.cancel(message.search);
       this.pending = this.pending.filter(p => p.search !== message.search);
-    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit', 'paste', 'selection'].includes(message.type)) {
+    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit', 'paste', 'selection', 'minimap'].includes(message.type)) {
       this.pending.push(message);
       this.flush();
     }
@@ -44,6 +45,8 @@ export class Output {
         try { outcome = { status: 'ok', snapshot: readScreen(this.terminal, message.recent) }; }
         catch (error) { outcome = { status: 'error', message: String(error) }; }
         this.send({ type: 'screen', request: message.request, sequence: this.parsed, outcome });
+      } else if (message.type === 'minimap') {
+        this.send({ type: 'minimap', request: message.request, sequence: this.parsed, outcome: this.minimap.run(message.action) });
       } else if (message.type === 'paste') {
         const outcome = this.paste.run(message.text);
         if (outcome.status === 'ok' && message.text) this.selection?.forget();

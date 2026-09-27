@@ -15,6 +15,7 @@ import { SearchUi } from './search.mjs';
 import { OutputSearch } from './output-search.mjs';
 import { PaneShortcuts } from './pane-shortcuts.mjs';
 import { Settings, options } from './settings.mjs';
+import { Minimap } from './minimap.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -34,10 +35,11 @@ const selection = new Selection(terminal);
 const find = new SearchUi(terminal, () => new SearchAddon(), document, selection);
 const outputSearch = new OutputSearch(terminal, send, undefined, selection);
 let restoring = false, composing = false, surfaceVisible = false;
+const minimap = new Minimap(terminal, document, () => composing || restoring);
 const paste = new Paste(terminal, () => composing ? 'Finish composing text before pasting.'
   : restoring ? 'Terminal history is being restored.' : null);
 const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message),
-  () => { find.invalidate(); outputSearch.changed(); }, outputSearch, paste, selection);
+  () => { find.invalidate(); outputSearch.changed(); minimap.changed(); }, outputSearch, paste, selection, minimap);
 const clipboard = new Clipboard(selection, paste, navigator.clipboard,
   outcome => send({ type: 'pasted', request: null, sequence: output.parsed, outcome }),
   message => { document.getElementById('input-status').textContent = message; },
@@ -65,10 +67,13 @@ terminal.textarea.addEventListener('beforeinput', () => { clipboard.cancel(); se
 
 const settings = new Settings(terminal, () => {
   if (document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
-}, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document);
+}, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document, minimap);
 const paneShortcuts = new PaneShortcuts();
 window.addEventListener('blur', () => { paneShortcuts.reset(); clipboard.cancel(); menu.close(false); selection.primaryUp(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { clipboard.cancel(); menu.close(false); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clipboard.cancel(); menu.close(false); }
+  minimap.visibility(surfaceVisible && (!document.hidden || backgroundTesting));
+});
 window.addEventListener('resize', () => menu.close(false));
 terminal.textarea.addEventListener('blur', () => { paneShortcuts.reset(); clipboard.cancel(); });
 terminal.textarea.addEventListener('compositionstart', () => { composing = true; clipboard.cancel(); selection.forget(); });
@@ -100,7 +105,10 @@ terminal.attachCustomKeyEventHandler(event => {
   }
   return true;
 });
-new ResizeObserver(() => { if (!restoring && document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit(); })
+new ResizeObserver(() => {
+  if (!restoring && document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
+  minimap.changed();
+})
   .observe(document.getElementById('terminal'));
 window.flowmuxHost = message => {
   try {
@@ -113,10 +121,12 @@ window.flowmuxHost = message => {
         restoring = false;
         terminal.options.disableStdin = false;
         settings.flush();
+        minimap.changed();
         send({ type: 'restored' });
       });
     } else if (message.type === 'visibility') {
       surfaceVisible = message.visible;
+      minimap.visibility(surfaceVisible && (!document.hidden || backgroundTesting));
       if (!surfaceVisible) { clipboard.cancel(); menu.close(false); selection.primaryUp(); }
     } else if (message.type === 'settings') settings.receive(message.document);
     else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }

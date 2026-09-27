@@ -25,6 +25,11 @@ pub struct Envelope {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
+    Minimap {
+        request: Uuid,
+        sequence: u64,
+        outcome: crate::minimap::Outcome,
+    },
     RetryCommandPrompt,
     Ready,
     SettingsApplied {
@@ -118,6 +123,11 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    Minimap {
+        request: Uuid,
+        after: u64,
+        action: crate::minimap::Action,
+    },
     Visibility {
         visible: bool,
     },

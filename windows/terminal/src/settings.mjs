@@ -12,8 +12,8 @@ export function options(settings) {
 // Apply only the newest desired settings after composition/restore has ended.
 // No focus calls, synthetic input or terminal recreation belong in this path.
 export class Settings {
-  constructor(terminal, fit, send, blocked, changed, document) {
-    Object.assign(this,{terminal,fit,send,blocked,changed,document}); this.pending=null;
+  constructor(terminal, fit, send, blocked, changed, document, minimap) {
+    Object.assign(this,{terminal,fit,send,blocked,changed,document,minimap}); this.pending=null;
   }
   receive(document) { this.pending=document; this.flush(); }
   flush() {
@@ -24,11 +24,13 @@ export class Settings {
     const theme=this.terminal.options.theme;
     this.document.body.style.backgroundColor=theme.background;
     this.document.body.style.color=theme.foreground;
+    this.minimap?.configure(settings);
     this.changed(); this.fit();
     const actual=this.terminal.options;
     this.send({type:'settings_applied',revision:desired.revision,
       terminal:{font_family:actual.fontFamily,font_size:actual.fontSize,theme:settings.theme,
-        scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle},
+        scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle,
+        minimap_enabled:settings.minimap_enabled,minimap_width:settings.minimap_width,minimap_opacity:settings.minimap_opacity},
       background:theme.background,foreground:theme.foreground});
   }
 }

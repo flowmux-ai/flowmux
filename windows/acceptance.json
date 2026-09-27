@@ -208,14 +208,22 @@
     {
       "id": "T14",
       "feature": "터미널 미니맵",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-minimap-background.json",
+        "evidence/2026-09-28/frontend-tests-minimap.txt"
+      ],
+      "notes": "Cell-based canvas minimap reads bounded normal-buffer rows via public xterm APIs, including wide Hangul, truecolor, ANSI palette, inverse/dim/invisible and backgrounds. Preview wheel and terminal seek are separate; keyboard navigation, parser-barrier CLI and hidden-tab raster suspension are implemented. Nine hidden native checks verify actual canvas checksums, colors/cells, scroll changes, selection preservation, history clearing and moved/exited surfaces. Physical pointer/keyboard/IME/accessibility, sustained multi-pane load and OSC palette mutation remain pending."
     },
     {
       "id": "T15",
       "feature": "미니맵 크기·투명도·alternate 전환",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-minimap-background.json",
+        "evidence/2026-09-28/frontend-tests-minimap.txt"
+      ],
+      "notes": "Shared persisted minimap settings default to enabled/40 CSS pixels/50 percent; width 12..96 and opacity 0..100 apply live. Alternate mode hides painting but retains gutter and ConPTY columns, verified in a hidden native host. Disabled minimaps release raster/gutter and reset preview. Rendering caps preview to 2048 rows and raster scale to 2x; high-DPI/multimonitor/visual/menu and active-composition acceptance remain pending."
     },
     {
       "id": "T16",
@@ -872,9 +880,10 @@
       "evidence": [
         "evidence/2026-09-27/native-output-load-background.json",
         "evidence/2026-09-27/native-state-background.json",
-        "evidence/2026-09-28/native-screen-background.json"
+        "evidence/2026-09-28/native-screen-background.json",
+        "evidence/2026-09-28/native-minimap-background.json"
       ],
-      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending. Bounded viewport/recent reads now have hidden native Unicode/scroll/alternate/exit evidence; agent detection and other screen consumers remain pending."
+      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending. Hidden restart additionally verifies bounded styled normal-buffer history, layout identity, window leases and atomic save failure; full persistence/restore coverage remains pending. Bounded viewport/recent reads now have hidden native Unicode/scroll/alternate/exit evidence; agent detection and other screen consumers remain pending. Bounded minimap raster, preview/viewport navigation and alternate gutter stability now have hidden native evidence; full screen-consumer acceptance remains pending."
     },
     {
       "id": "G07",

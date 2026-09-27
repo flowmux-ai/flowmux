@@ -43,7 +43,7 @@ function Wait-Screen([string]$Text) {
 function Control([string]$Action) {
     $id=[guid]::NewGuid().ToString('N')
     [IO.File]::WriteAllText(($control+'.tmp'),($id+':'+$Action),[Text.Encoding]::UTF8)
-    Move-Item -Force ($control+'.tmp') $control
+    if (-not [CliProbe]::MoveFileEx(($control+'.tmp'),$control,1)) {throw ('Owned control replacement failed: '+[Runtime.InteropServices.Marshal]::GetLastWin32Error())}
     if ($Action -ne 'exit') {return (Wait-Screen ('SELECTION_CONTROL_'+$id)).sequence}
 }
 function Selection([string[]]$Arguments=@('read')) {

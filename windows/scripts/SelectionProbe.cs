@@ -19,7 +19,10 @@ public static class SelectionProbe {
         try {
             while (true) {
                 string text = "";
-                try { if (File.Exists(args[0])) text = File.ReadAllText(args[0]); } catch (IOException) {}
+                try {
+                    using (var file = new FileStream(args[0], FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(file, Encoding.UTF8)) text = reader.ReadToEnd();
+                } catch (IOException) {}
                 var parts = text.Split(':');
                 if (text != last && parts.Length == 2) {
                     switch (parts[1]) {

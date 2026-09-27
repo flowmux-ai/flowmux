@@ -14,6 +14,9 @@ pub enum SettingKey {
     Scrollback,
     CursorBlink,
     CursorStyle,
+    MinimapEnabled,
+    MinimapWidth,
+    MinimapOpacity,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +40,9 @@ pub struct TerminalSettings {
     pub scrollback: u32,
     pub cursor_blink: bool,
     pub cursor_style: CursorStyle,
+    pub minimap_enabled: bool,
+    pub minimap_width: u16,
+    pub minimap_opacity: u8,
 }
 impl Default for TerminalSettings {
     fn default() -> Self {
@@ -47,6 +53,9 @@ impl Default for TerminalSettings {
             scrollback: 10000,
             cursor_blink: true,
             cursor_style: CursorStyle::Block,
+            minimap_enabled: true,
+            minimap_width: 40,
+            minimap_opacity: 50,
         }
     }
 }
@@ -66,6 +75,14 @@ impl TerminalSettings {
             self.scrollback <= 100_000,
             "scrollback must be between 0 and 100000"
         );
+        anyhow::ensure!(
+            (12..=96).contains(&self.minimap_width),
+            "minimap width must be between 12 and 96"
+        );
+        anyhow::ensure!(
+            self.minimap_opacity <= 100,
+            "minimap opacity must be between 0 and 100"
+        );
         Ok(())
     }
     pub fn value(&self, key: SettingKey) -> String {
@@ -74,6 +91,9 @@ impl TerminalSettings {
             SettingKey::FontSize => self.font_size.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
+            SettingKey::MinimapEnabled => self.minimap_enabled.to_string(),
+            SettingKey::MinimapWidth => self.minimap_width.to_string(),
+            SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
             SettingKey::Theme => match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -116,6 +136,23 @@ impl TerminalSettings {
                 next.cursor_blink = value
                     .parse()
                     .context("cursor blink must be true or false")?
+            }
+            SettingKey::MinimapEnabled => {
+                next.minimap_enabled = value
+                    .parse()
+                    .context("minimap enabled must be true or false")?
+            }
+            SettingKey::MinimapWidth => {
+                next.minimap_width = value
+                    .trim()
+                    .parse()
+                    .context("minimap width must be an integer")?
+            }
+            SettingKey::MinimapOpacity => {
+                next.minimap_opacity = value
+                    .trim()
+                    .parse()
+                    .context("minimap opacity must be an integer")?
             }
             SettingKey::Theme => {
                 next.theme = match value {
@@ -188,6 +225,10 @@ mod tests {
             (SettingKey::Theme, "unknown"),
             (SettingKey::CursorBlink, "yes"),
             (SettingKey::CursorStyle, "none"),
+            (SettingKey::MinimapEnabled, "yes"),
+            (SettingKey::MinimapWidth, "11"),
+            (SettingKey::MinimapWidth, "97"),
+            (SettingKey::MinimapOpacity, "101"),
         ] {
             assert!(old.changed(key, value, None).is_err());
         }
@@ -214,5 +255,32 @@ mod tests {
         value["terminal"]["unknown"] = true.into();
         assert!(Document::decode(&serde_json::to_vec(&value).unwrap()).is_err());
         assert!(Document::decode(&vec![b' '; MAX_SETTINGS_BYTES + 1]).is_err());
+    }
+    #[test]
+    fn old_settings_gain_minimap_defaults_and_boundary_values_persist() {
+        let old = Document::decode(
+            br#"{"version":1,"revision":"00000000-0000-0000-0000-000000000000","terminal":{}}"#,
+        )
+        .unwrap();
+        assert!(old.terminal.minimap_enabled);
+        assert_eq!(
+            (old.terminal.minimap_width, old.terminal.minimap_opacity),
+            (40, 50)
+        );
+        for (key, text) in [
+            (SettingKey::MinimapWidth, "12"),
+            (SettingKey::MinimapWidth, "96"),
+            (SettingKey::MinimapOpacity, "0"),
+            (SettingKey::MinimapOpacity, "100"),
+            (SettingKey::MinimapEnabled, "false"),
+        ] {
+            let value = old.terminal.changed(key, text, None).unwrap();
+            assert_eq!(value.value(key), text);
+            assert_eq!(
+                serde_json::from_slice::<TerminalSettings>(&serde_json::to_vec(&value).unwrap())
+                    .unwrap(),
+                value
+            );
+        }
     }
 }

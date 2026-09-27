@@ -283,7 +283,7 @@ is available in `scripts/verify-workspaces.ps1`.
 
 The side panel's **Settings…** menu changes terminal font/fallback list, size
 (6–72 pixels), dark/light theme, cursor blink/style and scrollback (0–100000
-lines). Larger/smaller/reset text commands change the shared font size. Lowering
+lines), plus minimap enable/width/opacity. Larger/smaller/reset text commands change the shared font size. Lowering
 scrollback discards the oldest retained lines. Terminal settings are shared
 across this user's Windows flowmux windows and apply to existing and new tabs
 without restarting their shells or requesting focus. An active terminal IME
@@ -297,6 +297,9 @@ flowmuxctl.exe settings set theme light
 flowmuxctl.exe settings set cursor-blink false
 flowmuxctl.exe settings set cursor-style bar
 flowmuxctl.exe settings set scrollback 20000
+flowmuxctl.exe settings set minimap-enabled true
+flowmuxctl.exe settings set minimap-width 40
+flowmuxctl.exe settings set minimap-opacity 50
 flowmuxctl.exe settings reset
 ```
 
@@ -324,6 +327,43 @@ terminal colors, not native controls or the find bar. Custom themes, font
 discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
 accessibility acceptance remain pending. See
 [settings verification](evidence/2026-09-28/settings.md).
+
+The terminal minimap is enabled by default at 40 CSS pixels wide and 50% opacity.
+Width accepts 12–96 and opacity 0–100. It previews a movable window of retained
+normal-buffer cells, with one physical row per CSS pixel. The mouse wheel over
+the minimap moves **only the preview** by 25 rows per event; click/drag centers
+the actual terminal viewport at the pointed row. Keyboard focus on the minimap
+supports arrows, Page Up/Down, Home and End. Composition blocks navigation.
+
+The minimap reserves a separate gutter. Alternate-screen entry hides its raster
+while keeping that gutter, so a TUI does not gain/lose columns on every mode
+switch. Explicit enable/width changes can resize/reflow the terminal. Native
+menu/CLI settings share persistence and live propagation; composition defers
+these changes with the other terminal settings. Disabling resets the preview.
+
+Rendering reads xterm cell widths and foreground/background colors, including
+wide Korean cells, truecolor, ANSI palette, inverse, dim and invisible attributes.
+Updates keep a 100 ms deadline during output; inactive tabs release their raster
+and skip painting while their parsers continue. The preview is bounded to 2048
+rows and canvas scaling to 2 device pixels per CSS pixel. Very tall windows show
+only that bounded preview. Large-pane/multi-pane sustained load, physical
+pointer/keyboard/IME/accessibility and high-DPI visual acceptance remain pending.
+Applications' OSC palette changes are not yet reflected by the minimap.
+
+```powershell
+flowmuxctl.exe minimap --surface surface:<id> read
+flowmuxctl.exe minimap --surface surface:<id> preview -25
+flowmuxctl.exe minimap --surface surface:<id> seek 120
+```
+
+These operations wait for preceding output parsing and do not request keyboard
+focus. `read` reports current geometry, preview bounds and a checksum of the
+actual canvas pixels; it refreshes a dirty visible preview before returning.
+`preview` takes signed rows (negative means older), and `seek` centers on a
+zero-based physical buffer row. Rows are not stable references after reflow or
+history eviction. Hidden/disabled/alternate/composing views reject navigation;
+reads remain available and report visibility. Terminal selection is preserved.
+See [minimap verification](evidence/2026-09-28/minimap.md).
 
 Move an existing terminal between panes or workspaces in the same window:
 

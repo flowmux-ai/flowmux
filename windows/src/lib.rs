@@ -2,6 +2,7 @@
 //! Windows host services. The GTK workspace does not depend on this crate.
 pub mod command;
 pub mod cwd;
+pub mod minimap;
 pub mod model;
 #[cfg(windows)]
 pub mod native;
