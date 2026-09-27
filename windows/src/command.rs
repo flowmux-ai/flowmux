@@ -80,6 +80,29 @@ pub enum Command {
         #[serde(default)]
         close: bool,
     },
+    /// Start a paged literal search across all terminals in this window.
+    SearchAll {
+        query: String,
+        #[arg(long)]
+        #[serde(default)]
+        match_case: bool,
+        #[arg(long, default_value_t = 0)]
+        #[serde(default)]
+        offset: usize,
+    },
+    /// Poll a search, including its matching lines and unavailable terminals.
+    SearchResults {
+        search: Uuid,
+    },
+    /// Cancel a search and invalidate its retained result references.
+    SearchCancel {
+        search: Uuid,
+    },
+    /// Select a result from the current page after verifying its retained text.
+    SearchOpen {
+        search: Uuid,
+        index: usize,
+    },
     SendKeys {
         #[arg(value_parser = parse_id)]
         pane: Uuid,

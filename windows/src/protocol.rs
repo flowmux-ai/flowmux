@@ -60,6 +60,23 @@ pub enum ClientMessage {
         sequence: u64,
         result: serde_json::Value,
     },
+    SearchResults {
+        search: Uuid,
+        sequence: u64,
+        total: usize,
+        hits: Vec<crate::output_search::Match>,
+        error: Option<String>,
+    },
+    SearchOpened {
+        request: Uuid,
+        search: Uuid,
+        sequence: u64,
+        error: Option<String>,
+        selection: String,
+        line: u32,
+        column: u16,
+        selected: bool,
+    },
     Snapshot {
         request: Uuid,
         sequence: u64,
@@ -99,6 +116,24 @@ pub enum HostMessage {
         focus: bool,
     },
     OpenFind,
+    SearchBuffer {
+        search: Uuid,
+        after: u64,
+        query: String,
+        match_case: bool,
+        skip: usize,
+        limit: usize,
+    },
+    CancelSearch {
+        search: Uuid,
+    },
+    OpenSearchHit {
+        request: Uuid,
+        search: Uuid,
+        after: u64,
+        hit: u32,
+        commit: bool,
+    },
     Snapshot {
         request: Uuid,
         after: u64,

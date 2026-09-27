@@ -8,6 +8,7 @@ import { Input } from './input.mjs';
 import { snapshot, restore } from './history.mjs';
 import { observeCwd } from './cwd.mjs';
 import { SearchUi } from './search.mjs';
+import { OutputSearch } from './output-search.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -22,7 +23,9 @@ const fit = new FitAddon(), serialize = new SerializeAddon();
 terminal.loadAddon(fit); terminal.loadAddon(serialize);
 terminal.open(document.getElementById('terminal'));
 const find = new SearchUi(terminal, () => new SearchAddon(), document);
-const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message), () => find.invalidate());
+const outputSearch = new OutputSearch(terminal, send);
+const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message),
+  () => { find.invalidate(); outputSearch.changed(); }, outputSearch);
 const input = new Input(data => send({ type: 'input', data }));
 let restoring = false;
 observeCwd(terminal, send, () => restoring);
@@ -61,6 +64,10 @@ window.flowmuxHost = message => {
       });
     } else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
     else if (message.type === 'open_find') { if (!restoring) find.open(true); }
+    else if (message.type === 'open_search_hit') {
+      if (message.commit) { find.close(false); fit.fit(); }
+      output.receive(message);
+    }
     else if (message.type === 'paste') terminal.paste(message.text);
     else if (message.type === 'exit') {
       document.getElementById('status').textContent = `Process exited (${message.code})`;

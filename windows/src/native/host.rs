@@ -36,6 +36,8 @@ use windows_sys::Win32::{
     UI::{HiDpi::*, Input::KeyboardAndMouse::SetFocus, WindowsAndMessaging::*},
 };
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+#[path = "search.rs"]
+mod search;
 
 const WAKE: u32 = WM_APP + 1;
 thread_local! { static EVENTS: RefCell<Option<EventSender>> = const { RefCell::new(None) }; }
@@ -49,6 +51,7 @@ enum Event {
     Bridge(SurfaceId, String, String),
     Session(SurfaceId, SessionEvent),
     Command(Request, ipc::Reply),
+    SearchUi(search::UiAction),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -165,6 +168,7 @@ enum Action {
     CloseTab,
     MoveTabMenu,
     Find,
+    SearchAll,
     Tab(PaneId, SurfaceId),
 }
 struct Control {
@@ -201,6 +205,7 @@ struct App {
     controls: Vec<Control>,
     pending_reads: HashMap<Uuid, PendingRead>,
     pending_finds: HashMap<Uuid, PendingRead>,
+    search: search::Controller,
     closing: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
@@ -333,6 +338,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             controls: vec![],
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
+            search: search::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
@@ -367,8 +373,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            if !app.search.handle_message(&message) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
         }
         // WebView construction pumps Win32 messages. Mutable state is only used here,
         // never from window_proc or callbacks, so reentrant UI messages are safe.
@@ -419,6 +427,7 @@ impl App {
             ("Close tab", Action::CloseTab),
             ("Move tab…", Action::MoveTabMenu),
             ("Find", Action::Find),
+            ("Search all", Action::SearchAll),
         ] {
             self.button(name, action)?;
         }
@@ -688,7 +697,9 @@ impl App {
             Event::Close => self.request_close(CloseRequest::Native)?,
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
+            Event::SearchUi(action) => self.search_ui(action)?,
             Event::Tick => {
+                self.search_tick()?;
                 self.pending_reads.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
@@ -896,6 +907,32 @@ impl App {
                         .reply
                         .try_send(json!({"surface":id,"sequence":sequence,"result":result}));
                 }
+            }
+            ClientMessage::SearchResults {
+                search,
+                sequence,
+                total,
+                hits,
+                error,
+            } => self.searched(id, search, sequence, total, hits, error)?,
+            ClientMessage::SearchOpened {
+                request,
+                search,
+                sequence,
+                error,
+                selection,
+                line,
+                column,
+                selected,
+            } => {
+                self.search_opened(
+                    id,
+                    request,
+                    search,
+                    sequence,
+                    error.map_or(Ok(selection), Err),
+                    (selected, line, column),
+                )?;
             }
             ClientMessage::Link { url } => {
                 if url.starts_with("https://") || url.starts_with("http://") {
@@ -1375,6 +1412,7 @@ impl App {
                 });
             }
             Action::MoveTabMenu => return self.move_menu(),
+            Action::SearchAll => return self.search_ui(search::UiAction::Show),
             Action::Find => {
                 // The native button explicitly opens the current terminal's find bar.
                 // Background test hosts never request desktop or DOM focus.
@@ -1429,7 +1467,8 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find"],
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
+                    "search-all","search-results","search-cancel","search-open"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1523,6 +1562,23 @@ impl App {
                         started: Instant::now(),
                     },
                 );
+                return Ok(None);
+            }
+            Command::SearchAll {
+                query,
+                match_case,
+                offset,
+            } => {
+                let id = self.begin_search(query, match_case, offset)?;
+                return Ok(Some(self.search_status(id)?));
+            }
+            Command::SearchResults { search } => return Ok(Some(self.search_status(search)?)),
+            Command::SearchCancel { search } => {
+                self.cancel_search(search)?;
+                return Ok(Some(self.search_status(search)?));
+            }
+            Command::SearchOpen { search, index } => {
+                self.open_search(search, index, Some(reply))?;
                 return Ok(None);
             }
             Command::SendKeys { pane, text } => self

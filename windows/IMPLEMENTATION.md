@@ -149,8 +149,23 @@ output; the frontend recreates the addon through its public API before the next
 query, retaining the terminal and process. The same native reproduction passes.
 Synthetic event tests guard composition Enter/Escape, but search-field real IME,
 buttons, keyboard navigation and DPI still need interactive verification.
-JavaScript regex differs from VTE/PCRE2; expression performance, whole-window
-search and full text/Unicode acceptance remain open.
+JavaScript regex differs from VTE/PCRE2; expression performance and full
+text/Unicode acceptance remain open.
+
+Whole-window output search now has a native EDIT/LISTBOX window and asynchronous
+CLI start/poll/cancel/open operations. Hidden tabs participate without activation;
+logical lines join soft wraps and results page in groups of 500. Scanning reads
+xterm's parsed grid in yielded batches, with generation checks rejecting mixed
+or cancelled results. Normal-buffer markers and retained text permit appended
+output and moved tabs while refusing rewritten, evicted and reflowed matches.
+Opening validates before focus changes, then revalidates after activation.
+Native hidden tests cover multiple workspaces, 503 matches, a logical line over
+260 physical rows, Korean/NFD/emoji selections, case-fold coordinate mapping,
+same-cursor rewrites, alternate-screen transitions and scrollback eviction.
+Results and error text are also checked through the hidden native controls.
+Search-window real IME, mouse/keyboard navigation, visual layout/DPI, SSH and
+sustained-output stress remain pending. Evidence is recorded separately under
+[evidence/2026-09-28](evidence/2026-09-28/README.md).
 
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,

@@ -97,9 +97,12 @@ public static class NativeInput {
     }
     // Read-only inspection also works when the owned host stays hidden.
     public static string[] ButtonTitles(IntPtr window) {
+        return ChildTitles(window, "BUTTON");
+    }
+    public static string[] ChildTitles(IntPtr window, string className) {
         var result = new System.Collections.Generic.List<string>();
         IntPtr button = IntPtr.Zero;
-        while ((button = FindWindowEx(window, button, "BUTTON", null)) != IntPtr.Zero) {
+        while ((button = FindWindowEx(window, button, className, null)) != IntPtr.Zero) {
             var text = new System.Text.StringBuilder(4096);
             GetWindowText(button, text, text.Capacity);
             result.Add(text.ToString());

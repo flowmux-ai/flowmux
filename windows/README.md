@@ -107,8 +107,39 @@ Output and resize invalidate cached search lines before the next query, includin
 in-place rewrites that leave the cursor unchanged. Queries are single-line and
 bounded to 1024 UTF-16 units; returned selection text is bounded to 16384 units
 without splitting surrogate pairs. Regex uses the pinned xterm addon's JavaScript
-semantics, which differ from VTE/PCRE2. All-terminal search, arbitrary expression
-performance and native keyboard/IME/DPI verification remain separate work.
+semantics, which differ from VTE/PCRE2. Arbitrary expression performance and
+native keyboard/IME/DPI verification remain separate work.
+
+**Search all** opens a native Windows search window for retained output across
+all workspaces in this window. It uses literal matching with an optional match
+case checkbox. Results show one match per logical line, joining soft wraps,
+with 500 rows per page. Double-click or **Open result** selects the matching cells
+in the owning terminal. **Refresh**, **Cancel search**, **Previous 500** and
+**Next 500** operate on the same service as the CLI:
+
+```powershell
+$search = flowmuxctl.exe --json search-all "한글" | ConvertFrom-Json
+flowmuxctl.exe --json search-results $search.search
+# After pending becomes false, open the first result on this page:
+flowmuxctl.exe search-open $search.search 0
+flowmuxctl.exe search-cancel $search.search
+```
+
+`search-all "한글" --offset 500` starts the next page. Each search replaces the
+previous search in this window and invalidates its references. Polling reports
+progress and terminals that changed, closed or timed out; unavailable terminals
+are not silently counted as having no matches. Pages rescan current output, so
+counts can change while shells continue writing. Scanning yields between row
+batches and never focuses hidden tabs. Normal history and the active alternate
+screen are searched separately; this does not search other application windows.
+
+Result activation verifies the retained text before changing workspace/focus,
+then checks again after activation in case the view resized. Normal-buffer
+markers allow later appended output and tab moves while rejecting rewritten,
+evicted or reflowed rows. A failed check asks for a fresh search. Alternate-screen
+results expire when that screen changes. Query limits match single-terminal
+find; result previews and labels are bounded. SSH integration, sustained-output
+search/load testing and native mouse/keyboard/IME/DPI acceptance remain pending.
 
 Window layout and styled normal-buffer history are saved every 30 seconds and
 before a normal close under `%LOCALAPPDATA%\flowmux\windows\state`. Each window
@@ -163,6 +194,7 @@ powershell -NoProfile -File windows/scripts/verify-output-load.ps1 -BuildDirecto
 powershell -NoProfile -File windows/scripts/verify-state.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-cwd.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-find.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-output-search.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories
@@ -170,7 +202,7 @@ via the debug-only `FLOWMUX_TEST_STATE_DIR`, including for crash/restart tests.
 Hidden debug hosts without an explicit test state directory also disable
 persistence. These tests cannot restore or overwrite a user's saved window.
 
-Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load, state, cwd and find scripts always use hidden hosts. Real
+Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load, state, cwd, find and output-search scripts always use hidden hosts. Real
 IME tests additionally require an idle desktop and explicit `-Interactive`:
 
 ```powershell

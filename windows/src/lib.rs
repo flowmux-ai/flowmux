@@ -5,5 +5,6 @@ pub mod cwd;
 pub mod model;
 #[cfg(windows)]
 pub mod native;
+pub mod output_search;
 pub mod protocol;
 pub mod state;

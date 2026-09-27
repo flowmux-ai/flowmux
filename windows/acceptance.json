@@ -163,8 +163,12 @@
     {
       "id": "T11",
       "feature": "모든 터미널 출력 검색",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-output-search-background.json",
+        "evidence/2026-09-28/frontend-tests-output-search.txt"
+      ],
+      "notes": "Native hidden Windows host searches parsed retained output across inactive tabs/workspaces with literal/case matching, 500-line pages, native result list and two-stage activation. Korean/NFD/emoji, 260+ physical-row soft wraps, append/move preservation, rewrite/reflow/eviction refusal, alternate isolation and cancellation verified. Native mouse/keyboard/IME, visual layout/DPI, sustained-output/load and SSH integration remain pending. Changed-during-scan terminals are reported unavailable; each page rescans current output."
     },
     {
       "id": "T12",
