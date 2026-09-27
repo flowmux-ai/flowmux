@@ -45,6 +45,40 @@ SYSTEM, and remote pipe clients are rejected. Terminals receive
 The discovery files live under `%LOCALAPPDATA%\flowmux\windows\instances`.
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
+The side panel's **Workspace…** menu (also available by right-clicking a workspace)
+renames, colors, moves up/down and closes workspaces. Right-click a tab to rename
+it. Names preserve Korean, decomposed Unicode, emoji, spaces and literal `&`;
+empty names, control characters and names over 256 UTF-16 units are rejected.
+A custom tab name stays locked when the shell changes its automatic title.
+The native name/color editor uses **Apply** and **Cancel** buttons. Enter/Escape
+while editing text stay with the native edit control; Tab can reach the buttons.
+
+```powershell
+flowmuxctl.exe workspace list
+flowmuxctl.exe workspace current
+flowmuxctl.exe workspace focus workspace:<id>
+flowmuxctl.exe workspace rename workspace:<id> "한글 프로젝트"
+flowmuxctl.exe workspace color workspace:<id> "#75a3ff"
+flowmuxctl.exe workspace color workspace:<id> --clear
+flowmuxctl.exe workspace reorder workspace:<id> 0
+flowmuxctl.exe rename-tab surface:<id> "테스트 셸"
+flowmuxctl.exe workspace close workspace:<id>
+```
+
+Reordering uses a zero-based position and preserves active identity, terminal
+processes and pane geometry. `workspace current` follows the calling surface's
+workspace, even while hidden or after a tab move. Metadata changes preserve
+terminal focus. Names, colors, order and locked tab titles persist on restart;
+older state without a color remains readable.
+
+Closing a workspace terminates all its terminals and descendant processes.
+The native menu asks before closing; an explicit CLI close performs the action.
+Closing the active workspace selects its next neighbor, or its previous one at
+the end. The final workspace is currently protected; use `quit` to close the
+window. Empty-window UI, drag reordering, overflowing side panels, automatic-name
+reset and native menu/dialog/IME/DPI acceptance remain pending. Hidden verification
+is available in `scripts/verify-workspaces.ps1`.
+
 Move an existing terminal between panes or workspaces in the same window:
 
 ```powershell

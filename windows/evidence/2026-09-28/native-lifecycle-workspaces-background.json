@@ -1,0 +1,54 @@
+{
+  "pid": 34496,
+  "started": "2026-09-28T00:55:01.8261847+09:00",
+  "checks": [
+    {
+      "surface": {
+        "bounds": {
+          "height": 685,
+          "width": 991,
+          "x": 189,
+          "y": 72
+        },
+        "cols": 117,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": 7,
+        "id": "4ec5ec4b-7a09-46e4-bab9-e52a93c98ac8",
+        "output_sequence": 81,
+        "parsed_sequence": 81,
+        "pid": 38456,
+        "ready": true,
+        "resources_released": true,
+        "rows": 42,
+        "running": false,
+        "visible": true
+      },
+      "name": "natural_exit_preserves_final_screen_and_exit_code",
+      "passed": true
+    },
+    {
+      "pids": [
+        34472,
+        37404,
+        33348,
+        34684
+      ],
+      "name": "tab_close_terminates_root_and_three_descendants",
+      "passed": true
+    },
+    {
+      "pids": [
+        27956,
+        38004,
+        12076,
+        15624
+      ],
+      "name": "host_crash_terminates_owned_process_tree",
+      "passed": true
+    }
+  ],
+  "mode": "background",
+  "status": "passed_lifecycle_subset",
+  "finished": "2026-09-28T00:55:07.0318727+09:00"
+}

@@ -6,14 +6,14 @@ use super::{
     wide,
 };
 use crate::{
-    command::{key_bytes, Command, Direction, FocusDirection, Launch, Request},
+    command::{key_bytes, Command, Direction, FocusDirection, Launch, Request, WorkspaceOp},
     model::{self, Workspace},
     protocol::{ClientMessage, HostMessage, Identity, TERMINAL_ORIGIN},
     state::{SavedScreen, WindowState},
 };
 use anyhow::Context;
 use base64::Engine;
-use flowmux_core::{PaneId, SplitDirection, SurfaceId};
+use flowmux_core::{PaneId, SplitDirection, SurfaceId, WorkspaceId};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
 use serde_json::{json, Value};
 use std::{
@@ -44,21 +44,28 @@ use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 mod panes;
 #[path = "search.rs"]
 mod search;
+#[path = "workspaces.rs"]
+mod workspaces;
 
 const WAKE: u32 = WM_APP + 1;
-thread_local! { static EVENTS: RefCell<Option<EventSender>> = const { RefCell::new(None) }; }
+thread_local! {
+    static EVENTS: RefCell<Option<EventSender>> = const { RefCell::new(None) };
+    static CONTROL_ACTIONS: RefCell<HashMap<isize, Action>> = RefCell::new(HashMap::new());
+}
 enum Event {
     Layout,
     Tick,
     Close,
     ExitAfterReply,
     Saved(Result<(), String>),
-    Button(u16),
+    Button(Action),
     Bridge(SurfaceId, String, String),
     Session(SurfaceId, SessionEvent),
     Command(Request, ipc::Reply),
     SearchUi(search::UiAction),
     Pointer(panes::Pointer),
+    ContextMenu(Action, i32, i32),
+    Metadata(workspaces::EditAction),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -89,6 +96,31 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
+        WM_CONTEXTMENU => {
+            let action =
+                CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(wparam as isize)).cloned());
+            if let Some(action) = action {
+                let mut x = lparam as u16 as i16 as i32;
+                let mut y = (lparam >> 16) as u16 as i16 as i32;
+                if x == -1 && y == -1 {
+                    let mut rect = RECT::default();
+                    GetWindowRect(wparam as HWND, &mut rect);
+                    x = rect.left;
+                    y = rect.bottom;
+                }
+                post(Event::ContextMenu(action, x, y));
+            }
+            0
+        }
+        WM_CTLCOLORSTATIC => {
+            if let Some(color) = workspaces::swatch_color(lparam as HWND) {
+                SetTextColor(wparam as HDC, color);
+                SetBkMode(wparam as HDC, TRANSPARENT as i32);
+                GetSysColorBrush(COLOR_WINDOW) as LRESULT
+            } else {
+                DefWindowProcW(window, message, wparam, lparam)
+            }
+        }
         WM_LBUTTONDOWN | WM_MOUSEMOVE | WM_LBUTTONUP => {
             let x = (lparam as u16 as i16) as i32;
             let y = ((lparam >> 16) as u16 as i16) as i32;
@@ -130,7 +162,10 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             if (wparam >> 16) == 0 {
-                post(Event::Button((wparam & 0xffff) as u16));
+                let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&lparam).cloned());
+                if let Some(action) = action {
+                    post(Event::Button(action));
+                }
             }
             0
         }
@@ -189,7 +224,9 @@ impl Surface {
 #[derive(Clone)]
 enum Action {
     NewWorkspace,
-    Workspace(usize),
+    Workspace(WorkspaceId),
+    WorkspaceMenu,
+    WorkspaceColor(WorkspaceId),
     NewTab,
     Vertical,
     Horizontal,
@@ -235,6 +272,7 @@ struct App {
     pane_layout: model::Layout,
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
+    metadata: Option<workspaces::Panel>,
     pending_reads: HashMap<Uuid, PendingRead>,
     pending_finds: HashMap<Uuid, PendingRead>,
     search: search::Controller,
@@ -371,6 +409,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pane_layout: model::Layout::default(),
             zoomed: None,
             drag: None,
+            metadata: None,
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             search: search::Controller::default(),
@@ -408,7 +447,12 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
-            if !app.search.handle_message(&message) {
+            if !app.search.handle_message(&message)
+                && !app
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|p| p.handle_message(&message))
+            {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
@@ -436,7 +480,13 @@ impl App {
         self.workspace().active()
     }
     fn rebuild(&mut self) -> anyhow::Result<()> {
+        self.rebuild_without_focus()?;
+        self.focus_active()
+    }
+    fn rebuild_without_focus(&mut self) -> anyhow::Result<()> {
         self.cancel_drag();
+        workspaces::clear_swatches();
+        CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
         let mut missing = Vec::new();
         for workspace in &self.workspaces {
             for (_, _, tabs) in workspace.leaves() {
@@ -468,6 +518,7 @@ impl App {
         ] {
             self.button(name, action)?;
         }
+        self.button("Workspace…", Action::WorkspaceMenu)?;
         for index in 0..self.workspaces.len() {
             let name = format!(
                 "{} {}",
@@ -478,7 +529,11 @@ impl App {
                 },
                 self.workspaces[index].name
             );
-            self.button(&name, Action::Workspace(index))?;
+            let id = self.workspaces[index].id;
+            self.button(&name, Action::Workspace(id))?;
+            if let Some(color) = self.workspaces[index].color.clone() {
+                self.swatch(id, &color)?;
+            }
         }
         for (pane, active, tabs) in self.workspace().leaves() {
             for tab in tabs {
@@ -490,8 +545,7 @@ impl App {
                 self.button(&title, Action::Tab(pane, tab.id))?;
             }
         }
-        self.layout()?;
-        self.focus_active()
+        self.layout()
     }
     fn button(&mut self, name: &str, action: Action) -> anyhow::Result<()> {
         let id = self.controls.len() + 100;
@@ -500,7 +554,7 @@ impl App {
             CreateWindowExW(
                 0,
                 wide("BUTTON").as_ptr(),
-                wide(name).as_ptr(),
+                wide(name.replace('&', "&&")).as_ptr(),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32,
                 0,
                 0,
@@ -521,6 +575,7 @@ impl App {
                 1,
             );
         }
+        CONTROL_ACTIONS.with(|actions| actions.borrow_mut().insert(hwnd as isize, action.clone()));
         self.controls.push(Control { hwnd, action });
         Ok(())
     }
@@ -670,12 +725,21 @@ impl App {
         let mut tab_positions: HashMap<PaneId, i32> = HashMap::new();
         for (index, control) in self.controls.iter().enumerate() {
             let (x, y, width, height) = match control.action {
-                Action::Workspace(i) => (
-                    px(5),
-                    bar + px(8) + i as i32 * px(36),
-                    (sidebar - px(10)).max(1),
-                    px(32),
-                ),
+                Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
+                Action::Workspace(id) | Action::WorkspaceColor(id) => {
+                    let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
+                    let swatch = matches!(control.action, Action::WorkspaceColor(_));
+                    (
+                        if swatch { px(5) } else { px(23) },
+                        bar + px(48) + i as i32 * px(36),
+                        if swatch {
+                            px(16)
+                        } else {
+                            (sidebar - px(28)).max(1)
+                        },
+                        px(32),
+                    )
+                }
                 Action::Tab(pane, _) => {
                     let Some((_, area)) = areas.iter().find(|(id, _)| *id == pane) else {
                         unsafe {
@@ -755,6 +819,8 @@ impl App {
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
+            Event::Metadata(action) => self.metadata_action(action)?,
+            Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
                 self.search_tick()?;
                 self.pending_reads.retain(|_, request| {
@@ -795,11 +861,7 @@ impl App {
                     }
                 }
             }
-            Event::Button(id) => {
-                if let Some(control) = self.controls.get(id.saturating_sub(100) as usize) {
-                    self.action(control.action.clone())?;
-                }
-            }
+            Event::Button(action) => self.action(action)?,
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
             Event::Session(id, message) => {
                 if let Some(surface) = self.surfaces.get_mut(&id) {
@@ -1296,7 +1358,7 @@ impl App {
                 for control in &self.controls {
                     if matches!(control.action, Action::Tab(_, surface) if surface == id) {
                         unsafe {
-                            SetWindowTextW(control.hwnd, wide(&label).as_ptr());
+                            SetWindowTextW(control.hwnd, wide(label.replace('&', "&&")).as_ptr());
                         }
                     }
                 }
@@ -1397,7 +1459,12 @@ impl App {
             // while its popup owns keyboard navigation, then restore the terminal.
             SetFocus(self.window);
             for (index, (label, _, _)) in destinations.iter().enumerate() {
-                AppendMenuW(menu, MF_STRING, index + 1, wide(label).as_ptr());
+                AppendMenuW(
+                    menu,
+                    MF_STRING,
+                    index + 1,
+                    wide(label.replace('&', "&&")).as_ptr(),
+                );
             }
             if destinations.is_empty() {
                 AppendMenuW(
@@ -1427,6 +1494,38 @@ impl App {
         }
         self.focus_active()
     }
+    fn remove_surface(&mut self, surface: SurfaceId) {
+        self.surfaces.remove(&surface);
+        if self
+            .pending_save
+            .as_ref()
+            .is_some_and(|s| !s.writing && s.waiting.contains_key(&surface))
+        {
+            self.finish_save(Err(
+                "terminal closed during checkpoint; previous save preserved".into(),
+            ));
+        }
+        self.pending_reads.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed during screen read"}));
+                false
+            } else {
+                true
+            }
+        });
+        self.pending_finds.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed during find"}));
+                false
+            } else {
+                true
+            }
+        });
+    }
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.close_request.is_none(),
@@ -1439,12 +1538,15 @@ impl App {
                 self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
             }
-            Action::Workspace(index) => {
+            Action::Workspace(id) => {
+                let index = self.workspace_index(id)?;
                 if self.active_workspace != index {
                     self.zoomed = None;
                 }
                 self.active_workspace = index;
             }
+            Action::WorkspaceMenu => return self.workspace_menu(self.workspace().id, None),
+            Action::WorkspaceColor(_) => return Ok(()),
             Action::NewTab => {
                 self.workspace_mut().new_tab();
             }
@@ -1462,36 +1564,7 @@ impl App {
                     .close_active()
                     .context("cannot close the final tab")?;
                 self.zoomed = None;
-                self.surfaces.remove(&surface);
-                if self
-                    .pending_save
-                    .as_ref()
-                    .is_some_and(|s| !s.writing && s.waiting.contains_key(&surface))
-                {
-                    self.finish_save(Err(
-                        "terminal closed during checkpoint; previous save preserved".into(),
-                    ));
-                }
-                self.pending_reads.retain(|_, request| {
-                    if request.surface == surface {
-                        let _ = request
-                            .reply
-                            .try_send(json!({"error":"terminal closed during screen read"}));
-                        false
-                    } else {
-                        true
-                    }
-                });
-                self.pending_finds.retain(|_, request| {
-                    if request.surface == surface {
-                        let _ = request
-                            .reply
-                            .try_send(json!({"error":"terminal closed during find"}));
-                        false
-                    } else {
-                        true
-                    }
-                });
+                self.remove_surface(surface);
             }
             Action::MoveTabMenu => return self.move_menu(),
             Action::SearchAll => return self.search_ui(search::UiAction::Show),
@@ -1505,13 +1578,7 @@ impl App {
                 }
                 return Ok(());
             }
-            Action::Tab(pane, surface) => {
-                if self.zoomed.is_some_and(|zoomed| zoomed != pane) {
-                    self.zoomed = None;
-                }
-                self.workspace_mut().focused = pane;
-                self.workspace_mut().root.set_active_surface(pane, surface);
-            }
+            Action::Tab(_, surface) => self.select(surface)?,
         }
         self.rebuild()
     }
@@ -1554,7 +1621,7 @@ impl App {
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1695,6 +1762,10 @@ impl App {
                 self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
                 self.rebuild()?;
+            }
+            Command::Workspace { op } => return self.workspace_command(op, caller).map(Some),
+            Command::RenameTab { surface, name } => {
+                self.rename_tab(SurfaceId(surface), name)?;
             }
             Command::FocusPane { pane } => {
                 let id = self.target(Some(pane), caller)?;

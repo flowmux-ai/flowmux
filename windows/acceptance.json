@@ -257,8 +257,11 @@
     {
       "id": "U01",
       "feature": "workspace 생성·이름·색·순서·닫기",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-workspaces-background.json"
+      ],
+      "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. Final workspace remains protected; empty-window UI, drag reorder, sidebar overflow, automatic name reset, real menu/dialog/IME/DPI/accessibility remain pending."
     },
     {
       "id": "U02",
@@ -274,9 +277,10 @@
       "feature": "tab 생성·focus·이름·닫기·재정렬",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-tab-move-background.json"
+        "evidence/2026-09-27/native-tab-move-background.json",
+        "evidence/2026-09-28/native-workspaces-background.json"
       ],
-      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain."
+      "notes": "Hidden native hosts verify tab moves/reorder with stable process, surface, output, cwd and calling-surface routing; user-locked Unicode tab names survive shell title output and restart without activation. Native rename dialog constructs hidden and preserves UTF-16 values, but actual menu/dialog IME and keyboard remain pending. Drag/drop, automatic title reset, cross-window and broader feature coverage remain."
     },
     {
       "id": "U04",
@@ -311,8 +315,11 @@
     {
       "id": "U08",
       "feature": "메뉴·popover·dialog·drag preview",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-rust-tests-workspaces.txt"
+      ],
+      "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending."
     },
     {
       "id": "U09",
@@ -683,7 +690,12 @@
       "id": "O02",
       "feature": "CLI↔GUI 통신·다중 창 endpoint",
       "status": "pending",
-      "evidence": []
+      "evidence": [
+        "evidence/2026-09-28/workspace-startup-failed-trial.json",
+        "evidence/2026-09-28/native-workspaces-background.json",
+        "evidence/2026-09-28/native-workspaces-repeat-background.json"
+      ],
+      "notes": "One restart trial failed to connect before tree. The original harness accepted any existing per-PID discovery file; the new harness checks fresh complete records and exact process identity. Two full reruns passed, but the failed process/discovery timestamps were not captured and its exact cause is unproven. Complete endpoint startup/race/multiwindow acceptance remains pending."
     },
     {
       "id": "O03",

@@ -184,6 +184,21 @@ do not establish physical keyboard or IME acceptance. Native divider drag,
 interactive focus, minimum-size usability, DPI and accessibility remain pending.
 See [pane evidence](evidence/2026-09-28/panes.md); U02 and U04 remain partial.
 
+Workspace metadata/lifecycle now has native menus and a UTF-16 name/color editor,
+plus list/current/focus/rename/color/reorder/close CLI operations. Tab rename uses
+the existing shared title-lock semantics. Unicode names retain their codepoints;
+Win32 button/menu captions escape literal ampersands. Metadata updates rebuild
+controls without requesting terminal focus; workspace actions use stable IDs.
+Native hidden tests verify 41 reorders with stable processes, hidden caller
+context, close of three terminals plus three descendants without affecting
+survivors, and restart preserving order/color/locked Unicode names/history.
+The editor detects metadata changed elsewhere before applying a pending edit.
+Native Rust tests construct its controls hidden and check UTF-16 values.
+Real menus/IME/DPI/accessibility, drag reordering, side panel overflow,
+automatic-name reset and an empty-window UI remain pending. The final workspace
+is protected until empty-window behavior is implemented. See
+[workspace evidence](evidence/2026-09-28/workspaces.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

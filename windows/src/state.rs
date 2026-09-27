@@ -72,6 +72,12 @@ impl WindowState {
         let mut surfaces = HashSet::new();
         for ws in &self.workspaces {
             ensure!(ids.insert(ws.id.0), "duplicate workspace identity");
+            if let Some(color) = &ws.color {
+                ensure!(
+                    crate::model::parse_color(color)?.is_some(),
+                    "invalid saved workspace color"
+                );
+            }
             ensure!(
                 ws.name.len() <= 4096 && ws.cwd.as_os_str().len() <= 32767,
                 "workspace metadata exceeds limit"
@@ -176,6 +182,38 @@ pub(crate) fn sample() -> WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_state_without_color_loads_and_custom_metadata_roundtrips_without_normalization() {
+        let mut state = sample();
+        let old = serde_json::to_value(&state).unwrap();
+        assert!(old["workspaces"][0].get("color").is_none());
+        assert!(WindowState::decode(&serde_json::to_vec(&old).unwrap())
+            .unwrap()
+            .workspaces[0]
+            .color
+            .is_none());
+        state.workspaces[0].color = Some("#1234ab".into());
+        state.workspaces[0].name = "한글 한 e\u{301} 😀 &".into();
+        let pane = state.workspaces[0].focused;
+        let surface = state.workspaces[0].active();
+        state.workspaces[0]
+            .root
+            .rename_surface(pane, surface, "사용자 이름".into());
+        state.workspaces[0]
+            .root
+            .set_surface_title_auto(pane, surface, "automatic".into());
+        let decoded = WindowState::decode(&state.encode().unwrap()).unwrap();
+        assert_eq!(decoded.workspaces[0].name, state.workspaces[0].name);
+        assert_eq!(decoded.workspaces[0].color, state.workspaces[0].color);
+        assert_eq!(
+            decoded.workspaces[0].root.surface_title(pane, surface),
+            Some("사용자 이름")
+        );
+        for color in ["", "red", "#12zz99"] {
+            state.workspaces[0].color = Some(color.into());
+            assert!(state.encode().is_err());
+        }
+    }
     #[test]
     fn validates_whole_layout_before_restore_and_preserves_styled_korean() {
         let state = sample();

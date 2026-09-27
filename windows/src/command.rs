@@ -122,6 +122,17 @@ pub enum Command {
         #[arg(long)]
         cwd: Option<PathBuf>,
     },
+    /// List, focus, rename, color, reorder or close a workspace in this window.
+    Workspace {
+        #[command(subcommand)]
+        op: WorkspaceOp,
+    },
+    /// Set a tab's user-locked title without activating or restarting it.
+    RenameTab {
+        #[arg(value_parser = parse_id)]
+        surface: Uuid,
+        name: String,
+    },
     FocusPane {
         #[arg(value_parser = parse_id)]
         pane: Uuid,
@@ -190,10 +201,48 @@ pub enum FocusDirection {
     Down,
 }
 
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum WorkspaceOp {
+    List,
+    Current,
+    Focus {
+        #[arg(value_parser = parse_id)]
+        workspace: Uuid,
+    },
+    Rename {
+        #[arg(value_parser = parse_id)]
+        workspace: Uuid,
+        name: String,
+    },
+    /// Use #RRGGBB; omit it with --clear to remove the color.
+    Color {
+        #[arg(value_parser = parse_id)]
+        workspace: Uuid,
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        color: Option<String>,
+        #[arg(long)]
+        #[serde(default)]
+        clear: bool,
+    },
+    /// Move to a zero-based absolute position, retaining the active workspace.
+    Reorder {
+        #[arg(value_parser = parse_id)]
+        workspace: Uuid,
+        index: usize,
+    },
+    /// Terminate every terminal in this workspace. The final workspace is protected.
+    Close {
+        #[arg(value_parser = parse_id)]
+        workspace: Uuid,
+    },
+}
+
 fn parse_id(text: &str) -> Result<Uuid, String> {
     let value = text
         .strip_prefix("pane:")
         .or_else(|| text.strip_prefix("surface:"))
+        .or_else(|| text.strip_prefix("workspace:"))
         .unwrap_or(text);
     Uuid::parse_str(value).map_err(|e| e.to_string())
 }

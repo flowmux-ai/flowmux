@@ -1,0 +1,43 @@
+{
+  "started": "2026-09-28T01:00:53.4571499+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "color": "#12abef",
+      "locked": true,
+      "name": "korean_nfd_emoji_and_ampersands_preserved_in_metadata_and_native_captions",
+      "tabName": "TAB-한글 한 é 😀 & && name",
+      "workspaceName": "한글 한 é 😀 & && name"
+    },
+    {
+      "name": "invalid_names_colors_reorders_and_missing_ids_leave_model_unchanged"
+    },
+    {
+      "name": "forty_one_reorders_preserve_all_pids_active_identity_and_hidden_child_context",
+      "count": 41,
+      "order": [
+        "3266eb05-2112-4de5-886c-d17a956d5876",
+        "13e0d3af-185e-4047-a680-06334b7487e9",
+        "513057bf-4f3f-41b7-b192-aa7a1f3585e5"
+      ]
+    },
+    {
+      "survivorPids": [
+        8836,
+        8172
+      ],
+      "name": "inactive_workspace_close_terminates_all_three_terminals_and_three_descendants_only",
+      "stoppedPids": [
+        31180,
+        27716,
+        33996,
+        36676,
+        37968,
+        35952
+      ]
+    }
+  ],
+  "status": "failed",
+  "error": "flowmuxctl failed: tree",
+  "finished": "2026-09-28T01:01:00.0455139+09:00"
+}

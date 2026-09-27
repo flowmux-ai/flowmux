@@ -1,0 +1,119 @@
+{
+  "started": "2026-09-28T01:08:00.8127552+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "layout": {
+        "dividers": [
+          {
+            "bounds": {
+              "height": 719,
+              "width": 5,
+              "x": 781,
+              "y": 38
+            },
+            "direction": "vertical",
+            "parent": {
+              "height": 719,
+              "width": 991,
+              "x": 189,
+              "y": 38
+            },
+            "split": "1fb37140-2676-4d6c-94b4-8fa918d6b540"
+          },
+          {
+            "bounds": {
+              "height": 5,
+              "width": 394,
+              "x": 786,
+              "y": 288
+            },
+            "direction": "horizontal",
+            "parent": {
+              "height": 719,
+              "width": 394,
+              "x": 786,
+              "y": 38
+            },
+            "split": "8f6ca6eb-445f-4fd0-9841-eed22d18a7d7"
+          }
+        ],
+        "panes": [
+          [
+            "1ae6c8a5-8e2b-49ec-8e09-024b847413b6",
+            {
+              "height": 719,
+              "width": 592,
+              "x": 189,
+              "y": 38
+            }
+          ],
+          [
+            "6b26974a-09ce-4693-ba51-af605df728cc",
+            {
+              "height": 250,
+              "width": 394,
+              "x": 786,
+              "y": 38
+            }
+          ],
+          [
+            "2fe5acb3-98fd-43bf-a4ff-a8ec3e57968f",
+            {
+              "height": 464,
+              "width": 394,
+              "x": 786,
+              "y": 293
+            }
+          ]
+        ]
+      },
+      "name": "nested_ratios_update_native_webview_and_real_conpty_dimensions",
+      "sizes": [
+        {
+          "cols": 69,
+          "rows": 42,
+          "pid": 24992
+        },
+        {
+          "cols": 45,
+          "rows": 12,
+          "pid": 36256
+        },
+        {
+          "cols": 45,
+          "rows": 26,
+          "pid": 36916
+        }
+      ]
+    },
+    {
+      "name": "invalid_ratios_and_ids_do_not_mutate_state_and_extremes_clamp_to_five_percent"
+    },
+    {
+      "name": "directional_focus_stays_in_workspace_and_missing_neighbors_preserve_focus"
+    },
+    {
+      "name": "maximize_restore_preserves_ratios_hidden_korean_output_and_processes",
+      "maximizedSize": {
+        "cols": 117,
+        "rows": 42,
+        "pid": 36256
+      }
+    },
+    {
+      "name": "forty_zoom_transitions_keep_sessions_and_directional_focus_or_resize_restores_layout",
+      "transitions": 40
+    },
+    {
+      "name": "stable_hidden_caller_context_and_workspace_split_move_close_zoom_transitions"
+    },
+    {
+      "stateWindow": "93f722bc-d798-409b-a9cd-bee1b2b31df5",
+      "name": "restart_restores_nested_ratios_focus_and_korean_history_with_zoom_cleared"
+    }
+  ],
+  "status": "passed_background_pane_subset",
+  "pending": "Physical divider drag, shortcuts, IME during transitions, DPI and accessibility remain unverified.",
+  "finished": "2026-09-28T01:08:12.4575345+09:00"
+}

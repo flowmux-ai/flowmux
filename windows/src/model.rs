@@ -11,6 +11,8 @@ use std::path::PathBuf;
 pub struct Workspace {
     pub id: WorkspaceId,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub cwd: PathBuf,
     pub root: Pane,
     pub focused: PaneId,
@@ -27,6 +29,7 @@ impl Workspace {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "Workspace".into()),
             cwd,
+            color: None,
             root: Pane::Leaf {
                 id: pane,
                 content: PaneContent::Tabs {
@@ -138,6 +141,76 @@ impl Workspace {
         self.root.set_split_ratio(split, ratio);
         Ok((split, ratio))
     }
+}
+
+/// Native captions and persisted metadata preserve Unicode without normalization.
+pub fn validate_name(name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(!name.trim().is_empty(), "name must not be empty");
+    anyhow::ensure!(
+        name.encode_utf16().count() <= 256,
+        "name exceeds 256 UTF-16 units"
+    );
+    anyhow::ensure!(
+        !name.chars().any(char::is_control),
+        "name must not contain control characters"
+    );
+    Ok(())
+}
+
+pub fn parse_color(color: &str) -> anyhow::Result<Option<String>> {
+    if color.is_empty() {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        color.len() == 7
+            && color.starts_with('#')
+            && color[1..].bytes().all(|b| b.is_ascii_hexdigit()),
+        "color must be #RRGGBB or empty to clear"
+    );
+    Ok(Some(color.to_ascii_lowercase()))
+}
+
+pub fn reorder_workspace(
+    workspaces: &mut Vec<Workspace>,
+    active: &mut usize,
+    target: WorkspaceId,
+    index: usize,
+) -> anyhow::Result<()> {
+    let source = workspaces
+        .iter()
+        .position(|w| w.id == target)
+        .context("workspace not found")?;
+    anyhow::ensure!(
+        index < workspaces.len(),
+        "workspace index is outside the list"
+    );
+    let focused = workspaces[*active].id;
+    let workspace = workspaces.remove(source);
+    workspaces.insert(index, workspace);
+    *active = workspaces.iter().position(|w| w.id == focused).unwrap();
+    Ok(())
+}
+
+pub fn remove_workspace(
+    workspaces: &mut Vec<Workspace>,
+    active: &mut usize,
+    target: WorkspaceId,
+) -> anyhow::Result<Workspace> {
+    let index = workspaces
+        .iter()
+        .position(|w| w.id == target)
+        .context("workspace not found")?;
+    anyhow::ensure!(
+        workspaces.len() > 1,
+        "cannot close the final workspace; close the window with quit"
+    );
+    let focused = workspaces[*active].id;
+    let removed = workspaces.remove(index);
+    *active = workspaces
+        .iter()
+        .position(|w| w.id == focused)
+        .unwrap_or(index.min(workspaces.len() - 1));
+    Ok(removed)
 }
 
 /// Relocate domain state only. The host retains the existing view and PTY by SurfaceId.
@@ -344,6 +417,46 @@ pub fn neighbor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_metadata_keeps_original_codepoints_and_rejects_invalid_native_captions() {
+        for name in ["한글 한 e\u{301} 😀 & 탭", "  공백 보존  "] {
+            assert!(validate_name(name).is_ok());
+        }
+        assert!(validate_name(&"😀".repeat(128)).is_ok());
+        for name in ["", " \t", "한\n글", "nul\0name", &"😀".repeat(129)] {
+            assert!(validate_name(name).is_err());
+        }
+        assert_eq!(parse_color("#Ab12EF").unwrap().as_deref(), Some("#ab12ef"));
+        assert_eq!(parse_color("").unwrap(), None);
+        for color in ["red", "#abc", "#abcxyz", "#12345678", "#한글"] {
+            assert!(parse_color(color).is_err());
+        }
+    }
+
+    #[test]
+    fn workspace_reorder_and_close_preserve_active_identity_and_select_nearest_survivor() {
+        let mut list: Vec<_> = (0..3)
+            .map(|i| Workspace::new(format!("workspace-{i}").into()))
+            .collect();
+        let ids: Vec<_> = list.iter().map(|w| w.id).collect();
+        let original: Vec<_> = list.iter().map(|w| w.active()).collect();
+        let mut active = 1;
+        reorder_workspace(&mut list, &mut active, ids[0], 2).unwrap();
+        assert_eq!(list[active].id, ids[1]);
+        assert_eq!(list[2].active(), original[0]);
+        let snapshot = serde_json::to_value(&list).unwrap();
+        assert!(reorder_workspace(&mut list, &mut active, ids[0], 3).is_err());
+        assert!(reorder_workspace(&mut list, &mut active, WorkspaceId::new(), 0).is_err());
+        assert_eq!(serde_json::to_value(&list).unwrap(), snapshot);
+        let removed = remove_workspace(&mut list, &mut active, ids[0]).unwrap();
+        assert_eq!(removed.active(), original[0]);
+        assert_eq!(list[active].id, ids[1]);
+        remove_workspace(&mut list, &mut active, ids[1]).unwrap();
+        assert_eq!(list[active].id, ids[2]);
+        assert!(remove_workspace(&mut list, &mut active, ids[2]).is_err());
+        assert_eq!(list.len(), 1);
+    }
 
     #[test]
     fn resizing_targets_only_the_owning_split_and_rejects_invalid_requests() {
