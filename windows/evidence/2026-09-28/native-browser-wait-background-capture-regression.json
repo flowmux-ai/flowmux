@@ -1,0 +1,60 @@
+{
+  "started": "2026-09-28T08:42:41.4499629+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "five_conditions_plain_json_exact_unicode_and_no_input_or_dom_mutation",
+      "passed": true
+    },
+    {
+      "name": "delayed_dom_and_streaming_loading_interactive_complete_states",
+      "passed": true
+    },
+    {
+      "timeoutElapsedMs": 236,
+      "name": "timeout_false_invalid_inputs_and_single_runtime_exception_without_replay",
+      "passed": true
+    },
+    {
+      "name": "navigation_redirect_hidden_surface_pin_and_close_cancellation",
+      "passed": true
+    },
+    {
+      "name": "bounded_concurrent_waits_keep_other_commands_responsive_and_release_capacity",
+      "passed": true
+    },
+    {
+      "name": "wait_exceeds_default_server_and_client_deadlines_without_retransmission",
+      "elapsedMs": 27076,
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "status": "passed_background_browser_wait_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "waitClientPids": [
+    9024,
+    32696,
+    25504,
+    34564,
+    31516,
+    29688,
+    18808,
+    23496,
+    34084,
+    15372,
+    25972,
+    30428
+  ],
+  "hosts": [
+    31076
+  ],
+  "shells": [
+    37148
+  ],
+  "finished": "2026-09-28T08:43:21.2126844+09:00"
+}

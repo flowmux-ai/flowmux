@@ -745,7 +745,7 @@ and invalid/non-JSON results are rejected. A timeout does not cancel JavaScript
 already executing, and rejected asynchronous scripts may already have started
 side effects; do not automatically retry them. Navigation IDs protect callbacks
 from earlier documents. Snapshot/ref queries and DOM actions are described below; active-element
-`type`/`press`, screenshots and asynchronous eval remain pending.
+`type`/`press` and asynchronous eval remain pending. PNG capture is described below.
 
 New-window requests and downloads are currently denied; DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
@@ -808,7 +808,7 @@ Full text/value queries retain the original Unicode within their result limit
 and the element's normal DOM value semantics. Browser script execution/memory
 budgets and complete timeout/navigation race coverage remain open. The existing
 16-pending-request and 12-second callback limits apply to these commands too.
-DOM actions and waits are described below; screenshots remain pending. The
+DOM actions, waits and PNG capture are described below. The
 [hidden DOM verifier](scripts/verify-browser-dom.ps1) uses only owned loopback
 pages; it does not simulate OS keyboard/IME input.
 
@@ -907,5 +907,57 @@ Windows command-line length limit may be lower. Existing
 action may have executed. No mutation is automatically retried. An error or an
 expired `action_pending` flag cannot prove that page side effects were undone;
 inspect the current page state before an intentional repeat. Page JS and event
-handlers are not sandboxed by these commands. `type`, `press`, screenshot, full
+handlers are not sandboxed by these commands. `type`, `press`, full
 framework/custom-widget coverage and physical IME acceptance remain pending.
+
+
+### Browser viewport PNG capture (partial)
+
+```powershell
+flowmuxctl.exe browser screenshot pane:<id> "한글 화면.png"
+flowmuxctl.exe --json browser screenshot pane:<id> "C:\captures\화면.png"
+```
+
+The active, logically visible browser tab is captured using WebView2's PNG
+encoder. It captures the page viewport at its current scroll/zoom, excluding the
+native toolbar, other panes and desktop. It does not focus, navigate, resize or
+scroll the page. Full-page stitching and desktop/terminal screenshots are not
+provided by this command. Hidden owned test hosts can also capture their logically
+visible view without displaying the parent window.
+
+Relative paths resolve against the CLI working directory. Raw IPC paths must be
+absolute. The existing parent directory must be writable, and the filename must
+end in `.png` (case-insensitive). Ordinary drive/UNC and extended drive/UNC paths
+are accepted; device paths/names, alternate streams, control characters and
+ambiguous trailing spaces/dots are rejected. Unicode is not normalized. UNC and
+extended path validation has native tests; actual network filesystem behavior
+remains unverified. Plain output is the absolute requested path; JSON also includes
+surface, navigation generation, width/height in pixels and PNG byte count.
+
+The host allows two outstanding captures/file saves per window. Browser status
+reports their total as `captures_pending`. Captures require finished successful
+navigation and no pending DOM action. The host checks the original surface,
+navigation generation, visibility/layout revision, dimensions and zoom revision
+before allowing the captured bytes to be written. It does not freeze DOM updates,
+animations or page-initiated scrolling. Treat the result as a rendered preview,
+not an atomic DOM snapshot.
+
+Viewports are limited to 8,192 pixels per side and 8 Mi pixels, and encoded output
+to 32 MiB. These limits bound accepted image data, not all browser memory or the
+encoder's temporary COM allocation. The 12-second deadline includes capture and
+save. Timed-out slots remain occupied until the real callback/writer completes,
+so a stalled filesystem cannot spawn unbounded writer threads. If a native
+callback never returns, its slot stays occupied until the host exits.
+
+A worker writes and flushes a unique temporary file beside the destination, then
+uses Windows atomic replacement. A failed save preserves an existing destination
+and attempts to remove its own temp file. Crashes may leave a temp file. After a
+writer is dispatched, a timeout, closed tab or lost reply can still leave a saved
+file; the command is never automatically retried. A successful result identifies
+the captured surface even if its tab navigates during disk I/O.
+
+The [hidden capture verifier](scripts/verify-browser-capture.ps1) decodes actual
+PNG pixels, checks scroll/zoom and Unicode filenames, and tests locked-destination
+failure and browser/terminal separation. Physical DPI/multi-monitor, minimized
+windows, remote filesystems, exhaustive lifecycle races and real IME acceptance
+remain open. See [capture evidence](evidence/2026-09-28/browser-capture.md).

@@ -1,0 +1,58 @@
+{
+  "started": "2026-09-28T08:42:23.1042742+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "native_webview_unicode_dom_address_and_no_terminal_bridge",
+      "page": {
+        "host": "undefined",
+        "identity": "undefined",
+        "ipc": "undefined",
+        "settings": "undefined",
+        "text": "첫째 한글 한 é 😀"
+      },
+      "passed": true
+    },
+    {
+      "name": "native_history_reload_stop_redirect_failure_recovery_and_bounded_zoom",
+      "failure": "Navigation failed or stopped (WebView2 error 8)",
+      "passed": true
+    },
+    {
+      "name": "forbidden_urls_popup_denial_script_errors_and_terminal_target_rejection",
+      "passed": true
+    },
+    {
+      "name": "right_reuse_down_split_mixed_pane_move_keeps_webview_and_source_process",
+      "passed": true
+    },
+    {
+      "name": "inactive_calling_terminal_keeps_own_cwd_in_mixed_pane",
+      "passed": true
+    },
+    {
+      "window": "0d1a3125-bee9-4b39-ba10-6ff712e97833",
+      "surface": "e3900171-d151-4543-aa61-2ae6d31d7217",
+      "name": "browser_only_checkpoint_restart_and_separate_profile_persistence",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "status": "passed_background_browser_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "hosts": [
+    29972,
+    5584
+  ],
+  "shells": [
+    38612,
+    39784,
+    18340,
+    39316
+  ],
+  "finished": "2026-09-28T08:42:33.1701447+09:00"
+}

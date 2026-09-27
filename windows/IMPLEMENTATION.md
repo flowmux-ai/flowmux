@@ -384,7 +384,7 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B03/B04/B05/B06/B07/B09 and G09 are partial. Screenshots, downloads,
+B01/B02/B03/B04/B05/B06/B07/B08/B09 and G09 are partial. Downloads,
 popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
@@ -399,7 +399,8 @@ and callbacks without stamping the DOM. Read-only text/value/attr/state/count
 commands support structured JSON and plain scalar output. Output/traversal bounds,
 Unicode excerpts, duplicate/deep selectors, reference lifetime and failure recovery
 are checked in a hidden WebView2 fixture. Frames/shadow trees, full accessibility,
-Active-element type/press, screenshots and actual browser IME remain pending. See
+active-element type/press and actual browser IME remain pending. PNG capture is
+described below. See
 [DOM evidence](evidence/2026-09-28/browser-dom.md).
 
 Windows browser waits now cover selector/text/URL/ready-state/synchronous JS
@@ -421,3 +422,15 @@ are blocked in background test hosts, so actual focus acceptance remains pending
 Clap action argument structs share their builders to avoid a reproduced Windows
 debug main-thread stack overflow without changing CLI/JSON grammar or stack size.
 B04/B05/G09 remain partial. See [action evidence](evidence/2026-09-28/browser-actions.md).
+
+
+Windows browser viewport capture now uses native WebView2 CapturePreview/PNG,
+with CLI-relative Unicode paths, original-surface/navigation/viewport validation,
+size limits and two outstanding capture/save slots. COM stays on the UI thread;
+a separate worker flushes a sibling temporary file and atomically replaces the
+destination. Timeouts after file dispatch are explicitly ambiguous and never
+trigger a retry. Hidden hosts capture actual page pixels without foreground,
+keyboard, pointer or clipboard operations. B08/G09 remain partial: physical
+DPI/minimized/multi-monitor behavior, remote filesystem guarantees, exhaustive
+lifecycle races and real IME are not established by these tests. See
+[capture evidence](evidence/2026-09-28/browser-capture.md).

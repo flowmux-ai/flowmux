@@ -4,6 +4,8 @@ use super::*;
 use crate::browser::{self as domain, Op};
 use crate::browser_dom as dom;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[path = "browser_capture.rs"]
+pub(super) mod capture;
 #[path = "browser_chrome.rs"]
 mod chrome;
 #[path = "browser_wait.rs"]
@@ -16,6 +18,8 @@ pub(super) enum Signal {
     Metadata(SurfaceId),
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
+    Capture(Uuid, Result<Vec<u8>, String>),
+    CaptureSaved(Uuid, Result<(), String>),
     WaitTick,
     WaitResult(Uuid, Uuid, u64, String),
 }
@@ -67,6 +71,8 @@ pub(super) struct Browser {
     error: Option<String>,
     refs: dom::Refs,
     dom_key: String,
+    viewport_revision: u64,
+    viewport: Option<(i32, i32, i32, i32)>,
 }
 impl Browser {
     pub(super) fn new(app: &mut App, id: SurfaceId) -> anyhow::Result<Self> {
@@ -167,6 +173,8 @@ impl Browser {
             zoom: 1.0,
             error: None,
             refs: dom::Refs::new(id.0),
+            viewport_revision: 0,
+            viewport: None,
             dom_key: format!("__flowmuxDom_{}", Uuid::new_v4().simple()),
         })
     }
@@ -202,6 +210,11 @@ impl Browser {
         json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"address_handle":self.chrome.address as usize})
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
+        let viewport = area.map(|r| (r.x, r.y, r.width, r.height));
+        if self.viewport != viewport {
+            self.viewport_revision = self.viewport_revision.wrapping_add(1);
+            self.viewport = viewport;
+        }
         let show = area.is_some();
         if self.visible != show {
             self.refs.clear();
@@ -263,6 +276,9 @@ impl Browser {
             "browser zoom must be between 0.5 and 3.0"
         );
         self.view.zoom(scale)?;
+        if self.zoom != scale {
+            self.viewport_revision = self.viewport_revision.wrapping_add(1);
+        }
         self.zoom = scale;
         Ok(())
     }
@@ -332,6 +348,7 @@ impl App {
     }
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
         self.browser_wait_cancel(id, reason);
+        self.browser_capture_cancel(id, reason);
         self.pending_browser.retain(|_, pending| {
             if pending.surface == id {
                 let _ = pending.reply.try_send(pending.error(reason));
@@ -342,6 +359,7 @@ impl App {
         });
     }
     pub(super) fn browser_tick(&mut self) {
+        self.browser_capture_tick();
         self.pending_browser.retain(|_, p| {
             if p.started.elapsed() > Duration::from_secs(12) {
                 let _ = p.reply.try_send(
@@ -369,6 +387,8 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Capture(id, result) => self.browser_capture_result(id, result),
+            Signal::CaptureSaved(id, result) => self.browser_capture_saved(id, result),
             Signal::WaitTick => self.browser_wait_tick(),
             Signal::WaitResult(id, poll, epoch, result) => {
                 self.browser_wait_result(id, poll, epoch, result)
@@ -594,6 +614,7 @@ impl App {
             | Op::Uncheck(args) => args.pane,
             Op::Fill(args) | Op::Select(args) => args.pane,
             Op::Scroll(args) => args.pane,
+            Op::Screenshot(args) => args.pane,
             Op::Open { .. } => unreachable!(),
         };
         let id = self.target(Some(pane), None)?;
@@ -605,7 +626,7 @@ impl App {
             .pending_browser
             .values()
             .any(|p| p.surface == id && matches!(p.response, Response::Action));
-        if op.is_action() || matches!(op, Op::Snapshot { .. }) {
+        if op.is_action() || matches!(op, Op::Snapshot { .. } | Op::Screenshot(..)) {
             anyhow::ensure!(
                 !action_pending,
                 "wait for the pending browser action before taking a snapshot or another action"
@@ -636,6 +657,10 @@ impl App {
             _ => None,
         };
         match op {
+            Op::Screenshot(args) => {
+                self.browser_capture_start(id, args.path, reply)?;
+                return Ok(None);
+            }
             Op::Wait { options, .. } => {
                 self.browser_wait_start(id, options, reply)?;
                 return Ok(None);
@@ -650,6 +675,7 @@ impl App {
             Op::Status { .. } => {
                 let mut status = browser.status(id);
                 status["action_pending"] = json!(action_pending);
+                status["captures_pending"] = json!(self.pending_captures.len());
                 return Ok(Some(status));
             }
             Op::Zoom { scale, .. } => browser.zoom(scale)?,

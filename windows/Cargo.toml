@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.39.1"
+windows = { version = "=0.62.2", features = ["Win32_System_Com_StructuredStorage"] }
 raw-window-handle = "=0.6.2"
 wry = { version = "=0.57.0", default-features = false, features = ["os-webview"] }
 windows-sys = { version = "0.61", features = [

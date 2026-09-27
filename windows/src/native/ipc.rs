@@ -142,6 +142,12 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         ));
     }
     let json = cli.json;
+    let screenshot_output = matches!(
+        &cli.command,
+        Command::Browser {
+            op: crate::browser::Op::Screenshot(..)
+        }
+    );
     let action_output = matches!(&cli.command,Command::Browser{op} if op.is_action());
     let dom_output = matches!(
         &cli.command,
@@ -163,6 +169,14 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         }
     );
     let value = request(cli)?;
+    if !json && screenshot_output {
+        return Ok(format!(
+            "{}\n",
+            value["path"]
+                .as_str()
+                .context("invalid screenshot response")?
+        ));
+    }
     if !json && action_output {
         anyhow::ensure!(value["ok"] == true, "invalid browser action response");
         return Ok("ok\n".into());
@@ -247,6 +261,12 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     } = &mut command
     {
         *path = std::path::absolute(&*path)?;
+    }
+    if let Command::Browser {
+        op: crate::browser::Op::Screenshot(args),
+    } = &mut command
+    {
+        args.path = std::path::absolute(&args.path)?;
     }
     let mut bytes = serde_json::to_vec(&Request {
         command,

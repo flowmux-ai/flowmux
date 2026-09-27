@@ -492,8 +492,12 @@
     {
       "id": "B08",
       "feature": "visible viewport PNG screenshot",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-capture.md",
+        "evidence/2026-09-28/native-browser-capture-background.json"
+      ],
+      "notes": "Native WebView2 viewport PNG capture implemented with CLI-relative Unicode paths, surface/navigation/viewport guards, size bounds, two pending slots and off-thread atomic save. Hidden fixture decodes actual pixels and covers scroll/zoom, active tabs, locked overwrite, invalid paths, loading rejection, concurrent capacity and viewport-change recovery. Physical DPI/minimized/multi-monitor behavior, remote filesystems, callback-loss/close/disconnect/timeout races and real IME remain pending."
     },
     {
       "id": "B09",
@@ -959,9 +963,10 @@
         "evidence/2026-09-28/browser-dom.md",
         "evidence/2026-09-28/native-browser-dom-background.json",
         "evidence/2026-09-28/native-browser-wait-background.json",
-        "evidence/2026-09-28/native-browser-actions-background.json"
+        "evidence/2026-09-28/native-browser-actions-background.json",
+        "evidence/2026-09-28/native-browser-capture-background.json"
       ],
-      "notes": "Thirty Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based actions now have hidden evidence, except actual focus/blur. Type/press/screenshot, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending."
+      "notes": "Thirty-one Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending."
     },
     {
       "id": "G10",

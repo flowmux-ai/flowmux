@@ -134,6 +134,8 @@ pub enum Op {
         #[serde(flatten)]
         options: crate::browser_wait::Options,
     },
+    /// Save the current browser viewport as a PNG file.
+    Screenshot(crate::browser_capture::Args),
     Click(crate::browser_action::TargetArgs),
     Dblclick(crate::browser_action::TargetArgs),
     Hover(crate::browser_action::TargetArgs),
