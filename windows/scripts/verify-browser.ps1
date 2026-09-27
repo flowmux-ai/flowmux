@@ -13,7 +13,7 @@ $directory=Join-Path $PSScriptRoot ('..\dist\evidence\browser-'+[guid]::NewGuid(
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object BrowserFixture;$origin=$fixture.Origin
 $pipeName=$null;$process=$null;$hosts=@();$shells=@()
-$evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';checks=@();clipboardAccess=$false;desktopInput=$false;externalSites=$false}
+$evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';checks=@();clipboardAccess=$false;desktopInput=$false;externalSites=$false;unicodeComparison='ordinal'}
 function Request([string[]]$Arguments,[int]$Exit=0) {
     if (-not $script:pipeName) {throw 'Owned pipe required'}
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
@@ -71,12 +71,13 @@ function Start-Owned([string[]]$Launch) {
         Start-Sleep -Milliseconds 50
     } while ($true)
 }
+function Same-Text([string]$Left,[string]$Right) {return [string]::Equals($Left,$Right,[StringComparison]::Ordinal)}
 function Eval-Page([string]$Pane,[string]$Source) {return (Request @('browser','eval',('pane:'+$Pane),$Source)).result}
 function Wait-Page([string]$Pane,[string]$Suffix,[string]$Title) {
     $deadline=(Get-Date).AddSeconds(20)
     do {
         $status=Request @('browser','status',('pane:'+$Pane))
-        if (-not $status.loading -and $status.url.Contains($Suffix) -and $status.title -eq $Title) {
+        if (-not $status.loading -and $status.url.Contains($Suffix) -and (Same-Text $status.title $Title)) {
             if ((Eval-Page $Pane 'document.readyState') -eq 'complete') {return $status}
         }
         if ((Get-Date) -gt $deadline) {throw ('Page did not load: '+($status|ConvertTo-Json -Compress))}
@@ -91,12 +92,12 @@ try {
     $oneTitle='첫째 한글 한 é 😀';$twoTitle='둘째 한글 한 é 😀'
     $loaded=Wait-Page $first.pane '/one' $oneTitle
     $page=Eval-Page $first.pane '({text:document.querySelector("#label").textContent,ipc:typeof window.ipc,host:typeof window.flowmuxHost,identity:typeof window.__flowmuxIdentity,settings:typeof window.__flowmuxSettings})'
-    if ($page.text -cne $oneTitle -or $page.ipc -ne 'undefined' -or $page.host -ne 'undefined' -or $page.identity -ne 'undefined' -or $page.settings -ne 'undefined') {throw 'Unicode page or bridge isolation differs'}
+    if (-not (Same-Text $page.text $oneTitle) -or $page.ipc -ne 'undefined' -or $page.host -ne 'undefined' -or $page.identity -ne 'undefined' -or $page.settings -ne 'undefined') {throw 'Unicode page or bridge isolation differs'}
     if ([BrowserFixture]::ReadText($loaded.address_handle) -ne ($origin+'/one')) {throw 'Native address differs'}
     $evidence.checks+=@{name='native_webview_unicode_dom_address_and_no_terminal_bridge';passed=$true;page=$page}
     Request @('browser','navigate',$first.pane,($origin+'/한글?q=한#😀'))|Out-Null
     $unicode=Wait-Page $first.pane '/%ED%95%9C%EA%B8%80' $oneTitle
-    if ([BrowserFixture]::ReadText($unicode.address_handle) -ne $unicode.url -or (Eval-Page $first.pane 'decodeURI(location.href)') -cne ($origin+'/한글?q=한#😀')) {throw 'Unicode address changed codepoints'}
+    if ([BrowserFixture]::ReadText($unicode.address_handle) -ne $unicode.url -or -not (Same-Text (Eval-Page $first.pane 'decodeURI(location.href)') ($origin+'/한글?q=한#😀'))) {throw 'Unicode address changed codepoints'}
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/two'))|Out-Null
     $two=Wait-Page $first.pane '/two' $twoTitle
@@ -148,7 +149,7 @@ try {
     Eval-Page $first.pane 'window.retained="한글 한 é 😀";localStorage.setItem("browser-persist",window.retained);null'|Out-Null
     $view=(Request @('browser','status',$first.pane)).view_handle
     Request @('move-tab',$first.surface,'--to-pane',$source.pane)|Out-Null
-    if ((Eval-Page $source.pane 'window.retained') -cne '한글 한 é 😀' -or (Request @('browser','status',$source.pane)).view_handle -ne $view) {throw 'Browser move recreated document or view'}
+    if (-not (Same-Text (Eval-Page $source.pane 'window.retained') '한글 한 é 😀') -or (Request @('browser','status',$source.pane)).view_handle -ne $view) {throw 'Browser move recreated document or view'}
     $mixedSave=Request @('save-state')
     $mixed=Get-Content -Raw -Encoding UTF8 $mixedSave.path|ConvertFrom-Json
     if (@($mixed.screens.psobject.Properties).Count -ne 1 -or $mixed.screens.($first.surface) -or $mixed.shells.($first.surface)) {throw 'Mixed checkpoint confused browser and terminal'}
@@ -200,7 +201,7 @@ try {
     if (@($restored.surfaces).Count -ne 0 -or @($restored.browsers).Count -ne 1 -or $restored.browsers[0].id -ne $first.surface) {throw 'Browser-only restore lost identity'}
     $restoredPane=(Request @('identify')).pane
     Wait-Page $restoredPane '/one' $oneTitle|Out-Null
-    if ((Eval-Page $restoredPane 'localStorage.getItem("browser-persist")') -cne '한글 한 é 😀') {throw 'Isolated browser profile did not persist'}
+    if (-not (Same-Text (Eval-Page $restoredPane 'localStorage.getItem("browser-persist")') '한글 한 é 😀')) {throw 'Isolated browser profile did not persist'}
     $evidence.checks+=@{name='browser_only_checkpoint_restart_and_separate_profile_persistence';passed=$true;window=$saved.window;surface=$first.surface}
     Tree|Out-Null
     $evidence.status='passed_background_browser_subset'

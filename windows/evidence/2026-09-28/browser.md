@@ -89,3 +89,10 @@ NSIS 패키지 생성도 통과했다. 설치 프로그램은 실행하지 않�
 조회해 남은 일치 프로세스가 없음을 확인했다. 사용자 WSL flowmux PID 787은 계속 실행
 중이며 사용자 창/입력/클립보드를 조작하지 않았다. Linux/macOS 전체 live 회귀 또는
 실제 Windows IME 완료를 이 결과로 대신하지 않는다.
+
+한글 검증의 문자열 비교는 `StringComparison.Ordinal`로 보강했다. 문화권 비교가
+canonical-equivalent 문자를 같은 문자열로 취급하는 여지를 없애기 위해서다. 같은
+바이너리에서 DOM/title, decoded URL, move 뒤 JS 값 및 restart 뒤 localStorage를
+UTF-16 코드 단위로 정확히 비교했고 숨김 6개 검사군이 다시 통과했다. 결과는
+`native-browser-ordinal-background.json`, 추가 소유 PID 6개의 정리는
+`cleanup-browser-ordinal.json`에 기록했다. 실제 IME 검증과는 별개다.

@@ -422,7 +422,8 @@
       "feature": "browser tab 열기·right sibling 재사용·split",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-browser-background.json"
+        "evidence/2026-09-28/native-browser-background.json",
+        "evidence/2026-09-28/native-browser-ordinal-background.json"
       ],
       "notes": "Native WebView2 browser tabs reuse the shared right-sibling placement model and support explicit down splits. Hidden loopback verification covers source terminal identity, mixed pane moves and browser-only restore. Physical UI/IME, broader placement/lifecycle and cross-window acceptance remain pending."
     },
@@ -431,7 +432,8 @@
       "feature": "주소·title·back/forward/reload/stop·zoom",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-browser-background.json"
+        "evidence/2026-09-28/native-browser-background.json",
+        "evidence/2026-09-28/native-browser-ordinal-background.json"
       ],
       "notes": "Native address/Go, history, reload/stop, 0.5–3.0 zoom and loading/error status implemented. Native navigation IDs guard old completions. Hidden fixture verifies Unicode DOM/address text, back/forward, reload, redirect, stop recovery and network errors. Actual address IME/keyboard/button interaction, visual rendering/DPI/accessibility and HTTP/TLS breadth remain pending."
     },
@@ -458,7 +460,8 @@
       "feature": "text/value/attr/count·상태 조회·eval",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-browser-background.json"
+        "evidence/2026-09-28/native-browser-background.json",
+        "evidence/2026-09-28/native-browser-ordinal-background.json"
       ],
       "notes": "Synchronous eval and URL/title/status query implemented through WebView2 callbacks without a terminal bridge. Hidden fixture covers Unicode results, script/Promise/result-limit errors and document identity after moves. Selector/ref text/value/attr/count, asynchronous eval, all pending-request races and complete automation parity remain pending."
     },
@@ -479,7 +482,8 @@
       "feature": "session 지속/비지속·profile·북마크",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-browser-background.json"
+        "evidence/2026-09-28/native-browser-background.json",
+        "evidence/2026-09-28/native-browser-ordinal-background.json"
       ],
       "notes": "Browser URL and surface identity persist separately from terminal histories/shells. A separate persistent WebView2 browser profile retains localStorage across a hidden browser-only restart. Private/nonpersistent mode, profile selection/management, bookmarks, cookies/login/session breadth and full acceptance remain pending."
     },
@@ -932,7 +936,8 @@
       "gate": "30개 browser 명령 + UI",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-browser-background.json"
+        "evidence/2026-09-28/native-browser-background.json",
+        "evidence/2026-09-28/native-browser-ordinal-background.json"
       ],
       "notes": "Native browser foundation and eleven CLI operations have hidden loopback evidence. Complete browser command/UI parity and physical IME/DPI/accessibility acceptance remain pending."
     },
