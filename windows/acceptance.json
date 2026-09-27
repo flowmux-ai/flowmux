@@ -263,8 +263,11 @@
     {
       "id": "U02",
       "feature": "가로·세로 중첩 split·경계 resize",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-panes-background.json"
+      ],
+      "notes": "Nested divider geometry and native drag handlers implemented. Hidden Windows verification checks CLI ratios, native WebView bounds, real ConPTY sizes, invalid request invariance, inactive workspace isolation and restart persistence. Actual divider drag, very small windows, DPI and composition during resize remain pending under background-only constraint."
     },
     {
       "id": "U03",
@@ -278,8 +281,11 @@
     {
       "id": "U04",
       "feature": "pane 방향 이동·zoom/maximize",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-panes-background.json"
+      ],
+      "notes": "Directional focus and temporary maximize/restore implemented with CLI, native button and guarded fixed shortcuts. Hidden Windows verification checks hidden Korean output, 40 zoom transitions with size convergence, stable processes, structural transitions and restart restoring normal layout. Physical keyboard/button, real IME, visual focus and accessibility remain pending."
     },
     {
       "id": "U05",

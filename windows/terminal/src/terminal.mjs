@@ -9,6 +9,7 @@ import { snapshot, restore } from './history.mjs';
 import { observeCwd } from './cwd.mjs';
 import { SearchUi } from './search.mjs';
 import { OutputSearch } from './output-search.mjs';
+import { PaneShortcuts } from './pane-shortcuts.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -36,10 +37,19 @@ terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title })
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
 
 let composing = false;
+const paneShortcuts = new PaneShortcuts();
+window.addEventListener('blur', () => paneShortcuts.reset());
+terminal.textarea.addEventListener('blur', () => paneShortcuts.reset());
 terminal.textarea.addEventListener('compositionstart', () => { composing = true; });
 terminal.textarea.addEventListener('compositionend', () => { composing = false; });
 terminal.attachCustomKeyEventHandler(event => {
   input.keyEvent(event);
+  const paneAction = paneShortcuts.event(event, composing);
+  if (paneAction) {
+    event.preventDefault();
+    if (paneAction !== 'consume') send(paneAction);
+    return false;
+  }
   // Composition belongs to xterm/Windows IME. Never replay commit keys using timers.
   if (composing || event.isComposing || event.keyCode === 229) return true;
   if (event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'KeyF') {

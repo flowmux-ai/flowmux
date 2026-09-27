@@ -1,0 +1,21 @@
+
+running 17 tests
+test command::tests::context_preserves_old_ipc_commands_and_roundtrips_stable_surface ... ok
+test cwd::tests::keeps_unicode_and_punctuation_without_expansion_or_remote_io ... ok
+test model::tests::directional_focus_uses_nearest_aligned_pane_and_stops_at_edges ... ok
+test model::tests::divider_drag_respects_grab_offset_clamps_and_partitions_tiny_areas ... ok
+test model::tests::invalid_move_leaves_layout_and_focus_unchanged ... ok
+test model::tests::live_tab_move_preserves_surface_and_cwd_and_collapses_empty_sources ... ok
+test model::tests::nested_splits_partition_available_pixels_without_overlap ... ok
+test model::tests::resizing_targets_only_the_owning_split_and_rejects_invalid_requests ... ok
+test model::tests::split_keeps_original_surface_and_closing_never_removes_last_pane ... ok
+test native::session::tests::failed_spawn_releases_pseudoconsole_resources ... ok
+test native::session::tests::natural_exit_keeps_final_output_and_reaches_eof ... ok
+test native::session::tests::prompt_reports_changed_unicode_directory_through_conpty ... ok
+test native::session::tests::repeated_native_pty_close_releases_process_handles ... ok
+test native::state_store::tests::native_lock_atomic_replace_failure_and_corrupt_state_preservation ... ok
+test protocol::tests::parser_ack_releases_only_output_already_sent ... ok
+test protocol::tests::stale_surface_and_foreign_origin_cannot_write_to_a_terminal ... ok
+test state::tests::validates_whole_layout_before_restore_and_preserves_styled_korean ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.16s

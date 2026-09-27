@@ -113,6 +113,31 @@ impl Workspace {
         });
         result
     }
+
+    /// The ratio always describes the first child, including when a leaf is targeted.
+    pub fn resize(&mut self, target: PaneId, ratio: f32) -> anyhow::Result<(PaneId, f32)> {
+        anyhow::ensure!(
+            ratio.is_finite() && ratio > 0.0 && ratio < 1.0,
+            "ratio must be finite and between 0 and 1 (exclusive)"
+        );
+        fn is_split(pane: &Pane, target: PaneId) -> bool {
+            match pane {
+                Pane::Leaf { .. } => false,
+                Pane::Split {
+                    id, first, second, ..
+                } => *id == target || is_split(first, target) || is_split(second, target),
+            }
+        }
+        let split = if is_split(&self.root, target) {
+            Some(target)
+        } else {
+            self.root.parent_split_id(target)
+        }
+        .context("pane has no divider or target was not found")?;
+        let ratio = ratio.clamp(0.05, 0.95);
+        self.root.set_split_ratio(split, ratio);
+        Ok((split, ratio))
+    }
 }
 
 /// Relocate domain state only. The host retains the existing view and PTY by SurfaceId.
@@ -174,7 +199,7 @@ pub fn move_surface(
     Ok(target_ws)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -182,10 +207,65 @@ pub struct Rect {
     pub height: i32,
 }
 
+impl Rect {
+    pub fn contains(self, x: i32, y: i32) -> bool {
+        x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Divider {
+    pub split: PaneId,
+    pub direction: SplitDirection,
+    pub bounds: Rect,
+    pub parent: Rect,
+}
+
+impl Divider {
+    pub fn coordinate(self, x: i32, y: i32) -> i32 {
+        if self.direction == SplitDirection::Vertical {
+            x
+        } else {
+            y
+        }
+    }
+
+    /// Preserve the grabbed offset so pressing at either edge never jumps the split.
+    pub fn drag_ratio(self, x: i32, y: i32, offset: i32) -> Option<f32> {
+        let vertical = self.direction == SplitDirection::Vertical;
+        let start = if vertical {
+            self.parent.x
+        } else {
+            self.parent.y
+        };
+        let available = if vertical {
+            self.parent.width - self.bounds.width
+        } else {
+            self.parent.height - self.bounds.height
+        };
+        (available > 0).then(|| {
+            ((self.coordinate(x, y) - start - offset) as f32 / available as f32).clamp(0.05, 0.95)
+        })
+    }
+}
+
+#[derive(Default, Serialize)]
+pub struct Layout {
+    pub panes: Vec<(PaneId, Rect)>,
+    pub dividers: Vec<Divider>,
+}
+
 pub fn layout(pane: &Pane, area: Rect, gap: i32, out: &mut Vec<(PaneId, Rect)>) {
+    let mut result = Layout::default();
+    partition(pane, area, gap, &mut result);
+    out.extend(result.panes);
+}
+
+pub fn partition(pane: &Pane, area: Rect, gap: i32, out: &mut Layout) {
     match pane {
-        Pane::Leaf { id, .. } => out.push((*id, area)),
+        Pane::Leaf { id, .. } => out.panes.push((*id, area)),
         Pane::Split {
+            id,
             direction,
             ratio,
             first,
@@ -197,31 +277,167 @@ pub fn layout(pane: &Pane, area: Rect, gap: i32, out: &mut Vec<(PaneId, Rect)>) 
             let gap = gap.max(0).min(length.max(0));
             let available = (length - gap).max(0);
             let ratio = if ratio.is_finite() {
-                ratio.clamp(0.1, 0.9)
+                ratio.clamp(0.05, 0.95)
             } else {
                 0.5
             };
             let a = (available as f32 * ratio).round() as i32;
             let mut left = area;
             let mut right = area;
+            let mut bounds = area;
             if vertical {
                 left.width = a;
                 right.x += a + gap;
                 right.width = available - a;
+                bounds.x += a;
+                bounds.width = gap;
             } else {
                 left.height = a;
                 right.y += a + gap;
                 right.height = available - a;
+                bounds.y += a;
+                bounds.height = gap;
             }
-            layout(first, left, gap, out);
-            layout(second, right, gap, out);
+            out.dividers.push(Divider {
+                split: *id,
+                direction: *direction,
+                bounds,
+                parent: area,
+            });
+            partition(first, left, gap, out);
+            partition(second, right, gap, out);
         }
     }
+}
+
+/// Use the unmaximized layout; a hidden sibling remains a directional destination.
+pub fn neighbor(
+    panes: &[(PaneId, Rect)],
+    source: PaneId,
+    direction: crate::command::FocusDirection,
+) -> Option<PaneId> {
+    use crate::command::FocusDirection::*;
+    let source_rect = panes.iter().find(|(id, _)| *id == source)?.1;
+    panes
+        .iter()
+        .filter_map(|(id, rect)| {
+            if *id == source {
+                return None;
+            }
+            // Doubled centers retain half-pixel precision and avoid float ordering.
+            let dx = i64::from(2 * (rect.x - source_rect.x) + rect.width - source_rect.width);
+            let dy = i64::from(2 * (rect.y - source_rect.y) + rect.height - source_rect.height);
+            let aligned_y = dy.abs() < i64::from(2 * rect.height.max(source_rect.height));
+            let aligned_x = dx.abs() < i64::from(2 * rect.width.max(source_rect.width));
+            let eligible = match direction {
+                Left => dx < -2 && aligned_y,
+                Right => dx > 2 && aligned_y,
+                Up => dy < -2 && aligned_x,
+                Down => dy > 2 && aligned_x,
+            };
+            eligible.then_some((*id, dx * dx + dy * dy))
+        })
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(id, _)| id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resizing_targets_only_the_owning_split_and_rejects_invalid_requests() {
+        let mut ws = Workspace::new("project".into());
+        let left = ws.focused;
+        assert!(ws.resize(left, 0.7).is_err());
+        ws.split(SplitDirection::Vertical);
+        let bottom = ws.split(SplitDirection::Horizontal);
+        let Pane::Split { id: root, .. } = ws.root else {
+            panic!()
+        };
+        let inner = ws.root.parent_split_id(bottom).unwrap();
+        assert_eq!(ws.resize(bottom, 0.7).unwrap(), (inner, 0.7));
+        assert_eq!(ws.resize(root, 0.001).unwrap(), (root, 0.05));
+        assert_eq!(ws.resize(left, 0.999).unwrap(), (root, 0.95));
+        let before = serde_json::to_value(&ws).unwrap();
+        for ratio in [0.0, 1.0, -0.1, f32::NAN, f32::INFINITY] {
+            assert!(ws.resize(root, ratio).is_err());
+        }
+        assert!(ws.resize(PaneId::new(), 0.5).is_err());
+        assert_eq!(serde_json::to_value(&ws).unwrap(), before);
+        let Pane::Split { second, .. } = &ws.root else {
+            panic!()
+        };
+        assert!(matches!(**second, Pane::Split { ratio, .. } if ratio == 0.7));
+    }
+
+    #[test]
+    fn divider_drag_respects_grab_offset_clamps_and_partitions_tiny_areas() {
+        let mut ws = Workspace::new("project".into());
+        ws.split(SplitDirection::Vertical);
+        ws.split(SplitDirection::Horizontal);
+        for (width, height) in [(1005, 805), (1, 1), (0, 0)] {
+            let area = Rect {
+                x: 10,
+                y: 20,
+                width,
+                height,
+            };
+            let mut result = Layout::default();
+            partition(&ws.root, area, 5, &mut result);
+            let total: i32 = result
+                .panes
+                .iter()
+                .map(|(_, r)| r.width * r.height)
+                .sum::<i32>()
+                + result
+                    .dividers
+                    .iter()
+                    .map(|d| d.bounds.width * d.bounds.height)
+                    .sum::<i32>();
+            assert_eq!(total, width * height);
+            for divider in result.dividers {
+                assert!(divider.bounds.width >= 0 && divider.bounds.height >= 0);
+                if width > 10 {
+                    let (x, y) = (divider.bounds.x + 2, divider.bounds.y + 2);
+                    assert!(divider.bounds.contains(x, y));
+                    assert_eq!(divider.drag_ratio(x, y, 2), Some(0.5));
+                    assert_eq!(divider.drag_ratio(-1000, -1000, 2), Some(0.05));
+                    assert_eq!(divider.drag_ratio(5000, 5000, 2), Some(0.95));
+                } else {
+                    assert_eq!(divider.drag_ratio(10, 20, 0), None);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn directional_focus_uses_nearest_aligned_pane_and_stops_at_edges() {
+        use crate::command::FocusDirection::*;
+        let mut ws = Workspace::new("project".into());
+        let left = ws.focused;
+        let top = ws.split(SplitDirection::Vertical);
+        let bottom = ws.split(SplitDirection::Horizontal);
+        let mut panes = vec![];
+        layout(
+            &ws.root,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1005,
+                height: 805,
+            },
+            5,
+            &mut panes,
+        );
+        assert_eq!(neighbor(&panes, top, Down), Some(bottom));
+        assert_eq!(neighbor(&panes, bottom, Up), Some(top));
+        assert_eq!(neighbor(&panes, bottom, Left), Some(left));
+        assert_eq!(neighbor(&panes, top, Right), None);
+        assert_eq!(neighbor(&panes, top, Up), None);
+        assert_eq!(neighbor(&panes, left, Left), None);
+        assert_eq!(neighbor(&panes, PaneId::new(), Right), None);
+    }
 
     #[test]
     fn live_tab_move_preserves_surface_and_cwd_and_collapses_empty_sources() {

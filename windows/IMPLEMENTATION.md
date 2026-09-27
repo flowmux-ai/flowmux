@@ -172,6 +172,18 @@ Windows acceptance gate has passed yet. Hanja candidates, focus transitions,
 DPI, clipboard/Unicode-width coverage, broader TUI compatibility, additional
 failure paths, full feature parity and clean-machine deployment remain.
 
+Nested panes now expose draggable dividers and a ratio-based CLI, directional
+focus, and temporary maximize/restore. All operations retain existing terminal
+views and sessions. A hidden native test compares calculated rectangles with
+WebView bounds and actual PowerShell console dimensions, checks hidden Korean
+output, repeats 40 zoom transitions, and restores persisted nested ratios.
+Invalid ratios/targets preserve state; resizing inactive workspaces preserves
+focus. Structural changes and navigation to another pane clear zoom. Fixed
+Alt+Arrow and Ctrl+Alt+M bindings defer to composition and AltGr; event unit tests
+do not establish physical keyboard or IME acceptance. Native divider drag,
+interactive focus, minimum-size usability, DPI and accessibility remain pending.
+See [pane evidence](evidence/2026-09-28/panes.md); U02 and U04 remain partial.
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

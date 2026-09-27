@@ -1,0 +1,30 @@
+{
+  "verification": "Hidden native nested pane resize, actual WebView/ConPTY dimensions, directional focus, 40 size-converged maximize/restore transitions, hidden Korean output and persisted ratio recovery passed. Existing output-search and tab-move regressions, 12 Linux crate tests, 19 frontend tests, 17 Windows native tests, release build and Clippy passed. Installer rebuilt, not run. Physical drag/shortcuts/buttons, composition during transitions, DPI, accessibility and deployment acceptance remain pending.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 6652928,
+      "sha256": "96d3cbd9bff07a88410c4782df5dea5c22a23c696bc6130036e82a1740f08e2d"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2505216,
+      "sha256": "7cc61d426fac58a6e18872a3ad04a5a4c9031fed5feb72a72bf8a19d255eecf2"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 3037184,
+      "sha256": "e998462b9301f69ecbd80d004d40ad759272ebb67d3b58407ad7b7bfbf325037"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 1104896,
+      "sha256": "6567e66fb4dc3c88687f31afaa959f4ba7f227f7fd4cebda542cc92c9925120f"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1617601,
+      "sha256": "9557050c4b27ebcbe894ee5646a702b77ae7655df00209007323a8410fd0c88e"
+    }
+  ]
+}

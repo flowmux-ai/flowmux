@@ -58,3 +58,6 @@ Windows release build와 Clippy도 통과했다(`release-clippy-output-search.tx
 
 SSH UI, 다른 애플리케이션 창의 검색, 지속 출력 중 장시간 부하·메모리, 모든
 한글 폭·줄바꿈 조합은 별도 작업이다. 전체 구현 목표는 계속 진행 중이다.
+
+후속 pane 크기·방향 이동·최대화 단계는 [별도 검증 기록](panes.md)에 정리했다.
+검색 단계의 기존 증거와 artifact 해시는 유지했다.

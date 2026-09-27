@@ -126,6 +126,25 @@ pub enum Command {
         #[arg(value_parser = parse_id)]
         pane: Uuid,
     },
+    /// Resize a split or the immediate parent of a pane (ratio of the first child).
+    ResizePane {
+        #[arg(value_parser = parse_id)]
+        pane: Uuid,
+        #[arg(long, allow_hyphen_values = true)]
+        ratio: f32,
+    },
+    /// Focus the nearest pane in a direction within the source workspace.
+    FocusDirection {
+        #[arg(value_enum)]
+        direction: FocusDirection,
+        #[arg(long, value_parser = parse_id)]
+        pane: Option<Uuid>,
+    },
+    /// Maximize a pane, or restore its existing split layout.
+    TogglePaneZoom {
+        #[arg(value_parser = parse_id)]
+        pane: Option<Uuid>,
+    },
     FocusTab {
         #[arg(value_parser = parse_id)]
         surface: Uuid,
@@ -160,6 +179,15 @@ pub enum Command {
 pub enum Direction {
     Vertical,
     Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FocusDirection {
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 fn parse_id(text: &str) -> Result<Uuid, String> {

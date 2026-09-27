@@ -6,7 +6,7 @@ use super::{
     wide,
 };
 use crate::{
-    command::{key_bytes, Command, Direction, Launch, Request},
+    command::{key_bytes, Command, Direction, FocusDirection, Launch, Request},
     model::{self, Workspace},
     protocol::{ClientMessage, HostMessage, Identity, TERMINAL_ORIGIN},
     state::{SavedScreen, WindowState},
@@ -33,9 +33,15 @@ use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
     System::{Com::*, LibraryLoader::*},
-    UI::{HiDpi::*, Input::KeyboardAndMouse::SetFocus, WindowsAndMessaging::*},
+    UI::{
+        HiDpi::*,
+        Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture, SetFocus},
+        WindowsAndMessaging::*,
+    },
 };
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+#[path = "panes.rs"]
+mod panes;
 #[path = "search.rs"]
 mod search;
 
@@ -52,6 +58,7 @@ enum Event {
     Session(SurfaceId, SessionEvent),
     Command(Request, ipc::Reply),
     SearchUi(search::UiAction),
+    Pointer(panes::Pointer),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -82,6 +89,27 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
+        WM_LBUTTONDOWN | WM_MOUSEMOVE | WM_LBUTTONUP => {
+            let x = (lparam as u16 as i16) as i32;
+            let y = ((lparam >> 16) as u16 as i16) as i32;
+            post(Event::Pointer(match message {
+                WM_LBUTTONDOWN => panes::Pointer::Down(x, y),
+                WM_LBUTTONUP => panes::Pointer::Up(x, y),
+                _ => panes::Pointer::Move(x, y),
+            }));
+            0
+        }
+        WM_CANCELMODE | WM_CAPTURECHANGED => {
+            post(Event::Pointer(panes::Pointer::Cancel));
+            DefWindowProcW(window, message, wparam, lparam)
+        }
+        WM_SETCURSOR if lparam as u16 == HTCLIENT as u16 => {
+            if panes::set_cursor(window) {
+                1
+            } else {
+                DefWindowProcW(window, message, wparam, lparam)
+            }
+        }
         WM_SIZE => {
             post(Event::Layout);
             0
@@ -169,6 +197,7 @@ enum Action {
     MoveTabMenu,
     Find,
     SearchAll,
+    TogglePaneZoom,
     Tab(PaneId, SurfaceId),
 }
 struct Control {
@@ -203,6 +232,9 @@ struct App {
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
     controls: Vec<Control>,
+    pane_layout: model::Layout,
+    zoomed: Option<PaneId>,
+    drag: Option<panes::Drag>,
     pending_reads: HashMap<Uuid, PendingRead>,
     pending_finds: HashMap<Uuid, PendingRead>,
     search: search::Controller,
@@ -336,6 +368,9 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             active_workspace,
             surfaces: HashMap::new(),
             controls: vec![],
+            pane_layout: model::Layout::default(),
+            zoomed: None,
+            drag: None,
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             search: search::Controller::default(),
@@ -401,6 +436,7 @@ impl App {
         self.workspace().active()
     }
     fn rebuild(&mut self) -> anyhow::Result<()> {
+        self.cancel_drag();
         let mut missing = Vec::new();
         for workspace in &self.workspaces {
             for (_, _, tabs) in workspace.leaves() {
@@ -428,6 +464,7 @@ impl App {
             ("Move tab…", Action::MoveTabMenu),
             ("Find", Action::Find),
             ("Search all", Action::SearchAll),
+            ("Maximize pane", Action::TogglePaneZoom),
         ] {
             self.button(name, action)?;
         }
@@ -592,18 +629,17 @@ impl App {
         let px = |value: i32| (value as f64 * scale).round() as i32;
         let sidebar = px(185).min((client.right / 3).max(0));
         let bar = px(34);
-        let mut areas = Vec::new();
-        model::layout(
-            &self.workspace().root,
-            model::Rect {
-                x: sidebar + px(4),
-                y: bar + px(4),
-                width: (client.right - sidebar - px(8)).max(1),
-                height: (client.bottom - bar - px(8)).max(1),
-            },
-            px(5),
-            &mut areas,
-        );
+        let (mut geometry, content) = self.geometry(self.active_workspace)?;
+        if let Some(pane) = self.zoomed {
+            geometry.panes = vec![(pane, content)];
+            geometry.dividers.clear();
+        }
+        panes::cursor_dividers(if self.background_test {
+            &[]
+        } else {
+            &geometry.dividers
+        });
+        let areas = &geometry.panes;
         let visible: HashMap<_, _> = areas
             .iter()
             .map(|(pane, area)| {
@@ -621,7 +657,7 @@ impl App {
                 surface.visible = show;
             }
         }
-        for (pane, area) in &areas {
+        for (pane, area) in areas {
             let id = self.workspace().root.active_surface_id(*pane).unwrap();
             if let Some(surface) = self.surfaces.get(&id) {
                 surface.view.set_bounds(bounds(model::Rect {
@@ -641,7 +677,12 @@ impl App {
                     px(32),
                 ),
                 Action::Tab(pane, _) => {
-                    let area = areas.iter().find(|(id, _)| *id == pane).unwrap().1;
+                    let Some((_, area)) = areas.iter().find(|(id, _)| *id == pane) else {
+                        unsafe {
+                            ShowWindow(control.hwnd, SW_HIDE);
+                        }
+                        continue;
+                    };
                     let offset = tab_positions.entry(pane).or_default();
                     let count = self.workspace().root.surface_count(pane).unwrap_or(1) as i32;
                     let width = (area.width / count).min(px(200)).max(1);
@@ -652,6 +693,17 @@ impl App {
                 _ => (px(5 + index as i32 * 130), px(2), px(124), bar - px(2)),
             };
             unsafe {
+                if matches!(control.action, Action::TogglePaneZoom) {
+                    SetWindowTextW(
+                        control.hwnd,
+                        wide(if self.zoomed.is_some() {
+                            "Restore pane"
+                        } else {
+                            "Maximize pane"
+                        })
+                        .as_ptr(),
+                    );
+                }
                 SetWindowPos(
                     control.hwnd,
                     std::ptr::null_mut(),
@@ -659,10 +711,11 @@ impl App {
                     y,
                     width,
                     height,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 );
             }
         }
+        self.pane_layout = geometry;
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
@@ -693,7 +746,11 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
-            Event::Layout => self.layout()?,
+            Event::Layout => {
+                self.cancel_drag();
+                self.layout()?;
+            }
+            Event::Pointer(pointer) => self.pointer(pointer)?,
             Event::Close => self.request_close(CloseRequest::Native)?,
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
@@ -854,6 +911,18 @@ impl App {
                     {
                         self.workspace_mut().focused = pane;
                     }
+                }
+            }
+            ClientMessage::FocusDirection { direction } => {
+                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
+                {
+                    self.focus_direction(id, direction)?;
+                }
+            }
+            ClientMessage::TogglePaneZoom => {
+                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
+                {
+                    self.toggle_zoom(id)?;
                 }
             }
             ClientMessage::Title { title } => {
@@ -1277,6 +1346,9 @@ impl App {
     }
     fn select(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         let (workspace, pane, _) = self.locate(id).context("surface not found")?;
+        if workspace != self.active_workspace || self.zoomed.is_some_and(|zoomed| zoomed != pane) {
+            self.zoomed = None;
+        }
         self.active_workspace = workspace;
         self.workspace_mut().focused = pane;
         self.workspace_mut().root.set_active_surface(pane, id);
@@ -1284,6 +1356,7 @@ impl App {
     }
     fn move_tab(&mut self, surface: SurfaceId, target: PaneId, index: usize) -> anyhow::Result<()> {
         self.active_workspace = model::move_surface(&mut self.workspaces, surface, target, index)?;
+        self.zoomed = None;
         // No surface is removed or recreated: its WebView, parser, IME target and
         // native process stay attached to the same identity throughout the move.
         self.rebuild()
@@ -1361,18 +1434,26 @@ impl App {
         );
         match action {
             Action::NewWorkspace => {
+                self.zoomed = None;
                 let cwd = self.locate(self.active()).unwrap().2;
                 self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
             }
-            Action::Workspace(index) => self.active_workspace = index,
+            Action::Workspace(index) => {
+                if self.active_workspace != index {
+                    self.zoomed = None;
+                }
+                self.active_workspace = index;
+            }
             Action::NewTab => {
                 self.workspace_mut().new_tab();
             }
             Action::Vertical => {
+                self.zoomed = None;
                 self.workspace_mut().split(SplitDirection::Vertical);
             }
             Action::Horizontal => {
+                self.zoomed = None;
                 self.workspace_mut().split(SplitDirection::Horizontal);
             }
             Action::CloseTab => {
@@ -1380,6 +1461,7 @@ impl App {
                     .workspace_mut()
                     .close_active()
                     .context("cannot close the final tab")?;
+                self.zoomed = None;
                 self.surfaces.remove(&surface);
                 if self
                     .pending_save
@@ -1413,6 +1495,7 @@ impl App {
             }
             Action::MoveTabMenu => return self.move_menu(),
             Action::SearchAll => return self.search_ui(search::UiAction::Show),
+            Action::TogglePaneZoom => return self.toggle_zoom(self.active()),
             Action::Find => {
                 // The native button explicitly opens the current terminal's find bar.
                 // Background test hosts never request desktop or DOM focus.
@@ -1423,6 +1506,9 @@ impl App {
                 return Ok(());
             }
             Action::Tab(pane, surface) => {
+                if self.zoomed.is_some_and(|zoomed| zoomed != pane) {
+                    self.zoomed = None;
+                }
                 self.workspace_mut().focused = pane;
                 self.workspace_mut().root.set_active_surface(pane, surface);
             }
@@ -1468,7 +1554,7 @@ impl App {
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1477,9 +1563,12 @@ impl App {
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
+                    "visible":surface.visible,
+                    "bounds":surface.view.bounds().ok().map(|rect| { let p = rect.position.to_physical::<i32>(1.0); let s = rect.size.to_physical::<u32>(1.0); json!({"x":p.x,"y":p.y,"width":s.width,"height":s.height}) }),
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
+                        "zoomed_pane":self.zoomed,"layout":self.pane_layout,
                         "background_testing":self.background_test,"window_handle":self.window as usize,
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
                             "saving":self.pending_save.is_some(),"error":self.state_error}}),
@@ -1602,23 +1691,34 @@ impl App {
                 let id = self.target(None, caller)?;
                 let cwd = cwd.unwrap_or_else(|| self.locate(id).unwrap().2);
                 anyhow::ensure!(cwd.is_dir(), "working directory does not exist");
+                self.zoomed = None;
                 self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
                 self.rebuild()?;
             }
             Command::FocusPane { pane } => {
                 let id = self.target(Some(pane), caller)?;
-                let (workspace, pane, _) = self.locate(id).unwrap();
-                self.active_workspace = workspace;
-                self.workspace_mut().focused = pane;
+                self.select(id)?;
                 self.rebuild()?;
+            }
+            Command::ResizePane { pane, ratio } => {
+                let (split, ratio) = self.resize_pane(PaneId(pane), ratio)?;
+                return Ok(Some(json!({"ok":true,"split":split,"ratio":ratio})));
+            }
+            Command::FocusDirection { direction, pane } => {
+                let id = self.target(pane, caller)?;
+                let target = self.focus_direction(id, direction)?;
+                return Ok(Some(
+                    json!({"ok":true,"focused":target.is_some(),"pane":target}),
+                ));
+            }
+            Command::TogglePaneZoom { pane } => {
+                self.toggle_zoom(self.target(pane, caller)?)?;
+                return Ok(Some(json!({"ok":true,"zoomed_pane":self.zoomed})));
             }
             Command::FocusTab { surface } | Command::CloseTab { surface } => {
                 let id = SurfaceId(surface);
-                let (workspace, pane, _) = self.locate(id).context("surface not found")?;
-                self.active_workspace = workspace;
-                self.workspace_mut().focused = pane;
-                self.workspace_mut().root.set_active_surface(pane, id);
+                self.select(id)?;
                 if matches!(command, Command::CloseTab { .. }) {
                     self.action(Action::CloseTab)?;
                 } else {

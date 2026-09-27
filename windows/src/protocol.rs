@@ -41,6 +41,10 @@ pub enum ClientMessage {
         sequence: u64,
     },
     Focus,
+    FocusDirection {
+        direction: crate::command::FocusDirection,
+    },
+    TogglePaneZoom,
     Title {
         title: String,
     },

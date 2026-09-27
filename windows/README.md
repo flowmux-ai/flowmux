@@ -58,6 +58,33 @@ Inside a terminal, commands with an omitted target resolve its stable surface ID
 including after a move or while hidden. `identify` returns its current location;
 the shell's inherited pane/workspace environment variables still describe spawn
 time and cannot be rewritten in a running child process.
+
+Drag a divider to resize nested panes. **Alt+Arrow** focuses the nearest pane in
+that direction; **Ctrl+Alt+M** or **Maximize pane / Restore pane** toggles the
+focused pane's size. Shortcuts defer to active IME composition and AltGr input.
+Maximizing hides siblings while their terminals continue processing output.
+Restoring reuses the original split ratios. Focusing a different pane, changing
+workspace, splitting, closing, moving a tab or resizing that workspace restores
+the split layout. A one-pane workspace is already full size.
+
+```powershell
+flowmuxctl.exe resize-pane pane:<id> --ratio 0.6
+flowmuxctl.exe focus-direction left --pane pane:<id>
+flowmuxctl.exe toggle-pane-zoom pane:<id>
+```
+
+`resize-pane` accepts a split ID or a leaf pane's immediate parent. The ratio is
+the **first** child's width/height, including when targeting the second child.
+Finite ratios strictly between 0 and 1 are accepted and clamped to 0.05–0.95.
+Resizing an inactive workspace preserves the active workspace and focus.
+Omitted navigation/zoom targets use the calling surface's current pane.
+Directional navigation with no neighbor makes no change. Ratios persist across
+restart; maximization is temporary and restarts with the ordinary split layout.
+`tree` reports `zoomed_pane`, pane/divider rectangles and each WebView's bounds and
+controller visibility (a hidden test host's parent window still stays hidden).
+Native drag, keyboard/IME transitions and DPI acceptance remain pending;
+`scripts/verify-panes.ps1` tests the shared behavior through a hidden native host.
+
 `read-screen --surface` reads an inactive tab without activating it. Its result
 waits for xterm to parse the captured output sequence; physical row breaks are
 preserved, including wraps in narrow panes.
