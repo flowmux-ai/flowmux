@@ -60,6 +60,39 @@ the window state before repeating a mutation. Commands are never automatically
 retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
+`paste` supplies explicit text to a terminal; it never reads the system clipboard.
+Unlike `send-keys`, it uses xterm's paste operation after previously received PTY
+output has been parsed. LF and CRLF become CR, and the current bracketed-paste
+mode controls the surrounding `ESC[200~` / `ESC[201~` sequences. Unicode codepoints
+are preserved without NFC/NFD normalization. Literal control sequences in the
+text are preserved too; bracketed paste is not a content sanitizer.
+
+```powershell
+flowmuxctl.exe paste --surface surface:<id> -- "한글 입력"
+flowmuxctl.exe paste --pane pane:<id> -- "first`nsecond"
+```
+
+Omitting the target follows the calling surface, or the active tab for an
+external caller. An explicit inactive surface retains focus and its own mode.
+The UTF-8 text limit is 128 KiB, excluding automatically added brackets; NUL,
+invalid Unicode, unavailable input and composition in progress are rejected.
+Empty text is a no-op. The CLI reports `accepted_bytes`, `bracketed`, `sequence`
+and `delivery: queued` after the native input queue accepts the complete payload.
+That receipt does not prove a shell consumed or executed it. A terminal permits
+one pending CLI paste, with a 12-second parser deadline; expired replies never
+inject input. As with other mutations, a lost IPC reply after queueing must not
+be automatically retried. Windows command-line limits still apply to CLI text.
+
+Browser paste events within the terminal use the same bounded xterm path, once
+per event, using its currently parsed mode. They do not pass through the
+Shift+Enter key mapping. Rejection appears inside the terminal without moving
+focus. The Find field retains its own text editing. Paste during IME composition
+and xterm's deferred finalization is rejected without committing, cancelling or
+replaying the composition.
+Desktop clipboard/menu/shortcut behavior and real IME interaction remain pending;
+the hidden verifier uses explicit test text and never accesses the OS clipboard.
+See [paste evidence](evidence/2026-09-28/paste.md).
+
 The installer includes three entry points. **flowmux.exe** is the GUI target
 for desktop shortcuts. **flowmux.com** is a console executable: with a command
 it uses the same IPC client as **flowmuxctl.exe**, and without a command it
@@ -429,6 +462,7 @@ powershell -NoProfile -File windows/scripts/verify-settings.ps1 -BuildDirectory 
 powershell -NoProfile -File windows/scripts/verify-shells.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-entrypoints.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-window-lifetime.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-paste.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Output } from './output.mjs';
+import { Paste } from './paste.mjs';
 
 test('split Korean UTF-8 stays bytes and screen waits for parser completion', () => {
   const callbacks = [], writes = [], replies = [];
@@ -19,4 +20,26 @@ test('split Korean UTF-8 stays bytes and screen waits for parser completion', ()
   assert.deepEqual(Buffer.concat(writes), Buffer.from(bytes));
   assert.deepEqual(replies.at(-1), { type: 'screen', request: 'read', sequence: 2, text: '한글' });
   assert.throws(() => output.receive({ type: 'output', sequence: 2, data: '' }), /Out-of-order/);
+});
+
+test('paste waits for pending mode output to finish parsing and emits only one outcome', () => {
+  const callbacks = [], replies = [], modes = [], calls = [];
+  const terminal = { options: {}, modes: { bracketedPasteMode: false },
+    write: (_bytes, callback) => callbacks.push(callback),
+    paste: text => { calls.push(text); modes.push(terminal.modes.bracketedPasteMode); paste.data('xterm-result'); } };
+  const paste = new Paste(terminal, () => null);
+  const output = new Output(terminal, message => replies.push(message), null, null, null, null, paste);
+  output.receive({ type: 'output', sequence: 1, data: 'QQ==' });
+  output.receive({ type: 'paste', after: 2, request: 'paste', text: '한글' });
+  output.receive({ type: 'output', sequence: 2, data: 'Qg==' });
+  callbacks[0]();
+  assert.deepEqual(calls, []);
+  terminal.modes.bracketedPasteMode = true;
+  callbacks[1]();
+  output.flush();
+  assert.deepEqual(modes, [true]);
+  assert.deepEqual(calls, ['한글']);
+  assert.deepEqual(replies.at(-1), { type: 'pasted', request: 'paste', sequence: 2,
+    outcome: { status: 'ok', data: 'xterm-result', bracketed: true } });
+  assert.equal(replies.filter(r => r.type === 'pasted').length, 1);
 });

@@ -1,0 +1,175 @@
+> flowmux-windows-terminal@0.10.1 test
+> node --test src/*.test.mjs
+
+TAP version 13
+# Subtest: local Windows OSC paths preserve Korean, combining characters and delimiters
+ok 1 - local Windows OSC paths preserve Korean, combining characters and delimiters
+  ---
+  duration_ms: 0.870092
+  type: 'test'
+  ...
+# Subtest: history replay cannot change cwd; unrelated OSC 9 remains available to other handlers
+ok 2 - history replay cannot change cwd; unrelated OSC 9 remains available to other handlers
+  ---
+  duration_ms: 0.673114
+  type: 'test'
+  ...
+# Subtest: history truncates complete styled rows by UTF-8 size and excludes process modes
+ok 3 - history truncates complete styled rows by UTF-8 size and excludes process modes
+  ---
+  duration_ms: 8.883758
+  type: 'test'
+  ...
+# Subtest: restore finishes only after both parser callbacks and moves history out of the viewport
+ok 4 - restore finishes only after both parser callbacks and moves history out of the viewport
+  ---
+  duration_ms: 0.684684
+  type: 'test'
+  ...
+# Subtest: snapshots wait for parsed output and errors are attached to the request
+ok 5 - snapshots wait for parsed output and errors are attached to the request
+  ---
+  duration_ms: 0.372346
+  type: 'test'
+  ...
+# Subtest: Shift+Enter preserves xterm commit order and never invents an Enter for an IME confirmation
+ok 6 - Shift+Enter preserves xterm commit order and never invents an Enter for an IME confirmation
+  ---
+  duration_ms: 1.491056
+  type: 'test'
+  ...
+# Subtest: rapid repeated Enter preserves the exact event count
+ok 7 - rapid repeated Enter preserves the exact event count
+  ---
+  duration_ms: 0.262818
+  type: 'test'
+  ...
+# Subtest: literal case folding maps expanded characters back to the original text
+ok 8 - literal case folding maps expanded characters back to the original text
+  ---
+  duration_ms: 1.182919
+  type: 'test'
+  ...
+# Subtest: wide soft-wrap padding is excluded from matching and mapped back to cells
+ok 9 - wide soft-wrap padding is excluded from matching and mapped back to cells
+  ---
+  duration_ms: 2.448557
+  type: 'test'
+  ...
+# Subtest: 500-line pages count all matches without retaining markers for omitted results
+ok 10 - 500-line pages count all matches without retaining markers for omitted results
+  ---
+  duration_ms: 10.021126
+  type: 'test'
+  ...
+# Subtest: append is allowed; rewritten, trimmed, resized and cancelled references are rejected
+ok 11 - append is allowed; rewritten, trimmed, resized and cancelled references are rejected
+  ---
+  duration_ms: 0.884602
+  type: 'test'
+  ...
+# Subtest: cancel or changed output during yielded scanning cannot publish mixed results
+ok 12 - cancel or changed output during yielded scanning cannot publish mixed results
+  ---
+  duration_ms: 6.259171
+  type: 'test'
+  ...
+# Subtest: split Korean UTF-8 stays bytes and screen waits for parser completion
+ok 13 - split Korean UTF-8 stays bytes and screen waits for parser completion
+  ---
+  duration_ms: 2.429353
+  type: 'test'
+  ...
+# Subtest: paste waits for pending mode output to finish parsing and emits only one outcome
+ok 14 - paste waits for pending mode output to finish parsing and emits only one outcome
+  ---
+  duration_ms: 0.497365
+  type: 'test'
+  ...
+# Subtest: pane navigation selects directions and prevents repeated zoom toggles
+ok 15 - pane navigation selects directions and prevents repeated zoom toggles
+  ---
+  duration_ms: 1.207469
+  type: 'test'
+  ...
+# Subtest: composition, AltGr and non-navigation keys retain normal terminal handling
+ok 16 - composition, AltGr and non-navigation keys retain normal terminal handling
+  ---
+  duration_ms: 0.312797
+  type: 'test'
+  ...
+# Subtest: paste bypasses Shift+Enter and is captured once without ordinary input duplication
+ok 17 - paste bypasses Shift+Enter and is captured once without ordinary input duplication
+  ---
+  duration_ms: 1.604925
+  type: 'test'
+  ...
+# Subtest: composition, restoration and disabled input reject without invoking xterm or replaying later
+ok 18 - composition, restoration and disabled input reject without invoking xterm or replaying later
+  ---
+  duration_ms: 0.357057
+  type: 'test'
+  ...
+# Subtest: UTF-8 bounds, invalid surrogates and NUL fail atomically; decomposition is preserved
+ok 19 - UTF-8 bounds, invalid surrogates and NUL fail atomically; decomposition is preserved
+  ---
+  duration_ms: 7.371551
+  type: 'test'
+  ...
+# Subtest: DOM handler consumes the default paste once; missing or cancelled clipboard events never paste
+ok 20 - DOM handler consumes the default paste once; missing or cancelled clipboard events never paste
+  ---
+  duration_ms: 0.328927
+  type: 'test'
+  ...
+# Subtest: failed or multiple xterm emissions do not leak partial input and next paste can recover
+ok 21 - failed or multiple xterm emissions do not leak partial input and next paste can recover
+  ---
+  duration_ms: 0.309377
+  type: 'test'
+  ...
+# Subtest: paste stays blocked through xterm deferred composition finalization without replaying text
+ok 22 - paste stays blocked through xterm deferred composition finalization without replaying text
+  ---
+  duration_ms: 41.384141
+  type: 'test'
+  ...
+# Subtest: IME confirmation and cancellation never navigate or close the find bar
+ok 23 - IME confirmation and cancellation never navigate or close the find bar
+  ---
+  duration_ms: 1.916582
+  type: 'test'
+  ...
+# Subtest: invalid regex clears stale selection; remote finds preserve focus and options
+ok 24 - invalid regex clears stale selection; remote finds preserve focus and options
+  ---
+  duration_ms: 1.08349
+  type: 'test'
+  ...
+# Subtest: find waits for completed terminal parsing and returns that sequence
+ok 25 - find waits for completed terminal parsing and returns that sequence
+  ---
+  duration_ms: 0.462156
+  type: 'test'
+  ...
+# Subtest: bounded search selection never cuts an emoji surrogate pair in the Rust bridge
+ok 26 - bounded search selection never cuts an emoji surrogate pair in the Rust bridge
+  ---
+  duration_ms: 0.190709
+  type: 'test'
+  ...
+# Subtest: settings defer and coalesce across composition/restore without focus or input
+ok 27 - settings defer and coalesce across composition/restore without focus or input
+  ---
+  duration_ms: 0.768202
+  type: 'test'
+  ...
+1..27
+# tests 27
+# suites 0
+# pass 27
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 173.985172

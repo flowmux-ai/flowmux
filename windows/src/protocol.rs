@@ -37,6 +37,11 @@ pub enum ClientMessage {
     Input {
         data: String,
     },
+    Pasted {
+        request: Option<Uuid>,
+        sequence: u64,
+        outcome: crate::paste::Outcome,
+    },
     BinaryInput {
         data: String,
     },
@@ -160,7 +165,12 @@ pub enum HostMessage {
     },
     Focus,
     Paste {
+        request: Uuid,
+        after: u64,
         text: String,
+    },
+    PasteResult {
+        error: Option<String>,
     },
     Exit {
         code: u32,

@@ -7,9 +7,10 @@
       "feature": "한글 완성형 표시·붙여넣기",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-ime-bundled-conpty.json"
+        "evidence/2026-09-27/native-ime-bundled-conpty.json",
+        "evidence/2026-09-28/native-paste-background.json"
       ],
-      "notes": "One Windows/IME/runtime combination verified; full review acceptance remains open."
+      "notes": "Previous real IME evidence covers one Windows/IME/runtime combination. Hidden explicit-text paste now preserves completed Hangul, decomposed jamo and emoji exactly at pre-ConPTY and ReadConsoleW boundaries. This is not new OS clipboard or real IME acceptance."
     },
     {
       "id": "I02",
@@ -147,14 +148,20 @@
     {
       "id": "T08",
       "feature": "선택·더블클릭·복사·붙여넣기",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-paste-background.json"
+      ],
+      "notes": "Bounded terminal paste path and explicit-text CLI use xterm once, preserve Unicode, reject composition/restore/disabled input, and avoid Shift+Enter rewriting. Twelve hidden WebView2/ConPTY paste checks pass; no desktop clipboard was accessed. Actual clipboard shortcuts/menu, mouse selection/double-click, redraw copy cache and full IME acceptance remain pending."
     },
     {
       "id": "T09",
       "feature": "bracketed paste",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-paste-background.json"
+      ],
+      "notes": "CLI paste waits for prior PTY output parsing and uses xterm current bracketed-paste mode. Hidden native tests verify mode on/off, multiline Unicode, empty no-op, 128 KiB boundary and inactive-surface routing at both input boundaries. Literal controls remain literal; this is not sanitization. Desktop clipboard, all timeout/close/queue races, shell/TUI interoperability and broad IME acceptance remain pending."
     },
     {
       "id": "T10",

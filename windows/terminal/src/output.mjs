@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Read barriers resolve only after xterm's parser callback, including hidden tabs.
 export class Output {
-  constructor(terminal, send, serialize, find, changed, outputSearch) {
+  constructor(terminal, send, serialize, find, changed, outputSearch, paste) {
     this.terminal = terminal;
     this.send = send;
     this.serialize = serialize;
     this.find = find;
     this.changed = changed;
     this.outputSearch = outputSearch;
+    this.paste = paste;
     this.received = 0;
     this.parsed = 0;
     this.pending = [];
@@ -27,7 +28,7 @@ export class Output {
     } else if (message.type === 'cancel_search') {
       this.outputSearch.cancel(message.search);
       this.pending = this.pending.filter(p => p.search !== message.search);
-    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit'].includes(message.type)) {
+    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit', 'paste'].includes(message.type)) {
       this.pending.push(message);
       this.flush();
     }
@@ -43,6 +44,8 @@ export class Output {
           lines.push(buffer.getLine(y)?.translateToString(true) ?? '');
         }
         this.send({ type: 'screen', request: message.request, sequence: this.parsed, text: lines.join('\n') });
+      } else if (message.type === 'paste') {
+        this.send({ type: 'pasted', request: message.request, sequence: this.parsed, outcome: this.paste.run(message.text) });
       } else if (message.type === 'find') {
         this.send({ type: 'found', request: message.request, sequence: this.parsed, result: this.find(message) });
       } else if (message.type === 'search_buffer') {

@@ -45,6 +45,8 @@ use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 mod appearance;
 #[path = "panes.rs"]
 mod panes;
+#[path = "paste.rs"]
+mod paste;
 #[path = "search.rs"]
 mod search;
 #[path = "shells.rs"]
@@ -289,6 +291,7 @@ struct App {
     metadata: Option<workspaces::Panel>,
     pending_reads: HashMap<Uuid, PendingRead>,
     pending_finds: HashMap<Uuid, PendingRead>,
+    pending_pastes: HashMap<Uuid, PendingRead>,
     search: search::Controller,
     closing: bool,
     background_test: bool,
@@ -462,6 +465,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             metadata: None,
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
+            pending_pastes: HashMap::new(),
             search: search::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
@@ -902,6 +906,16 @@ impl App {
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
                 self.search_tick()?;
+                self.pending_pastes.retain(|_, request| {
+                    if request.started.elapsed() > Duration::from_secs(12) {
+                        let _ = request.reply.try_send(
+                            json!({"error":"paste request expired before input was queued"}),
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.pending_reads.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
@@ -1038,6 +1052,11 @@ impl App {
                 }
             }
             ClientMessage::Input { data } => self.session(id)?.input(data.into_bytes())?,
+            ClientMessage::Pasted {
+                request,
+                sequence,
+                outcome,
+            } => self.pasted(id, request, sequence, outcome)?,
             ClientMessage::BinaryInput { data } => {
                 anyhow::ensure!(
                     data.chars().all(|c| c as u32 <= 255),
@@ -1631,6 +1650,16 @@ impl App {
                 true
             }
         });
+        self.pending_pastes.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed before paste was queued"}));
+                false
+            } else {
+                true
+            }
+        });
         self.pending_finds.retain(|_, request| {
             if request.surface == surface {
                 let _ = request
@@ -1783,7 +1812,7 @@ impl App {
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1899,6 +1928,19 @@ impl App {
             }
             Command::SearchOpen { search, index } => {
                 self.open_search(search, index, Some(reply))?;
+                return Ok(None);
+            }
+            Command::Paste {
+                text,
+                pane,
+                surface,
+            } => {
+                anyhow::ensure!(
+                    pane.is_none() || surface.is_none(),
+                    "choose either pane or surface"
+                );
+                let id = self.target(pane, surface.map(SurfaceId).or(caller))?;
+                self.begin_paste(id, text, reply)?;
                 return Ok(None);
             }
             Command::SendKeys { pane, text } => self

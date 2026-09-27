@@ -217,6 +217,16 @@ pub enum Command {
         search: Uuid,
         index: usize,
     },
+    /// Paste explicit text using the terminal's current bracketed-paste mode.
+    /// Does not access the system clipboard. Success means queued, not consumed.
+    Paste {
+        text: String,
+        #[arg(long, value_parser = parse_id, conflicts_with = "surface")]
+        pane: Option<Uuid>,
+        /// Target an inactive tab without changing focus.
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
+    },
     SendKeys {
         #[arg(value_parser = parse_id)]
         pane: Uuid,

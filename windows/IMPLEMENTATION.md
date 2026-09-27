@@ -297,6 +297,18 @@ after dispatch, detached existing tabs, window geometry, sleep/resume and full
 multiwindow acceptance remain pending. See
 [window lifetime evidence](evidence/2026-09-28/window-lifetime.md).
 
+Windows explicit-text `paste` now waits for terminal output parsing before
+using xterm's current bracketed-paste mode. Browser terminal paste events share
+the bounded capture path and avoid duplicate input and the Shift+Enter mapping.
+The host acknowledges one complete native queue submission; closed, busy,
+expired and invalid requests fail without replay. Unicode is not normalized;
+xterm converts LF/CRLF to CR. A hidden WebView2/ConPTY probe compares actual
+UTF-8 console input with pre-ConPTY bytes, including mode on/off, 128 KiB text,
+decomposed Hangul, emoji and inactive-tab routing. The verifier never uses the
+desktop clipboard or OS input. Actual clipboard/selection/menu/IME acceptance,
+all queue/timeout races and shell/TUI paste behavior remain open. T08 and T09
+are partial. See [paste evidence](evidence/2026-09-28/paste.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

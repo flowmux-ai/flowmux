@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { Output } from './output.mjs';
 import { Input } from './input.mjs';
+import { Paste } from './paste.mjs';
 import { snapshot, restore } from './history.mjs';
 import { observeCwd } from './cwd.mjs';
 import { SearchUi } from './search.mjs';
@@ -26,18 +27,22 @@ terminal.loadAddon(fit); terminal.loadAddon(serialize);
 terminal.open(document.getElementById('terminal'));
 const find = new SearchUi(terminal, () => new SearchAddon(), document);
 const outputSearch = new OutputSearch(terminal, send);
+let restoring = false, composing = false;
+const paste = new Paste(terminal, () => composing ? 'Finish composing text before pasting.'
+  : restoring ? 'Terminal history is being restored.' : null);
 const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message),
-  () => { find.invalidate(); outputSearch.changed(); }, outputSearch);
+  () => { find.invalidate(); outputSearch.changed(); }, outputSearch, paste);
 const input = new Input(data => send({ type: 'input', data }));
-let restoring = false;
 observeCwd(terminal, send, () => restoring);
-terminal.onData(data => { if (!restoring) input.data(data); });
+terminal.onData(data => { if (!paste.data(data) && !restoring) input.data(data); });
+document.getElementById('terminal').addEventListener('paste', event => paste.event(event, outcome => {
+  send({ type: 'pasted', request: null, sequence: output.parsed, outcome });
+}), true);
 terminal.onBinary(data => { if (!restoring) send({ type: 'binary_input', data }); });
 terminal.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
 terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title }); });
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
 
-let composing = false;
 const settings = new Settings(terminal, () => {
   if (document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
 }, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document);
@@ -45,9 +50,12 @@ const paneShortcuts = new PaneShortcuts();
 window.addEventListener('blur', () => paneShortcuts.reset());
 terminal.textarea.addEventListener('blur', () => paneShortcuts.reset());
 terminal.textarea.addEventListener('compositionstart', () => { composing = true; });
-terminal.textarea.addEventListener('compositionend', () => { composing = false; queueMicrotask(() => settings.flush()); });
+terminal.textarea.addEventListener('compositionend', () => {
+  paste.settleComposition(); composing = false; queueMicrotask(() => settings.flush());
+});
 terminal.attachCustomKeyEventHandler(event => {
   input.keyEvent(event);
+  if (event.type === 'keydown' && event.keyCode === 229) paste.settleComposition();
   const paneAction = paneShortcuts.event(event, composing);
   if (paneAction) {
     event.preventDefault();
@@ -84,7 +92,9 @@ window.flowmuxHost = message => {
       if (message.commit) { find.close(false); fit.fit(); }
       output.receive(message);
     }
-    else if (message.type === 'paste') terminal.paste(message.text);
+    else if (message.type === 'paste_result') {
+      document.getElementById('input-status').textContent = message.error ? `Paste failed: ${message.error}` : '';
+    }
     else if (message.type === 'shell_status') {
       const status=document.getElementById('status');
       status.textContent=message.error ? `Shell could not start: ${message.error} ` : '';
