@@ -1,0 +1,8 @@
+   Compiling windows-sys v0.61.2
+   Compiling anstyle-wincon v3.0.11
+   Compiling anstyle-query v1.1.5
+   Compiling anstream v1.0.0
+   Compiling clap_builder v4.6.7
+   Compiling clap v4.6.7
+   Compiling flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+    Finished `release` profile [optimized] target(s) in 46.60s

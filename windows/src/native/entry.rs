@@ -2,6 +2,7 @@
 //! Console entry points never open diagnostic dialogs. The desktop shortcut
 //! targets the GUI executable; flowmux.com provides normal shell wait semantics.
 use crate::command::{parse_entry, Cli, Invocation};
+use crate::window_launch::{LaunchContext, MAX_ENV_UNITS};
 use anyhow::Context;
 use clap::Parser;
 use std::io::Write;
@@ -118,9 +119,86 @@ fn launch_command(
     Ok(out)
 }
 
-fn launch_gui(arguments: &[std::ffi::OsString]) -> anyhow::Result<u32> {
+fn capture_launch(arguments: &[std::ffi::OsString]) -> anyhow::Result<LaunchContext> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::Environment::{
+        FreeEnvironmentStringsW, GetEnvironmentStringsW,
+    };
+    let raw = unsafe { GetEnvironmentStringsW() };
+    anyhow::ensure!(!raw.is_null(), "Cannot read launch environment");
+    let mut environment = Vec::new();
+    for index in 0..MAX_ENV_UNITS {
+        environment.push(unsafe { *raw.add(index) });
+        if environment.ends_with(&[0, 0]) {
+            break;
+        }
+    }
+    unsafe {
+        FreeEnvironmentStringsW(raw);
+    }
+    let context = LaunchContext {
+        arguments: arguments
+            .iter()
+            .map(|a| a.encode_wide().collect())
+            .collect(),
+        directory: std::env::current_dir()?.as_os_str().encode_wide().collect(),
+        environment,
+    };
+    context.validate()?;
+    Ok(context)
+}
+
+fn request_gui(arguments: &[std::ffi::OsString]) -> anyhow::Result<u32> {
+    let context = capture_launch(arguments)?;
+    if let Some(pipe) = std::env::var_os("FLOWMUX_PIPE_NAME") {
+        // Route only to the originating native host. Falling back after a
+        // timeout/stale endpoint could duplicate a window or inherit its job.
+        let pipe = pipe
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("Invalid FLOWMUX_PIPE_NAME"))?;
+        let surface =
+            std::env::var("FLOWMUX_SURFACE_ID").context("Missing Windows calling surface")?;
+        uuid::Uuid::parse_str(&surface).context("Invalid Windows calling surface")?;
+        let result = super::ipc::request(Cli {
+            pipe: Some(pipe),
+            json: true,
+            command: crate::command::Command::LaunchWindow {
+                context: Box::new(context),
+            },
+        })?;
+        let pid = result["spawned_pid"]
+            .as_u64()
+            .context("Host returned no launch process ID")?;
+        Ok(u32::try_from(pid).context("Invalid launch process ID")?)
+    } else {
+        launch_gui(&context)
+    }
+}
+
+pub(super) fn launch_gui(context: &LaunchContext) -> anyhow::Result<u32> {
+    use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
     use windows_sys::Win32::System::Threading::*;
+    context.validate()?;
+    let arguments: Vec<_> = context
+        .arguments
+        .iter()
+        .map(|a| std::ffi::OsString::from_wide(a))
+        .collect();
+    let invocation = parse_entry(
+        std::iter::once(std::ffi::OsString::from("flowmux")).chain(arguments.iter().cloned()),
+    )
+    .map_err(|_| anyhow::anyhow!("Invalid window launch options"))?;
+    anyhow::ensure!(
+        matches!(invocation, Invocation::Launch { .. }),
+        "Only window launch options can be delegated"
+    );
+    let directory = std::path::PathBuf::from(std::ffi::OsString::from_wide(&context.directory));
+    anyhow::ensure!(
+        directory.is_absolute() && directory.is_dir(),
+        "Launch directory must be an existing absolute path"
+    );
+    let environment = context.detached_environment()?;
     let executable = std::env::current_exe()?.with_file_name("flowmux.exe");
     let mut command = launch_command(
         std::iter::once(executable.as_os_str().to_owned()).chain(arguments.iter().cloned()),
@@ -138,9 +216,9 @@ fn launch_gui(arguments: &[std::ffi::OsString]) -> anyhow::Result<u32> {
             std::ptr::null(),
             std::ptr::null(),
             0,
-            DETACHED_PROCESS,
-            std::ptr::null(),
-            std::ptr::null(),
+            DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_ptr().cast(),
+            super::wide(directory).as_ptr(),
             &startup,
             &mut process,
         ))
@@ -158,7 +236,7 @@ pub fn console_main() -> i32 {
         Ok(Invocation::Client(cli)) => client(cli, "flowmux"),
         Ok(Invocation::Launch { json, .. }) => {
             let launch = || -> anyhow::Result<()> {
-                let pid = launch_gui(&arguments[1..])?;
+                let pid = request_gui(&arguments[1..])?;
                 // Report process creation only: readiness and startup failures
                 // belong to the new host. Never kill it if stdout is closed.
                 if json {
@@ -185,6 +263,19 @@ pub fn gui_main() -> i32 {
             client(cli, "flowmux")
         }
         Ok(Invocation::Launch { options, json }) => {
+            if std::env::var_os("FLOWMUX_PIPE_NAME").is_some() {
+                attach_parent();
+                return match request_gui(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+                    Ok(pid) => {
+                        if json {
+                            spawned(pid).map_or_else(|e| runtime_error("flowmux", json, e), |_| 0)
+                        } else {
+                            0
+                        }
+                    }
+                    Err(error) => runtime_error("flowmux", json, error),
+                };
+            }
             if json {
                 // Redirected GUI invocations can observe their own process ID.
                 // The console launcher supplies its own receipt independently.

@@ -95,6 +95,20 @@ return an error instead of panicking; a command may already have taken effect.
 CLI errors do not open message boxes. See
 [entry-point verification](evidence/2026-09-28/entrypoints.md).
 
+When launched from a native flowmux terminal, both launchers ask that terminal's
+GUI host to create the new window. The new GUI therefore survives closing the
+invoking tab, a clean source-window exit, or termination of the source host.
+Ordinary terminal descendants remain in their original kill-on-close job.
+The broker launches its own `flowmux.exe` build. It carries the caller's native
+UTF-16 arguments, current directory and environment, including updated PATH;
+relative `--cwd` is resolved from the caller. The previous terminal's flowmux
+routing variables are removed, and new PTYs receive their own identifiers.
+An obsolete inherited pipe or surface returns an error without another target
+or a local launch fallback. A timeout may still mean the host created a window;
+never repeat a launch automatically. The child still inherits any jobs containing
+its GUI broker; broader external-job policies have not been validated. See
+[independent-window verification](evidence/2026-09-28/window-lifetime.md).
+
 Windows PowerShell remains the initial default. Use **Settings…** to choose
 Windows PowerShell, Command Prompt, or installed PowerShell 7 for future tabs
 and workspaces. Right-click **+ Tab**, or choose **New tab with shell…** in the
@@ -414,6 +428,7 @@ powershell -NoProfile -File windows/scripts/verify-output-search.ps1 -BuildDirec
 powershell -NoProfile -File windows/scripts/verify-settings.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-shells.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-entrypoints.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-window-lifetime.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

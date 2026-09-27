@@ -370,8 +370,11 @@
     {
       "id": "U13",
       "feature": "여러 창의 상태 공유·락·소유권",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-window-lifetime-background.json"
+      ],
+      "notes": "Independent new windows launched from native terminals survive source-tab close, clean source-window quit, forced source-host exit and a further CMD launch. Caller cwd/PATH/Unicode environment and new CLI routing IDs are retained correctly through a bounded broker request. Ordinary terminal descendants retain strict job ownership. Shared settings/state leases have prior isolated evidence, but full multiwindow state, concurrency, existing-tab detachment and external-job policy coverage remain pending."
     },
     {
       "id": "U14",
@@ -702,9 +705,10 @@
       "feature": "`flowmux` CLI 위임·`flowmuxctl`·JSON 결과",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-entrypoints-background.json"
+        "evidence/2026-09-28/native-entrypoints-background.json",
+        "evidence/2026-09-28/native-window-lifetime-background.json"
       ],
-      "notes": "Installed console flowmux.com, GUI flowmux.exe and command-only flowmuxctl.exe share parsing/client paths. Leading shell/equals launch flags, CMD/PowerShell resolution and waiting, stdout/stderr, JSON runtime errors, Unicode/empty/quoted argv, two-window targeting, file/NUL redirection and closed stdout verified with hidden native processes. GUI launch explicitly forbids handle inheritance after a reproduced redirected-EOF hang. The JSON launch receipt establishes process creation only. Full legacy command parity, altered PATHEXT/custom shells, clean install/update and interactive desktop coverage remain pending."
+      "notes": "Installed console flowmux.com, GUI flowmux.exe and command-only flowmuxctl.exe share parsing/client paths. Leading shell/equals launch flags, CMD/PowerShell resolution and waiting, stdout/stderr, JSON runtime errors, Unicode/empty/quoted argv, two-window targeting, file/NUL redirection and closed stdout verified with hidden native processes. GUI launch explicitly forbids handle inheritance after a reproduced redirected-EOF hang. The JSON launch receipt establishes process creation only. Full legacy command parity, altered PATHEXT/custom shells, clean install/update and interactive desktop coverage remain pending. Native terminal launch now delegates through its originating verified pipe to the GUI host. Both launchers preserve caller UTF-16 argv/cwd/environment, remove stale terminal routing context and reject stale endpoints/surfaces without fallback or replay. Hidden checks verify independent new-window lifetime; broker uses its own GUI build. External job restrictions and timeouts after dispatch remain separate boundaries."
     },
     {
       "id": "O02",
@@ -786,8 +790,11 @@
     {
       "id": "O10",
       "feature": "sleep/resume·화면 잠금·multiwindow 종료",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-window-lifetime-background.json"
+      ],
+      "notes": "Hidden native tests cover independent new-window ownership across source-tab close and clean/forced source-host exit, with original child-process cleanup retained. Sleep/resume, screen lock, external-job containment, desktop multiwindow UX and all-window shutdown remain pending."
     },
     {
       "id": "O11",

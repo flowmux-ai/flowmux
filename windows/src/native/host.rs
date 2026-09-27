@@ -1737,6 +1737,19 @@ impl App {
             "window is saving before close"
         );
         match command {
+            Command::LaunchWindow { context } => {
+                let caller = caller.context("Window launch requires a calling terminal")?;
+                let source = self
+                    .surfaces
+                    .get(&caller)
+                    .context("Calling terminal no longer exists")?;
+                anyhow::ensure!(source.session.is_some(), "Calling terminal is not running");
+                // The GUI is outside its terminal jobs. Keep those jobs strict;
+                // the new window must not be owned by the invoking shell's job.
+                let pid = super::entry::launch_gui(&context)
+                    .map_err(|error| anyhow::anyhow!("{error:#}"))?;
+                return Ok(Some(json!({"spawned_pid":pid})));
+            }
             Command::Shells => {
                 return Ok(Some(
                     json!({"profiles":super::shell::profiles(),"default_shell":self.settings.default_shell}),

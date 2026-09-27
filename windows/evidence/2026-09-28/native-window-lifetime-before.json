@@ -1,0 +1,32 @@
+{
+  "started": "2026-09-28T03:37:02.4494551+09:00",
+  "mode": "background",
+  "checks": [],
+  "hosts": [
+    {
+      "pid": 39068,
+      "pipe": "\\\\.\\pipe\\flowmux-39068-e76f3c27-f3a5-4137-91cf-1fc5749e8d59",
+      "via": "gui"
+    },
+    {
+      "pid": 27276,
+      "pipe": "\\\\.\\pipe\\flowmux-27276-144a8b80-2072-4284-8b42-c5fe561cd3e5",
+      "via": "terminal"
+    }
+  ],
+  "pathext": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL",
+  "before": {
+    "sourceShell": 27352,
+    "sourceHost": 39068,
+    "sourceSurface": "f52e6867-3ce4-4c85-8f96-4ed1b6fca4c4",
+    "childHost": 27276,
+    "childShell": 33796
+  },
+  "after": {
+    "childExited": true,
+    "sourceShellAlive": false,
+    "childShellAlive": false
+  },
+  "status": "reproduced_coupled_lifetime",
+  "finished": "2026-09-28T03:37:04.9638413+09:00"
+}

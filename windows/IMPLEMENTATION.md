@@ -282,6 +282,21 @@ in this stage. Full command parity, custom shell resolution, clean-machine
 installation/update and desktop acceptance remain open. O01 is partial; see
 [entry-point evidence](evidence/2026-09-28/entrypoints.md).
 
+New-window launch from a native terminal now delegates to its originating GUI
+through the verified pipe instead of creating a GUI inside the terminal's job.
+A hidden reproduction first showed both the new GUI and its shell dying when
+the source tab closed. The corrected path retains both, also across clean and
+forced source-host exit and a further launch from a retained CMD window.
+The terminal job limits remain unchanged. A bounded UTF-16 launch context carries
+caller argv/cwd/environment to the broker, preserving PATH and drive entries
+while removing stale flowmux routing variables. Debug formatting redacts its
+contents. Invalid requests and stale callers fail without fallback or replay.
+Source and child context, Unicode paths/values/argv and normal descendant cleanup
+are checked separately from real IME. External-job restrictions, caller timeout
+after dispatch, detached existing tabs, window geometry, sleep/resume and full
+multiwindow acceptance remain pending. See
+[window lifetime evidence](evidence/2026-09-28/window-lifetime.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

@@ -10,3 +10,4 @@ pub mod protocol;
 pub mod settings;
 pub mod shell;
 pub mod state;
+pub mod window_launch;

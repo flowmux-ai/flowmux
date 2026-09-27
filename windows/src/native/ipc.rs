@@ -141,6 +141,17 @@ fn response(cli: Cli) -> anyhow::Result<String> {
             json!({"platform":"windows","webview2":version,"status":"ok", "background_testing":cfg!(debug_assertions)})
         ));
     }
+    let json = cli.json;
+    let value = request(cli)?;
+    if !json && value["text"].is_string() {
+        Ok(format!("{}\n", value["text"].as_str().unwrap()))
+    } else {
+        Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
+    }
+}
+
+/// One IPC submission, with no stdout formatting and no retry after dispatch.
+pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
     let candidates = if let Some(name) = &explicit {
         // A stale explicit or inherited endpoint must never select another window.
@@ -214,11 +225,7 @@ fn response(cli: Cli) -> anyhow::Result<String> {
     if let Some(error) = value.get("error") {
         anyhow::bail!("{}", error.as_str().unwrap_or("IPC error"));
     }
-    if !cli.json && value["text"].is_string() {
-        Ok(format!("{}\n", value["text"].as_str().unwrap()))
-    } else {
-        Ok(format!("{}\n", serde_json::to_string_pretty(&value)?))
-    }
+    Ok(value)
 }
 
 // Validate the OS-reported owner before sending any command bytes. A syntactically

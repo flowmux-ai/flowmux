@@ -141,6 +141,11 @@ pub struct Request {
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
+    /// Internal launcher request, never exposed as a shell command argument.
+    #[command(skip)]
+    LaunchWindow {
+        context: Box<crate::window_launch::LaunchContext>,
+    },
     /// Check local Windows and WebView2 prerequisites without connecting to a window.
     Doctor,
     /// Print the session-local PowerShell prompt integration for manual reinstallation.
