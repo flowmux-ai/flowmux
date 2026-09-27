@@ -138,6 +138,7 @@ struct Surface {
     rows: u16,
     ready: bool,
     restoring: bool,
+    cwd_reported: bool,
     visible: bool,
     process_pid: Option<u32>,
     exit_code: Option<u32>,
@@ -558,6 +559,7 @@ impl App {
                 rows: 24,
                 ready: false,
                 restoring: false,
+                cwd_reported: false,
                 visible: false,
                 process_pid: None,
                 exit_code: None,
@@ -838,13 +840,14 @@ impl App {
                 if let Some((workspace, pane, _)) = self.locate(id) {
                     self.workspaces[workspace]
                         .root
-                        .set_surface_title_auto(pane, id, title.clone());
-                    for control in &self.controls {
-                        if matches!(control.action, Action::Tab(_, surface) if surface == id) {
-                            unsafe {
-                                SetWindowTextW(control.hwnd, wide(&title).as_ptr());
-                            }
-                        }
+                        .set_surface_title_auto(pane, id, title);
+                    self.refresh_tab_title(id);
+                }
+            }
+            ClientMessage::Cwd { path } => {
+                if surface.ready && !surface.restoring {
+                    if let Ok(path) = crate::cwd::local_path(&path) {
+                        self.update_cwd(id, path);
                     }
                 }
             }
@@ -884,6 +887,9 @@ impl App {
                 sequence,
                 screen,
             } => {
+                let metadata = self
+                    .locate(id)
+                    .and_then(|(ws, pane, _)| self.workspaces[ws].root.find_surface(pane, id));
                 if let Some(pending) = &mut self.pending_save {
                     if pending.id == request && !pending.writing {
                         if let Some(after) = pending.waiting.get(&id) {
@@ -892,6 +898,32 @@ impl App {
                                 "invalid history response"
                             );
                             screen.validate()?;
+                            // Cwd/title can arrive while this snapshot waits for output
+                            // parsing. Capture them at the same per-surface barrier.
+                            if let Some(tab) = metadata {
+                                for workspace in &mut pending.state.workspaces {
+                                    for (pane, _, tabs) in workspace.leaves() {
+                                        if tabs.iter().any(|t| t.id == id) {
+                                            if let flowmux_core::SurfaceKind::Terminal {
+                                                cwd: Some(cwd),
+                                                ..
+                                            } = &tab.kind
+                                            {
+                                                workspace.root.set_surface_cwd(
+                                                    pane,
+                                                    id,
+                                                    cwd.clone(),
+                                                );
+                                            }
+                                            workspace.root.set_surface_title_auto(
+                                                pane,
+                                                id,
+                                                tab.title.clone(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             pending.state.screens.insert(id, screen);
                             pending.waiting.remove(&id);
                             self.write_save()?;
@@ -1093,6 +1125,48 @@ impl App {
             _ => {}
         }
     }
+    fn update_cwd(&mut self, id: SurfaceId, cwd: PathBuf) {
+        if let Some((workspace, pane, _)) = self.locate(id) {
+            let first_report = self.surfaces.get(&id).is_some_and(|s| !s.cwd_reported);
+            let root = &mut self.workspaces[workspace].root;
+            root.set_surface_cwd(pane, id, cwd.clone());
+            if first_report
+                && matches!(
+                    root.surface_title(pane, id),
+                    Some("PowerShell" | "Windows PowerShell")
+                )
+            {
+                root.set_surface_title_auto(
+                    pane,
+                    id,
+                    flowmux_core::terminal_tab_title_for_cwd(Some(&cwd)),
+                );
+            }
+            if let Some(surface) = self.surfaces.get_mut(&id) {
+                surface.cwd_reported = true;
+            }
+            self.refresh_tab_title(id);
+        }
+    }
+    fn refresh_tab_title(&self, id: SurfaceId) {
+        if let Some((workspace, pane, _)) = self.locate(id) {
+            let root = &self.workspaces[workspace].root;
+            if let Some(title) = root.surface_title(pane, id) {
+                let label = if root.active_surface_id(pane) == Some(id) {
+                    format!("● {title}")
+                } else {
+                    title.to_owned()
+                };
+                for control in &self.controls {
+                    if matches!(control.action, Action::Tab(_, surface) if surface == id) {
+                        unsafe {
+                            SetWindowTextW(control.hwnd, wide(&label).as_ptr());
+                        }
+                    }
+                }
+            }
+        }
+    }
     fn locate(&self, surface: SurfaceId) -> Option<(usize, PaneId, PathBuf)> {
         for (index, workspace) in self.workspaces.iter().enumerate() {
             for (pane, _, tabs) in workspace.leaves() {
@@ -1220,8 +1294,8 @@ impl App {
         );
         match action {
             Action::NewWorkspace => {
-                self.workspaces
-                    .push(Workspace::new(self.workspace().cwd.clone()));
+                let cwd = self.locate(self.active()).unwrap().2;
+                self.workspaces.push(Workspace::new(cwd));
                 self.active_workspace = self.workspaces.len() - 1;
             }
             Action::Workspace(index) => self.active_workspace = index,
@@ -1270,6 +1344,13 @@ impl App {
     }
     fn command(&mut self, request: Request, reply: ipc::Reply) -> anyhow::Result<Option<Value>> {
         let caller = request.caller_surface.map(SurfaceId);
+        // A CLI invoked after `cd` on the same command line may precede the next
+        // prompt's OSC report. Its native working directory is fresher context.
+        if let (Some(caller), Some(cwd)) = (caller, request.caller_cwd) {
+            if let Some(path) = cwd.to_str().and_then(|p| crate::cwd::local_path(p).ok()) {
+                self.update_cwd(caller, path);
+            }
+        }
         let command = request.command;
         anyhow::ensure!(
             self.close_request.is_none()
@@ -1286,18 +1367,20 @@ impl App {
             "window is saving before close"
         );
         match command {
-            Command::Doctor => anyhow::bail!("doctor is a local CLI operation"),
+            Command::Doctor | Command::ShellIntegration => {
+                anyhow::bail!("this is a local CLI operation")
+            }
             Command::Identify => {
                 let surface = self.target(None, caller)?;
-                let (workspace, pane, _) = self.locate(surface).unwrap();
+                let (workspace, pane, cwd) = self.locate(surface).unwrap();
                 return Ok(Some(json!({"pid":std::process::id(),"pipe":self._ipc.name,
-                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"platform":"windows"})));
+                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"platform":"windows"})));
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit"],
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1305,7 +1388,8 @@ impl App {
                     "pid":surface.process_pid,"running":surface.session.is_some() && surface.exit_code.is_none(),
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
-                    "cols":surface.cols,"rows":surface.rows})).collect();
+                    "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
+                    "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
                         "background_testing":self.background_test,"window_handle":self.window as usize,

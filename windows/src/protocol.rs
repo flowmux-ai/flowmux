@@ -44,6 +44,9 @@ pub enum ClientMessage {
     Title {
         title: String,
     },
+    Cwd {
+        path: String,
+    },
     Link {
         url: String,
     },

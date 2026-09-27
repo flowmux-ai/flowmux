@@ -105,8 +105,8 @@ Rust 호스트만 측정한 수치가 아니며 peak나 장기 안정성 결과�
 거부하는 핸들을 열어 저장 실패를 유도했을 때 이전 파일의 SHA-256이 유지됐고
 창이 열린 채 남았다. 명시적 저장 취소 종료 및 임시 실행도 기존 파일을 보존했다.
 
-셸 프로세스·agent 실행 상태를 이어가는 기능은 아니다. 시작 cwd를 복원하며
-셸 내부 `cd` 추적은 남아 있다. 정상 buffer의 색상 기록만 저장하며 alternate
+셸 프로세스·agent 실행 상태를 이어가는 기능은 아니다. 이 단계에서는 시작 cwd를
+복원했으며 이후 셸 내부 `cd` 추적은 아래 별도 검증으로 추가했다. 정상 buffer의 색상 기록만 저장하며 alternate
 screen, 창 위치·크기·설정, 모든 Unicode/줄바꿈 조합, 자동 저장 중/복원 직후 실제 IME 입력과
 네이티브 저장 실패 대화상자는 아직 검증하지 않았다. 기록은 terminal별
 128KiB로 제한되며 마지막 저장 이후 출력은 강제 종료 시 유실될 수 있다.
@@ -119,6 +119,41 @@ screen, 창 위치·크기·설정, 모든 Unicode/줄바꿈 조합, 자동 저�
 (`native-tab-move-state-background.json`, `native-lifecycle-state-background.json`,
 `native-smoke-state-background.json`). `artifacts-state.json`은 이 단계의 실행 파일과
 다시 만든 개발용 설치 파일을 기록한다. 새 설치 파일의 실제 IME/설치 합격 증거는 아니다.
+
+## 현재 셸 경로와 한글 경로 보존
+
+`native-cwd-background.json`은 창을 숨기고 고유 상태 폴더를 사용했다.
+한글 완성형·분해형 자모·결합 악센트·공백·`%#;'`가 포함된 경로를 실제
+PowerShell에서 변경하고 새 tab/split의 시작 위치, 비활성 tab의 독립 갱신,
+workspace 이동 후 경로 유지 및 5개 surface의 재시작 복원을 확인했다.
+프롬프트 출력 전에 같은 명령줄에서 `cd; flowmuxctl new-tab`을 실행해도
+새 디렉터리를 상속했다. 기록에 삽입한 과거 OSC는 복원 경로를 바꾸지 않았다.
+
+초기 구현의 문자 그대로인 OSC 경로 출력은 Windows PowerShell의 코드 페이지
+949를 거치며 결합문자를 `?`로 바꿨다. OSC 7의 ASCII URI로 전달하도록 수정한
+뒤 원래 Unicode 경로와 정확히 일치했다. 콘솔 인코딩을 강제로 바꾸지 않는다.
+프롬프트 wrapper를 closure로 만들면 `$pwd` 등 이전 값을 보관할 수 있어,
+고정 script template과 생성한 식별자로 원래 프롬프트를 참조하도록 했다.
+사용자 프롬프트가 실패 상태·종료 코드 17·변경된 일반 변수·현재 `$pwd`를
+읽는 것, 재설치의 멱등성, PSReadLine 함수·키 설정·코드 페이지 보존을 확인했다.
+
+Registry provider에서는 마지막 파일시스템 경로를 유지했고 원격 OSC 7과 UNC
+OSC 9 경로는 무시했다. UNC/device 경로 추적, 다른 셸, 긴 경로의 프로세스 시작,
+다양한 prompt framework는 지원 또는 검증이 남아 있다. Constrained Language
+mode에서는 자동 prompt wrapper를 설치하지 않는다.
+
+OSC 제목 갱신 시 사용자 지정 제목과 활성 표시가 사라지던 native caption도
+수정했다. 숨김 창의 BUTTON 문자열을 읽어 확인했으며 화면 표시나 입력을
+사용하지 않았다. 이 결과는 IME 조합·후보창·DPI 검증을 대신하지 않는다.
+
+Windows 네이티브 Rust 14개, Linux 독립 Rust 9개, 프런트엔드 8개 테스트와
+release Clippy 결과는 `native-rust-tests-cwd.txt`, `linux-rust-tests-cwd.txt`,
+`frontend-tests-cwd.txt`, `release-clippy-cwd.txt`에 기록한다.
+상태 저장·복원, 탭 이동 40회, 정상 종료·자손 정리도 최신 prompt 구현으로
+다시 통과했다(`native-state-cwd-background.json`,
+`native-tab-move-cwd-background.json`, `native-lifecycle-cwd-background.json`).
+`artifacts-cwd.json`은 해당 실행 파일과 다시 만든 개발용 설치 파일을 식별한다.
+최신 설치 파일의 실제 IME·설치 검증은 보류 상태다.
 
 ## 남은 검증 범위
 

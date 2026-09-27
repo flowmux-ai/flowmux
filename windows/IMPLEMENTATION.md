@@ -115,15 +115,28 @@ Windows state now uses versioned per-window files with exclusive OS leases and
 atomic replacement on a worker thread. Parser barriers capture bounded styled
 normal-buffer history for visible and hidden tabs. Clean close, explicit save
 and 30-second checkpoints persist layout, tab identity, focus and recorded
-startup cwd. Restore renders history into scrollback before starting fresh
+local cwd. Restore renders history into scrollback before starting fresh
 ConPTY processes; historical VT responses are suppressed while parsing it.
 A hidden native test verified four surfaces over two workspaces, Korean and
 green SGR round trips, duplicate-restore rejection, independent window saves,
 forced termination/recovery, periodic checkpoints, temporary mode, and failed
 atomic replacement retaining the old file and live window. Geometry/settings,
-current shell cwd tracking, alternate-screen snapshots, live-process/agent
+alternate-screen snapshots, live-process/agent
 resumption, broader Unicode/wrap fidelity and restore-time real IME remain
 pending. This is partial persistence coverage, not full session recovery.
+
+Session-local PowerShell prompt integration now reports current local drive
+directories through OSC 7. Native ConPTY testing found that raw OSC text passed
+through code page 949 could replace combining marks with `?`; ASCII URI encoding
+preserves the original path without changing console encoding or PSReadLine.
+Hidden hosts verified Korean/NFD/punctuation paths, new-tab/split inheritance,
+hidden and moved surface isolation, same-line `cd; flowmuxctl new-tab` context,
+and restart into the latest reported directory. A custom prompt retains command
+failure status, exit code, dynamic variables and current `$pwd`; reinstalling
+the wrapper is idempotent. Historical OSC metadata cannot change restored cwd.
+Read-only native control inspection also verifies locked tab captions and the
+active marker survive title output. UNC/device/remote paths, other shells,
+long-path startup, arbitrary prompt frameworks and interactive IME remain open.
 
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,

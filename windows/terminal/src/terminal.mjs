@@ -6,6 +6,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { Output } from './output.mjs';
 import { Input } from './input.mjs';
 import { snapshot, restore } from './history.mjs';
+import { observeCwd } from './cwd.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -22,6 +23,7 @@ terminal.open(document.getElementById('terminal'));
 const output = new Output(terminal, send, () => snapshot(terminal, serialize));
 const input = new Input(data => send({ type: 'input', data }));
 let restoring = false;
+observeCwd(terminal, send, () => restoring);
 terminal.onData(data => { if (!restoring) input.data(data); });
 terminal.onBinary(data => { if (!restoring) send({ type: 'binary_input', data }); });
 terminal.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));

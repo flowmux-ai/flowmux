@@ -62,6 +62,30 @@ time and cannot be rewritten in a running child process.
 waits for xterm to parse the captured output sequence; physical row breaks are
 preserved, including wraps in narrow panes.
 
+PowerShell reports its current local drive directory after each prompt. New
+tabs, splits and workspaces inherit that directory, including after a tab move.
+A child `flowmuxctl` also supplies its working directory, so `cd` followed by
+`flowmuxctl new-tab` on the same command line works before the next prompt.
+`identify` and `tree` expose the recorded directory; `tree` also reports whether
+the surface has supplied a live directory.
+
+The startup integration is session-local: it wraps the existing prompt without
+editing profiles, execution policy, PSReadLine functions/key bindings or console
+encoding. ASCII percent-encoded OSC 7 paths preserve Korean, decomposed Jamo and
+combining marks even with code page 949. Local OSC 9;9 reports are also accepted.
+If a prompt tool replaces the wrapper later, reinstall it in that shell:
+
+```powershell
+Invoke-Expression (& $env:FLOWMUX_BUNDLED_CLI_PATH shell-integration | Out-String)
+```
+
+Reported paths must be absolute local drive paths. UNC, device/verbatim paths,
+foreign file-URI hosts and non-filesystem providers are not tracked; the last
+local directory is retained. Reports are metadata and are not opened or probed.
+Long-path process startup, other shells and arbitrary prompt frameworks remain
+unverified. Constrained Language mode skips the automatic prompt wrapper.
+See Microsoft's [current-directory integration guidance](https://learn.microsoft.com/en-us/windows/terminal/tutorials/new-tab-same-directory).
+
 Window layout and styled normal-buffer history are saved every 30 seconds and
 before a normal close under `%LOCALAPPDATA%\flowmux\windows\state`. Each window
 holds an exclusive OS file lease; another process cannot restore or overwrite
@@ -87,13 +111,13 @@ state files are preserved; automatic startup skips them, while an explicit
 restore reports the error.
 
 Restoration retains workspace/pane/tab identities, order, focus, titles and
-recorded startup directories, and creates fresh PowerShell processes. History
+the latest reported local directories, and creates fresh PowerShell processes. History
 is rendered before spawning the new process; historical commands and terminal
 replies never become shell input. The old display is moved into scrollback so
 ConPTY's initial clear does not erase it. Scroll up to read or search it.
 Each history is bounded to 128 KiB of complete serialized rows (oldest rows are
 removed), with a 32 MiB file limit and at most 128 saved terminals. Alternate
-screens, running programs, agent resumption, changed shell directories, window
+screens, running programs, agent resumption, session-local prompt customizations, window
 geometry and terminal settings are not yet restored. Crash recovery uses the
 last completed checkpoint; later output can be lost.
 
@@ -113,14 +137,15 @@ powershell -NoProfile -File windows/scripts/verify-lifecycle.ps1 -BuildDirectory
 powershell -NoProfile -File windows/scripts/verify-tab-move.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-output-load.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-state.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-cwd.ps1 -BuildDirectory windows/target/debug
 ```
 
-Ordinary test hosts use `--temporary`; the state verifier uses a unique directory
+Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories
 via the debug-only `FLOWMUX_TEST_STATE_DIR`, including for crash/restart tests.
 Hidden debug hosts without an explicit test state directory also disable
 persistence. These tests cannot restore or overwrite a user's saved window.
 
-Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load and state scripts always use hidden hosts. Real
+Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load, state and cwd scripts always use hidden hosts. Real
 IME tests additionally require an idle desktop and explicit `-Interactive`:
 
 ```powershell

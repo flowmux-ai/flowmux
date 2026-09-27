@@ -194,6 +194,10 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
 }
 
 pub fn run(cli: Cli) -> anyhow::Result<()> {
+    if matches!(cli.command, Command::ShellIntegration) {
+        print!("{}", include_str!("../../shell/powershell.ps1"));
+        return Ok(());
+    }
     if matches!(cli.command, Command::Doctor) {
         super::conpty::api()?;
         let version =
@@ -267,6 +271,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         };
     let mut bytes = serde_json::to_vec(&Request {
         command: cli.command,
+        caller_cwd: caller_surface.and_then(|_| std::env::current_dir().ok()),
         caller_surface,
     })?;
     anyhow::ensure!(bytes.len() < MAX_MESSAGE_BYTES, "command is too large");

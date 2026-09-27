@@ -204,8 +204,11 @@
     {
       "id": "T18",
       "feature": "cwd/제목·새 tab 위치 상속",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-cwd-background.json"
+      ],
+      "notes": "Hidden Windows hosts verify current local PowerShell directory tracking, exact Korean/NFD/punctuation paths, new-tab/split inheritance, same-line child CLI context, moved/hidden surface isolation, restart cwd and locked native tab labels. Prompt status, dynamic variables, PSReadLine and console encoding retained. UNC/device/remote paths, other shells, long-path startup, arbitrary prompt frameworks and interactive IME remain open."
     },
     {
       "id": "T19",
@@ -320,9 +323,11 @@
       "feature": "재시작 후 layout·scrollback·agent 복원",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-state-background.json"
+        "evidence/2026-09-27/native-state-background.json",
+        "evidence/2026-09-27/native-cwd-background.json",
+        "evidence/2026-09-27/native-state-cwd-background.json"
       ],
-      "notes": "Hidden Windows hosts preserve workspace/pane/surface identity, layout, focus, titles and recorded startup cwd. Clean close, periodic checkpoint, independent window leases and forced termination/recovery verified. Geometry/settings, changed shell cwd, live processes and agent resumption remain pending."
+      "notes": "Hidden Windows hosts preserve workspace/pane/surface identity, layout, focus, titles and the latest reported local PowerShell cwd. Clean close, periodic checkpoint, independent window leases and forced termination/recovery verified. Geometry/settings, live processes and agent resumption remain pending."
     },
     {
       "id": "U13",
@@ -669,8 +674,12 @@
     {
       "id": "O03",
       "feature": "환경 context·identify·tree·capabilities",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-tab-move-background.json",
+        "evidence/2026-09-27/native-cwd-background.json"
+      ],
+      "notes": "Stable calling-surface routing survives moves and inactive tabs; identify/tree expose current local cwd, and same-line child CLI context updates cwd before the next prompt. Full context/capability parity, remote environments and cross-window cases remain pending."
     },
     {
       "id": "O04",

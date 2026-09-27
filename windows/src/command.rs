@@ -40,6 +40,8 @@ pub struct Request {
     /// The surface remains stable when its inherited pane/workspace IDs become stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caller_surface: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_cwd: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
@@ -47,6 +49,8 @@ pub struct Request {
 pub enum Command {
     /// Check local Windows and WebView2 prerequisites without connecting to a window.
     Doctor,
+    /// Print the session-local PowerShell prompt integration for manual reinstallation.
+    ShellIntegration,
     Identify,
     Capabilities,
     Tree,
@@ -154,6 +158,7 @@ mod tests {
     fn context_preserves_old_ipc_commands_and_roundtrips_stable_surface() {
         let old: Request = serde_json::from_str(r#"{"method":"identify"}"#).unwrap();
         assert!(old.caller_surface.is_none());
+        assert!(old.caller_cwd.is_none());
         let old_quit: Request = serde_json::from_str(r#"{"method":"quit"}"#).unwrap();
         assert!(matches!(
             old_quit.command,
@@ -177,10 +182,12 @@ mod tests {
                 surface: None,
             },
             caller_surface: Some(id),
+            caller_cwd: Some("C:\\한글 folder".into()),
         };
         let decoded: Request =
             serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
         assert_eq!(decoded.caller_surface, Some(id));
+        assert_eq!(decoded.caller_cwd, original.caller_cwd);
         assert!(matches!(
             decoded.command,
             Command::ReadScreen {

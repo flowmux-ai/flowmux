@@ -33,6 +33,7 @@ public static class NativeInput {
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int length);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
@@ -93,6 +94,17 @@ public static class NativeInput {
     }
     public static void RequireForeground(IntPtr window) {
         if (GetForegroundWindow() != window) throw new Exception("Refusing keyboard input: target window lost foreground");
+    }
+    // Read-only inspection also works when the owned host stays hidden.
+    public static string[] ButtonTitles(IntPtr window) {
+        var result = new System.Collections.Generic.List<string>();
+        IntPtr button = IntPtr.Zero;
+        while ((button = FindWindowEx(window, button, "BUTTON", null)) != IntPtr.Zero) {
+            var text = new System.Text.StringBuilder(4096);
+            GetWindowText(button, text, text.Capacity);
+            result.Add(text.ToString());
+        }
+        return result.ToArray();
     }
     public static void ClickButton(IntPtr window, string title) {
         RequireForeground(window);

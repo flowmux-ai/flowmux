@@ -4,6 +4,7 @@
 use super::{checked, wide};
 use crate::protocol::{OutputWindow, OUTPUT_CHUNK_BYTES};
 use anyhow::Context;
+use base64::Engine;
 use flowmux_core::{PaneId, SurfaceId, WorkspaceId};
 use std::{
     collections::BTreeMap,
@@ -207,8 +208,17 @@ impl Session {
         let executable = std::path::PathBuf::from(system_root)
             .join("System32/WindowsPowerShell/v1.0/powershell.exe");
         let exe = wide(&executable);
-        // No shell concatenation: executable is an absolute system path and arguments are constant.
-        let mut command = wide(format!("\"{}\" -NoLogo -NoExit", executable.display()));
+        // The startup program is fixed, UTF-16 encoded source. No cwd, user text
+        // or profile content is interpolated into the command line.
+        let script: Vec<u8> = include_str!("../../shell/powershell.ps1")
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let script = base64::engine::general_purpose::STANDARD.encode(script);
+        let mut command = wide(format!(
+            "\"{}\" -NoLogo -NoExit -EncodedCommand {script}",
+            executable.display()
+        ));
         let directory = wide(cwd);
         let mut attrs = Attributes::new(console.0)?;
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
@@ -456,6 +466,77 @@ mod tests {
             after <= before + 4,
             "native PTY handles grew from {before} to {after}"
         );
+    }
+
+    #[test]
+    fn prompt_reports_changed_unicode_directory_through_conpty() {
+        let _guard = SERIAL.lock().unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "flowmux-cwd-{}-한글 \u{1112}\u{1161}\u{11ab} e\u{301} %#;'",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let (send, receive) = mpsc::channel();
+        let session = Session::spawn(
+            &std::env::temp_dir(),
+            PaneId::new(),
+            SurfaceId::new(),
+            WorkspaceId::new(),
+            r"\\.\pipe\flowmux-test-unused",
+            120,
+            30,
+            move |event| {
+                let _ = send.send(event);
+            },
+        )
+        .unwrap();
+        let command = format!(
+            "Set-Location -LiteralPath '{}'\r",
+            directory.display().to_string().replace('\'', "''")
+        );
+        session.input(command.into_bytes()).unwrap();
+        let mut expected = "\x1b]7;file:///".to_owned();
+        for byte in directory.to_string_lossy().as_bytes() {
+            match byte {
+                b'\\' => expected.push('/'),
+                b':' | b'-' | b'_' | b'.' | b'~' | b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => {
+                    expected.push(*byte as char)
+                }
+                _ => {
+                    use std::fmt::Write;
+                    write!(&mut expected, "%{byte:02X}").unwrap();
+                }
+            }
+        }
+        expected.push('\x07');
+        // .NET Framework permits a literal apostrophe in the URI path;
+        // newer URI implementations may percent-encode the same character.
+        let framework_expected = expected.replace("%27", "'");
+        let reports_path = |bytes: &[u8]| {
+            let text = String::from_utf8_lossy(bytes);
+            text.contains(&expected) || text.contains(&framework_expected)
+        };
+        let mut bytes = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+        while let Ok(event) =
+            receive.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        {
+            if let SessionEvent::Output {
+                sequence,
+                bytes: chunk,
+            } = event
+            {
+                bytes.extend(chunk);
+                session.acknowledge(sequence).unwrap();
+                if reports_path(&bytes) {
+                    break;
+                }
+            }
+        }
+        drop(session);
+        std::fs::remove_dir(&directory).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(reports_path(&bytes), "missing cwd: {text:?}");
     }
 
     #[test]
