@@ -199,6 +199,25 @@ automatic-name reset and an empty-window UI remain pending. The final workspace
 is protected until empty-window behavior is implemented. See
 [workspace evidence](evidence/2026-09-28/workspaces.md).
 
+The named-pipe listener now resets abandoned connections when a client closes
+before `ConnectNamedPipe`. A deterministic native regression failed with error
+232 before the fix and accepts the next client after it. Discovery publication
+uses a synced temporary file and atomic replacement, with bounded retries for
+transient sharing/access failures. Failed publication releases its newly bound
+pipe; failed listener-thread startup removes its new record. Fatal listener
+failures are logged and remove the matching discovery record.
+The CLI ignores malformed, oversized or mismatched discovery records and checks
+the OS-reported pipe server PID before sending bytes. Explicit/inherited targets
+retain their window affinity and report underlying connection errors. Client
+security quality of service permits identification without impersonation.
+Hidden live hosts survived 640 empty/truncated disconnects, eight idle clients,
+two-window routing, six fresh start/quit cycles and normal discovery cleanup.
+The earlier workspace restart failure remains unexplained; these reproductions
+do not establish its historical cause. Read/write deadlines, bounded client
+resource use, coordinated listener cancellation, failure recovery after pipe
+allocation errors and full multi-user/deployment coverage remain pending.
+See [IPC evidence](evidence/2026-09-28/ipc.md); O02 is partial.
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

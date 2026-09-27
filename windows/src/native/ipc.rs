@@ -10,7 +10,10 @@ use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Read, Write},
-    os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    os::windows::{
+        fs::OpenOptionsExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::PathBuf,
     sync::{mpsc, Arc},
     time::Duration,
@@ -21,6 +24,8 @@ use windows_sys::Win32::{
     Storage::FileSystem::*,
     System::{Pipes::*, Threading::*},
 };
+
+mod discovery;
 
 pub type Reply = mpsc::SyncSender<Value>;
 
@@ -41,78 +46,113 @@ impl Server {
         let descriptor = user_descriptor()?;
         // Create the first instance synchronously: startup cannot advertise an unbound endpoint.
         let first = make_pipe(&name, &descriptor, true)?;
+        let discovery = discovery::publish(&data_dir()?.join("instances"), &name)?;
+        // The guard removes the record if thread creation fails. The bound first
+        // instance can already accept clients while the listener starts.
+        let server = Self { name, discovery };
         let emit = Arc::new(emit);
         let shutdown = Arc::new(shutdown);
-        let server_name = name.clone();
+        let server_name = server.name.clone();
+        let discovery = server.discovery.clone();
         std::thread::Builder::new()
             .name("flowmux-ipc".into())
             .spawn(move || {
                 let mut instance = first;
                 loop {
-                    let connected =
-                        unsafe { ConnectNamedPipe(instance.as_raw_handle(), std::ptr::null_mut()) };
-                    if connected == 0 && unsafe { GetLastError() } != ERROR_PIPE_CONNECTED {
+                    if let Err(error) = accept_connection(&instance) {
+                        super::host::report(&format!("IPC listener stopped: {error:#}"));
                         break;
                     }
                     let next = match make_pipe(&server_name, &descriptor, false) {
                         Ok(value) => value,
-                        Err(_) => break,
+                        Err(error) => {
+                            super::host::report(&format!(
+                                "IPC instance creation failed: {error:#}"
+                            ));
+                            break;
+                        }
                     };
                     let emit = emit.clone();
                     let shutdown = shutdown.clone();
                     // Each client has its own instance; a stalled caller does not block acceptance.
-                    std::thread::spawn(move || {
-                        let mut pipe = File::from(instance);
-                        let mut quitting = false;
-                        let response = (|| -> anyhow::Result<Value> {
-                            let mut reader =
-                                BufReader::new((&mut pipe).take((MAX_MESSAGE_BYTES + 1) as u64));
-                            let mut line = String::new();
-                            reader.read_line(&mut line)?;
-                            anyhow::ensure!(
-                                line.len() <= MAX_MESSAGE_BYTES && line.ends_with('\n'),
-                                "invalid IPC frame"
-                            );
-                            let command: Request = serde_json::from_str(&line)?;
-                            quitting = matches!(command.command, Command::Quit { .. });
-                            let (send, receive) = mpsc::sync_channel(1);
-                            emit(command, send);
-                            receive
-                                .recv_timeout(Duration::from_secs(15))
-                                .context("window did not answer within 15 seconds")
-                        })()
-                        .unwrap_or_else(|error| json!({"error":error.to_string()}));
-                        if let Ok(mut bytes) = serde_json::to_vec(&response) {
-                            bytes.push(b'\n');
-                            let _ = pipe.write_all(&bytes);
-                            // Client reads the reply before closing. Flush waits only in this worker.
-                            unsafe {
-                                FlushFileBuffers(pipe.as_raw_handle());
-                                DisconnectNamedPipe(pipe.as_raw_handle());
+                    let worker = std::thread::Builder::new()
+                        .name("flowmux-ipc-client".into())
+                        .spawn(move || {
+                            let mut pipe = File::from(instance);
+                            let mut quitting = false;
+                            let response = (|| -> anyhow::Result<Value> {
+                                let mut reader = BufReader::new(
+                                    (&mut pipe).take((MAX_MESSAGE_BYTES + 1) as u64),
+                                );
+                                let mut line = String::new();
+                                reader.read_line(&mut line)?;
+                                anyhow::ensure!(
+                                    line.len() <= MAX_MESSAGE_BYTES && line.ends_with('\n'),
+                                    "invalid IPC frame"
+                                );
+                                let command: Request = serde_json::from_str(&line)?;
+                                quitting = matches!(command.command, Command::Quit { .. });
+                                let (send, receive) = mpsc::sync_channel(1);
+                                emit(command, send);
+                                receive
+                                    .recv_timeout(Duration::from_secs(15))
+                                    .context("window did not answer within 15 seconds")
+                            })()
+                            .unwrap_or_else(|error| json!({"error":error.to_string()}));
+                            if let Ok(mut bytes) = serde_json::to_vec(&response) {
+                                bytes.push(b'\n');
+                                let _ = pipe.write_all(&bytes);
+                                // Client reads the reply before closing. Flush waits only in this worker.
+                                unsafe {
+                                    FlushFileBuffers(pipe.as_raw_handle());
+                                    DisconnectNamedPipe(pipe.as_raw_handle());
+                                }
                             }
-                        }
-                        if quitting && response.get("error").is_none() {
-                            shutdown();
-                        }
-                    });
+                            if quitting && response.get("error").is_none() {
+                                shutdown();
+                            }
+                        });
+                    if let Err(error) = worker {
+                        super::host::report(&format!("IPC client thread creation failed: {error}"));
+                    }
                     instance = next;
                 }
+                discovery::remove_if_current(&discovery, &server_name);
             })?;
-        let directory = data_dir()?.join("instances");
-        std::fs::create_dir_all(&directory)?;
-        let discovery = directory.join(format!("{}.json", std::process::id()));
-        std::fs::write(
-            &discovery,
-            serde_json::to_vec(&json!({"pid":std::process::id(),"pipe":name}))?,
-        )?;
-        Ok(Self { name, discovery })
+        Ok(server)
     }
 }
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.discovery);
+        discovery::remove_if_current(&self.discovery, &self.name);
     }
 }
+
+fn accept_connection(instance: &OwnedHandle) -> anyhow::Result<()> {
+    loop {
+        let connected = unsafe { ConnectNamedPipe(instance.as_raw_handle(), std::ptr::null_mut()) };
+        if connected != 0 {
+            return Ok(());
+        }
+        let error = unsafe { GetLastError() };
+        match error {
+            ERROR_PIPE_CONNECTED => return Ok(()),
+            // A client can open and close this instance before ConnectNamedPipe.
+            // Reset that abandoned connection, preserving the listener and name.
+            ERROR_NO_DATA => unsafe {
+                checked(DisconnectNamedPipe(instance.as_raw_handle()))
+                    .context("could not reset abandoned IPC connection")?;
+            },
+            _ => {
+                return Err(std::io::Error::from_raw_os_error(error as i32))
+                    .context("ConnectNamedPipe failed")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
 
 // Self-relative security descriptors can be copied as bytes after conversion.
 fn user_descriptor() -> anyhow::Result<Vec<u8>> {
@@ -214,51 +254,34 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         return Ok(());
     }
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
-    let mut candidates = Vec::new();
-    if let Some(name) = explicit {
-        candidates.push(name);
+    let candidates = if let Some(name) = &explicit {
+        // A stale explicit or inherited endpoint must never select another window.
+        discovery::pipe_pid(name)?;
+        vec![name.clone()]
     } else {
-        let directory = data_dir()?.join("instances");
-        if let Ok(entries) = std::fs::read_dir(directory) {
-            let mut entries: Vec<_> = entries.flatten().collect();
-            entries.sort_by_key(|entry| {
-                std::cmp::Reverse(entry.metadata().and_then(|m| m.modified()).ok())
-            });
-            for entry in entries {
-                if let Ok(bytes) = std::fs::read(entry.path()) {
-                    if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
-                        if let Some(name) = value["pipe"].as_str() {
-                            candidates.push(name.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-    }
+        discovery::candidates(&data_dir()?.join("instances"))
+    };
     let mut connected = None;
+    let mut last_error = None;
     for name in candidates {
-        anyhow::ensure!(
-            name.starts_with(r"\\.\pipe\flowmux-"),
-            "not a local flowmux pipe"
-        );
-        for _ in 0..2 {
-            match OpenOptions::new().read(true).write(true).open(&name) {
-                Ok(file) => {
-                    connected = Some((file, name.clone()));
-                    break;
-                }
-                Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => unsafe {
-                    WaitNamedPipeW(wide(&name).as_ptr(), 3000);
-                },
-                Err(_) => break,
+        match open_verified_pipe(&name) {
+            Ok(file) => {
+                connected = Some((file, name));
+                break;
             }
-        }
-        if connected.is_some() {
-            break;
+            Err(error) => last_error = Some(error),
         }
     }
-    let (mut file, connected_name) =
-        connected.context("No running Windows flowmux window; launch flowmux.exe first")?;
+    let (mut file, connected_name) = connected.ok_or_else(|| {
+        let detail = last_error
+            .map(|error| format!(": {error:#}"))
+            .unwrap_or_default();
+        if let Some(name) = explicit {
+            anyhow::anyhow!("Could not connect to requested Windows flowmux pipe {name}{detail}")
+        } else {
+            anyhow::anyhow!("No reachable Windows flowmux window; launch flowmux.exe first{detail}")
+        }
+    })?;
     let caller_surface =
         if std::env::var("FLOWMUX_PIPE_NAME").as_deref() == Ok(connected_name.as_str()) {
             std::env::var("FLOWMUX_SURFACE_ID")
@@ -279,6 +302,7 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     file.write_all(&bytes)?;
     let mut line = String::new();
     BufReader::new((&mut file).take(16 * MAX_MESSAGE_BYTES as u64)).read_line(&mut line)?;
+    anyhow::ensure!(line.ends_with('\n'), "incomplete or oversized IPC reply");
     let value: Value = serde_json::from_str(&line)?;
     if let Some(error) = value.get("error") {
         anyhow::bail!("{}", error.as_str().unwrap_or("IPC error"));
@@ -289,4 +313,38 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&value)?);
     }
     Ok(())
+}
+
+// Validate the OS-reported owner before sending any command bytes. A syntactically
+// valid discovery record or pipe name alone is not process identity evidence.
+fn open_verified_pipe(name: &str) -> anyhow::Result<File> {
+    let expected = discovery::pipe_pid(name)?;
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .security_qos_flags(SECURITY_IDENTIFICATION);
+    let mut file = options.open(name);
+    if file
+        .as_ref()
+        .is_err_and(|error| error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32))
+    {
+        unsafe { checked(WaitNamedPipeW(wide(name).as_ptr(), 3000)) }
+            .context("waiting for the requested pipe")?;
+        file = options.open(name);
+    }
+    let file = file.context("opening the requested pipe")?;
+    let mut actual = 0;
+    unsafe {
+        checked(GetNamedPipeServerProcessId(
+            file.as_raw_handle(),
+            &mut actual,
+        ))
+    }
+    .context("querying the pipe server process")?;
+    anyhow::ensure!(
+        actual == expected,
+        "pipe server PID mismatch: expected {expected}, found {actual}"
+    );
+    Ok(file)
 }

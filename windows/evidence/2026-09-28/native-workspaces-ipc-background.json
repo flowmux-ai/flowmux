@@ -1,0 +1,63 @@
+{
+  "started": "2026-09-28T01:26:28.3852730+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "color": "#12abef",
+      "locked": true,
+      "name": "korean_nfd_emoji_and_ampersands_preserved_in_metadata_and_native_captions",
+      "tabName": "TAB-한글 한 é 😀 & && name",
+      "workspaceName": "한글 한 é 😀 & && name"
+    },
+    {
+      "name": "invalid_names_colors_reorders_and_missing_ids_leave_model_unchanged"
+    },
+    {
+      "name": "forty_one_reorders_preserve_all_pids_active_identity_and_hidden_child_context",
+      "count": 41,
+      "order": [
+        "60e865b8-21a6-4416-9042-30d413843002",
+        "1524a993-e5db-4a7d-b6f7-fda867708bb5",
+        "0f1a2a97-b849-4feb-9ba1-f15b730a33d5"
+      ]
+    },
+    {
+      "survivorPids": [
+        34484,
+        26484
+      ],
+      "name": "inactive_workspace_close_terminates_all_three_terminals_and_three_descendants_only",
+      "stoppedPids": [
+        35980,
+        32456,
+        2788,
+        4812,
+        15328,
+        8908
+      ]
+    },
+    {
+      "name": "restart_restores_workspace_order_color_unicode_names_locked_tab_title_and_korean_history"
+    },
+    {
+      "name": "active_workspace_close_selects_survivor_color_clear_and_final_workspace_protection"
+    }
+  ],
+  "hosts": [
+    {
+      "launchedUtc": "2026-09-27T16:26:28.3902733Z",
+      "pid": 25104,
+      "pipe": "\\\\.\\pipe\\flowmux-25104-4bed6e6c-f21c-436c-9a4a-f6bb8a306947",
+      "discoveryWrittenUtc": "2026-09-27T16:26:28.4966865Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T16:26:34.3408715Z",
+      "pid": 32316,
+      "pipe": "\\\\.\\pipe\\flowmux-32316-0a1778b6-e480-4444-b9f6-38fed55137b6",
+      "discoveryWrittenUtc": "2026-09-27T16:26:34.3923706Z"
+    }
+  ],
+  "status": "passed_background_workspace_subset",
+  "pending": "Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and empty-window UI remain pending.",
+  "finished": "2026-09-28T01:26:36.2768893+09:00"
+}

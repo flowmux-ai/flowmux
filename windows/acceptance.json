@@ -689,13 +689,19 @@
     {
       "id": "O02",
       "feature": "CLI↔GUI 통신·다중 창 endpoint",
-      "status": "pending",
+      "status": "partial",
       "evidence": [
         "evidence/2026-09-28/workspace-startup-failed-trial.json",
         "evidence/2026-09-28/native-workspaces-background.json",
-        "evidence/2026-09-28/native-workspaces-repeat-background.json"
+        "evidence/2026-09-28/native-workspaces-repeat-background.json",
+        "evidence/2026-09-28/ipc.md",
+        "evidence/2026-09-28/native-ipc-before-fix.txt",
+        "evidence/2026-09-28/native-rust-tests-ipc.txt",
+        "evidence/2026-09-28/native-ipc-background.json",
+        "evidence/2026-09-28/native-state-ipc-background.json",
+        "evidence/2026-09-28/native-workspaces-ipc-background.json"
       ],
-      "notes": "One restart trial failed to connect before tree. The original harness accepted any existing per-PID discovery file; the new harness checks fresh complete records and exact process identity. Two full reruns passed, but the failed process/discovery timestamps were not captured and its exact cause is unproven. Complete endpoint startup/race/multiwindow acceptance remains pending."
+      "notes": "A native pre-accept disconnect reproduced ERROR_NO_DATA and listener termination; the same regression now accepts the next client. Atomic discovery replacement, record/name/PID validation and OS-reported pipe PID checks were added. Hidden hosts passed 640 empty/truncated disconnects, two-window routing, stale explicit/inherited target rejection, eight idle clients, quit cleanup and six fresh startup cycles. The earlier workspace restart failure remains historically unexplained. Synchronous read/write/flush deadlines, bounded client resources, coordinated cancellation, pipe-allocation failure recovery, crash-record cleanup and complete discovery/multi-user/deployment acceptance remain pending."
     },
     {
       "id": "O03",

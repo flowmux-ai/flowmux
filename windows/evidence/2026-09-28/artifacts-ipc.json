@@ -1,0 +1,30 @@
+{
+  "verification": "Native abandoned-client regression reproduced ERROR_NO_DATA before the fix and passes after recovery. 29 native Windows Rust tests and 15 Linux isolated-crate tests passed. Hidden IPC hosts passed six groups including 640 abandoned/truncated connections, two-window routing, stale explicit/inherited target rejection, eight idle clients and six start/quit cycles. Existing workspace (6 groups) and persistence (8 groups) checks passed. Release build and Clippy passed; installer compiled but not executed. Earlier workspace restart failure remains unexplained. IPC deadlines/resource bounds/cancellation and full Windows/IME/installer acceptance remain pending.",
+  "artifacts": [
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 6952448,
+      "sha256": "d40a898090855a3db1582e6feead27c8bd7093231142ee9fa4db4dcbf59e3dd3"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+      "bytes": 2664448,
+      "sha256": "2a189dbda0517921fc81837fbd5196c443f3577aa3b8891324568a6065f84891"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmux.exe",
+      "bytes": 3211264,
+      "sha256": "f7bdcead9f2b7f445793d543581a483079abffb24bf9c00c49b9d5642ada1b46"
+    },
+    {
+      "file": "target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+      "bytes": 1196032,
+      "sha256": "9a675f1c232a880fffbd69e403dd9ee1bf86cd7e99b30fcaa10b7afc50631a97"
+    },
+    {
+      "file": "dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+      "bytes": 1666924,
+      "sha256": "13e94e76f505dfa4a2948180b53ed06d1acfe1a6dd59fdcd472b22b107a7ff83"
+    }
+  ]
+}

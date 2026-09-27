@@ -43,6 +43,12 @@ The Named Pipe is per window. A protected DACL allows the owning user and
 SYSTEM, and remote pipe clients are rejected. Terminals receive
 `FLOWMUX_PIPE_NAME`; callers outside a terminal can pass `--pipe` explicitly.
 The discovery files live under `%LOCALAPPDATA%\flowmux\windows\instances`.
+They are published by atomic replacement after the pipe is bound. The CLI checks
+the process ID reported by Windows before sending commands. An unavailable
+explicit or inherited pipe returns its connection error; it never redirects the
+command to another window. Connecting and disconnecting before sending a request
+does not stop the listener. See [IPC verification](evidence/2026-09-28/ipc.md)
+for coverage and remaining limits.
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
 The side panel's **Workspace…** menu (also available by right-clicking a workspace)
