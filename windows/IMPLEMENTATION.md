@@ -374,3 +374,20 @@ The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.
 The root manifest/lock and shared core remain unchanged by the Windows host.
+
+Windows browser tabs now use separate WebView2 views/profile and the existing
+pure placement model. Native address/navigation/status controls and CLI
+open/navigate/history/stop/zoom/status/synchronous eval are implemented. Browser
+pages have no terminal bridge or host objects. Native navigation IDs guard old
+completion callbacks; failures surface in the status line. Mixed terminal/browser
+moves preserve view/process identity, and browser-only state can save and restore
+without waiting for nonexistent terminal history callbacks. Terminal-only actions
+reject browser surfaces. Shared Linux/macOS code remains unchanged.
+
+B01/B02/B06/B09 and G09 are partial. DOM refs/actions/waits/screenshots, downloads,
+popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
+media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
+The hidden loopback fixture checks Unicode DOM/control text, history, network
+failure recovery, isolation, move identity, mixed checkpoints and browser-only
+restart/profile persistence. It never synthesizes OS input or accesses clipboard.
+See [browser evidence](evidence/2026-09-28/browser.md).

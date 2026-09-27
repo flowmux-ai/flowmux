@@ -1,0 +1,32 @@
+[
+  {
+    "stage": "browser",
+    "file": "windows/dist/evidence/browser-89f50a63-e989-49f1-8233-56d7f864f317/native-browser-background.json",
+    "checks": 6,
+    "exitCode": 0
+  },
+  {
+    "stage": "keys",
+    "file": "windows/dist/evidence/keys-3c8d3833-bac9-4d1d-802a-2b1f440a4683/native-keys-background.json",
+    "checks": 7,
+    "exitCode": 0
+  },
+  {
+    "stage": "selection",
+    "file": "windows/dist/evidence/selection-ccd54ec3-3107-494d-beba-50dd6cd34bae/native-selection-background.json",
+    "checks": 10,
+    "exitCode": 0
+  },
+  {
+    "stage": "state",
+    "file": "windows/dist/evidence/state-d67cf635-953a-453e-a4c5-f552803ef8d3/native-state-background.json",
+    "checks": 8,
+    "exitCode": 0
+  },
+  {
+    "stage": "cwd",
+    "file": "windows/dist/evidence/cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7/native-cwd-background.json",
+    "checks": 7,
+    "exitCode": 0
+  }
+]

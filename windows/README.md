@@ -702,3 +702,60 @@ New-user, offline, upgrade, uninstall and signing checks are tracked separately;
 the presence of an installer script does not prove those gates passed.
 
 Reference: [Microsoft WebView2 distribution documentation](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution).
+
+Native browser tabs are available through **+ Browser** and `browser open`.
+The same pane tree/tab model places a page to the right of the source, reuses an
+existing browser pane there, or splits down with `--down`. Browser and terminal
+tabs can share a pane and move without recreating their views. The native
+address EDIT uses an explicit **Go** button; Enter is left to native text/IME
+handling. Back/Forward/Reload/Stop and 50–300% zoom have native controls.
+
+```powershell
+flowmuxctl.exe browser open https://example.com --pane pane:<source-id>
+flowmuxctl.exe browser navigate pane:<browser-pane-id> https://example.com/page
+flowmuxctl.exe browser status pane:<browser-pane-id>
+flowmuxctl.exe browser eval pane:<browser-pane-id> 'document.title'
+```
+
+`open` returns `browser_pane_opened` with `pane`, `surface` and
+`placement_strategy`. Other operations target the active browser tab of the
+explicit pane; they do not activate that tab. `url`, `title` and `status` return
+JSON objects. `tree` retains terminal entries in `surfaces` and adds `browsers`.
+`identify.shell` is null for a browser. Terminal input/screen/selection commands
+reject browser targets. `capabilities.browser_commands` lists the supported
+subset; the existing boolean `browser_automation` remains false and a separate
+`browser_automation_status` reports partial support. Linux/macOS browser automation
+parity is still pending.
+
+Pages support absolute HTTP/HTTPS and `about:blank`. Local files, data/script
+URLs and the reserved terminal origin are rejected. External pages use a
+separate `browser-profile`, have WebView2 web messaging/host objects disabled,
+and receive no terminal initialization script, custom protocol or IPC handler.
+Browser URL/tab identity persists in the Windows checkpoint; browser tabs have
+no terminal screen history or shell spec. Cookies/localStorage use the browser
+profile, separate from `terminal-profile`. This is persistent by default;
+private/profile selection, bookmarks, imports and profile management are pending.
+
+`eval` is synchronous only and returns `{ "result": ... }` or an error. Source
+and result have a 128 KiB UTF-8 limit, up to 16 pending requests, and a 12-second
+callback deadline. Promises, navigation in progress, closed/replaced documents
+and invalid/non-JSON results are rejected. A timeout does not cancel JavaScript
+already executing, and rejected asynchronous scripts may already have started
+side effects; do not automatically retry them. Navigation IDs protect callbacks
+from earlier documents. There is no selector/ref-based automation yet.
+
+New-window requests and downloads are currently denied; DevTools and browser
+zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
+normal runs and are denied in hidden debug tests. Custom permission UI, page
+find, fullscreen/media/login acceptance, download UI and popup-to-tab routing
+remain pending. HTTP error pages are pages, while network navigation failures
+report a WebView2 error code in the native status line. Terminal OSC 8 links now
+open an in-app browser; physical link-click behavior is not yet live-tested.
+
+The [browser verifier](scripts/verify-browser.ps1) uses hidden owned hosts and a
+loopback-only HTTP fixture. It checks Unicode DOM/native address text, history,
+network failure recovery, IPC isolation, moves, unchanged source shell identity
+and browser-only persistence. These checks do not verify glyph rendering, real
+IME composition, physical navigation controls, DPI or accessibility. No OS input,
+clipboard, external site, installer or foreground window is involved. See
+[browser evidence](evidence/2026-09-28/browser.md).

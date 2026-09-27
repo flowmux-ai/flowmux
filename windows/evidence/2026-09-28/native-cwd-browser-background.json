@@ -1,0 +1,56 @@
+{
+  "started": "2026-09-28T07:09:30.2841335+09:00",
+  "mode": "background",
+  "checks": [
+    "Prompt reports Korean, decomposed accent, spaces, percent, hash, semicolon and apostrophe paths through real ConPTY",
+    "New tab and split inherit the reported directory; child PowerShell confirms its actual location",
+    "Hidden tab cwd and focus stay isolated; moved child CLI uses fresh same-line cd context before the next prompt",
+    "Custom prompt sees failed command status and exit code 17; reinstall is idempotent and PSReadLine handlers/function remain unchanged",
+    "Custom prompt retains dynamic variables and current $pwd after integration and later cd",
+    "Registry provider retains last filesystem cwd; remote OSC 7/UNC OSC 9 metadata is ignored",
+    "Restart restores each current directory with fresh shells; history OSC cannot change cwd; native label retains locked title and active marker"
+  ],
+  "prompt": {
+    "idempotent": true,
+    "readline": true,
+    "encoding": true,
+    "keys": true,
+    "codePage": 949
+  },
+  "window": "9c362b11-081c-44a9-99d8-6db6d536fa96",
+  "first": 18440,
+  "restored": 6440,
+  "surfaces": [
+    {
+      "id": "0089e5d2-1e34-4143-8f0b-67a956eed97d",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7\\한글 inline",
+      "cwd_reported": true,
+      "pid": 30992
+    },
+    {
+      "id": "642616f1-88dc-4062-ba2c-52066af267c9",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7\\한글 한 é space %#;'folder",
+      "cwd_reported": true,
+      "pid": 33756
+    },
+    {
+      "id": "8f26eee7-4106-4fe7-b6c7-fd6139eb6374",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7\\한글 한 é space %#;'folder",
+      "cwd_reported": true,
+      "pid": 18228
+    },
+    {
+      "id": "ca25223d-f803-4f17-b2d4-20dda0eb7a01",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7\\한글 inline",
+      "cwd_reported": true,
+      "pid": 27672
+    },
+    {
+      "id": "9e309702-8a9a-4e4c-b0a1-dd8a0ef220eb",
+      "cwd": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\cwd-4c0ce195-c5ff-48ff-895b-2dff3b5822a7",
+      "cwd_reported": true,
+      "pid": 36256
+    }
+  ],
+  "finished": "2026-09-28T07:09:40.0820606+09:00"
+}

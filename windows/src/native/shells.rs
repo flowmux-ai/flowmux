@@ -20,7 +20,17 @@ impl App {
             self.close_request.is_none(),
             "window is saving before close"
         );
-        let source_cwd = self.locate(source).context("source terminal missing")?.2;
+        let (workspace, pane, fallback) = self.locate(source).context("source tab missing")?;
+        let source_cwd = if self.browsers.contains_key(&source) {
+            self.workspaces[workspace]
+                .root
+                .terminal_surface_cwd(pane)
+                .unwrap_or(fallback)
+        } else {
+            // Explicit/calling inactive terminals retain their own cwd; the
+            // pane's active tab can point at an unrelated directory.
+            fallback
+        };
         let cwd = match cwd {
             Some(path) if !path.is_absolute() => {
                 anyhow::ensure!(
@@ -38,7 +48,11 @@ impl App {
         };
         anyhow::ensure!(cwd.is_dir(), "working directory does not exist");
         let spec = requested.unwrap_or_else(|| match kind {
-            NewTerminal::Split(_) => self.shells[&source].clone(),
+            NewTerminal::Split(_) => self
+                .shells
+                .get(&source)
+                .cloned()
+                .unwrap_or_else(|| self.settings.default_shell.clone()),
             _ => self.settings.default_shell.clone(),
         });
         shell::resolve(&spec)?; // Invalid requests leave layout and focus untouched.

@@ -168,6 +168,11 @@ pub enum Command {
         op: SettingsOp,
     },
     Tree,
+    /// Control an in-app browser pane, separate from terminal content.
+    Browser {
+        #[command(subcommand)]
+        op: crate::browser::Op,
+    },
     /// Add an in-app notification. Desktop delivery is not yet implemented.
     Notify {
         #[arg(long, default_value = "Terminal")]
@@ -457,7 +462,7 @@ pub enum WorkspaceOp {
     },
 }
 
-fn parse_id(text: &str) -> Result<Uuid, String> {
+pub(crate) fn parse_id(text: &str) -> Result<Uuid, String> {
     let value = text
         .strip_prefix("pane:")
         .or_else(|| text.strip_prefix("surface:"))
@@ -469,6 +474,44 @@ fn parse_id(text: &str) -> Result<Uuid, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_commands_roundtrip_pane_context_and_reject_unknown_options() {
+        let id = Uuid::new_v4();
+        let pane = format!("pane:{id}");
+        for args in [
+            vec![
+                "browser",
+                "open",
+                "https://example.com/한글",
+                "--pane",
+                &pane,
+                "--down",
+            ],
+            vec!["browser", "navigate", &pane, "about:blank"],
+            vec!["browser", "status", &pane],
+            vec!["browser", "eval", &pane, "document.title"],
+        ] {
+            let cli = Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).unwrap();
+            let request = Request {
+                command: cli.command,
+                caller_surface: None,
+                caller_cwd: None,
+            };
+            let value = serde_json::to_value(&request).unwrap();
+            let decoded: Request = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        assert!(Cli::try_parse_from([
+            "flowmuxctl",
+            "browser",
+            "open",
+            "about:blank",
+            "--right",
+            "--down"
+        ])
+        .is_err());
+        assert!(serde_json::from_value::<Request>(serde_json::json!({"method":"browser","op":{"kind":"status","pane":id,"unexpected":true}})).is_err());
+    }
     #[test]
     fn send_key_preserves_old_wire_shape_and_adds_explicit_surface_routing() {
         let old: Request =

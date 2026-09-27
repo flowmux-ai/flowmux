@@ -14,7 +14,7 @@ use crate::{
 };
 use anyhow::Context;
 use base64::Engine;
-use flowmux_core::{PaneId, SplitDirection, SurfaceId, WorkspaceId};
+use flowmux_core::{PaneId, SplitDirection, SurfaceId, SurfaceKind, WorkspaceId};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
 use serde_json::{json, Value};
 use std::{
@@ -43,6 +43,8 @@ use windows_sys::Win32::{
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 #[path = "appearance.rs"]
 mod appearance;
+#[path = "browser.rs"]
+mod browser;
 #[path = "keys.rs"]
 mod keys;
 #[path = "notifications.rs"]
@@ -64,6 +66,7 @@ thread_local! {
     static CONTROL_ACTIONS: RefCell<HashMap<isize, Action>> = RefCell::new(HashMap::new());
 }
 enum Event {
+    Browser(browser::Signal),
     Layout,
     Tick,
     Close,
@@ -248,6 +251,7 @@ impl Surface {
 }
 #[derive(Clone)]
 enum Action {
+    NewBrowser,
     Notifications,
     Settings,
     NewWorkspace,
@@ -301,6 +305,9 @@ struct App {
     sender: EventSender,
     _ipc: ipc::Server,
     context: WebContext,
+    browsers: HashMap<SurfaceId, browser::Browser>,
+    browser_context: Option<WebContext>,
+    pending_browser: HashMap<Uuid, browser::Pending>,
     workspaces: Vec<Workspace>,
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
@@ -459,7 +466,9 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             for ws in &workspaces {
                 for (_, _, tabs) in ws.leaves() {
                     for tab in tabs {
-                        shells.entry(tab.id).or_default();
+                        if matches!(tab.kind, SurfaceKind::Terminal { .. }) {
+                            shells.entry(tab.id).or_default();
+                        }
                     }
                 }
             }
@@ -479,6 +488,9 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             sender,
             _ipc: ipc,
             context: WebContext::new(Some(data_dir()?.join("terminal-profile"))),
+            browser_context: None,
+            browsers: HashMap::new(),
+            pending_browser: HashMap::new(),
             workspaces,
             active_workspace,
             surfaces: HashMap::new(),
@@ -513,6 +525,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
         app._ipc.shutdown(); // Stop accepting commands before terminal teardown.
+        app.browsers.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
@@ -575,14 +588,21 @@ impl App {
         for workspace in &self.workspaces {
             for (_, _, tabs) in workspace.leaves() {
                 for tab in tabs {
-                    if !self.surfaces.contains_key(&tab.id) {
-                        missing.push(tab.id);
+                    if !self.surfaces.contains_key(&tab.id) && !self.browsers.contains_key(&tab.id)
+                    {
+                        missing.push((tab.id, tab.kind));
                     }
                 }
             }
         }
-        for id in missing {
-            self.add_view(id)?;
+        for (id, kind) in missing {
+            match kind {
+                SurfaceKind::Terminal { .. } => self.add_view(id)?,
+                SurfaceKind::Browser { initial_url } => {
+                    self.add_browser_view(id, initial_url.unwrap_or_else(|| "about:blank".into()))?
+                }
+                _ => anyhow::bail!("unsupported Windows surface"),
+            }
         }
         for control in self.controls.drain(..) {
             unsafe {
@@ -602,6 +622,7 @@ impl App {
         ] {
             self.button(name, action)?;
         }
+        self.button("+ Browser", Action::NewBrowser)?;
         self.button("Workspace…", Action::WorkspaceMenu)?;
         self.button(&self.notification_button_text(), Action::Notifications)?;
         self.button(
@@ -831,6 +852,17 @@ impl App {
                 }
             }
         }
+        for (id, browser) in &mut self.browsers {
+            let area = visible
+                .get(id)
+                .filter(|_| client.right > 0 && client.bottom > 0)
+                .map(|area| model::Rect {
+                    y: area.y + bar,
+                    height: (area.height - bar).max(1),
+                    ..*area
+                });
+            browser.layout(area, scale)?;
+        }
         for (pane, area) in areas {
             let id = self.workspace().root.active_surface_id(*pane).unwrap();
             if let Some(surface) = self.surfaces.get(&id) {
@@ -844,6 +876,7 @@ impl App {
         let mut tab_positions: HashMap<PaneId, i32> = HashMap::new();
         for (index, control) in self.controls.iter().enumerate() {
             let (x, y, width, height) = match control.action {
+                Action::NewBrowser => (px(5), bar + px(128), (sidebar - px(10)).max(1), px(32)),
                 Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
                 Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
                 Action::Notifications => (px(5), bar + px(88), (sidebar - px(10)).max(1), px(32)),
@@ -852,7 +885,7 @@ impl App {
                     let swatch = matches!(control.action, Action::WorkspaceColor(_));
                     (
                         if swatch { px(5) } else { px(23) },
-                        bar + px(128) + i as i32 * px(36),
+                        bar + px(168) + i as i32 * px(36),
                         if swatch {
                             px(16)
                         } else {
@@ -908,6 +941,21 @@ impl App {
             return Ok(());
         }
         self.ack_focused_notifications(self.active());
+        if let Some(browser) = self.browsers.get(&self.active()) {
+            let mut info = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..GUITHREADINFO::default()
+            };
+            let child = browser.view.hwnd().0;
+            let focused = unsafe {
+                let thread = GetWindowThreadProcessId(self.window, std::ptr::null_mut());
+                GetGUIThreadInfo(thread, &mut info) != 0
+                    && (info.hwndFocus == child || IsChild(child, info.hwndFocus) != 0)
+            };
+            if !focused {
+                browser.view.focus()?;
+            }
+        }
         if let Some(surface) = self.surfaces.get(&self.active()) {
             if surface.ready {
                 let mut info = GUITHREADINFO {
@@ -932,6 +980,7 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
+            Event::Browser(event) => self.browser_event(event)?,
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Activated => self.ack_focused_notifications(self.active()),
             Event::Layout => {
@@ -946,6 +995,7 @@ impl App {
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
+                self.browser_tick();
                 self.search_tick()?;
                 self.pending_selections.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
@@ -1323,18 +1373,7 @@ impl App {
                 )?;
             }
             ClientMessage::Link { url } => {
-                if url.starts_with("https://") || url.starts_with("http://") {
-                    unsafe {
-                        windows_sys::Win32::UI::Shell::ShellExecuteW(
-                            self.window,
-                            wide("open").as_ptr(),
-                            wide(url).as_ptr(),
-                            std::ptr::null(),
-                            std::ptr::null(),
-                            SW_SHOWNORMAL,
-                        );
-                    }
-                }
+                self.open_browser(id, url, false)?;
             }
             ClientMessage::Fault { message } => anyhow::bail!("terminal frontend: {message}"),
             ClientMessage::Snapshot {
@@ -1496,7 +1535,7 @@ impl App {
             reply,
         });
         self.last_save_attempt = Instant::now();
-        Ok(())
+        self.write_save()
     }
     fn write_save(&mut self) -> anyhow::Result<()> {
         let pending = self.pending_save.as_mut().unwrap();
@@ -1779,6 +1818,8 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.browser_cancel(surface, "browser closed during script request");
+        self.browsers.remove(&surface);
         self.pending_selections.retain(|_, request| {
             if request.surface == surface {
                 let _ = request
@@ -1859,6 +1900,11 @@ impl App {
             "window is saving before close"
         );
         match action {
+            Action::NewBrowser => {
+                return self
+                    .open_browser(self.active(), "about:blank".into(), false)
+                    .map(|_| ())
+            }
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Settings => return self.settings_menu(),
             Action::NewWorkspace => {
@@ -1914,7 +1960,9 @@ impl App {
             Action::Find => {
                 // The native button explicitly opens the current terminal's find bar.
                 // Background test hosts never request desktop or DOM focus.
-                if !self.background_test && self.surfaces[&self.active()].ready {
+                if !self.background_test
+                    && self.surfaces.get(&self.active()).is_some_and(|s| s.ready)
+                {
                     self.focus_active()?;
                     self.surfaces[&self.active()].send(&HostMessage::OpenFind)?;
                 }
@@ -1949,6 +1997,7 @@ impl App {
             "window is saving before close"
         );
         match command {
+            Command::Browser { op } => return self.browser_command(op, caller, reply),
             Command::LaunchWindow { context } => {
                 let caller = caller.context("Window launch requires a calling terminal")?;
                 let source = self
@@ -1988,13 +2037,13 @@ impl App {
                 let surface = self.target(None, caller)?;
                 let (workspace, pane, cwd) = self.locate(surface).unwrap();
                 return Ok(Some(json!({"pid":std::process::id(),"pipe":self._ipc.name,
-                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"shell":self.shells[&surface],"platform":"windows"})));
+                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"shell":self.shells.get(&surface),"platform":"windows"})));
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
-                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
+                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval"],
                 "named_key_protocol":"send_key_mode",
-                "commands":["identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "commands":["browser","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -2013,6 +2062,7 @@ impl App {
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
+                        "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,
                         "background_testing":self.background_test,"window_handle":self.window as usize,
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
@@ -2214,7 +2264,10 @@ impl App {
             }
             Command::Selection { surface, action } => {
                 let id = self.target(None, surface.map(SurfaceId).or(caller))?;
-                let surface = &self.surfaces[&id];
+                let surface = self
+                    .surfaces
+                    .get(&id)
+                    .context("terminal surface not found")?;
                 anyhow::ensure!(surface.ready && !surface.restoring, "terminal is not ready");
                 anyhow::ensure!(
                     self.pending_selections.len() < 128,

@@ -90,17 +90,25 @@ impl WindowState {
                 "focused pane missing"
             );
         }
-        ensure!(surfaces.len() <= 128, "too many saved terminals");
+        ensure!(surfaces.len() <= 128, "too many saved surfaces");
+        let terminals: HashSet<_> = self
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.leaves())
+            .flat_map(|(_, _, tabs)| tabs)
+            .filter(|tab| matches!(tab.kind, SurfaceKind::Terminal { .. }))
+            .map(|tab| tab.id)
+            .collect();
         ensure!(
-            self.screens.len() == surfaces.len(),
+            self.screens.len() == terminals.len(),
             "history missing from saved layout"
         );
         for (id, screen) in &self.screens {
-            ensure!(surfaces.contains(id), "orphaned history");
+            ensure!(terminals.contains(id), "orphaned history");
             screen.validate()?;
         }
         for (id, shell) in &self.shells {
-            ensure!(surfaces.contains(id), "orphaned shell specification");
+            ensure!(terminals.contains(id), "orphaned shell specification");
             shell.validate()?;
         }
         Ok(())
@@ -156,6 +164,9 @@ fn validate_pane(
                         cwd.as_ref().is_none_or(|p| p.as_os_str().len() <= 32767),
                         "cwd exceeds limit"
                     ),
+                    SurfaceKind::Browser { initial_url } => {
+                        crate::browser::url(initial_url.as_deref().unwrap_or("about:blank"))?;
+                    }
                     _ => anyhow::bail!("unsupported saved surface; original file was preserved"),
                 }
             }
@@ -189,6 +200,41 @@ pub(crate) fn sample() -> WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_checkpoints_require_history_only_for_terminals() {
+        let mut state = sample();
+        let source = state.workspaces[0].focused;
+        let terminal = state.workspaces[0].active();
+        let browser = crate::browser::open(
+            &mut state.workspaces[0],
+            source,
+            "https://example.com/한글".into(),
+            false,
+        )
+        .unwrap();
+        let encoded = state.encode().unwrap();
+        assert_eq!(WindowState::decode(&encoded).unwrap().screens.len(), 1);
+        state
+            .screens
+            .insert(browser.surface, state.screens[&terminal].clone());
+        assert!(state.encode().is_err());
+        state.screens.remove(&browser.surface);
+        state
+            .shells
+            .insert(browser.surface, crate::shell::Shell::default());
+        assert!(state.encode().is_err());
+        state.shells.clear();
+        state.workspaces[0].focused = source;
+        assert_eq!(state.workspaces[0].close_active(), Some(terminal));
+        state.screens.clear();
+        assert!(state.encode().is_ok());
+        state.workspaces[0].root.set_surface_browser_url(
+            browser.pane,
+            browser.surface,
+            "file:///C:/private".into(),
+        );
+        assert!(state.encode().is_err());
+    }
     #[test]
     fn shell_specs_roundtrip_without_using_history_as_commands_and_old_state_still_loads() {
         let mut state = sample();

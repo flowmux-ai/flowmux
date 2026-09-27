@@ -23,7 +23,9 @@ impl App {
         !self.background_test
             && unsafe { GetForegroundWindow() == self.window }
             && source.is_some_and(|id| {
-                id == self.active() && self.surfaces.get(&id).is_some_and(|s| s.visible)
+                id == self.active()
+                    && (self.surfaces.get(&id).is_some_and(|s| s.visible)
+                        || self.browsers.get(&id).is_some_and(|s| s.visible))
             })
     }
     pub(super) fn add_notification(
@@ -146,7 +148,7 @@ impl App {
                 }
             }
         }
-        for id in self.surfaces.keys() {
+        for id in self.surfaces.keys().chain(self.browsers.keys()) {
             self.refresh_tab_title(*id);
         }
         if let Some(panel) = &self.notifications.panel {

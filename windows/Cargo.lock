@@ -531,7 +531,9 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "serde_json",
+ "url",
  "uuid",
+ "webview2-com",
  "windows-sys 0.61.2",
  "wry",
 ]
