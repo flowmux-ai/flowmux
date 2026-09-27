@@ -1,0 +1,6402 @@
+{
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later; local Korean input audit, no product code changed",
+  "date": "2026-09-27",
+  "source_commit": "91f9a0922736619fca9d514418f77f1d69865981",
+  "runtime": {
+    "kernel": "5.15.167.4-microsoft-standard-WSL2",
+    "gtk": "4.14.5",
+    "vte": "0.76.0",
+    "ibus": "1.5.29-rc2",
+    "ibus_hangul": "1.5.5-2build2",
+    "libhangul": "0.1.0+git20230314-2build1",
+    "backend": "isolated Xvfb/X11, private IBus Unix socket; GTK_USE_PORTAL=0",
+    "renderer": "cairo",
+    "keyboard": "XTest, Xvfb US layout, ibus-hangul defaults",
+    "font_match_ko": "Noto Sans Mono CJK KR"
+  },
+  "current_user_process_launch_environment": {
+    "GTK_IM_MODULE": "ibus",
+    "IBUS_ENABLE_SYNC_MODE": "0",
+    "FLOWMUX_ENABLE_IBUS_NAV_WORKAROUND": "1",
+    "FLOWMUX_NO_IBUS_NAV_WORKAROUND": null,
+    "note": "Read-only allowlist; installed user GUI was not replaced, closed, or driven."
+  },
+  "binary_sha256": {
+    "target/fast/flowmux": "15e432c9f42a6d6a0948011bbea6722bfec7a9b1675a5de5e7f26254fd87259e",
+    "target/fast/flowmuxctl": "636f455073cef53b60b1bf4054dd3f50e5baee1985a9f3d1b12566c158a50854"
+  },
+  "script": "scripts/audit-terminal-korean-gui.py",
+  "script_sha256": "ea5f4bcd2830d098d16a0d7378a5a3e166f8859444fef3c5ef884d432e40d2af",
+  "build": {
+    "command": "cargo build --locked --profile fast -p flowmux -p flowmux-cli",
+    "exit": 0
+  },
+  "checks": {
+    "gui_pure_unit_unique_passed": 14,
+    "gui_pure_unit_names": [
+      "tests::ibus_im_module_override_targets_only_missing_or_non_preedit_modules",
+      "tests::ibus_reachability_rejects_an_unlinked_socket",
+      "tests::ibus_sync_mode_applies_when_gtk_im_module_is_ibus",
+      "ui::ghostty_pane::tests::ctrl_c_bypass_only_matches_plain_ctrl_c",
+      "ui::ghostty_pane::tests::enable_env_flags_require_truthy_values",
+      "ui::ghostty_pane::tests::flatpak_ibus_bypass_covers_deletion_keys",
+      "ui::ghostty_pane::tests::flatpak_ibus_bypass_keeps_navigation_and_function_keys",
+      "ui::ghostty_pane::tests::flatpak_ibus_bypass_leaves_text_on_vte_im_path",
+      "ui::ghostty_pane::tests::ibus_nav_workaround_defaults_on_in_flatpak_and_wsl",
+      "ui::ghostty_pane::tests::insert_newline_preedit_ordering_covers_ibus_and_macos",
+      "ui::ghostty_pane::tests::shift_enter_byte_sequence_is_esc_cr",
+      "ui::ghostty_pane::tests::shift_enter_capture_is_terminal_only_and_exact",
+      "ui::ghostty_pane::tests::terminal_selection_fallback_cache_is_bounded",
+      "ui::ghostty_pane::tests::vte_capture_key_controllers_are_legacy_opt_in"
+    ],
+    "gui_pure_unit_runs": [
+      {
+        "filter": "ibus",
+        "exit": 0,
+        "output": "\nrunning 8 tests\ntest ui::ghostty_pane::tests::ibus_nav_workaround_defaults_on_in_flatpak_and_wsl ... ok\ntest ui::ghostty_pane::tests::insert_newline_preedit_ordering_covers_ibus_and_macos ... ok\ntest ui::ghostty_pane::tests::flatpak_ibus_bypass_leaves_text_on_vte_im_path ... ok\ntest ui::ghostty_pane::tests::flatpak_ibus_bypass_covers_deletion_keys ... ok\ntest tests::ibus_im_module_override_targets_only_missing_or_non_preedit_modules ... ok\ntest tests::ibus_sync_mode_applies_when_gtk_im_module_is_ibus ... ok\ntest ui::ghostty_pane::tests::flatpak_ibus_bypass_keeps_navigation_and_function_keys ... ok\ntest tests::ibus_reachability_rejects_an_unlinked_socket ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 683 filtered out; finished in 0.03s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "shift_enter",
+        "exit": 0,
+        "output": "\nrunning 2 tests\ntest ui::ghostty_pane::tests::shift_enter_byte_sequence_is_esc_cr ... ok\ntest ui::ghostty_pane::tests::shift_enter_capture_is_terminal_only_and_exact ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 689 filtered out; finished in 0.02s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "insert_newline_preedit",
+        "exit": 0,
+        "output": "\nrunning 1 test\ntest ui::ghostty_pane::tests::insert_newline_preedit_ordering_covers_ibus_and_macos ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.02s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "vte_capture_key",
+        "exit": 0,
+        "output": "\nrunning 1 test\ntest ui::ghostty_pane::tests::vte_capture_key_controllers_are_legacy_opt_in ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.02s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "ctrl_c_bypass",
+        "exit": 0,
+        "output": "\nrunning 1 test\ntest ui::ghostty_pane::tests::ctrl_c_bypass_only_matches_plain_ctrl_c ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.02s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "enable_env_flags",
+        "exit": 0,
+        "output": "\nrunning 1 test\ntest ui::ghostty_pane::tests::enable_env_flags_require_truthy_values ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.03s\n\n",
+        "stderr": ""
+      },
+      {
+        "filter": "terminal_selection_fallback",
+        "exit": 0,
+        "output": "\nrunning 1 test\ntest ui::ghostty_pane::tests::terminal_selection_fallback_cache_is_bounded ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.02s\n\n",
+        "stderr": ""
+      }
+    ],
+    "gtk_focus_lifecycle_log": "\nrunning 1 test\nlibEGL warning: DRI3 error: Could not get DRI3 device\nlibEGL warning: Ensure your X server supports DRI3 to get accelerated rendering\ntest ui::ghostty_pane::tests::closing_terminal_releases_widget_graph ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 690 filtered out; finished in 0.56s\n\n",
+    "terminal_crate_log": "   Compiling libc v0.2.186\n   Compiling memchr v2.8.0\n   Compiling num-traits v0.2.19\n   Compiling syn v2.0.117\n   Compiling serde_json v1.0.150\n   Compiling getrandom v0.4.2\n   Compiling uuid v1.23.1\n   Compiling serde_derive v1.0.228\n   Compiling thiserror-impl v1.0.69\n   Compiling thiserror v1.0.69\n   Compiling serde v1.0.228\n   Compiling chrono v0.4.44\n   Compiling flowmux-core v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/crates/flowmux-core)\n   Compiling flowmux-terminal v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/crates/flowmux-terminal)\n    Finished `fast` profile [optimized] target(s) in 11.51s\n     Running unittests src/lib.rs (target/fast/deps/flowmux_terminal-b20f1a26c39e2ea5)\n\nrunning 23 tests\ntest key_modes::tests::alternate_screen_exit_is_reported_once_across_output_chunks ... ok\ntest key_modes::tests::default_cursor_keys_stay_in_normal_mode ... ok\ntest key_modes::tests::decckm_tracking_survives_split_output_chunks ... ok\ntest key_modes::tests::full_reset_restores_initial_modes_and_reports_alternate_screen_exit ... ok\ntest key_modes::tests::non_cursor_input_is_preserved_in_application_cursor_mode ... ok\ntest key_modes::tests::private_csi_list_updates_when_decckm_is_present ... ok\ntest key_modes::tests::rmkx_restores_normal_cursor_mode ... ok\ntest key_modes::tests::smkx_application_cursor_mode_rewrites_tig_arrow_keys ... ok\ntest pty::tests::explicit_no_color_extra_env_is_preserved ... ok\ntest pty::tests::inherited_no_color_is_not_forwarded_to_terminal_children ... ok\ntest pty::tests::master_fd_is_cloexec ... ok\ntest tests::agent_pty_env_includes_bundled_cli_when_provided ... ok\ntest tests::agent_pty_env_includes_pane_surface_workspace_socket ... ok\ntest tests::agent_pty_env_pane_and_surface_can_differ ... ok\ntest tests::env_to_kv_strings_joins_pairs_with_equals ... ok\ntest tests::scenario_full_envv_array_is_well_formed_for_terminal_spawn ... ok\ntest tests::shell_validation_accepts_paths_and_path_commands ... ok\ntest tests::shell_validation_rejects_empty_and_missing_paths ... ok\ntest pty::tests::drop_does_not_block_for_sighup_ignoring_child ... ok\ntest pty::tests::extra_env_reaches_the_child ... ok\ntest pty::tests::shell_output_reaches_the_pty_master ... ok\ntest pty::tests::resize_updates_winsize_seen_by_child ... ok\ntest pty::tests::external_watcher_keeps_exit_status_after_close_and_forced_kill ... ok\n\ntest result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.04s\n\n   Doc-tests flowmux_terminal\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+    "editor_frontend_log": "\n> flowmux-editor-web@0.1.0 test\n> npm run check && tsc -p tsconfig.test.json && node --test tests/*.test.mjs\n\n\n> flowmux-editor-web@0.1.0 check\n> tsc --noEmit\n\nTAP version 13\n# Subtest: find, replace, and save are bound to Ctrl+F, Ctrl+H, and Ctrl+S on Linux\nok 1 - find, replace, and save are bound to Ctrl+F, Ctrl+H, and Ctrl+S on Linux\n  ---\n  duration_ms: 1.152549\n  type: 'test'\n  ...\n# Subtest: core editing shortcuts cover save as, save all, quick open, workspace search, and close\nok 2 - core editing shortcuts cover save as, save all, quick open, workspace search, and close\n  ---\n  duration_ms: 0.218288\n  type: 'test'\n  ...\n# Subtest: editor zoom uses Ctrl++ and Ctrl+-\nok 3 - editor zoom uses Ctrl++ and Ctrl+-\n  ---\n  duration_ms: 1.232479\n  type: 'test'\n  ...\n# Subtest: action ids are unique and namespaced\nok 4 - action ids are unique and namespaced\n  ---\n  duration_ms: 0.339387\n  type: 'test'\n  ...\n# Subtest: no two actions claim the same chord\nok 5 - no two actions claim the same chord\n  ---\n  duration_ms: 0.317737\n  type: 'test'\n  ...\n# Subtest: every runner name is one of the wired handlers\nok 6 - every runner name is one of the wired handlers\n  ---\n  duration_ms: 0.193338\n  type: 'test'\n  ...\n# Subtest: no action shadows the native editing chords\nok 7 - no action shadows the native editing chords\n  ---\n  duration_ms: 0.241757\n  type: 'test'\n  ...\n# Subtest: chords encode into Monaco keybinding numbers\nok 8 - chords encode into Monaco keybinding numbers\n  ---\n  duration_ms: 0.370876\n  type: 'test'\n  ...\n# Subtest: the unfinished edit and diff mode controls stay hidden\nok 9 - the unfinished edit and diff mode controls stay hidden\n  ---\n  duration_ms: 9.219012\n  type: 'test'\n  ...\n# Subtest: document byte limits use UTF-8 bytes\nok 10 - document byte limits use UTF-8 bytes\n  ---\n  duration_ms: 0.699383\n  type: 'test'\n  ...\n# Subtest: editor zoom moves in ten percent steps inside its supported range\nok 11 - editor zoom moves in ten percent steps inside its supported range\n  ---\n  duration_ms: 0.150919\n  type: 'test'\n  ...\n# Subtest: editor zoom recognizes Ctrl plus and minus before Monaco handles them\nok 12 - editor zoom recognizes Ctrl plus and minus before Monaco handles them\n  ---\n  duration_ms: 0.199148\n  type: 'test'\n  ...\n# Subtest: conflict actions distinguish changed deleted and compare states\nok 13 - conflict actions distinguish changed deleted and compare states\n  ---\n  duration_ms: 1.211979\n  type: 'test'\n  ...\n# Subtest: document state distinguishes external changes and deletion\nok 14 - document state distinguishes external changes and deletion\n  ---\n  duration_ms: 0.241738\n  type: 'test'\n  ...\n# Subtest: plain Alt+arrow requests pane focus navigation\nok 15 - plain Alt+arrow requests pane focus navigation\n  ---\n  duration_ms: 0.674794\n  type: 'test'\n  ...\n# Subtest: typing and editor navigation remain owned by Monaco\nok 16 - typing and editor navigation remain owned by Monaco\n  ---\n  duration_ms: 0.154289\n  type: 'test'\n  ...\n# Subtest: recognizes exact file names and common extensions\nok 17 - recognizes exact file names and common extensions\n  ---\n  duration_ms: 0.703113\n  type: 'test'\n  ...\n# Subtest: handles multilingual paths without changing their contents\nok 18 - handles multilingual paths without changing their contents\n  ---\n  duration_ms: 0.140269\n  type: 'test'\n  ...\n# Subtest: falls back to plain text for unknown or extensionless files\nok 19 - falls back to plain text for unknown or extensionless files\n  ---\n  duration_ms: 0.149898\n  type: 'test'\n  ...\n# Subtest: rejects non-object envelopes and malformed save acknowledgements\nok 20 - rejects non-object envelopes and malformed save acknowledgements\n  ---\n  duration_ms: 2.424147\n  type: 'test'\n  ...\n# Subtest: accepts a complete multilingual initialization message\nok 21 - accepts a complete multilingual initialization message\n  ---\n  duration_ms: 0.181469\n  type: 'test'\n  ...\n# Subtest: rejects unsupported versions, unknown types, and incomplete documents\nok 22 - rejects unsupported versions, unknown types, and incomplete documents\n  ---\n  duration_ms: 0.242248\n  type: 'test'\n  ...\n# Subtest: rejects negative and fractional document versions\nok 23 - rejects negative and fractional document versions\n  ---\n  duration_ms: 0.189138\n  type: 'test'\n  ...\n# Subtest: accepts only known document disk states\nok 24 - accepts only known document disk states\n  ---\n  duration_ms: 0.138139\n  type: 'test'\n  ...\n# Subtest: accepts only complete recovery proposals\nok 25 - accepts only complete recovery proposals\n  ---\n  duration_ms: 0.123339\n  type: 'test'\n  ...\n# Subtest: advances the local version while sending the host's current base version\nok 26 - advances the local version while sending the host's current base version\n  ---\n  duration_ms: 0.603394\n  type: 'test'\n  ...\n# Subtest: accepts flush requests and document change acknowledgements\nok 27 - accepts flush requests and document change acknowledgements\n  ---\n  duration_ms: 0.133028\n  type: 'test'\n  ...\n# Subtest: accepts complete workspace search results with multilingual ranges\nok 28 - accepts complete workspace search results with multilingual ranges\n  ---\n  duration_ms: 0.342617\n  type: 'test'\n  ...\n# Subtest: accepts quick open completion and reveal range messages\nok 29 - accepts quick open completion and reveal range messages\n  ---\n  duration_ms: 0.395656\n  type: 'test'\n  ...\n# Subtest: accepts save as and conflict response messages\nok 30 - accepts save as and conflict response messages\n  ---\n  duration_ms: 0.198058\n  type: 'test'\n  ...\n# Subtest: accepts bounded light and multilingual editor appearance\nok 31 - accepts bounded light and multilingual editor appearance\n  ---\n  duration_ms: 0.274088\n  type: 'test'\n  ...\n# Subtest: fuzzy matching supports multilingual subsequences and terms\nok 32 - fuzzy matching supports multilingual subsequences and terms\n  ---\n  duration_ms: 0.774393\n  type: 'test'\n  ...\n# Subtest: quick open ranks recent and shorter paths first\nok 33 - quick open ranks recent and shorter paths first\n  ---\n  duration_ms: 0.638894\n  type: 'test'\n  ...\n# Subtest: comma separated globs are trimmed and bounded\nok 34 - comma separated globs are trimmed and bounded\n  ---\n  duration_ms: 0.180578\n  type: 'test'\n  ...\n1..34\n# tests 34\n# suites 0\n# pass 34\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 112.595859\n"
+  },
+  "runs": [
+    {
+      "sync": "0",
+      "navigation_workaround": "on",
+      "backend": "Xvfb/X11/private IBus",
+      "cases": [
+        {
+          "name": "english",
+          "start": 3890.298986248,
+          "end": 3890.620716028,
+          "raw_hex": "616263",
+          "expected": "abc",
+          "received": "abc",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "empty_enter",
+          "start": 3890.712535305,
+          "end": 3890.953603214,
+          "raw_hex": "1b5b4f1b5b490d",
+          "expected": "\r",
+          "received": "\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 3890.994762535,
+          "end": 3891.200339329,
+          "raw_hex": "1b5b4f1b5b490d1b5b4f1b5b491b5b4f1b5b490d0d",
+          "expected": "\r\r\r",
+          "received": "\r\r\r",
+          "passed": true,
+          "focus_out": 3
+        },
+        {
+          "name": "hidden_cursor_preedit",
+          "start": 3891.741925199,
+          "end": 3892.104030539,
+          "raw_hex": "eab080",
+          "expected": "가",
+          "received": "가",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "enter_after_preedit",
+          "start": 3892.145659007,
+          "end": 3892.387169683,
+          "raw_hex": "1b5b4feb82981b5b490d",
+          "expected": "나\r",
+          "received": "나\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "sentence_enter",
+          "start": 3892.447605303,
+          "end": 3893.181156006,
+          "raw_hex": "ec9588eb8595ed9598ec84b81b5b4fec9a941b5b490d",
+          "expected": "안녕하세요\r",
+          "received": "안녕하세요\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "backspace_composing",
+          "start": 3893.224500038,
+          "end": 3893.58731373,
+          "raw_hex": "1b5b4fed959c1b5b497f",
+          "expected": "한",
+          "received": "한",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "symbol_after_backspace",
+          "start": 3893.63199776,
+          "end": 3893.873986141,
+          "raw_hex": "1b5b4f1b5b493f",
+          "expected": "?",
+          "received": "?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_enter",
+          "start": 3893.924305147,
+          "end": 3894.246111706,
+          "raw_hex": "1b5b4feab0801b5b491b0d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "space",
+          "start": 3894.296457182,
+          "end": 3894.782870962,
+          "raw_hex": "ed959ceab88020",
+          "expected": "한글 ",
+          "received": "한글 ",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "number",
+          "start": 3894.821419649,
+          "end": 3895.142913971,
+          "raw_hex": "ec958431",
+          "expected": "아1",
+          "received": "아1",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "comma",
+          "start": 3895.179049599,
+          "end": 3895.666087124,
+          "raw_hex": "ec9588eb85952c",
+          "expected": "안녕,",
+          "received": "안녕,",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_symbol_question",
+          "start": 3895.704926679,
+          "end": 3896.069078888,
+          "raw_hex": "1b5b4fed959c1b5b493f",
+          "expected": "한?",
+          "received": "한?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_exclam",
+          "start": 3896.108786793,
+          "end": 3896.471354019,
+          "raw_hex": "1b5b4fed959c1b5b4921",
+          "expected": "한!",
+          "received": "한!",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_at",
+          "start": 3896.513477972,
+          "end": 3896.876746903,
+          "raw_hex": "1b5b4fed959c1b5b4940",
+          "expected": "한@",
+          "received": "한@",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_numbersign",
+          "start": 3896.933596345,
+          "end": 3897.296003922,
+          "raw_hex": "1b5b4fed959c1b5b4923",
+          "expected": "한#",
+          "received": "한#",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_dollar",
+          "start": 3897.336077616,
+          "end": 3897.69981492,
+          "raw_hex": "1b5b4fed959c1b5b4924",
+          "expected": "한$",
+          "received": "한$",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_percent",
+          "start": 3897.742946373,
+          "end": 3898.105461679,
+          "raw_hex": "1b5b4fed959c1b5b4925",
+          "expected": "한%",
+          "received": "한%",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciicircum",
+          "start": 3898.146817249,
+          "end": 3898.511451736,
+          "raw_hex": "1b5b4fed959c1b5b495e",
+          "expected": "한^",
+          "received": "한^",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_ampersand",
+          "start": 3898.551204642,
+          "end": 3898.913627439,
+          "raw_hex": "1b5b4fed959c1b5b4926",
+          "expected": "한&",
+          "received": "한&",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asterisk",
+          "start": 3898.952348414,
+          "end": 3899.315046208,
+          "raw_hex": "1b5b4fed959c1b5b492a",
+          "expected": "한*",
+          "received": "한*",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenleft",
+          "start": 3899.35526881,
+          "end": 3899.718166622,
+          "raw_hex": "1b5b4fed959c1b5b4928",
+          "expected": "한(",
+          "received": "한(",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenright",
+          "start": 3899.759415422,
+          "end": 3900.122504874,
+          "raw_hex": "1b5b4fed959c1b5b4929",
+          "expected": "한)",
+          "received": "한)",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_underscore",
+          "start": 3900.162349319,
+          "end": 3900.525161682,
+          "raw_hex": "1b5b4fed959c1b5b495f",
+          "expected": "한_",
+          "received": "한_",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_plus",
+          "start": 3900.577594868,
+          "end": 3900.942258504,
+          "raw_hex": "1b5b4fed959c1b5b492b",
+          "expected": "한+",
+          "received": "한+",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_colon",
+          "start": 3900.983498746,
+          "end": 3901.345699194,
+          "raw_hex": "1b5b4fed959c1b5b493a",
+          "expected": "한:",
+          "received": "한:",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_quotedbl",
+          "start": 3901.39400159,
+          "end": 3901.756648424,
+          "raw_hex": "1b5b4fed959c1b5b4922",
+          "expected": "한\"",
+          "received": "한\"",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_less",
+          "start": 3901.795497269,
+          "end": 3902.158001154,
+          "raw_hex": "1b5b4fed959c1b5b493c",
+          "expected": "한<",
+          "received": "한<",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_greater",
+          "start": 3902.20736896,
+          "end": 3902.569654937,
+          "raw_hex": "1b5b4fed959c1b5b493e",
+          "expected": "한>",
+          "received": "한>",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceleft",
+          "start": 3902.608727179,
+          "end": 3902.971679051,
+          "raw_hex": "1b5b4fed959c1b5b497b",
+          "expected": "한{",
+          "received": "한{",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceright",
+          "start": 3903.018274912,
+          "end": 3903.38051932,
+          "raw_hex": "1b5b4fed959c1b5b497d",
+          "expected": "한}",
+          "received": "한}",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_bar",
+          "start": 3903.418675981,
+          "end": 3903.780736411,
+          "raw_hex": "1b5b4fed959c1b5b497c",
+          "expected": "한|",
+          "received": "한|",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciitilde",
+          "start": 3903.822286461,
+          "end": 3904.186014823,
+          "raw_hex": "1b5b4fed959c1b5b497e",
+          "expected": "한~",
+          "received": "한~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "double_consonants",
+          "start": 3904.231768604,
+          "end": 3904.881003769,
+          "raw_hex": "eab98ceb94b0ebb9a0ec8bb81b5b4feca79c1b5b490d",
+          "expected": "까따빠싸짜\r",
+          "received": "까따빠싸짜\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "compound_vowels",
+          "start": 3904.926323733,
+          "end": 3905.655709223,
+          "raw_hex": "eab3bceb9098ec9b8c1b5b4fec9d981b5b490d",
+          "expected": "과되워의\r",
+          "received": "과되워의\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "final_cluster",
+          "start": 3905.703958568,
+          "end": 3906.109910731,
+          "raw_hex": "1b5b4feab0921b5b490d",
+          "expected": "값\r",
+          "received": "값\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "isolated_jamo",
+          "start": 3906.155863842,
+          "end": 3906.43851776,
+          "raw_hex": "1b5b4fe384b11b5b490d",
+          "expected": "ㄱ\r",
+          "received": "ㄱ\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "keypad_enter",
+          "start": 3906.478298555,
+          "end": 3906.800389302,
+          "raw_hex": "1b5b4feab0801b5b490d",
+          "expected": "가\r",
+          "received": "가\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "hangul_english_toggle",
+          "start": 3906.838640132,
+          "end": 3907.525309245,
+          "raw_hex": "ed959c6162631b5b4feab8801b5b490d",
+          "expected": "한abc글\r",
+          "received": "한abc글\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Tab",
+          "start": 3907.568266021,
+          "end": 3907.893148151,
+          "raw_hex": "1b5b4feab0801b5b4909",
+          "expected": "가\t",
+          "received": "가\t",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Left",
+          "start": 3908.080354698,
+          "end": 3908.402697742,
+          "raw_hex": "1b5b4feab0801b5b491b5b44",
+          "expected": "가\u001b[D",
+          "received": "가\u001b[D",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Right",
+          "start": 3908.587237425,
+          "end": 3908.909004315,
+          "raw_hex": "1b5b4feab0801b5b491b5b43",
+          "expected": "가\u001b[C",
+          "received": "가\u001b[C",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Home",
+          "start": 3909.093501726,
+          "end": 3909.415916261,
+          "raw_hex": "1b5b4feab0801b5b491b5b48",
+          "expected": "가\u001b[H",
+          "received": "가\u001b[H",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_End",
+          "start": 3909.597552309,
+          "end": 3909.919463048,
+          "raw_hex": "1b5b4feab0801b5b491b5b46",
+          "expected": "가\u001b[F",
+          "received": "가\u001b[F",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Delete",
+          "start": 3910.101584842,
+          "end": 3910.423420601,
+          "raw_hex": "1b5b4feab0801b5b491b5b337e",
+          "expected": "가\u001b[3~",
+          "received": "가\u001b[3~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_left_order",
+          "start": 3910.607614896,
+          "end": 3910.970521839,
+          "raw_hex": "1b5b441b5b4feab0801b5b490d",
+          "expected": "가\u001b[D\r",
+          "received": "\u001b[D가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_right_order",
+          "start": 3911.017003411,
+          "end": 3911.379547787,
+          "raw_hex": "1b5b431b5b4feab0801b5b490d",
+          "expected": "가\u001b[C\r",
+          "received": "\u001b[C가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "escape_then_enter",
+          "start": 3911.420185284,
+          "end": 3911.783961218,
+          "raw_hex": "1b5b4feab0801b5b491b1b5b4f1b5b490d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 2
+        }
+      ],
+      "passed": 46,
+      "failed": 2,
+      "note": "Byte checks only; screenshots need visual review. Not a WSLg portal or Windows test.",
+      "label": "final-sync0-navon",
+      "artifact_dir": "/tmp/fm-gui-3y82dvoi",
+      "raw_events": [
+        {
+          "time": 3889.829084484,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3890.30210173,
+          "hex": "61"
+        },
+        {
+          "time": 3890.341851826,
+          "hex": "62"
+        },
+        {
+          "time": 3890.382114906,
+          "hex": "63"
+        },
+        {
+          "time": 3890.713267578,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3890.713511537,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3890.716374948,
+          "hex": "0d"
+        },
+        {
+          "time": 3890.995607178,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3890.995800487,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3890.996165872,
+          "hex": "0d"
+        },
+        {
+          "time": 3890.99855873,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3890.998747629,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3890.999158014,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3890.999345034,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3891.001612293,
+          "hex": "0d"
+        },
+        {
+          "time": 3891.001715922,
+          "hex": "0d"
+        },
+        {
+          "time": 3891.86609075,
+          "hex": "eab080"
+        },
+        {
+          "time": 3892.146549918,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3892.146664507,
+          "hex": "eb8298"
+        },
+        {
+          "time": 3892.146931425,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3892.149528226,
+          "hex": "0d"
+        },
+        {
+          "time": 3892.575514549,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3892.700410613,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3892.821551377,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3892.902772757,
+          "hex": "ec84b8"
+        },
+        {
+          "time": 3892.941151285,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3892.941404755,
+          "hex": "ec9a94"
+        },
+        {
+          "time": 3892.941544722,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3892.944105139,
+          "hex": "0d"
+        },
+        {
+          "time": 3893.347200692,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3893.347397312,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3893.347589849,
+          "hex": "1b5b497f"
+        },
+        {
+          "time": 3893.633312058,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3893.633505375,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3894.006301134,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3894.006555101,
+          "hex": "eab080"
+        },
+        {
+          "time": 3894.00682574,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3894.010385845,
+          "hex": "1b0d"
+        },
+        {
+          "time": 3894.423421296,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3894.545060011,
+          "hex": "eab88020"
+        },
+        {
+          "time": 3894.904897561,
+          "hex": "ec958431"
+        },
+        {
+          "time": 3895.303853725,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3895.425276156,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3895.425346166,
+          "hex": "2c"
+        },
+        {
+          "time": 3895.828047547,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3895.828251496,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3895.828416345,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3896.231525398,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3896.231735196,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3896.231940394,
+          "hex": "1b5b4921"
+        },
+        {
+          "time": 3896.636965881,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3896.637153648,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3896.637354716,
+          "hex": "1b5b4940"
+        },
+        {
+          "time": 3897.05631068,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3897.056516549,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3897.056683826,
+          "hex": "1b5b4923"
+        },
+        {
+          "time": 3897.460164017,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3897.460263066,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3897.460542313,
+          "hex": "1b5b4924"
+        },
+        {
+          "time": 3897.865627658,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3897.865851036,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3897.866054165,
+          "hex": "1b5b4925"
+        },
+        {
+          "time": 3898.270160219,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3898.270344907,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3898.270443866,
+          "hex": "1b5b495e"
+        },
+        {
+          "time": 3898.673882316,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3898.673990435,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3898.674167143,
+          "hex": "1b5b4926"
+        },
+        {
+          "time": 3899.075458154,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3899.075613942,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3899.075778261,
+          "hex": "1b5b492a"
+        },
+        {
+          "time": 3899.47831143,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3899.478485918,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3899.478647666,
+          "hex": "1b5b4928"
+        },
+        {
+          "time": 3899.88284234,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3899.883121787,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3899.883333115,
+          "hex": "1b5b4929"
+        },
+        {
+          "time": 3900.285372292,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3900.285637668,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3900.285847235,
+          "hex": "1b5b495f"
+        },
+        {
+          "time": 3900.702312833,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3900.702435901,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3900.702640209,
+          "hex": "1b5b492b"
+        },
+        {
+          "time": 3901.105814224,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3901.105990602,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3901.10619891,
+          "hex": "1b5b493a"
+        },
+        {
+          "time": 3901.516645095,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3901.516752714,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3901.516873821,
+          "hex": "1b5b4922"
+        },
+        {
+          "time": 3901.918164862,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3901.918304481,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3901.918477379,
+          "hex": "1b5b493c"
+        },
+        {
+          "time": 3902.329698997,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3902.329806036,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3902.330076893,
+          "hex": "1b5b493e"
+        },
+        {
+          "time": 3902.73179426,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3902.731970969,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3902.732161996,
+          "hex": "1b5b497b"
+        },
+        {
+          "time": 3903.140430112,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3903.140567931,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3903.140694059,
+          "hex": "1b5b497d"
+        },
+        {
+          "time": 3903.540798291,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3903.540979291,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3903.54107655,
+          "hex": "1b5b497c"
+        },
+        {
+          "time": 3903.94647062,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3903.946662769,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3903.946853876,
+          "hex": "1b5b497e"
+        },
+        {
+          "time": 3904.317975821,
+          "hex": "eab98c"
+        },
+        {
+          "time": 3904.399303525,
+          "hex": "eb94b0"
+        },
+        {
+          "time": 3904.520335276,
+          "hex": "ebb9a0"
+        },
+        {
+          "time": 3904.561186702,
+          "hex": "ec8bb8"
+        },
+        {
+          "time": 3904.64089375,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3904.64112963,
+          "hex": "eca79c"
+        },
+        {
+          "time": 3904.641316517,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3904.644802834,
+          "hex": "0d"
+        },
+        {
+          "time": 3905.092599218,
+          "hex": "eab3bc"
+        },
+        {
+          "time": 3905.214840235,
+          "hex": "eb9098"
+        },
+        {
+          "time": 3905.336100903,
+          "hex": "ec9b8c"
+        },
+        {
+          "time": 3905.415644624,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3905.415891731,
+          "hex": "ec9d98"
+        },
+        {
+          "time": 3905.41604451,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3905.418552557,
+          "hex": "0d"
+        },
+        {
+          "time": 3905.86958886,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3905.869859708,
+          "hex": "eab092"
+        },
+        {
+          "time": 3905.870146644,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3905.873390845,
+          "hex": "0d"
+        },
+        {
+          "time": 3906.198350423,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3906.198598212,
+          "hex": "e384b1"
+        },
+        {
+          "time": 3906.198774699,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3906.20210102,
+          "hex": "0d"
+        },
+        {
+          "time": 3906.560267815,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3906.560524074,
+          "hex": "eab080"
+        },
+        {
+          "time": 3906.560679162,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3906.563297946,
+          "hex": "0d"
+        },
+        {
+          "time": 3906.962904652,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3907.002984395,
+          "hex": "61"
+        },
+        {
+          "time": 3907.046228667,
+          "hex": "62"
+        },
+        {
+          "time": 3907.083867583,
+          "hex": "63"
+        },
+        {
+          "time": 3907.285133629,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3907.285325326,
+          "hex": "eab880"
+        },
+        {
+          "time": 3907.285469314,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3907.287875441,
+          "hex": "0d"
+        },
+        {
+          "time": 3907.652888794,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3907.653076972,
+          "hex": "eab080"
+        },
+        {
+          "time": 3907.65327861,
+          "hex": "1b5b4909"
+        },
+        {
+          "time": 3907.940214138,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3907.940509987,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3907.942851515,
+          "hex": "0d"
+        },
+        {
+          "time": 3908.16192568,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3908.162153399,
+          "hex": "eab080"
+        },
+        {
+          "time": 3908.162323316,
+          "hex": "1b5b491b5b44"
+        },
+        {
+          "time": 3908.446442381,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3908.446662458,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3908.449074786,
+          "hex": "0d"
+        },
+        {
+          "time": 3908.668742177,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3908.668890215,
+          "hex": "eab080"
+        },
+        {
+          "time": 3908.669126073,
+          "hex": "1b5b491b5b43"
+        },
+        {
+          "time": 3908.95214454,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3908.952386826,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3908.95504733,
+          "hex": "0d"
+        },
+        {
+          "time": 3909.175693143,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3909.17591701,
+          "hex": "eab080"
+        },
+        {
+          "time": 3909.176107459,
+          "hex": "1b5b491b5b48"
+        },
+        {
+          "time": 3909.456469119,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3909.456679246,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3909.458890226,
+          "hex": "0d"
+        },
+        {
+          "time": 3909.679110362,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3909.67929466,
+          "hex": "eab080"
+        },
+        {
+          "time": 3909.679425619,
+          "hex": "1b5b491b5b46"
+        },
+        {
+          "time": 3909.961297254,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3909.961538352,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3909.964030269,
+          "hex": "0d"
+        },
+        {
+          "time": 3910.183065586,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3910.183247534,
+          "hex": "eab080"
+        },
+        {
+          "time": 3910.183366753,
+          "hex": "1b5b491b5b337e"
+        },
+        {
+          "time": 3910.465393016,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3910.465806863,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3910.469121332,
+          "hex": "0d"
+        },
+        {
+          "time": 3910.689797424,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 3910.730055795,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3910.730240273,
+          "hex": "eab080"
+        },
+        {
+          "time": 3910.730361682,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3910.733014727,
+          "hex": "0d"
+        },
+        {
+          "time": 3911.099129389,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 3911.139274951,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3911.13938507,
+          "hex": "eab080"
+        },
+        {
+          "time": 3911.139542768,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3911.141973015,
+          "hex": "0d"
+        },
+        {
+          "time": 3911.503244374,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3911.503464291,
+          "hex": "eab080"
+        },
+        {
+          "time": 3911.503659808,
+          "hex": "1b5b491b"
+        },
+        {
+          "time": 3911.543652823,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3911.54382738,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3911.545996681,
+          "hex": "0d"
+        }
+      ]
+    },
+    {
+      "sync": "0",
+      "navigation_workaround": "off",
+      "backend": "Xvfb/X11/private IBus",
+      "cases": [
+        {
+          "name": "english",
+          "start": 3913.804036665,
+          "end": 3914.125846614,
+          "raw_hex": "616263",
+          "expected": "abc",
+          "received": "abc",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "empty_enter",
+          "start": 3914.211153212,
+          "end": 3914.452274799,
+          "raw_hex": "1b5b4f1b5b490d",
+          "expected": "\r",
+          "received": "\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 3914.492122034,
+          "end": 3914.696857016,
+          "raw_hex": "1b5b4f1b5b491b5b4f1b5b490d0d1b5b4f1b5b490d",
+          "expected": "\r\r\r",
+          "received": "\r\r\r",
+          "passed": true,
+          "focus_out": 3
+        },
+        {
+          "name": "hidden_cursor_preedit",
+          "start": 3915.233020057,
+          "end": 3915.595331575,
+          "raw_hex": "eab080",
+          "expected": "가",
+          "received": "가",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "enter_after_preedit",
+          "start": 3915.632179687,
+          "end": 3915.873041239,
+          "raw_hex": "1b5b4feb82981b5b490d",
+          "expected": "나\r",
+          "received": "나\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "sentence_enter",
+          "start": 3915.912617548,
+          "end": 3916.639728619,
+          "raw_hex": "ec9588eb8595ed9598ec84b81b5b4fec9a941b5b490d",
+          "expected": "안녕하세요\r",
+          "received": "안녕하세요\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "backspace_composing",
+          "start": 3916.678545894,
+          "end": 3917.042198499,
+          "raw_hex": "",
+          "expected": "",
+          "received": "",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "symbol_after_backspace",
+          "start": 3917.090108046,
+          "end": 3917.330971508,
+          "raw_hex": "1b5b4fed95981b5b493f",
+          "expected": "하?",
+          "received": "하?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_enter",
+          "start": 3917.370491427,
+          "end": 3917.693497955,
+          "raw_hex": "1b5b4feab0801b5b491b0d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "space",
+          "start": 3917.734149022,
+          "end": 3918.217762406,
+          "raw_hex": "ed959ceab88020",
+          "expected": "한글 ",
+          "received": "한글 ",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "number",
+          "start": 3918.259113317,
+          "end": 3918.581729068,
+          "raw_hex": "ec958431",
+          "expected": "아1",
+          "received": "아1",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "comma",
+          "start": 3918.626709126,
+          "end": 3919.110873355,
+          "raw_hex": "ec9588eb85952c",
+          "expected": "안녕,",
+          "received": "안녕,",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_symbol_question",
+          "start": 3919.152636448,
+          "end": 3919.51607915,
+          "raw_hex": "1b5b4fed959c1b5b493f",
+          "expected": "한?",
+          "received": "한?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_exclam",
+          "start": 3919.558473351,
+          "end": 3919.92179853,
+          "raw_hex": "1b5b4fed959c1b5b4921",
+          "expected": "한!",
+          "received": "한!",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_at",
+          "start": 3919.959345756,
+          "end": 3920.322603925,
+          "raw_hex": "1b5b4fed959c1b5b4940",
+          "expected": "한@",
+          "received": "한@",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_numbersign",
+          "start": 3920.368926898,
+          "end": 3920.731313845,
+          "raw_hex": "1b5b4fed959c1b5b4923",
+          "expected": "한#",
+          "received": "한#",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_dollar",
+          "start": 3920.769497316,
+          "end": 3921.133166702,
+          "raw_hex": "1b5b4fed959c1b5b4924",
+          "expected": "한$",
+          "received": "한$",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_percent",
+          "start": 3921.170615579,
+          "end": 3921.533514181,
+          "raw_hex": "1b5b4fed959c1b5b4925",
+          "expected": "한%",
+          "received": "한%",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciicircum",
+          "start": 3921.574766153,
+          "end": 3921.939097811,
+          "raw_hex": "1b5b4fed959c1b5b495e",
+          "expected": "한^",
+          "received": "한^",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_ampersand",
+          "start": 3921.980385842,
+          "end": 3922.344330215,
+          "raw_hex": "1b5b4fed959c1b5b4926",
+          "expected": "한&",
+          "received": "한&",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asterisk",
+          "start": 3922.385459936,
+          "end": 3922.748081522,
+          "raw_hex": "1b5b4fed959c1b5b492a",
+          "expected": "한*",
+          "received": "한*",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenleft",
+          "start": 3922.78658393,
+          "end": 3923.150199415,
+          "raw_hex": "1b5b4fed959c1b5b4928",
+          "expected": "한(",
+          "received": "한(",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenright",
+          "start": 3923.190460655,
+          "end": 3923.554368879,
+          "raw_hex": "1b5b4fed959c1b5b4929",
+          "expected": "한)",
+          "received": "한)",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_underscore",
+          "start": 3923.595153305,
+          "end": 3923.957634121,
+          "raw_hex": "1b5b4fed959c1b5b495f",
+          "expected": "한_",
+          "received": "한_",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_plus",
+          "start": 3923.991839829,
+          "end": 3924.355311945,
+          "raw_hex": "1b5b4fed959c1b5b492b",
+          "expected": "한+",
+          "received": "한+",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_colon",
+          "start": 3924.395985513,
+          "end": 3924.759679168,
+          "raw_hex": "1b5b4fed959c1b5b493a",
+          "expected": "한:",
+          "received": "한:",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_quotedbl",
+          "start": 3924.799594572,
+          "end": 3925.161780771,
+          "raw_hex": "1b5b4fed959c1b5b4922",
+          "expected": "한\"",
+          "received": "한\"",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_less",
+          "start": 3925.199843242,
+          "end": 3925.563051421,
+          "raw_hex": "1b5b4fed959c1b5b493c",
+          "expected": "한<",
+          "received": "한<",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_greater",
+          "start": 3925.601538999,
+          "end": 3925.963928148,
+          "raw_hex": "1b5b4fed959c1b5b493e",
+          "expected": "한>",
+          "received": "한>",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceleft",
+          "start": 3925.997995306,
+          "end": 3926.363260944,
+          "raw_hex": "1b5b4fed959c1b5b497b",
+          "expected": "한{",
+          "received": "한{",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceright",
+          "start": 3926.403440828,
+          "end": 3926.766859803,
+          "raw_hex": "1b5b4fed959c1b5b497d",
+          "expected": "한}",
+          "received": "한}",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_bar",
+          "start": 3926.804463999,
+          "end": 3927.167284948,
+          "raw_hex": "1b5b4fed959c1b5b497c",
+          "expected": "한|",
+          "received": "한|",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciitilde",
+          "start": 3927.216925325,
+          "end": 3927.580429121,
+          "raw_hex": "1b5b4fed959c1b5b497e",
+          "expected": "한~",
+          "received": "한~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "double_consonants",
+          "start": 3927.622480015,
+          "end": 3928.270720361,
+          "raw_hex": "eab98ceb94b0ebb9a0ec8bb81b5b4feca79c1b5b490d",
+          "expected": "까따빠싸짜\r",
+          "received": "까따빠싸짜\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "compound_vowels",
+          "start": 3928.308337457,
+          "end": 3929.034493248,
+          "raw_hex": "eab3bceb9098ec9b8c1b5b4fec9d981b5b490d",
+          "expected": "과되워의\r",
+          "received": "과되워의\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "final_cluster",
+          "start": 3929.082208698,
+          "end": 3929.485975107,
+          "raw_hex": "1b5b4feab0921b5b490d",
+          "expected": "값\r",
+          "received": "값\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "isolated_jamo",
+          "start": 3929.53222508,
+          "end": 3929.814176055,
+          "raw_hex": "1b5b4fe384b11b5b490d",
+          "expected": "ㄱ\r",
+          "received": "ㄱ\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "keypad_enter",
+          "start": 3929.854697913,
+          "end": 3930.177898369,
+          "raw_hex": "1b5b4feab0801b5b490d",
+          "expected": "가\r",
+          "received": "가\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "hangul_english_toggle",
+          "start": 3930.214873891,
+          "end": 3930.90196525,
+          "raw_hex": "ed959c6162631b5b4feab8801b5b490d",
+          "expected": "한abc글\r",
+          "received": "한abc글\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Tab",
+          "start": 3930.948437174,
+          "end": 3931.270308892,
+          "raw_hex": "eab080",
+          "expected": "가\t",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Left",
+          "start": 3931.459861597,
+          "end": 3931.783812787,
+          "raw_hex": "eab080",
+          "expected": "가\u001b[D",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Right",
+          "start": 3931.970960923,
+          "end": 3932.293225118,
+          "raw_hex": "eab080",
+          "expected": "가\u001b[C",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Home",
+          "start": 3932.47568634,
+          "end": 3932.798292651,
+          "raw_hex": "eab080",
+          "expected": "가\u001b[H",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_End",
+          "start": 3932.981962683,
+          "end": 3933.30398435,
+          "raw_hex": "eab080",
+          "expected": "가\u001b[F",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Delete",
+          "start": 3933.481191122,
+          "end": 3933.804337187,
+          "raw_hex": "eab080",
+          "expected": "가\u001b[3~",
+          "received": "가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_left_order",
+          "start": 3933.988007037,
+          "end": 3934.351062739,
+          "raw_hex": "1b5b441b5b4feab0801b5b490d",
+          "expected": "가\u001b[D\r",
+          "received": "\u001b[D가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_right_order",
+          "start": 3934.389718955,
+          "end": 3934.752287981,
+          "raw_hex": "1b5b431b5b4feab0801b5b490d",
+          "expected": "가\u001b[C\r",
+          "received": "\u001b[C가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "escape_then_enter",
+          "start": 3934.787908515,
+          "end": 3935.150635679,
+          "raw_hex": "eab0801b5b4f1b5b490d",
+          "expected": "가\u001b\r",
+          "received": "가\r",
+          "passed": false,
+          "focus_out": 1
+        }
+      ],
+      "passed": 39,
+      "failed": 9,
+      "note": "Byte checks only; screenshots need visual review. Not a WSLg portal or Windows test.",
+      "label": "final-sync0-navoff",
+      "artifact_dir": "/tmp/fm-gui-cd2i07i7",
+      "raw_events": [
+        {
+          "time": 3913.301687027,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3913.807628171,
+          "hex": "61"
+        },
+        {
+          "time": 3913.846505575,
+          "hex": "62"
+        },
+        {
+          "time": 3913.887232941,
+          "hex": "63"
+        },
+        {
+          "time": 3914.211832924,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3914.211967313,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3914.214499798,
+          "hex": "0d"
+        },
+        {
+          "time": 3914.492831808,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3914.493053985,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3914.494970758,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3914.495140595,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3914.495347984,
+          "hex": "0d"
+        },
+        {
+          "time": 3914.495486533,
+          "hex": "0d"
+        },
+        {
+          "time": 3914.49575449,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3914.495885321,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3914.496069027,
+          "hex": "0d"
+        },
+        {
+          "time": 3915.356865911,
+          "hex": "eab080"
+        },
+        {
+          "time": 3915.632876761,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3915.63304077,
+          "hex": "eb8298"
+        },
+        {
+          "time": 3915.633187228,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3915.635876864,
+          "hex": "0d"
+        },
+        {
+          "time": 3916.036574759,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3916.158101345,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3916.279888318,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3916.361162943,
+          "hex": "ec84b8"
+        },
+        {
+          "time": 3916.39978735,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3916.400078245,
+          "hex": "ec9a94"
+        },
+        {
+          "time": 3916.400269304,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3916.402934029,
+          "hex": "0d"
+        },
+        {
+          "time": 3917.091263376,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3917.091412185,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3917.091651144,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3917.453699653,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3917.453871241,
+          "hex": "eab080"
+        },
+        {
+          "time": 3917.45397613,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3917.456321229,
+          "hex": "1b0d"
+        },
+        {
+          "time": 3917.857736268,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3917.979525351,
+          "hex": "eab88020"
+        },
+        {
+          "time": 3918.343486752,
+          "hex": "ec958431"
+        },
+        {
+          "time": 3918.750684398,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3918.872821617,
+          "hex": "eb85952c"
+        },
+        {
+          "time": 3919.276196128,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3919.276314987,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3919.276427157,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3919.682069727,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3919.682146857,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3919.682349346,
+          "hex": "1b5b4921"
+        },
+        {
+          "time": 3920.082924112,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3920.08312263,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3920.083188929,
+          "hex": "1b5b4940"
+        },
+        {
+          "time": 3920.491527784,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3920.491729382,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3920.491990049,
+          "hex": "1b5b4923"
+        },
+        {
+          "time": 3920.893229291,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3920.893415559,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3920.893621977,
+          "hex": "1b5b4924"
+        },
+        {
+          "time": 3921.29386461,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3921.294047606,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3921.294187817,
+          "hex": "1b5b4925"
+        },
+        {
+          "time": 3921.699350421,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3921.69948692,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3921.699709106,
+          "hex": "1b5b495e"
+        },
+        {
+          "time": 3922.104330985,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3922.104512264,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3922.104679702,
+          "hex": "1b5b4926"
+        },
+        {
+          "time": 3922.50847594,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3922.508672337,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3922.508921734,
+          "hex": "1b5b492a"
+        },
+        {
+          "time": 3922.910448633,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3922.910652592,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3922.910807211,
+          "hex": "1b5b4928"
+        },
+        {
+          "time": 3923.314545377,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3923.314745036,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3923.314929644,
+          "hex": "1b5b4929"
+        },
+        {
+          "time": 3923.717595861,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3923.71776179,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3923.717885168,
+          "hex": "1b5b495f"
+        },
+        {
+          "time": 3924.115212437,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3924.115298956,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3924.115460495,
+          "hex": "1b5b492b"
+        },
+        {
+          "time": 3924.519646528,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3924.519857796,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3924.520013876,
+          "hex": "1b5b493a"
+        },
+        {
+          "time": 3924.92201587,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3924.922212437,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3924.922374965,
+          "hex": "1b5b4922"
+        },
+        {
+          "time": 3925.323069342,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3925.32324195,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3925.323442818,
+          "hex": "1b5b493c"
+        },
+        {
+          "time": 3925.723932696,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3925.724047815,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3925.724179644,
+          "hex": "1b5b493e"
+        },
+        {
+          "time": 3926.121144536,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3926.121320274,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3926.121486082,
+          "hex": "1b5b497b"
+        },
+        {
+          "time": 3926.527156252,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3926.527310462,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3926.52748024,
+          "hex": "1b5b497d"
+        },
+        {
+          "time": 3926.926919207,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3926.927057716,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3926.927272454,
+          "hex": "1b5b497c"
+        },
+        {
+          "time": 3927.340390253,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3927.340467813,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3927.340651701,
+          "hex": "1b5b497e"
+        },
+        {
+          "time": 3927.708568466,
+          "hex": "eab98c"
+        },
+        {
+          "time": 3927.78884228,
+          "hex": "eb94b0"
+        },
+        {
+          "time": 3927.910651693,
+          "hex": "ebb9a0"
+        },
+        {
+          "time": 3927.950568526,
+          "hex": "ec8bb8"
+        },
+        {
+          "time": 3928.030809331,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3928.031024219,
+          "hex": "eca79c"
+        },
+        {
+          "time": 3928.031246547,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3928.03413989,
+          "hex": "0d"
+        },
+        {
+          "time": 3928.472456802,
+          "hex": "eab3bc"
+        },
+        {
+          "time": 3928.59366381,
+          "hex": "eb9098"
+        },
+        {
+          "time": 3928.715232786,
+          "hex": "ec9b8c"
+        },
+        {
+          "time": 3928.794269801,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3928.79438922,
+          "hex": "ec9d98"
+        },
+        {
+          "time": 3928.794536009,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3928.797068285,
+          "hex": "0d"
+        },
+        {
+          "time": 3929.245801109,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3929.246047887,
+          "hex": "eab092"
+        },
+        {
+          "time": 3929.246290704,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3929.248800361,
+          "hex": "0d"
+        },
+        {
+          "time": 3929.573916069,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3929.574074347,
+          "hex": "e384b1"
+        },
+        {
+          "time": 3929.574251495,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3929.5769933,
+          "hex": "0d"
+        },
+        {
+          "time": 3929.937730563,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3929.937886491,
+          "hex": "eab080"
+        },
+        {
+          "time": 3929.938085549,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3929.940475386,
+          "hex": "0d"
+        },
+        {
+          "time": 3930.339164152,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3930.378841468,
+          "hex": "61"
+        },
+        {
+          "time": 3930.420914212,
+          "hex": "62"
+        },
+        {
+          "time": 3930.460574988,
+          "hex": "63"
+        },
+        {
+          "time": 3930.661847983,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3930.662097571,
+          "hex": "eab880"
+        },
+        {
+          "time": 3930.662248549,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3930.665049982,
+          "hex": "0d"
+        },
+        {
+          "time": 3931.031600361,
+          "hex": "eab080"
+        },
+        {
+          "time": 3931.318213621,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3931.31841806,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3931.321324112,
+          "hex": "0d"
+        },
+        {
+          "time": 3931.545300293,
+          "hex": "eab080"
+        },
+        {
+          "time": 3931.830542327,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3931.830773734,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3931.832960534,
+          "hex": "0d"
+        },
+        {
+          "time": 3932.056027104,
+          "hex": "eab080"
+        },
+        {
+          "time": 3932.334713869,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3932.334844947,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3932.337044856,
+          "hex": "0d"
+        },
+        {
+          "time": 3932.561076146,
+          "hex": "eab080"
+        },
+        {
+          "time": 3932.841309497,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3932.841478276,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3932.843891223,
+          "hex": "0d"
+        },
+        {
+          "time": 3933.065818073,
+          "hex": "eab080"
+        },
+        {
+          "time": 3933.340992241,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3933.341168099,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3933.343544158,
+          "hex": "0d"
+        },
+        {
+          "time": 3933.56419383,
+          "hex": "eab080"
+        },
+        {
+          "time": 3933.847680719,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3933.847950477,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3933.850975879,
+          "hex": "0d"
+        },
+        {
+          "time": 3934.070299863,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 3934.110493664,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3934.110607073,
+          "hex": "eab080"
+        },
+        {
+          "time": 3934.110861681,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3934.113529486,
+          "hex": "0d"
+        },
+        {
+          "time": 3934.471726763,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 3934.511905404,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3934.511972843,
+          "hex": "eab080"
+        },
+        {
+          "time": 3934.512197762,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3934.514874496,
+          "hex": "0d"
+        },
+        {
+          "time": 3934.871602547,
+          "hex": "eab080"
+        },
+        {
+          "time": 3934.910414711,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3934.910684008,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3934.913428823,
+          "hex": "0d"
+        }
+      ]
+    },
+    {
+      "sync": "1",
+      "navigation_workaround": "on",
+      "backend": "Xvfb/X11/private IBus",
+      "cases": [
+        {
+          "name": "english",
+          "start": 3937.133663813,
+          "end": 3937.455337784,
+          "raw_hex": "616263",
+          "expected": "abc",
+          "received": "abc",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "empty_enter",
+          "start": 3937.547651364,
+          "end": 3937.788615965,
+          "raw_hex": "1b5b4f1b5b490d",
+          "expected": "\r",
+          "received": "\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 3937.829473599,
+          "end": 3938.034639388,
+          "raw_hex": "1b5b4f1b5b491b5b4f1b5b491b5b4f1b5b490d0d0d",
+          "expected": "\r\r\r",
+          "received": "\r\r\r",
+          "passed": true,
+          "focus_out": 3
+        },
+        {
+          "name": "hidden_cursor_preedit",
+          "start": 3938.57495582,
+          "end": 3938.937130209,
+          "raw_hex": "eab080",
+          "expected": "가",
+          "received": "가",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "enter_after_preedit",
+          "start": 3938.980433931,
+          "end": 3939.222545451,
+          "raw_hex": "1b5b4feb82981b5b490d",
+          "expected": "나\r",
+          "received": "나\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "sentence_enter",
+          "start": 3939.263593464,
+          "end": 3939.992904716,
+          "raw_hex": "ec9588eb8595ed9598ec84b81b5b4fec9a941b5b490d",
+          "expected": "안녕하세요\r",
+          "received": "안녕하세요\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "backspace_composing",
+          "start": 3940.0327754,
+          "end": 3940.396315077,
+          "raw_hex": "1b5b4fed959c1b5b497f",
+          "expected": "한",
+          "received": "한",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "symbol_after_backspace",
+          "start": 3940.436112421,
+          "end": 3940.676901634,
+          "raw_hex": "1b5b4f1b5b493f",
+          "expected": "?",
+          "received": "?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_enter",
+          "start": 3940.712973944,
+          "end": 3941.035859414,
+          "raw_hex": "1b5b4feab0801b5b491b0d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "space",
+          "start": 3941.077006166,
+          "end": 3941.563793022,
+          "raw_hex": "ed959c20eab880",
+          "expected": "한글 ",
+          "received": "한 글",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "number",
+          "start": 3941.600823283,
+          "end": 3941.922590913,
+          "raw_hex": "31ec9584",
+          "expected": "아1",
+          "received": "1아",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "comma",
+          "start": 3941.962704194,
+          "end": 3942.447541539,
+          "raw_hex": "ec95882ceb8595",
+          "expected": "안녕,",
+          "received": "안,녕",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_symbol_question",
+          "start": 3942.491825272,
+          "end": 3942.854443696,
+          "raw_hex": "1b5b4fed959c1b5b493f",
+          "expected": "한?",
+          "received": "한?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_exclam",
+          "start": 3942.898419063,
+          "end": 3943.262078878,
+          "raw_hex": "1b5b4fed959c1b5b4921",
+          "expected": "한!",
+          "received": "한!",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_at",
+          "start": 3943.307394661,
+          "end": 3943.669884127,
+          "raw_hex": "1b5b4fed959c1b5b4940",
+          "expected": "한@",
+          "received": "한@",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_numbersign",
+          "start": 3943.712249538,
+          "end": 3944.075636476,
+          "raw_hex": "1b5b4fed959c1b5b4923",
+          "expected": "한#",
+          "received": "한#",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_dollar",
+          "start": 3944.119292715,
+          "end": 3944.484786713,
+          "raw_hex": "1b5b4fed959c1b5b4924",
+          "expected": "한$",
+          "received": "한$",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_percent",
+          "start": 3944.526632338,
+          "end": 3944.895649432,
+          "raw_hex": "1b5b4fed959c1b5b4925",
+          "expected": "한%",
+          "received": "한%",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciicircum",
+          "start": 3944.94058992,
+          "end": 3945.303808629,
+          "raw_hex": "1b5b4fed959c1b5b495e",
+          "expected": "한^",
+          "received": "한^",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_ampersand",
+          "start": 3945.347715125,
+          "end": 3945.710923185,
+          "raw_hex": "1b5b4fed959c1b5b4926",
+          "expected": "한&",
+          "received": "한&",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asterisk",
+          "start": 3945.746409811,
+          "end": 3946.109536971,
+          "raw_hex": "1b5b4fed959c1b5b492a",
+          "expected": "한*",
+          "received": "한*",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenleft",
+          "start": 3946.147469344,
+          "end": 3946.51102228,
+          "raw_hex": "1b5b4fed959c1b5b4928",
+          "expected": "한(",
+          "received": "한(",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenright",
+          "start": 3946.549063722,
+          "end": 3946.912535749,
+          "raw_hex": "1b5b4fed959c1b5b4929",
+          "expected": "한)",
+          "received": "한)",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_underscore",
+          "start": 3946.952446693,
+          "end": 3947.314801041,
+          "raw_hex": "1b5b4fed959c1b5b495f",
+          "expected": "한_",
+          "received": "한_",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_plus",
+          "start": 3947.352573686,
+          "end": 3947.71521302,
+          "raw_hex": "1b5b4fed959c1b5b492b",
+          "expected": "한+",
+          "received": "한+",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_colon",
+          "start": 3947.752038802,
+          "end": 3948.114195082,
+          "raw_hex": "1b5b4fed959c1b5b493a",
+          "expected": "한:",
+          "received": "한:",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_quotedbl",
+          "start": 3948.155277865,
+          "end": 3948.517610663,
+          "raw_hex": "1b5b4fed959c1b5b4922",
+          "expected": "한\"",
+          "received": "한\"",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_less",
+          "start": 3948.558827545,
+          "end": 3948.921439179,
+          "raw_hex": "1b5b4fed959c1b5b493c",
+          "expected": "한<",
+          "received": "한<",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_greater",
+          "start": 3948.957913335,
+          "end": 3949.321130165,
+          "raw_hex": "1b5b4fed959c1b5b493e",
+          "expected": "한>",
+          "received": "한>",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceleft",
+          "start": 3949.360271626,
+          "end": 3949.722846161,
+          "raw_hex": "1b5b4fed959c1b5b497b",
+          "expected": "한{",
+          "received": "한{",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceright",
+          "start": 3949.760615525,
+          "end": 3950.123191421,
+          "raw_hex": "1b5b4fed959c1b5b497d",
+          "expected": "한}",
+          "received": "한}",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_bar",
+          "start": 3950.16160384,
+          "end": 3950.525022347,
+          "raw_hex": "1b5b4fed959c1b5b497c",
+          "expected": "한|",
+          "received": "한|",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciitilde",
+          "start": 3950.564803153,
+          "end": 3950.927415157,
+          "raw_hex": "1b5b4fed959c1b5b497e",
+          "expected": "한~",
+          "received": "한~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "double_consonants",
+          "start": 3950.967809007,
+          "end": 3951.613795613,
+          "raw_hex": "eab98ceb94b0ebb9a0ec8bb81b5b4feca79c1b5b490d",
+          "expected": "까따빠싸짜\r",
+          "received": "까따빠싸짜\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "compound_vowels",
+          "start": 3951.65662716,
+          "end": 3952.384094288,
+          "raw_hex": "eab3bceb9098ec9b8c1b5b4fec9d981b5b490d",
+          "expected": "과되워의\r",
+          "received": "과되워의\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "final_cluster",
+          "start": 3952.429972326,
+          "end": 3952.833701035,
+          "raw_hex": "1b5b4feab0921b5b490d",
+          "expected": "값\r",
+          "received": "값\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "isolated_jamo",
+          "start": 3952.873254572,
+          "end": 3953.1558621,
+          "raw_hex": "1b5b4fe384b11b5b490d",
+          "expected": "ㄱ\r",
+          "received": "ㄱ\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "keypad_enter",
+          "start": 3953.196973403,
+          "end": 3953.51895329,
+          "raw_hex": "1b5b4feab0801b5b490d",
+          "expected": "가\r",
+          "received": "가\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "hangul_english_toggle",
+          "start": 3953.558558127,
+          "end": 3954.245109512,
+          "raw_hex": "ed959c6162631b5b4feab8801b5b490d",
+          "expected": "한abc글\r",
+          "received": "한abc글\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Tab",
+          "start": 3954.283367923,
+          "end": 3954.606007803,
+          "raw_hex": "1b5b4feab0801b5b4909",
+          "expected": "가\t",
+          "received": "가\t",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Left",
+          "start": 3954.786242056,
+          "end": 3955.108110034,
+          "raw_hex": "1b5b4feab0801b5b491b5b44",
+          "expected": "가\u001b[D",
+          "received": "가\u001b[D",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Right",
+          "start": 3955.288609845,
+          "end": 3955.610951859,
+          "raw_hex": "1b5b4feab0801b5b491b5b43",
+          "expected": "가\u001b[C",
+          "received": "가\u001b[C",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Home",
+          "start": 3955.795444161,
+          "end": 3956.117177062,
+          "raw_hex": "1b5b4feab0801b5b491b5b48",
+          "expected": "가\u001b[H",
+          "received": "가\u001b[H",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_End",
+          "start": 3956.297740541,
+          "end": 3956.620067635,
+          "raw_hex": "1b5b4feab0801b5b491b5b46",
+          "expected": "가\u001b[F",
+          "received": "가\u001b[F",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Delete",
+          "start": 3956.798536895,
+          "end": 3957.120473395,
+          "raw_hex": "1b5b4feab0801b5b491b5b337e",
+          "expected": "가\u001b[3~",
+          "received": "가\u001b[3~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_left_order",
+          "start": 3957.303036423,
+          "end": 3957.66548222,
+          "raw_hex": "1b5b441b5b4feab0801b5b490d",
+          "expected": "가\u001b[D\r",
+          "received": "\u001b[D가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_right_order",
+          "start": 3957.707571633,
+          "end": 3958.069899481,
+          "raw_hex": "1b5b431b5b4feab0801b5b490d",
+          "expected": "가\u001b[C\r",
+          "received": "\u001b[C가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "escape_then_enter",
+          "start": 3958.112652119,
+          "end": 3958.475034826,
+          "raw_hex": "1b5b4feab0801b5b491b1b5b4f1b5b490d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 2
+        }
+      ],
+      "passed": 43,
+      "failed": 5,
+      "note": "Byte checks only; screenshots need visual review. Not a WSLg portal or Windows test.",
+      "label": "final-sync1-navon",
+      "artifact_dir": "/tmp/fm-gui-2705hyn4",
+      "raw_events": [
+        {
+          "time": 3936.635475255,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3937.136488436,
+          "hex": "61"
+        },
+        {
+          "time": 3937.17639824,
+          "hex": "62"
+        },
+        {
+          "time": 3937.217086317,
+          "hex": "63"
+        },
+        {
+          "time": 3937.548345538,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3937.548505756,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3937.553715287,
+          "hex": "0d"
+        },
+        {
+          "time": 3937.830315522,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3937.830474721,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3937.832324843,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3937.832427332,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3937.834218506,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3937.834327904,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3937.837998151,
+          "hex": "0d"
+        },
+        {
+          "time": 3937.838141198,
+          "hex": "0d"
+        },
+        {
+          "time": 3937.838284579,
+          "hex": "0d"
+        },
+        {
+          "time": 3938.700632235,
+          "hex": "eab080"
+        },
+        {
+          "time": 3938.98153663,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3938.981786398,
+          "hex": "eb8298"
+        },
+        {
+          "time": 3938.982055725,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3938.987340256,
+          "hex": "0d"
+        },
+        {
+          "time": 3939.389464809,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3939.513441021,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3939.634405642,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3939.715757545,
+          "hex": "ec84b8"
+        },
+        {
+          "time": 3939.752770948,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3939.752956855,
+          "hex": "ec9a94"
+        },
+        {
+          "time": 3939.753151863,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3939.75777137,
+          "hex": "0d"
+        },
+        {
+          "time": 3940.156140979,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3940.156349147,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3940.156555305,
+          "hex": "1b5b497f"
+        },
+        {
+          "time": 3940.438811648,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3940.438959025,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3940.79738854,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3940.797484469,
+          "hex": "eab080"
+        },
+        {
+          "time": 3940.797639377,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3940.802325692,
+          "hex": "1b0d"
+        },
+        {
+          "time": 3941.203912911,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3941.323431935,
+          "hex": "20"
+        },
+        {
+          "time": 3941.32510788,
+          "hex": "eab880"
+        },
+        {
+          "time": 3941.684703193,
+          "hex": "31"
+        },
+        {
+          "time": 3941.686335368,
+          "hex": "ec9584"
+        },
+        {
+          "time": 3942.089832588,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3942.209327152,
+          "hex": "2c"
+        },
+        {
+          "time": 3942.210930037,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3942.616110971,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3942.61616392,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3942.616331361,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3943.025237868,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3943.025458586,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3943.025596059,
+          "hex": "1b5b4921"
+        },
+        {
+          "time": 3943.432000076,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3943.432217445,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3943.432396024,
+          "hex": "1b5b4940"
+        },
+        {
+          "time": 3943.837254111,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3943.83733484,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3943.837471279,
+          "hex": "1b5b4923"
+        },
+        {
+          "time": 3944.247500787,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3944.247690686,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3944.247847554,
+          "hex": "1b5b4924"
+        },
+        {
+          "time": 3944.657328578,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3944.657422537,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3944.657577666,
+          "hex": "1b5b4925"
+        },
+        {
+          "time": 3945.065789221,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3945.065920519,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3945.066055359,
+          "hex": "1b5b495e"
+        },
+        {
+          "time": 3945.471650739,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3945.471758608,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3945.471904118,
+          "hex": "1b5b4926"
+        },
+        {
+          "time": 3945.871440574,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3945.871599132,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3945.87177439,
+          "hex": "1b5b492a"
+        },
+        {
+          "time": 3946.272746694,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3946.272896763,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3946.273012511,
+          "hex": "1b5b4928"
+        },
+        {
+          "time": 3946.674446623,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3946.674635109,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3946.674814687,
+          "hex": "1b5b4929"
+        },
+        {
+          "time": 3947.076624345,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3947.076729674,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3947.076864251,
+          "hex": "1b5b495f"
+        },
+        {
+          "time": 3947.478137512,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3947.478268031,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3947.478416391,
+          "hex": "1b5b492b"
+        },
+        {
+          "time": 3947.876346082,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3947.876462411,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3947.876624351,
+          "hex": "1b5b493a"
+        },
+        {
+          "time": 3948.279240448,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3948.279345307,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3948.279502297,
+          "hex": "1b5b4922"
+        },
+        {
+          "time": 3948.683033365,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3948.683188364,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3948.683354322,
+          "hex": "1b5b493c"
+        },
+        {
+          "time": 3949.082738831,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3949.08279931,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3949.082947359,
+          "hex": "1b5b493e"
+        },
+        {
+          "time": 3949.484455038,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3949.484548637,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3949.484713115,
+          "hex": "1b5b497b"
+        },
+        {
+          "time": 3949.885950886,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3949.886089924,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3949.886346994,
+          "hex": "1b5b497d"
+        },
+        {
+          "time": 3950.287103339,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3950.287254977,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3950.287465897,
+          "hex": "1b5b497c"
+        },
+        {
+          "time": 3950.690083195,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3950.690230624,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3950.690441071,
+          "hex": "1b5b497e"
+        },
+        {
+          "time": 3951.05465828,
+          "hex": "eab98c"
+        },
+        {
+          "time": 3951.136630788,
+          "hex": "eb94b0"
+        },
+        {
+          "time": 3951.255659697,
+          "hex": "ebb9a0"
+        },
+        {
+          "time": 3951.297688511,
+          "hex": "ec8bb8"
+        },
+        {
+          "time": 3951.373533997,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3951.373651556,
+          "hex": "eca79c"
+        },
+        {
+          "time": 3951.373773165,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3951.37847201,
+          "hex": "0d"
+        },
+        {
+          "time": 3951.824151943,
+          "hex": "eab3bc"
+        },
+        {
+          "time": 3951.945454251,
+          "hex": "eb9098"
+        },
+        {
+          "time": 3952.066679269,
+          "hex": "ec9b8c"
+        },
+        {
+          "time": 3952.143898742,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3952.144013521,
+          "hex": "ec9d98"
+        },
+        {
+          "time": 3952.144215858,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3952.149003143,
+          "hex": "0d"
+        },
+        {
+          "time": 3952.593541597,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3952.593729095,
+          "hex": "eab092"
+        },
+        {
+          "time": 3952.593930823,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3952.596778077,
+          "hex": "0d"
+        },
+        {
+          "time": 3952.915692734,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3952.915904521,
+          "hex": "e384b1"
+        },
+        {
+          "time": 3952.916105119,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3952.920756816,
+          "hex": "0d"
+        },
+        {
+          "time": 3953.278616985,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3953.278769804,
+          "hex": "eab080"
+        },
+        {
+          "time": 3953.278885093,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3953.283597978,
+          "hex": "0d"
+        },
+        {
+          "time": 3953.686622003,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3953.723330967,
+          "hex": "61"
+        },
+        {
+          "time": 3953.763711507,
+          "hex": "62"
+        },
+        {
+          "time": 3953.80372062,
+          "hex": "63"
+        },
+        {
+          "time": 3954.004770916,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3954.004921227,
+          "hex": "eab880"
+        },
+        {
+          "time": 3954.005082625,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3954.009621282,
+          "hex": "0d"
+        },
+        {
+          "time": 3954.365811506,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3954.365965184,
+          "hex": "eab080"
+        },
+        {
+          "time": 3954.366172443,
+          "hex": "1b5b4909"
+        },
+        {
+          "time": 3954.645963738,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3954.646124197,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3954.650190828,
+          "hex": "0d"
+        },
+        {
+          "time": 3954.867811459,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3954.867964067,
+          "hex": "eab080"
+        },
+        {
+          "time": 3954.868151126,
+          "hex": "1b5b491b5b44"
+        },
+        {
+          "time": 3955.147693962,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3955.147865632,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3955.15223038,
+          "hex": "0d"
+        },
+        {
+          "time": 3955.370800111,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3955.371079881,
+          "hex": "eab080"
+        },
+        {
+          "time": 3955.371224788,
+          "hex": "1b5b491b5b43"
+        },
+        {
+          "time": 3955.65447628,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3955.654716208,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3955.659334863,
+          "hex": "0d"
+        },
+        {
+          "time": 3955.876888306,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3955.877037624,
+          "hex": "eab080"
+        },
+        {
+          "time": 3955.877207743,
+          "hex": "1b5b491b5b48"
+        },
+        {
+          "time": 3956.157360594,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3956.157563952,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3956.162205398,
+          "hex": "0d"
+        },
+        {
+          "time": 3956.37969429,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3956.379868949,
+          "hex": "eab080"
+        },
+        {
+          "time": 3956.380123748,
+          "hex": "1b5b491b5b46"
+        },
+        {
+          "time": 3956.657651684,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3956.657799692,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3956.662313939,
+          "hex": "0d"
+        },
+        {
+          "time": 3956.880151239,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3956.880324356,
+          "hex": "eab080"
+        },
+        {
+          "time": 3956.880489514,
+          "hex": "1b5b491b5b337e"
+        },
+        {
+          "time": 3957.162206791,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3957.162383779,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3957.166004485,
+          "hex": "0d"
+        },
+        {
+          "time": 3957.386429898,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 3957.425065224,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3957.425194123,
+          "hex": "eab080"
+        },
+        {
+          "time": 3957.425352182,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3957.430581083,
+          "hex": "0d"
+        },
+        {
+          "time": 3957.791117347,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 3957.829467316,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3957.829607194,
+          "hex": "eab080"
+        },
+        {
+          "time": 3957.829774883,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3957.834569648,
+          "hex": "0d"
+        },
+        {
+          "time": 3958.194294951,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3958.19447403,
+          "hex": "eab080"
+        },
+        {
+          "time": 3958.194635288,
+          "hex": "1b5b491b"
+        },
+        {
+          "time": 3958.234736609,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3958.234947858,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3958.239640653,
+          "hex": "0d"
+        }
+      ]
+    },
+    {
+      "sync": "1",
+      "navigation_workaround": "off",
+      "backend": "Xvfb/X11/private IBus",
+      "cases": [
+        {
+          "name": "english",
+          "start": 3960.382511052,
+          "end": 3960.704539319,
+          "raw_hex": "616263",
+          "expected": "abc",
+          "received": "abc",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "empty_enter",
+          "start": 3960.786810895,
+          "end": 3961.027862694,
+          "raw_hex": "1b5b4f1b5b490d",
+          "expected": "\r",
+          "received": "\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 3961.069923848,
+          "end": 3961.274273424,
+          "raw_hex": "1b5b4f1b5b491b5b4f1b5b491b5b4f1b5b490d0d0d",
+          "expected": "\r\r\r",
+          "received": "\r\r\r",
+          "passed": true,
+          "focus_out": 3
+        },
+        {
+          "name": "hidden_cursor_preedit",
+          "start": 3961.811329876,
+          "end": 3962.173777492,
+          "raw_hex": "eab080",
+          "expected": "가",
+          "received": "가",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "enter_after_preedit",
+          "start": 3962.214031084,
+          "end": 3962.454887785,
+          "raw_hex": "1b5b4feb82981b5b490d",
+          "expected": "나\r",
+          "received": "나\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "sentence_enter",
+          "start": 3962.494326983,
+          "end": 3963.222098449,
+          "raw_hex": "ec9588eb8595ed9598ec84b81b5b4fec9a941b5b490d",
+          "expected": "안녕하세요\r",
+          "received": "안녕하세요\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "backspace_composing",
+          "start": 3963.258427867,
+          "end": 3963.620668006,
+          "raw_hex": "",
+          "expected": "",
+          "received": "",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "symbol_after_backspace",
+          "start": 3963.659195803,
+          "end": 3963.900268953,
+          "raw_hex": "1b5b4fed95981b5b493f",
+          "expected": "하?",
+          "received": "하?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_enter",
+          "start": 3963.947186391,
+          "end": 3964.268976862,
+          "raw_hex": "1b5b4feab0801b5b491b0d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "space",
+          "start": 3964.307187182,
+          "end": 3964.790944246,
+          "raw_hex": "ed959c20eab880",
+          "expected": "한글 ",
+          "received": "한 글",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "number",
+          "start": 3964.831071617,
+          "end": 3965.153797899,
+          "raw_hex": "31ec9584",
+          "expected": "아1",
+          "received": "1아",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "comma",
+          "start": 3965.19391521,
+          "end": 3965.67719008,
+          "raw_hex": "ec95882ceb8595",
+          "expected": "안녕,",
+          "received": "안,녕",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_symbol_question",
+          "start": 3965.716935595,
+          "end": 3966.079121753,
+          "raw_hex": "1b5b4fed959c1b5b493f",
+          "expected": "한?",
+          "received": "한?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_exclam",
+          "start": 3966.11873192,
+          "end": 3966.481029429,
+          "raw_hex": "1b5b4fed959c1b5b4921",
+          "expected": "한!",
+          "received": "한!",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_at",
+          "start": 3966.521906854,
+          "end": 3966.885855885,
+          "raw_hex": "1b5b4fed959c1b5b4940",
+          "expected": "한@",
+          "received": "한@",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_numbersign",
+          "start": 3966.930106209,
+          "end": 3967.293418547,
+          "raw_hex": "1b5b4fed959c1b5b4923",
+          "expected": "한#",
+          "received": "한#",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_dollar",
+          "start": 3967.332076303,
+          "end": 3967.697102645,
+          "raw_hex": "1b5b4fed959c1b5b4924",
+          "expected": "한$",
+          "received": "한$",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_percent",
+          "start": 3967.737835971,
+          "end": 3968.100209139,
+          "raw_hex": "1b5b4fed959c1b5b4925",
+          "expected": "한%",
+          "received": "한%",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciicircum",
+          "start": 3968.139582619,
+          "end": 3968.50463705,
+          "raw_hex": "1b5b4fed959c1b5b495e",
+          "expected": "한^",
+          "received": "한^",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_ampersand",
+          "start": 3968.543120537,
+          "end": 3968.906757114,
+          "raw_hex": "1b5b4fed959c1b5b4926",
+          "expected": "한&",
+          "received": "한&",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asterisk",
+          "start": 3968.952041837,
+          "end": 3969.315687112,
+          "raw_hex": "1b5b4fed959c1b5b492a",
+          "expected": "한*",
+          "received": "한*",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenleft",
+          "start": 3969.358064603,
+          "end": 3969.721014825,
+          "raw_hex": "1b5b4fed959c1b5b4928",
+          "expected": "한(",
+          "received": "한(",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenright",
+          "start": 3969.759008627,
+          "end": 3970.122592092,
+          "raw_hex": "1b5b4fed959c1b5b4929",
+          "expected": "한)",
+          "received": "한)",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_underscore",
+          "start": 3970.163696655,
+          "end": 3970.531793409,
+          "raw_hex": "1b5b4fed959c1b5b495f",
+          "expected": "한_",
+          "received": "한_",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_plus",
+          "start": 3970.573859593,
+          "end": 3970.93734295,
+          "raw_hex": "1b5b4fed959c1b5b492b",
+          "expected": "한+",
+          "received": "한+",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_colon",
+          "start": 3970.974617188,
+          "end": 3971.336905317,
+          "raw_hex": "1b5b4fed959c1b5b493a",
+          "expected": "한:",
+          "received": "한:",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_quotedbl",
+          "start": 3971.38222683,
+          "end": 3971.744446229,
+          "raw_hex": "1b5b4fed959c1b5b4922",
+          "expected": "한\"",
+          "received": "한\"",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_less",
+          "start": 3971.779925425,
+          "end": 3972.142389881,
+          "raw_hex": "1b5b4fed959c1b5b493c",
+          "expected": "한<",
+          "received": "한<",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_greater",
+          "start": 3972.181622162,
+          "end": 3972.544129758,
+          "raw_hex": "1b5b4fed959c1b5b493e",
+          "expected": "한>",
+          "received": "한>",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceleft",
+          "start": 3972.584129181,
+          "end": 3972.949952386,
+          "raw_hex": "1b5b4fed959c1b5b497b",
+          "expected": "한{",
+          "received": "한{",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceright",
+          "start": 3972.994244789,
+          "end": 3973.35717009,
+          "raw_hex": "1b5b4fed959c1b5b497d",
+          "expected": "한}",
+          "received": "한}",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_bar",
+          "start": 3973.400438663,
+          "end": 3973.764150068,
+          "raw_hex": "1b5b4fed959c1b5b497c",
+          "expected": "한|",
+          "received": "한|",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciitilde",
+          "start": 3973.802995052,
+          "end": 3974.166524678,
+          "raw_hex": "1b5b4fed959c1b5b497e",
+          "expected": "한~",
+          "received": "한~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "double_consonants",
+          "start": 3974.207482213,
+          "end": 3974.854911955,
+          "raw_hex": "eab98ceb94b0ebb9a0ec8bb81b5b4feca79c1b5b490d",
+          "expected": "까따빠싸짜\r",
+          "received": "까따빠싸짜\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "compound_vowels",
+          "start": 3974.893653941,
+          "end": 3975.621730024,
+          "raw_hex": "eab3bceb9098ec9b8c1b5b4fec9d981b5b490d",
+          "expected": "과되워의\r",
+          "received": "과되워의\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "final_cluster",
+          "start": 3975.661951845,
+          "end": 3976.065418965,
+          "raw_hex": "1b5b4feab0921b5b490d",
+          "expected": "값\r",
+          "received": "값\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "isolated_jamo",
+          "start": 3976.105104621,
+          "end": 3976.386451782,
+          "raw_hex": "1b5b4fe384b11b5b490d",
+          "expected": "ㄱ\r",
+          "received": "ㄱ\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "keypad_enter",
+          "start": 3976.429053241,
+          "end": 3976.752343426,
+          "raw_hex": "1b5b4feab0801b5b490d",
+          "expected": "가\r",
+          "received": "가\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "hangul_english_toggle",
+          "start": 3976.793941945,
+          "end": 3977.48143332,
+          "raw_hex": "ed959c6162631b5b4feab8801b5b490d",
+          "expected": "한abc글\r",
+          "received": "한abc글\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Tab",
+          "start": 3977.52270997,
+          "end": 3977.84464635,
+          "raw_hex": "09eab080",
+          "expected": "가\t",
+          "received": "\t가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Left",
+          "start": 3978.028078982,
+          "end": 3978.350064188,
+          "raw_hex": "1b5b44eab080",
+          "expected": "가\u001b[D",
+          "received": "\u001b[D가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Right",
+          "start": 3978.533297133,
+          "end": 3978.855300641,
+          "raw_hex": "1b5b43eab080",
+          "expected": "가\u001b[C",
+          "received": "\u001b[C가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Home",
+          "start": 3979.03915387,
+          "end": 3979.361447304,
+          "raw_hex": "1b5b48eab080",
+          "expected": "가\u001b[H",
+          "received": "\u001b[H가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_End",
+          "start": 3979.549989979,
+          "end": 3979.872401013,
+          "raw_hex": "1b5b46eab080",
+          "expected": "가\u001b[F",
+          "received": "\u001b[F가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "composing_Delete",
+          "start": 3980.083019149,
+          "end": 3980.406367034,
+          "raw_hex": "1b5b337eeab080",
+          "expected": "가\u001b[3~",
+          "received": "\u001b[3~가",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_left_order",
+          "start": 3980.606334641,
+          "end": 3980.969404102,
+          "raw_hex": "1b5b441b5b4feab0801b5b490d",
+          "expected": "가\u001b[D\r",
+          "received": "\u001b[D가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_right_order",
+          "start": 3981.018184012,
+          "end": 3981.381868797,
+          "raw_hex": "1b5b431b5b4feab0801b5b490d",
+          "expected": "가\u001b[C\r",
+          "received": "\u001b[C가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "escape_then_enter",
+          "start": 3981.430617958,
+          "end": 3981.794344973,
+          "raw_hex": "1beab0801b5b4f1b5b490d",
+          "expected": "가\u001b\r",
+          "received": "\u001b가\r",
+          "passed": false,
+          "focus_out": 1
+        }
+      ],
+      "passed": 36,
+      "failed": 12,
+      "note": "Byte checks only; screenshots need visual review. Not a WSLg portal or Windows test.",
+      "label": "final-sync1-navoff",
+      "artifact_dir": "/tmp/fm-gui-vbsxu5zz",
+      "raw_events": [
+        {
+          "time": 3959.871243208,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3960.38502169,
+          "hex": "61"
+        },
+        {
+          "time": 3960.425188981,
+          "hex": "62"
+        },
+        {
+          "time": 3960.466557592,
+          "hex": "63"
+        },
+        {
+          "time": 3960.787551949,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3960.787706627,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3960.791966089,
+          "hex": "0d"
+        },
+        {
+          "time": 3961.070589883,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3961.070756112,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3961.07294558,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3961.073082949,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3961.0752998,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3961.075373629,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3961.079258371,
+          "hex": "0d"
+        },
+        {
+          "time": 3961.07938265,
+          "hex": "0d"
+        },
+        {
+          "time": 3961.07949438,
+          "hex": "0d"
+        },
+        {
+          "time": 3961.937520529,
+          "hex": "eab080"
+        },
+        {
+          "time": 3962.214709918,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3962.214832697,
+          "hex": "eb8298"
+        },
+        {
+          "time": 3962.215000435,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3962.220132757,
+          "hex": "0d"
+        },
+        {
+          "time": 3962.621289919,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3962.743700215,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3962.865107191,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3962.945836551,
+          "hex": "ec84b8"
+        },
+        {
+          "time": 3962.981932992,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3962.9820903,
+          "hex": "ec9a94"
+        },
+        {
+          "time": 3962.982217678,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3962.987056113,
+          "hex": "0d"
+        },
+        {
+          "time": 3963.663360194,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3963.663519674,
+          "hex": "ed9598"
+        },
+        {
+          "time": 3963.663591543,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3964.034241301,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3964.034518939,
+          "hex": "eab080"
+        },
+        {
+          "time": 3964.034803726,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3964.039229034,
+          "hex": "1b0d"
+        },
+        {
+          "time": 3964.432499391,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3964.553741949,
+          "hex": "20"
+        },
+        {
+          "time": 3964.555872169,
+          "hex": "eab880"
+        },
+        {
+          "time": 3964.916352013,
+          "hex": "31"
+        },
+        {
+          "time": 3964.918121213,
+          "hex": "ec9584"
+        },
+        {
+          "time": 3965.318955912,
+          "hex": "ec9588"
+        },
+        {
+          "time": 3965.438953212,
+          "hex": "2c"
+        },
+        {
+          "time": 3965.440279219,
+          "hex": "eb8595"
+        },
+        {
+          "time": 3965.840898576,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3965.841026355,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3965.841190395,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 3966.24297484,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3966.243093039,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3966.243218779,
+          "hex": "1b5b4921"
+        },
+        {
+          "time": 3966.649053016,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3966.649177284,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3966.649463884,
+          "hex": "1b5b4940"
+        },
+        {
+          "time": 3967.055087082,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3967.05536429,
+          "hex": "ed959c1b5b4923"
+        },
+        {
+          "time": 3967.459101896,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3967.459322334,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3967.459433223,
+          "hex": "1b5b4924"
+        },
+        {
+          "time": 3967.862008212,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3967.862239251,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3967.862507887,
+          "hex": "1b5b4925"
+        },
+        {
+          "time": 3968.266415504,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3968.266611542,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3968.26679385,
+          "hex": "1b5b495e"
+        },
+        {
+          "time": 3968.668895943,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3968.669126522,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3968.669262152,
+          "hex": "1b5b4926"
+        },
+        {
+          "time": 3969.077673543,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3969.077774302,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3969.077928952,
+          "hex": "1b5b492a"
+        },
+        {
+          "time": 3969.482634331,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3969.482748199,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3969.482921027,
+          "hex": "1b5b4928"
+        },
+        {
+          "time": 3969.884351167,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3969.884509665,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3969.884654026,
+          "hex": "1b5b4929"
+        },
+        {
+          "time": 3970.293272995,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3970.293374694,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3970.293509644,
+          "hex": "1b5b495f"
+        },
+        {
+          "time": 3970.699657108,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3970.699757237,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3970.699919015,
+          "hex": "1b5b492b"
+        },
+        {
+          "time": 3971.099166796,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3971.099369494,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3971.099598072,
+          "hex": "1b5b493a"
+        },
+        {
+          "time": 3971.505877005,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3971.505975735,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3971.506143134,
+          "hex": "1b5b4922"
+        },
+        {
+          "time": 3971.903966828,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3971.904043767,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3971.904226165,
+          "hex": "1b5b493c"
+        },
+        {
+          "time": 3972.306457886,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3972.306536515,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3972.306717133,
+          "hex": "1b5b493e"
+        },
+        {
+          "time": 3972.711730719,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3972.711821858,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3972.711993257,
+          "hex": "1b5b497b"
+        },
+        {
+          "time": 3973.118927395,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3973.119012815,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3973.119200392,
+          "hex": "1b5b497d"
+        },
+        {
+          "time": 3973.525733263,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3973.525865193,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3973.525968572,
+          "hex": "1b5b497c"
+        },
+        {
+          "time": 3973.928111365,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3973.928309683,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3973.928528021,
+          "hex": "1b5b497e"
+        },
+        {
+          "time": 3974.295469935,
+          "hex": "eab98c"
+        },
+        {
+          "time": 3974.377148186,
+          "hex": "eb94b0"
+        },
+        {
+          "time": 3974.498518034,
+          "hex": "ebb9a0"
+        },
+        {
+          "time": 3974.538279628,
+          "hex": "ec8bb8"
+        },
+        {
+          "time": 3974.614629419,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3974.614783468,
+          "hex": "eca79c"
+        },
+        {
+          "time": 3974.614995175,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3974.61975202,
+          "hex": "0d"
+        },
+        {
+          "time": 3975.061321622,
+          "hex": "eab3bc"
+        },
+        {
+          "time": 3975.184097305,
+          "hex": "eb9098"
+        },
+        {
+          "time": 3975.304215075,
+          "hex": "ec9b8c"
+        },
+        {
+          "time": 3975.381529246,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3975.381742714,
+          "hex": "ec9d98"
+        },
+        {
+          "time": 3975.381892924,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3975.386724268,
+          "hex": "0d"
+        },
+        {
+          "time": 3975.825305277,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3975.825451046,
+          "hex": "eab092"
+        },
+        {
+          "time": 3975.825629994,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3975.830269551,
+          "hex": "0d"
+        },
+        {
+          "time": 3976.146343694,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3976.146548944,
+          "hex": "e384b1"
+        },
+        {
+          "time": 3976.146718481,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3976.151794943,
+          "hex": "0d"
+        },
+        {
+          "time": 3976.512202958,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3976.512416597,
+          "hex": "eab080"
+        },
+        {
+          "time": 3976.512566075,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3976.517829445,
+          "hex": "0d"
+        },
+        {
+          "time": 3976.923591883,
+          "hex": "ed959c"
+        },
+        {
+          "time": 3976.959161128,
+          "hex": "61"
+        },
+        {
+          "time": 3977.000139723,
+          "hex": "62"
+        },
+        {
+          "time": 3977.041936259,
+          "hex": "63"
+        },
+        {
+          "time": 3977.241323486,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3977.241516898,
+          "hex": "eab880"
+        },
+        {
+          "time": 3977.241716368,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3977.247076962,
+          "hex": "0d"
+        },
+        {
+          "time": 3977.606162404,
+          "hex": "09"
+        },
+        {
+          "time": 3977.607648841,
+          "hex": "eab080"
+        },
+        {
+          "time": 3977.887819813,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3977.887969631,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3977.893163501,
+          "hex": "0d"
+        },
+        {
+          "time": 3978.112132809,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 3978.114458558,
+          "hex": "eab080"
+        },
+        {
+          "time": 3978.393034635,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3978.393244923,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3978.398038658,
+          "hex": "0d"
+        },
+        {
+          "time": 3978.617373972,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 3978.619286294,
+          "hex": "eab080"
+        },
+        {
+          "time": 3978.898958071,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3978.899227668,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3978.904399049,
+          "hex": "0d"
+        },
+        {
+          "time": 3979.124367619,
+          "hex": "1b5b48"
+        },
+        {
+          "time": 3979.126365639,
+          "hex": "eab080"
+        },
+        {
+          "time": 3979.40969376,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3979.409884227,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3979.416671284,
+          "hex": "0d"
+        },
+        {
+          "time": 3979.63473447,
+          "hex": "1b5b46"
+        },
+        {
+          "time": 3979.636629703,
+          "hex": "eab080"
+        },
+        {
+          "time": 3979.941353573,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3979.941578461,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3979.947002779,
+          "hex": "0d"
+        },
+        {
+          "time": 3980.168497674,
+          "hex": "1b5b337e"
+        },
+        {
+          "time": 3980.173682316,
+          "hex": "eab080"
+        },
+        {
+          "time": 3980.464878145,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3980.465428738,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3980.472437714,
+          "hex": "0d"
+        },
+        {
+          "time": 3980.691712366,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 3980.729072837,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3980.729208135,
+          "hex": "eab080"
+        },
+        {
+          "time": 3980.729407914,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3980.732693753,
+          "hex": "0d"
+        },
+        {
+          "time": 3981.103468581,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 3981.141493041,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3981.14162065,
+          "hex": "eab080"
+        },
+        {
+          "time": 3981.141759829,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3981.14791478,
+          "hex": "0d"
+        },
+        {
+          "time": 3981.516377391,
+          "hex": "1b"
+        },
+        {
+          "time": 3981.518859597,
+          "hex": "eab080"
+        },
+        {
+          "time": 3981.553969456,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 3981.554368622,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 3981.562499978,
+          "hex": "0d"
+        }
+      ]
+    },
+    {
+      "sync": "1",
+      "navigation_workaround": "on",
+      "backend": "Xvfb/X11/private IBus",
+      "cases": [
+        {
+          "name": "english",
+          "start": 4026.927853628,
+          "end": 4027.250234081,
+          "raw_hex": "616263",
+          "expected": "abc",
+          "received": "abc",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "empty_enter",
+          "start": 4027.323129945,
+          "end": 4027.564258803,
+          "raw_hex": "1b5b4f1b5b490d",
+          "expected": "\r",
+          "received": "\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "fast_three_enter",
+          "start": 4027.602565113,
+          "end": 4027.8067692,
+          "raw_hex": "1b5b4f1b5b491b5b4f1b5b491b5b4f1b5b490d0d0d",
+          "expected": "\r\r\r",
+          "received": "\r\r\r",
+          "passed": true,
+          "focus_out": 3
+        },
+        {
+          "name": "hidden_cursor_preedit",
+          "start": 4028.343362992,
+          "end": 4028.705372998,
+          "raw_hex": "eab080",
+          "expected": "가",
+          "received": "가",
+          "passed": true,
+          "focus_out": 0
+        },
+        {
+          "name": "enter_after_preedit",
+          "start": 4028.740025732,
+          "end": 4028.980924964,
+          "raw_hex": "1b5b4feb82981b5b490d",
+          "expected": "나\r",
+          "received": "나\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "sentence_enter",
+          "start": 4029.020726777,
+          "end": 4029.747455714,
+          "raw_hex": "ec9588eb8595ed9598ec84b81b5b4fec9a941b5b490d",
+          "expected": "안녕하세요\r",
+          "received": "안녕하세요\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "backspace_composing",
+          "start": 4029.783861241,
+          "end": 4030.14611117,
+          "raw_hex": "1b5b4fed959c1b5b497f",
+          "expected": "한",
+          "received": "한",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "symbol_after_backspace",
+          "start": 4030.181852923,
+          "end": 4030.422644584,
+          "raw_hex": "1b5b4f1b5b493f",
+          "expected": "?",
+          "received": "?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_enter",
+          "start": 4030.458953002,
+          "end": 4030.781734112,
+          "raw_hex": "1b5b4feab0801b5b491b0d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "space",
+          "start": 4030.823736157,
+          "end": 4031.308092455,
+          "raw_hex": "ed959c20eab880",
+          "expected": "한글 ",
+          "received": "한 글",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "number",
+          "start": 4031.34901102,
+          "end": 4031.671740302,
+          "raw_hex": "31ec9584",
+          "expected": "아1",
+          "received": "1아",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "comma",
+          "start": 4031.712789394,
+          "end": 4032.197720337,
+          "raw_hex": "ec95882ceb8595",
+          "expected": "안녕,",
+          "received": "안,녕",
+          "passed": false,
+          "focus_out": 0
+        },
+        {
+          "name": "shift_symbol_question",
+          "start": 4032.23772595,
+          "end": 4032.59992559,
+          "raw_hex": "1b5b4fed959c1b5b493f",
+          "expected": "한?",
+          "received": "한?",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_exclam",
+          "start": 4032.640692455,
+          "end": 4033.003498839,
+          "raw_hex": "1b5b4fed959c1b5b4921",
+          "expected": "한!",
+          "received": "한!",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_at",
+          "start": 4033.04284621,
+          "end": 4033.405137927,
+          "raw_hex": "1b5b4fed959c1b5b4940",
+          "expected": "한@",
+          "received": "한@",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_numbersign",
+          "start": 4033.444570265,
+          "end": 4033.807569308,
+          "raw_hex": "1b5b4fed959c1b5b4923",
+          "expected": "한#",
+          "received": "한#",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_dollar",
+          "start": 4033.85072054,
+          "end": 4034.213738111,
+          "raw_hex": "1b5b4fed959c1b5b4924",
+          "expected": "한$",
+          "received": "한$",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_percent",
+          "start": 4034.248488795,
+          "end": 4034.611155898,
+          "raw_hex": "1b5b4fed959c1b5b4925",
+          "expected": "한%",
+          "received": "한%",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciicircum",
+          "start": 4034.646856204,
+          "end": 4035.009077701,
+          "raw_hex": "1b5b4fed959c1b5b495e",
+          "expected": "한^",
+          "received": "한^",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_ampersand",
+          "start": 4035.04630993,
+          "end": 4035.408552409,
+          "raw_hex": "1b5b4fed959c1b5b4926",
+          "expected": "한&",
+          "received": "한&",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asterisk",
+          "start": 4035.445349983,
+          "end": 4035.807549211,
+          "raw_hex": "1b5b4fed959c1b5b492a",
+          "expected": "한*",
+          "received": "한*",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenleft",
+          "start": 4035.848488556,
+          "end": 4036.214165803,
+          "raw_hex": "1b5b4fed959c1b5b4928",
+          "expected": "한(",
+          "received": "한(",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_parenright",
+          "start": 4036.256936649,
+          "end": 4036.620159319,
+          "raw_hex": "1b5b4fed959c1b5b4929",
+          "expected": "한)",
+          "received": "한)",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_underscore",
+          "start": 4036.658721925,
+          "end": 4037.021903335,
+          "raw_hex": "1b5b4fed959c1b5b495f",
+          "expected": "한_",
+          "received": "한_",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_plus",
+          "start": 4037.062200506,
+          "end": 4037.424239585,
+          "raw_hex": "1b5b4fed959c1b5b492b",
+          "expected": "한+",
+          "received": "한+",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_colon",
+          "start": 4037.46408187,
+          "end": 4037.826223649,
+          "raw_hex": "1b5b4fed959c1b5b493a",
+          "expected": "한:",
+          "received": "한:",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_quotedbl",
+          "start": 4037.863104602,
+          "end": 4038.225780547,
+          "raw_hex": "1b5b4fed959c1b5b4922",
+          "expected": "한\"",
+          "received": "한\"",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_less",
+          "start": 4038.263148994,
+          "end": 4038.626652471,
+          "raw_hex": "1b5b4fed959c1b5b493c",
+          "expected": "한<",
+          "received": "한<",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_greater",
+          "start": 4038.666021382,
+          "end": 4039.028705795,
+          "raw_hex": "1b5b4fed959c1b5b493e",
+          "expected": "한>",
+          "received": "한>",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceleft",
+          "start": 4039.067066635,
+          "end": 4039.430161695,
+          "raw_hex": "1b5b4fed959c1b5b497b",
+          "expected": "한{",
+          "received": "한{",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_braceright",
+          "start": 4039.470434385,
+          "end": 4039.832582874,
+          "raw_hex": "1b5b4fed959c1b5b497d",
+          "expected": "한}",
+          "received": "한}",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_bar",
+          "start": 4039.870480437,
+          "end": 4040.232861594,
+          "raw_hex": "1b5b4fed959c1b5b497c",
+          "expected": "한|",
+          "received": "한|",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_symbol_asciitilde",
+          "start": 4040.268723757,
+          "end": 4040.632968017,
+          "raw_hex": "1b5b4fed959c1b5b497e",
+          "expected": "한~",
+          "received": "한~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "double_consonants",
+          "start": 4040.671941209,
+          "end": 4041.317714918,
+          "raw_hex": "eab98ceb94b0ebb9a0ec8bb81b5b4feca79c1b5b490d",
+          "expected": "까따빠싸짜\r",
+          "received": "까따빠싸짜\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "compound_vowels",
+          "start": 4041.355042027,
+          "end": 4042.081806122,
+          "raw_hex": "eab3bceb9098ec9b8c1b5b4fec9d981b5b490d",
+          "expected": "과되워의\r",
+          "received": "과되워의\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "final_cluster",
+          "start": 4042.11830006,
+          "end": 4042.522021387,
+          "raw_hex": "1b5b4feab0921b5b490d",
+          "expected": "값\r",
+          "received": "값\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "isolated_jamo",
+          "start": 4042.56101376,
+          "end": 4042.842419849,
+          "raw_hex": "1b5b4fe384b11b5b490d",
+          "expected": "ㄱ\r",
+          "received": "ㄱ\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "keypad_enter",
+          "start": 4042.876256921,
+          "end": 4043.19809006,
+          "raw_hex": "1b5b4feab0801b5b490d",
+          "expected": "가\r",
+          "received": "가\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "hangul_english_toggle",
+          "start": 4043.230572694,
+          "end": 4043.917497915,
+          "raw_hex": "ed959c6162631b5b4feab8801b5b490d",
+          "expected": "한abc글\r",
+          "received": "한abc글\r",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Tab",
+          "start": 4043.954799113,
+          "end": 4044.276575323,
+          "raw_hex": "1b5b4feab0801b5b4909",
+          "expected": "가\t",
+          "received": "가\t",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Left",
+          "start": 4044.458238812,
+          "end": 4044.780213499,
+          "raw_hex": "1b5b4feab0801b5b491b5b44",
+          "expected": "가\u001b[D",
+          "received": "가\u001b[D",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Right",
+          "start": 4044.959206453,
+          "end": 4045.281224262,
+          "raw_hex": "1b5b4feab0801b5b491b5b43",
+          "expected": "가\u001b[C",
+          "received": "가\u001b[C",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Home",
+          "start": 4045.461000179,
+          "end": 4045.783056385,
+          "raw_hex": "1b5b4feab0801b5b491b5b48",
+          "expected": "가\u001b[H",
+          "received": "가\u001b[H",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_End",
+          "start": 4045.964814993,
+          "end": 4046.286639212,
+          "raw_hex": "1b5b4feab0801b5b491b5b46",
+          "expected": "가\u001b[F",
+          "received": "가\u001b[F",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "composing_Delete",
+          "start": 4046.465010572,
+          "end": 4046.786890001,
+          "raw_hex": "1b5b4feab0801b5b491b5b337e",
+          "expected": "가\u001b[3~",
+          "received": "가\u001b[3~",
+          "passed": true,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_left_order",
+          "start": 4046.964434129,
+          "end": 4047.326980123,
+          "raw_hex": "1b5b441b5b4feab0801b5b490d",
+          "expected": "가\u001b[D\r",
+          "received": "\u001b[D가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "shift_right_order",
+          "start": 4047.364771398,
+          "end": 4047.727447342,
+          "raw_hex": "1b5b431b5b4feab0801b5b490d",
+          "expected": "가\u001b[C\r",
+          "received": "\u001b[C가\r",
+          "passed": false,
+          "focus_out": 1
+        },
+        {
+          "name": "escape_then_enter",
+          "start": 4047.767104599,
+          "end": 4048.130637196,
+          "raw_hex": "1b5b4feab0801b5b491b1b5b4f1b5b490d",
+          "expected": "가\u001b\r",
+          "received": "가\u001b\r",
+          "passed": true,
+          "focus_out": 2
+        }
+      ],
+      "passed": 43,
+      "failed": 5,
+      "note": "Byte checks only; screenshots need visual review. Not a WSLg portal or Windows test.",
+      "label": "repeat-sync1-navon",
+      "artifact_dir": "/tmp/fm-gui-noxfqd04",
+      "raw_events": [
+        {
+          "time": 4026.415219645,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4026.934776792,
+          "hex": "61"
+        },
+        {
+          "time": 4026.97221663,
+          "hex": "62"
+        },
+        {
+          "time": 4027.0114872,
+          "hex": "63"
+        },
+        {
+          "time": 4027.324030317,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4027.324243135,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4027.329636164,
+          "hex": "0d"
+        },
+        {
+          "time": 4027.603236838,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4027.603366976,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4027.605488987,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4027.605598865,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4027.60721123,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4027.607320749,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4027.611753788,
+          "hex": "0d"
+        },
+        {
+          "time": 4027.611874566,
+          "hex": "0d"
+        },
+        {
+          "time": 4027.611967895,
+          "hex": "0d"
+        },
+        {
+          "time": 4028.469048653,
+          "hex": "eab080"
+        },
+        {
+          "time": 4028.740684345,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4028.740847063,
+          "hex": "eb8298"
+        },
+        {
+          "time": 4028.740989952,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4028.745618778,
+          "hex": "0d"
+        },
+        {
+          "time": 4029.146313517,
+          "hex": "ec9588"
+        },
+        {
+          "time": 4029.267092868,
+          "hex": "eb8595"
+        },
+        {
+          "time": 4029.38889855,
+          "hex": "ed9598"
+        },
+        {
+          "time": 4029.471385004,
+          "hex": "ec84b8"
+        },
+        {
+          "time": 4029.507424614,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4029.507595822,
+          "hex": "ec9a94"
+        },
+        {
+          "time": 4029.507755071,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4029.510876491,
+          "hex": "0d"
+        },
+        {
+          "time": 4029.9059626,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4029.906100919,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4029.906329657,
+          "hex": "1b5b497f"
+        },
+        {
+          "time": 4030.184299219,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4030.184442948,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 4030.543331018,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4030.543384277,
+          "hex": "eab080"
+        },
+        {
+          "time": 4030.543564526,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4030.547581168,
+          "hex": "1b0d"
+        },
+        {
+          "time": 4030.951011378,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4031.071152697,
+          "hex": "20"
+        },
+        {
+          "time": 4031.073515886,
+          "hex": "eab880"
+        },
+        {
+          "time": 4031.43396194,
+          "hex": "31"
+        },
+        {
+          "time": 4031.435540795,
+          "hex": "ec9584"
+        },
+        {
+          "time": 4031.838425571,
+          "hex": "ec9588"
+        },
+        {
+          "time": 4031.961096826,
+          "hex": "2c"
+        },
+        {
+          "time": 4031.963499274,
+          "hex": "eb8595"
+        },
+        {
+          "time": 4032.362151239,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4032.362294548,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4032.362423677,
+          "hex": "1b5b493f"
+        },
+        {
+          "time": 4032.765733338,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4032.765810177,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4032.765989617,
+          "hex": "1b5b4921"
+        },
+        {
+          "time": 4033.166758051,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4033.16690542,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4033.167111308,
+          "hex": "1b5b4940"
+        },
+        {
+          "time": 4033.569261651,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4033.56937162,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4033.569513528,
+          "hex": "1b5b4923"
+        },
+        {
+          "time": 4033.975701533,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4033.975795182,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4033.975943021,
+          "hex": "1b5b4924"
+        },
+        {
+          "time": 4034.373797455,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4034.373889794,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4034.374112571,
+          "hex": "1b5b4925"
+        },
+        {
+          "time": 4034.770898134,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4034.770983253,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4034.771129712,
+          "hex": "1b5b495e"
+        },
+        {
+          "time": 4035.169975326,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4035.170156684,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4035.170280693,
+          "hex": "1b5b4926"
+        },
+        {
+          "time": 4035.569002138,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4035.569152727,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4035.569261126,
+          "hex": "1b5b492a"
+        },
+        {
+          "time": 4035.975633079,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4035.975842087,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4035.975939855,
+          "hex": "1b5b4928"
+        },
+        {
+          "time": 4036.381727395,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4036.381850644,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4036.381948353,
+          "hex": "1b5b4929"
+        },
+        {
+          "time": 4036.783881858,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4036.784003557,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4036.784179465,
+          "hex": "1b5b495f"
+        },
+        {
+          "time": 4037.185261327,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4037.185373296,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4037.185509334,
+          "hex": "1b5b492b"
+        },
+        {
+          "time": 4037.587748007,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4037.587873145,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4037.588087103,
+          "hex": "1b5b493a"
+        },
+        {
+          "time": 4037.987580851,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4037.98763322,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4037.987795498,
+          "hex": "1b5b4922"
+        },
+        {
+          "time": 4038.388197938,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4038.388362235,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4038.388462244,
+          "hex": "1b5b493c"
+        },
+        {
+          "time": 4038.790126492,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4038.79028104,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4038.790499508,
+          "hex": "1b5b493e"
+        },
+        {
+          "time": 4039.191740791,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4039.19183454,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4039.192010858,
+          "hex": "1b5b497b"
+        },
+        {
+          "time": 4039.594099511,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4039.594262961,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4039.59442342,
+          "hex": "1b5b497d"
+        },
+        {
+          "time": 4039.994696069,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4039.994833307,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4039.995001727,
+          "hex": "1b5b497c"
+        },
+        {
+          "time": 4040.394605121,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4040.3947235,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4040.394980049,
+          "hex": "1b5b497e"
+        },
+        {
+          "time": 4040.758252358,
+          "hex": "eab98c"
+        },
+        {
+          "time": 4040.840158016,
+          "hex": "eb94b0"
+        },
+        {
+          "time": 4040.959323954,
+          "hex": "ebb9a0"
+        },
+        {
+          "time": 4041.00122256,
+          "hex": "ec8bb8"
+        },
+        {
+          "time": 4041.077452142,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4041.07757654,
+          "hex": "eca79c"
+        },
+        {
+          "time": 4041.077702719,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4041.082130128,
+          "hex": "0d"
+        },
+        {
+          "time": 4041.520994585,
+          "hex": "eab3bc"
+        },
+        {
+          "time": 4041.642584569,
+          "hex": "eb9098"
+        },
+        {
+          "time": 4041.763832828,
+          "hex": "ec9b8c"
+        },
+        {
+          "time": 4041.841759755,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4041.841932272,
+          "hex": "ec9d98"
+        },
+        {
+          "time": 4041.84207508,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4041.847003834,
+          "hex": "0d"
+        },
+        {
+          "time": 4042.281780109,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4042.281920258,
+          "hex": "eab092"
+        },
+        {
+          "time": 4042.282066117,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4042.286642664,
+          "hex": "0d"
+        },
+        {
+          "time": 4042.602177612,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4042.60235789,
+          "hex": "e384b1"
+        },
+        {
+          "time": 4042.602492649,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4042.606786819,
+          "hex": "0d"
+        },
+        {
+          "time": 4042.957941801,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4042.95809696,
+          "hex": "eab080"
+        },
+        {
+          "time": 4042.958228578,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4042.962785886,
+          "hex": "0d"
+        },
+        {
+          "time": 4043.35840418,
+          "hex": "ed959c"
+        },
+        {
+          "time": 4043.395206714,
+          "hex": "61"
+        },
+        {
+          "time": 4043.435769061,
+          "hex": "62"
+        },
+        {
+          "time": 4043.47620005,
+          "hex": "63"
+        },
+        {
+          "time": 4043.677308457,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4043.677489835,
+          "hex": "eab880"
+        },
+        {
+          "time": 4043.677687893,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4043.682588457,
+          "hex": "0d"
+        },
+        {
+          "time": 4044.036320576,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4044.036711082,
+          "hex": "eab080"
+        },
+        {
+          "time": 4044.036783591,
+          "hex": "1b5b4909"
+        },
+        {
+          "time": 4044.316417907,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4044.316657175,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4044.321796247,
+          "hex": "0d"
+        },
+        {
+          "time": 4044.539765914,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4044.539935623,
+          "hex": "eab080"
+        },
+        {
+          "time": 4044.540103981,
+          "hex": "1b5b491b5b44"
+        },
+        {
+          "time": 4044.818645948,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4044.818786187,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4044.822478692,
+          "hex": "0d"
+        },
+        {
+          "time": 4045.040833986,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4045.040934745,
+          "hex": "eab080"
+        },
+        {
+          "time": 4045.041052004,
+          "hex": "1b5b491b5b43"
+        },
+        {
+          "time": 4045.31970216,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4045.319907727,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4045.323736431,
+          "hex": "0d"
+        },
+        {
+          "time": 4045.54265623,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4045.542786228,
+          "hex": "eab080"
+        },
+        {
+          "time": 4045.542917907,
+          "hex": "1b5b491b5b48"
+        },
+        {
+          "time": 4045.824491695,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4045.824683914,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4045.828534037,
+          "hex": "0d"
+        },
+        {
+          "time": 4046.046440825,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4046.046608834,
+          "hex": "eab080"
+        },
+        {
+          "time": 4046.046794272,
+          "hex": "1b5b491b5b46"
+        },
+        {
+          "time": 4046.324194221,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4046.324368848,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4046.328580078,
+          "hex": "0d"
+        },
+        {
+          "time": 4046.546479706,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4046.546619855,
+          "hex": "eab080"
+        },
+        {
+          "time": 4046.546747663,
+          "hex": "1b5b491b5b337e"
+        },
+        {
+          "time": 4046.824146931,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4046.824367329,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4046.82850439,
+          "hex": "0d"
+        },
+        {
+          "time": 4047.047742666,
+          "hex": "1b5b44"
+        },
+        {
+          "time": 4047.08656768,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4047.086745028,
+          "hex": "eab080"
+        },
+        {
+          "time": 4047.087032475,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4047.091424904,
+          "hex": "0d"
+        },
+        {
+          "time": 4047.448256903,
+          "hex": "1b5b43"
+        },
+        {
+          "time": 4047.487019978,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4047.487178506,
+          "hex": "eab080"
+        },
+        {
+          "time": 4047.487324885,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4047.491659613,
+          "hex": "0d"
+        },
+        {
+          "time": 4047.849515764,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4047.849731782,
+          "hex": "eab080"
+        },
+        {
+          "time": 4047.850020829,
+          "hex": "1b5b491b"
+        },
+        {
+          "time": 4047.889813844,
+          "hex": "1b5b4f"
+        },
+        {
+          "time": 4047.889938133,
+          "hex": "1b5b49"
+        },
+        {
+          "time": 4047.892182892,
+          "hex": "0d"
+        }
+      ]
+    }
+  ],
+  "primary_matrix": {
+    "cases_per_configuration": 48,
+    "configurations": 4,
+    "passed": 164,
+    "mismatches": 28
+  },
+  "screenshots": [
+    {
+      "path": "docs/evidence/korean-input-2026-09-27/backspace-nav-off.png",
+      "sha256": "24c39fb6665f16018557a9f77b1877b391df5b129b53c0ab72279d17cf5154fc",
+      "visually_reviewed": true
+    },
+    {
+      "path": "docs/evidence/korean-input-2026-09-27/backspace-nav-on.png",
+      "sha256": "81fc7976708b6893d5193d75c2bad9ac825c49fddaf229b869fd67c3ee6c8090",
+      "visually_reviewed": true
+    },
+    {
+      "path": "docs/evidence/korean-input-2026-09-27/hidden-cursor-preedit.png",
+      "sha256": "658f2e68cbfe8d15ebe306f6b75f4e9aff508d7f48d88c276bb13a28e7d90fac",
+      "visually_reviewed": true
+    }
+  ],
+  "limits": [
+    "Not the WSLg portal path",
+    "Not Windows Microsoft IME or WebView2",
+    "Not real Claude/Codex/vim editing",
+    "Raw sink does not echo or edit committed text",
+    "No candidate window, real keyboard, DPI, clipboard or focus migration acceptance test",
+    "IBus nav-off configurations are diagnostic; WSL defaults nav-on",
+    "Nonzero audit exit signals mismatches; not all live cases passed"
+  ],
+  "preliminary_runs_excluded": "Initial two runs used XK_less+Shift which selected the ISO <> key and produced >; corrected to physical comma+Shift before the four-run matrix. Initial Xvfb filesystem listener could not bind WSLg-owned directory; final harness uses its own abstract socket.",
+  "orchestration_note": "The sequential four-run launcher reported exit 143 after printing all four completed subprocess exit codes (1 each, expected for recorded mismatches). All four result.json and raw logs were complete. A subsequent direct sync=1/nav=on repeat finished with exit 1 and the same five mismatches. This launcher status is not reported as a passing test."
+}
