@@ -735,6 +735,7 @@ impl GhosttyPane {
 
         if crate::platform::running_under_wsl() {
             install_wsl_ctrl_c_interrupt_passthrough(&container, &term);
+            install_wsl_shift_tab_passthrough(&container, &term);
         }
 
         // On the ibus path, recover Shift+symbol keys (notably `?`) that
@@ -1853,6 +1854,40 @@ fn is_plain_ctrl_c(keyval: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool
             | ModifierType::META_MASK);
     relevant == ModifierType::CONTROL_MASK
         && keyval.to_unicode().is_some_and(|ch| ch == 'c' || ch == 'C')
+}
+
+/// WSLg's IBus path can drop Shift+Tab before VTE encodes it. Capture it
+/// on the terminal's ancestor, preserving preedit before sending xterm's
+/// back-tab sequence (used by Claude Code to cycle permission modes).
+/// Installed only under WSL; other platforms keep VTE's native handling.
+fn install_wsl_shift_tab_passthrough(container: &gtk::Overlay, term: &vte::Terminal) {
+    let key = gtk::EventControllerKey::new();
+    key.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let term_widget = term.clone();
+    key.connect_key_pressed(move |_, keyval, _keycode, state| {
+        if !term_widget.has_focus() || !is_plain_shift_tab(keyval, state) {
+            return glib::Propagation::Proceed;
+        }
+        feed_after_preedit_commit(&term_widget, b"\x1b[Z");
+        glib::Propagation::Stop
+    });
+    container.add_controller(key);
+}
+
+fn is_plain_shift_tab(keyval: gtk::gdk::Key, state: gtk::gdk::ModifierType) -> bool {
+    use gtk::gdk::{Key, ModifierType};
+
+    let modifiers = state
+        & (ModifierType::SHIFT_MASK
+            | ModifierType::CONTROL_MASK
+            | ModifierType::ALT_MASK
+            | ModifierType::SUPER_MASK
+            | ModifierType::HYPER_MASK
+            | ModifierType::META_MASK);
+    // ISO_Left_Tab already denotes back-tab; some event paths consume Shift.
+    (keyval == Key::Tab && modifiers == ModifierType::SHIFT_MASK)
+        || (keyval == Key::ISO_Left_Tab
+            && (modifiers.is_empty() || modifiers == ModifierType::SHIFT_MASK))
 }
 
 /// Recover Shift+symbol keys that the ibus sync-mode path swallows while
@@ -3487,6 +3522,44 @@ mod tests {
             ModifierType::CONTROL_MASK | ModifierType::ALT_MASK
         ));
         assert!(!is_plain_ctrl_c(Key::v, ModifierType::CONTROL_MASK));
+    }
+
+    #[test]
+    fn wsl_shift_tab_accepts_back_tab_keyvals_and_lock_state() {
+        use gtk::gdk::{Key, ModifierType};
+
+        for key in [Key::Tab, Key::ISO_Left_Tab] {
+            assert!(is_plain_shift_tab(key, ModifierType::SHIFT_MASK));
+            assert!(is_plain_shift_tab(
+                key,
+                ModifierType::SHIFT_MASK | ModifierType::LOCK_MASK
+            ));
+        }
+        assert!(is_plain_shift_tab(Key::ISO_Left_Tab, ModifierType::empty()));
+    }
+
+    #[test]
+    fn wsl_shift_tab_leaves_plain_tab_and_other_shortcuts_alone() {
+        use gtk::gdk::{Key, ModifierType};
+
+        assert!(!is_plain_shift_tab(Key::Tab, ModifierType::empty()));
+        assert!(!is_plain_shift_tab(Key::Return, ModifierType::SHIFT_MASK));
+        assert!(!is_plain_shift_tab(Key::a, ModifierType::SHIFT_MASK));
+        for modifier in [
+            ModifierType::CONTROL_MASK,
+            ModifierType::ALT_MASK,
+            ModifierType::SUPER_MASK,
+            ModifierType::HYPER_MASK,
+            ModifierType::META_MASK,
+        ] {
+            for key in [Key::Tab, Key::ISO_Left_Tab] {
+                assert!(!is_plain_shift_tab(key, modifier));
+                assert!(!is_plain_shift_tab(
+                    key,
+                    modifier | ModifierType::SHIFT_MASK
+                ));
+            }
+        }
     }
 
     #[test]
