@@ -217,6 +217,13 @@ pub enum Command {
         search: Uuid,
         index: usize,
     },
+    /// Inspect or change a terminal selection without accessing the OS clipboard.
+    Selection {
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
+        #[command(subcommand)]
+        action: crate::selection::Action,
+    },
     /// Paste explicit text using the terminal's current bracketed-paste mode.
     /// Does not access the system clipboard. Success means queued, not consumed.
     Paste {

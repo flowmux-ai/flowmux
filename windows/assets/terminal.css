@@ -14,3 +14,8 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 #status { position: absolute; bottom: 8px; right: 20px; padding: 6px; background: #292e3e; font: 12px "Segoe UI", sans-serif; }
 #input-status:empty { display: none; }
 #input-status { position: absolute; bottom: 42px; right: 20px; left: 10px; max-width: 520px; margin-left: auto; padding: 6px; background: #292e3e; color: #ffb4b4; font: 12px "Segoe UI", sans-serif; pointer-events: none; }
+#terminal-menu { position: fixed; z-index: 10; padding: 4px; min-width: min(220px, 100vw); max-width: 100vw; max-height: 100vh; overflow: auto; box-sizing: border-box; background: #292e3e; color: #e2e5ed; border: 1px solid #7887b0; box-shadow: 0 3px 12px #0008; }
+#terminal-menu button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 7px; border: none; background: transparent; color: inherit; text-align: left; font: 13px "Segoe UI", sans-serif; }
+#terminal-menu button:focus-visible, #terminal-menu button:hover:not(:disabled) { background: #414b67; outline: 1px solid #b9c6ff; }
+#terminal-menu button:disabled { opacity: .5; }
+#terminal-menu span { color: #bfc8e0; font-size: 11px; }

@@ -93,6 +93,51 @@ Desktop clipboard/menu/shortcut behavior and real IME interaction remain pending
 the hidden verifier uses explicit test text and never accesses the OS clipboard.
 See [paste evidence](evidence/2026-09-28/paste.md).
 
+Terminal **Ctrl+Shift+C** (also **Ctrl+Insert**) copies the selected text;
+**Ctrl+Shift+V** and **Shift+Insert** paste through the bounded paste path.
+Ctrl+C retains its terminal interrupt behavior. Right-click opens **Copy**,
+**Paste**, **Select all** and **Clear selection**. When an application enables
+terminal mouse reporting, hold Shift with the right-click to open this menu.
+Arrow keys, Home/End and Escape navigate/close the menu. Search fields retain
+their own text editing. These UI paths are implemented; actual desktop shortcut,
+mouse, accessibility and IME acceptance is still pending.
+
+A selection snapshot keeps the original text available when a TUI redraws or
+clears the selected cells. A new primary selection, explicit clear, new search,
+normal text/key input, paste, buffer switch or terminal reset discards it.
+Tab hiding/moves and process exit preserve the surface's snapshot. Copying no
+selection leaves the clipboard alone. A selection over 128 KiB of UTF-8 is
+rejected without truncation or fallback to older text. This bounds retained
+snapshots; extracting a very large selection can still temporarily allocate a
+larger xterm string. Clipboard writes do not normalize Unicode. Browser/platform
+newline conventions still apply.
+
+Clipboard APIs are called only from the terminal's user actions. A clipboard
+read that completes after focus, tab visibility, composition or another input
+changed is discarded. Requests are not retried, and a pending request prevents
+additional concurrent requests. Permission/API failures appear inside the
+terminal. Hidden debug hosts disable these clipboard actions and the automatic
+WebView2 clipboard-read permission grant. The verifier never reads, replaces or
+restores the user's clipboard.
+
+Selection automation is independent of the OS clipboard:
+
+```powershell
+flowmuxctl.exe selection --surface surface:<id> read
+flowmuxctl.exe selection --surface surface:<id> all
+flowmuxctl.exe selection --surface surface:<id> range 5 0 12
+flowmuxctl.exe selection --surface surface:<id> clear
+```
+
+`range` takes zero-based buffer row, column and cell length; rows include
+scrollback in the current normal/alternate buffer. Requests wait for previously
+received output to be parsed and do not activate the target tab. Results include
+the exact text, `live`/`retained`/`none` source, buffer and selection coordinates.
+Retained coordinates describe the original selection and may no longer point
+to the same text. `result.error` reports an invalid range or oversized selection;
+transport/target errors use the normal CLI error response. See
+[selection evidence](evidence/2026-09-28/selection.md).
+
 The installer includes three entry points. **flowmux.exe** is the GUI target
 for desktop shortcuts. **flowmux.com** is a console executable: with a command
 it uses the same IPC client as **flowmuxctl.exe**, and without a command it
@@ -463,6 +508,7 @@ powershell -NoProfile -File windows/scripts/verify-shells.ps1 -BuildDirectory wi
 powershell -NoProfile -File windows/scripts/verify-entrypoints.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-window-lifetime.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-paste.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-selection.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

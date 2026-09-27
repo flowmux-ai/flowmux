@@ -42,6 +42,11 @@ pub enum ClientMessage {
         sequence: u64,
         outcome: crate::paste::Outcome,
     },
+    Selected {
+        request: Uuid,
+        sequence: u64,
+        result: crate::selection::Snapshot,
+    },
     BinaryInput {
         data: String,
     },
@@ -113,6 +118,14 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    Visibility {
+        visible: bool,
+    },
+    Selection {
+        request: Uuid,
+        after: u64,
+        action: crate::selection::Action,
+    },
     ShellStatus {
         error: Option<String>,
     },

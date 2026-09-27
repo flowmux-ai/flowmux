@@ -309,6 +309,19 @@ desktop clipboard or OS input. Actual clipboard/selection/menu/IME acceptance,
 all queue/timeout races and shell/TUI paste behavior remain open. T08 and T09
 are partial. See [paste evidence](evidence/2026-09-28/paste.md).
 
+Windows terminal selection now retains an exact bounded Unicode snapshot across
+TUI redraws, tab moves and process exit, with explicit clearing for new selection,
+search/input, normal/alternate-buffer transitions and reset. Parser-barrier CLI
+operations read, select a cell range, select all or clear without OS clipboard
+access or target activation. Copy/paste shortcuts and a keyboard-accessible
+terminal context menu use the browser Clipboard API; delayed reads are discarded
+when focus, visibility, composition or input changed. Background hosts disable
+clipboard access in this controller and its automatic read permission grant.
+Hidden native selection/Unicode/redraw tests and mocked clipboard/menu event
+tests are separate from physical clipboard, mouse, accessibility and IME
+acceptance, which remains open. T08 stays partial; see
+[selection evidence](evidence/2026-09-28/selection.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

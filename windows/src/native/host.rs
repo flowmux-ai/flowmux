@@ -292,6 +292,7 @@ struct App {
     pending_reads: HashMap<Uuid, PendingRead>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
+    pending_selections: HashMap<Uuid, PendingRead>,
     search: search::Controller,
     closing: bool,
     background_test: bool,
@@ -466,6 +467,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
+            pending_selections: HashMap::new(),
             search: search::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
@@ -662,9 +664,9 @@ impl App {
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
-            "window.__flowmuxIdentity={};window.__flowmuxSettings={};",
+            "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBackgroundTesting={};",
             serde_json::to_string(&identity)?,
-            serde_json::to_string(&self.settings)?
+            serde_json::to_string(&self.settings)?, self.background_test
         );
         #[cfg(debug_assertions)]
         let init = if std::env::var_os("FLOWMUX_TEST_INPUT_TRACE").is_some() {
@@ -685,7 +687,7 @@ impl App {
             .with_hotkeys_zoom(false)
             .with_visible(false)
             .with_focused(false)
-            .with_clipboard(true)
+            .with_clipboard(!self.background_test)
             .with_initialization_script(init)
             .with_custom_protocol("flowmux-terminal".into(), |_id, request| {
                 let (body, mime): (&'static [u8], &str) = match request.uri().path() {
@@ -792,6 +794,9 @@ impl App {
             if surface.visible != show {
                 surface.view.set_visible(show)?;
                 surface.visible = show;
+                if surface.ready || surface.restoring {
+                    surface.send(&HostMessage::Visibility { visible: show })?;
+                }
             }
         }
         for (pane, area) in areas {
@@ -906,6 +911,16 @@ impl App {
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
                 self.search_tick()?;
+                self.pending_selections.retain(|_, request| {
+                    if request.started.elapsed() > Duration::from_secs(12) {
+                        let _ = request.reply.try_send(
+                            json!({"error":"terminal did not answer the selection request"}),
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.pending_pastes.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
@@ -1006,6 +1021,9 @@ impl App {
         let message = surface.identity.decode(origin, body)?;
         match message {
             ClientMessage::Ready => {
+                surface.send(&HostMessage::Visibility {
+                    visible: surface.visible,
+                })?;
                 if surface.ready || surface.restoring {
                     return Ok(());
                 }
@@ -1122,6 +1140,25 @@ impl App {
                     if let Ok(path) = crate::cwd::local_path(&path) {
                         self.update_cwd(id, path);
                     }
+                }
+            }
+            ClientMessage::Selected {
+                request,
+                sequence,
+                result,
+            } => {
+                if let Some(pending) = self.pending_selections.get(&request) {
+                    anyhow::ensure!(
+                        pending.surface == id
+                            && sequence >= pending.after
+                            && sequence <= surface.output_sequence,
+                        "invalid selection response"
+                    );
+                    result.validate()?;
+                    let pending = self.pending_selections.remove(&request).unwrap();
+                    let _ = pending
+                        .reply
+                        .try_send(json!({"surface":id,"sequence":sequence,"result":result}));
                 }
             }
             ClientMessage::Screen {
@@ -1629,6 +1666,16 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.pending_selections.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed during selection request"}));
+                false
+            } else {
+                true
+            }
+        });
         self.shells.remove(&surface);
         self.surfaces.remove(&surface);
         if self
@@ -1812,7 +1859,7 @@ impl App {
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1928,6 +1975,35 @@ impl App {
             }
             Command::SearchOpen { search, index } => {
                 self.open_search(search, index, Some(reply))?;
+                return Ok(None);
+            }
+            Command::Selection { surface, action } => {
+                let id = self.target(None, surface.map(SurfaceId).or(caller))?;
+                let surface = &self.surfaces[&id];
+                anyhow::ensure!(surface.ready && !surface.restoring, "terminal is not ready");
+                anyhow::ensure!(
+                    self.pending_selections.len() < 128,
+                    "too many selection requests"
+                );
+                let after = surface
+                    .session
+                    .as_ref()
+                    .map_or(surface.output_sequence, Session::barrier);
+                let request = Uuid::new_v4();
+                surface.send(&HostMessage::Selection {
+                    request,
+                    after,
+                    action,
+                })?;
+                self.pending_selections.insert(
+                    request,
+                    PendingRead {
+                        surface: id,
+                        after,
+                        reply,
+                        started: Instant::now(),
+                    },
+                );
                 return Ok(None);
             }
             Command::Paste {

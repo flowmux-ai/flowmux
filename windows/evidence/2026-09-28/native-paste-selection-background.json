@@ -1,0 +1,205 @@
+{
+  "started": "2026-09-28T04:52:08.3228802+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "inputUtf8Bytes": 42,
+      "name": "plain_korean_decomposed_emoji_and_mixed_newlines",
+      "receipt": {
+        "accepted_bytes": 41,
+        "bracketed": false,
+        "delivery": "queued",
+        "sequence": 3,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "5d7d6ae22bfef215ea65a892b5102ac2450f21e022f2663f8ba3ffcce64fb97a",
+        "count": 41,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 35,
+      "name": "bracketed_korean_multiline",
+      "receipt": {
+        "accepted_bytes": 46,
+        "bracketed": true,
+        "delivery": "queued",
+        "sequence": 4,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "b0d02166c36b5b1ba8748f5264f047d8eea085c25d7b9bd514448a25198cc421",
+        "count": 87,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 0,
+      "name": "empty_paste_has_no_brackets_or_input",
+      "receipt": {
+        "accepted_bytes": 0,
+        "bracketed": false,
+        "delivery": "queued",
+        "sequence": 4,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "b0d02166c36b5b1ba8748f5264f047d8eea085c25d7b9bd514448a25198cc421",
+        "count": 87,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 15,
+      "name": "control_sequences_are_preserved_not_claimed_sanitized",
+      "receipt": {
+        "accepted_bytes": 27,
+        "bracketed": true,
+        "delivery": "queued",
+        "sequence": 4,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "226852985601eaa3626dc3d19eb2c2780047a8baecc5a4c9a3e691b525c9ad57",
+        "count": 114,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 7,
+      "name": "disabling_bracketed_mode_takes_effect",
+      "receipt": {
+        "accepted_bytes": 7,
+        "bracketed": false,
+        "delivery": "queued",
+        "sequence": 5,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "741c47b5d06a540c72b3ad5023f785bdd59ccca9266093e6150d89754441627b",
+        "count": 121,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 131072,
+      "name": "128k_utf8_boundary_without_truncation",
+      "receipt": {
+        "accepted_bytes": 131084,
+        "bracketed": true,
+        "delivery": "queued",
+        "sequence": 6,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "7dbe4e3e62560221acf9ea8bd7e75aa00e9a2cddd0569a35370f6063d96fbde6",
+        "count": 131205,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "inputUtf8Bytes": 21,
+      "name": "inactive_surface_keeps_its_mode_and_target",
+      "receipt": {
+        "accepted_bytes": 33,
+        "bracketed": true,
+        "delivery": "queued",
+        "sequence": 6,
+        "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4"
+      },
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ecafa987d74573e46cfb38598710b1094be629d83d1ae1aa217082bfd49c9dfe",
+        "count": 131238,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "error": "paste exceeds 128 KiB of UTF-8 text",
+      "name": "oversize",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ecafa987d74573e46cfb38598710b1094be629d83d1ae1aa217082bfd49c9dfe",
+        "count": 131238,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "error": "paste text contains NUL",
+      "name": "nul",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ecafa987d74573e46cfb38598710b1094be629d83d1ae1aa217082bfd49c9dfe",
+        "count": 131238,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "error": "choose either pane or surface",
+      "name": "conflicting_targets",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ecafa987d74573e46cfb38598710b1094be629d83d1ae1aa217082bfd49c9dfe",
+        "count": 131238,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "error": "calling surface no longer exists",
+      "name": "closed_or_missing_target",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ecafa987d74573e46cfb38598710b1094be629d83d1ae1aa217082bfd49c9dfe",
+        "count": 131238,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "error": "terminal process has exited",
+      "name": "exited_surface_rejects_without_restarting",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "host": {
+    "pid": 34452,
+    "surface": "705aca64-c2c7-4ede-a622-a11bc63bf7d4",
+    "probePid": 38948
+  },
+  "startupInputBeforeReady": [
+    27,
+    91,
+    63,
+    49,
+    59,
+    50,
+    99,
+    27,
+    91,
+    79,
+    27,
+    91,
+    79
+  ],
+  "status": "passed_background_paste_subset",
+  "finished": "2026-09-28T04:52:15.2518161+09:00"
+}

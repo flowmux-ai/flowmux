@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The same controller serves the visible find bar and parser-barrier CLI requests.
 export class SearchUi {
-  constructor(terminal, createAddon, document) {
+  constructor(terminal, createAddon, document, selection) {
     this.terminal = terminal;
+    this.selection = selection;
     this.createAddon = createAddon;
     this.addon = createAddon();
     terminal.loadAddon(this.addon);
@@ -43,6 +44,7 @@ export class SearchUi {
     else this.query.focus();
   }
   clear() {
+    this.selection?.forget();
     this.addon.clearDecorations();
     this.terminal.clearSelection();
     this.status.textContent = '';
@@ -77,9 +79,11 @@ export class SearchUi {
         this.terminal.loadAddon(this.addon);
         this.dirty = false;
       }
+      this.selection?.forget();
       const found = this.addon[previous ? 'findPrevious' : 'findNext'](query, {
         incremental, caseSensitive: this.matchCase.checked, regex: this.regex.checked,
       });
+      this.selection?.capture();
       this.status.textContent = found ? 'Match found' : 'No matches';
       return this.result(found);
     } catch (error) {

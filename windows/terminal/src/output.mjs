@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Read barriers resolve only after xterm's parser callback, including hidden tabs.
 export class Output {
-  constructor(terminal, send, serialize, find, changed, outputSearch, paste) {
+  constructor(terminal, send, serialize, find, changed, outputSearch, paste, selection) {
     this.terminal = terminal;
     this.send = send;
     this.serialize = serialize;
@@ -9,6 +9,7 @@ export class Output {
     this.changed = changed;
     this.outputSearch = outputSearch;
     this.paste = paste;
+    this.selection = selection;
     this.received = 0;
     this.parsed = 0;
     this.pending = [];
@@ -28,7 +29,7 @@ export class Output {
     } else if (message.type === 'cancel_search') {
       this.outputSearch.cancel(message.search);
       this.pending = this.pending.filter(p => p.search !== message.search);
-    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit', 'paste'].includes(message.type)) {
+    } else if (['read_screen', 'snapshot', 'find', 'search_buffer', 'open_search_hit', 'paste', 'selection'].includes(message.type)) {
       this.pending.push(message);
       this.flush();
     }
@@ -45,7 +46,11 @@ export class Output {
         }
         this.send({ type: 'screen', request: message.request, sequence: this.parsed, text: lines.join('\n') });
       } else if (message.type === 'paste') {
-        this.send({ type: 'pasted', request: message.request, sequence: this.parsed, outcome: this.paste.run(message.text) });
+        const outcome = this.paste.run(message.text);
+        if (outcome.status === 'ok' && message.text) this.selection?.forget();
+        this.send({ type: 'pasted', request: message.request, sequence: this.parsed, outcome });
+      } else if (message.type === 'selection') {
+        this.send({ type: 'selected', request: message.request, sequence: this.parsed, result: this.selection.run(message.action) });
       } else if (message.type === 'find') {
         this.send({ type: 'found', request: message.request, sequence: this.parsed, result: this.find(message) });
       } else if (message.type === 'search_buffer') {

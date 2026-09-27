@@ -64,7 +64,8 @@ function cellPosition(buffer, parts, offset, end) {
 }
 
 export class OutputSearch {
-  constructor(terminal, send, pause = yieldTask) {
+  constructor(terminal, send, pause = yieldTask, selection) {
+    this.selection = selection;
     this.terminal = terminal; this.send = send; this.pause = pause;
     this.revision = 0; this.current = null; this.retained = [];
     terminal.onResize(() => this.changed());
@@ -139,7 +140,9 @@ export class OutputSearch {
           error:null, selection:'', line:start.row, column:start.col, selected:false });
         return;
       }
+      this.selection?.forget();
       this.terminal.select(start.col, start.row, (end.row-start.row)*hit.cols + end.col-start.col);
+      this.selection?.capture();
       this.terminal.scrollToLine(Math.max(0, start.row-Math.floor(this.terminal.rows/2)));
       const selection=this.terminal.getSelection();
       if (selection.length>16384) throw new Error('Selected cell text exceeds response limit');

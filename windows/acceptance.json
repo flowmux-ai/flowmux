@@ -150,9 +150,11 @@
       "feature": "선택·더블클릭·복사·붙여넣기",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-paste-background.json"
+        "evidence/2026-09-28/native-paste-background.json",
+        "evidence/2026-09-28/native-selection-background.json",
+        "evidence/2026-09-28/frontend-tests-selection.txt"
       ],
-      "notes": "Bounded terminal paste path and explicit-text CLI use xterm once, preserve Unicode, reject composition/restore/disabled input, and avoid Shift+Enter rewriting. Twelve hidden WebView2/ConPTY paste checks pass; no desktop clipboard was accessed. Actual clipboard shortcuts/menu, mouse selection/double-click, redraw copy cache and full IME acceptance remain pending."
+      "notes": "Exact 128 KiB UTF-8 selection snapshots survive TUI redraw/erase, hidden or moved tabs and process exit; explicit clear/search/input/buffer transitions discard them. CLI selection read/all/range/clear waits for parsing without clipboard access or target activation. Clipboard shortcuts and a terminal context menu are implemented with focus/visibility/composition cancellation and no retry. Ten hidden WebView2/ConPTY selection checks and mocked frontend clipboard/menu tests pass. Real OS clipboard, physical drag/double-click/column selection, shortcuts/menu, IME/DPI/accessibility, large-selection memory and all race acceptance remain pending."
     },
     {
       "id": "T09",

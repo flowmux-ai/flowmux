@@ -6,6 +6,12 @@
 <link rel="stylesheet" href="/xterm.css"><link rel="stylesheet" href="/terminal.css">
 <title>flowmux terminal</title></head><body>
 <div id="terminal" aria-label="Terminal"></div>
+<div id="terminal-menu" role="menu" aria-label="Terminal actions" hidden>
+<button type="button" role="menuitem" data-action="copy">Copy <span>Ctrl+Shift+C</span></button>
+<button type="button" role="menuitem" data-action="paste">Paste <span>Ctrl+Shift+V</span></button>
+<button type="button" role="menuitem" data-action="all">Select all</button>
+<button type="button" role="menuitem" data-action="clear">Clear selection</button>
+</div>
 <form id="search" hidden aria-label="Find in terminal">
 <div class="search-row"><label>Find <input id="query" autocomplete="off" spellcheck="false" maxlength="1024" aria-label="Search terminal" aria-describedby="search-status"></label>
 <label title="Match case"><input id="match-case" type="checkbox" aria-label="Match case">Aa</label>

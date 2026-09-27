@@ -43,3 +43,16 @@ test('paste waits for pending mode output to finish parsing and emits only one o
     outcome: { status: 'ok', data: 'xterm-result', bracketed: true } });
   assert.equal(replies.filter(r => r.type === 'pasted').length, 1);
 });
+
+test('selection actions wait for parsed output and return the exact completed sequence', () => {
+  const replies = [], callbacks = [], actions = [];
+  const terminal = { write: (_, done) => callbacks.push(done) };
+  const selection = { run: action => { actions.push(action); return { text: '한글' }; } };
+  const output = new Output(terminal, result => replies.push(result), null, null, null, null, null, selection);
+  output.receive({ type: 'selection', request: 'select', after: 1, action: { kind: 'all' } });
+  output.receive({ type: 'output', sequence: 1, data: 'QQ==' });
+  assert.deepEqual(actions, []);
+  callbacks[0]();
+  assert.deepEqual(actions, [{ kind: 'all' }]);
+  assert.deepEqual(replies.at(-1), { type: 'selected', request: 'select', sequence: 1, result: { text: '한글' } });
+});
