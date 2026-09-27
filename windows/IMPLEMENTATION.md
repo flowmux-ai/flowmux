@@ -346,6 +346,18 @@ Physical pointer/keyboard/IME/accessibility, high-DPI visual fidelity, sustained
 multi-pane budgets and OSC palette mutation remain open. T14/T15 are partial;
 see [minimap evidence](evidence/2026-09-28/minimap.md).
 
+Windows notifications now reuse the existing pure Rust streaming OSC parser and
+bounded notification store by read-only module inclusion. A native list and
+workspace/tab captions expose unread notices; CLI operations inspect, acknowledge,
+remove or reopen their stable source after moves and process exit. Explicit
+notifications and simple OSC 9/99/777 share deduplication and priority rules.
+Output counters/timestamps provide observations without declaring agent identity
+or completion. Hidden native tests cover actual ConPTY Unicode delivery, native
+control text, routing, bounded retention and independent window stores. Desktop
+toasts, taskbar integration, real foreground/IME/menu acceptance, advanced OSC
+protocols and agent hooks remain open. T19/U14/A07 are partial; see
+[notification evidence](evidence/2026-09-28/notifications.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

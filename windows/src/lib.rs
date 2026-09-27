@@ -6,6 +6,7 @@ pub mod minimap;
 pub mod model;
 #[cfg(windows)]
 pub mod native;
+pub mod notifications;
 pub mod output_search;
 pub mod paste;
 pub mod protocol;

@@ -1,0 +1,37 @@
+[
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+    "bytes": 8808448,
+    "sha256": "f211202d97d24c5360ec1253bb284106217fefb8a81d0bbfe44c4360da2383c5"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+    "bytes": 2863104,
+    "sha256": "f14aeda37d0d767cb5e31894c674f2c0b5f14212ffe9aaf5d5c621037f9636ca"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.com",
+    "bytes": 2972160,
+    "sha256": "830603b8f9d14a4d1a75abe68128808a0c35a6d4d74156cad2a92091f65ecb71"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmux.exe",
+    "bytes": 4241408,
+    "sha256": "2e25ef6ecb76860018f6bb2f640fc1f5a17399e46278b390cbd56d5b4f5c770b"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+    "bytes": 1401344,
+    "sha256": "ae5f7310cb738305a8bac285681e8db690cdefc94073431b6d343024797f7de3"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmux.com",
+    "bytes": 1460736,
+    "sha256": "5626a9ec7a6f1b69fc02a40bf3415aac14c4141649e8ffb2365c8a8e137b4af1"
+  },
+  {
+    "path": "windows/dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+    "bytes": 2032521,
+    "sha256": "0e6d742c31b7a72d21185a82e519a498e26cbd8f1cc581883a5a83e4a3443abf"
+  }
+]

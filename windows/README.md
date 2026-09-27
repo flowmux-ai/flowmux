@@ -138,6 +138,51 @@ to the same text. `result.error` reports an invalid range or oversized selection
 transport/target errors use the normal CLI error response. See
 [selection evidence](evidence/2026-09-28/selection.md).
 
+The side panel's Notifications button opens a native list with unread counts on
+workspace and tab captions. Entries can reopen their original terminal after a
+move, including its retained screen after process exit. Opening a closed source
+returns an error; it does not select a replacement tab or mark the entry read.
+The list is per window, memory-only, oldest first, and retains at most 50 entries.
+
+```powershell
+flowmux notify --surface surface:<id> --title "작업 완료" --level attention "확인이 필요합니다"
+flowmux notify-complete --agent "My agent" --message "task complete"
+flowmux notifications list --unread
+flowmux notifications show
+flowmux notifications open <notification-id>
+flowmux notifications jump-to-unread
+flowmux notifications mark-read <notification-id>
+flowmux notifications delete <notification-id>
+flowmux notifications clear
+```
+
+`notify` targets the explicit surface/pane, the invoking terminal, or the active
+terminal, in that order. `--global` creates a source-free entry. Title/body limits
+are 1/8 KiB of UTF-8; NUL and completely empty notices are rejected. Supported
+input levels are `info`, `attention`, `error`, `completed`; list output uses the
+shared domain names `info`, `needs_input`, `error`, `turn_completed`. Near-duplicate
+notices from the same pane and surface are suppressed for eight seconds unless
+attention priority increases, even if their bodies differ. Global entries are
+not deduplicated. Moving between panes changes the dedup key; source navigation
+still uses the stable surface ID. Focused info/completed notices are suppressed;
+attention/error notices can still be retained. List is read-only; show marks
+existing entries read. Opening a source acknowledges its retained notices.
+
+Received ConPTY output is also inspected for OSC 9/99/777, using the existing
+Rust parser. Numeric OSC 9 cwd/progress subcommands are excluded. The streaming
+extractor bounds unfinished payloads and discards invalid UTF-8; the parser
+sanitizes controls and outer whitespace without Unicode normalization. At most
+16 notices are considered per output chunk; later higher-priority notices can
+replace earlier lower-priority entries in that bounded batch. Restored history is not replayed
+into the notification store. This supports the existing simple notification
+formats, not all Kitty OSC 99 multipart features. `tree` exposes received output
+byte counts and the last observed timestamp; these do not determine agent state.
+
+Windows desktop toast delivery, toast activation and OS taskbar badges are not
+implemented yet. CLI responses report `desktop_delivery: "not_implemented"`.
+Actual foreground/IME/menu behavior remains separate from the hidden native
+verification. See [notification evidence](evidence/2026-09-28/notifications.md).
+
 The installer includes three entry points. **flowmux.exe** is the GUI target
 for desktop shortcuts. **flowmux.com** is a console executable: with a command
 it uses the same IPC client as **flowmuxctl.exe**, and without a command it

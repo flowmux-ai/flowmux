@@ -1,0 +1,144 @@
+{
+  "started": "2026-09-28T05:55:26.4599947+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "activity": 242,
+      "name": "live_conpty_osc_9_99_777_unicode_and_metadata_filter",
+      "passed": true
+    },
+    {
+      "name": "explicit_unicode_dedup_escalation_and_read_only_list",
+      "passed": true
+    },
+    {
+      "name": "native_hidden_panel_unicode_detail_and_live_rows",
+      "panel": {
+        "button_text": "Notifications (1)",
+        "desktop_delivery": "not_implemented",
+        "duplicate_window_ms": 8000,
+        "entries": [
+          {
+            "body": "완료 한글 é\n두 번째 줄",
+            "closed": false,
+            "created_at": "2026-09-27T20:55:27.829038Z",
+            "id": "17e25925-7938-4f01-912b-501cdb1010f4",
+            "level": "info",
+            "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+            "read": true,
+            "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+            "title": "알림_한_😀",
+            "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+            "workspace_name": "jundu"
+          },
+          {
+            "body": "needs input",
+            "closed": false,
+            "created_at": "2026-09-27T20:55:27.885368200Z",
+            "id": "537d26bd-3198-417d-8bbd-6ca1f45c7ca2",
+            "level": "needs_input",
+            "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+            "read": true,
+            "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+            "title": "Terminal",
+            "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+            "workspace_name": "jundu"
+          },
+          {
+            "body": "failed",
+            "closed": false,
+            "created_at": "2026-09-27T20:55:27.926934400Z",
+            "id": "ca4b4b23-fcfe-4869-b976-8e8c08152ec3",
+            "level": "error",
+            "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+            "read": true,
+            "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+            "title": "Terminal",
+            "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+            "workspace_name": "jundu"
+          },
+          {
+            "body": "global",
+            "closed": false,
+            "created_at": "2026-09-27T20:55:28.177946Z",
+            "id": "b8219171-1892-42bd-9469-33b80f2f55d5",
+            "level": "info",
+            "pane": null,
+            "read": false,
+            "surface": null,
+            "title": "Terminal",
+            "workspace": null,
+            "workspace_name": null
+          }
+        ],
+        "panel_handle": 34146910,
+        "panel_rows": 4,
+        "panel_status": "4 retained · 1 unread · Desktop delivery not yet available",
+        "retained_limit": 50,
+        "unread_count": 1
+      },
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "host": {
+    "pid": 37120,
+    "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+    "probePid": 7240
+  },
+  "osc": {
+    "button_text": "Notifications (3)",
+    "desktop_delivery": "not_implemented",
+    "duplicate_window_ms": 8000,
+    "entries": [
+      {
+        "body": "OSC9_한글_한_😀",
+        "closed": false,
+        "created_at": "2026-09-27T20:55:27.645441400Z",
+        "id": "7e2d8e4f-bb22-47bf-b08e-6541707a25a7",
+        "level": "info",
+        "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+        "read": false,
+        "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+        "title": "Terminal",
+        "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+        "workspace_name": "jundu"
+      },
+      {
+        "body": "needs approval_한글",
+        "closed": false,
+        "created_at": "2026-09-27T20:55:27.645708500Z",
+        "id": "a82c218e-bc03-4a0b-98ae-66c779ad59bb",
+        "level": "needs_input",
+        "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+        "read": false,
+        "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+        "title": "Terminal",
+        "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+        "workspace_name": "jundu"
+      },
+      {
+        "body": "error_한_😀",
+        "closed": false,
+        "created_at": "2026-09-27T20:55:27.645998100Z",
+        "id": "df36dfc5-433e-4d22-bc38-316fc88c02a8",
+        "level": "error",
+        "pane": "e77ded94-799b-48a6-bc36-d59b383b3887",
+        "read": false,
+        "surface": "18d3fc68-c290-4e58-bff1-7635607e72ea",
+        "title": "Build_한글",
+        "workspace": "d90ce6c5-05e6-4610-8032-ae9ebd05a57f",
+        "workspace_name": "jundu"
+      }
+    ],
+    "panel_handle": null,
+    "panel_rows": null,
+    "panel_status": null,
+    "retained_limit": 50,
+    "unread_count": 3
+  },
+  "status": "failed",
+  "error": "CLI exit 1: {\"error\":\"working directory does not exist\"}\n",
+  "finished": "2026-09-28T05:55:28.4362628+09:00"
+}

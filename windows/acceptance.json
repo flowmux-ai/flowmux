@@ -253,8 +253,11 @@
     {
       "id": "T19",
       "feature": "OSC 9/99/777 알림·출력 활동",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-notifications-background.json"
+      ],
+      "notes": "The existing pure Rust OSC extractor/parser/store are reused read-only. Hidden native ConPTY delivers ST-terminated OSC 9/99/777 with exact Korean, NFD jamo and emoji; numeric OSC 9 cwd/progress metadata is excluded. Output byte/time observations are exposed without agent classification. BEL transport, other ConPTY/OS/shell combinations, Kitty multipart features, notify-stream/pty-tee and hook integration remain pending."
     },
     {
       "id": "T20",
@@ -404,8 +407,11 @@
     {
       "id": "U14",
       "feature": "알림 bell·활동 표시·usage bar·panel 전환",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-notifications-background.json"
+      ],
+      "notes": "Native Notifications button/list, unread workspace/tab captions, CLI list/read/delete/clear/jump and stable source routing are implemented. Hidden controls and source lifecycle are verified. Output counters are observations only; activity/usage panels, panel switching and real input/accessibility remain pending."
     },
     {
       "id": "B01",
@@ -632,8 +638,11 @@
     {
       "id": "A07",
       "feature": "bell list·desktop toast·click 복귀·배지",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-notifications-background.json"
+      ],
+      "notes": "An in-memory per-window 50-entry log reuses the existing eight-second source dedup and severity escalation. Hidden native tests verify Unicode detail/captions, unread state, current workspace/pane after moves, preserved exited screens and atomic closed-source rejection. Desktop toast delivery/activation, OS taskbar badges, preferences, real foreground suppression/focus and native mouse/keyboard interaction remain pending."
     },
     {
       "id": "A08",

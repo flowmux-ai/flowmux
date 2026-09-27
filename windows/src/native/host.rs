@@ -43,6 +43,8 @@ use windows_sys::Win32::{
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 #[path = "appearance.rs"]
 mod appearance;
+#[path = "notifications.rs"]
+mod notifications;
 #[path = "panes.rs"]
 mod panes;
 #[path = "paste.rs"]
@@ -74,6 +76,8 @@ enum Event {
     ContextMenu(Action, i32, i32),
     Metadata(workspaces::EditAction),
     Settings(settings_store::Update),
+    NotificationUi(notifications::UiAction),
+    Activated,
 }
 #[derive(Clone)]
 struct EventSender {
@@ -154,6 +158,12 @@ unsafe extern "system" fn window_proc(
             post(Event::Layout);
             0
         }
+        WM_ACTIVATE => {
+            if (wparam as u16) != WA_INACTIVE as u16 {
+                post(Event::Activated);
+            }
+            DefWindowProcW(window, message, wparam, lparam)
+        }
         WM_DPICHANGED => {
             let rect = &*(lparam as *const RECT);
             SetWindowPos(
@@ -221,6 +231,9 @@ struct Surface {
     output_ended: bool,
     output_sequence: u64,
     acknowledged_sequence: u64,
+    notification_sniffer: crate::notifications::Sniffer,
+    observed_output_bytes: u64,
+    last_output_ms: Option<i64>,
 }
 impl Surface {
     fn send(&self, message: &HostMessage) -> anyhow::Result<()> {
@@ -233,6 +246,7 @@ impl Surface {
 }
 #[derive(Clone)]
 enum Action {
+    Notifications,
     Settings,
     NewWorkspace,
     Workspace(WorkspaceId),
@@ -299,6 +313,7 @@ struct App {
     pending_selections: HashMap<Uuid, PendingRead>,
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
+    notifications: notifications::Controller,
     closing: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
@@ -475,6 +490,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_selections: HashMap::new(),
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
+            notifications: notifications::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
@@ -511,6 +527,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
             if !app.search.handle_message(&message)
+                && !app.notifications.handle_message(&message)
                 && !app
                     .metadata
                     .as_ref()
@@ -582,6 +599,7 @@ impl App {
             self.button(name, action)?;
         }
         self.button("Workspace…", Action::WorkspaceMenu)?;
+        self.button(&self.notification_button_text(), Action::Notifications)?;
         self.button(
             if self.settings_error.is_some() {
                 "Settings (!)…"
@@ -616,6 +634,7 @@ impl App {
                 self.button(&title, Action::Tab(pane, tab.id))?;
             }
         }
+        self.refresh_notifications();
         self.layout()
     }
     fn button(&mut self, name: &str, action: Action) -> anyhow::Result<()> {
@@ -761,6 +780,9 @@ impl App {
                 output_ended: false,
                 output_sequence: 0,
                 acknowledged_sequence: 0,
+                notification_sniffer: Default::default(),
+                observed_output_bytes: 0,
+                last_output_ms: None,
             },
         );
         Ok(())
@@ -820,12 +842,13 @@ impl App {
             let (x, y, width, height) = match control.action {
                 Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
                 Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
+                Action::Notifications => (px(5), bar + px(88), (sidebar - px(10)).max(1), px(32)),
                 Action::Workspace(id) | Action::WorkspaceColor(id) => {
                     let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
                     let swatch = matches!(control.action, Action::WorkspaceColor(_));
                     (
                         if swatch { px(5) } else { px(23) },
-                        bar + px(88) + i as i32 * px(36),
+                        bar + px(128) + i as i32 * px(36),
                         if swatch {
                             px(16)
                         } else {
@@ -880,6 +903,7 @@ impl App {
         if self.background_test {
             return Ok(());
         }
+        self.ack_focused_notifications(self.active());
         if let Some(surface) = self.surfaces.get(&self.active()) {
             if surface.ready {
                 let mut info = GUITHREADINFO {
@@ -904,6 +928,8 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
+            Event::NotificationUi(action) => self.notification_ui(action)?,
+            Event::Activated => self.ack_focused_notifications(self.active()),
             Event::Layout => {
                 self.cancel_drag();
                 self.layout()?;
@@ -989,6 +1015,7 @@ impl App {
             Event::Button(action) => self.action(action)?,
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
             Event::Session(id, message) => {
+                let mut notices = Vec::new();
                 if let Some(surface) = self.surfaces.get_mut(&id) {
                     match message {
                         SessionEvent::Output { sequence, bytes } => {
@@ -996,6 +1023,11 @@ impl App {
                                 sequence == surface.output_sequence + 1,
                                 "out-of-order PTY output"
                             );
+                            notices = surface.notification_sniffer.feed(&bytes);
+                            surface.observed_output_bytes = surface
+                                .observed_output_bytes
+                                .saturating_add(bytes.len() as u64);
+                            surface.last_output_ms = Some(chrono::Utc::now().timestamp_millis());
                             surface.send(&HostMessage::Output {
                                 sequence,
                                 data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -1016,6 +1048,9 @@ impl App {
                         // Retain its grid and accept parser ACKs after releasing native resources.
                         surface.session.take();
                     }
+                }
+                for notice in notices {
+                    self.add_notification(Some(id), notice.title, notice.body, notice.level)?;
                 }
             }
             Event::Settings(update) => self.settings_result(update)?,
@@ -1124,6 +1159,7 @@ impl App {
                             .is_some_and(|surface| surface.visible)
                     {
                         self.workspace_mut().focused = pane;
+                        self.ack_focused_notifications(id);
                     }
                 }
             }
@@ -1569,11 +1605,21 @@ impl App {
         if let Some((workspace, pane, _)) = self.locate(id) {
             let root = &self.workspaces[workspace].root;
             if let Some(title) = root.surface_title(pane, id) {
-                let label = if root.active_surface_id(pane) == Some(id) {
+                let mut label = if root.active_surface_id(pane) == Some(id) {
                     format!("● {title}")
                 } else {
                     title.to_owned()
                 };
+                let unread = self
+                    .notifications
+                    .store
+                    .entries()
+                    .iter()
+                    .filter(|entry| !entry.read && entry.surface == Some(id))
+                    .count();
+                if unread > 0 {
+                    label = format!("[{unread}] {label}");
+                }
                 for control in &self.controls {
                     if matches!(control.action, Action::Tab(_, surface) if surface == id) {
                         unsafe {
@@ -1783,6 +1829,7 @@ impl App {
             "window is saving before close"
         );
         match action {
+            Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Settings => return self.settings_menu(),
             Action::NewWorkspace => {
                 return self
@@ -1916,7 +1963,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
-                "commands":["identify","capabilities","tree","read-screen","capture-pane","minimap","send-keys","send-key","split","new-tab",
+                "commands":["identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -1926,6 +1973,7 @@ impl App {
                     "pid":surface.process_pid,"running":surface.session.is_some() && surface.exit_code.is_none(),
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
+                    "observed_output_bytes":surface.observed_output_bytes,"last_output_ms":surface.last_output_ms,
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
                     "visible":surface.visible,
                     "settings":surface.applied_settings,
@@ -2015,6 +2063,56 @@ impl App {
                 );
                 return Ok(None);
             }
+            Command::Notify {
+                title,
+                level,
+                body,
+                pane,
+                surface,
+                global,
+            } => {
+                anyhow::ensure!(
+                    !(global && (pane.is_some() || surface.is_some()))
+                        && !(pane.is_some() && surface.is_some()),
+                    "choose one notification target"
+                );
+                let source = if global {
+                    None
+                } else {
+                    Some(self.target(pane, surface.map(SurfaceId).or(caller))?)
+                };
+                return Ok(Some(self.add_notification(
+                    source,
+                    title,
+                    body,
+                    crate::notifications::level(&level)?,
+                )?));
+            }
+            Command::NotifyComplete {
+                agent,
+                message,
+                pane,
+                surface,
+            } => {
+                anyhow::ensure!(
+                    !agent.trim().is_empty()
+                        && agent.len() <= 256
+                        && !agent.chars().any(char::is_control),
+                    "agent name must be one nonempty line of at most 256 UTF-8 bytes"
+                );
+                anyhow::ensure!(
+                    pane.is_none() || surface.is_none(),
+                    "choose either pane or surface"
+                );
+                let source = self.target(pane, surface.map(SurfaceId).or(caller))?;
+                return Ok(Some(self.add_notification(
+                    Some(source),
+                    format!("{agent} is ready"),
+                    message,
+                    flowmux_core::NotificationLevel::TurnCompleted,
+                )?));
+            }
+            Command::Notifications { op } => return self.notification_command(op).map(Some),
             Command::Find {
                 query,
                 surface,

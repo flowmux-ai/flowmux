@@ -168,6 +168,37 @@ pub enum Command {
         op: SettingsOp,
     },
     Tree,
+    /// Add an in-app notification. Desktop delivery is not yet implemented.
+    Notify {
+        #[arg(long, default_value = "Terminal")]
+        title: String,
+        #[arg(long, default_value="info", value_parser=["info","attention","error","completed"])]
+        level: String,
+        body: String,
+        #[arg(long, value_parser=parse_id, conflicts_with="surface")]
+        pane: Option<Uuid>,
+        #[arg(long, value_parser=parse_id)]
+        surface: Option<Uuid>,
+        /// Create an entry without a terminal source.
+        #[arg(long, conflicts_with_all=["pane","surface"])]
+        #[serde(default)]
+        global: bool,
+    },
+    /// Report an agent turn completion without inferring agent identity/state.
+    NotifyComplete {
+        #[arg(long)]
+        agent: String,
+        #[arg(long, default_value = "task complete")]
+        message: String,
+        #[arg(long, value_parser=parse_id, conflicts_with="surface")]
+        pane: Option<Uuid>,
+        #[arg(long, value_parser=parse_id)]
+        surface: Option<Uuid>,
+    },
+    Notifications {
+        #[command(subcommand)]
+        op: crate::notifications::Op,
+    },
     /// Inspect or navigate a terminal minimap without changing keyboard focus.
     Minimap {
         #[arg(long, value_parser = parse_id)]
@@ -453,6 +484,53 @@ pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn notification_cli_and_wire_keep_source_and_operation_unambiguous() {
+        let id = Uuid::new_v4().to_string();
+        let cli = Cli::try_parse_from([
+            "flowmuxctl",
+            "notify",
+            "--surface",
+            &id,
+            "--title",
+            "한글",
+            "--level",
+            "attention",
+            "한 😀",
+        ])
+        .unwrap();
+        let request = Request {
+            command: cli.command,
+            caller_surface: None,
+            caller_cwd: None,
+        };
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["title"], "한글");
+        assert_eq!(wire["body"], "한 😀");
+        assert_eq!(wire["surface"], id);
+        let decoded: Request = serde_json::from_value(wire).unwrap();
+        assert!(matches!(
+            decoded.command,
+            Command::Notify { global: false, .. }
+        ));
+        assert!(
+            Cli::try_parse_from(["flowmuxctl", "notify", "--global", "--surface", &id, "x"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["flowmuxctl", "notify", "--level", "urgent", "x"]).is_err());
+        let cli = Cli::try_parse_from(["flowmuxctl", "notifications", "list", "--unread"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Notifications {
+                op: crate::notifications::Op::List { unread: true }
+            }
+        ));
+        assert!(serde_json::from_str::<Request>(
+            r#"{"method":"notifications","op":{"kind":"clear","id":"unexpected"}}"#
+        )
+        .is_err());
+    }
+
     #[test]
     fn capture_alias_and_recent_reads_preserve_targeting_and_legacy_wire_requests() {
         let id = Uuid::new_v4().to_string();
