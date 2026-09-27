@@ -99,8 +99,11 @@
     {
       "id": "T01",
       "feature": "기본 셸·tab별 셸·작업 디렉터리",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-shells-background.json"
+      ],
+      "notes": "Windows-only built-in Windows PowerShell/CMD/PowerShell 7 discovery, default and per-tab/workspace executable/argv, split inheritance and persisted per-surface shells implemented. Hidden hosts verify real PowerShell/CMD, exact Unicode cwd/argv, relative CLI cwd, mixed-shell restart, old state and explicit failed-start recovery. PATH/PATHEXT executable ordering has native file tests. Actual PS7 (unavailable locally), other interactive shells, command-language parsing, aliases, UNC/long paths and physical menus/IME remain pending."
     },
     {
       "id": "T02",
@@ -217,9 +220,10 @@
       "feature": "cwd/제목·새 tab 위치 상속",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-cwd-background.json"
+        "evidence/2026-09-27/native-cwd-background.json",
+        "evidence/2026-09-28/native-shells-background.json"
       ],
-      "notes": "Hidden Windows hosts verify current local PowerShell directory tracking, exact Korean/NFD/punctuation paths, new-tab/split inheritance, same-line child CLI context, moved/hidden surface isolation, restart cwd and locked native tab labels. Prompt status, dynamic variables, PSReadLine and console encoding retained. UNC/device/remote paths, other shells, long-path startup, arbitrary prompt frameworks and interactive IME remain open."
+      "notes": "PowerShell prompt integration and CMD child-only PROMPT reports preserve local Unicode cwd, tab/split inheritance and persisted cwd. Explicit CLI/launcher relative cwd is resolved at invocation; raw IPC relative cwd uses its source terminal. Hidden native probes verify Korean/NFD/emoji/ampersand paths. CMD uses /D; raw custom executable selections do not add prompt integration. Other shells, AutoRun/prompt frameworks, UNC/device/remote paths, long paths and interactive IME remain open."
     },
     {
       "id": "T19",
@@ -251,8 +255,11 @@
     {
       "id": "T23",
       "feature": "pane 닫기·child exit·GPU/WebView 장애",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-shells-background.json"
+      ],
+      "notes": "Hidden hosts and native tests verify natural exit/final output, process-tree ownership, 100 tab cycles, invalid executable and missing restored executable, saveable failed terminals and explicit same-surface CMD retry. Native startup suppresses system error dialogs and restores thread error mode; failed unwinding closes undrained output before ConPTY. Physical recovery button, thread-start fault injection, hung child startup, WebView/GPU failure and broader lifecycle acceptance remain pending."
     },
     {
       "id": "T24",
@@ -355,9 +362,10 @@
       "evidence": [
         "evidence/2026-09-27/native-state-background.json",
         "evidence/2026-09-27/native-cwd-background.json",
-        "evidence/2026-09-27/native-state-cwd-background.json"
+        "evidence/2026-09-27/native-state-cwd-background.json",
+        "evidence/2026-09-28/native-shells-background.json"
       ],
-      "notes": "Hidden Windows hosts preserve workspace/pane/surface identity, layout, focus, titles and the latest reported local PowerShell cwd. Clean close, periodic checkpoint, independent window leases and forced termination/recovery verified. Geometry/settings, live processes and agent resumption remain pending."
+      "notes": "Hidden Windows hosts preserve workspace/pane/surface identity, layout, focus, titles, local cwd, styled normal history and each terminal executable/argv in fresh processes. Default settings reload independently. Old state retains Windows PowerShell despite a changed default; missing executables leave a recoverable terminal. Window geometry, live-process recovery, agent resumption, wider style/Unicode fidelity and interactive IME remain pending."
     },
     {
       "id": "U13",
@@ -749,9 +757,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-27/native-state-background.json",
-        "evidence/2026-09-28/native-settings-background.json"
+        "evidence/2026-09-28/native-settings-background.json",
+        "evidence/2026-09-28/native-shells-background.json"
       ],
-      "notes": "Versioned Windows state and shared terminal config use exclusive OS leases/locks and atomic replacement. Config updates merge fields under lock, reject stale expected values, preserve failed writes and invalid/future files, poll external edits and support explicit reset. Hidden tests verify corruption, denied replace, multiwindow propagation and restart. Theme import, full configuration parity and remaining data/log/cache features are pending."
+      "notes": "Versioned Windows state and shared terminal/default-shell config use exclusive OS leases/locks and atomic replacement. Config merges fields, rejects stale edits, preserves failed/invalid writes and polls external edits. Outgoing JSON also enforces 64KiB when Unicode argv expands UTF-8 size. Shell/argv persist per surface. Theme import, full configuration parity and remaining data/log/cache features are pending."
     },
     {
       "id": "O07",

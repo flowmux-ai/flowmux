@@ -1,0 +1,532 @@
+{
+  "pid": 15264,
+  "started": "2026-09-28T02:56:40.6426555+09:00",
+  "checks": [
+    {
+      "pid": 18704,
+      "name": "native_conpty_start",
+      "passed": true
+    },
+    {
+      "name": "korean_utf8_roundtrip_via_cli_not_ime",
+      "sequence": 82,
+      "passed": true
+    },
+    {
+      "name": "four_splits_keep_original_process",
+      "passed": true
+    },
+    {
+      "name": "tab_close_terminates_shell",
+      "passed": true
+    },
+    {
+      "name": "repeated_tab_create_close",
+      "cycles": 100,
+      "passed": true
+    },
+    {
+      "totalHandleDelta": 1,
+      "name": "handles_stable_after_warmup",
+      "processHandleDelta": 0,
+      "passed": true
+    }
+  ],
+  "ime": "not tested",
+  "mode": "background",
+  "pipe": "\\\\.\\pipe\\flowmux-15264-af3fa4db-f572-434f-8338-a4f1a5975cf8",
+  "cycleSamples": [
+    {
+      "handleTypes": {
+        "Event": 94,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 31,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 68,
+        "Directory": 2,
+        "File": 36,
+        "ALPC Port": 7,
+        "Mutant": 1,
+        "Semaphore": 4,
+        "Key": 15,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 11,
+        "Thread": 29,
+        "Process": 13,
+        "ProcessImage:unknown": 1,
+        "UnknownProcessAccess:1FFFFF:pid=20580": 1,
+        "Timer": 1,
+        "ProcessImage:msedgewebview2.exe": 4,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 6152192,
+      "cycle": 25,
+      "hostHandles": 341
+    },
+    {
+      "handleTypes": {
+        "Event": 95,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 31,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 68,
+        "Directory": 2,
+        "File": 36,
+        "ALPC Port": 6,
+        "Mutant": 1,
+        "Semaphore": 4,
+        "Key": 15,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 11,
+        "Thread": 30,
+        "Process": 13,
+        "ProcessImage:unknown": 1,
+        "UnknownProcessAccess:1FFFFF:pid=20580": 1,
+        "Timer": 1,
+        "ProcessImage:msedgewebview2.exe": 4,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 5595136,
+      "cycle": 50,
+      "hostHandles": 342
+    },
+    {
+      "handleTypes": {
+        "Event": 95,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 31,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 68,
+        "Directory": 2,
+        "File": 36,
+        "ALPC Port": 6,
+        "Mutant": 1,
+        "Semaphore": 4,
+        "Key": 15,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 11,
+        "Thread": 30,
+        "Process": 13,
+        "ProcessImage:unknown": 1,
+        "UnknownProcessAccess:1FFFFF:pid=20580": 1,
+        "Timer": 1,
+        "ProcessImage:msedgewebview2.exe": 4,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 6311936,
+      "cycle": 75,
+      "hostHandles": 342
+    },
+    {
+      "handleTypes": {
+        "Event": 95,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 31,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 68,
+        "Directory": 2,
+        "File": 36,
+        "ALPC Port": 6,
+        "Mutant": 1,
+        "Semaphore": 4,
+        "Key": 15,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 11,
+        "Thread": 30,
+        "Process": 13,
+        "ProcessImage:unknown": 1,
+        "UnknownProcessAccess:1FFFFF:pid=20580": 1,
+        "Timer": 1,
+        "ProcessImage:msedgewebview2.exe": 4,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 6004736,
+      "cycle": 100,
+      "hostHandles": 342
+    }
+  ],
+  "tree": {
+    "active_workspace": "52e5e920-eaa3-480b-8c43-774004c1d8ed",
+    "background_testing": true,
+    "layout": {
+      "dividers": [
+        {
+          "bounds": {
+            "height": 719,
+            "width": 5,
+            "x": 682,
+            "y": 38
+          },
+          "direction": "vertical",
+          "parent": {
+            "height": 719,
+            "width": 991,
+            "x": 189,
+            "y": 38
+          },
+          "split": "dbc63b45-04af-4887-850a-e5f892b501cd"
+        },
+        {
+          "bounds": {
+            "height": 5,
+            "width": 493,
+            "x": 687,
+            "y": 395
+          },
+          "direction": "horizontal",
+          "parent": {
+            "height": 719,
+            "width": 493,
+            "x": 687,
+            "y": 38
+          },
+          "split": "6a18562f-a905-456c-93a0-697c2242cea1"
+        },
+        {
+          "bounds": {
+            "height": 357,
+            "width": 5,
+            "x": 931,
+            "y": 400
+          },
+          "direction": "vertical",
+          "parent": {
+            "height": 357,
+            "width": 493,
+            "x": 687,
+            "y": 400
+          },
+          "split": "620d1fe2-be6b-49ef-a0a0-382fa7645bec"
+        }
+      ],
+      "panes": [
+        [
+          "5beb1103-8632-48be-8c69-ae96407c535b",
+          {
+            "height": 719,
+            "width": 493,
+            "x": 189,
+            "y": 38
+          }
+        ],
+        [
+          "aed893a5-28c2-419b-ae30-cb62ed5e29ff",
+          {
+            "height": 357,
+            "width": 493,
+            "x": 687,
+            "y": 38
+          }
+        ],
+        [
+          "7ca8394a-5029-4f23-8e53-5508a74e6d79",
+          {
+            "height": 357,
+            "width": 244,
+            "x": 687,
+            "y": 400
+          }
+        ],
+        [
+          "45f6fd4b-ff3f-4ad6-a9cc-580aaff3ac24",
+          {
+            "height": 357,
+            "width": 244,
+            "x": 936,
+            "y": 400
+          }
+        ]
+      ]
+    },
+    "state": {
+      "error": null,
+      "path": null,
+      "saving": false,
+      "window": null
+    },
+    "surfaces": [
+      {
+        "bounds": {
+          "height": 323,
+          "width": 244,
+          "x": 687,
+          "y": 434
+        },
+        "cols": 26,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": null,
+        "id": "bf4b8d3b-54c1-4f56-a077-0387e10a0620",
+        "output_sequence": 4,
+        "parsed_sequence": 4,
+        "pid": 38984,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true,
+        "settings": {
+          "background": "#17191f",
+          "foreground": "#e2e5ed",
+          "revision": "00000000-0000-0000-0000-000000000000",
+          "terminal": {
+            "cursor_blink": true,
+            "cursor_style": "block",
+            "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+            "font_size": 14,
+            "scrollback": 10000,
+            "theme": "dark"
+          }
+        },
+        "shell": {
+          "args": [],
+          "program": "powershell"
+        },
+        "startup_error": null,
+        "visible": true
+      },
+      {
+        "bounds": {
+          "height": 323,
+          "width": 244,
+          "x": 936,
+          "y": 434
+        },
+        "cols": 26,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": null,
+        "id": "9c1559ef-54dd-4b3a-b14f-2c59b1875dca",
+        "output_sequence": 4,
+        "parsed_sequence": 4,
+        "pid": 34780,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true,
+        "settings": {
+          "background": "#17191f",
+          "foreground": "#e2e5ed",
+          "revision": "00000000-0000-0000-0000-000000000000",
+          "terminal": {
+            "cursor_blink": true,
+            "cursor_style": "block",
+            "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+            "font_size": 14,
+            "scrollback": 10000,
+            "theme": "dark"
+          }
+        },
+        "shell": {
+          "args": [],
+          "program": "powershell"
+        },
+        "startup_error": null,
+        "visible": true
+      },
+      {
+        "bounds": {
+          "height": 685,
+          "width": 493,
+          "x": 189,
+          "y": 72
+        },
+        "cols": 57,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": null,
+        "id": "0d7903f0-4613-4779-aa47-3eeadad50163",
+        "output_sequence": 82,
+        "parsed_sequence": 82,
+        "pid": 18704,
+        "ready": true,
+        "resources_released": false,
+        "rows": 42,
+        "running": true,
+        "settings": {
+          "background": "#17191f",
+          "foreground": "#e2e5ed",
+          "revision": "00000000-0000-0000-0000-000000000000",
+          "terminal": {
+            "cursor_blink": true,
+            "cursor_style": "block",
+            "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+            "font_size": 14,
+            "scrollback": 10000,
+            "theme": "dark"
+          }
+        },
+        "shell": {
+          "args": [],
+          "program": "powershell"
+        },
+        "startup_error": null,
+        "visible": true
+      },
+      {
+        "bounds": {
+          "height": 323,
+          "width": 493,
+          "x": 687,
+          "y": 72
+        },
+        "cols": 57,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": null,
+        "id": "290181e8-7b64-4865-a508-d55ac43a0e33",
+        "output_sequence": 4,
+        "parsed_sequence": 4,
+        "pid": 18840,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true,
+        "settings": {
+          "background": "#17191f",
+          "foreground": "#e2e5ed",
+          "revision": "00000000-0000-0000-0000-000000000000",
+          "terminal": {
+            "cursor_blink": true,
+            "cursor_style": "block",
+            "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+            "font_size": 14,
+            "scrollback": 10000,
+            "theme": "dark"
+          }
+        },
+        "shell": {
+          "args": [],
+          "program": "powershell"
+        },
+        "startup_error": null,
+        "visible": true
+      }
+    ],
+    "window_handle": 12389332,
+    "workspaces": [
+      {
+        "cwd": "C:\\Users\\jundu",
+        "focused": "45f6fd4b-ff3f-4ad6-a9cc-580aaff3ac24",
+        "id": "52e5e920-eaa3-480b-8c43-774004c1d8ed",
+        "name": "jundu",
+        "root": {
+          "direction": "vertical",
+          "first": {
+            "content": {
+              "active": "0d7903f0-4613-4779-aa47-3eeadad50163",
+              "surfaces": [
+                {
+                  "id": "0d7903f0-4613-4779-aa47-3eeadad50163",
+                  "kind": {
+                    "cwd": "C:\\Users\\jundu",
+                    "shell": null,
+                    "type": "terminal"
+                  },
+                  "title": "jundu",
+                  "title_locked": false
+                }
+              ],
+              "type": "tabs"
+            },
+            "id": "5beb1103-8632-48be-8c69-ae96407c535b",
+            "kind": "leaf"
+          },
+          "id": "dbc63b45-04af-4887-850a-e5f892b501cd",
+          "kind": "split",
+          "ratio": 0.5,
+          "second": {
+            "direction": "horizontal",
+            "first": {
+              "content": {
+                "active": "290181e8-7b64-4865-a508-d55ac43a0e33",
+                "surfaces": [
+                  {
+                    "id": "290181e8-7b64-4865-a508-d55ac43a0e33",
+                    "kind": {
+                      "cwd": "C:\\Users\\jundu",
+                      "shell": null,
+                      "type": "terminal"
+                    },
+                    "title": "jundu",
+                    "title_locked": false
+                  }
+                ],
+                "type": "tabs"
+              },
+              "id": "aed893a5-28c2-419b-ae30-cb62ed5e29ff",
+              "kind": "leaf"
+            },
+            "id": "6a18562f-a905-456c-93a0-697c2242cea1",
+            "kind": "split",
+            "ratio": 0.5,
+            "second": {
+              "direction": "vertical",
+              "first": {
+                "content": {
+                  "active": "bf4b8d3b-54c1-4f56-a077-0387e10a0620",
+                  "surfaces": [
+                    {
+                      "id": "bf4b8d3b-54c1-4f56-a077-0387e10a0620",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "jundu",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "7ca8394a-5029-4f23-8e53-5508a74e6d79",
+                "kind": "leaf"
+              },
+              "id": "620d1fe2-be6b-49ef-a0a0-382fa7645bec",
+              "kind": "split",
+              "ratio": 0.5,
+              "second": {
+                "content": {
+                  "active": "9c1559ef-54dd-4b3a-b14f-2c59b1875dca",
+                  "surfaces": [
+                    {
+                      "id": "9c1559ef-54dd-4b3a-b14f-2c59b1875dca",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "jundu",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "45f6fd4b-ff3f-4ad6-a9cc-580aaff3ac24",
+                "kind": "leaf"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "zoomed_pane": null
+  },
+  "status": "passed_smoke_only",
+  "finished": "2026-09-28T02:57:39.7606502+09:00"
+}

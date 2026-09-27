@@ -3,7 +3,7 @@
 # Native Windows host — development build
 
 This is a separate Rust workspace. It opens native Windows workspaces, panes
-and tabs, embeds an xterm.js terminal in WebView2, and runs Windows PowerShell
+and tabs, embeds an xterm.js terminal in WebView2, and runs native Windows shells
 through ConPTY. WSL is not used by the installed application.
 
 This implementation is in progress. It is **not feature-equivalent to the
@@ -58,6 +58,66 @@ the window state before repeating a mutation. Commands are never automatically
 retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
+Windows PowerShell remains the initial default. Use **Settings…** to choose
+Windows PowerShell, Command Prompt, or installed PowerShell 7 for future tabs
+and workspaces. Right-click **+ Tab**, or choose **New tab with shell…** in the
+settings menu, to select a built-in profile for one tab. Splits inherit their
+source terminal's shell and arguments unless explicitly overridden. Existing
+processes keep their shell when the default changes.
+
+```powershell
+flowmux.exe --new-window --shell cmd
+flowmuxctl.exe shells
+flowmuxctl.exe settings shell cmd
+flowmuxctl.exe settings shell powershell --arg=-NoProfile
+flowmuxctl.exe new-tab --shell powershell --shell-arg=-NoProfile --cwd 'C:\Projects'
+flowmuxctl.exe split horizontal --shell cmd
+flowmuxctl.exe new-workspace --shell cmd --cwd 'C:\Projects'
+```
+
+`--shell` also accepts an absolute `.exe`/`.com` path or a bare executable name
+on the host's PATH. Each repeated `--shell-arg` is one argument, with no command
+string splitting. `--shell-arg=` supplies an empty argument even through legacy
+shell argument marshalling. The settings equivalent is `settings shell PROGRAM
+--arg=VALUE`; program and argv persist together. Built-in `powershell` and `cmd`
+resolve under System32; `pwsh` searches PATH and then `ProgramFiles\PowerShell\7`.
+Bare custom names search absolute PATH entries, in order, using the executable
+`.COM`/`.EXE` entries from PATHEXT. Relative executable paths and implicit batch
+files are rejected. Select their interpreter explicitly when needed.
+
+Built-in PowerShell profiles add the session-local prompt integration. The CMD
+profile uses `/D` (no registry AutoRun) and prefixes only the child's `PROMPT`
+with a cwd report; it leaves console encoding and the rest of the prompt intact.
+An explicit executable path/name such as `powershell.exe` is a raw executable:
+it receives only the supplied arguments and no automatic prompt integration.
+Custom interpreters, including `cmd /C`, have their own argument parsing rules;
+argv escaping is based on the Microsoft C runtime convention. PowerShell 5's
+native argument marshalling also requires care with embedded quotes.
+
+Check `tree` for each terminal's `shell`, `ready`, `running` and `startup_error`.
+A new-tab reply creates the terminal; startup completes asynchronously. New-tab
+requests reject invalid paths/cwd before changing layout. A later CreateProcess failure
+leaves a saveable terminal with an error and **Start Command Prompt** recovery
+button. To retry it through the CLI:
+
+```powershell
+flowmuxctl.exe retry-shell --surface surface:<id> --shell cmd
+```
+
+Retry preserves the surface and history and never replaces a running/exited
+process. Saved terminals restart their recorded program and arguments in fresh
+processes, so explicit startup commands run again. The display history itself
+is never executed. Older state without shell records keeps Windows PowerShell,
+even if the current default is CMD. If a restored executable has disappeared,
+other terminals still start and the failed tab offers explicit recovery.
+Explicit relative `--cwd` paths are resolved where the CLI/launcher is invoked.
+Omitting `--cwd` inherits the source terminal's recorded directory. Raw IPC
+relative cwd values use the source terminal; ambiguous drive-relative values
+must be sent as absolute paths.
+PowerShell 7, other interactive shells, script-language quoting, real menus/IME,
+DPI and accessibility acceptance remain pending. See
+[shell verification](evidence/2026-09-28/shells.md).
+
 The side panel's **Workspace…** menu (also available by right-clicking a workspace)
 renames, colors, moves up/down and closes workspaces. Right-click a tab to rename
 it. Names preserve Korean, decomposed Unicode, emoji, spaces and literal `&`;
@@ -111,7 +171,7 @@ flowmuxctl.exe settings set scrollback 20000
 flowmuxctl.exe settings reset
 ```
 
-Settings use versioned UTF-8 JSON at
+Settings, including the default shell/argv, use versioned UTF-8 JSON at
 `%LOCALAPPDATA%\flowmux\windows\config.json`. Writes acquire an exclusive lock,
 merge the changed field with the latest file and atomically replace it. A failed
 save preserves the previous file and current options. Native edits detect a
@@ -123,7 +183,8 @@ IME composition can still defer an individual terminal's application.
 
 Invalid or future-version files are preserved and reported by **Settings (!)…**.
 An already running window retains its last valid options; a newly opened window
-uses defaults. Only an explicit reset replaces an invalid file. Temporary
+uses defaults. Only an explicit reset replaces an invalid file. Reset also
+restores the default shell to Windows PowerShell. Temporary
 windows share settings too; `--temporary` disables window-state persistence.
 Hidden debug hosts use volatile defaults unless the verifier explicitly supplies
 an isolated `FLOWMUX_TEST_CONFIG_DIR`.
@@ -314,6 +375,7 @@ powershell -NoProfile -File windows/scripts/verify-cwd.ps1 -BuildDirectory windo
 powershell -NoProfile -File windows/scripts/verify-find.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-output-search.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-settings.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-shells.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

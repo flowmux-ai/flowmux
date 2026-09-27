@@ -4,6 +4,7 @@ pub mod host;
 pub mod ipc;
 mod session;
 mod settings_store;
+mod shell;
 mod state_store;
 
 use std::ffi::OsStr;

@@ -172,8 +172,19 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
         } else {
             None
         };
+    let mut command = cli.command;
+    // Explicit relative paths belong to the CLI process, not the GUI's cwd.
+    if let Command::NewTab {
+        cwd: Some(path), ..
+    }
+    | Command::NewWorkspace {
+        cwd: Some(path), ..
+    } = &mut command
+    {
+        *path = std::path::absolute(&*path)?;
+    }
     let mut bytes = serde_json::to_vec(&Request {
-        command: cli.command,
+        command,
         caller_cwd: caller_surface.and_then(|_| std::env::current_dir().ok()),
         caller_surface,
     })?;

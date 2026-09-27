@@ -1,0 +1,23 @@
+{
+  "source_run_started": "2026-09-28T03:03:23.3358180+09:00",
+  "observation": [
+    {
+      "surface": "2cdc44ba-910f-48d1-a925-cc4b5e80626b",
+      "title": "Recovered 한글 한 😀 &",
+      "title_locked": true,
+      "shell": {
+        "program": "cmd",
+        "args": []
+      }
+    },
+    {
+      "surface": "8cb968e5-6fc8-452f-baca-02020067f1ef",
+      "title": "cwd 한글 한 😀 & #",
+      "title_locked": false,
+      "shell": {
+        "program": "cmd",
+        "args": []
+      }
+    }
+  ]
+}

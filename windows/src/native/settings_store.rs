@@ -184,13 +184,34 @@ fn change(current: &Document, op: &SettingsOp) -> anyhow::Result<Document> {
             expected,
         } => current.terminal.changed(*key, value, expected.as_deref())?,
         SettingsOp::Reset => Default::default(),
+        SettingsOp::Shell { .. } => current.terminal.clone(),
         SettingsOp::Show => anyhow::bail!("show does not write settings"),
     };
-    Ok(Document {
+    let default_shell = match op {
+        SettingsOp::Shell { program, args } => {
+            let shell = crate::shell::Shell {
+                program: program.clone(),
+                args: args.clone(),
+            };
+            super::shell::resolve(&shell)?;
+            shell
+        }
+        SettingsOp::Reset => Default::default(),
+        _ => current.default_shell.clone(),
+    };
+    let document = Document {
         version: 1,
         revision: Uuid::new_v4(),
         terminal,
-    })
+        default_shell,
+    };
+    // UTF-16 argv limits do not bound JSON's UTF-8 size (e.g. long Korean argv).
+    // Never write a file that our own bounded reader cannot load afterwards.
+    anyhow::ensure!(
+        serde_json::to_vec_pretty(&document)?.len() <= MAX_SETTINGS_BYTES,
+        "settings file exceeds 64 KiB"
+    );
+    Ok(document)
 }
 
 #[cfg(test)]
@@ -216,6 +237,13 @@ mod tests {
         b.update(&set(SettingKey::Theme, "light", None)).unwrap();
         assert_eq!(b.read().unwrap().terminal.font_size, 20);
         let previous = std::fs::read(&path).unwrap();
+        assert!(a
+            .update(&SettingsOp::Shell {
+                program: "cmd".into(),
+                args: vec!["한".repeat(25000)]
+            })
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
         assert!(a
             .update(&set(SettingKey::FontSize, "24", Some("14")))
             .is_err());

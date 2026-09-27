@@ -85,6 +85,15 @@ window.flowmuxHost = message => {
       output.receive(message);
     }
     else if (message.type === 'paste') terminal.paste(message.text);
+    else if (message.type === 'shell_status') {
+      const status=document.getElementById('status');
+      status.textContent=message.error ? `Shell could not start: ${message.error} ` : '';
+      terminal.options.disableStdin=!!message.error;
+      if (message.error) {
+        const retry=document.createElement('button'); retry.textContent='Start Command Prompt';
+        retry.addEventListener('click',()=>send({type:'retry_command_prompt'})); status.append(retry);
+      }
+    }
     else if (message.type === 'exit') {
       document.getElementById('status').textContent = `Process exited (${message.code})`;
       terminal.options.disableStdin = true;

@@ -7,6 +7,8 @@ use uuid::Uuid;
 #[derive(Debug, Parser)]
 #[command(name = "flowmux", about = "Open a native Windows flowmux window")]
 pub struct Launch {
+    #[command(flatten)]
+    pub shell: ShellArgs,
     #[arg(long, conflicts_with = "restore_window")]
     pub cwd: Option<PathBuf>,
     #[arg(long, conflicts_with = "restore_window")]
@@ -14,8 +16,39 @@ pub struct Launch {
     /// Open without reading or saving persistent window state.
     #[arg(long, conflicts_with = "restore_window")]
     pub temporary: bool,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["shell", "shell_args"])]
     pub restore_window: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, clap::Args, Serialize, Deserialize)]
+pub struct ShellArgs {
+    /// Built-in powershell/cmd/pwsh profile, absolute executable, or PATH name.
+    #[arg(long)]
+    #[serde(default)]
+    pub shell: Option<String>,
+    /// One argv item; repeat for multiple arguments. No command-string splitting.
+    #[arg(long = "shell-arg", allow_hyphen_values = true, requires = "shell")]
+    #[serde(default)]
+    pub shell_args: Vec<String>,
+}
+impl ShellArgs {
+    pub fn requested(&self) -> anyhow::Result<Option<crate::shell::Shell>> {
+        anyhow::ensure!(
+            self.shell.is_some() || self.shell_args.is_empty(),
+            "shell arguments require --shell"
+        );
+        self.shell
+            .as_ref()
+            .map(|program| {
+                let shell = crate::shell::Shell {
+                    program: program.clone(),
+                    args: self.shell_args.clone(),
+                };
+                shell.validate()?;
+                Ok(shell)
+            })
+            .transpose()
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -53,6 +86,16 @@ pub enum Command {
     ShellIntegration,
     Identify,
     Capabilities,
+    /// Discover native built-in shell profiles without launching them.
+    Shells,
+    /// Retry a failed terminal startup. A running or exited process is never replaced.
+    RetryShell {
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
+        #[command(flatten)]
+        #[serde(flatten)]
+        shell: ShellArgs,
+    },
     /// Show or update the Windows terminal appearance shared by windows.
     Settings {
         #[command(subcommand)]
@@ -121,11 +164,23 @@ pub enum Command {
     Split {
         #[arg(value_enum, default_value = "vertical")]
         direction: Direction,
+        #[command(flatten)]
+        #[serde(flatten)]
+        shell: ShellArgs,
     },
-    NewTab,
+    NewTab {
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        #[command(flatten)]
+        #[serde(flatten)]
+        shell: ShellArgs,
+    },
     NewWorkspace {
         #[arg(long)]
         cwd: Option<PathBuf>,
+        #[command(flatten)]
+        #[serde(flatten)]
+        shell: ShellArgs,
     },
     /// List, focus, rename, color, reorder or close a workspace in this window.
     Workspace {
@@ -194,6 +249,13 @@ pub enum Command {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SettingsOp {
     Show,
+    /// Set the shell for future tabs/workspaces. Existing terminals keep their shell.
+    Shell {
+        program: String,
+        #[arg(long = "arg", allow_hyphen_values = true)]
+        #[serde(default)]
+        args: Vec<String>,
+    },
     Set {
         #[arg(value_enum)]
         key: crate::settings::SettingKey,
@@ -294,6 +356,52 @@ pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shell_cli_and_legacy_requests_keep_each_argv_item_separate() {
+        let launch = Launch::try_parse_from(["flowmux", "--shell", "cmd"]).unwrap();
+        assert_eq!(launch.shell.requested().unwrap().unwrap().program, "cmd");
+        assert!(Launch::try_parse_from([
+            "flowmux",
+            "--restore-window",
+            "00000000-0000-0000-0000-000000000000",
+            "--shell",
+            "cmd"
+        ])
+        .is_err());
+        let cli = Cli::try_parse_from([
+            "flowmuxctl",
+            "new-tab",
+            "--shell",
+            "custom.exe",
+            "--shell-arg",
+            "",
+            "--shell-arg",
+            "한글 & quote\"\\",
+        ])
+        .unwrap();
+        let Command::NewTab { shell, .. } = cli.command else {
+            panic!()
+        };
+        assert_eq!(
+            shell.requested().unwrap().unwrap().args,
+            vec!["", "한글 & quote\"\\"]
+        );
+        assert!(Cli::try_parse_from(["flowmuxctl", "new-tab", "--shell-arg", "x"]).is_err());
+        for json in [
+            r#"{"method":"new_tab"}"#,
+            r#"{"method":"split","direction":"vertical"}"#,
+            r#"{"method":"new_workspace"}"#,
+        ] {
+            let request: Request = serde_json::from_str(json).unwrap();
+            let shell = match request.command {
+                Command::NewTab { shell, .. }
+                | Command::Split { shell, .. }
+                | Command::NewWorkspace { shell, .. } => shell,
+                _ => panic!(),
+            };
+            assert!(shell.requested().unwrap().is_none());
+        }
+    }
 
     #[test]
     fn context_preserves_old_ipc_commands_and_roundtrips_stable_surface() {

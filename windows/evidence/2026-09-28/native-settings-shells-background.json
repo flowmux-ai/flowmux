@@ -1,0 +1,73 @@
+{
+  "started": "2026-09-28T02:45:03.3717505+09:00",
+  "mode": "background",
+  "hosts": [
+    {
+      "launchedUtc": "2026-09-27T17:45:03.3777502Z",
+      "pid": 29888,
+      "pipe": "\\\\.\\pipe\\flowmux-29888-57ecff02-f661-4e1c-aa85-6a760c7e07a4"
+    },
+    {
+      "launchedUtc": "2026-09-27T17:45:04.7857692Z",
+      "pid": 33124,
+      "pipe": "\\\\.\\pipe\\flowmux-33124-3cee8472-8f62-46df-83cc-01a1b1abfc43"
+    },
+    {
+      "launchedUtc": "2026-09-27T17:45:09.8567601Z",
+      "pid": 16916,
+      "pipe": "\\\\.\\pipe\\flowmux-16916-b70321ec-e5fd-447e-bd27-3ce97c891a1e"
+    },
+    {
+      "launchedUtc": "2026-09-27T17:45:11.8609291Z",
+      "pid": 29736,
+      "pipe": "\\\\.\\pipe\\flowmux-29736-40d640ac-58f7-4dcf-a640-83685f2f950b"
+    }
+  ],
+  "checks": [
+    {
+      "console": {
+        "rows": 11,
+        "cols": 68
+      },
+      "name": "font_size_updates_all_visible_and_hidden_tabs_and_another_window_without_restarting_or_focusing",
+      "surfacePids": "6f30cbe5-9f7b-4347-9764-23268107f6ee:32512,a7137202-1a09-4ca3-8e74-d74d7ae965eb:27964,bb154f0f-b326-44db-9032-c9a17034d9d4:13180",
+      "previousGrid": [
+        117,
+        19
+      ],
+      "newGrid": [
+        68,
+        11
+      ]
+    },
+    {
+      "terminal": {
+        "cursor_blink": false,
+        "cursor_style": "bar",
+        "font_family": "'한글 한 😀', Consolas, monospace",
+        "font_size": 24,
+        "scrollback": 10000,
+        "theme": "light"
+      },
+      "name": "unicode_font_list_theme_and_cursor_survive_cross_window_field_merges"
+    },
+    {
+      "name": "invalid_stale_and_denied_writes_preserve_file_and_live_terminal_options"
+    },
+    {
+      "name": "external_atomic_edit_reloads_even_when_revision_is_unchanged"
+    },
+    {
+      "window": "e5057d82-5e3e-4a08-99f8-64682d001bb6",
+      "name": "restart_restores_three_tabs_and_korean_history_with_persisted_terminal_settings"
+    },
+    {
+      "name": "scrollback_limit_evicts_old_history_and_keeps_new_output"
+    },
+    {
+      "name": "corrupt_settings_keep_last_good_runtime_defaults_on_new_host_and_require_explicit_reset"
+    }
+  ],
+  "status": "passed_settings_subset",
+  "finished": "2026-09-28T02:45:13.5880575+09:00"
+}

@@ -1,0 +1,72 @@
+{
+  "pid": 19016,
+  "started": "2026-09-28T02:46:03.0861472+09:00",
+  "checks": [
+    {
+      "surface": {
+        "bounds": {
+          "height": 685,
+          "width": 991,
+          "x": 189,
+          "y": 72
+        },
+        "cols": 117,
+        "cwd": "C:\\Users\\jundu",
+        "cwd_reported": true,
+        "exit_code": 7,
+        "id": "ad01e4d7-645c-4010-b06c-3277510c9286",
+        "output_sequence": 80,
+        "parsed_sequence": 80,
+        "pid": 38852,
+        "ready": true,
+        "resources_released": true,
+        "rows": 42,
+        "running": false,
+        "settings": {
+          "background": "#17191f",
+          "foreground": "#e2e5ed",
+          "revision": "00000000-0000-0000-0000-000000000000",
+          "terminal": {
+            "cursor_blink": true,
+            "cursor_style": "block",
+            "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+            "font_size": 14,
+            "scrollback": 10000,
+            "theme": "dark"
+          }
+        },
+        "shell": {
+          "args": [],
+          "program": "powershell"
+        },
+        "startup_error": null,
+        "visible": true
+      },
+      "name": "natural_exit_preserves_final_screen_and_exit_code",
+      "passed": true
+    },
+    {
+      "pids": [
+        34748,
+        37908,
+        33276,
+        28800
+      ],
+      "name": "tab_close_terminates_root_and_three_descendants",
+      "passed": true
+    },
+    {
+      "pids": [
+        17136,
+        37260,
+        5880,
+        27964
+      ],
+      "name": "host_crash_terminates_owned_process_tree",
+      "passed": true
+    }
+  ],
+  "mode": "background",
+  "status": "passed_lifecycle_subset",
+  "finished": "2026-09-28T02:46:07.8674009+09:00"
+}

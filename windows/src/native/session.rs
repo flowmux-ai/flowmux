@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! A suspended process joins its kill-on-close job before any user code runs.
-//! Blocking pipe IO and ClosePseudoConsole never run on the window thread.
+//! Blocking pipe IO and normal-session ClosePseudoConsole use worker threads.
+//! Failed startup closes undrained output before releasing its pseudoconsole.
 use super::{checked, wide};
 use crate::protocol::{OutputWindow, OUTPUT_CHUNK_BYTES};
 use anyhow::Context;
-use base64::Engine;
 use flowmux_core::{PaneId, SurfaceId, WorkspaceId};
 use std::{
     collections::BTreeMap,
@@ -18,10 +18,50 @@ use std::{
     },
     thread,
 };
+use windows_sys::Win32::System::Diagnostics::Debug::{
+    GetThreadErrorMode, SetThreadErrorMode, SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX,
+    SEM_NOOPENFILEERRORBOX,
+};
 use windows_sys::Win32::{
     Foundation::*,
     System::{Console::*, JobObjects::*, Pipes::*, Threading::*},
 };
+
+struct ErrorMode(u32);
+impl ErrorMode {
+    fn suppress_dialogs() -> anyhow::Result<Self> {
+        let mut previous = 0;
+        unsafe {
+            checked(SetThreadErrorMode(
+                GetThreadErrorMode()
+                    | SEM_FAILCRITICALERRORS
+                    | SEM_NOGPFAULTERRORBOX
+                    | SEM_NOOPENFILEERRORBOX,
+                &mut previous,
+            ))?;
+        }
+        Ok(Self(previous))
+    }
+}
+impl Drop for ErrorMode {
+    fn drop(&mut self) {
+        unsafe {
+            SetThreadErrorMode(self.0, std::ptr::null_mut());
+        }
+    }
+}
+#[cfg(debug_assertions)]
+fn spawn_phase(phase: &str) {
+    if let Some(path) = std::env::var_os("FLOWMUX_TEST_SPAWN_TRACE") {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+        {
+            let _ = writeln!(file, "{} {phase}", std::process::id());
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum SessionEvent {
@@ -55,7 +95,11 @@ struct Console(HPCON, &'static super::conpty::Api);
 unsafe impl Send for Console {}
 impl Drop for Console {
     fn drop(&mut self) {
+        #[cfg(debug_assertions)]
+        spawn_phase("console-close-start");
         unsafe { (self.1.close)(self.0) }
+        #[cfg(debug_assertions)]
+        spawn_phase("console-close-end");
     }
 }
 
@@ -120,6 +164,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         cwd: &Path,
+        shell: &crate::shell::Shell,
         pane: PaneId,
         surface: SurfaceId,
         workspace: WorkspaceId,
@@ -128,6 +173,8 @@ impl Session {
         rows: u16,
         emit: impl Fn(SessionEvent) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
+        let _error_mode = ErrorMode::suppress_dialogs()?;
+        let shell = super::shell::resolve(shell)?;
         let emit = Arc::new(emit);
         let (console_in, input_write) = pipe()?;
         let (output_read, console_out) = pipe()?;
@@ -147,6 +194,10 @@ impl Session {
         };
         anyhow::ensure!(result >= 0, "CreatePseudoConsole failed: 0x{result:08x}");
         let console = Console(console, api);
+        // Locals drop in reverse order. Until a reader owns this handle, close it
+        // before Console on every early return; an undrained pipe can deadlock
+        // ClosePseudoConsole while it emits final output.
+        let terminal_output = output_read;
         drop(console_in);
         drop(console_out);
 
@@ -195,6 +246,15 @@ impl Session {
             environment.insert(key.to_owned(), (key.into(), value.into()));
         }
         environment.remove("FLOWMUX_SOCKET_PATH");
+        if shell.cmd_prompt {
+            let prompt = environment
+                .get("PROMPT")
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| "$P$G".into());
+            let mut reported = std::ffi::OsString::from("$E]9;9;$P$E\\");
+            reported.push(prompt);
+            environment.insert("PROMPT".into(), ("PROMPT".into(), reported));
+        }
         let mut block = Vec::<u16>::new();
         for (key, value) in environment.values() {
             let mut entry = key.clone();
@@ -204,21 +264,8 @@ impl Session {
         }
         block.push(0);
 
-        let system_root = std::env::var_os("SystemRoot").context("SystemRoot is unavailable")?;
-        let executable = std::path::PathBuf::from(system_root)
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        let exe = wide(&executable);
-        // The startup program is fixed, UTF-16 encoded source. No cwd, user text
-        // or profile content is interpolated into the command line.
-        let script: Vec<u8> = include_str!("../../shell/powershell.ps1")
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes)
-            .collect();
-        let script = base64::engine::general_purpose::STANDARD.encode(script);
-        let mut command = wide(format!(
-            "\"{}\" -NoLogo -NoExit -EncodedCommand {script}",
-            executable.display()
-        ));
+        let exe = wide(&shell.executable);
+        let mut command = wide(&shell.command);
         let directory = wide(cwd);
         let mut attrs = Attributes::new(console.0)?;
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
@@ -231,7 +278,9 @@ impl Session {
         startup.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
         startup.lpAttributeList = attrs.ptr();
         let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-        unsafe {
+        #[cfg(debug_assertions)]
+        spawn_phase("create-process-start");
+        let started = unsafe {
             checked(CreateProcessW(
                 exe.as_ptr(),
                 command.as_mut_ptr(),
@@ -244,8 +293,15 @@ impl Session {
                 &startup.StartupInfo,
                 &mut process,
             ))
-            .context("Cannot start PowerShell in ConPTY")?;
-        }
+            .with_context(|| format!("Cannot start {} in ConPTY", shell.executable.display()))
+        };
+        #[cfg(debug_assertions)]
+        spawn_phase(if started.is_ok() {
+            "create-process-ok"
+        } else {
+            "create-process-error"
+        });
+        started?;
         let process_handle = unsafe { OwnedHandle::from_raw_handle(process.hProcess) };
         let thread_handle = unsafe { OwnedHandle::from_raw_handle(process.hThread) };
         // If assignment fails, kill the still-suspended process before releasing its handles.
@@ -266,7 +322,7 @@ impl Session {
         thread::Builder::new()
             .name(format!("pty-read-{}", surface.0))
             .spawn(move || {
-                let mut reader = File::from(output_read);
+                let mut reader = File::from(terminal_output);
                 let mut bytes = [0u8; OUTPUT_CHUNK_BYTES];
                 loop {
                     match reader.read(&mut bytes) {
@@ -444,6 +500,7 @@ mod tests {
         let create = || {
             Session::spawn(
                 &std::env::temp_dir(),
+                &crate::shell::Shell::default(),
                 PaneId::new(),
                 SurfaceId::new(),
                 WorkspaceId::new(),
@@ -479,6 +536,7 @@ mod tests {
         let (send, receive) = mpsc::channel();
         let session = Session::spawn(
             &std::env::temp_dir(),
+            &crate::shell::Shell::default(),
             PaneId::new(),
             SurfaceId::new(),
             WorkspaceId::new(),
@@ -545,6 +603,7 @@ mod tests {
         let (send, receive) = mpsc::channel();
         let session = Session::spawn(
             &std::env::temp_dir(),
+            &crate::shell::Shell::default(),
             PaneId::new(),
             SurfaceId::new(),
             WorkspaceId::new(),
@@ -596,6 +655,7 @@ mod tests {
         let attempt = || {
             Session::spawn(
                 &directory,
+                &crate::shell::Shell::default(),
                 PaneId::new(),
                 SurfaceId::new(),
                 WorkspaceId::new(),
@@ -617,5 +677,39 @@ mod tests {
             after <= before + 4,
             "failed spawns leaked handles: {before} -> {after}"
         );
+    }
+
+    #[test]
+    fn invalid_executable_returns_without_dialog_and_restores_thread_error_mode() {
+        let _guard = SERIAL.lock().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("flowmux-invalid-{}.exe", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"not a Windows executable").unwrap();
+        let shell = crate::shell::Shell::profile(&path.to_string_lossy());
+        let before = unsafe { GetThreadErrorMode() };
+        let handles_before = handles();
+        for _ in 0..5 {
+            let start = std::time::Instant::now();
+            let result = Session::spawn(
+                &std::env::temp_dir(),
+                &shell,
+                PaneId::new(),
+                SurfaceId::new(),
+                WorkspaceId::new(),
+                r"\\.\pipe\flowmux-test-unused",
+                80,
+                24,
+                |_| {},
+            );
+            assert!(result.is_err());
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "invalid-image error did not return promptly"
+            );
+            assert_eq!(unsafe { GetThreadErrorMode() }, before);
+        }
+        thread::sleep(std::time::Duration::from_millis(200));
+        assert!(handles() <= handles_before + 4);
+        std::fs::remove_file(path).unwrap();
     }
 }

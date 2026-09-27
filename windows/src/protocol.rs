@@ -25,6 +25,7 @@ pub struct Envelope {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
+    RetryCommandPrompt,
     Ready,
     SettingsApplied {
         revision: Uuid,
@@ -107,6 +108,9 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    ShellStatus {
+        error: Option<String>,
+    },
     Settings {
         document: crate::settings::Document,
     },

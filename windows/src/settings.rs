@@ -143,6 +143,8 @@ pub struct Document {
     pub version: u8,
     pub revision: Uuid,
     pub terminal: TerminalSettings,
+    #[serde(default)]
+    pub default_shell: crate::shell::Shell,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -150,6 +152,7 @@ impl Default for Document {
             version: 1,
             revision: Uuid::nil(),
             terminal: TerminalSettings::default(),
+            default_shell: Default::default(),
         }
     }
 }
@@ -162,6 +165,7 @@ impl Document {
         let value: Self = serde_json::from_slice(bytes)?;
         anyhow::ensure!(value.version == 1, "unsupported settings version");
         value.terminal.validate()?;
+        value.default_shell.validate()?;
         Ok(value)
     }
 }

@@ -251,6 +251,23 @@ configurable zoom keys and broader config/log/cache parity remain pending.
 T07, T20, U10 and O06 remain partial; see
 [settings evidence](evidence/2026-09-28/settings.md).
 
+Shell choice now covers the shared default, individual new tabs/workspaces and
+split inheritance, with built-in Windows PowerShell/CMD/PowerShell 7 discovery
+and explicit executable/argv selection. Resolution uses full executable paths
+before CreateProcessW; custom PATH/PATHEXT lookup is restricted to executable
+extensions and never adds an implicit current-directory search. CMD reports
+cwd through a child-only prompt prefix; PowerShell retains its prompt wrapper.
+State stores each terminal's shell/argv; old state retains the original Windows
+PowerShell behavior. Missing or invalid executables leave a saveable failed
+terminal with explicit CMD recovery, preserving its surface/history and other
+processes. Thread error-mode guards return native startup errors without system
+error dialogs, and startup unwinding closes undrained output before ConPTY.
+Hidden tests cover exact Unicode cwd/argv, failed-image recovery, mixed-shell
+restart, unavailable restored executables and old-state compatibility. PowerShell
+7 is unavailable on the validation machine; actual PS7, other interactive shells,
+custom script parsers, physical menu/IME/DPI and broader failures remain pending.
+T01 and T23 are partial. See [shell evidence](evidence/2026-09-28/shells.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

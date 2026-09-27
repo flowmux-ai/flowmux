@@ -103,11 +103,18 @@ impl App {
             "Underline cursor".into(),
             "Bar cursor".into(),
             format!("Scrollback… ({})", value.scrollback),
-            "Reset terminal settings".into(),
+            "Reset settings (including default shell)".into(),
             self.settings_error
                 .clone()
-                .unwrap_or_else(|| "Terminal settings are shared by Windows windows".into())
+                .unwrap_or_else(|| "Settings apply to all flowmux windows".into())
                 .replace('&', "&&"),
+            "Default shell: Windows PowerShell".into(),
+            "Default shell: Command Prompt".into(),
+            "Default shell: PowerShell 7".into(),
+            format!(
+                "New tab with shell… (default: {})",
+                self.settings.default_shell.program.replace('&', "&&")
+            ),
         ];
         let mut rect = RECT::default();
         let hwnd = self
@@ -123,6 +130,20 @@ impl App {
             &[14],
             (rect.left, rect.bottom),
         )?;
+        if (15..=17).contains(&choice) {
+            self.settings_submit(
+                SettingsOp::Shell {
+                    program: ["powershell", "cmd", "pwsh"][choice - 15].into(),
+                    args: vec![],
+                },
+                None,
+                None,
+            )?;
+            return self.focus_active();
+        }
+        if choice == 18 {
+            return self.shell_menu((rect.left, rect.bottom));
+        }
         let edit = match choice {
             1 => Some(SettingKey::FontFamily),
             2 => Some(SettingKey::FontSize),

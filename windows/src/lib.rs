@@ -8,4 +8,5 @@ pub mod native;
 pub mod output_search;
 pub mod protocol;
 pub mod settings;
+pub mod shell;
 pub mod state;

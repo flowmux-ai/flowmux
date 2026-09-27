@@ -141,6 +141,7 @@ impl App {
     pub(super) fn context_menu(&mut self, action: Action, x: i32, y: i32) -> anyhow::Result<()> {
         let point = (x, y);
         match action {
+            Action::NewTab => self.shell_menu(point),
             Action::Workspace(id) | Action::WorkspaceColor(id) => {
                 self.workspace_menu(id, Some(point))
             }

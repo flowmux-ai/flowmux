@@ -47,6 +47,8 @@ mod appearance;
 mod panes;
 #[path = "search.rs"]
 mod search;
+#[path = "shells.rs"]
+mod shells;
 #[path = "workspaces.rs"]
 mod workspaces;
 
@@ -201,6 +203,7 @@ impl HasWindowHandle for Parent {
     }
 }
 struct Surface {
+    startup_error: Option<String>,
     applied_settings: Option<Value>,
     view: WebView,
     identity: Identity,
@@ -267,6 +270,7 @@ struct PendingSave {
     reply: Option<ipc::Reply>,
 }
 struct App {
+    shells: HashMap<SurfaceId, crate::shell::Shell>,
     settings_worker: settings_store::Worker,
     settings: crate::settings::Document,
     settings_error: Option<String>,
@@ -297,13 +301,14 @@ struct App {
 }
 
 pub fn run(launch: Launch) -> anyhow::Result<()> {
+    let initial_shell = launch.shell.requested()?;
     let background_test =
         cfg!(debug_assertions) && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1");
     let (store, restored) = if launch.temporary {
         (None, None)
     } else {
         state_store::open(
-            launch.new_window || launch.cwd.is_some(),
+            launch.new_window || launch.cwd.is_some() || initial_shell.is_some(),
             launch.restore_window,
             background_test,
         )?
@@ -312,21 +317,28 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         .cwd
         .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
         .context("No initial working directory")?;
+    let cwd = std::path::absolute(cwd)?;
     anyhow::ensure!(
         cwd.is_dir(),
         "Working directory does not exist: {}",
         cwd.display()
     );
-    let (mut workspaces, active_workspace, restore_screens) = match restored {
+    let restoring_window = restored.is_some();
+    let (mut workspaces, active_workspace, restore_screens, mut shells) = match restored {
         Some(state) => {
             let active = state
                 .workspaces
                 .iter()
                 .position(|w| w.id == state.active_workspace)
                 .unwrap();
-            (state.workspaces, active, state.screens)
+            (state.workspaces, active, state.screens, state.shells)
         }
-        None => (vec![Workspace::new(cwd.clone())], 0, HashMap::new()),
+        None => (
+            vec![Workspace::new(cwd.clone())],
+            0,
+            HashMap::new(),
+            HashMap::new(),
+        ),
     };
     // Deleted/unmounted directories cannot prevent recovery of the other tabs.
     for workspace in &mut workspaces {
@@ -413,9 +425,27 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
                 settings_events.send(Event::Settings(update))
             })?;
         let settings_error = initial_settings.as_ref().err().cloned();
+        let settings = initial_settings.unwrap_or_default();
+        if restoring_window {
+            // Old checkpoints always launched Windows PowerShell. Changing the
+            // default affects future terminals, never silently changes old ones.
+            for ws in &workspaces {
+                for (_, _, tabs) in ws.leaves() {
+                    for tab in tabs {
+                        shells.entry(tab.id).or_default();
+                    }
+                }
+            }
+        } else {
+            shells.insert(
+                workspaces[0].active(),
+                initial_shell.unwrap_or_else(|| settings.default_shell.clone()),
+            );
+        }
         let mut app = App {
+            shells,
             settings_worker,
-            settings: initial_settings.unwrap_or_default(),
+            settings,
             settings_error,
             settings_pending: HashMap::new(),
             window,
@@ -609,6 +639,22 @@ impl App {
         Ok(())
     }
     fn add_view(&mut self, surface: SurfaceId) -> anyhow::Result<()> {
+        let spec = self
+            .shells
+            .entry(surface)
+            .or_insert_with(|| self.settings.default_shell.clone())
+            .clone();
+        if spec.program != "powershell" {
+            if let Some((ws, pane, _)) = self.locate(surface) {
+                if self.workspaces[ws].root.surface_title(pane, surface) == Some("PowerShell") {
+                    self.workspaces[ws].root.set_surface_title_auto(
+                        pane,
+                        surface,
+                        spec.program.clone(),
+                    );
+                }
+            }
+        }
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
@@ -687,6 +733,7 @@ impl App {
         self.surfaces.insert(
             surface,
             Surface {
+                startup_error: None,
                 applied_settings: None,
                 view,
                 identity,
@@ -965,6 +1012,9 @@ impl App {
                 );
                 self.start_session(id)?;
             }
+            ClientMessage::RetryCommandPrompt => {
+                self.retry_shell(id, Some(crate::shell::Shell::profile("cmd")))?
+            }
             ClientMessage::SettingsApplied {
                 revision,
                 terminal,
@@ -1213,6 +1263,7 @@ impl App {
         let surface = &self.surfaces[&id];
         let session = Session::spawn(
             &cwd,
+            &self.shells[&id],
             pane,
             id,
             self.workspaces[workspace].id,
@@ -1220,8 +1271,23 @@ impl App {
             surface.cols,
             surface.rows,
             move |event| sender.send(Event::Session(id, event)),
-        )?;
+        );
+        let session = match session {
+            Ok(session) => session,
+            Err(error) => {
+                let error = format!("{error:#}");
+                report(&error);
+                let surface = self.surfaces.get_mut(&id).unwrap();
+                surface.ready = true;
+                surface.restoring = false;
+                surface.startup_error = Some(error.clone());
+                surface.send(&HostMessage::ShellStatus { error: Some(error) })?;
+                return Ok(());
+            }
+        };
         let surface = self.surfaces.get_mut(&id).unwrap();
+        surface.startup_error = None;
+        surface.send(&HostMessage::ShellStatus { error: None })?;
         surface.process_pid = Some(session.pid);
         surface.session = Some(session);
         surface.ready = true;
@@ -1262,6 +1328,7 @@ impl App {
                 workspaces: self.workspaces.clone(),
                 active_workspace: self.workspace().id,
                 screens: HashMap::new(),
+                shells: self.shells.clone(),
             },
             waiting,
             started: Instant::now(),
@@ -1379,7 +1446,7 @@ impl App {
             if first_report
                 && matches!(
                     root.surface_title(pane, id),
-                    Some("PowerShell" | "Windows PowerShell")
+                    Some("PowerShell" | "Windows PowerShell" | "cmd" | "pwsh" | "powershell")
                 )
             {
                 root.set_surface_title_auto(
@@ -1543,6 +1610,7 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.shells.remove(&surface);
         self.surfaces.remove(&surface);
         if self
             .pending_save
@@ -1582,10 +1650,9 @@ impl App {
         match action {
             Action::Settings => return self.settings_menu(),
             Action::NewWorkspace => {
-                self.zoomed = None;
-                let cwd = self.locate(self.active()).unwrap().2;
-                self.workspaces.push(Workspace::new(cwd));
-                self.active_workspace = self.workspaces.len() - 1;
+                return self
+                    .new_terminal(self.active(), None, None, shells::NewTerminal::Workspace)
+                    .map(|_| ());
             }
             Action::Workspace(id) => {
                 let index = self.workspace_index(id)?;
@@ -1597,15 +1664,29 @@ impl App {
             Action::WorkspaceMenu => return self.workspace_menu(self.workspace().id, None),
             Action::WorkspaceColor(_) => return Ok(()),
             Action::NewTab => {
-                self.workspace_mut().new_tab();
+                return self
+                    .new_terminal(self.active(), None, None, shells::NewTerminal::Tab)
+                    .map(|_| ());
             }
             Action::Vertical => {
-                self.zoomed = None;
-                self.workspace_mut().split(SplitDirection::Vertical);
+                return self
+                    .new_terminal(
+                        self.active(),
+                        None,
+                        None,
+                        shells::NewTerminal::Split(SplitDirection::Vertical),
+                    )
+                    .map(|_| ());
             }
             Action::Horizontal => {
-                self.zoomed = None;
-                self.workspace_mut().split(SplitDirection::Horizontal);
+                return self
+                    .new_terminal(
+                        self.active(),
+                        None,
+                        None,
+                        shells::NewTerminal::Split(SplitDirection::Horizontal),
+                    )
+                    .map(|_| ());
             }
             Action::CloseTab => {
                 let surface = self
@@ -1656,6 +1737,18 @@ impl App {
             "window is saving before close"
         );
         match command {
+            Command::Shells => {
+                return Ok(Some(
+                    json!({"profiles":super::shell::profiles(),"default_shell":self.settings.default_shell}),
+                ))
+            }
+            Command::RetryShell { surface, shell } => {
+                let id = surface.map(SurfaceId).unwrap_or(self.target(None, caller)?);
+                self.retry_shell(id, shell.requested()?)?;
+                return Ok(Some(
+                    json!({"ok":self.surfaces[&id].startup_error.is_none(),"surface":id,"startup_error":self.surfaces[&id].startup_error}),
+                ));
+            }
             Command::Settings { op } => {
                 if matches!(op, crate::command::SettingsOp::Show) {
                     return Ok(Some(self.settings_status()));
@@ -1670,14 +1763,14 @@ impl App {
                 let surface = self.target(None, caller)?;
                 let (workspace, pane, cwd) = self.locate(surface).unwrap();
                 return Ok(Some(json!({"pid":std::process::id(),"pipe":self._ipc.name,
-                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"platform":"windows"})));
+                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"shell":self.shells[&surface],"platform":"windows"})));
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1688,6 +1781,7 @@ impl App {
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
                     "visible":surface.visible,
                     "settings":surface.applied_settings,
+                    "shell":self.shells[id],"startup_error":surface.startup_error,
                     "bounds":surface.view.bounds().ok().map(|rect| { let p = rect.position.to_physical::<i32>(1.0); let s = rect.size.to_physical::<u32>(1.0); json!({"x":p.x,"y":p.y,"width":s.width,"height":s.height}) }),
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
@@ -1800,25 +1894,32 @@ impl App {
             Command::SendKey { key, pane } => self
                 .session(self.target(pane, caller)?)?
                 .input(key_bytes(&key)?)?,
-            Command::Split { direction } => {
-                self.select(self.target(None, caller)?)?;
-                self.action(match direction {
-                    Direction::Vertical => Action::Vertical,
-                    Direction::Horizontal => Action::Horizontal,
-                })?;
+            Command::Split { direction, shell } => {
+                self.new_terminal(
+                    self.target(None, caller)?,
+                    None,
+                    shell.requested()?,
+                    shells::NewTerminal::Split(match direction {
+                        Direction::Vertical => SplitDirection::Vertical,
+                        Direction::Horizontal => SplitDirection::Horizontal,
+                    }),
+                )?;
             }
-            Command::NewTab => {
-                self.select(self.target(None, caller)?)?;
-                self.action(Action::NewTab)?;
+            Command::NewTab { cwd, shell } => {
+                self.new_terminal(
+                    self.target(None, caller)?,
+                    cwd,
+                    shell.requested()?,
+                    shells::NewTerminal::Tab,
+                )?;
             }
-            Command::NewWorkspace { cwd } => {
-                let id = self.target(None, caller)?;
-                let cwd = cwd.unwrap_or_else(|| self.locate(id).unwrap().2);
-                anyhow::ensure!(cwd.is_dir(), "working directory does not exist");
-                self.zoomed = None;
-                self.workspaces.push(Workspace::new(cwd));
-                self.active_workspace = self.workspaces.len() - 1;
-                self.rebuild()?;
+            Command::NewWorkspace { cwd, shell } => {
+                self.new_terminal(
+                    self.target(None, caller)?,
+                    cwd,
+                    shell.requested()?,
+                    shells::NewTerminal::Workspace,
+                )?;
             }
             Command::Workspace { op } => return self.workspace_command(op, caller).map(Some),
             Command::RenameTab { surface, name } => {

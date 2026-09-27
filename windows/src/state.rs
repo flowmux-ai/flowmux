@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Windows-only state schema. No executable commands or live process identities.
+//! Windows-only state schema. Shell argv is explicit; history is display data only.
 use crate::model::Workspace;
 use anyhow::ensure;
 use flowmux_core::{Pane, PaneContent, SurfaceId, SurfaceKind, WorkspaceId};
@@ -42,6 +42,8 @@ pub struct WindowState {
     pub workspaces: Vec<Workspace>,
     pub active_workspace: WorkspaceId,
     pub screens: HashMap<SurfaceId, SavedScreen>,
+    #[serde(default)]
+    pub shells: HashMap<SurfaceId, crate::shell::Shell>,
 }
 impl WindowState {
     pub fn decode(bytes: &[u8]) -> anyhow::Result<Self> {
@@ -96,6 +98,10 @@ impl WindowState {
         for (id, screen) in &self.screens {
             ensure!(surfaces.contains(id), "orphaned history");
             screen.validate()?;
+        }
+        for (id, shell) in &self.shells {
+            ensure!(surfaces.contains(id), "orphaned shell specification");
+            shell.validate()?;
         }
         Ok(())
     }
@@ -177,11 +183,36 @@ pub(crate) fn sample() -> WindowState {
             },
         )]),
         workspaces: vec![ws],
+        shells: HashMap::new(),
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shell_specs_roundtrip_without_using_history_as_commands_and_old_state_still_loads() {
+        let mut state = sample();
+        let id = state.workspaces[0].active();
+        let mut old = serde_json::to_value(&state).unwrap();
+        old.as_object_mut().unwrap().remove("shells");
+        assert!(WindowState::decode(&serde_json::to_vec(&old).unwrap())
+            .unwrap()
+            .shells
+            .is_empty());
+        let shell = crate::shell::Shell {
+            program: "C:\\한글\\shell.exe".into(),
+            args: vec!["".into(), "한 😀 & \" \\".into()],
+        };
+        state.shells.insert(id, shell.clone());
+        assert_eq!(
+            WindowState::decode(&state.encode().unwrap())
+                .unwrap()
+                .shells[&id],
+            shell
+        );
+        state.shells.insert(SurfaceId::new(), shell);
+        assert!(state.encode().is_err());
+    }
     #[test]
     fn old_state_without_color_loads_and_custom_metadata_roundtrips_without_normalization() {
         let mut state = sample();
