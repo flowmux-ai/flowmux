@@ -131,6 +131,11 @@ struct Surface {
     rows: u16,
     ready: bool,
     visible: bool,
+    process_pid: Option<u32>,
+    exit_code: Option<u32>,
+    output_ended: bool,
+    output_sequence: u64,
+    acknowledged_sequence: u64,
 }
 impl Surface {
     fn send(&self, message: &HostMessage) -> anyhow::Result<()> {
@@ -463,6 +468,11 @@ impl App {
                 rows: 24,
                 ready: false,
                 visible: false,
+                process_pid: None,
+                exit_code: None,
+                output_ended: false,
+                output_sequence: 0,
+                acknowledged_sequence: 0,
             },
         );
         Ok(())
@@ -581,18 +591,32 @@ impl App {
             }
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
             Event::Session(id, message) => {
-                if let Some(surface) = self.surfaces.get(&id) {
+                if let Some(surface) = self.surfaces.get_mut(&id) {
                     match message {
                         SessionEvent::Output { sequence, bytes } => {
+                            anyhow::ensure!(
+                                sequence == surface.output_sequence + 1,
+                                "out-of-order PTY output"
+                            );
                             surface.send(&HostMessage::Output {
                                 sequence,
                                 data: base64::engine::general_purpose::STANDARD.encode(bytes),
-                            })?
+                            })?;
+                            surface.output_sequence = sequence;
                         }
-                        SessionEvent::Exit(code) => surface.send(&HostMessage::Exit { code })?,
+                        SessionEvent::OutputEnd => surface.output_ended = true,
+                        SessionEvent::Exit(code) => {
+                            surface.exit_code = Some(code);
+                            surface.send(&HostMessage::Exit { code })?;
+                        }
                         SessionEvent::Error(message) => {
                             report(&format!("terminal {id}: {message}"))
                         }
+                    }
+                    if surface.output_ended && surface.exit_code.is_some() {
+                        // All final bytes have entered the WebView's ordered stream.
+                        // Retain its grid and accept parser ACKs after releasing native resources.
+                        surface.session.take();
                     }
                 }
             }
@@ -633,6 +657,7 @@ impl App {
                     move |event| sender.send(Event::Session(id, event)),
                 )?;
                 let surface = self.surfaces.get_mut(&id).unwrap();
+                surface.process_pid = Some(session.pid);
                 surface.session = Some(session);
                 surface.ready = true;
                 if self.active() == id {
@@ -643,8 +668,10 @@ impl App {
                 let surface = self.surfaces.get_mut(&id).unwrap();
                 surface.cols = cols;
                 surface.rows = rows;
-                if let Some(session) = &surface.session {
-                    session.resize(cols, rows)?;
+                if surface.exit_code.is_none() {
+                    if let Some(session) = &surface.session {
+                        session.resize(cols, rows)?;
+                    }
                 }
             }
             ClientMessage::Input { data } => self.session(id)?.input(data.into_bytes())?,
@@ -656,7 +683,18 @@ impl App {
                 self.session(id)?
                     .input(data.chars().map(|c| c as u8).collect())?;
             }
-            ClientMessage::Ack { sequence } => self.session(id)?.acknowledge(sequence)?,
+            ClientMessage::Ack { sequence } => {
+                let surface = self.surfaces.get_mut(&id).unwrap();
+                anyhow::ensure!(
+                    sequence >= surface.acknowledged_sequence
+                        && sequence <= surface.output_sequence,
+                    "invalid parser acknowledgement"
+                );
+                if let Some(session) = &surface.session {
+                    session.acknowledge(sequence)?;
+                }
+                surface.acknowledged_sequence = sequence;
+            }
             ClientMessage::Focus => {
                 if let Some((workspace, pane, _)) = self.locate(id) {
                     // A delayed hidden-view focus event must not switch the workspace back.
@@ -761,10 +799,12 @@ impl App {
         None
     }
     fn session(&self, id: SurfaceId) -> anyhow::Result<&Session> {
-        self.surfaces
+        let surface = self
+            .surfaces
             .get(&id)
-            .and_then(|surface| surface.session.as_ref())
-            .context("terminal is not ready")
+            .context("terminal surface not found")?;
+        anyhow::ensure!(surface.exit_code.is_none(), "terminal process has exited");
+        surface.session.as_ref().context("terminal is not ready")
     }
     fn target(&self, pane: Option<Uuid>) -> anyhow::Result<SurfaceId> {
         if let Some(pane) = pane {
@@ -826,21 +866,32 @@ impl App {
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
-                "terminal_backend":"ConPTY/xterm.js","browser_backend":"WebView2",
+                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","quit"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
-                    "pid":surface.session.as_ref().map(|s| s.pid),"cols":surface.cols,"rows":surface.rows})).collect();
+                    "pid":surface.process_pid,"running":surface.session.is_some() && surface.exit_code.is_none(),
+                    "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
+                    "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
+                    "cols":surface.cols,"rows":surface.rows})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces}),
                 ));
             }
             Command::ReadScreen { pane } => {
                 let id = self.target(pane)?;
-                let after = self.session(id)?.barrier();
+                let surface = self
+                    .surfaces
+                    .get(&id)
+                    .context("terminal surface not found")?;
+                anyhow::ensure!(surface.ready, "terminal is not ready");
+                let after = surface
+                    .session
+                    .as_ref()
+                    .map_or(surface.output_sequence, Session::barrier);
                 let request = Uuid::new_v4();
                 self.surfaces[&id].send(&HostMessage::ReadScreen { request, after })?;
                 self.pending_reads.insert(

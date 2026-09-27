@@ -1,0 +1,44 @@
+{
+  "pid": 18840,
+  "started": "2026-09-27T21:41:07.1300686+09:00",
+  "checks": [
+    {
+      "surface": {
+        "cols": 117,
+        "exit_code": 7,
+        "id": "a92e838e-b06f-42ae-bba2-17a466668a69",
+        "output_sequence": 86,
+        "parsed_sequence": 86,
+        "pid": 28416,
+        "ready": true,
+        "resources_released": true,
+        "rows": 42,
+        "running": false
+      },
+      "name": "natural_exit_preserves_final_screen_and_exit_code",
+      "passed": true
+    },
+    {
+      "pids": [
+        10400,
+        26520,
+        7640,
+        23736
+      ],
+      "name": "tab_close_terminates_root_and_three_descendants",
+      "passed": true
+    },
+    {
+      "pids": [
+        9744,
+        31232,
+        31472,
+        33000
+      ],
+      "name": "host_crash_terminates_owned_process_tree",
+      "passed": true
+    }
+  ],
+  "status": "passed_lifecycle_subset",
+  "finished": "2026-09-27T21:41:10.1173873+09:00"
+}

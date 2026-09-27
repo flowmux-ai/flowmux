@@ -56,6 +56,7 @@ Native smoke and IME checks launch and close their own window:
 ```powershell
 powershell -NoProfile -File windows/scripts/verify-native.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-korean-ime.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-lifecycle.ps1 -BuildDirectory windows/target/debug
 ```
 
 The IME script requires an unlocked interactive Windows desktop and the
@@ -65,6 +66,11 @@ as UTF-8, separately from the bytes sent to ConPTY. The debug-only
 `FLOWMUX_TEST_INPUT_TRACE` environment variable records input bytes **only when
 explicitly set** by this test. It can include sensitive input; never enable it
 for normal sessions. Release builds omit that trace code.
+
+The lifecycle check verifies final Korean output and exit status after normal
+shell exit, then creates its own descendant processes and checks that tab close
+and forced termination of its own host remove the whole process tree. An exited
+tab retains its screen for selection, search and `read-screen` until closed.
 
 Create an NSIS installer after building the release binaries:
 

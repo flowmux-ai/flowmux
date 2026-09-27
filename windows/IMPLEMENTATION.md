@@ -77,11 +77,17 @@ IME and WebView2 112.0.1722.48 established these **partial** results:
   at cycles 25/50/75/100. This is not a full process-tree memory benchmark.
 - Per-user installation, repeat installation, shortcuts, registration and
   uninstall preserving the exact PATH value and registry value type.
+- Natural shell exit retains the last Korean output and exit code after EOF,
+  releases the native session, and keeps the rendered screen readable. Tab
+  close and host termination remove the root shell and three descendant
+  processes. Twenty failed spawns and twenty direct PTY closes have bounded
+  handle counts. Repeating 100 live tab cycles after this change kept process
+  handles at 13 and total handles at 295/295/294/294.
 
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,
-DPI, clipboard/Unicode-width coverage, broader TUI compatibility, failure paths,
-child-tree termination, full feature parity and clean-machine deployment remain.
+DPI, clipboard/Unicode-width coverage, broader TUI compatibility, additional
+failure paths, full feature parity and clean-machine deployment remain.
 
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the

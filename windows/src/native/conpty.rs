@@ -13,11 +13,13 @@ use windows_sys::Win32::{
 type Create = unsafe extern "system" fn(COORD, HANDLE, HANDLE, u32, *mut HPCON) -> i32;
 type Resize = unsafe extern "system" fn(HPCON, COORD) -> i32;
 type Close = unsafe extern "system" fn(HPCON);
+type Release = unsafe extern "system" fn(HPCON) -> i32;
 pub struct Api {
     _module: isize,
     pub create: Create,
     pub resize: Resize,
     pub close: Close,
+    pub release: Release,
 }
 static API: OnceLock<Result<Api, String>> = OnceLock::new();
 
@@ -55,11 +57,16 @@ fn load() -> anyhow::Result<Api> {
                 .context("ConPTY resize export is missing")?;
             let close = GetProcAddress(module, c"ConptyClosePseudoConsole".as_ptr().cast())
                 .context("ConPTY close export is missing")?;
+            let release = GetProcAddress(module, c"ConptyReleasePseudoConsole".as_ptr().cast())
+                .context("ConPTY release export is missing")?;
             Ok(Api {
                 _module: module as isize,
                 create: std::mem::transmute::<unsafe extern "system" fn() -> isize, Create>(create),
                 resize: std::mem::transmute::<unsafe extern "system" fn() -> isize, Resize>(resize),
                 close: std::mem::transmute::<unsafe extern "system" fn() -> isize, Close>(close),
+                release: std::mem::transmute::<unsafe extern "system" fn() -> isize, Release>(
+                    release,
+                ),
             })
         })();
         if result.is_err() {

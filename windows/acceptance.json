@@ -730,8 +730,12 @@
       "gate": "PTY lifecycle",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/README.md"
-      ]
+        "evidence/2026-09-27/README.md",
+        "evidence/2026-09-27/native-lifecycle.json",
+        "evidence/2026-09-27/native-smoke-lifecycle.json",
+        "evidence/2026-09-27/native-rust-tests.txt"
+      ],
+      "notes": "Normal exit preserves final output/code after EOF; tab close and forced host termination remove a three-level descendant tree. Invalid-cwd spawn failure and 100 tab cycles verified. Thread creation/pipe failures and broader resize/load cases remain."
     },
     {
       "id": "G04",

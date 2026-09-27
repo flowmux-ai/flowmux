@@ -25,12 +25,14 @@ use windows_sys::Win32::{
 #[derive(Debug)]
 pub enum SessionEvent {
     Output { sequence: u64, bytes: Vec<u8> },
+    OutputEnd,
     Exit(u32),
     Error(String),
 }
 enum Input {
     Bytes(Vec<u8>),
     Resize(u16, u16),
+    Release,
 }
 
 #[derive(Default)]
@@ -42,7 +44,7 @@ type SharedCredit = Arc<(Mutex<Credit>, Condvar)>;
 
 pub struct Session {
     pub pid: u32,
-    job: OwnedHandle,
+    job: Arc<OwnedHandle>,
     input: Option<SyncSender<Input>>,
     credit: SharedCredit,
 }
@@ -154,7 +156,7 @@ impl Session {
                 "CreateJobObject failed: {}",
                 std::io::Error::last_os_error()
             );
-            OwnedHandle::from_raw_handle(handle)
+            Arc::new(OwnedHandle::from_raw_handle(handle))
         };
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -211,6 +213,12 @@ impl Session {
         let mut attrs = Attributes::new(console.0)?;
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+        // The launcher may itself have redirected console handles (CLI/tests).
+        // Prevent those from overriding the pseudoconsole's standard streams.
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startup.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+        startup.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
+        startup.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
         startup.lpAttributeList = attrs.ptr();
         let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
         unsafe {
@@ -278,6 +286,7 @@ impl Session {
                         }
                     }
                 }
+                reader_emit(SessionEvent::OutputEnd);
             })?;
         let (input, input_receiver) = mpsc::sync_channel(256);
         let writer_emit = emit.clone();
@@ -287,6 +296,14 @@ impl Session {
                 let mut writer = File::from(input_write);
                 for message in input_receiver {
                     let result = match message {
+                        Input::Release => {
+                            let result = unsafe { (console.1.release)(console.0) };
+                            if result < 0 {
+                                Err(anyhow::anyhow!("ConPTY release failed: 0x{result:08x}"))
+                            } else {
+                                Ok(())
+                            }
+                        }
                         Input::Bytes(bytes) => {
                             writer.write_all(&bytes).map_err(anyhow::Error::from)
                         }
@@ -324,6 +341,10 @@ impl Session {
         if unsafe { ResumeThread(thread_handle.as_raw_handle()) } == u32::MAX {
             return Err(std::io::Error::last_os_error().into());
         }
+        // The initial client is attached. Release the host reference so natural
+        // client exit closes the output stream instead of keeping ConPTY alive.
+        session.input.as_ref().unwrap().try_send(Input::Release)?;
+        let process_job = session.job.clone();
         thread::Builder::new()
             .name(format!("pty-wait-{}", surface.0))
             .spawn(move || {
@@ -333,6 +354,9 @@ impl Session {
                 let mut code = 1;
                 unsafe {
                     GetExitCodeProcess(process_handle.as_raw_handle(), &mut code);
+                    // Session descendants must not survive their root shell. The
+                    // reader keeps draining the final output before UI cleanup.
+                    TerminateJobObject(process_job.as_raw_handle(), code);
                 }
                 emit(SessionEvent::Exit(code));
             })?;
@@ -395,6 +419,7 @@ impl Drop for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static SERIAL: Mutex<()> = Mutex::new(());
     fn handles() -> u32 {
         let mut count = 0;
         unsafe {
@@ -405,6 +430,7 @@ mod tests {
 
     #[test]
     fn repeated_native_pty_close_releases_process_handles() {
+        let _guard = SERIAL.lock().unwrap();
         let create = || {
             Session::spawn(
                 &std::env::temp_dir(),
@@ -429,6 +455,86 @@ mod tests {
         assert!(
             after <= before + 4,
             "native PTY handles grew from {before} to {after}"
+        );
+    }
+
+    #[test]
+    fn natural_exit_keeps_final_output_and_reaches_eof() {
+        let _guard = SERIAL.lock().unwrap();
+        let (send, receive) = mpsc::channel();
+        let session = Session::spawn(
+            &std::env::temp_dir(),
+            PaneId::new(),
+            SurfaceId::new(),
+            WorkspaceId::new(),
+            r"\\.\pipe\flowmux-test-unused",
+            120,
+            30,
+            move |event| {
+                let _ = send.send(event);
+            },
+        )
+        .unwrap();
+        session
+            .input(
+                "Write-Output ('FLOWMUX_' + 'FINAL_한글'); exit 7\r"
+                    .as_bytes()
+                    .to_vec(),
+            )
+            .unwrap();
+        let mut exit = None;
+        let mut eof = false;
+        let mut bytes = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+        while exit.is_none() || !eof {
+            match receive
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .unwrap()
+            {
+                SessionEvent::Output {
+                    sequence,
+                    bytes: chunk,
+                } => {
+                    bytes.extend(chunk);
+                    session.acknowledge(sequence).unwrap();
+                }
+                SessionEvent::OutputEnd => eof = true,
+                SessionEvent::Exit(code) => exit = Some(code),
+                SessionEvent::Error(error) => panic!("PTY failed: {error}"),
+            }
+        }
+        assert_eq!(exit, Some(7));
+        assert!(String::from_utf8_lossy(&bytes).contains("FLOWMUX_FINAL_한글"));
+    }
+
+    #[test]
+    fn failed_spawn_releases_pseudoconsole_resources() {
+        let _guard = SERIAL.lock().unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("flowmux-absent-{}", uuid::Uuid::new_v4()));
+        let attempt = || {
+            Session::spawn(
+                &directory,
+                PaneId::new(),
+                SurfaceId::new(),
+                WorkspaceId::new(),
+                r"\\.\pipe\flowmux-test-unused",
+                80,
+                24,
+                |_| {},
+            )
+        };
+        assert!(attempt().is_err());
+        thread::sleep(std::time::Duration::from_millis(100));
+        let before = handles();
+        for _ in 0..20 {
+            assert!(attempt().is_err());
+        }
+        thread::sleep(std::time::Duration::from_millis(200));
+        let after = handles();
+        assert!(
+            after <= before + 4,
+            "failed spawns leaked handles: {before} -> {after}"
         );
     }
 }

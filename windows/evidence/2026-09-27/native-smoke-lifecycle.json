@@ -1,0 +1,316 @@
+{
+  "pid": 33136,
+  "started": "2026-09-27T21:39:42.0491279+09:00",
+  "checks": [
+    {
+      "pid": 6368,
+      "name": "native_conpty_start",
+      "passed": true
+    },
+    {
+      "name": "korean_utf8_roundtrip_via_cli_not_ime",
+      "sequence": 87,
+      "passed": true
+    },
+    {
+      "name": "four_splits_keep_original_process",
+      "passed": true
+    },
+    {
+      "name": "tab_close_terminates_shell",
+      "passed": true
+    },
+    {
+      "name": "repeated_tab_create_close",
+      "cycles": 100,
+      "passed": true
+    },
+    {
+      "totalHandleDelta": -1,
+      "name": "handles_stable_after_warmup",
+      "processHandleDelta": 0,
+      "passed": true
+    }
+  ],
+  "ime": "not tested",
+  "pipe": "\\\\.\\pipe\\flowmux-33136-13edb0f6-0d84-4a89-8b95-6f8c816dd28d",
+  "cycleSamples": [
+    {
+      "handleTypes": {
+        "Event": 65,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 15,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 86,
+        "Directory": 2,
+        "File": 22,
+        "ALPC Port": 8,
+        "Mutant": 3,
+        "Semaphore": 6,
+        "Thread": 13,
+        "Key": 18,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 14,
+        "Process": 13,
+        "ProcessImage:msedgewebview2.exe": 5,
+        "Timer": 1,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 5701632,
+      "cycle": 25,
+      "hostHandles": 295
+    },
+    {
+      "handleTypes": {
+        "Event": 65,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 15,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 86,
+        "Directory": 2,
+        "File": 22,
+        "ALPC Port": 8,
+        "Mutant": 3,
+        "Semaphore": 6,
+        "Thread": 13,
+        "Key": 18,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 14,
+        "Process": 13,
+        "ProcessImage:msedgewebview2.exe": 5,
+        "Timer": 1,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 4775936,
+      "cycle": 50,
+      "hostHandles": 295
+    },
+    {
+      "handleTypes": {
+        "Event": 65,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 15,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 86,
+        "Directory": 2,
+        "File": 22,
+        "ALPC Port": 7,
+        "Mutant": 3,
+        "Semaphore": 6,
+        "Thread": 13,
+        "Key": 18,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 14,
+        "Process": 13,
+        "ProcessImage:msedgewebview2.exe": 5,
+        "Timer": 1,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 5124096,
+      "cycle": 75,
+      "hostHandles": 294
+    },
+    {
+      "handleTypes": {
+        "Event": 65,
+        "WaitCompletionPacket": 10,
+        "IoCompletion": 15,
+        "TpWorkerFactory": 4,
+        "IRTimer": 8,
+        "Type55": 86,
+        "Directory": 2,
+        "File": 22,
+        "ALPC Port": 7,
+        "Mutant": 3,
+        "Semaphore": 6,
+        "Thread": 13,
+        "Key": 18,
+        "WindowStation": 2,
+        "Desktop": 1,
+        "Section": 14,
+        "Process": 13,
+        "ProcessImage:msedgewebview2.exe": 5,
+        "Timer": 1,
+        "Job": 4,
+        "ProcessImage:powershell.exe": 4,
+        "ProcessImage:OpenConsole.exe": 4
+      },
+      "hostPrivateBytes": 5898240,
+      "cycle": 100,
+      "hostHandles": 294
+    }
+  ],
+  "tree": {
+    "active_workspace": "ecd992a5-c83a-4cda-ae6f-45cf728bd485",
+    "surfaces": [
+      {
+        "cols": 57,
+        "exit_code": null,
+        "id": "6ecc40db-fa7a-4fb9-b328-47aadc532441",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 18756,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      },
+      {
+        "cols": 57,
+        "exit_code": null,
+        "id": "c6312ffc-1d7b-4198-84a9-482d547e0eb8",
+        "output_sequence": 87,
+        "parsed_sequence": 87,
+        "pid": 6368,
+        "ready": true,
+        "resources_released": false,
+        "rows": 42,
+        "running": true
+      },
+      {
+        "cols": 26,
+        "exit_code": null,
+        "id": "0c489042-f924-4717-8658-6f7038a10ecf",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 31176,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      },
+      {
+        "cols": 26,
+        "exit_code": null,
+        "id": "97f9c7f1-5f02-4049-884c-fc5bea96e8ab",
+        "output_sequence": 3,
+        "parsed_sequence": 3,
+        "pid": 34016,
+        "ready": true,
+        "resources_released": false,
+        "rows": 19,
+        "running": true
+      }
+    ],
+    "workspaces": [
+      {
+        "cwd": "C:\\Users\\jundu",
+        "focused": "2b7183e1-92ab-4afa-b414-567f3b8f5099",
+        "id": "ecd992a5-c83a-4cda-ae6f-45cf728bd485",
+        "name": "jundu",
+        "root": {
+          "direction": "vertical",
+          "first": {
+            "content": {
+              "active": "c6312ffc-1d7b-4198-84a9-482d547e0eb8",
+              "surfaces": [
+                {
+                  "id": "c6312ffc-1d7b-4198-84a9-482d547e0eb8",
+                  "kind": {
+                    "cwd": "C:\\Users\\jundu",
+                    "shell": null,
+                    "type": "terminal"
+                  },
+                  "title": "PowerShell",
+                  "title_locked": false
+                }
+              ],
+              "type": "tabs"
+            },
+            "id": "0888282a-df22-4329-a365-fae0984da0ba",
+            "kind": "leaf"
+          },
+          "id": "6f75319f-213b-41b9-834a-958161d57ae7",
+          "kind": "split",
+          "ratio": 0.5,
+          "second": {
+            "direction": "horizontal",
+            "first": {
+              "content": {
+                "active": "6ecc40db-fa7a-4fb9-b328-47aadc532441",
+                "surfaces": [
+                  {
+                    "id": "6ecc40db-fa7a-4fb9-b328-47aadc532441",
+                    "kind": {
+                      "cwd": "C:\\Users\\jundu",
+                      "shell": null,
+                      "type": "terminal"
+                    },
+                    "title": "PowerShell",
+                    "title_locked": false
+                  }
+                ],
+                "type": "tabs"
+              },
+              "id": "d6ff43e0-dc49-407d-81f7-1029de9ac96a",
+              "kind": "leaf"
+            },
+            "id": "530a2acf-5adb-4ab0-977a-df0f099213f9",
+            "kind": "split",
+            "ratio": 0.5,
+            "second": {
+              "direction": "vertical",
+              "first": {
+                "content": {
+                  "active": "0c489042-f924-4717-8658-6f7038a10ecf",
+                  "surfaces": [
+                    {
+                      "id": "0c489042-f924-4717-8658-6f7038a10ecf",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "PowerShell",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "d79a6dec-a719-49e4-915f-5a019a42c2b2",
+                "kind": "leaf"
+              },
+              "id": "1647c21e-2b87-4267-9c73-3785cecdcaab",
+              "kind": "split",
+              "ratio": 0.5,
+              "second": {
+                "content": {
+                  "active": "97f9c7f1-5f02-4049-884c-fc5bea96e8ab",
+                  "surfaces": [
+                    {
+                      "id": "97f9c7f1-5f02-4049-884c-fc5bea96e8ab",
+                      "kind": {
+                        "cwd": "C:\\Users\\jundu",
+                        "shell": null,
+                        "type": "terminal"
+                      },
+                      "title": "jundu",
+                      "title_locked": false
+                    }
+                  ],
+                  "type": "tabs"
+                },
+                "id": "2b7183e1-92ab-4afa-b414-567f3b8f5099",
+                "kind": "leaf"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "status": "passed_smoke_only",
+  "finished": "2026-09-27T21:40:36.7126123+09:00"
+}
