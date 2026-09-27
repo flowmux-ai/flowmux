@@ -2,6 +2,7 @@
 //! Windows host services. The GTK workspace does not depend on this crate.
 pub mod browser;
 pub mod browser_dom;
+pub mod browser_wait;
 pub mod command;
 pub mod cwd;
 pub mod keys;

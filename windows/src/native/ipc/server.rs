@@ -174,12 +174,16 @@ fn serve(
     let mut quitting = false;
     let response = (|| -> anyhow::Result<Value> {
         let command: Request = serde_json::from_slice(&frame)?;
+        let budget = match &command.command {
+            Command::Browser { op: crate::browser::Op::Wait { options, .. } } => options.ipc_budget(limits.command, 5)?,
+            _ => limits.command,
+        };
         quitting = matches!(command.command, Command::Quit { .. });
         let (send, receive) = mpsc::sync_channel(1);
         let reply = Reply::new(send, pending)
             .context("window request queue is full; request was not dispatched")?;
         emit(command, reply);
-        let deadline = Instant::now() + limits.command;
+        let deadline = Instant::now() + budget;
         loop {
             anyhow::ensure!(!stop.is_set(), "IPC server is stopping");
             let left = deadline.saturating_duration_since(Instant::now());

@@ -54,7 +54,9 @@ for coverage and remaining limits.
 Each window admits up to 16 pipe clients and 16 outstanding GUI requests. IPC
 uses fixed deadlines: 3 seconds to acquire a connection, 5 seconds to send/receive
 a request or write a reply, 15 seconds for the GUI command, and 25 seconds for
-the CLI to receive its reply. A completed reply waits up to 2 seconds for client
+the CLI to receive its reply. Browser wait commands alone extend the GUI/client
+reply budgets to the requested timeout plus 5/10 seconds when greater than those
+defaults. A completed reply waits up to 2 seconds for client
 closure. A timeout after dispatch does not prove a command was cancelled; check
 the window state before repeating a mutation. Commands are never automatically
 retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
@@ -806,6 +808,50 @@ Full text/value queries retain the original Unicode within their result limit
 and the element's normal DOM value semantics. Browser script execution/memory
 budgets and complete timeout/navigation race coverage remain open. The existing
 16-pending-request and 12-second callback limits apply to these commands too.
-DOM actions, waits and screenshots are still pending. The
+DOM actions and screenshots are still pending; waits are described below. The
 [hidden DOM verifier](scripts/verify-browser-dom.ps1) uses only owned loopback
 pages; it does not simulate OS keyboard/IME input.
+
+### Browser waits (partial)
+
+`browser wait` polls exactly one of `--selector`, `--text`, `--url`,
+`--ready-state` or `--js`. For example:
+
+```powershell
+flowmux browser wait pane:<uuid> --url /dashboard --timeout-ms 30000
+flowmux browser wait pane:<uuid> --ready-state complete
+flowmux browser wait pane:<uuid> --selector "#result" --poll-ms 50
+flowmux browser wait pane:<uuid> --text "한글 한 😀"
+flowmux browser wait pane:<uuid> --js "() => window.appReady === true"
+```
+
+Plain output is `true` when matched or `false` on timeout; both exit successfully.
+`--json` returns `{ "result": true|false, "surface": "<uuid>" }`. Invalid conditions,
+script errors, Promise predicates and a closed browser return errors. Selectors
+check existence, including hidden elements. Text is an exact Unicode substring
+of rendered `innerText`, without normalization. URL matching uses `location.href`
+and its percent encoding. A ready state must be `loading`, `interactive` or
+`complete`; short-lived states can pass between polls.
+
+The wait stays with the initial browser surface through tab hiding, moves and
+navigation. It does not retarget another tab activated in the same pane. Old
+navigation callbacks cannot complete it. Conditions other than loading/interactive
+are sampled after native navigation finishes; waits can therefore miss an element
+that appears and disappears during loading. Reads do not activate a tab, take OS
+focus or generate page input events. Frames/shadow roots are not traversed.
+
+Conditions must be nonempty. Defaults are 5,000 ms timeout and 100 ms polling. Accepted ranges are 1–120,000 ms
+and 1–10,000 ms respectively; OS timer resolution and WebView scheduling can make
+polling slower. Eight waits per window are allowed, with one in-flight script per
+wait. Browser waits alone extend the IPC response budget; other command deadlines
+are unchanged. A callback stalled for 12 seconds fails. An expired wait cannot be
+completed by a late callback, but timeout cannot cancel JavaScript already running.
+
+`--js` supports a synchronous expression, function or function body. Polling
+repeats the predicate, so use a read-only predicate. Only a compilation error
+selects the body form; an execution error fails without executing it again in the
+same poll. As with `eval`, arbitrary page JavaScript is not a resource sandbox.
+Closing a CLI currently leaves its wait bounded by the requested timeout; prompt
+cancellation on client disconnect and exhaustive race coverage remain pending.
+The [hidden wait verifier](scripts/verify-browser-wait.ps1) uses isolated local
+pages and does not establish physical IME or desktop interaction acceptance.

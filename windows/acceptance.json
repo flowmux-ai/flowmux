@@ -474,8 +474,12 @@
     {
       "id": "B07",
       "feature": "selector/text/url/ready-state/JS wait",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-wait.md",
+        "evidence/2026-09-28/native-browser-wait-background.json"
+      ],
+      "notes": "Selector/text/URL/ready-state/synchronous JS waits implemented with surface pinning, one in-flight callback, native navigation epochs, deadline checks and bounded transport extension. Hidden fixture covers exact Unicode, delayed/streaming pages, timeout, runtime errors without replay, late callbacks, redirects, tab hiding/close, concurrent capacity and waits beyond default IPC deadlines. Prompt client-disconnect cancellation, transient states between polls, broader frame/shadow semantics and exhaustive races remain pending."
     },
     {
       "id": "B08",
@@ -945,9 +949,10 @@
         "evidence/2026-09-28/native-browser-background.json",
         "evidence/2026-09-28/native-browser-ordinal-background.json",
         "evidence/2026-09-28/browser-dom.md",
-        "evidence/2026-09-28/native-browser-dom-background.json"
+        "evidence/2026-09-28/native-browser-dom-background.json",
+        "evidence/2026-09-28/native-browser-wait-background.json"
       ],
-      "notes": "Native browser foundation and nineteen CLI operations have hidden loopback evidence, including DOM snapshots and read-only ref queries. Actions/waits/screenshots, complete browser UI parity and physical IME/DPI/accessibility acceptance remain pending."
+      "notes": "Native browser foundation and twenty CLI operations have hidden loopback evidence, including DOM snapshots, read-only queries and five-condition waits. Actions/screenshots, complete browser UI parity and physical IME/DPI/accessibility acceptance remain pending."
     },
     {
       "id": "G10",

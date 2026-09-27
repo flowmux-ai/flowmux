@@ -1,0 +1,37 @@
+{
+  "checked": "2026-09-28T07:58:50.1930354+09:00",
+  "remaining": [],
+  "ownedFixtureNames": [
+    "browser-wait-7717a453-1fd1-4b0b-abb0-1d8299b897e6",
+    "browser-wait-de64a6bf-ed10-4b3e-bf49-3158e56b066b",
+    "browser-dom-2b5c6eec-b5c3-42fa-9853-93d00265cffe",
+    "keys-8dafce3e-2fd0-4e4b-b72b-67b74565eac5",
+    "ipc-limits-b7937ccb-6ea6-40bf-b15f-635ca4df979f"
+  ],
+  "mode": "read_only",
+  "ownedPids": [
+    10252,
+    11188,
+    13728,
+    20644,
+    25968,
+    28728,
+    29444,
+    30024,
+    30672,
+    32128,
+    32292,
+    32588,
+    34372,
+    35872,
+    36036,
+    37032,
+    37256,
+    37308,
+    37444,
+    37880,
+    38112,
+    38324,
+    39912
+  ]
+}

@@ -152,6 +152,7 @@ fn response(cli: Cli) -> anyhow::Result<String> {
                 | crate::browser::Op::IsEnabled { .. }
                 | crate::browser::Op::IsChecked { .. }
                 | crate::browser::Op::Count { .. }
+                | crate::browser::Op::Wait { .. }
         }
     );
     let snapshot_output = matches!(
@@ -186,6 +187,12 @@ fn response(cli: Cli) -> anyhow::Result<String> {
 
 /// One IPC submission, with no stdout formatting and no retry after dispatch.
 pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
+    let reply_budget = match &cli.command {
+        Command::Browser {
+            op: crate::browser::Op::Wait { options, .. },
+        } => options.ipc_budget(Duration::from_secs(25), 10)?,
+        _ => Duration::from_secs(25),
+    };
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
     let candidates = if let Some(name) = &explicit {
         // A stale explicit or inherited endpoint must never select another window.
@@ -249,7 +256,7 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     let frame = file
         .read_frame(
             server::MAX_REPLY_BYTES,
-            Instant::now() + Duration::from_secs(25),
+            Instant::now() + reply_budget,
             &stop,
         )
         .context("waiting for IPC reply; command may already have executed (not retried)")?;

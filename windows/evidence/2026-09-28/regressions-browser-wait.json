@@ -1,0 +1,52 @@
+{
+  "mode": "background",
+  "nativeRust": {
+    "exitCode": 0,
+    "pid": 32588,
+    "mode": "hidden"
+  },
+  "linuxRustPassed": 94,
+  "nativeRustPassed": 121,
+  "waitGroups": 6,
+  "regressions": [
+    {
+      "name": "browser-dom",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-wait-browser-dom-regression.json"
+      ],
+      "groups": 6
+    },
+    {
+      "name": "keys",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-wait-keys-regression.json"
+      ],
+      "groups": 7
+    },
+    {
+      "name": "ipc-limits",
+      "exitCode": 0,
+      "evidence": [
+        "evidence/2026-09-28/native-browser-wait-ipc-limits-regression.json"
+      ],
+      "groups": 3
+    }
+  ],
+  "debugBuild": "passed",
+  "releaseBuild": "passed",
+  "releaseClippy": "passed",
+  "rustFmt": "passed",
+  "nsisPackageBuild": "passed",
+  "installerExecuted": false,
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "scope": "windows/ only; no changes to root/shared/Linux/macOS files",
+  "existingPlatformSourceDiffSince": "79af440",
+  "existingPlatformSourceDiff": [],
+  "physicalImeAcceptance": "not performed",
+  "remainingRecordedOwnedProcesses": [],
+  "userWslFlowmuxPid787": "running at read-only audit"
+}

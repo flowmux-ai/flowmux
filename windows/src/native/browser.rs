@@ -6,6 +6,8 @@ use crate::browser_dom as dom;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[path = "browser_chrome.rs"]
 mod chrome;
+#[path = "browser_wait.rs"]
+pub(super) mod wait;
 const MAX_SCRIPT: usize = 128 * 1024;
 pub(super) enum Signal {
     Navigation(SurfaceId, u64),
@@ -14,6 +16,8 @@ pub(super) enum Signal {
     Metadata(SurfaceId),
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
+    WaitTick,
+    WaitResult(Uuid, Uuid, u64, String),
 }
 enum Response {
     Eval,
@@ -310,6 +314,7 @@ impl App {
         Ok(())
     }
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
+        self.browser_wait_cancel(id, reason);
         self.pending_browser.retain(|_, pending| {
             if pending.surface == id {
                 let _ = pending.reply.try_send(json!({"error":reason}));
@@ -347,6 +352,10 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::WaitTick => self.browser_wait_tick(),
+            Signal::WaitResult(id, poll, epoch, result) => {
+                self.browser_wait_result(id, poll, epoch, result)
+            }
             Signal::Navigation(id, navigation) => {
                 let epoch = self
                     .browsers
@@ -552,7 +561,8 @@ impl App {
             | Op::IsVisible { pane, .. }
             | Op::IsEnabled { pane, .. }
             | Op::IsChecked { pane, .. }
-            | Op::Count { pane, .. } => *pane,
+            | Op::Count { pane, .. }
+            | Op::Wait { pane, .. } => *pane,
             Op::Open { .. } => unreachable!(),
         };
         let id = self.target(Some(pane), None)?;
@@ -572,6 +582,10 @@ impl App {
             _ => None,
         };
         match op {
+            Op::Wait { options, .. } => {
+                self.browser_wait_start(id, options, reply)?;
+                return Ok(None);
+            }
             Op::Navigate { url, .. } => browser.navigate(&url)?,
             Op::Back { .. } => browser.operation(1)?,
             Op::Forward { .. } => browser.operation(2)?,

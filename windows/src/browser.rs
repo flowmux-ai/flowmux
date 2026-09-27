@@ -126,6 +126,14 @@ pub enum Op {
         pane: Uuid,
         selector: String,
     },
+    /// Poll exactly one condition until true or the timeout expires.
+    Wait {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        #[command(flatten)]
+        #[serde(flatten)]
+        options: crate::browser_wait::Options,
+    },
     /// Evaluate synchronous JavaScript in the active browser document.
     Eval {
         #[arg(value_parser = crate::command::parse_id)]

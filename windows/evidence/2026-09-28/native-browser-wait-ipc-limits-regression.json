@@ -1,0 +1,31 @@
+{
+  "started": "2026-09-28T07:56:52.8637122+09:00",
+  "mode": "background",
+  "legacyObservation": false,
+  "checks": [
+    {
+      "threadsWhileOccupied": 30,
+      "name": "idle_connection_capacity_and_expiration",
+      "rejected": 8,
+      "writableAfterSixSeconds": 0,
+      "accepted": 16,
+      "attempted": 24,
+      "threadsBefore": 30
+    },
+    {
+      "error": "{\"error\":\"waiting for IPC reply; command may already have executed (not retried): IPC I/O deadline exceeded\"}",
+      "request": "{\"method\":\"new_workspace\",\"cwd\":null,\"shell\":null,\"shell_args\":[]}",
+      "name": "cli_exits_when_owned_server_never_replies_without_retrying_mutation",
+      "elapsedSeconds": 25.1182254
+    },
+    {
+      "elapsedSeconds": 2.0310354,
+      "name": "unread_quit_reply_finishes_and_cancels_fifteen_idle_clients_and_shells"
+    }
+  ],
+  "pid": 11188,
+  "pipe": "\\\\.\\pipe\\flowmux-11188-eb87acbe-9c6f-4e99-a339-390a484fd0b8",
+  "shellPids": 20644,
+  "status": "passed_ipc_limits_subset",
+  "finished": "2026-09-28T07:57:28.0009374+09:00"
+}

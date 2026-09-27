@@ -1,0 +1,100 @@
+{
+  "started": "2026-09-28T07:56:39.7937612+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "reference_vectors_mode_True",
+      "keys": 128,
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "8a83c7fac6ffd882749b595719a8b8389b73e5745328b738bbea24e67b5aff6e",
+        "count": 455,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "reference_vectors_mode_False",
+      "keys": 128,
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "9f09eb22b748999e36ce26d0f3a8db6d5932e12c22b99baa293d7cf6714c0165",
+        "count": 910,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "legacy_send_key_wire_keeps_pane_target_and_mode",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "658c90fba1ccfddea213e380e330e233cbb7d044050aa47ea802b135ef6c0f6d",
+        "count": 913,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "inactive_surface_uses_its_own_mode_without_focus",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ff100c5344dd481d68b1b55d99fc30d6b9a39554141e190782bd975fad52c648",
+        "count": 916,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "invalid_keys_ui_actions_and_targets_produce_no_input",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ff100c5344dd481d68b1b55d99fc30d6b9a39554141e190782bd975fad52c648",
+        "count": 916,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "moved_source_retains_mode_and_process",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "ab5c207635ffcc1d74712de3f654a7134caf7eac07e55b6e4d0f1506a173be70",
+        "count": 919,
+        "beforeConptyMatches": true
+      },
+      "passed": true
+    },
+    {
+      "name": "exited_and_closed_targets_fail_without_restarting",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "launched": {
+    "started": "2026-09-27T22:56:39.7957632Z",
+    "pid": 38324
+  },
+  "host": {
+    "pid": 38324,
+    "surface": "413f37e8-db61-42fb-b4eb-b229145ef1ef",
+    "probePid": 37256
+  },
+  "startupInputBeforeReady": [
+    27,
+    91,
+    63,
+    49,
+    59,
+    50,
+    99,
+    27,
+    91,
+    79,
+    27,
+    91,
+    79
+  ],
+  "status": "passed_background_named_keys_subset",
+  "finished": "2026-09-28T07:56:51.2788193+09:00"
+}

@@ -384,7 +384,7 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B03/B06/B09 and G09 are partial. DOM actions/waits/screenshots, downloads,
+B01/B02/B03/B06/B07/B09 and G09 are partial. DOM actions/screenshots, downloads,
 popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
@@ -399,5 +399,15 @@ and callbacks without stamping the DOM. Read-only text/value/attr/state/count
 commands support structured JSON and plain scalar output. Output/traversal bounds,
 Unicode excerpts, duplicate/deep selectors, reference lifetime and failure recovery
 are checked in a hidden WebView2 fixture. Frames/shadow trees, full accessibility,
-DOM actions, waits, screenshots and actual browser IME remain pending. See
+DOM actions, screenshots and actual browser IME remain pending. See
 [DOM evidence](evidence/2026-09-28/browser-dom.md).
+
+Windows browser waits now cover selector/text/URL/ready-state/synchronous JS
+conditions through an independent native timer. Each wait pins the initial
+surface, allows only one in-flight predicate, rejects old navigation callbacks
+and checks the deadline again at completion. Timeout returns false; script errors
+and browser close return errors. Only wait commands extend the IPC budget, up to
+the validated 120-second wait plus transport margin. Existing terminal/state timer
+frequency and non-wait IPC limits remain unchanged. B07/G09 remain partial because
+client-disconnect cancellation, broader page semantics and complete race/physical
+UI acceptance remain open. See [wait evidence](evidence/2026-09-28/browser-wait.md).

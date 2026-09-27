@@ -31,6 +31,20 @@ public sealed class BrowserFixture : IDisposable {
                 var request=reader.ReadLine();if(request==null)return;
                 string line;while(!String.IsNullOrEmpty(line=reader.ReadLine())) {}
                 var path=request.Split(' ')[1];
+                if(path.StartsWith("/deferred.js")) {
+                    for(int i=0;i<30&&!stopped;i++)Thread.Sleep(100);
+                    var js=Encoding.UTF8.GetBytes("window.deferredDone=true;");
+                    var jsHeader=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: "+js.Length+"\r\nConnection: close\r\n\r\n");
+                    stream.Write(jsHeader,0,jsHeader.Length);stream.Write(js,0,js.Length);return;
+                }
+                if(path.StartsWith("/stream")) {
+                    var first=Encoding.UTF8.GetBytes("<!doctype html><meta charset='utf-8'><title>대기 한글</title><script defer src='/deferred.js'></script><h1 id='stream'>지연 한 😀</h1>");
+                    var last=Encoding.UTF8.GetBytes("<p>완료</p>");
+                    var streamHeader=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; connect-src 'none'\r\nContent-Length: "+(first.Length+last.Length)+"\r\nConnection: close\r\n\r\n");
+                    stream.Write(streamHeader,0,streamHeader.Length);stream.Write(first,0,first.Length);stream.Flush();
+                    for(int i=0;i<12&&!stopped;i++)Thread.Sleep(100);
+                    stream.Write(last,0,last.Length);return;
+                }
                 if(path.StartsWith("/slow")) {for(int i=0;i<50&&!stopped;i++)Thread.Sleep(100);}
                 if(path.StartsWith("/fail")) return;
                 if(path.StartsWith("/redirect")) {

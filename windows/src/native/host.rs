@@ -201,7 +201,11 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_TIMER => {
-            post(Event::Tick);
+            if wparam == browser::wait::TIMER {
+                post(Event::Browser(browser::Signal::WaitTick));
+            } else if wparam == 1 {
+                post(Event::Tick);
+            }
             0
         }
         WAKE => 0,
@@ -308,6 +312,7 @@ struct App {
     browsers: HashMap<SurfaceId, browser::Browser>,
     browser_context: Option<WebContext>,
     pending_browser: HashMap<Uuid, browser::Pending>,
+    browser_waits: HashMap<Uuid, browser::wait::Wait>,
     browser_tokens: crate::browser_dom::Tokens,
     workspaces: Vec<Workspace>,
     active_workspace: usize,
@@ -492,6 +497,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             browser_context: None,
             browsers: HashMap::new(),
             pending_browser: HashMap::new(),
+            browser_waits: HashMap::new(),
             browser_tokens: crate::browser_dom::Tokens::default(),
             workspaces,
             active_workspace,
@@ -2043,7 +2049,7 @@ impl App {
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
-                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count"],
+                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode",
                 "commands":["browser","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
