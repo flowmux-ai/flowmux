@@ -53,6 +53,11 @@ pub enum Command {
     ShellIntegration,
     Identify,
     Capabilities,
+    /// Show or update the Windows terminal appearance shared by windows.
+    Settings {
+        #[command(subcommand)]
+        op: SettingsOp,
+    },
     Tree,
     ReadScreen {
         #[arg(value_parser = parse_id)]
@@ -183,6 +188,23 @@ pub enum Command {
     },
     /// Save layout and styled terminal history without closing the window.
     SaveState,
+}
+
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum SettingsOp {
+    Show,
+    Set {
+        #[arg(value_enum)]
+        key: crate::settings::SettingKey,
+        value: String,
+        /// Refuse to replace a value changed by another window.
+        #[arg(long)]
+        #[serde(default)]
+        expected: Option<String>,
+    },
+    /// Restore terminal appearance defaults, including an invalid settings file.
+    Reset,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Serialize, Deserialize)]

@@ -10,14 +10,15 @@ import { observeCwd } from './cwd.mjs';
 import { SearchUi } from './search.mjs';
 import { OutputSearch } from './output-search.mjs';
 import { PaneShortcuts } from './pane-shortcuts.mjs';
+import { Settings, options } from './settings.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
 const send = message => window.ipc.postMessage(JSON.stringify({ ...identity, message }));
+const initialSettings = window.__flowmuxSettings;
+delete window.__flowmuxSettings;
 const terminal = new Terminal({
-  cursorBlink: true, scrollback: 10000, fontFamily: 'Cascadia Mono, Consolas, "Malgun Gothic", monospace',
-  fontSize: 14, allowProposedApi: false,
-  theme: { background: '#17191f', foreground: '#e2e5ed', cursor: '#b9c6ff', selectionBackground: '#455483' },
+  ...options(initialSettings.terminal), allowProposedApi: false,
   linkHandler: { activate: (_event, url) => send({ type: 'link', url }) },
 });
 const fit = new FitAddon(), serialize = new SerializeAddon();
@@ -37,11 +38,14 @@ terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title })
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
 
 let composing = false;
+const settings = new Settings(terminal, () => {
+  if (document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
+}, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document);
 const paneShortcuts = new PaneShortcuts();
 window.addEventListener('blur', () => paneShortcuts.reset());
 terminal.textarea.addEventListener('blur', () => paneShortcuts.reset());
 terminal.textarea.addEventListener('compositionstart', () => { composing = true; });
-terminal.textarea.addEventListener('compositionend', () => { composing = false; });
+terminal.textarea.addEventListener('compositionend', () => { composing = false; queueMicrotask(() => settings.flush()); });
 terminal.attachCustomKeyEventHandler(event => {
   input.keyEvent(event);
   const paneAction = paneShortcuts.event(event, composing);
@@ -70,9 +74,11 @@ window.flowmuxHost = message => {
         fit.fit();
         restoring = false;
         terminal.options.disableStdin = false;
+        settings.flush();
         send({ type: 'restored' });
       });
-    } else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
+    } else if (message.type === 'settings') settings.receive(message.document);
+    else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
     else if (message.type === 'open_find') { if (!restoring) find.open(true); }
     else if (message.type === 'open_search_hit') {
       if (message.commit) { find.close(false); fit.fit(); }
@@ -86,5 +92,6 @@ window.flowmuxHost = message => {
   } catch (error) { send({ type: 'fault', message: String(error) }); }
 };
 fit.fit();
+settings.receive(initialSettings);
 send({ type: 'ready' });
 // The native host grants focus after readiness. Hidden tabs must not steal it.

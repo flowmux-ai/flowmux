@@ -1,0 +1,119 @@
+[
+  {
+    "started": "2026-09-28T02:13:22.2927674+09:00",
+    "mode": "background",
+    "hosts": [],
+    "checks": [],
+    "status": "failed",
+    "error": "Owned request failed: settings show",
+    "finished": "2026-09-28T02:13:23.5162740+09:00"
+  },
+  {
+    "started": "2026-09-28T02:18:01.6438879+09:00",
+    "mode": "background",
+    "hosts": [
+      {
+        "launchedUtc": "2026-09-27T17:18:01.6478885Z",
+        "pid": 33300,
+        "pipe": "\\\\.\\pipe\\flowmux-33300-157d1f02-8ca6-4fd1-aa11-e66b6b07ed66"
+      },
+      {
+        "launchedUtc": "2026-09-27T17:18:03.0749750Z",
+        "pid": 29576,
+        "pipe": "\\\\.\\pipe\\flowmux-29576-861a67c2-2cb8-46bb-97fc-66aca267d4a3"
+      }
+    ],
+    "checks": [
+      {
+        "console": {
+          "rows": 11,
+          "cols": 68
+        },
+        "name": "font_size_updates_all_visible_and_hidden_tabs_and_another_window_without_restarting_or_focusing",
+        "surfacePids": "19ba6979-ea85-41e5-b876-4cfd0c1d0e46:16860,c23c7c34-5080-4033-aec4-dc5999eb024d:17832,f6211360-d546-400b-8924-da6178006ef4:37956",
+        "previousGrid": [
+          117,
+          19
+        ],
+        "newGrid": [
+          68,
+          11
+        ]
+      }
+    ],
+    "status": "failed",
+    "error": "Owned request failed: settings set font-family \"한글 한 😀\", Consolas, monospace",
+    "finished": "2026-09-28T02:18:04.5402466+09:00"
+  },
+  {
+    "started": "2026-09-28T02:18:47.4831230+09:00",
+    "mode": "background",
+    "hosts": [
+      {
+        "launchedUtc": "2026-09-27T17:18:47.4882767Z",
+        "pid": 31684,
+        "pipe": "\\\\.\\pipe\\flowmux-31684-d688336e-e062-4dea-bfad-9ab23df3aab2"
+      },
+      {
+        "launchedUtc": "2026-09-27T17:18:48.7901670Z",
+        "pid": 10232,
+        "pipe": "\\\\.\\pipe\\flowmux-10232-284899d8-3b3e-40c6-9e43-f5e6ff4c4733"
+      },
+      {
+        "launchedUtc": "2026-09-27T17:18:52.7591975Z",
+        "pid": 26272,
+        "pipe": "\\\\.\\pipe\\flowmux-26272-5c9eb267-65a0-4f4f-9124-03944800bbdf"
+      },
+      {
+        "launchedUtc": "2026-09-27T17:18:54.6892553Z",
+        "pid": 38856,
+        "pipe": "\\\\.\\pipe\\flowmux-38856-2b7a08ae-3497-4444-8e5a-fd7ed36305c8"
+      }
+    ],
+    "checks": [
+      {
+        "console": {
+          "rows": 11,
+          "cols": 68
+        },
+        "name": "font_size_updates_all_visible_and_hidden_tabs_and_another_window_without_restarting_or_focusing",
+        "surfacePids": "2d5ffef5-892c-44ee-9896-ca2cb96190f3:38776,35a8dfeb-b78a-4d4b-bf78-90af8fa57ffb:37184,6335a14b-bf9b-4268-93cd-8c98fa4360ec:33412",
+        "previousGrid": [
+          117,
+          19
+        ],
+        "newGrid": [
+          68,
+          11
+        ]
+      },
+      {
+        "terminal": {
+          "cursor_blink": false,
+          "cursor_style": "bar",
+          "font_family": "'한글 한 😀', Consolas, monospace",
+          "font_size": 24,
+          "scrollback": 10000,
+          "theme": "light"
+        },
+        "name": "unicode_font_list_theme_and_cursor_survive_cross_window_field_merges"
+      },
+      {
+        "name": "invalid_stale_and_denied_writes_preserve_file_and_live_terminal_options"
+      },
+      {
+        "name": "external_atomic_edit_reloads_even_when_revision_is_unchanged"
+      },
+      {
+        "window": "03c2d62d-1f24-4e7a-9f41-9f8f7bf30ea1",
+        "name": "restart_restores_three_tabs_and_korean_history_with_persisted_terminal_settings"
+      },
+      {
+        "name": "scrollback_limit_evicts_old_history_and_keeps_new_output"
+      }
+    ],
+    "status": "failed",
+    "error": "Explicit reset left a settings error",
+    "finished": "2026-09-28T02:18:55.3875758+09:00"
+  }
+]

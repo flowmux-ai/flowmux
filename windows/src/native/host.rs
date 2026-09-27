@@ -2,6 +2,7 @@
 use super::{
     checked, data_dir, ipc,
     session::{Session, SessionEvent},
+    settings_store,
     state_store::{self, Store},
     wide,
 };
@@ -40,6 +41,8 @@ use windows_sys::Win32::{
     },
 };
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+#[path = "appearance.rs"]
+mod appearance;
 #[path = "panes.rs"]
 mod panes;
 #[path = "search.rs"]
@@ -66,6 +69,7 @@ enum Event {
     Pointer(panes::Pointer),
     ContextMenu(Action, i32, i32),
     Metadata(workspaces::EditAction),
+    Settings(settings_store::Update),
 }
 #[derive(Clone)]
 struct EventSender {
@@ -197,6 +201,7 @@ impl HasWindowHandle for Parent {
     }
 }
 struct Surface {
+    applied_settings: Option<Value>,
     view: WebView,
     identity: Identity,
     session: Option<Session>,
@@ -223,6 +228,7 @@ impl Surface {
 }
 #[derive(Clone)]
 enum Action {
+    Settings,
     NewWorkspace,
     Workspace(WorkspaceId),
     WorkspaceMenu,
@@ -261,6 +267,10 @@ struct PendingSave {
     reply: Option<ipc::Reply>,
 }
 struct App {
+    settings_worker: settings_store::Worker,
+    settings: crate::settings::Document,
+    settings_error: Option<String>,
+    settings_pending: HashMap<Uuid, (Option<ipc::Reply>, Option<Uuid>)>,
     window: HWND,
     sender: EventSender,
     _ipc: ipc::Server,
@@ -397,7 +407,17 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             move |command, reply| dispatch.send(Event::Command(command, reply)),
             move || shutdown.send(Event::ExitAfterReply),
         )?;
+        let settings_events = sender.clone();
+        let (settings_worker, initial_settings) =
+            settings_store::Worker::start(background_test, move |update| {
+                settings_events.send(Event::Settings(update))
+            })?;
+        let settings_error = initial_settings.as_ref().err().cloned();
         let mut app = App {
+            settings_worker,
+            settings: initial_settings.unwrap_or_default(),
+            settings_error,
+            settings_pending: HashMap::new(),
             window,
             sender,
             _ipc: ipc,
@@ -520,6 +540,14 @@ impl App {
             self.button(name, action)?;
         }
         self.button("Workspace…", Action::WorkspaceMenu)?;
+        self.button(
+            if self.settings_error.is_some() {
+                "Settings (!)…"
+            } else {
+                "Settings…"
+            },
+            Action::Settings,
+        )?;
         for index in 0..self.workspaces.len() {
             let name = format!(
                 "{} {}",
@@ -584,8 +612,9 @@ impl App {
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
-            "window.__flowmuxIdentity={};",
-            serde_json::to_string(&identity)?
+            "window.__flowmuxIdentity={};window.__flowmuxSettings={};",
+            serde_json::to_string(&identity)?,
+            serde_json::to_string(&self.settings)?
         );
         #[cfg(debug_assertions)]
         let init = if std::env::var_os("FLOWMUX_TEST_INPUT_TRACE").is_some() {
@@ -658,6 +687,7 @@ impl App {
         self.surfaces.insert(
             surface,
             Surface {
+                applied_settings: None,
                 view,
                 identity,
                 session: None,
@@ -727,12 +757,13 @@ impl App {
         for (index, control) in self.controls.iter().enumerate() {
             let (x, y, width, height) = match control.action {
                 Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
+                Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
                 Action::Workspace(id) | Action::WorkspaceColor(id) => {
                     let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
                     let swatch = matches!(control.action, Action::WorkspaceColor(_));
                     (
                         if swatch { px(5) } else { px(23) },
-                        bar + px(48) + i as i32 * px(36),
+                        bar + px(88) + i as i32 * px(36),
                         if swatch {
                             px(16)
                         } else {
@@ -894,6 +925,7 @@ impl App {
                     }
                 }
             }
+            Event::Settings(update) => self.settings_result(update)?,
             Event::Command(command, reply) => match self.command(command, reply.clone()) {
                 Ok(Some(result)) => {
                     let _ = reply.try_send(result);
@@ -916,6 +948,9 @@ impl App {
                 if surface.ready || surface.restoring {
                     return Ok(());
                 }
+                surface.send(&HostMessage::Settings {
+                    document: self.settings.clone(),
+                })?;
                 if let Some(screen) = self.restore_screens.remove(&id) {
                     surface.send(&HostMessage::Restore { screen })?;
                     self.surfaces.get_mut(&id).unwrap().restoring = true;
@@ -929,6 +964,18 @@ impl App {
                     "unexpected history restore acknowledgement"
                 );
                 self.start_session(id)?;
+            }
+            ClientMessage::SettingsApplied {
+                revision,
+                terminal,
+                background,
+                foreground,
+            } => {
+                if revision == self.settings.revision && terminal == self.settings.terminal {
+                    self.surfaces.get_mut(&id).unwrap().applied_settings = Some(
+                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground}),
+                    );
+                }
             }
             ClientMessage::Resize { cols, rows } => {
                 let surface = self.surfaces.get_mut(&id).unwrap();
@@ -1533,6 +1580,7 @@ impl App {
             "window is saving before close"
         );
         match action {
+            Action::Settings => return self.settings_menu(),
             Action::NewWorkspace => {
                 self.zoomed = None;
                 let cwd = self.locate(self.active()).unwrap().2;
@@ -1608,6 +1656,13 @@ impl App {
             "window is saving before close"
         );
         match command {
+            Command::Settings { op } => {
+                if matches!(op, crate::command::SettingsOp::Show) {
+                    return Ok(Some(self.settings_status()));
+                }
+                self.settings_submit(op, Some(reply), None)?;
+                return Ok(None);
+            }
             Command::Doctor | Command::ShellIntegration => {
                 anyhow::bail!("this is a local CLI operation")
             }
@@ -1622,7 +1677,7 @@ impl App {
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
-                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab"],
+                    "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1632,6 +1687,7 @@ impl App {
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
                     "visible":surface.visible,
+                    "settings":surface.applied_settings,
                     "bounds":surface.view.bounds().ok().map(|rect| { let p = rect.position.to_physical::<i32>(1.0); let s = rect.size.to_physical::<u32>(1.0); json!({"x":p.x,"y":p.y,"width":s.width,"height":s.height}) }),
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(

@@ -1,0 +1,63 @@
+{
+  "started": "2026-09-28T02:20:35.1839770+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "color": "#12abef",
+      "locked": true,
+      "name": "korean_nfd_emoji_and_ampersands_preserved_in_metadata_and_native_captions",
+      "tabName": "TAB-한글 한 é 😀 & && name",
+      "workspaceName": "한글 한 é 😀 & && name"
+    },
+    {
+      "name": "invalid_names_colors_reorders_and_missing_ids_leave_model_unchanged"
+    },
+    {
+      "name": "forty_one_reorders_preserve_all_pids_active_identity_and_hidden_child_context",
+      "count": 41,
+      "order": [
+        "f648df4d-d070-4a70-b22d-7357a5b8a60f",
+        "799fcdfd-8676-44fb-a4cc-d3a904368de9",
+        "32e79f5e-d0e0-4c6d-8def-9f8ad13788d9"
+      ]
+    },
+    {
+      "survivorPids": [
+        38372,
+        28800
+      ],
+      "name": "inactive_workspace_close_terminates_all_three_terminals_and_three_descendants_only",
+      "stoppedPids": [
+        33872,
+        32460,
+        33096,
+        38512,
+        28168,
+        35084
+      ]
+    },
+    {
+      "name": "restart_restores_workspace_order_color_unicode_names_locked_tab_title_and_korean_history"
+    },
+    {
+      "name": "active_workspace_close_selects_survivor_color_clear_and_final_workspace_protection"
+    }
+  ],
+  "hosts": [
+    {
+      "launchedUtc": "2026-09-27T17:20:35.1899783Z",
+      "pid": 26020,
+      "pipe": "\\\\.\\pipe\\flowmux-26020-d12fb8fc-827b-48b7-85a6-de913f3c7f13",
+      "discoveryWrittenUtc": "2026-09-27T17:20:35.2987080Z"
+    },
+    {
+      "launchedUtc": "2026-09-27T17:20:43.5870859Z",
+      "pid": 26992,
+      "pipe": "\\\\.\\pipe\\flowmux-26992-ba3de1d0-7b5d-459a-aecf-45e84cf9631a",
+      "discoveryWrittenUtc": "2026-09-27T17:20:43.6402078Z"
+    }
+  ],
+  "status": "passed_background_workspace_subset",
+  "pending": "Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and empty-window UI remain pending.",
+  "finished": "2026-09-28T02:20:45.2066030+09:00"
+}

@@ -7,4 +7,5 @@ pub mod model;
 pub mod native;
 pub mod output_search;
 pub mod protocol;
+pub mod settings;
 pub mod state;

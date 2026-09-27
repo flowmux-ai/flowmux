@@ -135,8 +135,11 @@
     {
       "id": "T07",
       "feature": "scrollback 용량·일반 scrollbar",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-settings-background.json"
+      ],
+      "notes": "Configurable terminal scrollback 0–100000 lines applies to live xterm views and persists across Windows hosts. Hidden native test reduces it to 100, emits 600 lines, verifies old history eviction and retained new output. Native scrollbar/selection/IME, memory/load and complete scrollback parity remain pending."
     },
     {
       "id": "T08",
@@ -227,8 +230,11 @@
     {
       "id": "T20",
       "feature": "폰트·테마·줌·커서 점멸",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-settings-background.json"
+      ],
+      "notes": "Native settings menu/editor and CLI implement shared font/fallback list, 6–72px size with larger/smaller/reset, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Real menu/IME/DPI, installed font fallback/width, custom themes, whole-app colors and configurable zoom shortcuts remain pending."
     },
     {
       "id": "T21",
@@ -330,8 +336,11 @@
     {
       "id": "U10",
       "feature": "옵션·테마·font·zoom 실시간 반영",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-settings-background.json"
+      ],
+      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI, per-tab options and full settings parity remain pending."
     },
     {
       "id": "U11",
@@ -739,9 +748,10 @@
       "feature": "config/state/log/cache·theme import",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-27/native-state-background.json"
+        "evidence/2026-09-27/native-state-background.json",
+        "evidence/2026-09-28/native-settings-background.json"
       ],
-      "notes": "Versioned Windows window state with exclusive OS lease and atomic replacement; explicit failure preserves old file and leaves host alive. Configuration/theme import and remaining data/log/cache parity are pending."
+      "notes": "Versioned Windows state and shared terminal config use exclusive OS leases/locks and atomic replacement. Config updates merge fields under lock, reject stale expected values, preserve failed writes and invalid/future files, poll external edits and support explicit reset. Hidden tests verify corruption, denied replace, multiwindow propagation and restart. Theme import, full configuration parity and remaining data/log/cache features are pending."
     },
     {
       "id": "O07",

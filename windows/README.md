@@ -92,6 +92,49 @@ window. Empty-window UI, drag reordering, overflowing side panels, automatic-nam
 reset and native menu/dialog/IME/DPI acceptance remain pending. Hidden verification
 is available in `scripts/verify-workspaces.ps1`.
 
+The side panel's **Settings…** menu changes terminal font/fallback list, size
+(6–72 pixels), dark/light theme, cursor blink/style and scrollback (0–100000
+lines). Larger/smaller/reset text commands change the shared font size. Lowering
+scrollback discards the oldest retained lines. Terminal settings are shared
+across this user's Windows flowmux windows and apply to existing and new tabs
+without restarting their shells or requesting focus. An active terminal IME
+composition or history restore defers changes until it ends.
+
+```powershell
+flowmuxctl.exe settings show
+flowmuxctl.exe settings set font-family 'Cascadia Mono, Consolas, monospace'
+flowmuxctl.exe settings set font-size 18
+flowmuxctl.exe settings set theme light
+flowmuxctl.exe settings set cursor-blink false
+flowmuxctl.exe settings set cursor-style bar
+flowmuxctl.exe settings set scrollback 20000
+flowmuxctl.exe settings reset
+```
+
+Settings use versioned UTF-8 JSON at
+`%LOCALAPPDATA%\flowmux\windows\config.json`. Writes acquire an exclusive lock,
+merge the changed field with the latest file and atomically replace it. A failed
+save preserves the previous file and current options. Native edits detect a
+competing change to the same value; the CLI also supports `--expected <value>`.
+Other windows and external edits are observed about once per idle second.
+`settings show` reports the desired document, `config_error` and each terminal's
+applied acknowledgement; a successful set means the file was saved, while an
+IME composition can still defer an individual terminal's application.
+
+Invalid or future-version files are preserved and reported by **Settings (!)…**.
+An already running window retains its last valid options; a newly opened window
+uses defaults. Only an explicit reset replaces an invalid file. Temporary
+windows share settings too; `--temporary` disables window-state persistence.
+Hidden debug hosts use volatile defaults unless the verifier explicitly supplies
+an isolated `FLOWMUX_TEST_CONFIG_DIR`.
+
+Use installed monospaced fonts; Unicode font names are preserved, but font
+availability and glyph coverage are not validated. Settings currently affect
+terminal colors, not native controls or the find bar. Custom themes, font
+discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
+accessibility acceptance remain pending. See
+[settings verification](evidence/2026-09-28/settings.md).
+
 Move an existing terminal between panes or workspaces in the same window:
 
 ```powershell
@@ -246,8 +289,9 @@ replies never become shell input. The old display is moved into scrollback so
 ConPTY's initial clear does not erase it. Scroll up to read or search it.
 Each history is bounded to 128 KiB of complete serialized rows (oldest rows are
 removed), with a 32 MiB file limit and at most 128 saved terminals. Alternate
-screens, running programs, agent resumption, session-local prompt customizations, window
-geometry and terminal settings are not yet restored. Crash recovery uses the
+screens, running programs, agent resumption, session-local prompt customizations and window
+geometry are not yet restored. Terminal settings reload from the shared config.
+Crash recovery uses the
 last completed checkpoint; later output can be lost.
 
 The app loads the pinned Microsoft ConPTY DLL from its own installation
@@ -269,6 +313,7 @@ powershell -NoProfile -File windows/scripts/verify-state.ps1 -BuildDirectory win
 powershell -NoProfile -File windows/scripts/verify-cwd.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-find.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-output-search.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-settings.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories

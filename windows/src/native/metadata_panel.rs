@@ -79,6 +79,7 @@ unsafe extern "system" fn edit_procedure(
 }
 
 pub(crate) struct Panel {
+    pub(crate) edit_id: Uuid,
     window: HWND,
     input: HWND,
     hint: HWND,
@@ -129,6 +130,7 @@ impl Panel {
             );
             anyhow::ensure!(!window.is_null(), "cannot create name editor");
             let mut panel = Self {
+                edit_id: Uuid::nil(),
                 window,
                 input: std::ptr::null_mut(),
                 hint: std::ptr::null_mut(),
@@ -183,10 +185,25 @@ impl Panel {
         }
     }
     pub(super) fn edit(&mut self, target: EditTarget, value: &str, locked: bool, background: bool) {
+        self.edit_id = Uuid::new_v4();
         self.target = Some(target);
         self.original = value.to_owned();
         self.original_locked = locked;
         let (title, hint) = match target {
+            EditTarget::Setting(key) => match key {
+                crate::settings::SettingKey::FontFamily => (
+                    "Terminal font",
+                    "Font family / fallback list (installed fonts)",
+                ),
+                crate::settings::SettingKey::FontSize => {
+                    ("Terminal font size", "Font size in pixels, 6–72")
+                }
+                crate::settings::SettingKey::Scrollback => (
+                    "Terminal scrollback",
+                    "0–100000 lines; lowering discards the oldest history",
+                ),
+                _ => ("Terminal setting", "Value"),
+            },
             EditTarget::WorkspaceName(_) => ("Rename workspace", "Workspace name"),
             EditTarget::WorkspaceColor(_) => {
                 ("Workspace color", "Color as #RRGGBB; leave empty to clear")
@@ -259,7 +276,7 @@ impl Panel {
             }
         }
     }
-    pub(super) fn status(&self, text: &str) {
+    pub(crate) fn status(&self, text: &str) {
         unsafe {
             SetWindowTextW(self.error, wide(text).as_ptr());
         }
@@ -271,7 +288,7 @@ impl Panel {
             String::from_utf16_lossy(&data[..n.max(0) as usize])
         }
     }
-    pub(super) fn hide(&self) {
+    pub(crate) fn hide(&self) {
         unsafe {
             ShowWindow(self.window, SW_HIDE);
         }

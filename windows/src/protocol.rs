@@ -26,6 +26,12 @@ pub struct Envelope {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
     Ready,
+    SettingsApplied {
+        revision: Uuid,
+        terminal: crate::settings::TerminalSettings,
+        background: String,
+        foreground: String,
+    },
     Restored,
     Input {
         data: String,
@@ -101,6 +107,9 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    Settings {
+        document: crate::settings::Document,
+    },
     Output {
         sequence: u64,
         data: String,

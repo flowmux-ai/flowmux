@@ -234,6 +234,23 @@ sustained load/fairness, full discovery/multi-user/deployment coverage and real
 IME remain pending. See [IPC limits evidence](evidence/2026-09-28/ipc-limits.md).
 O02 remains partial.
 
+Terminal settings now have a native menu/editor and CLI, with versioned shared
+Windows config for font/fallback list, integer size, dark/light terminal theme,
+scrollback and cursor blink/style. A dedicated worker validates and atomically
+saves under an OS writer lock, re-reading before per-field updates. Stale edit
+values and failed saves preserve existing data. External changes propagate to
+other windows, including edits that preserve the revision; corrupt config retains
+last-good runtime values and requires explicit reset. Existing xterm views apply
+options without recreating shells or requesting focus, deferring while terminal
+composition or history restoration is active. Per-view applied acknowledgements
+are distinct from successful persistence. Hidden live tests verify Unicode values,
+two-window updates, three-tab restart, actual ConPTY dimensions, history eviction,
+invalid/stale/denied writes and corrupt-file recovery. Real menu/editor/IME/DPI,
+font availability/width, custom themes, whole-app styling, per-tab settings,
+configurable zoom keys and broader config/log/cache parity remain pending.
+T07, T20, U10 and O06 remain partial; see
+[settings evidence](evidence/2026-09-28/settings.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

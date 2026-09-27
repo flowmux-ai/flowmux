@@ -16,6 +16,7 @@ pub(super) fn swatch_color(hwnd: HWND) -> Option<COLORREF> {
 
 #[derive(Clone, Copy)]
 pub(super) enum EditTarget {
+    Setting(crate::settings::SettingKey),
     WorkspaceName(WorkspaceId),
     WorkspaceColor(WorkspaceId),
     TabName(SurfaceId),
@@ -154,7 +155,7 @@ impl App {
             _ => Ok(()),
         }
     }
-    fn popup(
+    pub(super) fn popup(
         &self,
         items: &[&str],
         disabled: &[usize],
@@ -290,6 +291,7 @@ impl App {
     }
     fn metadata_text(&self, target: EditTarget) -> anyhow::Result<String> {
         match target {
+            EditTarget::Setting(key) => Ok(self.settings.terminal.value(key)),
             EditTarget::WorkspaceName(id) => {
                 Ok(self.workspaces[self.workspace_index(id)?].name.clone())
             }
@@ -307,7 +309,7 @@ impl App {
             }
         }
     }
-    fn edit_metadata(&mut self, target: EditTarget) -> anyhow::Result<()> {
+    pub(super) fn edit_metadata(&mut self, target: EditTarget) -> anyhow::Result<()> {
         let value = self.metadata_text(target)?;
         let locked = match target {
             EditTarget::TabName(id) => self.title_locked(id)?,
@@ -347,6 +349,27 @@ impl App {
                 let original = panel.original.clone();
                 let original_locked = panel.original_locked;
                 let value = panel.value();
+                if let Some(EditTarget::Setting(key)) = target {
+                    let editor = panel.edit_id;
+                    let result = self.settings_submit(
+                        crate::command::SettingsOp::Set {
+                            key,
+                            value,
+                            expected: Some(original),
+                        },
+                        None,
+                        Some(editor),
+                    );
+                    if let Some(panel) = &self.metadata {
+                        panel.status(
+                            &result
+                                .err()
+                                .map(|e| e.to_string())
+                                .unwrap_or_else(|| "Saving…".into()),
+                        );
+                    }
+                    return Ok(());
+                }
                 let result = (|| -> anyhow::Result<()> {
                     anyhow::ensure!(
                         self.close_request.is_none(),
@@ -364,6 +387,7 @@ impl App {
                     };
                     anyhow::ensure!(unchanged, "This name or color changed elsewhere. Close and reopen the editor to reload it.");
                     match target {
+                        EditTarget::Setting(_) => unreachable!("handled above"),
                         EditTarget::WorkspaceName(id) => {
                             self.workspace_command(
                                 WorkspaceOp::Rename {

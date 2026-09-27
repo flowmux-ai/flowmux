@@ -1,0 +1,119 @@
+{
+  "started": "2026-09-28T02:21:05.5067005+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "layout": {
+        "dividers": [
+          {
+            "bounds": {
+              "height": 719,
+              "width": 5,
+              "x": 781,
+              "y": 38
+            },
+            "direction": "vertical",
+            "parent": {
+              "height": 719,
+              "width": 991,
+              "x": 189,
+              "y": 38
+            },
+            "split": "e26813de-000b-4b39-8bad-621cfe99a8eb"
+          },
+          {
+            "bounds": {
+              "height": 5,
+              "width": 394,
+              "x": 786,
+              "y": 288
+            },
+            "direction": "horizontal",
+            "parent": {
+              "height": 719,
+              "width": 394,
+              "x": 786,
+              "y": 38
+            },
+            "split": "81a1507e-62f0-420b-9872-95868b04b00a"
+          }
+        ],
+        "panes": [
+          [
+            "71902531-e286-4d47-83e1-9d59bcb9469c",
+            {
+              "height": 719,
+              "width": 592,
+              "x": 189,
+              "y": 38
+            }
+          ],
+          [
+            "19df642d-fe42-4da4-8ae0-fc5cdcc8f41e",
+            {
+              "height": 250,
+              "width": 394,
+              "x": 786,
+              "y": 38
+            }
+          ],
+          [
+            "523c4945-0447-43a2-b2fe-134bb0c20991",
+            {
+              "height": 464,
+              "width": 394,
+              "x": 786,
+              "y": 293
+            }
+          ]
+        ]
+      },
+      "name": "nested_ratios_update_native_webview_and_real_conpty_dimensions",
+      "sizes": [
+        {
+          "cols": 69,
+          "rows": 42,
+          "pid": 5288
+        },
+        {
+          "cols": 45,
+          "rows": 12,
+          "pid": 16316
+        },
+        {
+          "cols": 45,
+          "rows": 26,
+          "pid": 37744
+        }
+      ]
+    },
+    {
+      "name": "invalid_ratios_and_ids_do_not_mutate_state_and_extremes_clamp_to_five_percent"
+    },
+    {
+      "name": "directional_focus_stays_in_workspace_and_missing_neighbors_preserve_focus"
+    },
+    {
+      "name": "maximize_restore_preserves_ratios_hidden_korean_output_and_processes",
+      "maximizedSize": {
+        "cols": 117,
+        "rows": 42,
+        "pid": 16316
+      }
+    },
+    {
+      "name": "forty_zoom_transitions_keep_sessions_and_directional_focus_or_resize_restores_layout",
+      "transitions": 40
+    },
+    {
+      "name": "stable_hidden_caller_context_and_workspace_split_move_close_zoom_transitions"
+    },
+    {
+      "stateWindow": "d44c993a-fcf0-43a3-9e94-a4d39857be7e",
+      "name": "restart_restores_nested_ratios_focus_and_korean_history_with_zoom_cleared"
+    }
+  ],
+  "status": "passed_background_pane_subset",
+  "pending": "Physical divider drag, shortcuts, IME during transitions, DPI and accessibility remain unverified.",
+  "finished": "2026-09-28T02:21:16.2226959+09:00"
+}
