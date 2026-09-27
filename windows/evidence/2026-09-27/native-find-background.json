@@ -1,0 +1,23 @@
+{
+  "started": "2026-09-27T23:50:54.6014404+09:00",
+  "mode": "background",
+  "checks": [
+    "Retained history searches next/previous and wraps across three Korean matches after 100 filler lines",
+    "Case-sensitive/insensitive and regular-expression searches work; invalid regex clears selection and valid search recovers",
+    "Selected text preserves decomposed Jamo, combining accent and emoji; Korean query crosses a soft-wrap boundary",
+    "Hidden surface lookup leaves active focus intact, new tabs have independent search state, moved surface and fresh output stay searchable",
+    "In-place rewrite ending at the same cursor position invalidates stale search text immediately",
+    "Alternate-screen search is isolated from normal history; normal history remains searchable after returning",
+    "Exited terminal remains searchable after native process resources are released"
+  ],
+  "origin": "d26e8819-b837-42fe-9559-643e2f5e5d7c",
+  "positions": [
+    24,
+    29,
+    30,
+    24
+  ],
+  "host": 17968,
+  "finished": "2026-09-27T23:51:00.1041714+09:00",
+  "interactive": "Real search-field IME, buttons, keyboard navigation and DPI remain pending; no desktop input was injected."
+}

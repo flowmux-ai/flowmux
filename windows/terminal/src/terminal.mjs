@@ -7,6 +7,7 @@ import { Output } from './output.mjs';
 import { Input } from './input.mjs';
 import { snapshot, restore } from './history.mjs';
 import { observeCwd } from './cwd.mjs';
+import { SearchUi } from './search.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
@@ -17,10 +18,11 @@ const terminal = new Terminal({
   theme: { background: '#17191f', foreground: '#e2e5ed', cursor: '#b9c6ff', selectionBackground: '#455483' },
   linkHandler: { activate: (_event, url) => send({ type: 'link', url }) },
 });
-const fit = new FitAddon(), search = new SearchAddon(), serialize = new SerializeAddon();
-terminal.loadAddon(fit); terminal.loadAddon(search); terminal.loadAddon(serialize);
+const fit = new FitAddon(), serialize = new SerializeAddon();
+terminal.loadAddon(fit); terminal.loadAddon(serialize);
 terminal.open(document.getElementById('terminal'));
-const output = new Output(terminal, send, () => snapshot(terminal, serialize));
+const find = new SearchUi(terminal, () => new SearchAddon(), document);
+const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message), () => find.invalidate());
 const input = new Input(data => send({ type: 'input', data }));
 let restoring = false;
 observeCwd(terminal, send, () => restoring);
@@ -39,18 +41,10 @@ terminal.attachCustomKeyEventHandler(event => {
   if (composing || event.isComposing || event.keyCode === 229) return true;
   if (event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'KeyF') {
     event.preventDefault();
-    document.getElementById('search').hidden = false;
-    document.getElementById('query').focus();
+    find.open(true);
     return false;
   }
   return true;
-});
-const query = document.getElementById('query');
-document.getElementById('search').addEventListener('submit', event => event.preventDefault());
-query.addEventListener('input', () => search.findNext(query.value, { incremental: true }));
-query.addEventListener('keydown', event => {
-  if (event.key === 'Escape') { document.getElementById('search').hidden = true; terminal.focus(); }
-  if (event.key === 'Enter') { event.preventDefault(); search[event.shiftKey ? 'findPrevious' : 'findNext'](query.value); }
 });
 new ResizeObserver(() => { if (!restoring && document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit(); })
   .observe(document.getElementById('terminal'));
@@ -65,7 +59,8 @@ window.flowmuxHost = message => {
         terminal.options.disableStdin = false;
         send({ type: 'restored' });
       });
-    } else if (message.type === 'focus') { if (!restoring) { fit.fit(); terminal.focus(); } }
+    } else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
+    else if (message.type === 'open_find') { if (!restoring) find.open(true); }
     else if (message.type === 'paste') terminal.paste(message.text);
     else if (message.type === 'exit') {
       document.getElementById('status').textContent = `Process exited (${message.code})`;

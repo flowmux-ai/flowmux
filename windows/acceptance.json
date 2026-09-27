@@ -153,8 +153,12 @@
     {
       "id": "T10",
       "feature": "단일 터미널 찾기",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-find-background.json",
+        "evidence/2026-09-27/frontend-tests-find.txt"
+      ],
+      "notes": "Native hidden WebView2/ConPTY verifies retained Korean next/previous/wrap, case/regex, invalid-expression recovery, NFD/emoji selected text, soft-wrap crossing, hidden/moved/exited surfaces and normal/alternate separation. Real same-cursor overwrite reproduced stale addon cache; parser-complete invalidation fixes that case. Synthetic composition guards are not real IME evidence. Search-field IME, buttons/focus/DPI, complex expression latency and PCRE2 differences remain open."
     },
     {
       "id": "T11",

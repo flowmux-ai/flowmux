@@ -138,6 +138,20 @@ Read-only native control inspection also verifies locked tab captions and the
 active marker survive title output. UNC/device/remote paths, other shells,
 long-path startup, arbitrary prompt frameworks and interactive IME remain open.
 
+Single-terminal find now has case/regex controls, previous/next with wrap, clear
+errors, close and a native entry point. The `find` CLI shares its controller and
+waits for parsed output without taking keyboard focus. Hidden Windows tests
+verify retained Korean history, NFD/emoji selection, soft-wrap boundaries,
+inactive/moved/exited tabs, and separation of normal/alternate buffers.
+A real in-place rewrite exposed stale xterm-addon search lines when the cursor
+returned to the same position. The host now invalidates search after parsed
+output; the frontend recreates the addon through its public API before the next
+query, retaining the terminal and process. The same native reproduction passes.
+Synthetic event tests guard composition Enter/Escape, but search-field real IME,
+buttons, keyboard navigation and DPI still need interactive verification.
+JavaScript regex differs from VTE/PCRE2; expression performance, whole-window
+search and full text/Unicode acceptance remain open.
+
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,
 DPI, clipboard/Unicode-width coverage, broader TUI compatibility, additional

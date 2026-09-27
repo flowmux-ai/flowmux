@@ -86,6 +86,30 @@ Long-path process startup, other shells and arbitrary prompt frameworks remain
 unverified. Constrained Language mode skips the automatic prompt wrapper.
 See Microsoft's [current-directory integration guidance](https://learn.microsoft.com/en-us/windows/terminal/tutorials/new-tab-same-directory).
 
+The native **Find** button and **Ctrl+Shift+F** open a terminal's find bar.
+It supports match case, regular expressions, next/previous with wrap,
+**Enter** / **Shift+Enter**, and **Escape** to close while the query is focused.
+IME composition owns its Enter/Escape events. Invalid expressions clear the old
+selection and display an error; an empty query clears the search. CLI callers
+use the same controller after pending output has been parsed:
+
+```powershell
+flowmuxctl.exe find "한글" --match-case
+flowmuxctl.exe find "error|warning" --regex --previous --surface surface:<id>
+flowmuxctl.exe find --close --surface surface:<id>
+```
+
+CLI find does not take keyboard focus or activate an inactive tab. It reports
+the matched selection, cell position, active buffer and parser sequence; it
+does change the target terminal's selection and scroll position. Search covers
+retained normal history or the active alternate screen, including exited tabs.
+Output and resize invalidate cached search lines before the next query, including
+in-place rewrites that leave the cursor unchanged. Queries are single-line and
+bounded to 1024 UTF-16 units; returned selection text is bounded to 16384 units
+without splitting surrogate pairs. Regex uses the pinned xterm addon's JavaScript
+semantics, which differ from VTE/PCRE2. All-terminal search, arbitrary expression
+performance and native keyboard/IME/DPI verification remain separate work.
+
 Window layout and styled normal-buffer history are saved every 30 seconds and
 before a normal close under `%LOCALAPPDATA%\flowmux\windows\state`. Each window
 holds an exclusive OS file lease; another process cannot restore or overwrite
@@ -138,6 +162,7 @@ powershell -NoProfile -File windows/scripts/verify-tab-move.ps1 -BuildDirectory 
 powershell -NoProfile -File windows/scripts/verify-output-load.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-state.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-cwd.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-find.ps1 -BuildDirectory windows/target/debug
 ```
 
 Ordinary test hosts use `--temporary`; state and cwd verifiers use unique directories
@@ -145,7 +170,7 @@ via the debug-only `FLOWMUX_TEST_STATE_DIR`, including for crash/restart tests.
 Hidden debug hosts without an explicit test state directory also disable
 persistence. These tests cannot restore or overwrite a user's saved window.
 
-Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load, state and cwd scripts always use hidden hosts. Real
+Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load, state, cwd and find scripts always use hidden hosts. Real
 IME tests additionally require an idle desktop and explicit `-Interactive`:
 
 ```powershell

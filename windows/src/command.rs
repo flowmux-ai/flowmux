@@ -61,6 +61,25 @@ pub enum Command {
         #[arg(long, value_parser = parse_id, conflicts_with = "pane")]
         surface: Option<Uuid>,
     },
+    /// Find in a terminal's retained output without activating an inactive tab.
+    Find {
+        #[arg(required_unless_present = "close", conflicts_with = "close")]
+        query: Option<String>,
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
+        #[arg(long, conflicts_with = "close")]
+        #[serde(default)]
+        previous: bool,
+        #[arg(long, conflicts_with = "close")]
+        #[serde(default)]
+        match_case: bool,
+        #[arg(long, conflicts_with = "close")]
+        #[serde(default)]
+        regex: bool,
+        #[arg(long)]
+        #[serde(default)]
+        close: bool,
+    },
     SendKeys {
         #[arg(value_parser = parse_id)]
         pane: Uuid,

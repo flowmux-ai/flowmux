@@ -1,7 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #17191f; color: #e2e5ed; }
 #terminal { position: absolute; inset: 5px; }
-#search { position: absolute; top: 6px; right: 20px; padding: 8px; background: #292e3e; font: 13px "Segoe UI", sans-serif; }
-#query { background: #17191f; color: #e2e5ed; border: 1px solid #8ea4fa; padding: 4px; }
+#search { position: absolute; top: 6px; right: 20px; left: 10px; margin-left: auto; max-width: 560px; padding: 8px; background: #292e3e; font: 13px "Segoe UI", sans-serif; }
+.search-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.search-row > label:first-child { flex: 1; min-width: 100px; display: flex; align-items: center; gap: 5px; }
+#query { background: #17191f; color: #e2e5ed; border: 1px solid #8ea4fa; padding: 4px; width: 100%; min-width: 0; }
+#search button { background: #17191f; color: #e2e5ed; border: 1px solid #7887b0; min-width: 28px; min-height: 26px; }
+#search :focus-visible { outline: 2px solid #b9c6ff; outline-offset: 1px; }
+#search-status { padding-top: 4px; }
+#search-status:empty { display: none; }
+#search-status[data-error] { color: #ffb4b4; }
 #status:empty { display: none; }
 #status { position: absolute; bottom: 8px; right: 20px; padding: 6px; background: #292e3e; font: 12px "Segoe UI", sans-serif; }

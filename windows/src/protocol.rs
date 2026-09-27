@@ -55,6 +55,11 @@ pub enum ClientMessage {
         sequence: u64,
         text: String,
     },
+    Found {
+        request: Uuid,
+        sequence: u64,
+        result: serde_json::Value,
+    },
     Snapshot {
         request: Uuid,
         sequence: u64,
@@ -75,13 +80,39 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
-    Output { sequence: u64, data: String },
-    ReadScreen { request: Uuid, after: u64 },
-    Snapshot { request: Uuid, after: u64 },
-    Restore { screen: crate::state::SavedScreen },
+    Output {
+        sequence: u64,
+        data: String,
+    },
+    ReadScreen {
+        request: Uuid,
+        after: u64,
+    },
+    Find {
+        request: Uuid,
+        after: u64,
+        query: String,
+        previous: bool,
+        match_case: bool,
+        regex: bool,
+        close: bool,
+        focus: bool,
+    },
+    OpenFind,
+    Snapshot {
+        request: Uuid,
+        after: u64,
+    },
+    Restore {
+        screen: crate::state::SavedScreen,
+    },
     Focus,
-    Paste { text: String },
-    Exit { code: u32 },
+    Paste {
+        text: String,
+    },
+    Exit {
+        code: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

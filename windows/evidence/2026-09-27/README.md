@@ -155,6 +155,38 @@ release Clippy 결과는 `native-rust-tests-cwd.txt`, `linux-rust-tests-cwd.txt`
 `artifacts-cwd.json`은 해당 실행 파일과 다시 만든 개발용 설치 파일을 식별한다.
 최신 설치 파일의 실제 IME·설치 검증은 보류 상태다.
 
+## 단일 터미널 검색
+
+`native-find-background.json`은 숨김 Windows 호스트에서 같은 검색 UI controller를
+CLI로 호출했다. 한글이 포함된 scrollback 결과 3개 사이의 다음·이전·순환,
+대소문자 구별, 정규식 및 잘못된 정규식 이후 복구를 확인했다. 선택 문자열은
+분해형 자모·결합 악센트·이모지를 그대로 보존했고 한글 검색어가 soft-wrap
+경계를 걸쳐 있어도 일치했다. 숨은 tab 검색은 활성 tab을 바꾸지 않았으며
+이동한 tab과 종료 후 화면도 검색할 수 있었다.
+
+실제 ConPTY 출력이 `CACHE_OLD`를 `CACHE_NEW`로 덮어쓰고 같은 커서 위치로
+돌아왔을 때, 화면 읽기는 새 문자열을 반환했지만 검색은 이전 문자열을
+반환하는 결함을 재현했다. 사용 중인 addon-search 0.16의 line cache는
+cursor/linefeed/resize 이벤트로 무효화되므로 이 출력에서 남아 있었다.
+파싱된 출력 뒤 다음 검색 전에 addon을 공개 API로 재생성하도록 수정한 후,
+같은 네이티브 재현에서 이전 문자열 미검출·새 문자열 선택을 확인했다.
+터미널이나 셸을 교체하지 않는다. Alternate 화면과 normal history도 서로
+검색 결과를 섞지 않았고 normal 복귀 후 이전 기록 검색이 유지됐다.
+
+프런트엔드 자동 검사는 조합 중 Enter·Escape·legacy 229 이벤트가 이동/닫기를
+실행하지 않는 것, parser barrier, 검색 결과 크기 제한 시 emoji surrogate pair
+보존을 포함한다. 실제 Microsoft IME 조합이나 키보드·마우스를 사용한 검증은
+아니다. 버튼·포커스 복귀·검색창 IME·DPI는 사용자 요청에 따라 보류했다.
+정규식은 JavaScript 문법이며 VTE/PCRE2 전체 호환 및 복잡한 표현식의 지연 시간,
+모든 터미널을 한 번에 검색하는 UI는 별도 구현·검증 대상이다.
+
+이번 단계의 Linux 독립 Rust 9개, 프런트엔드 12개 테스트와 Windows release
+Clippy 결과는 `linux-rust-tests-find.txt`, `frontend-tests-find.txt`,
+`release-clippy-find.txt`에 기록했다. 기존 상태 저장·복원과 한글 경로 검증도
+최종 빌드에서 통과했다(`native-state-find-background.json`,
+`native-cwd-find-background.json`). `artifacts-find.json`은 debug/release 실행
+파일과 갱신한 개발용 설치 파일을 기록하며 실제 설치 검증은 추가하지 않았다.
+
 ## 남은 검증 범위
 
 한자 후보창·다중 DPI·모니터 이동·조합 중 탭/창 이동, clipboard와 NFC/NFD/emoji

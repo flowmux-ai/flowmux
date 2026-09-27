@@ -1,0 +1,34 @@
+{
+  "started": "2026-09-27T23:51:00.7230178+09:00",
+  "mode": "background",
+  "checks": [
+    "Four terminal histories, including inactive tabs/workspaces, saved with Korean and green SGR",
+    "Live-window lease rejected explicit duplicate restore; another window saved independently",
+    "Clean restart kept workspace/pane/surface identity, layout, focus, cwd, Korean and SGR with fresh process IDs",
+    "Historical command text and VT status query replayed to display only; sentinel was not created",
+    "Denied atomic replace retained old checkpoint and kept window/processes alive after quit failed",
+    "Thirty-second background checkpoint persisted later Korean output without an explicit save",
+    "Forced termination released the OS lease; explicit restart recovered the last checkpoint",
+    "Default launch restored latest closed window; explicit discard and temporary mode preserved its checkpoint"
+  ],
+  "hosts": [
+    {
+      "originalShells": [
+        16764,
+        25792,
+        37352,
+        36132
+      ],
+      "first": 35876,
+      "restoredShells": [
+        12108,
+        30168,
+        39112,
+        37972
+      ],
+      "restored": 18044,
+      "window": "03339043-bfd7-4874-b2f9-72623d804130"
+    }
+  ],
+  "finished": "2026-09-27T23:51:39.0116045+09:00"
+}

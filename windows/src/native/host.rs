@@ -164,6 +164,7 @@ enum Action {
     Horizontal,
     CloseTab,
     MoveTabMenu,
+    Find,
     Tab(PaneId, SurfaceId),
 }
 struct Control {
@@ -199,6 +200,7 @@ struct App {
     surfaces: HashMap<SurfaceId, Surface>,
     controls: Vec<Control>,
     pending_reads: HashMap<Uuid, PendingRead>,
+    pending_finds: HashMap<Uuid, PendingRead>,
     closing: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
@@ -330,6 +332,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             surfaces: HashMap::new(),
             controls: vec![],
             pending_reads: HashMap::new(),
+            pending_finds: HashMap::new(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
@@ -415,6 +418,7 @@ impl App {
             ("Split down", Action::Horizontal),
             ("Close tab", Action::CloseTab),
             ("Move tab…", Action::MoveTabMenu),
+            ("Find", Action::Find),
         ] {
             self.button(name, action)?;
         }
@@ -695,6 +699,16 @@ impl App {
                         true
                     }
                 });
+                self.pending_finds.retain(|_, request| {
+                    if request.started.elapsed() > Duration::from_secs(12) {
+                        let _ = request
+                            .reply
+                            .try_send(json!({"error":"terminal did not answer the find request"}));
+                        false
+                    } else {
+                        true
+                    }
+                });
                 if self
                     .pending_save
                     .as_ref()
@@ -865,6 +879,22 @@ impl App {
                     let _ = pending
                         .reply
                         .try_send(json!({"surface":id,"sequence":sequence,"text":text}));
+                }
+            }
+            ClientMessage::Found {
+                request,
+                sequence,
+                result,
+            } => {
+                if let Some(pending) = self.pending_finds.get(&request) {
+                    anyhow::ensure!(
+                        pending.surface == id && sequence >= pending.after,
+                        "invalid find response"
+                    );
+                    let pending = self.pending_finds.remove(&request).unwrap();
+                    let _ = pending
+                        .reply
+                        .try_send(json!({"surface":id,"sequence":sequence,"result":result}));
                 }
             }
             ClientMessage::Link { url } => {
@@ -1333,8 +1363,27 @@ impl App {
                         true
                     }
                 });
+                self.pending_finds.retain(|_, request| {
+                    if request.surface == surface {
+                        let _ = request
+                            .reply
+                            .try_send(json!({"error":"terminal closed during find"}));
+                        false
+                    } else {
+                        true
+                    }
+                });
             }
             Action::MoveTabMenu => return self.move_menu(),
+            Action::Find => {
+                // The native button explicitly opens the current terminal's find bar.
+                // Background test hosts never request desktop or DOM focus.
+                if !self.background_test && self.surfaces[&self.active()].ready {
+                    self.focus_active()?;
+                    self.surfaces[&self.active()].send(&HostMessage::OpenFind)?;
+                }
+                return Ok(());
+            }
             Action::Tab(pane, surface) => {
                 self.workspace_mut().focused = pane;
                 self.workspace_mut().root.set_active_surface(pane, surface);
@@ -1380,7 +1429,7 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
                 "commands":["identify","capabilities","tree","read-screen","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration"],
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
             Command::Tree => {
@@ -1415,6 +1464,57 @@ impl App {
                 let request = Uuid::new_v4();
                 self.surfaces[&id].send(&HostMessage::ReadScreen { request, after })?;
                 self.pending_reads.insert(
+                    request,
+                    PendingRead {
+                        surface: id,
+                        after,
+                        reply,
+                        started: Instant::now(),
+                    },
+                );
+                return Ok(None);
+            }
+            Command::Find {
+                query,
+                surface,
+                previous,
+                match_case,
+                regex,
+                close,
+            } => {
+                anyhow::ensure!(close != query.is_some(), "provide a query or --close");
+                let query = query.unwrap_or_default();
+                anyhow::ensure!(
+                    query.encode_utf16().count() <= 1024 && !query.contains(['\r', '\n', '\0']),
+                    "use a single-line query of at most 1024 characters"
+                );
+                let id = self.target(None, surface.map(SurfaceId).or(caller))?;
+                let surface = self
+                    .surfaces
+                    .get(&id)
+                    .context("terminal surface not found")?;
+                anyhow::ensure!(surface.ready, "terminal is not ready");
+                anyhow::ensure!(
+                    self.pending_finds.len() < 128,
+                    "too many pending find requests"
+                );
+                let after = surface
+                    .session
+                    .as_ref()
+                    .map_or(surface.output_sequence, Session::barrier);
+                let request = Uuid::new_v4();
+                surface.send(&HostMessage::Find {
+                    request,
+                    after,
+                    query,
+                    previous,
+                    match_case,
+                    regex,
+                    close,
+                    // CLI searches update the result without taking keyboard focus.
+                    focus: false,
+                })?;
+                self.pending_finds.insert(
                     request,
                     PendingRead {
                         surface: id,
