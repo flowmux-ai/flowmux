@@ -1,0 +1,29 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>DOM 한글 한 é 😀</title><style>body{font:16px sans-serif}.off{display:none}</style></head><body>
+<h1 id="heading">한글 한 é 😀 "quoted" \ backslash</h1>
+<h2 id="error-data">error: not found</h2>
+<label for="entry">입력 이름 한 😀</label><input id="entry">
+<textarea id="area" aria-label="본문 한글"></textarea>
+<input id="checked" type="checkbox" checked aria-label="확인 한글">
+<fieldset disabled><input id="disabled" aria-label="비활성 입력"></fieldset>
+<button id="visible" data-note="'); window.intrusion = true; //">보기 한글</button>
+<button id="long-name">long</button><button id="long-jamo">long jamo</button><button id="long-combining">long accent</button><button id="duplicate">중복 첫째</button><button id="duplicate">중복 둘째</button>
+<button class="off" id="hidden">숨김</button>
+<div id="shadow-host"></div><iframe src="about:blank" title="owned frame"></iframe>
+<script>
+window.fixtureText='한글 한 é 😀 " \\ \n';
+document.querySelector('#entry').value=fixtureText;
+document.querySelector('#area').value=fixtureText;
+document.querySelector('#long-name').setAttribute('aria-label','a'.repeat(119)+'😀');
+document.querySelector('#long-jamo').setAttribute('aria-label','a'.repeat(119)+'한');
+document.querySelector('#long-combining').setAttribute('aria-label','a'.repeat(119)+'é');
+document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML='<button>shadow only</button>';
+for(let branch=0;branch<2;branch++) {
+  let root=document.createElement('section');document.body.append(root);
+  for(let depth=0;depth<10;depth++){const node=document.createElement('div');root.append(node);root=node;}
+  const button=document.createElement('button');button.textContent='깊은 항목 '+branch;root.append(button);
+}
+window.domMutationCount=0;window.inputEventCount=0;
+new MutationObserver(records=>{domMutationCount+=records.length}).observe(document,{subtree:true,childList:true,attributes:true,characterData:true});
+for(const event of ['input','change','keydown','keyup','focusin'])document.addEventListener(event,()=>inputEventCount++);
+</script></body></html>

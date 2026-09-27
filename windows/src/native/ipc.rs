@@ -142,7 +142,41 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         ));
     }
     let json = cli.json;
+    let dom_output = matches!(
+        &cli.command,
+        Command::Browser {
+            op: crate::browser::Op::Text { .. }
+                | crate::browser::Op::Value { .. }
+                | crate::browser::Op::Attr { .. }
+                | crate::browser::Op::IsVisible { .. }
+                | crate::browser::Op::IsEnabled { .. }
+                | crate::browser::Op::IsChecked { .. }
+                | crate::browser::Op::Count { .. }
+        }
+    );
+    let snapshot_output = matches!(
+        &cli.command,
+        Command::Browser {
+            op: crate::browser::Op::Snapshot { .. }
+        }
+    );
     let value = request(cli)?;
+    if !json && dom_output {
+        let result = &value["result"];
+        return Ok(format!(
+            "{}\n",
+            result
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| result.to_string())
+        ));
+    }
+    if !json && snapshot_output {
+        return Ok(value["markdown"]
+            .as_str()
+            .context("invalid snapshot response")?
+            .to_string());
+    }
     if !json && value["text"].is_string() {
         Ok(format!("{}\n", value["text"].as_str().unwrap()))
     } else {

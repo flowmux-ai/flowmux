@@ -11,8 +11,11 @@ public sealed class BrowserFixture : IDisposable {
     private readonly TcpListener listener;
     private readonly Thread thread;
     private volatile bool stopped;
+    private readonly string documentPath;
     public readonly string Origin;
-    public BrowserFixture() {
+    public BrowserFixture() : this(null) {}
+    public BrowserFixture(string documentPath) {
+        this.documentPath=documentPath;
         listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
         Origin="http://127.0.0.1:"+((IPEndPoint)listener.LocalEndpoint).Port;
         thread=new Thread(Run);thread.IsBackground=true;thread.Start();
@@ -39,8 +42,9 @@ public sealed class BrowserFixture : IDisposable {
                 var html="<!doctype html><meta charset='utf-8'><title>"+label+" 한글 한 é 😀</title>"+
                     "<h1 id='label'>"+label+" 한글 한 é 😀</h1><input id='entry'><a href='/two'>다음</a>"+
                     "<script>window.fixtureLoad=Math.random();window.fixtureText='한글 한 é 😀';</script>";
+                if(path.StartsWith("/dom") && documentPath!=null) html=File.ReadAllText(documentPath,Encoding.UTF8);
                 var body=Encoding.UTF8.GetBytes(html);
-                var header=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; connect-src 'none'\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n");
+                var header=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n");
                 stream.Write(header,0,header.Length);stream.Write(body,0,body.Length);
             }
         } catch(IOException) {} catch(ObjectDisposedException) {} }

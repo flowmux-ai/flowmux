@@ -85,6 +85,47 @@ pub enum Op {
         pane: Uuid,
         scale: f64,
     },
+    /// Snapshot the top-level document without modifying its DOM.
+    Snapshot {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+    },
+    Text {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+    },
+    Value {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+    },
+    IsVisible {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+    },
+    IsEnabled {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+    },
+    IsChecked {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+    },
+    Attr {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        target: String,
+        name: String,
+    },
+    Count {
+        #[arg(value_parser = crate::command::parse_id)]
+        pane: Uuid,
+        selector: String,
+    },
     /// Evaluate synchronous JavaScript in the active browser document.
     Eval {
         #[arg(value_parser = crate::command::parse_id)]

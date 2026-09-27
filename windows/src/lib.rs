@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Windows host services. The GTK workspace does not depend on this crate.
 pub mod browser;
+pub mod browser_dom;
 pub mod command;
 pub mod cwd;
 pub mod keys;

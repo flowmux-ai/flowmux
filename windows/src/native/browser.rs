@@ -2,6 +2,7 @@
 //! Untrusted pages have a separate WebView2 profile and no terminal IPC bridge.
 use super::*;
 use crate::browser::{self as domain, Op};
+use crate::browser_dom as dom;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[path = "browser_chrome.rs"]
 mod chrome;
@@ -14,7 +15,17 @@ pub(super) enum Signal {
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
 }
+enum Response {
+    Eval,
+    Snapshot(Uuid),
+    Query {
+        snapshot: Option<Uuid>,
+        kind: &'static str,
+    },
+}
 pub(super) struct Pending {
+    response: Response,
+    limit: usize,
     surface: SurfaceId,
     epoch: u64,
     reply: ipc::Reply,
@@ -33,6 +44,8 @@ pub(super) struct Browser {
     forward: bool,
     zoom: f64,
     error: Option<String>,
+    refs: dom::Refs,
+    dom_key: String,
 }
 impl Browser {
     pub(super) fn new(app: &mut App, id: SurfaceId) -> anyhow::Result<Self> {
@@ -132,6 +145,8 @@ impl Browser {
             forward: false,
             zoom: 1.0,
             error: None,
+            refs: dom::Refs::new(id.0),
+            dom_key: format!("__flowmuxDom_{}", Uuid::new_v4().simple()),
         })
     }
     fn refresh(&mut self) -> anyhow::Result<()> {
@@ -168,6 +183,7 @@ impl Browser {
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
         let show = area.is_some();
         if self.visible != show {
+            self.refs.clear();
             self.view.set_visible(show)?;
             unsafe {
                 ShowWindow(self.chrome.window, if show { SW_SHOWNA } else { SW_HIDE });
@@ -187,6 +203,7 @@ impl Browser {
     }
     fn navigate(&mut self, url: &str) -> anyhow::Result<()> {
         let url = domain::url(url)?;
+        self.refs.clear();
         self.view.load_url(&url)?;
         self.loading = true;
         self.error = None;
@@ -194,6 +211,9 @@ impl Browser {
     }
     fn operation(&mut self, action: u16) -> anyhow::Result<()> {
         self.error = None;
+        if matches!(action, 1..=3) {
+            self.refs.clear();
+        }
         match action {
             1 => unsafe {
                 self.view.controller().CoreWebView2()?.GoBack()?;
@@ -344,6 +364,7 @@ impl App {
                 });
                 if epoch == Some(navigation) {
                     if let Some(browser) = self.browsers.get_mut(&id) {
+                        browser.refs.clear();
                         browser.loading = true;
                         browser.error = None;
                     }
@@ -389,18 +410,111 @@ impl App {
                             .is_none_or(|b| b.epoch.load(Ordering::SeqCst) != epoch)
                     {
                         json!({"error":"browser document changed during script request"})
-                    } else if result.len() > MAX_SCRIPT {
-                        json!({"error":"browser script result exceeds 128 KiB"})
+                    } else if result.len() > p.limit {
+                        json!({"error":"browser response exceeds size limit"})
                     } else {
-                        serde_json::from_str::<Value>(&result)
-                            .ok()
-                            .filter(|v| v.is_object())
-                            .unwrap_or_else(|| json!({"error":"invalid browser script result"}))
+                        match serde_json::from_str::<Value>(&result) {
+                            Ok(value) if value.is_object() => self
+                                .browser_result(p.surface, p.response, value)
+                                .unwrap_or_else(|error| json!({"error":error.to_string()})),
+                            _ => json!({"error":"invalid browser script result"}),
+                        }
                     };
                     let _ = p.reply.try_send(reply);
                 }
             }
         }
+        Ok(())
+    }
+    fn browser_result(
+        &mut self,
+        id: SurfaceId,
+        response: Response,
+        value: Value,
+    ) -> anyhow::Result<Value> {
+        if value.get("error").is_some() {
+            return Ok(value);
+        }
+        let result = value
+            .get("result")
+            .context("browser response missing result")?
+            .clone();
+        match response {
+            Response::Eval => Ok(value),
+            Response::Snapshot(request) => {
+                let browser = self.browsers.get_mut(&id).context("browser was closed")?;
+                let mut result = browser
+                    .refs
+                    .publish(request, result, &mut self.browser_tokens)?;
+                result["surface"] = json!(id);
+                Ok(result)
+            }
+            Response::Query { snapshot, kind } => {
+                if let Some(snapshot) = snapshot {
+                    anyhow::ensure!(
+                        self.browsers
+                            .get(&id)
+                            .is_some_and(|b| b.refs.current == Some(snapshot)),
+                        "snapshot was superseded or hidden"
+                    );
+                }
+                let valid = match kind {
+                    "count" => result.is_u64(),
+                    "is_visible" | "is_enabled" | "is_checked" => result.is_boolean(),
+                    _ => result.is_string(),
+                };
+                anyhow::ensure!(valid, "invalid DOM query result type");
+                Ok(json!({"result":result,"surface":id}))
+            }
+        }
+    }
+    fn browser_script(
+        &mut self,
+        id: SurfaceId,
+        source: String,
+        response: Response,
+        limit: usize,
+        reply: ipc::Reply,
+    ) -> anyhow::Result<()> {
+        let browser = self.browsers.get(&id).context("browser was closed")?;
+        anyhow::ensure!(
+            !browser.loading,
+            "wait for browser navigation to finish before evaluating a script"
+        );
+        anyhow::ensure!(source.len() <= MAX_SCRIPT, "browser script exceeds 128 KiB");
+        anyhow::ensure!(
+            self.pending_browser.len() < 16,
+            "too many pending browser scripts"
+        );
+        let epoch = browser.epoch.load(Ordering::SeqCst);
+        let request = Uuid::new_v4();
+        let sender = self.sender.clone();
+        let source = serde_json::to_string(&source)?;
+        let script=format!("(()=>{{try{{const result=(0,eval)({source});if(result&&typeof result.then==='function')throw new Error('asynchronous scripts are not supported');const out={{result:result===undefined?null:result}};if(JSON.stringify(out).length>{limit})throw new Error('browser response exceeds size limit');return out;}}catch(e){{return {{error:String(e).slice(0,4096)}};}}}})()");
+        browser
+            .view
+            .evaluate_script_with_callback(&script, move |result| {
+                sender.send(Event::Browser(Signal::Eval(
+                    request,
+                    epoch,
+                    if result.len() > limit {
+                        "{\"error\":\"browser response exceeds size limit\"}".into()
+                    } else {
+                        result
+                    },
+                )))
+            })?;
+        self.pending_browser.insert(
+            request,
+            Pending {
+                surface: id,
+                epoch,
+                reply,
+                started: Instant::now(),
+                response,
+                limit,
+            },
+        );
         Ok(())
     }
     pub(super) fn browser_command(
@@ -430,7 +544,15 @@ impl App {
             | Op::Title { pane }
             | Op::Status { pane }
             | Op::Zoom { pane, .. }
-            | Op::Eval { pane, .. } => *pane,
+            | Op::Eval { pane, .. }
+            | Op::Snapshot { pane }
+            | Op::Text { pane, .. }
+            | Op::Value { pane, .. }
+            | Op::Attr { pane, .. }
+            | Op::IsVisible { pane, .. }
+            | Op::IsEnabled { pane, .. }
+            | Op::IsChecked { pane, .. }
+            | Op::Count { pane, .. } => *pane,
             Op::Open { .. } => unreachable!(),
         };
         let id = self.target(Some(pane), None)?;
@@ -440,6 +562,15 @@ impl App {
         );
         self.browser_refresh(id)?;
         let browser = self.browsers.get_mut(&id).unwrap();
+        let query_kind = match &op {
+            Op::Text { .. } => Some(("text", None)),
+            Op::Value { .. } => Some(("value", None)),
+            Op::Attr { name, .. } => Some(("attr", Some(name.clone()))),
+            Op::IsVisible { .. } => Some(("is_visible", None)),
+            Op::IsEnabled { .. } => Some(("is_enabled", None)),
+            Op::IsChecked { .. } => Some(("is_checked", None)),
+            _ => None,
+        };
         match op {
             Op::Navigate { url, .. } => browser.navigate(&url)?,
             Op::Back { .. } => browser.operation(1)?,
@@ -451,41 +582,55 @@ impl App {
             Op::Status { .. } => return Ok(Some(browser.status(id))),
             Op::Zoom { scale, .. } => browser.zoom(scale)?,
             Op::Eval { source, .. } => {
-                anyhow::ensure!(
-                    !browser.loading,
-                    "wait for browser navigation to finish before evaluating a script"
-                );
-                anyhow::ensure!(source.len() <= MAX_SCRIPT, "browser script exceeds 128 KiB");
-                anyhow::ensure!(
-                    self.pending_browser.len() < 16,
-                    "too many pending browser scripts"
-                );
-                let epoch = browser.epoch.load(Ordering::SeqCst);
-                let request = Uuid::new_v4();
-                let sender = self.sender.clone();
-                let script=format!("(()=>{{try{{const result=(0,eval)({});if(result&&typeof result.then==='function')throw new Error('asynchronous scripts are not supported');const out={{result:result===undefined?null:result}};if(JSON.stringify(out).length>131072)throw new Error('browser script result exceeds 128 KiB');return out;}}catch(e){{return {{error:String(e).slice(0,4096)}};}}}})()",serde_json::to_string(&source)?);
-                browser
-                    .view
-                    .evaluate_script_with_callback(&script, move |result| {
-                        sender.send(Event::Browser(Signal::Eval(
-                            request,
-                            epoch,
-                            if result.len() > MAX_SCRIPT {
-                                "{\"error\":\"browser script result exceeds 128 KiB\"}".into()
-                            } else {
-                                result
-                            },
-                        )))
-                    })?;
-                self.pending_browser.insert(
-                    request,
-                    Pending {
-                        surface: id,
-                        epoch,
-                        reply,
-                        started: Instant::now(),
+                self.browser_script(id, source, Response::Eval, MAX_SCRIPT, reply)?;
+                return Ok(None);
+            }
+            Op::Snapshot { .. } => {
+                let request = browser.refs.begin();
+                let source = dom::snapshot(&browser.dom_key);
+                self.browser_script(
+                    id,
+                    source,
+                    Response::Snapshot(request),
+                    dom::MAX_SNAPSHOT,
+                    reply,
+                )?;
+                return Ok(None);
+            }
+            Op::Count { selector, .. } => {
+                self.browser_script(
+                    id,
+                    dom::count(&selector)?,
+                    Response::Query {
+                        snapshot: None,
+                        kind: "count",
                     },
-                );
+                    MAX_SCRIPT,
+                    reply,
+                )?;
+                return Ok(None);
+            }
+            Op::Text { target, .. }
+            | Op::Value { target, .. }
+            | Op::Attr { target, .. }
+            | Op::IsVisible { target, .. }
+            | Op::IsEnabled { target, .. }
+            | Op::IsChecked { target, .. } => {
+                let (kind, name) = query_kind.context("missing DOM query kind")?;
+                let (snapshot, source) =
+                    browser
+                        .refs
+                        .query(&browser.dom_key, &target, kind, name.as_deref())?;
+                self.browser_script(
+                    id,
+                    source,
+                    Response::Query {
+                        snapshot: Some(snapshot),
+                        kind,
+                    },
+                    MAX_SCRIPT,
+                    reply,
+                )?;
                 return Ok(None);
             }
             Op::Open { .. } => unreachable!(),

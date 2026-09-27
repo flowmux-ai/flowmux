@@ -1,0 +1,30 @@
+{
+  "mode": "background",
+  "nativeRust": {
+    "exitCode": 0,
+    "pid": 3304,
+    "mode": "hidden"
+  },
+  "linuxRustPassed": 92,
+  "nativeRustPassed": 119,
+  "liveGroups": {
+    "native-browser-dom-background.json": 6,
+    "native-browser-dom-foundation-regression.json": 6,
+    "native-browser-dom-keys-regression.json": 7
+  },
+  "debugBuild": "passed",
+  "releaseBuild": "passed",
+  "releaseClippy": "passed",
+  "rustFmt": "passed",
+  "nsisPackageBuild": "passed",
+  "installerExecuted": false,
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "scope": "windows/ only; shared headless dependencies read-only",
+  "existingPlatformSourceDiffSince": "cb56b1f",
+  "existingPlatformSourceDiff": [],
+  "userWslFlowmuxPid787": "running at audit",
+  "remainingRecordedOwnedProcesses": [],
+  "physicalImeAcceptance": "not performed"
+}

@@ -742,7 +742,8 @@ callback deadline. Promises, navigation in progress, closed/replaced documents
 and invalid/non-JSON results are rejected. A timeout does not cancel JavaScript
 already executing, and rejected asynchronous scripts may already have started
 side effects; do not automatically retry them. Navigation IDs protect callbacks
-from earlier documents. There is no selector/ref-based automation yet.
+from earlier documents. Snapshot/ref queries are described below; DOM action
+commands and asynchronous eval remain pending.
 
 New-window requests and downloads are currently denied; DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
@@ -759,3 +760,52 @@ and browser-only persistence. These checks do not verify glyph rendering, real
 IME composition, physical navigation controls, DPI or accessibility. No OS input,
 clipboard, external site, installer or foreground window is involved. See
 [browser evidence](evidence/2026-09-28/browser.md).
+
+Windows browser DOM queries now include `snapshot`, `text`, `value`, `attr`,
+`is-visible`, `is-enabled`, `is-checked` and `count`:
+
+```powershell
+flowmuxctl.exe --json browser snapshot pane:<id>
+flowmuxctl.exe browser text pane:<id> e12
+flowmuxctl.exe browser value pane:<id> @e13
+flowmuxctl.exe browser attr pane:<id> e14 href
+flowmuxctl.exe browser count pane:<id> 'button'
+```
+
+A JSON snapshot contains `markdown`, `refs`, `page`, `surface`, `snapshot_id`,
+`dom_revision`, `node_count`, `frame_count` and `omitted_refs`. Plain snapshots
+print Markdown; plain queries print a string, boolean or integer. Query JSON
+contains `result` and `surface`. Attribute absence returns an empty string.
+`text` reads rendered `innerText`; `value` reports the control's live DOM value,
+including HTML control rules such as removing newlines from a single-line input.
+
+Refs resolve on the native host through the shared pure Rust `RefStore` and
+snapshot types. Ref numbers are not reused within one window process. Take a new
+snapshot after navigation, reload, URL history changes, a DOM tree/attribute/text
+mutation, tab hiding/switching or another snapshot. A visible view moved intact
+keeps its surface and refs. Property changes such as `input.value`/`checked` and
+CSSOM changes can be read through existing refs while the same DOM nodes remain.
+Refs are runtime state and are never saved in a checkpoint.
+
+Snapshots/query reads add no DOM attributes and dispatch no input/focus events.
+One non-enumerable page property and a MutationObserver maintain a revision;
+queries check it and the page URL before resolving a unique selector. Page data
+is untrusted and this is not protection against pages overriding JavaScript/DOM
+APIs. Frames and shadow roots are not traversed. Accessibility names/roles and
+CSS visibility are best-effort; hit testing/occlusion and a full accessibility
+snapshot remain pending. `frame_count` reports top-document frame elements, and
+`omitted_refs` reports elements without a unique selector within the path limit.
+
+Snapshots reject more than 10,000 top-document elements, 2,048 refs or 1 MiB of
+result data. CSS selectors are limited to 4,096 UTF-8 bytes, attribute names to
+256 bytes, and query results to 128 KiB. Failed snapshots discard previous refs.
+Titles/names/page excerpts are shortened at grapheme boundaries using
+`Intl.Segmenter`, preserving decomposed Hangul, combining accents and emoji
+sequences. Older runtimes without that API only protect surrogate pairs.
+Full text/value queries retain the original Unicode within their result limit
+and the element's normal DOM value semantics. Browser script execution/memory
+budgets and complete timeout/navigation race coverage remain open. The existing
+16-pending-request and 12-second callback limits apply to these commands too.
+DOM actions, waits and screenshots are still pending. The
+[hidden DOM verifier](scripts/verify-browser-dom.ps1) uses only owned loopback
+pages; it does not simulate OS keyboard/IME input.

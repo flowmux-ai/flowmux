@@ -1,0 +1,27 @@
+{
+  "started": "2026-09-28T07:27:31.0581436+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "nodeCount": 46,
+      "name": "snapshot_and_typed_queries_preserve_exact_unicode_without_dom_mutation_or_input",
+      "refs": 13,
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "status": "failed",
+  "error": "Snapshot crossed hidden/shadow document boundary",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "hosts": [
+    36024
+  ],
+  "shells": [
+    13356
+  ],
+  "finished": "2026-09-28T07:27:33.4979962+09:00"
+}

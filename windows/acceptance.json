@@ -440,8 +440,12 @@
     {
       "id": "B03",
       "feature": "DOM snapshot·refs",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-dom.md",
+        "evidence/2026-09-28/native-browser-dom-background.json"
+      ],
+      "notes": "Top-document non-mutating DOM snapshots use shared headless Rust types and per-surface refs with window-wide unique tokens. Hidden WebView2 evidence covers Unicode grapheme excerpts, unique selectors, stale ref rejection after DOM/navigation/tab changes, moves and size bounds. Frame/shadow traversal, full accessibility semantics and complete pending-request races remain pending."
     },
     {
       "id": "B04",
@@ -461,9 +465,11 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-browser-background.json",
-        "evidence/2026-09-28/native-browser-ordinal-background.json"
+        "evidence/2026-09-28/native-browser-ordinal-background.json",
+        "evidence/2026-09-28/browser-dom.md",
+        "evidence/2026-09-28/native-browser-dom-background.json"
       ],
-      "notes": "Synchronous eval and URL/title/status query implemented through WebView2 callbacks without a terminal bridge. Hidden fixture covers Unicode results, script/Promise/result-limit errors and document identity after moves. Selector/ref text/value/attr/count, asynchronous eval, all pending-request races and complete automation parity remain pending."
+      "notes": "Synchronous eval, URL/title/status and read-only text/value/attr/count/is-visible/is-enabled/is-checked queries implemented. Hidden fixture verifies ordinal Unicode preservation, plain/JSON results, property/CSSOM reads, stale refs and output bounds. Asynchronous eval, broader accessibility state semantics, all pending-request races and complete automation parity remain pending."
     },
     {
       "id": "B07",
@@ -937,9 +943,11 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-browser-background.json",
-        "evidence/2026-09-28/native-browser-ordinal-background.json"
+        "evidence/2026-09-28/native-browser-ordinal-background.json",
+        "evidence/2026-09-28/browser-dom.md",
+        "evidence/2026-09-28/native-browser-dom-background.json"
       ],
-      "notes": "Native browser foundation and eleven CLI operations have hidden loopback evidence. Complete browser command/UI parity and physical IME/DPI/accessibility acceptance remain pending."
+      "notes": "Native browser foundation and nineteen CLI operations have hidden loopback evidence, including DOM snapshots and read-only ref queries. Actions/waits/screenshots, complete browser UI parity and physical IME/DPI/accessibility acceptance remain pending."
     },
     {
       "id": "G10",

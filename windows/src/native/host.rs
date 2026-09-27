@@ -308,6 +308,7 @@ struct App {
     browsers: HashMap<SurfaceId, browser::Browser>,
     browser_context: Option<WebContext>,
     pending_browser: HashMap<Uuid, browser::Pending>,
+    browser_tokens: crate::browser_dom::Tokens,
     workspaces: Vec<Workspace>,
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
@@ -491,6 +492,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             browser_context: None,
             browsers: HashMap::new(),
             pending_browser: HashMap::new(),
+            browser_tokens: crate::browser_dom::Tokens::default(),
             workspaces,
             active_workspace,
             surfaces: HashMap::new(),
@@ -2041,7 +2043,7 @@ impl App {
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
-                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval"],
+                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count"],
                 "named_key_protocol":"send_key_mode",
                 "commands":["browser","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",

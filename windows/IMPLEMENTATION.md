@@ -384,10 +384,20 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B06/B09 and G09 are partial. DOM refs/actions/waits/screenshots, downloads,
+B01/B02/B03/B06/B09 and G09 are partial. DOM actions/waits/screenshots, downloads,
 popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
 failure recovery, isolation, move identity, mixed checkpoints and browser-only
 restart/profile persistence. It never synthesizes OS input or accesses clipboard.
 See [browser evidence](evidence/2026-09-28/browser.md).
+
+Windows DOM snapshots now share the existing headless Rust snapshot/ref types.
+Top-document selectors must be unique, and ref numbers are not reused in a live
+window. DOM revisions, navigation IDs and snapshot identities reject stale refs
+and callbacks without stamping the DOM. Read-only text/value/attr/state/count
+commands support structured JSON and plain scalar output. Output/traversal bounds,
+Unicode excerpts, duplicate/deep selectors, reference lifetime and failure recovery
+are checked in a hidden WebView2 fixture. Frames/shadow trees, full accessibility,
+DOM actions, waits, screenshots and actual browser IME remain pending. See
+[DOM evidence](evidence/2026-09-28/browser-dom.md).
