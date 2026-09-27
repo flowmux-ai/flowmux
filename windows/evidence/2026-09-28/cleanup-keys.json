@@ -1,0 +1,21 @@
+{
+  "checked": "2026-09-28T06:32:23.8206775+09:00",
+  "scope": "Recorded owned host/probe/test PIDs and direct parent IDs; read-only inspection",
+  "ownedIds": [
+    5268,
+    10232,
+    15648,
+    21100,
+    23104,
+    23224,
+    26992,
+    27156,
+    27464,
+    32256,
+    32340,
+    33100,
+    35816,
+    36860
+  ],
+  "matchingProcesses": []
+}

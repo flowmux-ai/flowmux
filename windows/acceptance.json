@@ -271,8 +271,12 @@
     {
       "id": "T21",
       "feature": "focus reporting·키 반복·named key",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/native-keys-before-background.json",
+        "evidence/2026-09-28/native-keys-background.json"
+      ],
+      "notes": "Named keys use parser-barrier cursor-mode snapshots and stable surface targeting. 128 pinned-xterm reference vectors are checked in normal/application modes against pre-ConPTY and ReadConsoleW bytes. Guards cover composition/settling/restore and bounded pending input; no synthetic desktop input is used. Physical repeat, actual focus reporting/IME transitions, advanced protocols, all timeout/close races and broader shell/TUI acceptance remain pending."
     },
     {
       "id": "T22",
@@ -783,9 +787,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-27/native-tab-move-background.json",
-        "evidence/2026-09-28/native-screen-background.json"
+        "evidence/2026-09-28/native-screen-background.json",
+        "evidence/2026-09-28/native-keys-background.json"
       ],
-      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain. capture-pane aliases the parser-barrier viewport read; --recent and read-only range metadata are available. Full command parity remains pending."
+      "notes": "Hidden Windows host verifies same-window moves/reorder with stable process, surface, viewport output, cwd and calling-surface CLI routing. Native menu and IME move rerun pending; rename, drag/drop, cross-window and broader feature coverage remain. capture-pane aliases the parser-barrier viewport read; --recent and read-only range metadata are available. Full command parity remains pending. Named keys now use parsed cursor mode and explicit inactive/moved surface targets. New send_key_mode wire requests fail on old hosts instead of letting them ignore a surface selector; new hosts accept legacy send_key. Live byte probes and parser/guard tests are partial evidence; full pane/tab automation parity remains open."
     },
     {
       "id": "O05",

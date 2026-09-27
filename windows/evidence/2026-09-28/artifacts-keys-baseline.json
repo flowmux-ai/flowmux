@@ -1,0 +1,12 @@
+[
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+    "sha256": "f211202d97d24c5360ec1253bb284106217fefb8a81d0bbfe44c4360da2383c5",
+    "commit": "e2e6cd0"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+    "sha256": "f14aeda37d0d767cb5e31894c674f2c0b5f14212ffe9aaf5d5c621037f9636ca",
+    "commit": "e2e6cd0"
+  }
+]

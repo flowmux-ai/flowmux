@@ -7,7 +7,7 @@ use super::{
     wide,
 };
 use crate::{
-    command::{key_bytes, Command, Direction, FocusDirection, Launch, Request, WorkspaceOp},
+    command::{Command, Direction, FocusDirection, Launch, Request, WorkspaceOp},
     model::{self, Workspace},
     protocol::{ClientMessage, HostMessage, Identity, TERMINAL_ORIGIN},
     state::{SavedScreen, WindowState},
@@ -43,6 +43,8 @@ use windows_sys::Win32::{
 use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 #[path = "appearance.rs"]
 mod appearance;
+#[path = "keys.rs"]
+mod keys;
 #[path = "notifications.rs"]
 mod notifications;
 #[path = "panes.rs"]
@@ -310,6 +312,7 @@ struct App {
     pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
+    pending_keys: HashMap<Uuid, keys::PendingKey>,
     pending_selections: HashMap<Uuid, PendingRead>,
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
@@ -487,6 +490,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
+            pending_keys: HashMap::new(),
             pending_selections: HashMap::new(),
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
@@ -953,6 +957,16 @@ impl App {
                         true
                     }
                 });
+                self.pending_keys.retain(|_, pending| {
+                    if pending.read.started.elapsed() > Duration::from_secs(12) {
+                        let _ = pending.read.reply.try_send(
+                            json!({"error":"named-key request expired before input was queued"}),
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.pending_pastes.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
@@ -1122,6 +1136,11 @@ impl App {
                 }
             }
             ClientMessage::Input { data } => self.session(id)?.input(data.into_bytes())?,
+            ClientMessage::KeyMode {
+                request,
+                sequence,
+                outcome,
+            } => self.key_mode(id, request, sequence, outcome)?,
             ClientMessage::Pasted {
                 request,
                 sequence,
@@ -1802,6 +1821,17 @@ impl App {
                 true
             }
         });
+        self.pending_keys.retain(|_, pending| {
+            if pending.read.surface == surface {
+                let _ = pending
+                    .read
+                    .reply
+                    .try_send(json!({"error":"terminal closed before named key was queued"}));
+                false
+            } else {
+                true
+            }
+        });
         self.pending_pastes.retain(|_, request| {
             if request.surface == surface {
                 let _ = request
@@ -1963,6 +1993,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,
+                "named_key_protocol":"send_key_mode",
                 "commands":["identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
@@ -2226,9 +2257,15 @@ impl App {
             Command::SendKeys { pane, text } => self
                 .session(self.target(Some(pane), caller)?)?
                 .input(text.into_bytes())?,
-            Command::SendKey { key, pane } => self
-                .session(self.target(pane, caller)?)?
-                .input(key_bytes(&key)?)?,
+            Command::SendKey { key, pane, surface } => {
+                anyhow::ensure!(
+                    pane.is_none() || surface.is_none(),
+                    "choose either pane or surface"
+                );
+                let id = self.target(pane, surface.map(SurfaceId).or(caller))?;
+                self.begin_key(id, key, reply)?;
+                return Ok(None);
+            }
             Command::Split { direction, shell } => {
                 self.new_terminal(
                     self.target(None, caller)?,

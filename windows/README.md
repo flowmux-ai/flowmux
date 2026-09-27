@@ -450,6 +450,42 @@ controller visibility (a hidden test host's parent window still stays hidden).
 Native drag, keyboard/IME transitions and DPI acceptance remain pending;
 `scripts/verify-panes.ps1` tests the shared behavior through a hidden native host.
 
+`send-key` waits for already-received output to finish parsing before encoding
+arrows, Home and End using the target's current application cursor mode. It can
+target an inactive or moved surface without activating it:
+
+```powershell
+flowmux send-key Up --surface surface:<id>
+flowmux send-key Ctrl+C --pane pane:<id>
+flowmux send-key Shift+Enter
+flowmux send-key Ctrl+Alt+F12 --surface surface:<id>
+```
+
+Names are case-insensitive. Supported keys include Enter/Return, Tab, Escape/Esc,
+Backspace/BSpace, arrows (with optional `Arrow` prefix), Home/End, Insert/Ins,
+Delete/Del, PageUp/PgUp, PageDown/PgDn, F1–F12, Ctrl+A–Z, Alt+letters, Ctrl+Space,
+Alt+Space, Ctrl+3–8 and Ctrl+[ / Ctrl+\ / Ctrl+] / Ctrl+_ / Ctrl+@. Shift/Ctrl/Alt
+modifiers on navigation and function keys follow the pinned xterm 6 encoder.
+`ShiftEnter` and `ShiftTab` are aliases. Shift+Enter retains flowmux's `ESC CR`
+contract. Clipboard combinations using modified Insert, Shift+PageUp/PageDown
+viewport actions, Ctrl+Shift+letters and Meta/Win combinations are rejected.
+These are terminal input commands; they do not invoke flowmux's UI shortcuts.
+Numpad keys, Kitty/modifyOtherKeys negotiation and arbitrary key release/repeat
+synthesis are not implemented by this command.
+
+Receipts retain `ok: true` and add the target surface, parsed sequence, byte
+count, cursor mode and `delivery: "queued"`. This acknowledges native input queue
+submission, not shell processing. Busy, composing/settling, restoring, exited,
+closed and expired requests fail without replay. Named keys and paste exclude
+concurrent pending requests on the same surface. Parallel raw `send-keys`
+commands still have no ordering guarantee with these requests.
+
+The CLI sends the `send_key_mode` wire method. New hosts also accept legacy
+`send_key` requests. Older hosts reject the new method, preventing an unrecognized
+`surface` field from silently routing input to their active tab. Raw IPC callers
+using the new surface contract should use `send_key_mode`; capabilities exposes
+it as `named_key_protocol`. See [named-key evidence](evidence/2026-09-28/keys.md).
+
 `read-screen --surface` reads an inactive tab without activating it.
 `capture-pane` is an alias with the same arguments; it does not implement tmux's
 capture flags. Both wait for xterm to parse the captured output sequence and

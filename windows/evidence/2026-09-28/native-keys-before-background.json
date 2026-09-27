@@ -1,0 +1,47 @@
+{
+  "started": "2026-09-28T06:22:23.0312718+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "passed": true,
+      "name": "baseline_sends_normal_cursor_bytes_after_application_mode_output",
+      "bytes": {
+        "readConsoleMatches": true,
+        "sha256": "f2b5fe5221db4c3336800f17cebc9dcd130fcc3174729d5511219b68cbd22a2e",
+        "count": 3,
+        "beforeConptyMatches": true
+      },
+      "modeSequence": 4,
+      "desired": "1B-4F-41",
+      "actual": "1B-5B-41"
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "launched": {
+    "started": "2026-09-27T21:22:23.0332709Z",
+    "pid": 15648
+  },
+  "host": {
+    "pid": 15648,
+    "surface": "60a9cc3f-35f0-49fc-ae43-d3e92a59e271",
+    "probePid": 5268
+  },
+  "startupInputBeforeReady": [
+    27,
+    91,
+    63,
+    49,
+    59,
+    50,
+    99,
+    27,
+    91,
+    79,
+    27,
+    91,
+    79
+  ],
+  "status": "reproduced_fixed_normal_cursor_encoding",
+  "finished": "2026-09-28T06:22:24.2996132+09:00"
+}

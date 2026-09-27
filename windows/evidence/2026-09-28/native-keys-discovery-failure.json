@@ -1,0 +1,10 @@
+{
+  "started": "2026-09-28T06:20:43.3818366+09:00",
+  "mode": "background",
+  "checks": [],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "status": "failed",
+  "error": "CLI exit 1: {\"error\":\"Could not connect to requested Windows flowmux pipe \\\\\\\\.\\\\pipe\\\\flowmux-10232-284899d8-3b3e-40c6-9e43-f5e6ff4c4733: opening the requested pipe: 지정된 파일을 찾을 수 없습니다. (os error 2)\"}\n",
+  "finished": "2026-09-28T06:20:53.5750059+09:00"
+}

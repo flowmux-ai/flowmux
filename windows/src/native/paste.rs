@@ -14,8 +14,9 @@ impl App {
         anyhow::ensure!(surface.ready && !surface.restoring, "terminal is not ready");
         anyhow::ensure!(self.pending_pastes.len() < 16, "too many pending pastes");
         anyhow::ensure!(
-            !self.pending_pastes.values().any(|p| p.surface == id),
-            "another paste is pending for this terminal"
+            !self.pending_pastes.values().any(|p| p.surface == id)
+                && !self.pending_keys.values().any(|p| p.read.surface == id),
+            "another input request is pending for this terminal"
         );
         // Includes output queued by the ConPTY reader but not yet delivered to
         // the WebView. The frontend must parse its mode changes before pasting.

@@ -358,6 +358,18 @@ toasts, taskbar integration, real foreground/IME/menu acceptance, advanced OSC
 protocols and agent hooks remain open. T19/U14/A07 are partial; see
 [notification evidence](evidence/2026-09-28/notifications.md).
 
+Windows named keys now wait for the target xterm parser before using its public
+application cursor mode. Arrows/Home/End switch between normal and application
+sequences, and an expanded named-key encoder is checked against 128 vectors from
+the pinned xterm keyboard implementation plus flowmux's Shift+Enter contract.
+Hidden native tests compare bytes before ConPTY and through ReadConsoleW, including
+inactive/moved/exited targets. The new wire method avoids old hosts ignoring a
+surface selector; legacy requests remain accepted by new hosts. Composition,
+restore and pending-input guards preserve the existing text owner. Physical
+keyboard, focus reporting/IME, advanced keyboard protocols and broader shell/TUI
+acceptance remain pending. T21/O04 are partial; see
+[named-key evidence](evidence/2026-09-28/keys.md).
+
 The Windows changes are confined to this directory. During development, the
 separate existing-platform change `15ee955` (WSL Shift+Tab) appeared in the
 shared checkout; it was not edited or included as part of this Windows work.

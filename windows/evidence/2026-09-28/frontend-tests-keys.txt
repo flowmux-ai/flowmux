@@ -1,0 +1,350 @@
+
+> flowmux-windows-terminal@0.10.1 test
+> node --test src/*.test.mjs
+
+TAP version 13
+# Subtest: async clipboard read is discarded across tab/focus changes, composition, or intervening input
+ok 1 - async clipboard read is discarded across tab/focus changes, composition, or intervening input
+  ---
+  duration_ms: 1.576016
+  type: 'test'
+  ...
+# Subtest: empty or oversized selections never overwrite clipboard; permission failure never retries
+ok 2 - empty or oversized selections never overwrite clipboard; permission failure never retries
+  ---
+  duration_ms: 0.450156
+  type: 'test'
+  ...
+# Subtest: only copy/paste shortcuts are consumed; composition, AltGr, Ctrl+C and repeats preserve ownership
+ok 3 - only copy/paste shortcuts are consumed; composition, AltGr, Ctrl+C and repeats preserve ownership
+  ---
+  duration_ms: 1.585275
+  type: 'test'
+  ...
+# Subtest: background/hidden document and active composition refuse clipboard APIs before access
+ok 4 - background/hidden document and active composition refuse clipboard APIs before access
+  ---
+  duration_ms: 0.347127
+  type: 'test'
+  ...
+# Subtest: a pending clipboard operation is bounded and cancellation permits a fresh request after completion
+ok 5 - a pending clipboard operation is bounded and cancellation permits a fresh request after completion
+  ---
+  duration_ms: 0.324647
+  type: 'test'
+  ...
+# Subtest: local Windows OSC paths preserve Korean, combining characters and delimiters
+ok 6 - local Windows OSC paths preserve Korean, combining characters and delimiters
+  ---
+  duration_ms: 1.13306
+  type: 'test'
+  ...
+# Subtest: history replay cannot change cwd; unrelated OSC 9 remains available to other handlers
+ok 7 - history replay cannot change cwd; unrelated OSC 9 remains available to other handlers
+  ---
+  duration_ms: 0.788563
+  type: 'test'
+  ...
+# Subtest: history truncates complete styled rows by UTF-8 size and excludes process modes
+ok 8 - history truncates complete styled rows by UTF-8 size and excludes process modes
+  ---
+  duration_ms: 8.5055
+  type: 'test'
+  ...
+# Subtest: restore finishes only after both parser callbacks and moves history out of the viewport
+ok 9 - restore finishes only after both parser callbacks and moves history out of the viewport
+  ---
+  duration_ms: 1.122362
+  type: 'test'
+  ...
+# Subtest: snapshots wait for parsed output and errors are attached to the request
+ok 10 - snapshots wait for parsed output and errors are attached to the request
+  ---
+  duration_ms: 0.626464
+  type: 'test'
+  ...
+# Subtest: Shift+Enter preserves xterm commit order and never invents an Enter for an IME confirmation
+ok 11 - Shift+Enter preserves xterm commit order and never invents an Enter for an IME confirmation
+  ---
+  duration_ms: 1.417787
+  type: 'test'
+  ...
+# Subtest: rapid repeated Enter preserves the exact event count
+ok 12 - rapid repeated Enter preserves the exact event count
+  ---
+  duration_ms: 0.276427
+  type: 'test'
+  ...
+# Subtest: minimap resolves ANSI, RGB, inverse, dim and invisible cell attributes
+ok 13 - minimap resolves ANSI, RGB, inverse, dim and invisible cell attributes
+  ---
+  duration_ms: 1.867312
+  type: 'test'
+  ...
+# Subtest: preview geometry remains bounded and navigation uses physical rows
+ok 14 - preview geometry remains bounded and navigation uses physical rows
+  ---
+  duration_ms: 0.381457
+  type: 'test'
+  ...
+# Subtest: raster reads only preview cells and counts wide characters once
+ok 15 - raster reads only preview cells and counts wide characters once
+  ---
+  duration_ms: 3.486438
+  type: 'test'
+  ...
+# Subtest: wheel preview leaves terminal viewport alone; seek follows without focus or input
+ok 16 - wheel preview leaves terminal viewport alone; seek follows without focus or input
+  ---
+  duration_ms: 1.297058
+  type: 'test'
+  ...
+# Subtest: refresh keeps its first deadline and hidden or alternate views release raster work
+ok 17 - refresh keeps its first deadline and hidden or alternate views release raster work
+  ---
+  duration_ms: 3.006532
+  type: 'test'
+  ...
+# Subtest: composition leaves navigation keys and pointer untouched; ordinary keyboard scrolls
+ok 18 - composition leaves navigation keys and pointer untouched; ordinary keyboard scrolls
+  ---
+  duration_ms: 0.384746
+  type: 'test'
+  ...
+# Subtest: frozen native key vectors match pinned xterm and flowmux Shift+Enter encoding
+ok 19 - frozen native key vectors match pinned xterm and flowmux Shift+Enter encoding
+  ---
+  duration_ms: 486.905115
+  type: 'test'
+  ...
+# Subtest: mode snapshots wait for parser completion, never produce onData and reply once
+ok 20 - mode snapshots wait for parser completion, never produce onData and reply once
+  ---
+  duration_ms: 0.98386
+  type: 'test'
+  ...
+# Subtest: composition settling, restore and disabled input reject without querying mode
+ok 21 - composition settling, restore and disabled input reject without querying mode
+  ---
+  duration_ms: 0.203698
+  type: 'test'
+  ...
+# Subtest: literal case folding maps expanded characters back to the original text
+ok 22 - literal case folding maps expanded characters back to the original text
+  ---
+  duration_ms: 1.255348
+  type: 'test'
+  ...
+# Subtest: wide soft-wrap padding is excluded from matching and mapped back to cells
+ok 23 - wide soft-wrap padding is excluded from matching and mapped back to cells
+  ---
+  duration_ms: 2.715815
+  type: 'test'
+  ...
+# Subtest: 500-line pages count all matches without retaining markers for omitted results
+ok 24 - 500-line pages count all matches without retaining markers for omitted results
+  ---
+  duration_ms: 9.573739
+  type: 'test'
+  ...
+# Subtest: append is allowed; rewritten, trimmed, resized and cancelled references are rejected
+ok 25 - append is allowed; rewritten, trimmed, resized and cancelled references are rejected
+  ---
+  duration_ms: 0.566065
+  type: 'test'
+  ...
+# Subtest: cancel or changed output during yielded scanning cannot publish mixed results
+ok 26 - cancel or changed output during yielded scanning cannot publish mixed results
+  ---
+  duration_ms: 6.347961
+  type: 'test'
+  ...
+# Subtest: split Korean UTF-8 stays bytes and screen waits for parser completion
+ok 27 - split Korean UTF-8 stays bytes and screen waits for parser completion
+  ---
+  duration_ms: 2.074111
+  type: 'test'
+  ...
+# Subtest: recent reads share parser barriers and screen errors do not strand later requests
+ok 28 - recent reads share parser barriers and screen errors do not strand later requests
+  ---
+  duration_ms: 1.054401
+  type: 'test'
+  ...
+# Subtest: paste waits for pending mode output to finish parsing and emits only one outcome
+ok 29 - paste waits for pending mode output to finish parsing and emits only one outcome
+  ---
+  duration_ms: 0.551455
+  type: 'test'
+  ...
+# Subtest: selection actions wait for parsed output and return the exact completed sequence
+ok 30 - selection actions wait for parsed output and return the exact completed sequence
+  ---
+  duration_ms: 0.295238
+  type: 'test'
+  ...
+# Subtest: minimap reads wait for preceding output before sampling cells
+ok 31 - minimap reads wait for preceding output before sampling cells
+  ---
+  duration_ms: 0.252218
+  type: 'test'
+  ...
+# Subtest: pane navigation selects directions and prevents repeated zoom toggles
+ok 32 - pane navigation selects directions and prevents repeated zoom toggles
+  ---
+  duration_ms: 1.124359
+  type: 'test'
+  ...
+# Subtest: composition, AltGr and non-navigation keys retain normal terminal handling
+ok 33 - composition, AltGr and non-navigation keys retain normal terminal handling
+  ---
+  duration_ms: 0.359376
+  type: 'test'
+  ...
+# Subtest: paste bypasses Shift+Enter and is captured once without ordinary input duplication
+ok 34 - paste bypasses Shift+Enter and is captured once without ordinary input duplication
+  ---
+  duration_ms: 1.816872
+  type: 'test'
+  ...
+# Subtest: composition, restoration and disabled input reject without invoking xterm or replaying later
+ok 35 - composition, restoration and disabled input reject without invoking xterm or replaying later
+  ---
+  duration_ms: 0.469326
+  type: 'test'
+  ...
+# Subtest: UTF-8 bounds, invalid surrogates and NUL fail atomically; decomposition is preserved
+ok 36 - UTF-8 bounds, invalid surrogates and NUL fail atomically; decomposition is preserved
+  ---
+  duration_ms: 9.917179
+  type: 'test'
+  ...
+# Subtest: DOM handler consumes the default paste once; missing or cancelled clipboard events never paste
+ok 37 - DOM handler consumes the default paste once; missing or cancelled clipboard events never paste
+  ---
+  duration_ms: 0.363096
+  type: 'test'
+  ...
+# Subtest: failed or multiple xterm emissions do not leak partial input and next paste can recover
+ok 38 - failed or multiple xterm emissions do not leak partial input and next paste can recover
+  ---
+  duration_ms: 0.350736
+  type: 'test'
+  ...
+# Subtest: paste stays blocked through xterm deferred composition finalization without replaying text
+ok 39 - paste stays blocked through xterm deferred composition finalization without replaying text
+  ---
+  duration_ms: 44.455098
+  type: 'test'
+  ...
+# Subtest: viewport preserves physical row breaks, blank rows and exact Unicode
+ok 40 - viewport preserves physical row breaks, blank rows and exact Unicode
+  ---
+  duration_ms: 1.542216
+  type: 'test'
+  ...
+# Subtest: recent reads only the newest 80 normal rows independent of viewport and cursor
+ok 41 - recent reads only the newest 80 normal rows independent of viewport and cursor
+  ---
+  duration_ms: 4.362318
+  type: 'test'
+  ...
+# Subtest: recent includes blank bottom rows and all alternate rows below the cursor
+ok 42 - recent includes blank bottom rows and all alternate rows below the cursor
+  ---
+  duration_ms: 0.380767
+  type: 'test'
+  ...
+# Subtest: screen byte limit counts Unicode and newlines and never returns truncated text
+ok 43 - screen byte limit counts Unicode and newlines and never returns truncated text
+  ---
+  duration_ms: 2.12925
+  type: 'test'
+  ...
+# Subtest: IME confirmation and cancellation never navigate or close the find bar
+ok 44 - IME confirmation and cancellation never navigate or close the find bar
+  ---
+  duration_ms: 1.854383
+  type: 'test'
+  ...
+# Subtest: invalid regex clears stale selection; remote finds preserve focus and options
+ok 45 - invalid regex clears stale selection; remote finds preserve focus and options
+  ---
+  duration_ms: 0.453876
+  type: 'test'
+  ...
+# Subtest: find waits for completed terminal parsing and returns that sequence
+ok 46 - find waits for completed terminal parsing and returns that sequence
+  ---
+  duration_ms: 0.568145
+  type: 'test'
+  ...
+# Subtest: bounded search selection never cuts an emoji surrogate pair in the Rust bridge
+ok 47 - bounded search selection never cuts an emoji surrogate pair in the Rust bridge
+  ---
+  duration_ms: 0.241417
+  type: 'test'
+  ...
+# Subtest: copy retains the selected Unicode snapshot after redraw, trim and loss of live selection
+ok 48 - copy retains the selected Unicode snapshot after redraw, trim and loss of live selection
+  ---
+  duration_ms: 0.999551
+  type: 'test'
+  ...
+# Subtest: new primary selection, explicit clear, alternate screen and RIS cannot resurrect an old snapshot
+ok 49 - new primary selection, explicit clear, alternate screen and RIS cannot resurrect an old snapshot
+  ---
+  duration_ms: 0.512765
+  type: 'test'
+  ...
+# Subtest: oversized selections replace the fallback with an error and never truncate or copy earlier text
+ok 50 - oversized selections replace the fallback with an error and never truncate or copy earlier text
+  ---
+  duration_ms: 1.637776
+  type: 'test'
+  ...
+# Subtest: copy event uses exact plain text once and leaves the clipboard alone when empty or blocked
+ok 51 - copy event uses exact plain text once and leaves the clipboard alone when empty or blocked
+  ---
+  duration_ms: 0.824132
+  type: 'test'
+  ...
+# Subtest: invalid range is atomic; valid ranges use cell coordinates without taking focus
+ok 52 - invalid range is atomic; valid ranges use cell coordinates without taking focus
+  ---
+  duration_ms: 0.414136
+  type: 'test'
+  ...
+# Subtest: settings defer and coalesce across composition/restore without focus or input
+ok 53 - settings defer and coalesce across composition/restore without focus or input
+  ---
+  duration_ms: 1.200649
+  type: 'test'
+  ...
+# Subtest: menu fits the pane and keyboard navigation skips unavailable Copy/Paste
+ok 54 - menu fits the pane and keyboard navigation skips unavailable Copy/Paste
+  ---
+  duration_ms: 1.200429
+  type: 'test'
+  ...
+# Subtest: menu actions share clipboard/selection controllers; Escape during IME leaves the menu alone
+ok 55 - menu actions share clipboard/selection controllers; Escape during IME leaves the menu alone
+  ---
+  duration_ms: 0.734793
+  type: 'test'
+  ...
+# Subtest: composition and application mouse mode retain their normal handling; Shift can open the menu
+ok 56 - composition and application mouse mode retain their normal handling; Shift can open the menu
+  ---
+  duration_ms: 0.269457
+  type: 'test'
+  ...
+1..56
+# tests 56
+# suites 0
+# pass 56
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 735.678489

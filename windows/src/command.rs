@@ -284,10 +284,17 @@ pub enum Command {
         pane: Uuid,
         text: String,
     },
+    /// Send one terminal key after parsing the current cursor mode.
+    // Old hosts ignore unknown fields. A new wire method makes them reject a
+    // new --surface request instead of silently typing into the active tab.
+    #[serde(rename = "send_key_mode", alias = "send_key")]
     SendKey {
         key: String,
-        #[arg(long, value_parser = parse_id)]
+        #[arg(long, value_parser = parse_id, conflicts_with = "surface")]
         pane: Option<Uuid>,
+        /// Target an inactive tab without changing focus.
+        #[arg(long, value_parser = parse_id)]
+        surface: Option<Uuid>,
     },
     Split {
         #[arg(value_enum, default_value = "vertical")]
@@ -459,31 +466,44 @@ fn parse_id(text: &str) -> Result<Uuid, String> {
     Uuid::parse_str(value).map_err(|e| e.to_string())
 }
 
-pub fn key_bytes(key: &str) -> anyhow::Result<Vec<u8>> {
-    let bytes: &[u8] = match key.to_ascii_lowercase().as_str() {
-        "enter" => b"\r",
-        "tab" => b"\t",
-        "escape" | "esc" => b"\x1b",
-        "backspace" => b"\x7f",
-        "arrowup" | "up" => b"\x1b[A",
-        "arrowdown" | "down" => b"\x1b[B",
-        "arrowright" | "right" => b"\x1b[C",
-        "arrowleft" | "left" => b"\x1b[D",
-        "home" => b"\x1b[H",
-        "end" => b"\x1b[F",
-        "delete" => b"\x1b[3~",
-        "shiftenter" | "shift+enter" => b"\x1b\r",
-        "ctrl+c" => b"\x03",
-        "ctrl+d" => b"\x04",
-        "ctrl+l" => b"\x0c",
-        _ => anyhow::bail!("unsupported named key: {key}"),
-    };
-    Ok(bytes.to_vec())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn send_key_preserves_old_wire_shape_and_adds_explicit_surface_routing() {
+        let old: Request =
+            serde_json::from_str(r#"{"method":"send_key","key":"Enter","pane":null}"#).unwrap();
+        assert!(matches!(
+            old.command,
+            Command::SendKey { surface: None, .. }
+        ));
+        let id = Uuid::new_v4().to_string();
+        let cli =
+            Cli::try_parse_from(["flowmuxctl", "send-key", "Ctrl+Z", "--surface", &id]).unwrap();
+        assert_eq!(
+            serde_json::to_value(&cli.command).unwrap()["method"],
+            "send_key_mode"
+        );
+        assert!(matches!(
+            cli.command,
+            Command::SendKey {
+                surface: Some(_),
+                pane: None,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from([
+            "flowmuxctl",
+            "send-key",
+            "Enter",
+            "--surface",
+            &id,
+            "--pane",
+            &id
+        ])
+        .is_err());
+    }
+
     #[test]
     fn notification_cli_and_wire_keep_source_and_operation_unambiguous() {
         let id = Uuid::new_v4().to_string();

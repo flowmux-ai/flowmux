@@ -6,6 +6,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { Output } from './output.mjs';
 import { Input } from './input.mjs';
 import { Paste } from './paste.mjs';
+import { keyMode } from './named-key.mjs';
 import { Selection } from './selection.mjs';
 import { Clipboard } from './clipboard.mjs';
 import { TerminalMenu } from './terminal-menu.mjs';
@@ -39,7 +40,11 @@ const minimap = new Minimap(terminal, document, () => composing || restoring);
 const paste = new Paste(terminal, () => composing ? 'Finish composing text before pasting.'
   : restoring ? 'Terminal history is being restored.' : null);
 const output = new Output(terminal, send, () => snapshot(terminal, serialize), message => find.run(message),
-  () => { find.invalidate(); outputSearch.changed(); minimap.changed(); }, outputSearch, paste, selection, minimap);
+  () => { find.invalidate(); outputSearch.changed(); minimap.changed(); }, outputSearch, paste, selection, minimap, () => keyMode(terminal, () => {
+    if (composing || paste.settling) return 'Finish composing text before sending a named key.';
+    if (restoring) return 'Terminal history is being restored.';
+    return null;
+  }));
 const clipboard = new Clipboard(selection, paste, navigator.clipboard,
   outcome => send({ type: 'pasted', request: null, sequence: output.parsed, outcome }),
   message => { document.getElementById('input-status').textContent = message; },
