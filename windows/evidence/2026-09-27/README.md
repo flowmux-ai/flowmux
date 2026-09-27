@@ -28,6 +28,8 @@ WebView2 112.0.1722.48이다. Rust/Win32 창과 WebView2 터미널을 실제 실
 | 이동 구현 후 백그라운드 lifecycle | 정상 종료·자손 정리 통과 | `native-lifecycle-move-background.json` |
 | 이동 구현 후 모델/IPC 및 네이티브 테스트 | Linux 7개, Windows 10개 통과 | `linux-rust-tests-move.txt`, `native-rust-tests-move.txt` |
 | 이동 구현 후 Windows release Clippy | 경고 없이 통과 | `release-clippy-move.txt` |
+| 숨김 호스트 1/4/16 pane 동시 출력 | 각 1만 줄, 마지막 한글 출력·parser barrier 통과 | `native-output-load-background.json` |
+| 비활성 tab 출력 조회 | 출력 완료 및 focus 유지 | 같은 파일의 `hiddenTab` |
 
 `artifacts.json`은 첫 구현, `artifacts-lifecycle.json`은 세션 종료 개선 후 검증한
 실행 파일과 설치 파일의 크기·SHA-256을 기록한다. 개선 후 실제 IME 11개 사례와
@@ -77,6 +79,18 @@ Windows 데스크톱을 동시에 사용하던 사용자의 입력이 실기 시
 숨김 모드에서는 최상위 창을 표시하지 않고 native focus를 요청하지 않는다.
 표시 상태/foreground 여부와 40회 이동 후 출력 보존을 실제 Windows에서 확인했다.
 화면을 가상으로 채우거나 문자열 전송을 IME 검증으로 간주하지 않았다.
+
+## 출력 부하와 메모리
+
+PowerShell 표준 출력으로 각 pane에 1만 줄의 한글·색상 출력을 동시에 보냈다.
+시작 gate부터 마지막 화면 조회까지 1/4/16 pane에서 약 0.98/2.52/5.99초였다.
+계측용 코드 실행과 CLI polling도 포함하므로 renderer 처리량 자체를 나타내지 않는다.
+
+출력 후 전체 프로세스 트리의 private memory는 약 276/732/2303MiB였다.
+16 pane에서는 PowerShell 16개, ConPTY 16개, WebView2 21개 프로세스가 포함됐다.
+Rust 호스트만 측정한 수치가 아니며 peak나 장기 안정성 결과도 아니다. 특히
+다수의 셸과 WebView를 유지하는 현재 구조의 메모리 비용은 추가 개선 대상이다.
+최소화·잠금·복귀 및 release 빌드의 같은 부하 검증은 별도로 남아 있다.
 
 ## 아직 검증하지 못했거나 구현 중인 범위
 

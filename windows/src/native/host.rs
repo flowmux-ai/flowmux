@@ -999,8 +999,12 @@ impl App {
                         "background_testing":self.background_test,"window_handle":self.window as usize}),
                 ));
             }
-            Command::ReadScreen { pane } => {
-                let id = self.target(pane, caller)?;
+            Command::ReadScreen { pane, surface } => {
+                anyhow::ensure!(
+                    pane.is_none() || surface.is_none(),
+                    "choose either pane or surface"
+                );
+                let id = self.target(pane, surface.map(SurfaceId).or(caller))?;
                 let surface = self
                     .surfaces
                     .get(&id)

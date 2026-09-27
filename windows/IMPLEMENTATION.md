@@ -99,6 +99,18 @@ controlled interactive rerun. The earlier eleven IME cases validate the lifecycl
 build, not this newer focus change. Moving to another window, drag/drop, broader
 TUI/scrollback and all other pending gates remain separate work.
 
+The hidden debug host also completed synchronized Korean/color output across
+1/4/16 panes (10,000 lines per pane), with parser-complete reads taking about
+0.98/2.52/5.99 seconds from the start gate through the final reads. A separate
+inactive tab completed its output and remained readable without changing focus.
+`read-screen --surface` exposes this direct inactive-tab read to the CLI.
+These timings include probe generation and polling, not just terminal throughput.
+Post-output private memory for the owned process tree was approximately
+276/732/2303 MiB; the 16-pane sample included 16 PowerShell processes,
+16 ConPTY hosts and 21 WebView2 processes. This is a point-in-time measurement,
+not peak usage or a leak test. Memory efficiency, repeated sustained load,
+minimize/lock/resume and release-build desktop evidence remain pending.
+
 Evidence is under [evidence/2026-09-27](evidence/2026-09-27/README.md). No complete
 Windows acceptance gate has passed yet. Hanja candidates, focus transitions,
 DPI, clipboard/Unicode-width coverage, broader TUI compatibility, additional

@@ -756,14 +756,20 @@
     {
       "id": "G05",
       "gate": "출력 부하·background",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-output-load-background.json"
+      ],
+      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending."
     },
     {
       "id": "G06",
       "gate": "화면 소비 기능",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-27/native-output-load-background.json"
+      ],
+      "notes": "Hidden debug host: 1/4/16 panes with 10,000 Korean/color lines each; direct inactive-tab screen read preserves focus. Owned-tree memory after 16-pane output about 2303 MiB. Sustained/peak memory, minimize/lock/resume, release desktop and full screen-consumer parity remain pending."
     },
     {
       "id": "G07",

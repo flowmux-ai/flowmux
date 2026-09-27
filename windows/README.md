@@ -49,6 +49,7 @@ Move an existing terminal between panes or workspaces in the same window:
 
 ```powershell
 flowmuxctl.exe move-tab surface:<id> --to-pane pane:<id> --index 0
+flowmuxctl.exe read-screen --surface surface:<id>
 ```
 
 The native **Move tab…** menu exposes destinations and left/right reordering.
@@ -57,6 +58,9 @@ Inside a terminal, commands with an omitted target resolve its stable surface ID
 including after a move or while hidden. `identify` returns its current location;
 the shell's inherited pane/workspace environment variables still describe spawn
 time and cannot be rewritten in a running child process.
+`read-screen --surface` reads an inactive tab without activating it. Its result
+waits for xterm to parse the captured output sequence; physical row breaks are
+preserved, including wraps in narrow panes.
 
 The app loads the pinned Microsoft ConPTY DLL from its own installation
 directory, with the SDK's `x64/OpenConsole.exe` layout. It does not fall back
@@ -72,9 +76,10 @@ launch because the background test switch is deliberately absent from it:
 powershell -NoProfile -File windows/scripts/verify-native.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-lifecycle.ps1 -BuildDirectory windows/target/debug
 powershell -NoProfile -File windows/scripts/verify-tab-move.ps1 -BuildDirectory windows/target/debug
+powershell -NoProfile -File windows/scripts/verify-output-load.ps1 -BuildDirectory windows/target/debug
 ```
 
-Adding `-Interactive` opts these scripts into visible-window verification. Real
+Adding `-Interactive` opts the smoke/lifecycle/tab-move scripts into visible-window verification. The output-load script always uses a hidden host. Real
 IME tests additionally require an idle desktop and explicit `-Interactive`:
 
 ```powershell

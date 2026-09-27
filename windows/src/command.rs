@@ -39,6 +39,9 @@ pub enum Command {
     ReadScreen {
         #[arg(value_parser = parse_id)]
         pane: Option<Uuid>,
+        /// Read a specific tab, including an inactive tab, without changing focus.
+        #[arg(long, value_parser = parse_id, conflicts_with = "pane")]
+        surface: Option<Uuid>,
     },
     SendKeys {
         #[arg(value_parser = parse_id)]
@@ -130,9 +133,21 @@ mod tests {
     fn context_preserves_old_ipc_commands_and_roundtrips_stable_surface() {
         let old: Request = serde_json::from_str(r#"{"method":"identify"}"#).unwrap();
         assert!(old.caller_surface.is_none());
+        let old_read: Request =
+            serde_json::from_str(r#"{"method":"read_screen","pane":null}"#).unwrap();
+        assert!(matches!(
+            old_read.command,
+            Command::ReadScreen {
+                pane: None,
+                surface: None
+            }
+        ));
         let id = Uuid::new_v4();
         let original = Request {
-            command: Command::ReadScreen { pane: None },
+            command: Command::ReadScreen {
+                pane: None,
+                surface: None,
+            },
             caller_surface: Some(id),
         };
         let decoded: Request =
@@ -140,7 +155,10 @@ mod tests {
         assert_eq!(decoded.caller_surface, Some(id));
         assert!(matches!(
             decoded.command,
-            Command::ReadScreen { pane: None }
+            Command::ReadScreen {
+                pane: None,
+                surface: None
+            }
         ));
     }
 }
