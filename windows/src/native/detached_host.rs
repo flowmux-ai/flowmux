@@ -186,9 +186,7 @@ impl App {
         if let Some(browser) = self.browsers.get_mut(&surface) {
             browser.parent_changed();
         }
-        let layout = self
-            .rebuild_without_focus()
-            .and_then(|()| self.browser_find_reparent(surface));
+        let layout = self.rebuild_without_focus();
         self.detached[&surface].show(self.background_test);
         layout?;
         self.select(surface)?;
@@ -228,7 +226,10 @@ impl App {
                 terminal.send(&HostMessage::Visibility { visible: true })?;
             }
         } else if let Some(browser) = self.browsers.get_mut(&surface) {
-            browser.layout(Some(area), scale)?;
+            let find_height =
+                self.browser_find
+                    .layout(surface, Some(area), scale, self.background_test);
+            browser.layout(Some(area), scale, find_height)?;
         } else if let Some(editor) = self.editors.get_mut(&surface) {
             editor.view.layout(Some(area))?;
         }

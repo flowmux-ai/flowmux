@@ -25,6 +25,26 @@ impl Controller {
             .as_ref()
             .is_some_and(|p| p.handle_message(message))
     }
+    pub(crate) fn layout(
+        &self,
+        id: SurfaceId,
+        area: Option<model::Rect>,
+        scale: f64,
+        background: bool,
+    ) -> i32 {
+        let Some((panel, area)) = self
+            .panel
+            .as_ref()
+            .filter(|p| self.surface == Some(id) && p.is_open())
+            .zip(area)
+        else {
+            return 0;
+        };
+        let top = chrome::Chrome::height(scale);
+        let height = panel::Panel::height(area.width, scale).min((area.height - top - 1).max(0));
+        panel.place(area.width, top, height, background);
+        height
+    }
 }
 impl App {
     fn browser_find_available(&self, id: SurfaceId) -> anyhow::Result<()> {
@@ -58,19 +78,22 @@ impl App {
             "busy":self.pending_browser.values().any(|p|p.surface == id && p.response.is_find()),
             "panel_handle":panel.map(|p|p.window as usize),
             "panel_owner":panel.map(|p|p.owner() as usize),
+            "panel_parent":panel.map(|p|p.parent() as usize),
+            "panel_bounds":panel.map(|p|p.bounds()),
+            "panel_controls":panel.map(|p|p.diagnostics()),
             "panel_query_handle":panel.map(|p|p.query_handle() as usize),
             "panel_status":panel.map(|p|p.status_text())})
     }
     pub(super) fn browser_find_show(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         self.browser_find_available(id)?;
-        let owner = self.surface_window(id);
+        let parent = self.browsers[&id].holder.window;
         if self
             .browser_find
             .panel
             .as_ref()
-            .is_none_or(|p| p.owner() != owner)
+            .is_none_or(|p| p.parent() != parent)
         {
-            self.browser_find.panel = Some(panel::Panel::new(owner)?);
+            self.browser_find.panel = Some(panel::Panel::new(parent)?);
         }
         self.browser_find.deferred_close.remove(&id);
         self.browser_find.surface = Some(id);
@@ -91,35 +114,7 @@ impl App {
             },
         });
         panel.show(self.background_test);
-        Ok(())
-    }
-    pub(crate) fn browser_find_reparent(&mut self, id: SurfaceId) -> anyhow::Result<()> {
-        if self.browser_find.surface != Some(id) {
-            return Ok(());
-        }
-        let Some(previous) = self.browser_find.panel.as_ref() else {
-            return Ok(());
-        };
-        let owner = self.surface_window(id);
-        if previous.owner() == owner {
-            return Ok(());
-        }
-        // Preserve the current edit draft independently of the last executed
-        // find query/result. Reparenting must not execute a search or take focus.
-        let query = previous.query();
-        let case_sensitive = previous.case_sensitive();
-        let status = previous.status_text();
-        let visible = unsafe { IsWindowVisible(previous.window) != 0 };
-        let panel = panel::Panel::new(owner)?;
-        panel.set_query(&query, case_sensitive);
-        panel.status(&status);
-        self.browser_find.panel = Some(panel);
-        self.browser_find
-            .panel
-            .as_ref()
-            .unwrap()
-            .restore_visibility(self.background_test, visible);
-        Ok(())
+        self.layout()
     }
     pub(super) fn browser_find_start(
         &mut self,
@@ -175,10 +170,9 @@ impl App {
         self.browser_script_optional(id, source, Response::FindClose, MAX_SCRIPT, reply)?;
         self.browsers.get_mut(&id).unwrap().find.found = None;
         if self.browser_find.surface == Some(id) {
-            if let Some(panel) = &self.browser_find.panel {
-                panel.hide();
-            }
+            self.browser_find.panel.take();
             self.browser_find.surface = None;
+            self.layout()?;
         }
         Ok(())
     }
@@ -192,6 +186,9 @@ impl App {
                 panel.status(reason);
             }
             self.browser_find.surface = None;
+            if let Err(error) = self.layout() {
+                report(&format!("page find layout: {error:#}"));
+            }
         }
     }
     pub(super) fn browser_find_result(
@@ -295,11 +292,9 @@ impl App {
                 } else {
                     self.browser_find_close(id, None)
                 };
-                if let Some(panel) = &self.browser_find.panel {
-                    panel.hide();
-                }
+                self.browser_find.panel.take();
                 self.browser_find.surface = None;
-                result
+                result.and_then(|()| self.layout())
             } else {
                 let panel = self.browser_find.panel.as_ref().unwrap();
                 self.browser_find_start(

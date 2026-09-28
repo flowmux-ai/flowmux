@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Owned page-find controls. Construction and background requests never show the window.
+//! Inline page-find controls hosted beneath the browser address bar.
+use super::super::super::chrome;
 use super::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use windows_sys::Win32::{
-    System::SystemServices::SS_NOPREFIX,
+    System::SystemServices::{SS_ENDELLIPSIS, SS_NOPREFIX},
     UI::{
-        Controls::EM_LIMITTEXT,
+        Controls::{EM_LIMITTEXT, EM_SETCUEBANNER},
         Input::KeyboardAndMouse::{GetFocus, VK_TAB},
     },
 };
@@ -36,32 +37,19 @@ unsafe extern "system" fn procedure(
             emit(UiAction::Close(generation));
             0
         }
-        WM_GETMINMAXINFO => {
-            let info = &mut *(lparam as *mut MINMAXINFO);
-            let scale = GetDpiForWindow(window).max(96) as f64 / 96.0;
-            info.ptMinTrackSize.x = (480.0 * scale).round() as i32;
-            info.ptMinTrackSize.y = (180.0 * scale).round() as i32;
-            0
-        }
-        WM_SIZE => {
-            emit(UiAction::Layout(generation));
-            0
-        }
-        WM_DPICHANGED => {
-            let rect = &*(lparam as *const RECT);
-            SetWindowPos(
-                window,
-                std::ptr::null_mut(),
-                rect.left,
-                rect.top,
-                rect.right - rect.left,
-                rect.bottom - rect.top,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
+        WM_SIZE | WM_DPICHANGED_AFTERPARENT => {
             emit(UiAction::Layout(generation));
             0
         }
         WM_COMMAND => {
+            let control = lparam as HWND;
+            if control.is_null()
+                || GetParent(control) != window
+                || IsWindowEnabled(control) == 0
+                || GetDlgCtrlID(control) as usize != (wparam & 0xffff)
+            {
+                return 0;
+            }
             let action = match (wparam & 0xffff, (wparam >> 16) as u32) {
                 (30, BN_CLICKED) => Some(UiAction::Previous(generation)),
                 (31, BN_CLICKED) => Some(UiAction::Next(generation)),
@@ -74,14 +62,63 @@ unsafe extern "system" fn procedure(
             }
             0
         }
-        _ => DefWindowProcW(window, message, wparam, lparam),
+        _ => chrome::message(window, message, wparam, lparam)
+            .unwrap_or_else(|| DefWindowProcW(window, message, wparam, lparam)),
     }
+}
+
+// Physical-pixel geometry shared by height() and layout(), including narrow panes.
+fn geometry(width: i32, scale: f64) -> (i32, [(i32, i32, i32, i32); 6]) {
+    let px = |value: i32| ((value as f64 * scale).round() as i32).max(1);
+    let margin = px(8).min(width.max(1) / 4);
+    let available = (width - 2 * margin).max(1);
+    let row = px(28);
+    let gap = px(4);
+    let tools = [px(58), row, row, row];
+    let tools_width = tools.iter().sum::<i32>() + 3 * gap;
+    let inline = available >= px(120) + gap + tools_width;
+    let inline_status = available >= px(120) + tools_width + px(120) + 2 * gap;
+    let query_width = if inline_status {
+        available - tools_width - px(120) - 2 * gap
+    } else if inline {
+        available - tools_width - gap
+    } else {
+        available
+    };
+    let mut controls = [(margin, px(8), query_width, row); 6];
+    let mut x = if inline {
+        margin + query_width + gap + if inline_status { px(120) + gap } else { 0 }
+    } else {
+        margin
+    };
+    let mut y = if inline { px(8) } else { px(8) + row + gap };
+    for (index, width) in tools.into_iter().enumerate() {
+        let width = width.min(available);
+        if x > margin && x + width > margin + available {
+            x = margin;
+            y += row + gap;
+        }
+        controls[index + 1] = (x, y, width, row);
+        x += width + gap;
+    }
+    if inline_status {
+        controls[5] = (
+            margin + query_width + gap,
+            y + (row - px(20)) / 2,
+            px(120),
+            px(20),
+        );
+        return (y + row + px(8), controls);
+    }
+    let status_y = y + row + gap;
+    let status_height = px(if available < px(120) { 40 } else { 20 });
+    controls[5] = (margin, status_y, available, status_height);
+    (status_y + status_height + px(8), controls)
 }
 
 pub(super) struct Panel {
     pub(super) window: HWND,
     pub(super) generation: usize,
-    label: HWND,
     query: HWND,
     case: HWND,
     previous: HWND,
@@ -89,10 +126,23 @@ pub(super) struct Panel {
     close: HWND,
     status: HWND,
     message: RefCell<String>,
+    opened: Cell<bool>,
+    focus_pending: Cell<bool>,
 }
 
 impl Drop for Panel {
     fn drop(&mut self) {
+        for control in [
+            self.query,
+            self.case,
+            self.previous,
+            self.next,
+            self.close,
+            self.status,
+        ] {
+            chrome::unregister(control);
+        }
+        chrome::unregister(self.window);
         unsafe {
             DestroyWindow(self.window);
         }
@@ -108,7 +158,6 @@ impl Panel {
                 lpfnWndProc: Some(procedure),
                 hInstance: instance,
                 hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                hbrBackground: (COLOR_BTNFACE + 1) as HBRUSH,
                 lpszClassName: class.as_ptr(),
                 ..std::mem::zeroed()
             };
@@ -116,16 +165,15 @@ impl Panel {
                 RegisterClassW(&spec) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS,
                 "cannot register page find window"
             );
-            let scale = GetDpiForWindow(parent).max(96) as f64 / 96.0;
             let window = CreateWindowExW(
-                WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT,
+                WS_EX_CONTROLPARENT,
                 class.as_ptr(),
                 wide("Find in page").as_ptr(),
-                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                (580.0 * scale).round() as i32,
-                (190.0 * scale).round() as i32,
+                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                0,
+                0,
+                1,
+                1,
                 parent,
                 std::ptr::null_mut(),
                 instance,
@@ -134,11 +182,11 @@ impl Panel {
             anyhow::ensure!(!window.is_null(), "cannot create page find window");
             let generation = NEXT_PANEL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             SetWindowLongPtrW(window, GWLP_USERDATA, generation as isize);
+            chrome::register_control(window, chrome::ControlRole::Static);
             // Own the HWND before creating children so an error destroys all controls.
             let mut panel = Self {
                 window,
                 generation,
-                label: std::ptr::null_mut(),
                 query: std::ptr::null_mut(),
                 case: std::ptr::null_mut(),
                 previous: std::ptr::null_mut(),
@@ -146,8 +194,9 @@ impl Panel {
                 close: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
                 message: RefCell::new(String::new()),
+                opened: Cell::new(false),
+                focus_pending: Cell::new(false),
             };
-            panel.label = panel.child("STATIC", "Find:", 9, SS_NOPREFIX)?;
             panel.query = panel.child(
                 "EDIT",
                 "",
@@ -160,16 +209,34 @@ impl Panel {
                 crate::browser_find::MAX_QUERY_BYTES,
                 0,
             );
-            panel.case = panel.child(
-                "BUTTON",
-                "Match case",
-                11,
-                WS_TABSTOP | BS_AUTOCHECKBOX as u32,
-            )?;
-            panel.previous = panel.child("BUTTON", "Previous", 30, WS_TABSTOP)?;
-            panel.next = panel.child("BUTTON", "Next", 31, WS_TABSTOP)?;
-            panel.close = panel.child("BUTTON", "Close", 2, WS_TABSTOP)?;
-            panel.status = panel.child("STATIC", "", 12, SS_NOPREFIX)?;
+            SendMessageW(
+                panel.query,
+                EM_SETCUEBANNER,
+                1,
+                wide("Find in page…").as_ptr() as LPARAM,
+            );
+            panel.case = panel.child("BUTTON", "Aa", 11, WS_TABSTOP | BS_AUTOCHECKBOX as u32)?;
+            panel.previous =
+                panel.child("BUTTON", "Previous", 30, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.next = panel.child("BUTTON", "Next", 31, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.close = panel.child("BUTTON", "Close", 2, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.status = panel.child("STATIC", "", 12, SS_NOPREFIX | SS_ENDELLIPSIS)?;
+            chrome::register_button(
+                panel.previous,
+                chrome::Role::Icon {
+                    kind: chrome::ChromeIcon::Back,
+                    marked: false,
+                },
+            );
+            chrome::register_button(
+                panel.next,
+                chrome::Role::Icon {
+                    kind: chrome::ChromeIcon::Forward,
+                    marked: false,
+                },
+            );
+            chrome::register_button(panel.close, chrome::Role::Tool);
+            chrome::register_control(panel.status, chrome::ControlRole::Caption);
             panel.layout();
             panel.status("Enter text, then choose Next or Previous.");
             Ok(panel)
@@ -193,11 +260,13 @@ impl Panel {
                 std::ptr::null(),
             );
             checked((!handle.is_null()) as i32)?;
-            SendMessageW(
+            chrome::register_control(
                 handle,
-                WM_SETFONT,
-                GetStockObject(DEFAULT_GUI_FONT) as WPARAM,
-                1,
+                if class == "EDIT" {
+                    chrome::ControlRole::Edit
+                } else {
+                    chrome::ControlRole::Static
+                },
             );
             Ok(handle)
         }
@@ -208,28 +277,18 @@ impl Panel {
             let mut rect = RECT::default();
             GetClientRect(self.window, &mut rect);
             let scale = GetDpiForWindow(self.window).max(96) as f64 / 96.0;
-            let px = |value: i32| (value as f64 * scale).round() as i32;
-            for (handle, x, y, width, height) in [
-                (self.label, px(12), px(17), px(44), px(22)),
-                (
-                    self.query,
-                    px(60),
-                    px(12),
-                    (rect.right - px(72)).max(1),
-                    px(28),
-                ),
-                (self.case, px(12), px(50), px(112), px(28)),
-                (self.previous, rect.right - px(304), px(50), px(92), px(28)),
-                (self.next, rect.right - px(204), px(50), px(92), px(28)),
-                (self.close, rect.right - px(104), px(50), px(92), px(28)),
-                (
-                    self.status,
-                    px(12),
-                    px(90),
-                    (rect.right - px(24)).max(1),
-                    (rect.bottom - px(102)).max(1),
-                ),
-            ] {
+            let (_, controls) = geometry(rect.right, scale);
+            for (handle, (x, y, width, height)) in [
+                self.query,
+                self.case,
+                self.previous,
+                self.next,
+                self.close,
+                self.status,
+            ]
+            .into_iter()
+            .zip(controls)
+            {
                 if !handle.is_null() {
                     SetWindowPos(
                         handle,
@@ -246,31 +305,50 @@ impl Panel {
     }
 
     pub(super) fn owner(&self) -> HWND {
-        unsafe { GetWindow(self.window, GW_OWNER) }
+        unsafe { GetAncestor(self.window, GA_ROOT) }
     }
 
-    pub(super) fn restore_visibility(&self, background: bool, visible: bool) {
-        if !background && visible {
-            unsafe {
-                ShowWindow(self.window, SW_SHOWNOACTIVATE);
+    pub(super) fn parent(&self) -> HWND {
+        unsafe { GetParent(self.window) }
+    }
+
+    pub(super) fn height(width: i32, scale: f64) -> i32 {
+        geometry(width, scale).0
+    }
+
+    pub(super) fn is_open(&self) -> bool {
+        self.opened.get()
+    }
+
+    pub(super) fn place(&self, width: i32, top: i32, height: i32, background: bool) {
+        unsafe {
+            SetWindowPos(
+                self.window,
+                std::ptr::null_mut(),
+                0,
+                top,
+                width.max(1),
+                height.max(1),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            self.layout();
+            let show = self.opened.get() && width > 0 && height > 0 && !background;
+            if (GetWindowLongPtrW(self.window, GWL_STYLE) as u32 & WS_VISIBLE != 0) != show {
+                ShowWindow(self.window, if show { SW_SHOWNA } else { SW_HIDE });
             }
-        }
-    }
-
-    pub(super) fn show(&self, background: bool) {
-        // A background request must not affect visibility, activation, or focus.
-        if !background {
-            unsafe {
-                ShowWindow(self.window, SW_SHOW);
+            if show
+                && IsWindowVisible(self.window) != 0
+                && IsWindowEnabled(self.owner()) != 0
+                && self.focus_pending.replace(false)
+            {
                 SetFocus(self.query);
             }
         }
     }
 
-    pub(super) fn hide(&self) {
-        unsafe {
-            ShowWindow(self.window, SW_HIDE);
-        }
+    pub(super) fn show(&self, background: bool) {
+        self.opened.set(true);
+        self.focus_pending.set(!background);
     }
 
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
@@ -323,6 +401,23 @@ impl Panel {
 
     pub(super) fn query_handle(&self) -> HWND {
         self.query
+    }
+
+    pub(super) fn bounds(&self) -> Value {
+        unsafe {
+            let mut rect = RECT::default();
+            GetWindowRect(self.window, &mut rect);
+            let mut point = POINT {
+                x: rect.left,
+                y: rect.top,
+            };
+            ScreenToClient(self.parent(), &mut point);
+            json!({"x":point.x,"y":point.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top})
+        }
+    }
+
+    pub(super) fn diagnostics(&self) -> Value {
+        json!({"query":self.query as usize,"case":self.case as usize,"previous":self.previous as usize,"next":self.next as usize,"close":self.close as usize,"status":self.status as usize})
     }
 
     fn control_text(&self, handle: HWND) -> String {

@@ -1565,7 +1565,10 @@ impl App {
                     height: (area.height - bar).max(1),
                     ..*area
                 });
-            browser.layout(area, scale)?;
+            let find_height = self
+                .browser_find
+                .layout(*id, area, scale, self.background_test);
+            browser.layout(area, scale, find_height)?;
         }
         let row_height = px(58).max(1);
         let sidebar_layout =
@@ -3011,12 +3014,7 @@ impl App {
             let window = self.detached.remove(&surface).unwrap();
             self.metadata_owner_closing(window.window);
             self.download_owner_closing(window.window);
-            // A find panel owned by the old frame must move before it is destroyed.
-            let find = self.browser_find_reparent(surface);
-            if let Err(error) = find {
-                self.browser_find_reset(surface, "Search window could not move");
-                report(&format!("browser find moved: {error:#}"));
-            }
+            // The inline find controls move with the retained browser holder.
             drop(window);
         }
         self.workspaces = candidate;

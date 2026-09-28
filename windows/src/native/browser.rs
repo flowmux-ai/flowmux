@@ -344,12 +344,18 @@ impl Browser {
         let viewport = self.holder.view_bounds(&self.view);
         json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"instance":self.instance,"preview_binding":self.preview_binding,"preview_generation":self.preview_generation,"preview_expired":self.preview_blocked.get(),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
     }
-    pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
+    pub(super) fn layout(
+        &mut self,
+        area: Option<model::Rect>,
+        scale: f64,
+        find_height: i32,
+    ) -> anyhow::Result<()> {
         if self.native_closed.get() {
             return Ok(());
         }
         self.holder.layout(area, self.background)?;
-        let viewport = area.map(|r| (r.x, r.y, r.width, r.height));
+        let height = chrome::Chrome::height(scale) + find_height;
+        let viewport = area.map(|r| (r.x, r.y + height, r.width, (r.height - height).max(1)));
         if self.viewport != viewport {
             self.viewport_revision = self.viewport_revision.wrapping_add(1);
             self.viewport = viewport;
@@ -367,7 +373,6 @@ impl Browser {
         if let Some(area) = area {
             let area = model::Rect { x: 0, y: 0, ..area };
             self.chrome.layout(area, scale);
-            let height = chrome::Chrome::height(scale);
             self.view.set_bounds(bounds(model::Rect {
                 y: height,
                 height: (area.height - height).max(1),

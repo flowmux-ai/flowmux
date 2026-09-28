@@ -10,7 +10,8 @@ $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe'
 $cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs') -ReferencedAssemblies System.Drawing
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('browser-find-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null
 $directory=(Resolve-Path $directory).Path
@@ -137,7 +138,7 @@ function Assert-Hit($Result,[string]$Id,[string]$Text) {
     if(-not $Result.found -or $selection.id -ne $Id -or -not (Same-Text $selection.text $Text) -or -not (Same-Text $Result.selection $selection.text)) {throw ('Unexpected native find selection: '+($selection|ConvertTo-Json -Compress))}
 }
 function Assert-Panel([string]$Query) {
-    $find=(Status).find
+    $browser=Status;$find=$browser.find
     if(-not $find.panel_handle -or -not $find.panel_query_handle -or -not (Same-Text $find.query $Query)) {throw 'Find panel/query state missing'}
     foreach($handle in @($find.panel_handle,$find.panel_query_handle)) {
         $window=[IntPtr]([long]$handle)
@@ -145,7 +146,47 @@ function Assert-Panel([string]$Query) {
     }
     if(-not (Same-Text ([FindFixture]::ReadText([long]$find.panel_query_handle)) $Query)) {throw 'Native query control changed Unicode codepoints'}
     if($find.busy -or $null -eq $find.panel_status) {throw 'Finished find panel has no settled native status'}
+    $native=[OptionsFixture]::Describe([long]$find.panel_handle,$process.Id)
+    $parent=[OptionsFixture]::Parent([long]$find.panel_handle,$process.Id)
+    if(($native.Style -band 0x40000000) -eq 0 -or ($native.Style -band 0x00C00000) -ne 0) {throw 'Page find is not a captionless native child'}
+    if($parent -ne [long]$browser.holder.window -or $find.panel_parent -ne $parent -or $find.panel_owner -ne $browser.holder.root) {throw 'Page find parent or top-level owner differs from its browser holder'}
+    $rect=[OptionsFixture]::RelativeBounds($parent,[long]$find.panel_handle,$process.Id)
+    $holderSize=[ChromeFixture]::Size($parent,$process.Id)
+    foreach($field in @('X','Y','Width','Height')) {
+        if($rect.$field -ne $find.panel_bounds.$field) {throw ('Find diagnostic bounds differ from HWND: '+$field)}
+    }
+    if($rect.X -ne 0 -or $rect.Y -lt 0 -or $rect.Width -ne $holderSize[0] -or $rect.Height -le 0 -or $rect.Y+$rect.Height -ge $holderSize[1]) {throw 'Inline find lies outside its browser holder or leaves no viewport'}
+    if($browser.bounds.x -ne $browser.holder.bounds.x -or $browser.bounds.y -ne $browser.holder.bounds.y+$rect.Y+$rect.Height -or $browser.bounds.width -ne $rect.Width -or $browser.bounds.height -ne $holderSize[1]-$rect.Y-$rect.Height) {throw 'Browser viewport does not begin directly below inline find'}
+    $controls=@([ChromeFixture]::Read([long]$find.panel_handle,$process.Id))
+    foreach($name in @('query','case','previous','next','close','status')) {
+        $control=@($controls|Where-Object {$_.Handle -eq [long]$find.panel_controls.$name})
+        if($control.Count -ne 1 -or -not $control[0].Shown -or $control[0].Font -eq 0) {throw ('Inline find control is missing, hidden or has no font: '+$name)}
+    }
+    $queryControl=@($controls|Where-Object {$_.Handle -eq [long]$find.panel_query_handle})[0]
+    $mainFonts=@([ChromeFixture]::Read([long]$browser.holder.root,$process.Id)|ForEach-Object {$_.Font})
+    if($mainFonts -notcontains $queryControl.Font) {throw 'Inline find query does not use the shared native chrome font'}
+    foreach($control in $controls) {
+        if($control.X -lt 0 -or $control.Y -lt 0 -or $control.Width -le 0 -or $control.Height -le 0 -or $control.X+$control.Width -gt $rect.Width -or $control.Y+$control.Height -gt $rect.Height) {throw ('Inline find control escaped its client: '+$control.Text)}
+    }
+    for($left=0;$left -lt $controls.Count;$left++) {
+        for($right=$left+1;$right -lt $controls.Count;$right++) {
+            $a=$controls[$left];$b=$controls[$right]
+            if($a.X -lt $b.X+$b.Width -and $b.X -lt $a.X+$a.Width -and $a.Y -lt $b.Y+$b.Height -and $b.Y -lt $a.Y+$a.Height) {throw ('Inline find controls overlap: '+$a.Text+' / '+$b.Text)}
+        }
+    }
+    $script:evidence.inlinePanel=@{browser=$browser;controls=$controls}
     return $find
+}
+function Same-Browser($Before,$After) {
+    if($Before.id -ne $After.id -or $Before.instance -ne $After.instance -or $Before.view_handle -ne $After.view_handle -or $Before.holder.window -ne $After.holder.window) {throw 'Inline find replaced its browser or holder'}
+    $current=@((Tree).surfaces|Where-Object {$_.id -eq $terminal.id})
+    if($current.Count -ne 1 -or $current[0].pid -ne $terminal.pid -or -not $current[0].running) {throw 'Inline find changed the original terminal PID'}
+}
+function Same-Viewport($Before,$After) {
+    Same-Browser $Before $After
+    foreach($field in @('x','y','width','height')) {
+        if($Before.bounds.$field -ne $After.bounds.$field) {throw ('Find close did not restore browser viewport: '+$field)}
+    }
 }
 function Begin-PendingFind {
     $busy=Begin-Command @('browser','eval',$script:domPane,'(()=>{const until=performance.now()+2500;while(performance.now()<until){};return "owned busy loop done";})()')
@@ -205,15 +246,34 @@ try {
     }
 
     if($Case -in @('all','panel')) {
+    $beforePanel=Status;$main=Tree;$originalSize=[ChromeFixture]::Size([long]$main.window_handle,$process.Id)
     Request @('browser','find-show',$domPane)|Out-Null
     if(-not (Find ([FindFixture]::Unicode)).found) {throw 'Known compound Unicode query was not found before native panel inspection'}
     $evidence.panel=Assert-Panel ([FindFixture]::Unicode)
+    $afterPanel=Status;Same-Browser $beforePanel $afterPanel
+    if($afterPanel.bounds.y -ne $beforePanel.bounds.y+$afterPanel.find.panel_bounds.height -or $afterPanel.bounds.height -ne $beforePanel.bounds.height-$afterPanel.find.panel_bounds.height) {throw 'Opening inline find did not reserve its exact height from the existing viewport'}
+    $originalTheme=(Request @('settings','show')).document.terminal.theme
+    $changedTheme=if($originalTheme -eq 'light'){'dark'}else{'light'}
+    Request @('settings','set','theme',$changedTheme)|Out-Null
+    if((Tree).chrome.theme -ne $changedTheme) {throw 'Native theme did not change while find was open'}
+    $themed=Assert-Panel ([FindFixture]::Unicode)
+    if($themed.panel_handle -ne $evidence.panel.panel_handle -or $themed.panel_query_handle -ne $evidence.panel.panel_query_handle) {throw 'Theme change replaced the inline find input'}
+    Same-Browser $beforePanel (Status)
+    $scale=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$main.window_handle))/96.0
+    [ChromeFixture]::Resize([long]$main.window_handle,$process.Id,[int][Math]::Min(1600,[Math]::Max(400,[Math]::Round(720*$scale))),$originalSize[1])
+    $narrow=Assert-Panel ([FindFixture]::Unicode);Same-Browser $beforePanel (Status)
+    if($narrow.panel_bounds.width -ge $afterPanel.find.panel_bounds.width) {throw 'Narrow-window fixture did not reduce the find bar width'}
+    $evidence.narrowPanel=$narrow
+    [ChromeFixture]::Resize([long]$main.window_handle,$process.Id,$originalSize[0],$originalSize[1])
+    Request @('settings','set','theme',$originalTheme)|Out-Null
+    Assert-Panel ([FindFixture]::Unicode)|Out-Null
     Reset-Selection;Assert-Hit (Find 'needle') 'one' 'needle'
     $closed=Request @('browser','find-close',$domPane)
     if(-not $closed.ok -or $closed.surface -ne $opened.surface -or -not $closed.cleared) {throw 'Find close did not report its owned selection cleared'}
     if(-not (Same-Text (Selection).text '')) {throw 'Find close kept its owned match selection'}
     $closedStatus=(Status).find
     if($closedStatus.panel_handle -or $closedStatus.panel_query_handle) {throw 'Find close left its panel bound'}
+    Same-Viewport $beforePanel (Status)
     Request @('browser','find-show',$domPane)|Out-Null
     Assert-Panel 'needle'|Out-Null
     Reset-Selection;Find 'needle'|Out-Null
@@ -221,7 +281,8 @@ try {
     $closed=Request @('browser','find-close',$domPane)
     if(-not $closed.ok -or $closed.cleared) {throw 'Find close reported clearing a changed user selection'}
     if(-not (Same-Text (Selection).text 'user selection stays')) {throw 'Find close removed a selection changed by the page/user'}
-    Passed 'hidden_native_panel_exact_query_and_close_clears_only_owned_selection'
+    Same-Viewport $beforePanel (Status)
+    Passed 'hidden_inline_find_parent_viewport_narrow_layout_theme_query_and_owned_selection'
     }
 
     if($Case -in @('all','surface')) {

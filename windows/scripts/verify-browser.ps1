@@ -92,8 +92,10 @@ function Location($Tree,[string]$Surface) {
     return $panes[0].id
 }
 function Check-Find([string]$Pane,[long]$Owner,[string]$Query) {
-    $find=(Request @('browser','status',$Pane)).find
-    if (-not $find.panel_handle -or -not $find.panel_query_handle -or $find.panel_owner -ne $Owner -or ([OptionsFixture]::Describe([long]$find.panel_handle,$process.Id)).Owner -ne $Owner -or -not (Same-Text ([FindFixture]::ReadText([long]$find.panel_query_handle)) $Query)) {throw 'Browser find owner or raw native query changed'}
+    $browser=Request @('browser','status',$Pane);$find=$browser.find
+    if (-not $find.panel_handle -or -not $find.panel_query_handle -or $find.panel_owner -ne $Owner -or $browser.holder.root -ne $Owner -or -not (Same-Text ([FindFixture]::ReadText([long]$find.panel_query_handle)) $Query)) {throw 'Browser find root owner or raw native query changed'}
+    # A child panel moves with its stable holder; GW_OWNER is only meaningful for popups.
+    if ([OptionsFixture]::Parent([long]$find.panel_handle,$process.Id) -ne $browser.holder.window -or [OptionsFixture]::Parent([long]$find.panel_query_handle,$process.Id) -ne $find.panel_handle -or [OptionsFixture]::Parent([long]$browser.holder.window,$process.Id) -ne $Owner -or (([OptionsFixture]::Describe($Owner,$process.Id)).Style -band 0x40000000) -ne 0) {throw 'Browser find native parent chain differs from its holder/root'}
     return $find
 }
 function Check-Stable($Before,$After) {
@@ -117,8 +119,13 @@ function Check-Toolbar($Status) {
     $chrome=@([ChromeFixture]::Read([long]$Status.chrome_handle,$process.Id));$shown=@($chrome|Where-Object Shown)
     $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$Status.chrome_handle));$area=[ChromeFixture]::Size([long]$Status.chrome_handle,$process.Id)
     if($Status.chrome.rows -ne 1 -or [Math]::Abs($area[1]-40*$dpi/96) -gt 1){throw 'Browser toolbar is not one40-DIP row'}
-    $holder=$Status.holder.bounds;$viewport=$Status.bounds
-    if (-not $holder -or -not $viewport -or $Status.chrome.parent -ne $Status.holder.window -or $holder.width -ne $area[0] -or $viewport.x -ne $holder.x -or $viewport.y -ne ($holder.y+$area[1]) -or $viewport.width -ne $holder.width -or $viewport.height -ne [Math]::Max(1,$holder.height-$area[1])) {throw 'Browser holder, toolbar and root-coordinate viewport geometry differ'}
+    $holder=$Status.holder.bounds;$viewport=$Status.bounds;$findHeight=0
+    if($Status.find.panel_handle){
+        $findBounds=[OptionsFixture]::RelativeBounds([long]$Status.holder.window,[long]$Status.find.panel_handle,$process.Id)
+        if([OptionsFixture]::Parent([long]$Status.find.panel_handle,$process.Id) -ne $Status.holder.window -or $findBounds.X -ne 0 -or $findBounds.Y -ne $area[1] -or $findBounds.Width -ne $area[0] -or $findBounds.Height -le 0 -or $findBounds.Height -ne $Status.find.panel_bounds.height){throw 'Inline find geometry differs from its retained holder'}
+        $findHeight=$findBounds.Height
+    }
+    if (-not $holder -or -not $viewport -or $Status.chrome.parent -ne $Status.holder.window -or $holder.width -ne $area[0] -or $viewport.x -ne $holder.x -or $viewport.y -ne ($holder.y+$area[1]+$findHeight) -or $viewport.width -ne $holder.width -or $viewport.height -ne [Math]::Max(1,$holder.height-$area[1]-$findHeight)) {throw 'Browser holder, toolbar and root-coordinate viewport geometry differ'}
     foreach($c in $shown){if($c.Y -lt 0 -or $c.Y+$c.Height -gt $area[1] -or $c.X -lt 0 -or $c.X+$c.Width -gt $area[0]){throw 'Browser toolbar control escapes its row'}}
     $ordered=@($shown|Sort-Object X);for($i=1;$i -lt $ordered.Count;$i++){if($ordered[$i].X -lt $ordered[$i-1].X+$ordered[$i-1].Width){throw 'Browser toolbar controls overlap'}}
     if(@($shown|Where-Object Class -eq 'Edit').Count -ne 1 -or @($shown|Where-Object Handle -eq $Status.chrome.tools_handle).Count -ne 1){throw 'Address or tools entry missing'}
@@ -339,7 +346,7 @@ try {
     $detachedStatus=Request @('browser','status',$detachedPane);Check-Stable $afterMove $detachedStatus
     if (-not (Same-Text (Eval-Page $detachedPane 'window.retained') '한글 한 é 😀')) {throw 'Detached browser lost its Korean DOM state'}
     $detachedFind=Check-Find $detachedPane ([long]$browserFrame.window_handle) $draftQuery
-    if ($detachedFind.panel_handle -eq $mainFind.panel_handle -or -not (Same-Text $detachedFind.query $oneTitle)) {throw 'Detach did not recreate find owner while preserving executed query and native draft separately'}
+    if ($detachedFind.panel_handle -ne $mainFind.panel_handle -or $detachedFind.panel_query_handle -ne $mainFind.panel_query_handle -or -not (Same-Text $detachedFind.query $oneTitle)) {throw 'Detach replaced find controls or changed the executed query independently of the native draft'}
     Request @('downloads','show')|Out-Null;$downloads=Request @('downloads','list')
     if (-not $downloads.panel_handle -or $downloads.panel_owner -ne $browserFrame.window_handle -or ([OptionsFixture]::Describe([long]$downloads.panel_handle,$process.Id)).Owner -ne $browserFrame.window_handle) {throw 'Downloads panel did not use detached browser owner'}
     $popupResult=Eval-Page $detachedPane 'window.fixtureDetachedPopup=window.open("/two");window.fixtureDetachedPopup!==null'
@@ -374,7 +381,7 @@ try {
     $reattached=Tree;$returned=Request @('browser','status',$source.pane);Check-Stable $afterMove $returned
     if (@($reattached.detached_windows).Count -ne 0 -or -not (Same-Text (Eval-Page $source.pane 'window.retained') '한글 한 é 😀')) {throw 'Browser reattach lost its DOM or left detached windows'}
     $returnedFind=Check-Find $source.pane ([long]$root.window_handle) $draftQuery
-    if ($returnedFind.panel_handle -eq $detachedFind.panel_handle) {throw 'Reattach kept the find panel owned by the destroyed frame'}
+    if ($returnedFind.panel_handle -ne $detachedFind.panel_handle -or $returnedFind.panel_query_handle -ne $detachedFind.panel_query_handle -or -not (Same-Text $returnedFind.query $oneTitle)) {throw 'Reattach replaced find controls or changed the executed query independently of the native draft'}
     Request @('downloads','show')|Out-Null;$downloads=Request @('downloads','list')
     if ($downloads.panel_owner -ne $root.window_handle -or ([OptionsFixture]::Describe([long]$downloads.panel_handle,$process.Id)).Owner -ne $root.window_handle) {throw 'Downloads owner was not restored to main window'}
     Request @('browser','find-close',$source.pane)|Out-Null
