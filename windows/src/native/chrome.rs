@@ -242,8 +242,12 @@ pub(super) enum Role {
     },
     Tab {
         selected: bool,
-        focused: bool,
+        multiple: bool,
         kind: SurfaceIcon,
+    },
+    TabClose {
+        selected: bool,
+        multiple: bool,
     },
     Tool,
     Icon {
@@ -513,6 +517,7 @@ struct State {
     resources: Resources,
     controls: HashMap<isize, Entry>,
     tooltips: HashMap<isize, Tooltip>,
+    pane_headers: HashMap<isize, Vec<(model::Rect, bool)>>,
 }
 impl State {
     fn new() -> Self {
@@ -525,6 +530,7 @@ impl State {
             resources: Resources::new(palette, 96),
             controls: HashMap::new(),
             tooltips: HashMap::new(),
+            pane_headers: HashMap::new(),
         }
     }
 }
@@ -532,6 +538,59 @@ thread_local! { static STATE: RefCell<State> = RefCell::new(State::new()); }
 
 pub(super) fn palette() -> Palette {
     STATE.with(|slot| slot.borrow().palette)
+}
+
+pub(super) fn set_pane_headers(window: HWND, headers: Vec<(model::Rect, bool)>) {
+    let changed = STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        if headers.is_empty() {
+            state.pane_headers.remove(&(window as isize)).is_some()
+        } else if state.pane_headers.get(&(window as isize)) == Some(&headers) {
+            false
+        } else {
+            state.pane_headers.insert(window as isize, headers);
+            true
+        }
+    });
+    if changed {
+        unsafe {
+            InvalidateRect(window, std::ptr::null(), 1);
+        }
+    }
+}
+
+fn in_pane_header(window: HWND) -> bool {
+    // Use actual native geometry so toolbar buttons share the header's surface
+    // without adding separate roles or retaining stale HWND position metadata.
+    let root = unsafe { GetAncestor(window, GA_ROOT) };
+    if !STATE.with(|slot| slot.borrow().pane_headers.contains_key(&(root as isize))) {
+        return false;
+    }
+    let mut rect = RECT::default();
+    unsafe {
+        if GetWindowRect(window, &mut rect) == 0 {
+            return false;
+        }
+        MapWindowPoints(
+            std::ptr::null_mut(),
+            root,
+            (&mut rect as *mut RECT).cast(),
+            2,
+        );
+    }
+    STATE.with(|slot| {
+        slot.borrow()
+            .pane_headers
+            .get(&(root as isize))
+            .is_some_and(|headers| {
+                headers.iter().any(|(header, _)| {
+                    rect.left >= header.x
+                        && rect.top >= header.y
+                        && rect.right <= header.x.saturating_add(header.width)
+                        && rect.bottom <= header.y.saturating_add(header.height)
+                })
+            })
+    })
 }
 
 pub(super) fn suggested_colors() -> (COLORREF, COLORREF) {
@@ -627,16 +686,24 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
                 )
             })
             .collect();
+        let headers: Vec<_> = state.pane_headers.keys().copied().collect();
         let old = std::mem::replace(&mut state.resources, resources);
-        Some((controls, old))
+        Some((controls, headers, old))
     });
-    if let Some((controls, old)) = swap {
+    if let Some((controls, headers, old)) = swap {
         // Assign every live control its replacement font before deleting the old
         // fonts; release the RefCell borrow before synchronous window callbacks.
         for (hwnd, font) in controls {
             unsafe {
                 if IsWindow(hwnd as HWND) != 0 {
                     SendMessageW(hwnd as HWND, WM_SETFONT, font as WPARAM, 0);
+                    InvalidateRect(hwnd as HWND, std::ptr::null(), 1);
+                }
+            }
+        }
+        for hwnd in headers {
+            unsafe {
+                if IsWindow(hwnd as HWND) != 0 {
                     InvalidateRect(hwnd as HWND, std::ptr::null(), 1);
                 }
             }
@@ -735,6 +802,7 @@ pub(super) fn shutdown() {
     for window in controls {
         unregister(window as HWND);
     }
+    STATE.with(|slot| slot.borrow_mut().pane_headers.clear());
     // All controls now hold a stock font. Retained state resources remain valid
     // until the UI thread exits; no registered HWND references them at teardown.
 }
@@ -812,7 +880,9 @@ unsafe extern "system" fn control_proc(
         WM_NCDESTROY => {
             remove_tooltip(window);
             STATE.with(|slot| {
-                slot.borrow_mut().controls.remove(&(window as isize));
+                let mut state = slot.borrow_mut();
+                state.controls.remove(&(window as isize));
+                state.pane_headers.remove(&(window as isize));
             });
             RemoveWindowSubclass(window, Some(control_proc), SUBCLASS);
         }
@@ -1141,6 +1211,55 @@ unsafe fn draw_terminal_glyph(dc: HDC, cx: i32, cy: i32, radius: i32, unit: i32)
     LineTo(dc, cx + radius + 1, cy + radius - unit);
 }
 
+unsafe fn draw_tab_background(
+    dc: HDC,
+    rect: &RECT,
+    color: COLORREF,
+    palette: Palette,
+    close: bool,
+    accent: bool,
+    dpi: u32,
+) {
+    let radius = ((4 * dpi as i32 + 48) / 96).max(1);
+    fill(dc, rect, palette.surface);
+    let saved = SaveDC(dc);
+    if saved == 0 {
+        fill(dc, rect, color);
+        return;
+    }
+    // Extend the other corners beyond this control and clip to its bounds. The
+    // adjacent body/close HWNDs then form one tab with only its top corners round.
+    IntersectClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
+    if BeginPath(dc) != 0 {
+        RoundRect(
+            dc,
+            rect.left - if close { radius * 2 } else { 0 },
+            rect.top,
+            rect.right + if close { 0 } else { radius * 2 },
+            rect.bottom + radius,
+            radius * 2,
+            radius * 2,
+        );
+        if EndPath(dc) != 0 {
+            SelectClipPath(dc, RGN_AND);
+        } else {
+            AbortPath(dc);
+        }
+    }
+    fill(dc, rect, color);
+    if accent {
+        fill(
+            dc,
+            &RECT {
+                bottom: (rect.top + ((2 * dpi as i32 + 48) / 96).max(1)).min(rect.bottom),
+                ..*rect
+            },
+            palette.accent,
+        );
+    }
+    RestoreDC(dc, saved);
+}
+
 fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let paint = STATE.with(|slot| {
         let state = slot.borrow();
@@ -1165,7 +1284,9 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     };
     let selected = matches!(
         role,
-        Role::Workspace { selected: true, .. } | Role::Tab { selected: true, .. }
+        Role::Workspace { selected: true, .. }
+            | Role::Tab { selected: true, .. }
+            | Role::TabClose { selected: true, .. }
     );
     let pressed = item.itemState & ODS_SELECTED != 0;
     let hot = hot || item.itemState & ODS_HOTLIGHT != 0;
@@ -1174,13 +1295,13 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let highlighted = selected || pressed || hot;
     let color = if suggested {
         palette.accent
-    } else if selected && matches!(role, Role::Tab { focused: false, .. }) {
-        palette.hover
     } else if pressed || selected {
         palette.selected
     } else if hot {
         palette.hover
-    } else if matches!(role, Role::Tab { .. }) {
+    } else if matches!(role, Role::Tab { .. } | Role::TabClose { .. })
+        || (matches!(role, Role::Tool | Role::Icon { .. }) && in_pane_header(item.hwndItem))
+    {
         palette.surface
     } else {
         palette.background
@@ -1197,7 +1318,16 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         palette.accent
     } else if !palette.high_contrast
         && ((matches!(role, Role::Icon { .. }) && !hot && item.itemState & ODS_FOCUS == 0)
-            || matches!(role, Role::Tab { focused: false, .. }))
+            || matches!(
+                role,
+                Role::Tab {
+                    selected: false,
+                    ..
+                } | Role::TabClose {
+                    selected: false,
+                    ..
+                }
+            ))
     {
         palette.muted
     } else {
@@ -1217,7 +1347,22 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             RestoreDC(item.hDC, saved);
             return true;
         }
-        if matches!(role, Role::Workspace { .. } | Role::Suggested) && !palette.high_contrast {
+        if matches!(role, Role::Tab { .. } | Role::TabClose { .. }) {
+            let multiple = match role {
+                Role::Tab { multiple, .. } | Role::TabClose { multiple, .. } => multiple,
+                _ => false,
+            };
+            draw_tab_background(
+                item.hDC,
+                &item.rcItem,
+                color,
+                palette,
+                matches!(role, Role::TabClose { .. }),
+                selected && multiple,
+                dpi,
+            );
+        } else if matches!(role, Role::Workspace { .. } | Role::Suggested) && !palette.high_contrast
+        {
             fill(item.hDC, &item.rcItem, palette.background);
             SelectObject(item.hDC, GetStockObject(NULL_PEN));
             SelectObject(item.hDC, GetStockObject(DC_BRUSH));
@@ -1260,25 +1405,6 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     },
                 );
             }
-            Role::Tab {
-                selected: true,
-                focused,
-                ..
-            } => {
-                let stripe = RECT {
-                    top: item.rcItem.bottom - pixel(if focused { 2 } else { 1 }),
-                    ..item.rcItem
-                };
-                fill(
-                    item.hDC,
-                    &stripe,
-                    if focused {
-                        palette.accent
-                    } else {
-                        palette.border
-                    },
-                );
-            }
             _ => {}
         }
         if palette.high_contrast {
@@ -1294,11 +1420,12 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         let label = caption_for_paint(&original);
         let length = label.len() as i32;
         let label_text = String::from_utf16_lossy(&label);
-        let symbol = matches!(role, Role::Icon { .. })
+        let symbol = matches!(role, Role::Icon { .. } | Role::TabClose { .. })
             || (matches!(role, Role::Tool)
                 && matches!(
                     label_text.as_str(),
-                    "Close" | "Close tab"
+                    "Close"
+                        | "Close tab"
                         | "Close workspace"
                         | "Pane actions"
                         | "+"
@@ -1500,7 +1627,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 pixel(4).min(((item.rcItem.right - item.rcItem.left) / 2 - pixel(4)).max(1));
             SelectObject(item.hDC, GetStockObject(DC_PEN));
             SetDCPenColor(item.hDC, text);
-            match label_text.as_str() {
+            match if matches!(role, Role::TabClose { .. }) {
+                "Close tab"
+            } else {
+                label_text.as_str()
+            } {
                 "Close" | "Close tab" | "Close workspace" => {
                     MoveToEx(item.hDC, cx - radius, cy - radius, std::ptr::null_mut());
                     LineTo(item.hDC, cx + radius + 1, cy + radius + 1);
@@ -1530,7 +1661,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 }
             }
         }
-        let inset = pixel(if matches!(role, Role::Tool) { 4 } else { 10 });
+        let inset = pixel(if matches!(role, Role::Tool | Role::TabClose { .. }) {
+            4
+        } else {
+            10
+        });
         let mut rect = RECT {
             left: item.rcItem.left + inset,
             right: item.rcItem.right - inset,
@@ -1694,13 +1829,71 @@ pub(super) fn message(
             (item.CtlType == ODT_BUTTON && draw_button(item)).then_some(1)
         }
         WM_ERASEBKGND | WM_PRINTCLIENT => {
-            let brush = STATE.with(|slot| slot.borrow().resources.background);
+            let (brush, palette, dpi, headers) = STATE.with(|slot| {
+                let state = slot.borrow();
+                (
+                    state.resources.background,
+                    state.palette,
+                    state.dpi,
+                    state
+                        .pane_headers
+                        .get(&(window as isize))
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            });
             let mut rect = RECT::default();
             unsafe {
                 GetClientRect(window, &mut rect);
                 FillRect(wparam as HDC, &rect, brush);
+                if !headers.is_empty() {
+                    let dc = wparam as HDC;
+                    let saved = SaveDC(dc);
+                    if saved != 0 {
+                        IntersectClipRect(dc, rect.left, rect.top, rect.right, rect.bottom);
+                        for (header, focused) in headers {
+                            if header.width <= 0 || header.height <= 0 {
+                                continue;
+                            }
+                            let area = RECT {
+                                left: header.x,
+                                top: header.y,
+                                right: header.x.saturating_add(header.width),
+                                bottom: header.y.saturating_add(header.height),
+                            };
+                            fill(dc, &area, palette.surface);
+                            if focused {
+                                fill(
+                                    dc,
+                                    &RECT {
+                                        bottom: (area.top + ((2 * dpi as i32 + 48) / 96).max(1))
+                                            .min(area.bottom),
+                                        ..area
+                                    },
+                                    palette.accent,
+                                );
+                            }
+                            fill(
+                                dc,
+                                &RECT {
+                                    top: (area.bottom - ((dpi as i32 + 48) / 96).max(1))
+                                        .max(area.top),
+                                    ..area
+                                },
+                                palette.border,
+                            );
+                        }
+                        RestoreDC(dc, saved);
+                    }
+                }
             }
             Some(1)
+        }
+        WM_NCDESTROY => {
+            STATE.with(|slot| {
+                slot.borrow_mut().pane_headers.remove(&(window as isize));
+            });
+            None
         }
         WM_CTLCOLORSTATIC | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORBTN => {
             let (palette, brush, role) = STATE.with(|slot| {

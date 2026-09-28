@@ -168,12 +168,20 @@ impl Window {
                 TAB,
                 chrome::Role::Tab {
                     selected: true,
-                    focused: true,
+                    multiple: false,
                     kind: chrome::SurfaceIcon::Terminal,
                 },
                 true,
             )?;
-            result.close = result.button("Close tab", CLOSE, chrome::Role::Tool, true)?;
+            result.close = result.button(
+                "Close tab",
+                CLOSE,
+                chrome::Role::TabClose {
+                    selected: true,
+                    multiple: false,
+                },
+                true,
+            )?;
             for (index, (label, role)) in [
                 (
                     "Maximize pane",
@@ -370,6 +378,7 @@ impl Window {
             height: client.bottom.min(px(28)),
         };
         let header = workspaces::pane_header_layout(area, dpi);
+        chrome::set_pane_headers(self.window, vec![(area, false)]);
         let width = header.tabs_width.min(px(190));
         let close_width = if width >= px(72) { px(22) } else { 0 };
         for (index, window) in self.tools.iter().enumerate() {
@@ -378,19 +387,19 @@ impl Window {
         place(
             self.tab,
             (width > close_width).then_some(model::Rect {
-                x: area.x,
-                y: 0,
+                x: area.x + px(2),
+                y: px(4),
                 width: width - close_width,
-                height: area.height,
+                height: (area.height - px(5)).max(0),
             }),
         )?;
         place(
             self.close,
             (close_width > 0).then_some(model::Rect {
-                x: area.x + width - close_width,
-                y: 0,
+                x: area.x + px(2) + width - close_width,
+                y: px(4),
                 width: close_width,
-                height: area.height,
+                height: (area.height - px(5)).max(0),
             }),
         )?;
         Ok(())
@@ -482,7 +491,7 @@ impl Window {
             self.tab,
             chrome::Role::Tab {
                 selected: true,
-                focused: true,
+                multiple: false,
                 kind,
             },
         );

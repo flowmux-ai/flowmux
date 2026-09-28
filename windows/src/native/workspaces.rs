@@ -55,26 +55,51 @@ pub(super) fn pane_header_layout(area: model::Rect, dpi: u32) -> PaneHeaderLayou
     if area.width <= 0 || area.height <= 0 {
         return layout;
     }
-    let width = px(28);
+    let width = px(22);
     let gap = px(1);
     let tab_gap = px(4);
-    let available = (area.width - px(30) - tab_gap).max(0);
+    let available = (area.width - px(30) - tab_gap - px(4)).max(0);
     let count = ((available + gap) / (width + gap)).clamp(1, 6) as usize;
-    let occupied = (count as i32 * width + (count as i32 - 1) * gap).min(area.width);
-    let start = area.x + area.width - occupied;
-    layout.tabs_width = (area.width - occupied - tab_gap).max(0);
+    let occupied =
+        (count as i32 * width + (count as i32 - 1) * gap).min((area.width - px(4)).max(0));
+    let start = area.x + area.width - px(2) - occupied;
+    layout.tabs_width = (area.width - occupied - tab_gap - px(4)).max(0);
     for (offset, slot) in layout.tools[6 - count..].iter_mut().enumerate() {
         let x = start + offset as i32 * (width + gap);
         *slot = Some(model::Rect {
             x,
-            y: area.y,
-            width: width.min(area.x + area.width - x),
-            height: width.min(area.height),
+            y: area.y + px(4),
+            width: width.min((area.x + area.width - px(2) - x).max(0)),
+            height: width.min((area.height - px(5)).max(0)),
         });
     }
     layout
 }
 impl App {
+    pub(super) fn refresh_pane_headers(&self, areas: &[(PaneId, model::Rect)]) {
+        let workspace = self.current_workspace();
+        let solo = workspace.is_none_or(|w| {
+            let panes = w.leaves();
+            panes.len() == 1 && panes[0].2.len() == 1
+        });
+        let height =
+            (28.0 * unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0).round() as i32;
+        chrome::set_pane_headers(
+            self.window,
+            areas
+                .iter()
+                .map(|(pane, area)| {
+                    (
+                        model::Rect {
+                            height: height.min(area.height),
+                            ..*area
+                        },
+                        !solo && workspace.is_some_and(|w| w.focused == *pane),
+                    )
+                })
+                .collect(),
+        );
+    }
     pub(super) fn sidebar_layout(&self, height: i32, dpi: u32) -> SidebarLayout {
         let px = |n: i32| (n as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
         let footer_top = (height - px(36)).max(0);
@@ -145,7 +170,16 @@ impl App {
                     color,
                 }
             }
-            Action::Tab(pane, surface) => {
+            Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
+                let workspace = self.current_workspace();
+                let selected =
+                    workspace.and_then(|w| w.root.active_surface_id(pane)) == Some(surface);
+                let multiple = workspace
+                    .and_then(|w| w.leaves().into_iter().find(|(p, _, _)| *p == pane))
+                    .is_some_and(|(_, _, tabs)| tabs.len() > 1);
+                if matches!(action, Action::TabClose(..)) {
+                    return chrome::Role::TabClose { selected, multiple };
+                }
                 let kind = self
                     .workspaces
                     .iter()
@@ -158,13 +192,8 @@ impl App {
                         _ => chrome::SurfaceIcon::Terminal,
                     });
                 chrome::Role::Tab {
-                    selected: self
-                        .current_workspace()
-                        .and_then(|workspace| workspace.root.active_surface_id(pane))
-                        == Some(surface),
-                    focused: self
-                        .current_workspace()
-                        .is_some_and(|workspace| workspace.focused == pane),
+                    selected,
+                    multiple,
                     kind,
                 }
             }
@@ -213,11 +242,12 @@ impl App {
                 },
                 marked: false,
             },
-            Action::PaneAdd(..) | Action::TabClose(..) | Action::NewWorkspace => chrome::Role::Tool,
+            Action::PaneAdd(..) | Action::NewWorkspace => chrome::Role::Tool,
             _ => chrome::Role::Button,
         }
     }
     pub(super) fn refresh_chrome_metadata(&self) {
+        self.refresh_pane_headers(&self.pane_layout.panes);
         self.refresh_ssh_toolbar();
         for window in self.detached.values() {
             if let Some(workspace) = self.workspaces.iter().find(|w| w.id == window.workspace) {

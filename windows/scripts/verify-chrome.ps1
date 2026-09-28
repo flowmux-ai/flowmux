@@ -10,7 +10,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('chrome-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $cwd=Join-Path $directory 'workspace 한글';[IO.Directory]::CreateDirectory($cwd)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$pipeName=$null;$clients=@();$shells=@();$cleanup=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
-$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';case=$Case;baseline=$false;hosts=@();checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';case=$Case;baseline=$false;hosts=@();checks=@();observations=@();lastCapture=$null;desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
 function Require([bool]$Condition,[string]$Message) {if(-not $Condition){throw $Message}}
 function Budget([int]$Maximum=5000) {
     $remaining=55000-$clock.ElapsedMilliseconds
@@ -79,7 +79,7 @@ function Capture([string]$Name,$Tree) {
     $capture=Request @('chrome-capture',$bmp)
     [ChromeFixture]::Png($bmp,$path);$background=[ChromeFixture]::Pixel($path,1,100)
     $record=[ordered]@{name=$Name;path=$path;window=$handle;client=$size;dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]$handle);controls=$controls;background=$background;layout=$Tree.layout;chrome=$Tree.chrome;terminalIdentities=(Identities $Tree);capture=$capture}
-    $script:evidence.observations+=$record;$script:evidence.artifacts+=@{path=$path;bytes=(Get-Item -LiteralPath $path).Length;sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant();scope='owned hidden native chrome only'}
+    $script:evidence.lastCapture=$record
     Require ($background -eq $(if($Tree.chrome.theme -eq 'light'){'#f2f1f0'}else{'#24272e'})) 'Actual native background pixels do not match the configured palette'
     $scale=[Math]::Max(96,$record.dpi)/96.0;$shown=@($controls|Where-Object {$_.Shown})
     Require (@($shown|Where-Object {$_.Text -eq 'Workspaces'}).Count -eq 1) 'Workspaces header missing or duplicated'
@@ -114,20 +114,45 @@ function Capture([string]$Name,$Tree) {
         Require (-not ($a.X -lt $b.X+$b.Width -and $b.X -lt $a.X+$a.Width -and $a.Y -lt $b.Y+$b.Height -and $b.Y -lt $a.Y+$a.Height)) ('Native controls overlap: '+$a.Text+' / '+$b.Text)
     }}
     foreach($pane in @($Tree.layout.panes)){
-        $area=$pane[1];$tabs=@($shown|Where-Object {$_.X -ge $area.x -and $_.X -lt $area.x+$area.width -and [Math]::Abs($_.Y-$area.y) -le 1})
+        $area=$pane[1];$tabs=@($shown|Where-Object {$_.X -ge $area.x -and $_.X -lt $area.x+$area.width -and [Math]::Abs($_.Y-($area.y+[Math]::Round(4*$scale))) -le 1})
         $menu=@($tabs|Where-Object {$_.Text -eq 'Pane actions' -or $_.Text -eq 'More'});$plus=@($tabs|Where-Object {$_.Text -eq '+'})
         Require ($menu.Count -eq 1 -and $plus.Count -eq 1 -and $plus[0].X -lt $menu[0].X -and [Math]::Abs($menu[0].X+$menu[0].Width-($area.x+$area.width)) -le 4*$scale) 'Pane +/More controls are not aligned at the right edge'
-        Require ($tabs.Count -ge 4 -and @($tabs|Where-Object {$_.Height -gt 30*$scale}).Count -eq 0) 'Pane tab strip is not compact'
+        Require ($tabs.Count -ge 4 -and @($tabs|Where-Object {$_.Height -gt 24*$scale}).Count -eq 0) 'Pane tab strip is not compact'
+        $toolHandles=@($Tree.chrome.controls|Where-Object {$_.pane -eq $pane[0] -and $_.kind -like 'pane_*'}|ForEach-Object {$_.handle})
+        Require (@($tabs|Where-Object {$toolHandles -contains $_.Handle -and ([Math]::Abs($_.Height-22*$scale) -gt 1 -or [Math]::Abs($_.Width-22*$scale) -gt 1)}).Count -eq 0) 'Pane tools are not22DIP at the inset header position'
     }
     return $record
 }
 function FocusPaint($Tree,$Capture) {
+    $scale=[Math]::Max(96,$Capture.dpi)/96.0;$line=[int][Math]::Max(1,[Math]::Round(2*$scale));$one=[int][Math]::Max(1,[Math]::Round($scale));$bar=[int][Math]::Round(28*$scale)
+    $surface=if($Tree.chrome.theme -eq 'light'){'#ffffff'}else{'#282c34'}
+    $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
+    $border=if($Tree.chrome.theme -eq 'light'){'#d1d1d3'}else{'#454a55'}
+    $selectedColor=if($Tree.chrome.theme -eq 'light'){'#dae6f5'}else{'#313741'}
     $selected=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.selected -and $_.layout_visible})
     Require (@($selected|Where-Object {$_.focused}).Count -eq 1) 'Exactly one visible selected tab must be in the focused pane'
+    $panes=@($Tree.layout.panes);$solo=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab'}).Count -eq 1
+    foreach($pane in $panes){
+        $area=$pane[1];$active=@($selected|Where-Object {$_.pane -eq $pane[0]})
+        Require ($active.Count -eq 1) 'A visible pane has no single active native tab'
+        $expected=if(-not $solo -and $active[0].focused){$accent}else{$surface}
+        Require ([ChromeFixture]::ColorCount($Capture.path,$area.x,$area.y,$area.width,$line,$expected) -eq $area.width*$line) 'Pane focus line is missing, partial or visible in a single-surface workspace'
+        Require ([ChromeFixture]::Pixel($Capture.path,($area.x+[int]($area.width/2)),($area.y+$line)) -eq $surface) 'Pane focus line exceeds2DIP'
+        Require ([ChromeFixture]::ColorCount($Capture.path,$area.x,($area.y+$bar-$one),$area.width,$one,$border) -eq $area.width*$one) 'Pane header bottom separator is missing or covered by a tab'
+    }
     foreach($tab in $selected){
-        $r=$tab.rect;$actual=[ChromeFixture]::Pixel($Capture.path,($r.x+[int]($r.width/2)),($r.y+$r.height-1))
-        $expected=if($Tree.chrome.theme -eq 'light'){if($tab.focused){'#2066ba'}else{'#d1d1d3'}}else{if($tab.focused){'#78aeed'}else{'#454a55'}}
-        Require ($actual -eq $expected) 'Native active-tab accent does not distinguish the focused pane'
+        $r=$tab.rect;$close=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab_close' -and $_.surface -eq $tab.surface -and $_.layout_visible})
+        Require ($close.Count -eq 1) 'Selected tab has no visible paired close control'
+        $c=$close[0].rect;$multiple=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.pane -eq $tab.pane}).Count -gt 1
+        Require ($r.x+$r.width -eq $c.x -and $r.y -eq $c.y -and $r.height -eq $c.height -and [Math]::Abs($r.height-23*$scale) -le 1) 'Tab body and close are not a contiguous23DIP shape'
+        $top=if($multiple){$accent}else{$selectedColor}
+        Require ([ChromeFixture]::ColorCount($Capture.path,($c.x-1),$r.y,2,$line,$top) -eq 2*$line) 'Active tab top line does not continue across body/close, or appears on a single tab'
+        foreach($x in @(($c.x-1),$c.x,($c.x+$c.width-2))){
+            Require ([ChromeFixture]::Pixel($Capture.path,$x,($r.y+$r.height-2)) -eq $selectedColor) 'Selected tab body and close do not share one background'
+        }
+        Require ([ChromeFixture]::Pixel($Capture.path,$r.x,$r.y) -eq $surface -and [ChromeFixture]::Pixel($Capture.path,($c.x+$c.width-1),$c.y) -eq $surface) 'Active tab outer top corners are not rounded against the header surface'
+        $radius=[int][Math]::Max(1,[Math]::Round(4*$scale))
+        Require ([ChromeFixture]::Pixel($Capture.path,($r.x+$radius+1),$r.y) -eq $top -and [ChromeFixture]::Pixel($Capture.path,($c.x+$c.width-$radius-2),$c.y) -eq $top) 'Rounded corners consumed more than the intended4DIP tab inset'
     }
 }
 function Theme([string]$Name,[string]$Identities) {
@@ -144,7 +169,9 @@ function Theme([string]$Name,[string]$Identities) {
         Start-Sleep -Milliseconds ([int][Math]::Min(20,[Math]::Max(1,5000-$wait.ElapsedMilliseconds)))
     } while($true)
     $tree=Tree;Require ((Identities $tree) -eq $Identities) 'Theme change replaced a live terminal identity or PID'
-    return Capture $Name $tree
+    $capture=Capture $Name $tree
+    if($Case -eq 'details'){FocusPaint $tree $capture}
+    return $capture
 }
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'A working hidden debug build is required; no host launched'
@@ -154,6 +181,7 @@ try {
     Request @('workspace','rename',$tree.active_workspace,'workspace 한글')|Out-Null;$tree=Tree
     $initial=Capture 'initial' $tree
     if($Case -eq 'details') {
+        FocusPaint $tree $initial
         $notification=(Request @('notify','--global','--title','한글 알림','chrome fixture')).id
         $noticeTree=Tree;$notice=Capture 'unread-bell' $noticeTree
         $bell=@($notice.controls|Where-Object {$_.Text -eq 'Notifications (1)'})[0]
@@ -188,12 +216,21 @@ try {
         $metadata=Capture 'unicode-cwd' $tree;$row=@($metadata.controls|Where-Object {$_.Text -eq ($name+"`n"+$changed).Replace('&','&&')})
         Require ($row.Count -eq 1 -and [ChromeFixture]::Pixel($metadata.path,($row[0].X+1),($row[0].Y+15)) -eq '#12abef') 'Live Unicode path/name or actual model color stripe was lost'
         $evidence.checks+=@{name='unicode_cwd_metadata_and_color_update_preserve_native_handles_and_terminal_process';passed=$true}
-        Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 2
+        Request @('new-tab','--shell=cmd','--cwd',$changed)|Out-Null;$tree=Ready 2
+        Require (@($tree.layout.panes).Count -eq 1 -and (Identities $tree).Contains($original)) 'Multi-tab fixture changed its original pane or terminal'
+        $multiple=Capture 'single-pane-multiple-tabs' $tree;FocusPaint $tree $multiple
+        Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 3
         Require ((Identities $tree).Contains($original)) 'Split replaced the original terminal process'
         $split=Capture 'split' $tree;FocusPaint $tree $split;$stable=Identities $tree;$controls=ControlIds $tree
         Request @('focus-pane',$source.pane)|Out-Null;$tree=Tree
         Require ((ControlIds $tree) -eq $controls -and (Identities $tree) -eq $stable) 'Pane focus replaced native controls or terminal processes'
         $focused=Capture 'focus-original' $tree;FocusPaint $tree $focused
+        Request @('toggle-pane-zoom',$source.pane)|Out-Null;$tree=Tree
+        Require ($tree.zoomed_pane -eq $source.pane -and @($tree.layout.panes).Count -eq 1 -and (Identities $tree) -eq $stable -and (ControlIds $tree) -eq $controls) 'Zoom changed native controls, processes or the selected pane'
+        $zoom=Capture 'zoom-retains-focus-line' $tree;FocusPaint $tree $zoom
+        Request @('toggle-pane-zoom',$source.pane)|Out-Null;$tree=Tree
+        Require (-not $tree.zoomed_pane -and @($tree.layout.panes).Count -eq 2 -and (Identities $tree) -eq $stable -and (ControlIds $tree) -eq $controls) 'Unzoom did not restore panes without rebuilding native controls'
+        $evidence.checks+=@{name='solo_multitab_split_focus_and_zoom_header_lines_joined_tab_shape';passed=$true}
         $light=Theme 'light' $stable;$dark=Theme 'dark' $stable
         Require ($light.background -ne $dark.background) 'Light/dark setting did not change actual native background pixels'
         $evidence.checks+=@{name='hidden_native_workspace_tab_geometry_owner_draw_and_theme_pixels_preserve_terminal_processes';passed=$true}

@@ -1494,6 +1494,7 @@ impl App {
             scale,
         );
         let areas = &geometry.panes;
+        self.refresh_pane_headers(areas);
         let visible: HashMap<_, _> = view_areas
             .iter()
             .map(|(pane, area)| {
@@ -1747,15 +1748,16 @@ impl App {
                         }
                         Some((
                             area.x
+                                + px(2)
                                 + (at - start) as i32 * width
                                 + if close { width - close_width } else { 0 },
-                            area.y,
+                            area.y + px(4),
                             if close {
                                 close_width
                             } else {
                                 width - close_width
                             },
-                            bar,
+                            (bar - px(5)).min((area.height - px(5)).max(0)),
                         ))
                     }),
                 _ => None,
