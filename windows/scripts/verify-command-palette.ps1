@@ -3,9 +3,10 @@
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs') -ReferencedAssemblies System.Drawing
 $base=if($env:FLOWMUX_TEST_ARTIFACT_ROOT){$env:FLOWMUX_TEST_ARTIFACT_ROOT}else{[IO.Path]::GetTempPath()};$directory=Join-Path $base ('palette-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
+$terminalDirectory=Join-Path $directory '현재 경로 한 é 😀';[IO.Directory]::CreateDirectory($terminalDirectory)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$checks=@();$failure=$null;$last=$null;$commandFailure=$null;$cleanupErrors=@();$cleaning=$false
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Budget([int]$Maximum=5000){if($cleaning){return $Maximum};$left=50000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Palette work budget expired';return [int][Math]::Min($Maximum,$left)}
@@ -35,6 +36,12 @@ function Open-Palette([string]$Surface){$reply=Request @('test-shortcut',$Surfac
 function Menu-Open{$tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'command_palette'});Require ($button.Count -eq 1) 'Command Palette toolbar entry missing';$handle=[long]$button[0].handle;[OptionsFixture]::Click([OptionsFixture]::Parent($handle,$owned.Id),$handle,$owned.Id);return Await {param($t) $t.command_palette.open}}
 function Execute($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEnter([long]$panel.query_handle,$owned.Id)}
 function Dismiss($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);$tree=Await {param($t) -not $t.command_palette -or -not $t.command_palette.open};Require ([OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Enabled) 'Palette dismissal left its main owner disabled';return $tree}
+function Copy-Feedback([string]$Surface,[string]$Expected){
+    $tree=Await {param($t) $t.copy_feedback -and $t.copy_feedback.source -ceq $Surface};$feedback=$tree.copy_feedback
+    Require ($feedback.text -ceq $Expected -and $feedback.success -eq $false -and $feedback.message -match 'Clipboard access is disabled in background hosts' -and -not $feedback.native_visible -and $feedback.owner -eq $tree.window_handle) 'Copy path background guard, source or original payload differs'
+    Require ([OptionsFixture]::Parent([long]$feedback.window,$owned.Id) -eq $feedback.owner -and [OptionsFixture]::Text([long]$feedback.window,$owned.Id) -ceq $feedback.message) 'Copy result is not the actual owned hidden native feedback';Owner-Restored $tree
+    return $tree
+}
 function Workspace($Tree,[string]$Id){$found=@($Tree.workspaces|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable workspace';return $found[0]}
 function Workspace-Caption($Tree,[string]$Id,[string]$Expected){
     $rows=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Id -and $_.layout_visible});Require ($rows.Count -eq 1) 'Named workspace has no unique visible native sidebar row'
@@ -79,13 +86,13 @@ function Double-Metadata($Tree,[string]$Id){
 function Passed([string]$Name){$script:checks+=$Name}
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
-    $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$directory),$directory,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();
+    $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$terminalDirectory),$terminalDirectory,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($owned.Id).json"
     do {Require (-not $owned.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Host discovery exceeded eight seconds or exited';if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json;Require ($record.pid -eq $owned.Id -and [bool]$record.pipe) 'Wrong discovery owner';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
     $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';Require ((Request @('identify') ([int][Math]::Min(5000,$left))).pid -eq $owned.Id) 'Pipe owner mismatch'
     do {$left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup readiness exceeded eight seconds';$tree=Tree ([int][Math]::Min(5000,$left));if(@($tree.surfaces).Count -eq 1 -and $tree.surfaces[0].ready -and $tree.surfaces[0].running){break};Start-Sleep -Milliseconds 20}while($true)
     $identities=Identities $tree;$initial=Request @('identify');$active=$initial.surface
-
+    Require ($initial.cwd -ceq $terminalDirectory) 'Initial terminal lost its exact Korean/NFD current directory';$copyReply=Request @('test-shortcut',$initial.surface,'{"code":"KeyK","key":"k","ctrlKey":true,"shiftKey":true}');Require ($copyReply.surface -ceq $initial.surface -and -not $copyReply.forwarded) 'Copy path shortcut was not handled by the actual terminal renderer';$tree=Copy-Feedback $initial.surface $terminalDirectory;Require ((Identities $tree) -ceq $identities) 'Copy path shortcut changed terminal IDs or PIDs';Same-Identity $initial;Passed 'terminal-copy-path-shortcut-preserves-Korean-NFD-cwd-with-owned-hidden-clipboard-blocked-feedback'
 
     $workspaceName='한글 작업공간 한 &';$tabName='원본 터미널 한글'
     Request @('workspace','rename',$initial.workspace,$workspaceName)|Out-Null;Request @('rename-tab',$active,$tabName)|Out-Null
@@ -146,6 +153,7 @@ try {
     $tree=Menu-Open;Require (@($tree.command_palette.entries|Where-Object {$_.id -ceq 'action:terminal-search'}).Count -eq 0) 'Browser palette offers terminal-only search'
     $tree=Dismiss $tree;Require ((Request @('identify')).surface -ceq $browser.surface) 'Browser palette changed its target'
     $browserBefore=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];$browserTab=Surface $tree $browser.surface
+    $tree=Menu-Open;$tree=Query $tree 'Copy focused pane path';$tree=Select-Entry $tree 'action:copy-pane-path';Execute $tree;$tree=Closed;$tree=Copy-Feedback $browser.surface $browserBefore.url;$copiedBrowser=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];Require ($copiedBrowser.view_handle -eq $browserBefore.view_handle -and $copiedBrowser.url -ceq $browserBefore.url -and (Identities $tree) -ceq $identities -and (Request @('identify')).surface -ceq $browser.surface) 'Browser copy request changed its view, URL, selection or terminal PIDs';Passed 'browser-palette-copy-URL-uses-current-view-and-hidden-clipboard-blocked-feedback'
     $tree=Double-Metadata $tree $browser.surface;$panel=Metadata $tree
     Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $browserTab.title) 'Browser double-click captured a different tab'
     Metadata-Text $panel '   ';Metadata-Click $panel 'apply';$tree=Metadata-Closed;$unchanged=Surface $tree $browser.surface
@@ -156,6 +164,15 @@ try {
     Passed 'browser-header-doubleclick-trim-and-whitespace-noop-preserve-view-and-lock'
     Request @('close-tab',$browser.surface)|Out-Null
     $tree=Await {param($t) @($t.browsers).Count -eq 0};Owner-Restored $tree;Require ((Identities $tree) -ceq $identities) 'Browser palette or cleanup replaced a terminal';Passed 'contextual-action-availability-and-browser-toolbar-entry'
+
+    Request @('focus-tab',$initial.surface)|Out-Null;$editorFixture=New-Object EditorFixture($directory)
+    try{
+        $editorPath=$editorFixture.Write('경로 한 문서.txt',[EditorFixture]::Original,$false,$false);$editor=(Request @('editor','open',$editorPath,'--pane',$initial.pane,'--root',$editorFixture.Root)).editor_opened
+        $tree=Await {param($t) @($t.editors|Where-Object {$_.id -ceq $editor.surface -and $_.ready -and -not $_.dirty}).Count -eq 1};$editorBefore=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0]
+        $tree=Menu-Open;$tree=Query $tree 'Copy focused pane path';$tree=Select-Entry $tree 'action:copy-pane-path';Execute $tree;$tree=Closed;$tree=Copy-Feedback $editor.surface $editorBefore.workspace_root;$editorAfter=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0]
+        Require ($editorAfter.view_handle -eq $editorBefore.view_handle -and -not $editorAfter.dirty -and $editorAfter.workspace_root -ceq $editorBefore.workspace_root -and (Identities $tree) -ceq $identities -and $editorFixture.BytesEqual($editorPath,[EditorFixture]::Encode([EditorFixture]::Original,$false,$false))) 'Editor copy request changed its retained view, workspace root, document bytes or terminal PIDs'
+        Request @('close-tab',$editor.surface)|Out-Null;$tree=Await {param($t) @($t.editors).Count -eq 0};Require ((Identities $tree) -ceq $identities) 'Closing the copy-path editor changed terminal PIDs';Passed 'editor-palette-copy-uses-workspace-root-and-preserves-clean-document-and-view'
+    }finally{$editorFixture.Dispose()}
 
     # Native metadata dialogs reuse the palette, settings theme and original
     # model IDs. Synthetic composition messages test guards, not physical IME.

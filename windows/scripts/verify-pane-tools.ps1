@@ -166,19 +166,19 @@ try {
  $evidence.checks+=@{name='whole_pane_close_seals_all_editors_rejects_dirty_without_partial_removal_and_preserves_final_pane';passed=$true}
  Click $a.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Require (@($tree.tab_menu.menu.rows).Count -eq 1 -and -not $tree.tab_menu.menu.rows[0].enabled) 'Final pane Close is not disabled';$tree=Menu-Dismiss $tree
  $tree=Workspace-Menu $a.workspace;$workspaceMenu=$tree.tab_menu.menu
- Require ((@($workspaceMenu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace||Change tab name|Change color…||Close tab|Close all tabs||Show in folder|Copy path') 'Workspace menu differs from Linux action and separator order'
+ Require ((@($workspaceMenu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace|New window||Change tab name|Change color…||Close tab|Close all tabs||Show in folder|Copy path') 'Workspace menu differs from Linux action and separator order'
  foreach($label in @('New SSH Workspace')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and $row[0].enabled) ('SSH workspace action unavailable: '+$label)}
  foreach($label in @('Close tab','Close all tabs')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and $row[0].enabled) ('Workspace close action missing: '+$label)}
  Require ($tree.tab_menu.folder -ceq $fixture.Root -and $tree.tab_menu.copy_text -ceq $fixture.Root -and @($workspaceMenu.rows|Where-Object {$_.separator}).Count -eq 3) 'Workspace context lost its Unicode CWD or native separators'
  [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,40,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 1};Require ($tree.tab_menu.menu.id -ceq $workspaceMenu.id) 'Menu navigation replaced the workspace target'
- [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,35,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 10}
+ [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,35,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq (@($workspaceMenu.rows).Count-1)}
  $bitmap=Join-Path $directory 'workspace-menu.bmp';$capture=Request @('chrome-capture',$bitmap);Require ($capture.root_handle -eq $workspaceMenu.window) 'Workspace bitmap captured another popup'
  $background=[ChromeFixture]::Pixel($bitmap,0,0)
  foreach($row in @($workspaceMenu.rows|Where-Object {$_.separator -and $_.layout_visible})){$r=$row.bounds;$plain=[ChromeFixture]::ColorCount($bitmap,$r.x,$r.y,$r.width,$r.height,$background);Require ($plain -lt $r.width*$r.height-5) 'Native separator painter omitted its divider'}
  $tree=Tree;Require ($tree.tab_menu.menu.id -ceq $workspaceMenu.id) 'Workspace bitmap changed menu generation';Remove-Item -LiteralPath $bitmap -Force;$tree=Menu-Dismiss $tree;Stable $tree $original
  $blankY=[int]($tree.chrome.sidebar_list_top+2*$tree.chrome.workspace_row_height_dip*$tree.chrome.dpi/96)
  [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,12,$blankY);$tree=Await {param($t) $t.tab_menu.kind -ceq 'creation'}
- Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace') 'Empty sidebar context did not use the creation menu';$tree=Menu-Dismiss $tree
+ Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace|New window') 'Empty sidebar context did not use the creation menu';$tree=Menu-Dismiss $tree
  [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,([int]$tree.chrome.sidebar_actual_width+20),$blankY);$tree=Tree;Require (-not $tree.tab_menu) 'Workspace creation menu escaped the sidebar bounds'
  $evidence.checks+=@{name='workspace_Linux_menu_order_Close_and_SSH_actions_native_separators_and_modeless_Escape';passed=$true}
  # Tab context menus remain modeless while the normal IPC loop answers Tree.
@@ -254,10 +254,10 @@ try {
  Require ($returned.surface -ceq $a.surface -and $returned.workspace -ceq $first.workspace -and $returned.pane -ceq $first.pane -and $terminalAfter.view_handle -eq $terminalBefore.view_handle -and $terminalAfter.holder.window -eq $terminalBefore.holder.window -and $terminalAfter.holder.parent -eq $tree.window_handle -and $terminalAfter.holder.root -eq $tree.window_handle) 'Detached context Move did not return the same WebView/holder to the original main workspace'
  Require (@($tree.detached_windows|Where-Object {$_.window_handle -eq $frame.window_handle}).Count -eq 0 -and [OptionsFixture]::Parent([long]$terminalAfter.holder.window,$hostProcess.Id) -eq $tree.window_handle -and [OptionsFixture]::Describe([long]$tree.window_handle,$hostProcess.Id).Enabled) 'Detached context Move retained the old frame or wrong native owner';Stable $tree $menuTerminals
  $evidence.checks+=@{name='detached_tab_context_exact_owner_Move_reattaches_same_HWND_and_PID_and_removes_frame';passed=$true}
- # Header creation is a separate Linux two-entry menu; existing PTYs survive.
+ # Header creation uses the shared creation menu; existing PTYs survive.
  $tree=Tree;$header=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_header' -and $_.layout_visible});Require ($header.Count -eq 1) 'Workspace header entry missing'
  [OptionsFixture]::Click([long]$tree.window_handle,[long]$header[0].handle,$hostProcess.Id);$tree=Await {param($t) $t.tab_menu.kind -ceq 'creation'};Menu-Panel $tree.tab_menu.menu ([long]$tree.window_handle)|Out-Null
- Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace' -and $tree.tab_menu.menu.rows[0].enabled -and $tree.tab_menu.menu.rows[1].enabled) 'Creation menu order or SSH availability differs'
+ Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace|New window' -and $tree.tab_menu.menu.rows[0].enabled -and $tree.tab_menu.menu.rows[1].enabled) 'Creation menu order or SSH availability differs'
  Menu-Click $tree.tab_menu.menu 'New workspace';$tree=Ready 4;$created=Request @('identify');Require ($created.workspace -notin @($first.workspace,$third.workspace) -and -not $tree.tab_menu) 'Native creation reused an existing workspace';Stable $tree $menuTerminals
  # Pin the new automatic name before comparing unrelated workspace metadata.
  Request @('workspace','rename',$created.workspace,'새 생성 고정 한 😀')|Out-Null;$tree=Tree

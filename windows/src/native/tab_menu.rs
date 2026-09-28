@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Themed Linux menus, captured by surface/workspace identity rather than row index.
 use super::*;
+use windows_sys::Win32::System::SystemServices::{
+    SS_CENTER, SS_CENTERIMAGE, SS_ENDELLIPSIS, SS_NOPREFIX,
+};
 #[path = "tab_menu_panel.rs"]
 mod panel;
 pub(super) use panel::UiAction;
@@ -75,7 +78,188 @@ impl Drop for Menu {
         self.submenu.take();
     }
 }
+pub(super) struct CopyFeedback {
+    source: SurfaceId,
+    owner: HWND,
+    window: HWND,
+    text: String,
+    message: String,
+    success: bool,
+    expires: Instant,
+    bounds: Option<model::Rect>,
+}
+impl CopyFeedback {
+    fn new(
+        owner: HWND,
+        source: SurfaceId,
+        text: String,
+        message: String,
+        success: bool,
+    ) -> anyhow::Result<Self> {
+        let window = unsafe {
+            CreateWindowExW(
+                WS_EX_NOACTIVATE,
+                wide("STATIC").as_ptr(),
+                wide(&message).as_ptr(),
+                WS_CHILD
+                    | WS_DISABLED
+                    | WS_CLIPSIBLINGS
+                    | SS_CENTER
+                    | SS_CENTERIMAGE
+                    | SS_NOPREFIX
+                    | SS_ENDELLIPSIS,
+                0,
+                0,
+                1,
+                1,
+                owner,
+                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            )
+        };
+        anyhow::ensure!(!window.is_null(), "Cannot display clipboard result");
+        chrome::register_control(window, chrome::ControlRole::Caption);
+        Ok(Self {
+            source,
+            owner,
+            window,
+            text,
+            message,
+            success,
+            expires: Instant::now() + Duration::from_millis(1400),
+            bounds: None,
+        })
+    }
+    fn layout(&mut self, background: bool) {
+        unsafe {
+            let mut client: RECT = std::mem::zeroed();
+            if GetClientRect(self.owner, &mut client) == 0 {
+                return;
+            }
+            let dpi = GetDpiForWindow(self.owner).max(96) as i32;
+            let px = |dip: i32| (dip * dpi + 48) / 96;
+            let margin = px(12).min(client.right.max(0) / 4);
+            let width = px(680).min((client.right - 2 * margin).max(1));
+            let height = px(40).min((client.bottom - 2 * margin).max(1));
+            let bounds = model::Rect {
+                x: (client.right - width).max(0) / 2,
+                y: (client.bottom - margin - height).max(0),
+                width,
+                height,
+            };
+            if self.bounds != Some(bounds) {
+                SetWindowPos(
+                    self.window,
+                    HWND_TOP,
+                    bounds.x,
+                    bounds.y,
+                    bounds.width,
+                    bounds.height,
+                    SWP_NOACTIVATE,
+                );
+                self.bounds = Some(bounds);
+            }
+            if !background {
+                ShowWindow(self.window, SW_SHOWNA);
+            }
+        }
+    }
+    pub(super) fn diagnostics(&self) -> Value {
+        json!({"source":self.source,"text":self.text,"message":self.message,"success":self.success,
+            "window":self.window as usize,"owner":self.owner as usize,"native_visible":unsafe {IsWindowVisible(self.window)!=0}})
+    }
+}
+impl Drop for CopyFeedback {
+    fn drop(&mut self) {
+        chrome::unregister(self.window);
+        unsafe {
+            if IsWindow(self.window) != 0 {
+                DestroyWindow(self.window);
+            }
+        }
+    }
+}
 impl App {
+    pub(super) fn copy_pane_path(&mut self, source: SurfaceId) -> anyhow::Result<()> {
+        self.copy_surface_text(source, true)
+    }
+    fn copy_surface_text(
+        &mut self,
+        source: SurfaceId,
+        workspace_fallback: bool,
+    ) -> anyhow::Result<()> {
+        let owner = self.surface_window(source);
+        if self.locate(source).is_none()
+            || self.closing
+            || self.close_accepted
+            || (self.main_closed && owner == self.window)
+            || self.close_request.is_some()
+            || self.pending_save.is_some()
+            || self.editor_barrier.is_some()
+            || self.overview.is_open()
+            || self.command_palette.is_open()
+            || unsafe { IsWindow(owner) == 0 || IsWindowEnabled(owner) == 0 }
+        {
+            return Ok(());
+        }
+        let (mut text, _, mut label) = self.tab_copy_text(source)?;
+        if workspace_fallback && text.is_empty() {
+            let (workspace, _, _) = self.locate(source).context("Tab no longer exists")?;
+            let workspace = &self.workspaces[workspace];
+            if let Some(first) = workspace
+                .root
+                .first_leaf_id()
+                .and_then(|pane| workspace.root.active_surface_id(pane))
+            {
+                let (candidate, _, candidate_label) = self.tab_copy_text(first)?;
+                text = candidate;
+                label = candidate_label;
+            }
+            if text.is_empty() {
+                text = match &workspace.ssh {
+                    Some(config) => flowmux_core::WorkspaceLocation::Ssh {
+                        config: config.clone(),
+                    }
+                    .display(),
+                    None => workspace.cwd.to_string_lossy().into_owned(),
+                };
+                label = "location";
+            }
+        }
+        let result = if text.is_empty() {
+            Err(anyhow::anyhow!("No {label} is available for this tab"))
+        } else if self.background_test {
+            Err(anyhow::anyhow!(
+                "Clipboard access is disabled in background hosts"
+            ))
+        } else {
+            copy_text(owner, &text)
+        };
+        let success = result.is_ok();
+        let message = match result {
+            Ok(()) => format!("Copied {label}: {text}"),
+            Err(error) => format!("Could not copy {label}: {error}"),
+        };
+        self.copy_feedback.take();
+        let mut feedback = CopyFeedback::new(owner, source, text, message, success)?;
+        feedback.layout(self.background_test);
+        self.copy_feedback = Some(feedback);
+        Ok(())
+    }
+    pub(super) fn copy_feedback_tick(&mut self) {
+        let stale = self.copy_feedback.as_ref().is_some_and(|feedback| {
+            Instant::now() >= feedback.expires
+                || self.locate(feedback.source).is_none()
+                || self.surface_window(feedback.source) != feedback.owner
+                || unsafe { IsWindow(feedback.owner) == 0 || IsWindow(feedback.window) == 0 }
+        });
+        if stale {
+            self.copy_feedback.take();
+        } else if let Some(feedback) = &mut self.copy_feedback {
+            feedback.layout(self.background_test);
+        }
+    }
     pub(super) fn refresh_terminal_menu(&mut self, source: SurfaceId) -> anyhow::Result<()> {
         let (workspace, pane, _) = self.locate(source).context("Terminal no longer exists")?;
         let split = !self.is_detached_workspace(self.workspaces[workspace].id)
@@ -109,7 +293,7 @@ impl App {
         let Some(terminal) = self.surfaces.get(&source) else {
             return Ok(());
         };
-        let (workspace, pane, cwd) = self.locate(source).context("Terminal no longer exists")?;
+        let (workspace, pane, _) = self.locate(source).context("Terminal no longer exists")?;
         let owner = self.surface_window(source);
         // A right-click may come from another visible pane. Bind the action to
         // that surface and reject hidden tabs and menus left over after a move.
@@ -154,22 +338,15 @@ impl App {
             ClosePane => {
                 self.close_pane(pane, None)?;
             }
-            CopyPath => {
-                anyhow::ensure!(
-                    !self.background_test,
-                    "Clipboard access is disabled in background hosts"
-                );
-                let path = match self.remote_directory(source) {
-                    Some(remote) => remote.context("Remote directory has not been reported")?,
-                    None => cwd.to_string_lossy().into_owned(),
-                };
-                copy_text(owner, &path)?;
-            }
+            CopyPath => self.copy_surface_text(source, false)?,
         }
         Ok(())
     }
 
-    fn tab_copy_text(&self, surface: SurfaceId) -> anyhow::Result<(String, Option<PathBuf>)> {
+    fn tab_copy_text(
+        &self,
+        surface: SurfaceId,
+    ) -> anyhow::Result<(String, Option<PathBuf>, &'static str)> {
         let (workspace, pane, cwd) = self.locate(surface).context("Tab no longer exists")?;
         let tab = self.workspaces[workspace]
             .leaves()
@@ -178,10 +355,14 @@ impl App {
             .and_then(|(_, _, tabs)| tabs.into_iter().find(|tab| tab.id == surface))
             .context("Tab no longer exists")?;
         match &tab.kind {
-            SurfaceKind::Terminal { .. } => Ok((cwd.to_string_lossy().into_owned(), Some(cwd))),
-            SurfaceKind::SshTerminal { cwd, .. } => Ok((cwd.clone().unwrap_or_default(), None)),
+            SurfaceKind::Terminal { .. } => {
+                Ok((cwd.to_string_lossy().into_owned(), Some(cwd), "path"))
+            }
+            SurfaceKind::SshTerminal { cwd, .. } => {
+                Ok((cwd.clone().unwrap_or_default(), None, "remote path"))
+            }
             SurfaceKind::Editor { workspace_root, .. } => {
-                Ok((workspace_root.to_string_lossy().into_owned(), None))
+                Ok((workspace_root.to_string_lossy().into_owned(), None, "path"))
             }
             SurfaceKind::Browser { initial_url } => {
                 let url = self
@@ -189,9 +370,10 @@ impl App {
                     .get(&surface)
                     .map(|browser| browser.view.url())
                     .transpose()?
+                    .filter(|url| !url.is_empty())
                     .or_else(|| initial_url.clone())
                     .unwrap_or_default();
-                Ok((url, None))
+                Ok((url, None, "URL"))
             }
         }
     }
@@ -205,7 +387,7 @@ impl App {
         anyhow::ensure!(current == pane, "Tab moved before opening its menu");
         let source_local = self.workspaces[workspace].ssh.is_none();
         let workspace = self.workspaces[workspace].id;
-        let (copy_text, folder) = self.tab_copy_text(surface)?;
+        let (copy_text, folder, _) = self.tab_copy_text(surface)?;
         let destinations: Vec<_> = self
             .main_workspace_indices()
             .into_iter()
@@ -361,7 +543,7 @@ impl App {
                 && unsafe { IsWindowEnabled(owner) } != 0,
             "Window is busy"
         );
-        let (copy_text, mut folder) = surface
+        let (copy_text, mut folder, _) = surface
             .map(|surface| self.tab_copy_text(surface))
             .transpose()?
             .unwrap_or_default();
@@ -386,6 +568,13 @@ impl App {
         Ok(())
     }
     pub(super) fn tab_menu_surface_closing(&mut self, surface: SurfaceId) {
+        if self
+            .copy_feedback
+            .as_ref()
+            .is_some_and(|feedback| feedback.source == surface)
+        {
+            self.copy_feedback.take();
+        }
         if self
             .tab_menu
             .as_ref()
@@ -481,12 +670,7 @@ impl App {
         self.tab_menu.take();
         match action {
             MenuAction::Copy => {
-                anyhow::ensure!(
-                    !self.background_test,
-                    "Clipboard access is disabled in background hosts"
-                );
-                let (text, _) = self.tab_copy_text(surface.context("No tab to copy")?)?;
-                copy_text(owner, &text)?;
+                self.copy_surface_text(surface.context("No tab to copy")?, false)?;
                 self.focus_active()?;
             }
             MenuAction::Folder => {

@@ -573,6 +573,7 @@ struct App {
     drop_preview: Option<chrome::DropPreview>,
     metadata: Option<workspaces::Panel>,
     tab_menu: Option<tab_menu::Menu>,
+    copy_feedback: Option<tab_menu::CopyFeedback>,
     workspace_close: Option<workspaces::Close>,
     ssh_dialog: Option<ssh_panel::Panel>,
     ssh_disconnected: HashSet<WorkspaceId>,
@@ -851,6 +852,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             drop_preview: None,
             metadata: None,
             tab_menu: None,
+            copy_feedback: None,
             workspace_close: None,
             ssh_dialog: None,
             initial_cwd: cwd.clone(),
@@ -926,6 +928,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.workspace_close.take();
         app.metadata.take();
         app.tab_menu.take();
+        app.copy_feedback.take();
         app.browsers.clear();
         app.ssh_forwards.clear();
         app.editors.clear();
@@ -1965,6 +1968,7 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                self.copy_feedback_tick();
                 self.usage_tick()?;
                 self.sessions_reconcile()?;
                 self.worktrees_reconcile()?;
@@ -3564,6 +3568,7 @@ impl App {
                         "command_palette":self.command_palette.diagnostics(),
                         "metadata":self.metadata.as_ref().map(workspaces::Panel::diagnostics),
                         "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
+                        "copy_feedback":self.copy_feedback.as_ref().map(tab_menu::CopyFeedback::diagnostics),
                         "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
                         "ssh_dialog":self.ssh_dialog.as_ref().map(ssh_panel::Panel::diagnostics),
                         "ssh_ports":self.ssh_ports.as_ref().map(ssh_ports_panel::Panel::status),

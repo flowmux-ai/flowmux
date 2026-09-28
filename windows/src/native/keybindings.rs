@@ -393,6 +393,7 @@ impl App {
             Some(NewWorkspace) => Action::NewWorkspace,
             Some(NewWindow) => return self.new_window(Some(source)),
             Some(OpenTig) => return self.open_tig(source),
+            Some(CopyPanePath) => return self.copy_pane_path(source),
             Some(ToggleUsagePopover) => Action::Usage,
             Some(ToggleSessionPanel) => Action::Sessions,
             Some(TerminalSearch) => Action::Find,
