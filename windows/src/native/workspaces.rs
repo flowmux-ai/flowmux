@@ -173,6 +173,7 @@ impl App {
             | Action::CommandPalette
             | Action::ShowFiles
             | Action::Worktrees
+            | Action::Usage
             | Action::SearchAll
             | Action::OpenEditor
             | Action::Notifications => chrome::Role::Icon {
@@ -182,6 +183,7 @@ impl App {
                     Action::Settings => chrome::ChromeIcon::Settings,
                     Action::ShowFiles => chrome::ChromeIcon::Files,
                     Action::Worktrees => chrome::ChromeIcon::Worktrees,
+                    Action::Usage => chrome::ChromeIcon::Usage,
                     Action::SearchAll => chrome::ChromeIcon::Search,
                     Action::OpenEditor => chrome::ChromeIcon::OpenFile,
                     _ => chrome::ChromeIcon::Notifications,
@@ -355,6 +357,7 @@ impl App {
                 Action::Overview=>("overview",None,None,None,false),
                 Action::ShowFiles=>("files",None,None,None,false),
                 Action::Worktrees=>("worktrees",None,None,None,false),
+                Action::Usage=>("usage",None,None,None,false),
                 Action::SearchAll=>("search_all",None,None,None,false),
                 Action::OpenEditor=>("open_file",None,None,None,false),
                 Action::Notifications=>("notifications",None,None,None,false),

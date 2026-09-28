@@ -85,8 +85,8 @@ try {
     $status=Await {param($s) Ack $s};$entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});Require ($entry.Count -eq 1) 'Options entry missing';Native-Click ([long]$entry[0].handle)
     $status=Await {param($s) $s.options -and $s.options.open};Require ($status.options.page -eq 'general' -and $status.options.auto_apply -and $status.options.error_or_status -match 'save automatically') 'General page no longer describes automatic saving'
     Click $status ([long]$status.options.tabs[2].handle);$status=Await {param($s) $s.options.page -eq 'keybindings'};Require (-not $status.options.keybindings.auto_apply -and $status.options.error_or_status -match 'save after OK' -and $status.options.error_or_status -notmatch 'automatically') 'Keybindings footer misstates the explicit OK save flow'
-    Require (@($status.options.keybindings.actions).Count -eq 35 -and @($status.options.keybindings.actions|Where-Object {$_.supported}).Count -eq 32) 'Expected 35 rows including 32 supported actions'
-    $unsupported=@($status.options.keybindings.actions|Where-Object {-not $_.supported});Require ($unsupported.Count -eq 3) 'Unsupported action count differs';foreach($row in $unsupported){Require (-not [OptionsFixture]::Describe([long]$row.edit,$owned.Id).Enabled) ('Unavailable action Edit is enabled: '+$row.action)}
+    Require (@($status.options.keybindings.actions).Count -eq 35 -and @($status.options.keybindings.actions|Where-Object {$_.supported}).Count -eq 33) 'Expected 35 rows including 33 supported actions'
+    $unsupported=@($status.options.keybindings.actions|Where-Object {-not $_.supported});Require ($unsupported.Count -eq 2) 'Unsupported action count differs';foreach($row in $unsupported){Require (-not [OptionsFixture]::Describe([long]$row.edit,$owned.Id).Enabled) ('Unavailable action Edit is enabled: '+$row.action)}
     $row=Row $status 'new-surface';Require ([OptionsFixture]::Text([long]$row.edit,$owned.Id) -ceq 'Edit' -and [OptionsFixture]::Text([long]$row.accel_handle,$owned.Id) -ceq (@($row.accels) -join ', ')) 'Actual row Edit or current binding chip differs';Record 'row-list-and-default-shortcut' $status;Require ($status.options.scroll_offset -eq 0) 'Initial rows capture must start at scroll top';Capture 'keybindings-rows'
     $evidence.checks+=@{name='native_action_rows_current_chips_edit_controls_and_existing_default_shortcut';passed=$true}
 
@@ -97,12 +97,12 @@ try {
     Edit-Enter $status 'reset';$status=Await {param($s) (Editor-Text $s) -ceq $originalDraft};Require ($status.document.revision -eq $before) 'Reset saved before OK';Record 'reset-and-unbind-remain-drafts' $status
     Edit-Click $status 'cancel';$status=Await {param($s) -not $s.options.keybindings.editor};$evidence.checks+=@{name='owned_420x220_modal_Enter_targets_Cancel_Reset_Unbind_without_early_save';passed=$true}
 
-    $status=Open-Editor $status 'new-surface';Draft $status 'Ctrl+Alt+Y, Ctrl+Alt+U';Edit-Enter $status 'ok'
-    $status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and (Bound $s 'new-surface' 'KeyY' $true $true $false) -and (Bound $s 'new-surface' 'KeyU' $true $true $false)}
-    $row=Row $status 'new-surface';Require ([OptionsFixture]::Text([long]$row.accel_handle,$owned.Id) -ceq 'Ctrl+Alt+Y, Ctrl+Alt+U') 'Committed row chip did not show comma-separated bindings';Record 'multi-accelerator-commit-and-renderer-ack' $status
+    $status=Open-Editor $status 'new-surface';Draft $status 'Ctrl+Alt+Y, Ctrl+Alt+Z';Edit-Enter $status 'ok'
+    $status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and (Bound $s 'new-surface' 'KeyY' $true $true $false) -and (Bound $s 'new-surface' 'KeyZ' $true $true $false)}
+    $row=Row $status 'new-surface';Require ([OptionsFixture]::Text([long]$row.accel_handle,$owned.Id) -ceq 'Ctrl+Alt+Y, Ctrl+Alt+Z') 'Committed row chip did not show comma-separated bindings';Record 'multi-accelerator-commit-and-renderer-ack' $status
     Shortcut $active $defaultEvent $true;Require ((Identities (Tree)) -ceq $identities) 'Old default still dispatched after rebind'
     Shortcut $active @{code='KeyY';key='y';ctrlKey=$true;altKey=$true} $false;$tree=Await-Tree 3;$active=(Request @('identify')).surface;$status=Await {param($s) Ack $s}
-    Shortcut $active @{code='KeyU';key='u';ctrlKey=$true;altKey=$true} $false;$tree=Await-Tree 4;$active=(Request @('identify')).surface;$status=Await {param($s) Ack $s};$identities=Identities $tree
+    Shortcut $active @{code='KeyZ';key='z';ctrlKey=$true;altKey=$true} $false;$tree=Await-Tree 4;$active=(Request @('identify')).surface;$status=Await {param($s) Ack $s};$identities=Identities $tree
     $evidence.checks+=@{name='comma_separated_Enter_OK_updates_row_and_renderer_both_chords_create_one_terminal_each';passed=$true}
 
     # Keep the renderer guards separate from the native capture-popup guards.
@@ -156,11 +156,11 @@ try {
     $generalBefore=$status.document.terminal|ConvertTo-Json -Depth 10 -Compress
     Request @('settings','keybindings','set','toggle-pane-zoom','Ctrl+Alt+L')|Out-Null;$status=Await {param($s) (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyL' $true $true $false)}
     Require ([OptionsFixture]::Text([long]$status.options.keybindings.reset,$owned.Id) -ceq 'Reset all keybindings to defaults') 'Reset-all native control differs';Native-Click ([long]$status.options.keybindings.reset)
-    $status=Await {param($s) -not $s.options.keybindings.pending -and -not $s.options.keybindings.queued -and (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Bound $s 'new-surface' 'KeyT' $true $false $true) -and @($s.surfaces[0].applied.bindings).Count -eq 32}
+    $status=Await {param($s) -not $s.options.keybindings.pending -and -not $s.options.keybindings.queued -and (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Bound $s 'new-surface' 'KeyT' $true $false $true) -and @($s.surfaces[0].applied.bindings).Count -eq 33}
     Require (($status.document.terminal|ConvertTo-Json -Depth 10 -Compress) -ceq $generalBefore -and (Identities (Tree)) -ceq $identities) 'Native Reset all changed general settings or terminal PIDs'
     Click $status ([long]$status.options.close);$status=Await {param($s) -not $s.options.open};$tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});Require ($entry.Count -eq 1) 'Options reopen entry is missing';Native-Click ([long]$entry[0].handle)
     $status=Await {param($s) $s.options.open};Click $status ([long]$status.options.tabs[2].handle);$status=Await {param($s) $s.options.page -eq 'keybindings' -and (Ack $s)}
-    Require (($status.document.terminal|ConvertTo-Json -Depth 10 -Compress) -ceq $generalBefore -and $status.document.terminal.font_size -eq 17 -and @($status.surfaces[0].applied.bindings).Count -eq 32 -and (Bound $status 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Identities (Tree)) -ceq $identities -and -not $status.options.keybindings.editor) 'Reset-all/close/reopen changed general settings, renderer bindings or surviving terminal PIDs'
+    Require (($status.document.terminal|ConvertTo-Json -Depth 10 -Compress) -ceq $generalBefore -and $status.document.terminal.font_size -eq 17 -and @($status.surfaces[0].applied.bindings).Count -eq 33 -and (Bound $status 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Identities (Tree)) -ceq $identities -and -not $status.options.keybindings.editor) 'Reset-all/close/reopen changed general settings, renderer bindings or surviving terminal PIDs'
     Record 'reset-all-close-reopen' $status;$evidence.checks+=@{name='native_reset_all_and_options_reopen_preserve_general_settings_and_terminal_pids';passed=$true};$evidence.status='passed'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;$evidence.failureSettings=$status;throw}
 finally {

@@ -40,6 +40,8 @@ impl App {
             Ok(document) => {
                 self.settings_error = None;
                 if self.settings != document {
+                    let enable_usage = !self.settings.terminal.usage_bar_enabled
+                        && document.terminal.usage_bar_enabled;
                     self.settings = document;
                     chrome::configure_settings(&self.settings.terminal, unsafe {
                         GetDpiForWindow(self.window)
@@ -50,6 +52,11 @@ impl App {
                     }
                     self.editor_apply_theme()?;
                     self.worktrees.refresh_theme()?;
+                    self.usage_render();
+                    if enable_usage {
+                        self.usage_refresh(false)?;
+                    }
+                    self.layout()?;
                     unsafe {
                         InvalidateRect(self.window, std::ptr::null(), 1);
                     }

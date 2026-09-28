@@ -48,12 +48,12 @@ impl Output {
         }
     }
 }
-struct Attributes {
+pub(super) struct Attributes {
     storage: Vec<usize>,
     initialized: bool,
 }
 impl Attributes {
-    fn new(handles: &[HANDLE]) -> Result<Self> {
+    pub(super) fn new(handles: &[HANDLE]) -> Result<Self> {
         let mut bytes = 0;
         unsafe {
             InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut bytes);
@@ -83,7 +83,7 @@ impl Attributes {
         }
         Ok(value)
     }
-    fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+    pub(super) fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
         self.storage.as_mut_ptr().cast()
     }
 }
@@ -96,7 +96,7 @@ impl Drop for Attributes {
         }
     }
 }
-fn pipe() -> Result<(OwnedHandle, OwnedHandle)> {
+pub(super) fn pipe() -> Result<(OwnedHandle, OwnedHandle)> {
     let (mut read, mut write) = (std::ptr::null_mut(), std::ptr::null_mut());
     unsafe {
         checked(CreatePipe(&mut read, &mut write, std::ptr::null(), 0))?;
@@ -106,7 +106,7 @@ fn pipe() -> Result<(OwnedHandle, OwnedHandle)> {
         ))
     }
 }
-fn job() -> Result<OwnedHandle> {
+pub(super) fn job() -> Result<OwnedHandle> {
     unsafe {
         let raw = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         anyhow::ensure!(
@@ -136,7 +136,7 @@ fn executable() -> Result<PathBuf> {
     }
     anyhow::bail!("Git for Windows was not found on the absolute host PATH")
 }
-fn command(arguments: &[OsString]) -> Result<Vec<u16>> {
+pub(super) fn command(arguments: &[OsString]) -> Result<Vec<u16>> {
     let mut out = Vec::new();
     for argument in arguments {
         if !out.is_empty() {

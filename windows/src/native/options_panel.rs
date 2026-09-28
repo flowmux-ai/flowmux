@@ -374,6 +374,12 @@ impl Panel {
             )?;
             p.row(None, 0, "Default shell (future terminals)", vec![])?;
             p.row(
+                Some(SettingKey::UsageBarEnabled),
+                0,
+                "AI Usage bar",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
                 Some(SettingKey::Theme),
                 1,
                 "Legacy dark/light",

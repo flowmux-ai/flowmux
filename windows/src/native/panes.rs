@@ -142,7 +142,7 @@ impl App {
             x: sidebar + px(4),
             y: px(4) + ssh_bar,
             width: (available - files_width - worktrees_width).max(1),
-            height: (client.bottom - px(8) - ssh_bar).max(1),
+            height: (client.bottom - px(8) - ssh_bar - self.usage_height(client.bottom)).max(1),
         };
         let mut geometry = model::Layout::default();
         if let Some(workspace) = self.workspaces.get(workspace) {

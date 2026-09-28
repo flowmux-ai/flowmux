@@ -171,7 +171,10 @@ impl App {
                     anyhow::ensure!(
                         matches!(
                             action,
-                            ActionId::NewWorkspace | ActionId::NewWindow | ActionId::QuitApp
+                            ActionId::NewWorkspace
+                                | ActionId::NewWindow
+                                | ActionId::QuitApp
+                                | ActionId::ToggleUsagePopover
                         ),
                         "No active workspace"
                     );
@@ -309,6 +312,9 @@ impl App {
                         self.action(Action::NewWorkspace)?
                     }
                     Target::Keybinding(ActionId::NewWindow) => self.action(Action::NewWindow)?,
+                    Target::Keybinding(ActionId::ToggleUsagePopover) => {
+                        self.action(Action::Usage)?
+                    }
                     Target::Keybinding(ActionId::QuitApp) => {
                         self.request_close(CloseRequest::Native)?
                     }

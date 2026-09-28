@@ -95,6 +95,10 @@ mod ssh_ports_panel;
 pub(super) mod surface_host;
 #[path = "tab_menu.rs"]
 mod tab_menu;
+#[path = "usage.rs"]
+mod usage;
+#[path = "usage_panel.rs"]
+mod usage_panel;
 #[path = "workspaces.rs"]
 mod workspaces;
 #[path = "worktree_panel.rs"]
@@ -139,6 +143,8 @@ enum Event {
     Metadata(Uuid, workspaces::EditAction),
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
+    UsageUi(usage_panel::UiAction),
+    UsageResult([crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
     Overview(overview::Signal),
     Download(downloads::Signal),
@@ -450,6 +456,7 @@ enum Action {
     Worktrees,
     NewBrowser,
     Notifications,
+    Usage,
     Settings,
     CommandPalette,
     Overview,
@@ -582,6 +589,7 @@ struct App {
     search: search::Controller,
     browser_find: browser::find::Controller,
     notifications: notifications::Controller,
+    usage: usage::Controller,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -853,6 +861,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             search: search::Controller::default(),
             browser_find: browser::find::Controller::default(),
             notifications: notifications::Controller::default(),
+            usage: usage::Controller::default(),
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -873,6 +882,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             restore_main_closed,
             restore_detached_focus,
         )?;
+        app.usage_initialize()?;
         app.rebuild_without_focus()?;
         if !app.background_test && !app.main_closed {
             ShowWindow(window, SW_SHOW);
@@ -886,6 +896,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.focus_active()?;
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.usage.shutdown();
         app.worktrees.shutdown();
         app.files_shutdown();
         app.editor_cancel_opens(None, "window closed before editor Open completed");
@@ -976,6 +987,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.worktrees.handle_message(&message)
                 && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
+                && !app.usage.handle_message(&message)
                 && !app.downloads.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
                 && !app
@@ -1030,6 +1042,7 @@ impl App {
                 | Action::Settings
                 | Action::CommandPalette
                 | Action::Notifications
+                | Action::Usage
                 | Action::SidebarScroll(_)
                 | Action::EmptyState
         )
@@ -1092,6 +1105,7 @@ impl App {
             ("Search", Action::SearchAll),
             ("Open file", Action::OpenEditor),
             ("Notices", Action::Notifications),
+            ("AI usage (Ctrl+Alt+U)", Action::Usage),
             ("Previous", Action::SidebarScroll(-1)),
             ("Next", Action::SidebarScroll(1)),
         ] {
@@ -1160,6 +1174,7 @@ impl App {
             }
             self.refresh_chrome_metadata();
         } else {
+            self.usage.hide_panel();
             for control in self.controls.drain(..) {
                 chrome::unregister(control.hwnd);
                 unsafe {
@@ -1435,6 +1450,7 @@ impl App {
             (client.right - content.x - px(4) - dock_width).max(1),
             scale,
         );
+        self.usage_layout(client, sidebar + px(4));
         self.worktrees_layout(
             (worktrees_width > 0).then_some(model::Rect {
                 x: client.right - px(4) - dock_width - worktrees_width,
@@ -1615,12 +1631,14 @@ impl App {
                 | Action::CommandPalette
                 | Action::ShowFiles
                 | Action::Worktrees
+                | Action::Usage
                 | Action::SearchAll
                 | Action::OpenEditor => {
                     let x = match control.action {
                         Action::Settings => px(4),
                         Action::Overview => px(36),
                         Action::CommandPalette => px(68),
+                        Action::Usage => sidebar - px(164),
                         Action::OpenEditor => sidebar - px(132),
                         Action::Worktrees => sidebar - px(100),
                         Action::ShowFiles => sidebar - px(68),
@@ -1628,6 +1646,7 @@ impl App {
                     };
                     (sidebar
                         >= px(match control.action {
+                            Action::Usage => 260,
                             Action::CommandPalette => 200,
                             Action::OpenEditor => 232,
                             Action::Worktrees => 168,
@@ -1725,12 +1744,14 @@ impl App {
         self.refresh_ssh_toolbar();
         self.pane_layout = geometry;
         self.overview_layout()?;
+        self.usage.reposition();
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
         if self.background_test
             || self.overview.is_open()
             || self.command_palette.is_open()
+            || self.usage.is_open()
             || self.ssh_dialog.is_some()
             || unsafe {
                 IsWindowEnabled(
@@ -1851,6 +1872,8 @@ impl App {
             Event::Browser(event) => self.browser_event(event)?,
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
+            Event::UsageUi(action) => self.usage_ui(action)?,
+            Event::UsageResult(results) => self.usage_result(results)?,
             Event::Activated => {
                 if !self.main_closed {
                     self.detached_focus = None;
@@ -1874,6 +1897,7 @@ impl App {
                 self.layout()?;
             }
             Event::WindowMoved => {
+                self.usage.reposition();
                 self.cancel_drag();
                 // Child WebViews do not receive Wry's top-level WM_MOVE hook.
                 for view in self
@@ -1912,6 +1936,7 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                self.usage_tick()?;
                 self.worktrees_reconcile()?;
                 self.ssh_ports_tick()?;
                 #[cfg(debug_assertions)]
@@ -3185,6 +3210,7 @@ impl App {
             Action::Worktrees => return self.toggle_worktrees(),
             Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
+            Action::Usage => return self.toggle_usage(),
             Action::Settings => return self.settings_menu(),
             Action::CommandPalette => {
                 return self.command_palette_ui(command_palette::UiAction::Show)
@@ -3441,6 +3467,8 @@ impl App {
                 return Ok(None);
             }
             #[cfg(debug_assertions)]
+            Command::TestUsage { input } => return self.test_usage(&input).map(Some),
+            #[cfg(debug_assertions)]
             Command::ChromeCapture { path } => {
                 anyhow::ensure!(
                     self.background_test,
@@ -3459,6 +3487,7 @@ impl App {
                             .and_then(appearance::Panel::capture_window)
                     })
                     .or_else(|| self.overview_capture_window())
+                    .or_else(|| self.usage.capture_window())
                 {
                     chrome::capture_subtree(window, &path)
                 } else {
@@ -3485,7 +3514,7 @@ impl App {
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
-                        "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),
+                        "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),"usage":self.usage.status(),
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),

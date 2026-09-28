@@ -21,6 +21,7 @@ pub enum SettingKey {
     Scrollback,
     CursorBlink,
     CursorStyle,
+    UsageBarEnabled,
     MinimapEnabled,
     MinimapWidth,
     MinimapOpacity,
@@ -111,6 +112,7 @@ pub struct TerminalSettings {
     pub scrollback: u32,
     pub cursor_blink: bool,
     pub cursor_style: CursorStyle,
+    pub usage_bar_enabled: bool,
     pub minimap_enabled: bool,
     pub minimap_width: u16,
     pub minimap_opacity: u8,
@@ -126,6 +128,7 @@ impl Default for TerminalSettings {
             scrollback: 10000,
             cursor_blink: true,
             cursor_style: CursorStyle::Block,
+            usage_bar_enabled: true,
             minimap_enabled: true,
             minimap_width: 40,
             minimap_opacity: 50,
@@ -171,6 +174,7 @@ impl TerminalSettings {
             SettingKey::FontSize => self.font_size.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
+            SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
             SettingKey::MinimapEnabled => self.minimap_enabled.to_string(),
             SettingKey::MinimapWidth => self.minimap_width.to_string(),
             SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
@@ -266,6 +270,11 @@ impl TerminalSettings {
                 next.cursor_blink = value
                     .parse()
                     .context("cursor blink must be true or false")?
+            }
+            SettingKey::UsageBarEnabled => {
+                next.usage_bar_enabled = value
+                    .parse()
+                    .context("usage bar enabled must be true or false")?;
             }
             SettingKey::MinimapEnabled => {
                 next.minimap_enabled = value

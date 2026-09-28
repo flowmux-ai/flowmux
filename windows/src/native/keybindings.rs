@@ -111,6 +111,7 @@ impl App {
                     ActionId::NewWorkspace
                         | ActionId::NewWindow
                         | ActionId::CommandPalette
+                        | ActionId::ToggleUsagePopover
                         | ActionId::QuitApp
                 )
             });
@@ -141,6 +142,7 @@ impl App {
             ActionId::NewWorkspace => self.action(Action::NewWorkspace),
             ActionId::NewWindow => self.action(Action::NewWindow),
             ActionId::CommandPalette => self.action(Action::CommandPalette),
+            ActionId::ToggleUsagePopover => self.action(Action::Usage),
             ActionId::QuitApp => self.request_close(CloseRequest::Native),
             _ => Ok(()),
         }
@@ -389,6 +391,7 @@ impl App {
             Some(NewWorkspace) => Action::NewWorkspace,
             Some(NewWindow) => return self.new_window(Some(source)),
             Some(OpenTig) => return self.open_tig(source),
+            Some(ToggleUsagePopover) => Action::Usage,
             Some(TerminalSearch) => Action::Find,
             Some(SearchAllTerminals) => Action::SearchAll,
             Some(TogglePaneZoom) => Action::TogglePaneZoom,

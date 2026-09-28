@@ -232,6 +232,11 @@ pub enum Command {
         surface: Uuid,
         event: String,
     },
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    TestUsage {
+        input: String,
+    },
     /// Print the session-local PowerShell prompt integration for manual reinstallation.
     ShellIntegration,
     Identify,
