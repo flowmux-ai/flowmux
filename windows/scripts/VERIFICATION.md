@@ -68,8 +68,11 @@ condition is met; only tests of elapsed-time behavior have a deliberate dwell.
 Self-check: `verify-check-runner.ps1` verifies success, preserved exit status,
 and timeout of a process with a live descendant. Inspect `activeAfterCleanup`
 for the timeout result. The POSIX runner uses a separate process group and
-kills that group on every exit; it cannot contain intentionally detached
-processes or Windows processes launched through WSL interop.
+kills that group on normal/error/timeout exits and SIGTERM/SIGHUP/SIGINT
+cancellation. `verify-check-runner-posix.py --output <evidence.json>` exercises
+cancellation with children and grandchildren. SIGKILL cannot be handled; the
+runner also cannot contain intentionally detached processes or Windows processes
+launched through WSL interop.
 
 Job containment follows Microsoft's [Job Objects documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 and [process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags).

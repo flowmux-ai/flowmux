@@ -1,0 +1,87 @@
+{
+  "status": "passed",
+  "linuxSubreaper": true,
+  "checks": [
+    {
+      "signal": "SIGTERM",
+      "runnerPid": 274340,
+      "ownedPids": {
+        "root": 274342,
+        "child": 274344,
+        "grandchild": 274346
+      },
+      "exitCode": 143,
+      "cancellationSeconds": 0.064,
+      "activeAfterCleanup": 0,
+      "runnerResult": {
+        "name": "cancel-sigterm-35740f8d-a5cc-4c38-bb16-a40cecbc7c8b",
+        "command": [
+          "/usr/bin/python3",
+          "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/scripts/verify-check-runner-posix.py",
+          "--fixture-root",
+          "/tmp/flowmux-cancel-c8qb8suq/ready.json"
+        ],
+        "deadlineSeconds": 20,
+        "status": "cancelled",
+        "pid": 274342,
+        "exitCode": 143,
+        "signal": "SIGTERM",
+        "elapsedSeconds": 0.205
+      }
+    },
+    {
+      "signal": "SIGHUP",
+      "runnerPid": 274348,
+      "ownedPids": {
+        "root": 274349,
+        "child": 274350,
+        "grandchild": 274351
+      },
+      "exitCode": 129,
+      "cancellationSeconds": 0.032,
+      "activeAfterCleanup": 0,
+      "runnerResult": {
+        "name": "cancel-sighup-84a438e0-c96d-464d-ab1f-e5310a850d78",
+        "command": [
+          "/usr/bin/python3",
+          "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/scripts/verify-check-runner-posix.py",
+          "--fixture-root",
+          "/tmp/flowmux-cancel-uwge9kdt/ready.json"
+        ],
+        "deadlineSeconds": 20,
+        "status": "cancelled",
+        "pid": 274349,
+        "exitCode": 129,
+        "signal": "SIGHUP",
+        "elapsedSeconds": 0.208
+      }
+    },
+    {
+      "signal": "SIGINT",
+      "runnerPid": 274352,
+      "ownedPids": {
+        "root": 274353,
+        "child": 274356,
+        "grandchild": 274357
+      },
+      "exitCode": 130,
+      "cancellationSeconds": 0.114,
+      "activeAfterCleanup": 0,
+      "runnerResult": {
+        "name": "cancel-sigint-9afc3c32-700c-4b90-bbf3-8f9687a05b2a",
+        "command": [
+          "/usr/bin/python3",
+          "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/scripts/verify-check-runner-posix.py",
+          "--fixture-root",
+          "/tmp/flowmux-cancel-39wul3j7/ready.json"
+        ],
+        "deadlineSeconds": 20,
+        "status": "cancelled",
+        "pid": 274353,
+        "exitCode": 130,
+        "signal": "SIGINT",
+        "elapsedSeconds": 0.309
+      }
+    }
+  ]
+}

@@ -30,6 +30,17 @@ def main():
     result = dict(name=args.name, command=command, deadlineSeconds=args.timeout_seconds, status='runner_error')
     started = time.monotonic()
     process = None
+    cancelled_by = None
+    def request_cancel(signum, _frame):
+        nonlocal cancelled_by
+        # Do not raise from Popen before it has returned the owned PID, or
+        # interrupt cleanup when cancellation is requested more than once.
+        if cancelled_by is None:
+            cancelled_by = signum
+    previous_handlers = {
+        signum: signal.signal(signum, request_cancel)
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    }
     def terminate_group():
         if process is not None:
             try:
@@ -43,6 +54,8 @@ def main():
             print(f'[{args.name}] started pid={process.pid}, deadline={args.timeout_seconds}s; logs: {directory}', flush=True)
             heartbeat = 5
             while True:
+                if cancelled_by is not None:
+                    break
                 chunk = reader.read(65536)
                 if chunk:
                     sys.stdout.buffer.write(chunk)
@@ -61,16 +74,21 @@ def main():
                 time.sleep(0.1)
             terminate_group()
             process.wait(timeout=3)
-            while chunk := reader.read(65536):
+            while cancelled_by is None and (chunk := reader.read(65536)):
                 sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
     except (Exception, KeyboardInterrupt) as error:
         result.update(status='runner_error', exitCode=125, error=str(error))
     finally:
         terminate_group()
+        if cancelled_by is not None and 'error' not in result:
+            result.update(status='cancelled', exitCode=128 + cancelled_by,
+                          signal=signal.Signals(cancelled_by).name)
         result['elapsedSeconds'] = round(time.monotonic() - started, 3)
         (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         print(f'[{args.name}] {result["status"]} in {result["elapsedSeconds"]}s; result: {directory / "result.json"}', flush=True)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     return result['exitCode'] if 0 <= result['exitCode'] <= 255 else 1
 
 
