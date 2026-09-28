@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$Extended)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
@@ -19,11 +19,11 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $($err.Result) $($out.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Raw-Request($Body) {
@@ -55,7 +55,7 @@ function Start-Owned([string[]]$Launch) {
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
     do {
-        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+$stderr.Result)}
+        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
             $record=Get-Content -Raw $file|ConvertFrom-Json
             if ($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
@@ -99,8 +99,8 @@ function Plain([string[]]$Arguments) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName)+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned plain CLI timed out'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+$err.Result)}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned plain CLI timed out'}
+        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+([CliProbe]::Output($err)))}
         return $out.Result.TrimEnd("`r","`n")
     } finally {$p.Dispose()}
 }
@@ -115,11 +115,11 @@ function Begin-Wait([string]$Pane,[string[]]$Condition) {
 function End-Wait($Job,[int]$Exit=0) {
     $p=$Job.process
     try {
-        if (-not $p.WaitForExit(45000)) {$p.Kill();$p.WaitForExit();throw 'Owned wait CLI timed out; not retried'}
+        if (-not $p.WaitForExit(45000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned wait CLI timed out; not retried'}
         if (-not $Job.output.Wait(3000) -or -not $Job.error.Wait(3000)) {throw 'Owned wait output remained open'}
-        if ($p.ExitCode -ne $Exit) {throw ('Wait CLI exit '+$p.ExitCode+': '+$Job.error.Result)}
+        if ($p.ExitCode -ne $Exit) {throw ('Wait CLI exit '+$p.ExitCode+': '+([CliProbe]::Output($Job.error)))}
         if ($Exit -eq 0) {return ($Job.output.Result|ConvertFrom-Json)}
-        return ($Job.error.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($Job.error))|ConvertFrom-Json)
     } finally {$Job.completed=$true;$p.Dispose()}
 }
 function Wait-True([string[]]$Condition) {
@@ -146,6 +146,7 @@ try {
     Wait-True @('--text','가')|Out-Null
     if ((Request @('browser','wait',$domPane,'--text','가','--timeout-ms','120')).result -ne $false) {throw 'Text wait normalized Hangul'}
     $evidence.checks+=@{name='five_conditions_plain_json_exact_unicode_and_no_input_or_dom_mutation';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Eval-Page $domPane 'setTimeout(()=>{const p=document.createElement("p");p.id="delayed";p.textContent="지연 한 😀";document.body.append(p);},250);null'|Out-Null
     Wait-True @('--selector','#delayed','--poll-ms','25')|Out-Null
@@ -156,6 +157,7 @@ try {
     Wait-True @('--ready-state','complete','--poll-ms','25')|Out-Null
     Wait-True @('--js','window.deferredDone === true')|Out-Null
     $evidence.checks+=@{name='delayed_dom_and_streaming_loading_interactive_complete_states';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $time=[Diagnostics.Stopwatch]::StartNew()
     if ((Plain @('browser','wait',$domPane,'--selector','#never','--timeout-ms','200','--poll-ms','20')) -cne 'false') {throw 'Timeout did not return plain false'}
@@ -176,6 +178,7 @@ try {
     }
     Wait-True @('--js','true')|Out-Null
     $evidence.checks+=@{name='timeout_false_invalid_inputs_and_single_runtime_exception_without_replay';passed=$true;timeoutElapsedMs=$time.ElapsedMilliseconds}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $job=Begin-Wait $domPane @('--text','둘째 한글','--timeout-ms','8000','--poll-ms','25')
     Request @('browser','navigate',$domPane,($origin+'/redirect'))|Out-Null
@@ -196,6 +199,7 @@ try {
     $r=End-Wait $job 1
     if (-not $r.error.Contains('closed')) {throw 'Closing the owned browser did not cancel its wait'}
     $evidence.checks+=@{name='navigation_redirect_hidden_surface_pin_and_close_cancellation';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $jobs=@()
     for($i=0;$i -lt 8;$i++) {$jobs+=Begin-Wait $domPane @('--js',('window.capacity'+$i+'=true; return Boolean(window.releaseWaits);'),'--timeout-ms','10000','--poll-ms','50')}
@@ -215,20 +219,27 @@ try {
     $current=(Tree).surfaces|Where-Object {$_.id -eq $terminal.id}
     if ($current.pid -ne $terminal.pid -or -not $current.running) {throw 'Waits changed the terminal process'}
     $evidence.checks+=@{name='bounded_concurrent_waits_keep_other_commands_responsive_and_release_capacity';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
-    Eval-Page $domPane 'window.longWaitTarget=Date.now()+27000;null'|Out-Null
-    $time=[Diagnostics.Stopwatch]::StartNew()
-    $job=Begin-Wait $domPane @('--js','Date.now() >= window.longWaitTarget','--timeout-ms','32000','--poll-ms','100')
-    $r=End-Wait $job;$time.Stop()
-    if ($r.result -ne $true -or $time.ElapsedMilliseconds -lt 25000 -or $time.ElapsedMilliseconds -gt 40000) {throw 'Long wait exceeded or bypassed its transport budget'}
-    $evidence.checks+=@{name='wait_exceeds_default_server_and_client_deadlines_without_retransmission';passed=$true;elapsedMs=$time.ElapsedMilliseconds}
+    if ($Extended) {
+        Eval-Page $domPane 'window.longWaitTarget=Date.now()+27000;null'|Out-Null
+        $time=[Diagnostics.Stopwatch]::StartNew()
+        $job=Begin-Wait $domPane @('--js','Date.now() >= window.longWaitTarget','--timeout-ms','32000','--poll-ms','100')
+        $r=End-Wait $job;$time.Stop()
+        if ($r.result -ne $true -or $time.ElapsedMilliseconds -lt 25000 -or $time.ElapsedMilliseconds -gt 40000) {throw 'Long wait exceeded or bypassed its transport budget'}
+        $evidence.checks+=@{name='wait_exceeds_default_server_and_client_deadlines_without_retransmission';passed=$true;elapsedMs=$time.ElapsedMilliseconds}
+        Write-Host ("[check] passed "+$evidence.checks[-1].name)
+    } else {
+        $evidence.skippedChecks=@('wait_exceeds_default_server_and_client_deadlines_without_retransmission')
+        Write-Host '[check] deferred 27-second transport check; run with -Extended before release or after transport changes'
+    }
     Tree|Out-Null
     $evidence.status='passed_background_browser_wait_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
-    foreach($job in $waitClients) {if(-not $job.completed){if(-not $job.process.HasExited){$job.process.Kill();$job.process.WaitForExit()};$job.process.Dispose()}}
+    foreach($job in $waitClients) {if(-not $job.completed){if(-not $job.process.HasExited){$job.process.Kill();[CliProbe]::WaitAfterKill($job.process)};$job.process.Dispose()}}
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=$stderr.Result};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $evidence.waitClientPids=@($waitClients|ForEach-Object {$_.pid})
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
     $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-wait-background.json')

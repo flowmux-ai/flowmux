@@ -19,11 +19,11 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $($err.Result) $($out.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Raw-Request($Body) {
@@ -55,7 +55,7 @@ function Start-Owned([string[]]$Launch) {
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
     do {
-        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+$stderr.Result)}
+        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
             $record=Get-Content -Raw $file|ConvertFrom-Json
             if ($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
@@ -95,6 +95,7 @@ try {
     if (-not (Same-Text $page.text $oneTitle) -or $page.ipc -ne 'undefined' -or $page.host -ne 'undefined' -or $page.identity -ne 'undefined' -or $page.settings -ne 'undefined') {throw 'Unicode page or bridge isolation differs'}
     if ([BrowserFixture]::ReadText($loaded.address_handle) -ne ($origin+'/one')) {throw 'Native address differs'}
     $evidence.checks+=@{name='native_webview_unicode_dom_address_and_no_terminal_bridge';passed=$true;page=$page}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Request @('browser','navigate',$first.pane,($origin+'/한글?q=한#😀'))|Out-Null
     $unicode=Wait-Page $first.pane '/%ED%95%9C%EA%B8%80' $oneTitle
     if ([BrowserFixture]::ReadText($unicode.address_handle) -ne $unicode.url -or -not (Same-Text (Eval-Page $first.pane 'decodeURI(location.href)') ($origin+'/한글?q=한#😀'))) {throw 'Unicode address changed codepoints'}
@@ -127,6 +128,7 @@ try {
     } while ($true)
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
     $evidence.checks+=@{name='native_history_reload_stop_redirect_failure_recovery_and_bounded_zoom';passed=$true;failure=$failed.navigation_error}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     foreach ($url in @('file:///C:/private','javascript:1','data:text/html,no','http://flowmux-terminal.localhost/')) {Request @('browser','navigate',$first.pane,$url) 1|Out-Null}
     Eval-Page $first.pane 'location.href="http://flowmux-terminal.localhost/";null'|Out-Null
     Start-Sleep -Milliseconds 200
@@ -139,6 +141,7 @@ try {
     if ((Request @('identify')).shell) {throw 'Browser advertised a terminal shell'}
     Tree|Out-Null
     $evidence.checks+=@{name='forbidden_urls_popup_denial_script_errors_and_terminal_target_rejection';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     $second=(Request @('browser','open',($origin+'/two'),'--pane',$source.pane)).browser_pane_opened
     if ($second.placement_strategy -ne 'reuse_right_sibling' -or $second.pane -ne $first.pane) {throw 'Right browser pane not reused'}
     Wait-Page $second.pane '/two' $twoTitle|Out-Null
@@ -157,6 +160,7 @@ try {
     if ($stable.pid -ne $terminal.pid -or -not $stable.running) {throw 'Browser work restarted source shell'}
     Request @('read-screen','--surface',$terminal.id)|Out-Null
     $evidence.checks+=@{name='right_reuse_down_split_mixed_pane_move_keeps_webview_and_source_process';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     # Calling inactive terminals must retain their own cwd when another tab is active.
     $otherCwd=Join-Path $directory 'other 한글';[IO.Directory]::CreateDirectory($otherCwd)|Out-Null
     Request @('new-tab','--cwd',$otherCwd,'--shell=cmd')|Out-Null;$otherTerminal=Request @('identify')
@@ -175,6 +179,7 @@ try {
     Request @('close-tab',$fromInactive.surface)|Out-Null;Request @('close-tab',$otherTerminal.surface)|Out-Null
     Request @('focus-tab',$first.surface)|Out-Null
     $evidence.checks+=@{name='inactive_calling_terminal_keeps_own_cwd_in_mixed_pane';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     # A terminal split from a browser must use the configured shell rather than indexing browser shell metadata.
     Request @('split','vertical')|Out-Null
     $new=(Request @('identify'));$deadline=(Get-Date).AddSeconds(20)
@@ -203,12 +208,13 @@ try {
     Wait-Page $restoredPane '/one' $oneTitle|Out-Null
     if (-not (Same-Text (Eval-Page $restoredPane 'localStorage.getItem("browser-persist")') '한글 한 é 😀')) {throw 'Isolated browser profile did not persist'}
     $evidence.checks+=@{name='browser_only_checkpoint_restart_and_separate_profile_persistence';passed=$true;window=$saved.window;surface=$first.surface}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Tree|Out-Null
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=$stderr.Result};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
     $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-background.json')
     Write-Output ('Evidence: '+$directory)

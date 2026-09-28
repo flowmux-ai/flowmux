@@ -1,0 +1,13 @@
+{
+  "name": "process-browser-wait",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-browser-wait.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T00:34:16.8440588Z",
+  "pid": 26336,
+  "exitCode": 0,
+  "activeBeforeCleanup": 6,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 13.164,
+  "finished": "2026-09-28T00:34:30.0116155Z"
+}

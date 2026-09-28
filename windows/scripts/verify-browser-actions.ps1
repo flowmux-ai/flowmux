@@ -17,8 +17,8 @@ foreach($file in @('flowmux.exe','flowmuxctl.exe','flowmux-command.exe')) {
     $probe=[CliProbe]::Start((Join-Path $BuildDirectory $file),@('doctor'),$directory,$directory)
     try {
         $out=$probe.StandardOutput.ReadToEndAsync();$err=$probe.StandardError.ReadToEndAsync()
-        if(-not $probe.WaitForExit(15000)){$probe.Kill();$probe.WaitForExit();throw 'Owned entry-point doctor timed out'}
-        if(-not $out.Wait(3000) -or -not $err.Wait(3000) -or $probe.ExitCode -ne 0){throw ('Entry-point parser failed: '+$file+' '+$err.Result)}
+        if(-not $probe.WaitForExit(15000)){$probe.Kill();[CliProbe]::WaitAfterKill($probe);throw 'Owned entry-point doctor timed out'}
+        if(-not $out.Wait(3000) -or -not $err.Wait(3000) -or $probe.ExitCode -ne 0){throw ('Entry-point parser failed: '+$file+' '+([CliProbe]::Output($err)))}
         if(-not ($out.Result|ConvertFrom-Json).background_testing){throw 'Wrong entry-point build'}
     } finally {$probe.Dispose()}
 }
@@ -29,11 +29,11 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $($err.Result) $($out.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Raw-Request($Body) {
@@ -65,7 +65,7 @@ function Start-Owned([string[]]$Launch) {
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
     do {
-        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+$stderr.Result)}
+        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
             $record=Get-Content -Raw $file|ConvertFrom-Json
             if ($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
@@ -109,8 +109,8 @@ function Plain([string[]]$Arguments) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName)+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned plain CLI timed out'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+$err.Result)}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned plain CLI timed out'}
+        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+([CliProbe]::Output($err)))}
         return $out.Result.TrimEnd("`r","`n")
     } finally {$p.Dispose()}
 }
@@ -133,8 +133,8 @@ function Begin-Action([string[]]$Arguments) {
 }
 function End-Action($Job) {
     try {
-        if (-not $Job.process.WaitForExit(20000)) {$Job.process.Kill();$Job.process.WaitForExit();throw 'Action CLI timed out; not retried'}
-        if (-not $Job.output.Wait(3000) -or -not $Job.error.Wait(3000) -or $Job.process.ExitCode -ne 0) {throw ('Action failed: '+$Job.error.Result)}
+        if (-not $Job.process.WaitForExit(20000)) {$Job.process.Kill();[CliProbe]::WaitAfterKill($Job.process);throw 'Action CLI timed out; not retried'}
+        if (-not $Job.output.Wait(3000) -or -not $Job.error.Wait(3000) -or $Job.process.ExitCode -ne 0) {throw ('Action failed: '+([CliProbe]::Output($Job.error)))}
         return ($Job.output.Result|ConvertFrom-Json)
     } finally {$Job.completed=$true;$Job.process.Dispose()}
 }
@@ -165,6 +165,7 @@ try {
     Act 'fill' '#area' @('')|Out-Null
     if (-not (Same-Text (Eval-Page $domPane 'document.querySelector("#area").value') '')) {throw 'Empty fill failed'}
     $evidence.checks+=@{name='exact_unicode_fill_native_setter_events_empty_and_idempotent_values';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     foreach($selector in @('#readonly','#disabled','#file')) {
         Reset-Events;$err=Act 'fill' $selector @('새 값') 1
@@ -181,6 +182,7 @@ try {
     if (-not $err.error.Contains('disabled') -or -not (Same-Text (Eval-Page $domPane 'document.querySelector("#lock").value') '원문')) {throw 'Fill bypassed a beforeinput disable'}
     Assert-Events '#lock' @('beforeinput')
     $evidence.checks+=@{name='disabled_readonly_file_cancel_replacement_and_reentrant_disable_rejected';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $evidence.selectHtml=Eval-Page $domPane 'document.querySelector("#pick").outerHTML'
     $evidence.selectBefore=Eval-Page $domPane 'Array.from(document.querySelector("#pick").options).map(option=>({value:option.value,text:option.textContent}))'
@@ -197,6 +199,7 @@ try {
     $selected=Eval-Page $domPane 'Array.from(document.querySelector("#multiple").selectedOptions).map(option=>option.value)'
     if ($selected.Count -ne 2 -or -not (Same-Text $selected[1] '한 😀')) {throw 'Multiple selection discarded existing selection'}
     $evidence.checks+=@{name='select_value_label_precedence_unicode_multiple_noop_and_disabled_options';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Reset-Events;Act 'check' '#checked'|Out-Null;Assert-Events '#checked' @('input','change')
     Reset-Events;Act 'check' '#checked'|Out-Null;Assert-Events '#checked' @()
@@ -208,6 +211,7 @@ try {
     if (-not $err.error.Contains('radios cannot')) {throw 'Individual radio uncheck was accepted'}
     Act 'check' '#entry' @() 1|Out-Null
     $evidence.checks+=@{name='checkbox_idempotence_and_radio_group_semantics_without_click_or_keyboard';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Reset-Events;$ref=Find-Ref (Snapshot) '#click'
     if ((Plain @('browser','click',$domPane,$ref)) -cne 'ok') {throw 'Plain action output differs'}
@@ -226,6 +230,7 @@ try {
     Request @('browser','click',$domPane,$ref) 1|Out-Null
     if ((Eval-Page $domPane 'clicks') -ne 3) {throw 'Stale ref clicked a replacement element'}
     $evidence.checks+=@{name='explicit_click_repeats_synthetic_double_hover_scroll_and_stale_replacement_refs';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $snap=Snapshot;$entry=Find-Ref $snap '#entry'
     Reset-Events
@@ -251,6 +256,7 @@ try {
     $current=(Tree).surfaces|Where-Object {$_.id -eq $terminal.id}
     if ($current.pid -ne $terminal.pid -or -not $current.running) {throw 'Browser actions changed the source terminal'}
     $evidence.checks+=@{name='background_focus_guard_cross_tab_refs_navigation_and_terminal_identity';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Reset-Events;$ref=Find-Ref (Snapshot) '#busy'
     $job=Begin-Action @('browser','fill',$domPane,$ref,'동시 한 😀')
@@ -272,6 +278,7 @@ try {
     Request @('browser','fill',$domPane,$ref,'동시 한 😀')|Out-Null
     Assert-Events '#busy' @()
     $evidence.checks+=@{name='one_action_in_flight_status_snapshot_barrier_and_idempotent_explicit_repeat';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Reset-Events;$ref=Find-Ref (Snapshot) '#area'
     $large='한'*20000
@@ -285,13 +292,14 @@ try {
     if (-not $r.error.Contains('128 KiB')) {throw 'Encoded script bound was not enforced'}
     Act 'fill' '#area' @('복구 한 😀')|Out-Null
     $evidence.checks+=@{name='large_unicode_value_raw_and_encoded_bounds_recover_without_mutation';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Tree|Out-Null
     $evidence.status='passed_background_browser_actions_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
-    foreach($job in $actionClients){if(-not $job.completed){if(-not $job.process.HasExited){$job.process.Kill();$job.process.WaitForExit()};$job.process.Dispose()}}
+    foreach($job in $actionClients){if(-not $job.completed){if(-not $job.process.HasExited){$job.process.Kill();[CliProbe]::WaitAfterKill($job.process)};$job.process.Dispose()}}
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=$stderr.Result};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.actionClientPids=@($actionClients|ForEach-Object {$_.pid});$evidence.finished=(Get-Date).ToString('o')
     $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-actions-background.json')
     Write-Output ('Evidence: '+$directory)

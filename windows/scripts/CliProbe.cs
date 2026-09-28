@@ -4,11 +4,18 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 public static class CliProbe {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     public static extern bool MoveFileEx(string from, string to, uint flags);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    public static string Output(Task<string> task) {
+        return task != null && task.Status == TaskStatus.RanToCompletion ? task.Result : "[output not complete]";
+    }
+    public static void WaitAfterKill(Process process) {
+        if (!process.WaitForExit(2000)) throw new TimeoutException("Owned process did not exit after termination");
+    }
     public static string Quote(string value) {
         var result = new StringBuilder("\""); int slashes = 0;
         foreach (char ch in value) {

@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Bound one Linux/WSL build or check; use run-check.ps1 for Windows children."""
+import argparse
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--name', default='check')
+    parser.add_argument('--timeout-seconds', type=int, default=120)
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ['--'] else args.command
+    if not command or not 1 <= args.timeout_seconds <= 1800:
+        parser.error('a command and a deadline of 1..1800 seconds are required')
+    if not all(c.isascii() and (c.isalnum() or c in '_-') for c in args.name):
+        parser.error('name must contain only ASCII letters, digits, underscores or hyphens')
+    if os.name != 'posix' or command[0].lower().endswith(('.exe', '.com')):
+        parser.error('use run-check.ps1 for Windows processes and their descendants')
+    directory = Path(__file__).resolve().parent.parent / 'dist' / 'checks' / (args.name + '-' + str(uuid.uuid4()))
+    directory.mkdir(parents=True)
+    result = dict(name=args.name, command=command, deadlineSeconds=args.timeout_seconds, status='runner_error')
+    started = time.monotonic()
+    process = None
+    def terminate_group():
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    try:
+        with (directory / 'stdout.txt').open('wb') as output, (directory / 'stdout.txt').open('rb') as reader:
+            process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+            result['pid'] = process.pid
+            print(f'[{args.name}] started pid={process.pid}, deadline={args.timeout_seconds}s; logs: {directory}', flush=True)
+            heartbeat = 5
+            while True:
+                chunk = reader.read(65536)
+                if chunk:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+                elapsed = time.monotonic() - started
+                code = process.poll()
+                if code is not None:
+                    result.update(status='passed' if code == 0 else 'failed', exitCode=code)
+                    break
+                if elapsed >= args.timeout_seconds:
+                    result.update(status='timeout', exitCode=124)
+                    break
+                if elapsed >= heartbeat:
+                    print(f'[{args.name}] running {elapsed:.1f}/{args.timeout_seconds}s', flush=True)
+                    heartbeat = elapsed + 5
+                time.sleep(0.1)
+            terminate_group()
+            process.wait(timeout=3)
+            while chunk := reader.read(65536):
+                sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+    except (Exception, KeyboardInterrupt) as error:
+        result.update(status='runner_error', exitCode=125, error=str(error))
+    finally:
+        terminate_group()
+        result['elapsedSeconds'] = round(time.monotonic() - started, 3)
+        (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+        print(f'[{args.name}] {result["status"]} in {result["elapsedSeconds"]}s; result: {directory / "result.json"}', flush=True)
+    return result['exitCode'] if 0 <= result['exitCode'] <= 255 else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

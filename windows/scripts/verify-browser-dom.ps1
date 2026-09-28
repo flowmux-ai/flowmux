@@ -19,11 +19,11 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $($err.Result) $($out.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Raw-Request($Body) {
@@ -55,7 +55,7 @@ function Start-Owned([string[]]$Launch) {
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
     do {
-        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+$stderr.Result)}
+        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
             $record=Get-Content -Raw $file|ConvertFrom-Json
             if ($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
@@ -99,8 +99,8 @@ function Plain([string[]]$Arguments) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName)+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned plain CLI timed out'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+$err.Result)}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned plain CLI timed out'}
+        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+([CliProbe]::Output($err)))}
         return $out.Result.TrimEnd("`r","`n")
     } finally {$p.Dispose()}
 }
@@ -123,6 +123,7 @@ try {
     $after=Eval-Page $domPane '({html:document.documentElement.outerHTML,mutations:domMutationCount,events:inputEventCount,stamped:document.querySelectorAll("[data-flowmux-ref]").length})'
     if (-not (Same-Text $before.html $after.html) -or $before.mutations -ne $after.mutations -or $before.events -ne $after.events -or $after.stamped -ne 0) {throw 'Snapshot/query mutated DOM or dispatched input'}
     $evidence.checks+=@{name='snapshot_and_typed_queries_preserve_exact_unicode_without_dom_mutation_or_input';passed=$true;refs=@($snap.refs.psobject.Properties).Count;nodeCount=$snap.node_count}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     foreach ($label in @('중복 첫째','중복 둘째','깊은 항목 0','깊은 항목 1')) {
         $ref=@($snap.refs.psobject.Properties|Where-Object {Same-Text $_.Value.name $label})
@@ -138,6 +139,7 @@ try {
     if (($snap.refs.psobject.Properties.Value.name -join '').Contains('shadow only') -or $snap.refs.psobject.Properties.Value.selector -contains '#hidden') {throw 'Snapshot crossed hidden/shadow document boundary'}
     if ((Plain @('browser','is-checked',$domPane,$checked)) -ne 'true' -or (Plain @('browser','count',$domPane,'#duplicate')) -ne '2' -or -not (Same-Text (Plain @('browser','text',$domPane,$heading)) '한글 한 é 😀 "quoted" \ backslash')) {throw 'Plain scalar output differs'}
     $evidence.checks+=@{name='unique_duplicate_and_deep_selectors_surrogate_safe_excerpt_and_plain_output';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $next=Snapshot
     if (@($next.refs.psobject.Properties|Where-Object {$snap.refs.psobject.Properties.Name -contains $_.Name}).Count -ne 0) {throw 'Ref numbers were reused'}
@@ -153,6 +155,7 @@ try {
     $next=Snapshot
     if (-not (Same-Text (Query 'text' (Find-Ref $next '#heading')) '교체 한 😀')) {throw 'Fresh snapshot did not recover replacement element'}
     $evidence.checks+=@{name='latest_snapshot_only_dom_mutation_rejects_old_refs_and_property_queries_stay_live';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $old=Find-Ref $next '#heading'
     $second=(Request @('browser','open',($origin+'/dom'),'--pane',$source.pane)).browser_pane_opened
@@ -168,6 +171,7 @@ try {
     $current=(Tree).surfaces|Where-Object {$_.id -eq $terminal.id}
     if ($current.pid -ne $terminal.pid -or -not $current.running) {throw 'DOM automation changed source terminal process'}
     $evidence.checks+=@{name='cross_tab_refs_rejected_hide_invalidates_and_visible_move_keeps_surface_identity';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Eval-Page $domPane 'history.pushState({},"","/dom?new=한글");null'|Out-Null
     Request @('browser','text',$domPane,$stable) 1|Out-Null
@@ -180,6 +184,7 @@ try {
     $plain=Plain @('browser','snapshot',$domPane)
     if (-not $plain.Contains('[ref=e') -or -not $plain.Contains('한글')) {throw 'Plain snapshot missing readable refs'}
     $evidence.checks+=@{name='history_url_reload_navigation_invalidate_old_refs_and_plain_snapshot_is_readable';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $next=Snapshot;$old=Find-Ref $next '#heading'
     Request @('browser','count',$domPane,'[') 1|Out-Null
@@ -211,12 +216,13 @@ try {
     $final=Snapshot
     if (-not (Same-Text (Query 'text' (Find-Ref $final '#heading')) '한글 한 é 😀 "quoted" \ backslash')) {throw 'Oversize failure damaged later snapshots'}
     $evidence.checks+=@{name='invalid_selectors_attributes_and_oversized_dom_results_fail_without_reusing_refs';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Tree|Out-Null
     $evidence.status='passed_background_browser_dom_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=$stderr.Result};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
     $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-dom-background.json')
     Write-Output ('Evidence: '+$directory)

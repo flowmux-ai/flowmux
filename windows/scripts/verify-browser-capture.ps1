@@ -17,8 +17,8 @@ foreach($file in @('flowmux.exe','flowmuxctl.exe','flowmux-command.exe')) {
     $probe=[CliProbe]::Start((Join-Path $BuildDirectory $file),@('doctor'),$directory,$directory)
     try {
         $out=$probe.StandardOutput.ReadToEndAsync();$err=$probe.StandardError.ReadToEndAsync()
-        if(-not $probe.WaitForExit(15000)){$probe.Kill();$probe.WaitForExit();throw 'Owned entry-point doctor timed out'}
-        if(-not $out.Wait(3000) -or -not $err.Wait(3000) -or $probe.ExitCode -ne 0){throw ('Entry-point parser failed: '+$file+' '+$err.Result)}
+        if(-not $probe.WaitForExit(15000)){$probe.Kill();[CliProbe]::WaitAfterKill($probe);throw 'Owned entry-point doctor timed out'}
+        if(-not $out.Wait(3000) -or -not $err.Wait(3000) -or $probe.ExitCode -ne 0){throw ('Entry-point parser failed: '+$file+' '+([CliProbe]::Output($err)))}
         if(-not ($out.Result|ConvertFrom-Json).background_testing){throw 'Wrong entry-point build'}
     } finally {$probe.Dispose()}
 }
@@ -29,11 +29,11 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $($err.Result) $($out.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Raw-Request($Body) {
@@ -65,7 +65,7 @@ function Start-Owned([string[]]$Launch) {
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
     $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
     do {
-        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+$stderr.Result)}
+        if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
             $record=Get-Content -Raw $file|ConvertFrom-Json
             if ($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
@@ -98,8 +98,8 @@ function Plain([string[]]$Arguments) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName)+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned plain CLI timed out'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+$err.Result)}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned plain CLI timed out'}
+        if (-not $out.Wait(3000) -or -not $err.Wait(3000) -or $p.ExitCode -ne 0) {throw ('Plain CLI failed: '+([CliProbe]::Output($err)))}
         return $out.Result.TrimEnd("`r","`n")
     } finally {$p.Dispose()}
 }
@@ -113,10 +113,10 @@ function Begin-Command([string[]]$Arguments) {
 }
 function End-Command($Job,[int]$Exit=0) {
     try {
-        if(-not $Job.process.WaitForExit(20000)) {$Job.process.Kill();$Job.process.WaitForExit();throw 'Owned concurrent CLI timed out; not retried'}
-        if(-not $Job.output.Wait(3000) -or -not $Job.error.Wait(3000) -or $Job.process.ExitCode -ne $Exit) {throw ('Concurrent CLI failed: '+$Job.error.Result+' '+$Job.output.Result)}
+        if(-not $Job.process.WaitForExit(20000)) {$Job.process.Kill();[CliProbe]::WaitAfterKill($Job.process);throw 'Owned concurrent CLI timed out; not retried'}
+        if(-not $Job.output.Wait(3000) -or -not $Job.error.Wait(3000) -or $Job.process.ExitCode -ne $Exit) {throw ('Concurrent CLI failed: '+([CliProbe]::Output($Job.error))+' '+([CliProbe]::Output($Job.output)))}
         if($Exit -eq 0) {return ($Job.output.Result|ConvertFrom-Json)}
-        return ($Job.error.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($Job.error))|ConvertFrom-Json)
     } finally {$Job.completed=$true;$Job.process.Dispose()}
 }
 Add-Type -AssemblyName System.Drawing
@@ -142,6 +142,7 @@ try {
     if ($pixel.width -ne $r.width -or $pixel.height -ne $r.height -or $r.width -lt 50 -or $r.height -lt 50 -or $r.height -ge 2000) {throw 'Capture is not the viewport size'}
     $evidence.first=$r;$evidence.firstPixel=$pixel
     $evidence.checks+=@{name='hidden_viewport_png_decoded_color_and_size_exact_unicode_relative_cli_path';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Eval-Page $domPane 'window.scrollTo({top:2000,behavior:"instant"});window.scrollY'|Out-Null
     $scrolled=Join-Path $directory 'scrolled.png';$r=Capture $scrolled
@@ -152,6 +153,7 @@ try {
     Pixel $plain 90 160 210|Out-Null
     $r=Capture $path;Pixel $path 90 160 210|Out-Null
     $evidence.checks+=@{name='current_scroll_plain_output_atomic_overwrite_without_focus_or_scroll_change';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     $original=[IO.File]::ReadAllBytes($path)
     $lock=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
@@ -162,6 +164,7 @@ try {
     Request @('browser','screenshot',$domPane,$missing) 1|Out-Null
     if(Test-Path -LiteralPath $missing) {throw 'Missing parent was created'}
     $evidence.checks+=@{name='locked_destination_preserved_temporary_file_removed_missing_parent_rejected';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     foreach($bad in @('relative.png',(Join-Path $directory 'capture.jpg'),(Join-Path $directory 'capture.png:stream'),'\\.\pipe\capture.png')) {
         $r=Raw-Request @{method='browser';op=@{kind='screenshot';pane=$domPane;path=$bad}}
@@ -175,6 +178,7 @@ try {
     Request @('browser','wait',$domPane,'--ready-state','complete','--timeout-ms','10000')|Out-Null
     if(Test-Path -LiteralPath (Join-Path $directory 'loading.png')) {throw 'Loading request wrote a file'}
     $evidence.checks+=@{name='invalid_paths_raw_relative_terminal_target_and_loading_capture_rejected';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
 
     Request @('browser','navigate',$domPane,($origin+'/dom'))|Out-Null
     Wait-Page $domPane '/dom' 'Capture 한글 한 é 😀'|Out-Null
@@ -195,6 +199,7 @@ try {
     $current=(Tree).surfaces|Where-Object {$_.id -eq $terminal.id}
     if($current.pid -ne $terminal.pid -or -not $current.running) {throw 'Source terminal identity changed'}
     $evidence.checks+=@{name='zoom_active_browser_tab_restoration_and_source_terminal_identity';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     # A busy loop is confined to our owned renderer; native status remains responsive.
     $busy=Begin-Command @('browser','eval',$domPane,'(()=>{const until=performance.now()+4000;while(performance.now()<until){};return "done";})()')
     Start-Sleep -Milliseconds 150
@@ -217,13 +222,14 @@ try {
     if((Request @('browser','status',$domPane)).captures_pending -ne 0) {throw 'Capture completion did not release slots'}
     $r=Capture (Join-Path $directory 'recovered.png');Pixel $r.path 12 34 56|Out-Null
     $evidence.checks+=@{name='two_native_captures_bound_viewport_change_discards_images_and_capacity_recovers';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Tree|Out-Null
     $evidence.status='passed_background_browser_capture_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
-    foreach($job in $clients) {if(-not $job.completed) {if(-not $job.process.HasExited) {$job.process.Kill();$job.process.WaitForExit()};$job.process.Dispose()}}
+    foreach($job in $clients) {if(-not $job.completed) {if(-not $job.process.HasExited) {$job.process.Kill();[CliProbe]::WaitAfterKill($job.process)};$job.process.Dispose()}}
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=$stderr.Result};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.clientPids=@($clients|ForEach-Object {$_.pid});$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
     $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-capture-background.json')
     Write-Output ('Evidence: '+$directory)

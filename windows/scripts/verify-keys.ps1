@@ -21,11 +21,11 @@ function Program([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,$Arguments,$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned CLI pipes did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI exit $($p.ExitCode): $($err.Result)"}
+        if ($p.ExitCode -ne $Exit) {throw "CLI exit $($p.ExitCode): $(([CliProbe]::Output($err)))"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
-        return ($err.Result|ConvertFrom-Json)
+        return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
 function Request([string[]]$Arguments,[int]$Exit=0) {
@@ -206,7 +206,7 @@ try {
 } finally {
     if ($pipeName) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
     if ($process) {
-        if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()}
+        if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)}
         $process.Dispose()
     }
     $evidence.finished=(Get-Date).ToString('o')

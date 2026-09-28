@@ -1,0 +1,13 @@
+{
+  "name": "runner-posix-pass",
+  "command": [
+    "python3",
+    "-c",
+    "print(\"fixture ready\")"
+  ],
+  "deadlineSeconds": 5,
+  "status": "passed",
+  "pid": 266936,
+  "exitCode": 0,
+  "elapsedSeconds": 0.107
+}

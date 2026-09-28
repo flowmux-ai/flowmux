@@ -1,0 +1,46 @@
+{
+  "started": "2026-09-28T09:34:09.8779135+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "nodeCount": 48,
+      "name": "snapshot_and_typed_queries_preserve_exact_unicode_without_dom_mutation_or_input",
+      "refs": 14,
+      "passed": true
+    },
+    {
+      "name": "unique_duplicate_and_deep_selectors_surrogate_safe_excerpt_and_plain_output",
+      "passed": true
+    },
+    {
+      "name": "latest_snapshot_only_dom_mutation_rejects_old_refs_and_property_queries_stay_live",
+      "passed": true
+    },
+    {
+      "name": "cross_tab_refs_rejected_hide_invalidates_and_visible_move_keeps_surface_identity",
+      "passed": true
+    },
+    {
+      "name": "history_url_reload_navigation_invalidate_old_refs_and_plain_snapshot_is_readable",
+      "passed": true
+    },
+    {
+      "name": "invalid_selectors_attributes_and_oversized_dom_results_fail_without_reusing_refs",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "status": "passed_background_browser_dom_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "hosts": [
+    15496
+  ],
+  "shells": [
+    36160
+  ],
+  "finished": "2026-09-28T09:34:16.1283469+09:00"
+}

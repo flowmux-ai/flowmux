@@ -1,0 +1,13 @@
+{
+  "name": "process-browser-capture",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-browser-capture.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T00:34:40.8703256Z",
+  "pid": 32500,
+  "exitCode": 0,
+  "activeBeforeCleanup": 5,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 14.184,
+  "finished": "2026-09-28T00:34:55.0575970Z"
+}
