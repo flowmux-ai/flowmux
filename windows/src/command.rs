@@ -200,6 +200,10 @@ pub enum Command {
         #[arg(long, value_parser=parse_id)]
         surface: Option<Uuid>,
     },
+    Downloads {
+        #[command(subcommand)]
+        op: crate::downloads::Op,
+    },
     Notifications {
         #[command(subcommand)]
         op: crate::notifications::Op,

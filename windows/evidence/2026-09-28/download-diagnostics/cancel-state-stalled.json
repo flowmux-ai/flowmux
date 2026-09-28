@@ -1,0 +1,64 @@
+{
+  "started": "2026-09-28T09:14:53.7996064+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "unavailable_destination_fails_before_native_transfer_preserves_blocker_and_recovers",
+      "passed": true
+    },
+    {
+      "name": "native_attachment_exact_unicode_filename_payload_and_original_browser_surface",
+      "passed": true
+    },
+    {
+      "name": "collision_preserves_existing_file_empty_and_unknown_length_downloads",
+      "passed": true
+    },
+    {
+      "name": "hidden_native_list_and_remove_keep_downloaded_files",
+      "passed": true
+    },
+    {
+      "name": "active_clear_remove_guard_native_cancellation_cleanup_and_idempotence",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "first": {
+    "error": null,
+    "filename": "한 글 한 é 😀.txt",
+    "id": "d58a0ac0-072e-4ab5-91ce-2dd2d8fbe3b3",
+    "path": "\\\\?\\C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\browser-downloads-21c69f06-1bb7-4c23-afeb-881f34acb2fd\\state\\downloads\\한 글 한 é 😀.txt",
+    "phase": "complete",
+    "received": 52,
+    "surface": "e7028f2f-c3a9-4cb8-a59b-0f994be4bb0e",
+    "total": 52,
+    "uri": "http://127.0.0.1:53310/one"
+  },
+  "truncatedBeforeCancel": {
+    "error": null,
+    "filename": "broken.txt",
+    "id": "12d5e1d8-6d96-4e3a-824b-96f9e7bd5c1f",
+    "path": "\\\\?\\C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\browser-downloads-21c69f06-1bb7-4c23-afeb-881f34acb2fd\\state\\downloads\\.flowmux-download-12d5e1d8-6d96-4e3a-824b-96f9e7bd5c1f\\broken.txt",
+    "phase": "downloading",
+    "received": 52,
+    "surface": "e7028f2f-c3a9-4cb8-a59b-0f994be4bb0e",
+    "total": 200052,
+    "uri": "http://127.0.0.1:53310/broken"
+  },
+  "status": "failed",
+  "error": "Unexpected download state: {\"error\":null,\"filename\":\"broken.txt\",\"id\":\"12d5e1d8-6d96-4e3a-824b-96f9e7bd5c1f\",\"path\":\"\\\\\\\\?\\\\C:\\\\Users\\\\jundu\\\\Documents\\\\Codex\\\\2026-06-10\\\\jsuya-flowmux-https-github-com-jsuya\\\\work\\\\flowmux\\\\windows\\\\dist\\\\evidence\\\\browser-downloads-21c69f06-1bb7-4c23-afeb-881f34acb2fd\\\\state\\\\downloads\\\\.flowmux-download-12d5e1d8-6d96-4e3a-824b-96f9e7bd5c1f\\\\broken.txt\",\"phase\":\"cancelling\",\"received\":52,\"surface\":\"e7028f2f-c3a9-4cb8-a59b-0f994be4bb0e\",\"total\":200052,\"uri\":\"http://127.0.0.1:53310/broken\"}",
+  "hostStderr": "",
+  "hostExitCode": -1073741819,
+  "brokenRequests": 6,
+  "hosts": [
+    37184
+  ],
+  "shells": [
+    27052
+  ],
+  "finished": "2026-09-28T09:15:30.0280215+09:00"
+}

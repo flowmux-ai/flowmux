@@ -7,6 +7,8 @@ pub mod browser_dom;
 pub mod browser_wait;
 pub mod command;
 pub mod cwd;
+mod download_name;
+pub mod downloads;
 pub mod keys;
 pub mod minimap;
 pub mod model;

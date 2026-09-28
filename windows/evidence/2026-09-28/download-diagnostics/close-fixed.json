@@ -1,0 +1,50 @@
+{
+  "started": "2026-09-28T09:44:22.3327881+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "source_tab_close_cancels_owned_download_and_preserves_original_terminal",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "case": "close",
+  "final": {
+    "active": 0,
+    "active_limit": 8,
+    "entries": [
+      {
+        "error": null,
+        "filename": "취소 한 😀.bin",
+        "id": "92541edd-cf7f-4625-bda1-5505c89e6405",
+        "navigation": 4,
+        "path": null,
+        "phase": "cancelled",
+        "received": 0,
+        "surface": "a85cf38f-9e4f-4a63-871a-269c63ba4e55",
+        "total": 1048576,
+        "uri": "http://127.0.0.1:49218/slow"
+      }
+    ],
+    "panel_handle": null,
+    "panel_rows": null,
+    "panel_status": null,
+    "rejected_at_capacity": 0,
+    "retained_limit": 50
+  },
+  "status": "passed_background_browser_downloads_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "brokenRequests": 0,
+  "concurrentFixtureOrigins": [],
+  "hosts": [
+    38728
+  ],
+  "shells": [
+    38460
+  ],
+  "finished": "2026-09-28T09:44:25.0301181+09:00"
+}

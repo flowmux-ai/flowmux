@@ -97,7 +97,6 @@ impl Browser {
                 title_sender.send(Event::Browser(Signal::Metadata(id)))
             })
             .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-            .with_download_started_handler(|_, _| false)
             .with_permission_handler(move |_| {
                 if background {
                     wry::PermissionResponse::Deny
@@ -108,6 +107,8 @@ impl Browser {
             .build_as_child(&Parent(app.window))?;
         unsafe {
             let core = view.controller().CoreWebView2()?;
+            app.downloads
+                .install(&core, id, epoch.clone(), app.sender.clone())?;
             let settings = core.Settings()?;
             settings.SetIsWebMessageEnabled(false)?;
             settings.SetAreHostObjectsAllowed(false)?;
@@ -349,6 +350,7 @@ impl App {
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
         self.browser_wait_cancel(id, reason);
         self.browser_capture_cancel(id, reason);
+        self.download_cancel_surface(id);
         self.pending_browser.retain(|_, pending| {
             if pending.surface == id {
                 let _ = pending.reply.try_send(pending.error(reason));
@@ -360,6 +362,7 @@ impl App {
     }
     pub(super) fn browser_tick(&mut self) {
         self.browser_capture_tick();
+        self.download_tick();
         self.pending_browser.retain(|_, p| {
             if p.started.elapsed() > Duration::from_secs(12) {
                 let _ = p.reply.try_send(
@@ -435,6 +438,10 @@ impl App {
             }
             Signal::Metadata(id) => self.browser_refresh(id)?,
             Signal::Ui(id, action) => {
+                if action == 9 {
+                    self.download_ui(downloads::UiAction::Show)?;
+                    return Ok(());
+                }
                 if self.close_request.is_some() {
                     return Ok(());
                 }

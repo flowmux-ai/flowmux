@@ -1,0 +1,6 @@
+[downloads-clippy] started pid=275242, deadline=300s; logs: /mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/downloads-clippy-7535b69e-812a-4609-8ab7-c1990f5f0137
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+[downloads-clippy] running 5.0/300s
+[downloads-clippy] running 10.0/300s
+    Finished `release` profile [optimized] target(s) in 13.79s
+[downloads-clippy] passed in 14.265s; result: /mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/downloads-clippy-7535b69e-812a-4609-8ab7-c1990f5f0137/result.json

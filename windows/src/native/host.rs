@@ -45,6 +45,8 @@ use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 mod appearance;
 #[path = "browser.rs"]
 mod browser;
+#[path = "downloads.rs"]
+mod downloads;
 #[path = "keys.rs"]
 mod keys;
 #[path = "notifications.rs"]
@@ -82,6 +84,7 @@ enum Event {
     Metadata(workspaces::EditAction),
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
+    Download(downloads::Signal),
     Activated,
 }
 #[derive(Clone)]
@@ -331,6 +334,7 @@ struct App {
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
     notifications: notifications::Controller,
+    downloads: downloads::Controller,
     closing: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
@@ -517,6 +521,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
             notifications: notifications::Controller::default(),
+            downloads: downloads::Controller::default(),
             closing: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
@@ -535,6 +540,10 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
         app._ipc.shutdown(); // Stop accepting commands before terminal teardown.
+
+        // Cancel and release native download operations before their WebView
+        // controllers close (older runtimes invalidate these COM objects).
+        drop(std::mem::take(&mut app.downloads));
         app.browsers.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
         drop(app);
@@ -555,6 +564,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         unsafe {
             if !app.search.handle_message(&message)
                 && !app.notifications.handle_message(&message)
+                && !app.downloads.handle_message(&message)
                 && !app
                     .metadata
                     .as_ref()
@@ -991,6 +1001,7 @@ impl App {
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Browser(event) => self.browser_event(event)?,
+            Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Activated => self.ack_focused_notifications(self.active()),
             Event::Layout => {
@@ -2053,7 +2064,7 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode",
-                "commands":["browser","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "commands":["browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -2203,6 +2214,7 @@ impl App {
                     flowmux_core::NotificationLevel::TurnCompleted,
                 )?));
             }
+            Command::Downloads { op } => return Ok(Some(self.download_command(op)?)),
             Command::Notifications { op } => return self.notification_command(op).map(Some),
             Command::Find {
                 query,

@@ -384,7 +384,7 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B03/B04/B05/B06/B07/B08/B09 and G09 are partial. Downloads,
+B01/B02/B03/B04/B05/B06/B07/B08/B09/B10 and G09 are partial.
 popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
@@ -434,3 +434,15 @@ keyboard, pointer or clipboard operations. B08/G09 remain partial: physical
 DPI/minimized/multi-monitor behavior, remote filesystem guarantees, exhaustive
 lifecycle races and real IME are not established by these tests. See
 [capture evidence](evidence/2026-09-28/browser-capture.md).
+
+
+Windows browser downloads now use native WebView2 transfers and a Downloads
+manager/list, with CLI inspection/cancel/history controls. Each transfer receives
+an isolated staging directory and a no-replacement final rename with collision
+suffixes. UTF-8 extended filename metadata preserves decomposed Korean and other
+Unicode codepoints while retaining the browser-selected extension. Native state
+callbacks complement progress polling; reported interruptions request cancellation.
+The runtime can retry internally before exposing an interrupted state.
+B10/G09 remain partial. Save As/destination choice, pause/resume, restart recovery,
+physical UI/security integration and broader lifecycle/network/filesystem coverage
+remain open. See [download evidence](evidence/2026-09-28/browser-downloads.md).

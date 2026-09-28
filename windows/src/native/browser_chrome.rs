@@ -70,9 +70,19 @@ impl Chrome {
                 buttons: vec![],
             };
             OWNERS.with(|map| map.borrow_mut().insert(window as isize, id));
-            for (index, label) in ["Back", "Forward", "Reload", "Stop", "Go", "−", "+", "100%"]
-                .iter()
-                .enumerate()
+            for (index, label) in [
+                "Back",
+                "Forward",
+                "Reload",
+                "Stop",
+                "Go",
+                "−",
+                "+",
+                "100%",
+                "Downloads",
+            ]
+            .iter()
+            .enumerate()
             {
                 chrome.buttons.push(chrome.child(
                     "BUTTON",
@@ -136,7 +146,7 @@ impl Chrome {
                 Self::height(scale),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            let widths = [50, 62, 60, 48, 42, 30, 30, 48];
+            let widths = [50, 62, 60, 48, 42, 30, 30, 48, 86];
             let mut x = px(2);
             for (i, button) in self.buttons.iter().enumerate() {
                 // Go belongs to the address row; remaining controls stay stable.

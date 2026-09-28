@@ -1,0 +1,13 @@
+{
+  "name": "downloads-installer",
+  "command": [
+    "/tmp/flowmux-windows-tools/nsis/usr/bin/makensis",
+    "-V3",
+    "windows/installer.nsi"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 276330,
+  "exitCode": 0,
+  "elapsedSeconds": 5.539
+}

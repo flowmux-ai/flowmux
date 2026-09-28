@@ -25,8 +25,16 @@ transport 변경 또는 최종 릴리스 때 필요하다. 이 deferred 항목�
 
 개선 뒤 다운로드 검증을 재개한 첫 결과도 보존했다. 27.833초에 실패를 보고했고
 소유 프로세스 cleanup은 0개 잔류였다. Timeout snapshot에서 잘린 응답의 추가
-native download records가 active slot을 차지함을 확인했다. 이는 다운로드 기능의
-미해결 결함이며 테스트 통과로 처리하지 않았다. 관련 구현은 별도 진행 중이다.
+native download records가 active slot을 차지함을 확인했다. 당시에는 다운로드 기능의
+미해결 결함이었으며 테스트 통과로 처리하지 않았다. 후속 수정과 검증은
+[다운로드 기록](../browser-downloads.md)에 정리했다.
 
 실행 순서, 기본 제한 시간, 필요한 경우에만 수행하는 확장 검증은
 [VERIFICATION.md](../../../scripts/VERIFICATION.md)에 정의되어 있다.
+
+후속 병렬 리뷰에서 POSIX 실행기 자체의 SIGTERM/SIGHUP 종료 시 자식 그룹이 남는
+경로를 수정했다. `posix-cancellation.json`은 SIGTERM/SIGHUP/SIGINT 각각
+143/129/130으로 종료하고 대상·자식·손자 잔류가 0개임을 보여준다.
+취소 후 종료까지 0.032~0.114초였고, 기존 성공/exit 7/timeout 124 구분도
+`posix-cancellation-regressions.json`에서 다시 확인했다. SIGKILL 및 의도적인
+process group 이탈은 지원 범위 밖이다.

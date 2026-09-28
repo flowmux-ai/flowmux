@@ -747,10 +747,11 @@ side effects; do not automatically retry them. Navigation IDs protect callbacks
 from earlier documents. Snapshot/ref queries and DOM actions are described below; active-element
 `type`/`press` and asynchronous eval remain pending. PNG capture is described below.
 
-New-window requests and downloads are currently denied; DevTools and browser
+New-window requests are currently denied; downloads use the manager described
+below. DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
 normal runs and are denied in hidden debug tests. Custom permission UI, page
-find, fullscreen/media/login acceptance, download UI and popup-to-tab routing
+find, fullscreen/media/login acceptance and popup-to-tab routing
 remain pending. HTTP error pages are pages, while network navigation failures
 report a WebView2 error code in the native status line. Terminal OSC 8 links now
 open an in-app browser; physical link-click behavior is not yet live-tested.
@@ -961,3 +962,76 @@ PNG pixels, checks scroll/zoom and Unicode filenames, and tests locked-destinati
 failure and browser/terminal separation. Physical DPI/multi-monitor, minimized
 windows, remote filesystems, exhaustive lifecycle races and real IME acceptance
 remain open. See [capture evidence](evidence/2026-09-28/browser-capture.md).
+
+
+### Browser downloads (partial)
+
+Browser attachments now use a native download manager. The browser toolbar's
+**Downloads** button opens its list, with byte progress, open-file/folder, cancel,
+remove and clear controls. Downloads go to the Windows Known Folder for Downloads.
+The default WebView2 download dialog is suppressed. In hidden debug tests, the
+folder is redirected below the explicitly isolated test state directory and the
+manager window is never displayed. Opening a file/folder is also refused there.
+
+```powershell
+flowmuxctl.exe --json downloads list
+flowmuxctl.exe downloads show
+flowmuxctl.exe downloads cancel <download-id>
+flowmuxctl.exe downloads remove <download-id>
+flowmuxctl.exe downloads clear
+```
+
+IDs belong to one host window and retain their original browser surface through
+moves. `remove` rejects active work; `clear` forgets finished entries only. Both
+keep downloaded files, including any completed data retained after a failed final
+save. Cancellation is confirmed after the native Cancel call succeeds and owned
+staging cleanup finishes; it does not require another native State event.
+Repeating cancellation is idempotent. Final file publication is too
+late to cancel. Closing the source browser requests cancellation of its active
+transfers. The original terminal session is unaffected.
+
+Every download receives a unique staging directory under Downloads. WebView2
+writes there, then a filesystem worker moves the complete file to the first free
+name (`name.ext`, `name (1).ext`, and so on). Publication never uses replacement;
+concurrent filename collisions cannot overwrite an existing file. There are up to
+10,000 candidate names. Native errors and cancellation clean only the owned
+staging directory. A failed final save retains the complete staging file and
+reports its path. Crashes/host exit or cleanup failures can leave staging files;
+automatic startup cleanup and download resume across restarts remain pending.
+Files are never opened automatically.
+
+Valid UTF-8 `Content-Disposition: filename*` values preserve their original
+codepoints without NFC/NFD normalization, provided their extension agrees with
+the browser-selected extension. Otherwise the WebView2-proposed name is used;
+that fallback can already be normalized by the runtime. Filename policy removes
+path components, replaces Windows-invalid/control characters, protects reserved
+device names, and clips the stem/extension to 180/32 UTF-16 units without splitting
+a surrogate pair. Clipping can still split a combining/grapheme sequence.
+Malformed/duplicate extended parameters and unsupported charsets use the native
+fallback. File payload bytes are not decoded or normalized by flowmux.
+
+A new native operation for the same surface/navigation/URI while its original
+transfer is incomplete is rejected, and the original transfer is cancelled with
+a restart error. This prevents native retries from leaving orphaned active rows.
+A fresh navigation can retry explicitly; failed/cancelled rows suppress more
+restarts for their recorded navigation while retained. This policy can also
+reject intentional concurrent same-URI downloads within one navigation.
+
+A window admits eight active transfers/file workers and retains at most 50 rows;
+finished rows are evicted first. `rejected_at_capacity` counts refused downloads.
+Preparation has a 15-second timeout, but a stalled filesystem worker continues
+to occupy its slot until it returns. Progress is polled on the existing one-second
+host timer; native interruption events are also observed. On a reported native
+interruption the host requests cancellation. WebView2 can retry internally before
+exposing that state, so flowmux cannot guarantee that a download makes only one
+HTTP request. The CLI never automatically retransmits a submitted command. Manual pause/resume, choosing a destination, persistence, exhaustive
+network/filesystem/lifecycle races, SmartScreen/antivirus/MOTW and physical
+menu/focus/DPI/accessibility acceptance remain pending. HTTP credentials/cookies
+and security checks remain WebView2's responsibility.
+
+The [bounded verification workflow](scripts/VERIFICATION.md) defines deadlines,
+quick checks and explicit extended checks.
+
+See [download evidence](evidence/2026-09-28/browser-downloads.md) and the
+[hidden fixture verifier](scripts/verify-browser-downloads.ps1). This feature does
+not establish real Korean IME behavior.

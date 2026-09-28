@@ -512,8 +512,13 @@
     {
       "id": "B10",
       "feature": "다운로드·취소·파일명 충돌",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-downloads.md",
+        "evidence/2026-09-28/native-browser-downloads-background.json",
+        "evidence/2026-09-28/native-browser-downloads-shutdown.json"
+      ],
+      "notes": "Hidden native WebView2 downloads preserve UTF-8 filename* codepoints and payload bytes; staging/no-replace publication handles collisions, cancellation and native retries. Eight active transfers, ninth rejection, hidden list/remove/clear and source/host closure have live evidence. Destination UI, pause/resume, persistence, physical UI/DPI/accessibility, MOTW/security checks and exhaustive races remain pending."
     },
     {
       "id": "B11",
@@ -964,9 +969,10 @@
         "evidence/2026-09-28/native-browser-dom-background.json",
         "evidence/2026-09-28/native-browser-wait-background.json",
         "evidence/2026-09-28/native-browser-actions-background.json",
-        "evidence/2026-09-28/native-browser-capture-background.json"
+        "evidence/2026-09-28/native-browser-capture-background.json",
+        "evidence/2026-09-28/browser-downloads.md"
       ],
-      "notes": "Thirty-one Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending."
+      "notes": "Thirty-one Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending. Native download manager/list/cancellation now have partial hidden evidence."
     },
     {
       "id": "G10",

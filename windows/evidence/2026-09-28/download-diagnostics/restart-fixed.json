@@ -1,0 +1,86 @@
+{
+  "started": "2026-09-28T09:40:37.0311401+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "truncated_body_not_published_native_retry_count_recorded_then_cancelled",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "case": "broken",
+  "truncatedBeforeCancel": {
+    "error": "native download restarted an incomplete transfer; start a new navigation to retry",
+    "filename": "broken.txt",
+    "id": "5013e2d0-3495-4aae-899f-c1fda9adf11a",
+    "navigation": 4,
+    "path": null,
+    "phase": "failed",
+    "received": 52,
+    "surface": "b9a1386e-04f8-4ce1-9d18-14f02f07ce7d",
+    "total": 200052,
+    "uri": "http://127.0.0.1:54867/broken"
+  },
+  "brokenRequestsAfterCancel": 2,
+  "afterBrokenCancel": {
+    "active": 0,
+    "active_limit": 8,
+    "entries": [
+      {
+        "error": "native download restarted an incomplete transfer; start a new navigation to retry",
+        "filename": "broken.txt",
+        "id": "5013e2d0-3495-4aae-899f-c1fda9adf11a",
+        "navigation": 4,
+        "path": null,
+        "phase": "failed",
+        "received": 52,
+        "surface": "b9a1386e-04f8-4ce1-9d18-14f02f07ce7d",
+        "total": 200052,
+        "uri": "http://127.0.0.1:54867/broken"
+      }
+    ],
+    "panel_handle": null,
+    "panel_rows": null,
+    "panel_status": null,
+    "rejected_at_capacity": 0,
+    "retained_limit": 50
+  },
+  "final": {
+    "active": 0,
+    "active_limit": 8,
+    "entries": [
+      {
+        "error": "native download restarted an incomplete transfer; start a new navigation to retry",
+        "filename": "broken.txt",
+        "id": "5013e2d0-3495-4aae-899f-c1fda9adf11a",
+        "navigation": 4,
+        "path": null,
+        "phase": "failed",
+        "received": 52,
+        "surface": "b9a1386e-04f8-4ce1-9d18-14f02f07ce7d",
+        "total": 200052,
+        "uri": "http://127.0.0.1:54867/broken"
+      }
+    ],
+    "panel_handle": null,
+    "panel_rows": null,
+    "panel_status": null,
+    "rejected_at_capacity": 0,
+    "retained_limit": 50
+  },
+  "status": "passed_background_browser_downloads_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "brokenRequests": 2,
+  "concurrentFixtureOrigins": [],
+  "hosts": [
+    28940
+  ],
+  "shells": [
+    37712
+  ],
+  "finished": "2026-09-28T09:40:40.4216201+09:00"
+}

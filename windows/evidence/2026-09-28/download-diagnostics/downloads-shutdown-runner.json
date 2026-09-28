@@ -1,0 +1,13 @@
+{
+  "name": "downloads-shutdown",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\verify-download-shutdown-only.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T00:46:33.7027546Z",
+  "pid": 35276,
+  "exitCode": 0,
+  "activeBeforeCleanup": 2,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 3.216,
+  "finished": "2026-09-28T00:46:36.9230276Z"
+}
