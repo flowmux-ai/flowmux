@@ -112,7 +112,7 @@ impl App {
         self.workspaces[workspace]
             .root
             .set_surface_title_auto(pane, id, shell.program.clone());
-        self.refresh_tab_title(id);
+        self.refresh_surface_metadata(id);
         self.shells.insert(id, shell);
         self.start_session(id)?;
         if let Some(error) = &self.surfaces[&id].startup_error {

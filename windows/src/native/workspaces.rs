@@ -445,7 +445,7 @@ impl App {
         model::validate_name(&name)?;
         let (ws, pane, _) = self.locate(id).context("tab no longer exists")?;
         self.workspaces[ws].root.rename_surface(pane, id, name);
-        self.refresh_tab_title(id);
+        self.refresh_surface_metadata(id);
         Ok(())
     }
     pub(super) fn workspace_command(
@@ -470,9 +470,8 @@ impl App {
                 self.rebuild()?;
             }
             WorkspaceOp::Rename { workspace, name } => {
-                model::validate_name(&name)?;
                 let index = self.workspace_index(WorkspaceId(workspace))?;
-                self.workspaces[index].name = name;
+                self.workspaces[index].rename(name)?;
                 self.refresh_chrome_metadata();
             }
             WorkspaceOp::Color {
@@ -741,6 +740,7 @@ impl App {
         let value = self.metadata_text(target)?;
         let locked = match target {
             EditTarget::TabName(id) => self.title_locked(id)?,
+            EditTarget::WorkspaceName(id) => self.workspaces[self.workspace_index(id)?].name_locked,
             _ => false,
         };
         let surface = match target {
@@ -812,14 +812,18 @@ impl App {
                     );
                     let target = target.context("no metadata target")?;
                     let current = self.metadata_text(target)?;
-                    let unchanged = if let EditTarget::TabName(id) = target {
-                        let locked = self.title_locked(id)?;
-                        // Ordinary shell OSC titles can change while the user types.
-                        // Only a competing manual rename invalidates this pending edit.
-                        locked == original_locked && (!locked || current == original)
-                    } else {
-                        current == original
+                    // Automatic title changes do not invalidate a pending rename.
+                    // A competing manual name or mode change does.
+                    let locked = match target {
+                        EditTarget::TabName(id) => Some(self.title_locked(id)?),
+                        EditTarget::WorkspaceName(id) => {
+                            Some(self.workspaces[self.workspace_index(id)?].name_locked)
+                        }
+                        _ => None,
                     };
+                    let unchanged = locked.map_or(current == original, |locked| {
+                        locked == original_locked && (!locked || current == original)
+                    });
                     anyhow::ensure!(unchanged, "This name or color changed elsewhere. Close and reopen the editor to reload it.");
                     match target {
                         EditTarget::WorkspaceName(id) => {

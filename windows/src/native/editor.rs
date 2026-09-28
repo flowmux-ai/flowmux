@@ -926,7 +926,7 @@ impl App {
                     self.workspaces[index]
                         .root
                         .set_surface_editor_session(pane, surface, state);
-                    self.refresh_tab_title(surface);
+                    self.refresh_surface_metadata(surface);
                 }
                 if search_capture {
                     self.editor_search_snapshot(

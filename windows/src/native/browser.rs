@@ -480,7 +480,7 @@ impl App {
                 self.workspaces[ws]
                     .root
                     .set_surface_title_auto(pane, id, title);
-                self.refresh_tab_title(id);
+                self.refresh_surface_metadata(id);
             }
         }
         Ok(())

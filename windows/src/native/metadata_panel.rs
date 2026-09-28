@@ -256,7 +256,10 @@ impl Panel {
         self.original = value.to_owned();
         self.original_locked = locked;
         let (title, hint) = match target {
-            EditTarget::WorkspaceName(_) => ("Rename workspace", "Workspace name"),
+            EditTarget::WorkspaceName(_) => (
+                "Rename workspace",
+                "Workspace name (leave empty for automatic naming)",
+            ),
             EditTarget::WorkspaceColor(_) => {
                 ("Workspace color", "Color as #RRGGBB; leave empty to clear")
             }

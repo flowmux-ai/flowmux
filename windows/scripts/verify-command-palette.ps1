@@ -36,6 +36,12 @@ function Menu-Open{$tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.k
 function Execute($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEnter([long]$panel.query_handle,$owned.Id)}
 function Dismiss($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);$tree=Await {param($t) -not $t.command_palette -or -not $t.command_palette.open};Require ([OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Enabled) 'Palette dismissal left its main owner disabled';return $tree}
 function Workspace($Tree,[string]$Id){$found=@($Tree.workspaces|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable workspace';return $found[0]}
+function Workspace-Caption($Tree,[string]$Id,[string]$Expected){
+    $rows=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Id -and $_.layout_visible});Require ($rows.Count -eq 1) 'Named workspace has no unique visible native sidebar row'
+    $row=$rows[0];Require ([OptionsFixture]::Parent([long]$row.handle,$owned.Id) -eq $Tree.window_handle) 'Workspace caption belongs to another native parent'
+    $caption=([OptionsFixture]::Text([long]$row.handle,$owned.Id) -split "`r?`n",2)[0]
+    Require ($caption -ceq $Expected.Replace('&','&&')) 'Native workspace row differs from its Unicode name or Win32 ampersand escaping'
+}
 function Leaves($Node){if($Node.content){$Node}else{Leaves $Node.first;Leaves $Node.second}}
 function Surface($Tree,[string]$Id){$found=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces}|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable surface';return $found[0]}
 function Metadata($Tree,[long]$Owner=0){
@@ -146,20 +152,36 @@ try {
     $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $renamed) 'Native Apply did not retain the exact Korean/NFD/emoji/ampersand name';Same-Identity $initial
     Passed 'metadata-owned-themed-name-Cancel-composition-guard-and-explicit-Apply-preserve-Unicode-identity'
 
-    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree;Metadata-Text $panel '';Metadata-Click $panel 'apply'
-    $tree=Await {param($t) $t.metadata.open -and $t.metadata.error};Metadata $tree|Out-Null
-    Require ((Workspace $tree $initial.workspace).name -ceq $renamed -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq '') 'Invalid name changed the model or replaced the invalid draft'
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
     $losing='UI 한 😀 draft';$winner='외부 한글 & winner';Metadata-Text $panel $losing
     Request @('workspace','rename',$initial.workspace,$winner)|Out-Null;Metadata-Click $panel 'apply'
     $tree=Await {param($t) $t.metadata.open -and $t.metadata.error -match 'changed elsewhere'};Metadata $tree|Out-Null
     Require ((Workspace $tree $initial.workspace).name -ceq $winner -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $losing) 'Concurrent IPC rename was overwritten or its pending UI draft was lost'
     Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $winner) 'Conflict Cancel changed the external winner'
-    Passed 'metadata-invalid-name-and-concurrent-rename-conflict-retain-draft-and-modal-owner'
+    Passed 'metadata-concurrent-rename-conflict-retains-draft-and-modal-owner'
 
     $tree=Open-Metadata 'metadata:tab-name';$panel=Metadata $tree;$newTab='탭 한 😀 & 고정';Metadata-Text $panel $newTab;Metadata-Click $panel 'apply'
     $tree=Metadata-Closed;$tab=Surface $tree $initial.surface
     Require ($tab.title -ceq $newTab -and $tab.title_locked) 'Native tab rename did not preserve its exact title and manual title lock';Same-Identity $initial
     Passed 'metadata-tab-name-Apply-locks-title-without-changing-live-surface-identity'
+
+    Require ((Workspace $tree $initial.workspace).name_locked -eq $true -and (Workspace $tree $initial.workspace).name -ceq $winner) 'Manual workspace name followed a tab rename'
+    Workspace-Caption $tree $initial.workspace $winner
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree;Metadata-Text $panel '   ';Metadata-Click $panel 'apply'
+    $tree=Metadata-Closed;$workspace=Workspace $tree $initial.workspace
+    Require ($workspace.name_locked -eq $false -and $workspace.name -ceq $newTab) 'Whitespace workspace rename did not resume the current tab title';Workspace-Caption $tree $initial.workspace $newTab
+    $automatic='자동 둘째 한 😀 & 탭';Request @('rename-tab',$initial.surface,$automatic)|Out-Null
+    $tree=Await {param($t) $w=Workspace $t $initial.workspace;$w.name_locked -eq $false -and $w.name -ceq $automatic};Workspace-Caption $tree $initial.workspace $automatic
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree;$trimmedDraft='  '+$winner+'  ';Metadata-Text $panel $trimmedDraft
+    $duringEdit='편집 중 자동 한 😀 & 제목';Request @('rename-tab',$initial.surface,$duringEdit)|Out-Null
+    $tree=Await {param($t) $w=Workspace $t $initial.workspace;$w.name_locked -eq $false -and $w.name -ceq $duringEdit};Metadata $tree|Out-Null
+    Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $trimmedDraft) 'Automatic title update replaced the open workspace draft'
+    Metadata-Click $panel 'apply';$tree=Metadata-Closed
+    Require ((Workspace $tree $initial.workspace).name_locked -eq $true -and (Workspace $tree $initial.workspace).name -ceq $winner) 'Automatic title update caused a false conflict or custom whitespace was not trimmed'
+    Request @('rename-tab',$initial.surface,'고정 후 변경 한 😀 & 탭')|Out-Null;$tree=Tree
+    Require ((Workspace $tree $initial.workspace).name_locked -eq $true -and (Workspace $tree $initial.workspace).name -ceq $winner) 'Restored custom workspace name continued following tab titles'
+    Workspace-Caption $tree $initial.workspace $winner;Require ((Identities $tree) -ceq $identities) 'Workspace automatic naming changed terminal identities';Same-Identity $initial
+    Passed 'workspace-custom-lock-whitespace-auto-title-sidebar-follow-and-edit-draft-trim-preservation'
 
     $tree=Open-Metadata 'metadata:workspace-color';$panel=Metadata $tree;$originalColor=(Workspace $tree $initial.workspace).color
     foreach($key in @('swatch','picker')){Require ($panel.$key -and [OptionsFixture]::Parent([long]$panel.$key,$owned.Id) -eq $panel.window) ('Color editor omitted its actual owned '+$key);$control=[OptionsFixture]::Describe([long]$panel.$key,$owned.Id);Require (($control.Style -band 0x10000000) -ne 0 -and ($control.Style -band 0xf) -eq 0xb) ('Color control is not shown and painted by native chrome: '+$key)}

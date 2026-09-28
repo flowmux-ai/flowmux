@@ -11,11 +11,17 @@ use std::path::PathBuf;
 pub struct Workspace {
     pub id: WorkspaceId,
     pub name: String,
+    #[serde(default = "legacy_name_locked")]
+    pub name_locked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     pub cwd: PathBuf,
     pub root: Pane,
     pub focused: PaneId,
+}
+
+fn legacy_name_locked() -> bool {
+    true
 }
 
 impl Workspace {
@@ -28,6 +34,7 @@ impl Workspace {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "Workspace".into()),
+            name_locked: false,
             cwd,
             color: None,
             root: Pane::Leaf {
@@ -45,6 +52,48 @@ impl Workspace {
         self.root
             .active_surface_id(self.focused)
             .expect("focused pane must be a leaf")
+    }
+
+    pub fn rename(&mut self, raw: String) -> anyhow::Result<()> {
+        let name = raw.trim();
+        if name.is_empty() {
+            self.name_locked = false;
+            self.refresh_name();
+        } else {
+            validate_name(name)?;
+            self.name = name.to_owned();
+            self.name_locked = true;
+        }
+        Ok(())
+    }
+
+    pub fn refresh_name(&mut self) -> bool {
+        if self.name_locked {
+            return false;
+        }
+        let Some(active) = self.root.active_surface_id(self.focused) else {
+            return false;
+        };
+        let Some(surface) = self.root.find_surface(self.focused, active) else {
+            return false;
+        };
+        let mut name = surface.title.clone();
+        if !surface.title_locked {
+            if let flowmux_core::SurfaceKind::Terminal { cwd: Some(cwd), .. } = &surface.kind {
+                if surface.title == flowmux_core::terminal_tab_title_for_cwd(Some(cwd)) {
+                    if let Some(folder) = cwd.file_name().and_then(|value| value.to_str()) {
+                        if !folder.is_empty() {
+                            name = folder.to_owned();
+                        }
+                    }
+                }
+            }
+        }
+        if self.name == name {
+            return false;
+        }
+        self.name = name;
+        true
     }
 
     pub fn new_tab(&mut self) -> SurfaceId {
@@ -350,6 +399,7 @@ pub fn detach_surface(
     candidate.push(Workspace {
         id: WorkspaceId::new(),
         name: title,
+        name_locked: false,
         color: None,
         cwd,
         root: Pane::Leaf {
@@ -511,6 +561,72 @@ pub fn neighbor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_names_follow_focused_titles_unless_locked_and_preserve_legacy_names() {
+        let folder = "한글_한_e\u{301}_아주긴프로젝트폴더이름";
+        let cwd = PathBuf::from("C:/작업").join(folder);
+        let mut workspace = Workspace::new(cwd.clone());
+        let first = workspace.focused;
+        let surface = workspace.active();
+        assert!(!workspace.name_locked);
+        assert_eq!(workspace.name, folder);
+        workspace.root.set_surface_title_auto(
+            first,
+            surface,
+            flowmux_core::terminal_tab_title_for_cwd(Some(&cwd)),
+        );
+        workspace.name = "previous".into();
+        assert!(workspace.refresh_name());
+        assert_eq!(workspace.name, folder);
+        assert!(!workspace.refresh_name());
+
+        let custom = "수동 한 e\u{301} 이름";
+        workspace.rename(format!("  {custom}  ")).unwrap();
+        assert!(workspace.name_locked);
+        assert_eq!(workspace.name, custom);
+        let second = workspace.split(SplitDirection::Vertical);
+        let second_surface = workspace.active();
+        workspace
+            .root
+            .set_surface_title_auto(second, second_surface, "OSC 한글 제목".into());
+        assert!(!workspace.refresh_name());
+        assert_eq!(workspace.name, custom);
+        workspace.rename(" \t\n ".into()).unwrap();
+        assert!(!workspace.name_locked);
+        assert_eq!(workspace.name, "OSC 한글 제목");
+        workspace.focused = first;
+        assert!(workspace.refresh_name());
+        assert_eq!(workspace.name, folder);
+
+        workspace
+            .root
+            .rename_surface(first, surface, "탭 한 제목".into());
+        workspace
+            .root
+            .set_surface_cwd(first, surface, "C:/다른폴더".into());
+        assert!(workspace.refresh_name());
+        assert_eq!(workspace.name, "탭 한 제목");
+        let before = serde_json::to_value(&workspace).unwrap();
+        assert!(workspace.rename("잘못된\n이름".into()).is_err());
+        assert_eq!(serde_json::to_value(&workspace).unwrap(), before);
+
+        let roundtrip: Workspace = serde_json::from_value(before.clone()).unwrap();
+        assert!(!roundtrip.name_locked);
+        assert_eq!(roundtrip.name, workspace.name);
+        let mut legacy = before;
+        legacy.as_object_mut().unwrap().remove("name_locked");
+        let mut legacy: Workspace = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.name_locked);
+        legacy.focused = second;
+        assert!(!legacy.refresh_name());
+        assert_eq!(legacy.name, workspace.name);
+        workspace.rename(custom.into()).unwrap();
+        let roundtrip: Workspace =
+            serde_json::from_value(serde_json::to_value(workspace).unwrap()).unwrap();
+        assert!(roundtrip.name_locked);
+        assert_eq!(roundtrip.name, custom);
+    }
 
     #[test]
     fn unicode_metadata_keeps_original_codepoints_and_rejects_invalid_native_captions() {
@@ -855,6 +971,7 @@ mod tests {
             assert_ne!(workspace.id, source_workspace);
             assert_ne!(workspace.focused, source_pane);
             assert_eq!(workspace.name, title);
+            assert!(!workspace.name_locked);
             assert_eq!(workspace.cwd, cwd);
             assert_eq!(workspace.active(), surface);
             assert_eq!(workspace.leaves().len(), 1);

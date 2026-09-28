@@ -152,6 +152,17 @@ function Detached-Placements($Tree,$Expected) {
         foreach ($key in @('x','y','width','height')) {if ($views[0].holder.bounds.$key -ne $frame.area.$key) {throw ('Native retained surface overlaps its restored sidebar: '+$key)}}
     }
 }
+function State-Name($Tree,[string]$Workspace,[string]$Expected,[bool]$Locked) {
+    $matches=@($Tree.workspaces|Where-Object {$_.id -eq $Workspace})
+    if ($matches.Count -ne 1 -or $matches[0].name_locked -ne $Locked -or -not [string]::Equals($matches[0].name,$Expected,[StringComparison]::Ordinal)) {throw ('Saved workspace name/mode differs: '+$Workspace)}
+}
+function Detached-Name($Tree,[string]$Surface,[string]$Expected,[bool]$Locked) {
+    $frames=@($Tree.detached_windows|Where-Object {$_.surface -eq $Surface})
+    if ($frames.Count -ne 1) {throw 'Named detached surface has no unique native frame'}
+    State-Name $Tree $frames[0].workspace $Expected $Locked
+    $rows=@([ChromeFixture]::Read([long]$frames[0].window_handle,$script:detachedProcess.Id)|Where-Object {$_.Handle -eq [long]$frames[0].sidebar.workspace_row})
+    if ($rows.Count -ne 1 -or -not $rows[0].Shown -or -not [string]::Equals($rows[0].Text,$Expected.Replace('&','&&'),[StringComparison]::Ordinal)) {throw 'Restored native detached row lost its Unicode name or ampersand escaping'}
+}
 function Detached-State {
     $tree=Detached-Start @('--new-window','--cwd',$directory);$anchor=Invoke-Flowmux @('identify')
     Invoke-Flowmux @('new-tab')|Out-Null;$terminal=Invoke-Flowmux @('identify');Detached-Ready|Out-Null
@@ -180,17 +191,26 @@ function Detached-State {
         } while ($true)
         [ChromeFixture]::Position([long]$frame.window_handle,$script:detachedProcess.Id,(60+30*$index),(700+40*$index),(460+30*$index))
     }
+    $nameTree=Detached-Tree;$terminalWorkspace=@($nameTree.detached_windows|Where-Object {$_.surface -eq $terminal.surface})[0].workspace;$browserWorkspace=@($nameTree.detached_windows|Where-Object {$_.surface -eq $browser.surface})[0].workspace
+    $customName='저장 고정 한 😀 & 작업공간';$browserName='첫째 한글 한 é 😀'
+    Invoke-Flowmux @('workspace','rename',$terminalWorkspace,$customName)|Out-Null
+    Invoke-Flowmux @('workspace','rename',$browserWorkspace,'   ')|Out-Null
     Invoke-Flowmux @('focus-tab',$browser.surface)|Out-Null
     $before=Detached-Tree;$topology=State-Topology $before;$oldPid=@($before.surfaces|Where-Object {$_.id -eq $terminal.surface})[0].pid
     $saved=Invoke-Flowmux @('save-state');$snapshot=Load-State $saved.path
     if (@($snapshot.detached_windows.psobject.Properties).Count -ne 3 -or $snapshot.main_closed -or $snapshot.detached_focus -ne $browser.surface) {throw 'Mixed state omitted detached placement/focus or closed its main window'}
     Detached-Placements $before $snapshot.detached_windows
+    Detached-Name $before $terminal.surface $customName $true;Detached-Name $before $browser.surface $browserName $false
+    State-Name $snapshot $terminalWorkspace $customName $true;State-Name $snapshot $browserWorkspace $browserName $false
     if (-not $snapshot.screens.($terminal.surface).data.Contains($marker)) {throw 'Detached Korean history was not saved'}
     Stop-Owned $script:detachedProcess
     # State-input recovery probe only: no fixture displays or maximizes a window.
     $snapshot=Load-State $saved.path
     $snapshot.detached_windows.($browser.surface).left=999999;$snapshot.detached_windows.($browser.surface).top=999999
     $snapshot.detached_windows.($terminal.surface).maximized=$true
+    # Missing name_locked is the actual legacy state shape, not an explicit mode.
+    $legacy=@($snapshot.workspaces|Where-Object {$_.id -eq $anchor.workspace});if ($legacy.Count -ne 1) {throw 'Legacy migration probe requires the attached anchor workspace'}
+    $legacyName='이전 저장 한 😀 & 이름';$legacy[0].name=$legacyName;$legacy[0].psobject.Properties.Remove('name_locked')
     Save-Json $saved.path $snapshot
     $restored=Detached-Start @('--restore-window',$saved.window)
     if ((State-Topology $restored) -cne $topology -or $restored.main_closed) {throw 'Mixed detached restart changed workspace/pane/surface identities'}
@@ -203,8 +223,17 @@ function Detached-State {
     $screen=Invoke-Flowmux @('read-screen','--surface',$terminal.surface,'--recent')
     if (-not $screen.text.Replace("`r",'').Replace("`n",'').Contains($marker)) {throw 'Detached restart lost visible Korean terminal history'}
     Detached-BrowserText $browser.surface;Detached-EditorText $editor.surface
+    Detached-Name $restored $terminal.surface $customName $true;Detached-Name $restored $browser.surface $browserName $false
+    State-Name $restored $anchor.workspace $legacyName $true
+    $browserRenamed='복원 뒤 자동 한 😀 & 브라우저'
+    Invoke-Flowmux @('rename-tab',$browser.surface,$browserRenamed)|Out-Null
+    Invoke-Flowmux @('rename-tab',$terminal.surface,'복원 뒤 탭 변경 한 😀 &')|Out-Null
+    $restored=Detached-Tree;Detached-Name $restored $browser.surface $browserRenamed $false;Detached-Name $restored $terminal.surface $customName $true
+    State-Name $restored $anchor.workspace $legacyName $true
     $correctedSave=Invoke-Flowmux @('save-state');$correctedSnapshot=Load-State $correctedSave.path
     Detached-Placements $restored $correctedSnapshot.detached_windows
+    State-Name $correctedSnapshot $terminalWorkspace $customName $true;State-Name $correctedSnapshot $browserWorkspace $browserRenamed $false;State-Name $correctedSnapshot $anchor.workspace $legacyName $true
+    $evidence.checks+='Workspace naming saves and restores custom/automatic modes, follows browser tab rename in the native sidebar, retains custom terminal name, and migrates missing legacy mode to locked'
     if (-not $correctedSnapshot.detached_windows.($terminal.surface).maximized) {throw 'Hidden save lost the restored maximized intent'}
     $evidence.checks+='Mixed detached restart preserves identities, actual placements, focus, Korean history with fresh PTY, browser profile/editor text; offscreen browser is clamped and maximized intent is saved without native maximization'
     [FindFixture]::PostClose([long]$restored.window_handle,$script:detachedProcess.Id)
@@ -223,6 +252,7 @@ function Detached-State {
     if (-not $brokerRestored.main_closed -or (State-Topology $brokerRestored) -cne (State-Topology $broker)) {throw 'Broker-only restart recreated a main workspace or lost surface identities'}
     Detached-Placements $brokerRestored $brokerSnapshot.detached_windows
     Detached-BrowserText $browser.surface;Detached-EditorText $editor.surface
+    Detached-Name $brokerRestored $terminal.surface $customName $true;Detached-Name $brokerRestored $browser.surface $browserRenamed $false
     $evidence.checks+='Closed-main broker restart restores only the three detached windows and their native placements'
     Invoke-Flowmux @('new-workspace','--cwd',$directory)|Out-Null;$destination=Invoke-Flowmux @('identify');Detached-Ready|Out-Null
     foreach ($surface in $ids) {Invoke-Flowmux @('move-tab',$surface,'--to-pane',$destination.pane)|Out-Null}

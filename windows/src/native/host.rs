@@ -910,7 +910,11 @@ impl App {
                 self.refresh_tab_title(id);
             }
         }
+        for workspace in &mut self.workspaces {
+            workspace.refresh_name();
+        }
         if self.main_closed {
+            self.refresh_chrome_metadata();
             return self.layout();
         }
         let mut desired = Vec::new();
@@ -1843,6 +1847,7 @@ impl App {
                             .is_some_and(|surface| surface.visible)
                     {
                         self.workspace_mut().focused = pane;
+                        self.workspace_mut().refresh_name();
                         self.refresh_chrome_metadata();
                         self.ack_focused_notifications(id);
                     }
@@ -1876,7 +1881,7 @@ impl App {
                     self.workspaces[workspace]
                         .root
                         .set_surface_title_auto(pane, id, title);
-                    self.refresh_tab_title(id);
+                    self.refresh_surface_metadata(id);
                 }
             }
             ClientMessage::Cwd { path } => {
@@ -2036,6 +2041,7 @@ impl App {
                                                 id,
                                                 tab.title.clone(),
                                             );
+                                            workspace.refresh_name();
                                         }
                                     }
                                 }
@@ -2318,9 +2324,17 @@ impl App {
             if let Some(surface) = self.surfaces.get_mut(&id) {
                 surface.cwd_reported = true;
             }
-            self.refresh_tab_title(id);
+            self.refresh_surface_metadata(id);
             self.refresh_chrome_metadata();
         }
+    }
+    fn refresh_surface_metadata(&mut self, id: SurfaceId) {
+        if let Some((workspace, _, _)) = self.locate(id) {
+            if self.workspaces[workspace].refresh_name() {
+                self.refresh_chrome_metadata();
+            }
+        }
+        self.refresh_tab_title(id);
     }
     fn refresh_tab_title(&self, id: SurfaceId) {
         if let Some((workspace, pane, _)) = self.locate(id) {
@@ -2408,6 +2422,7 @@ impl App {
         self.active_workspace = workspace;
         self.workspace_mut().focused = pane;
         self.workspace_mut().root.set_active_surface(pane, id);
+        self.workspace_mut().refresh_name();
         self.refresh_chrome_metadata();
         Ok(())
     }
