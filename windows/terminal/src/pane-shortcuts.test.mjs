@@ -7,7 +7,7 @@ import { Clipboard } from './clipboard.mjs';
 const binding = (action, code, ctrl = false, alt = false, shift = false) => ({ action, chord: { code, ctrl, alt, shift } });
 const key = (chord, overrides = {}) => ({ type: 'keydown', key: chord.code, code: chord.code,
   ctrlKey: chord.ctrl, altKey: chord.alt, shiftKey: chord.shift, ...overrides });
-// Windows' 28 supported Rust defaults, as wire fixtures, not runtime fallbacks.
+// Windows' 29 supported Rust defaults, as wire fixtures, not runtime fallbacks.
 const defaults = [
   ...['Left', 'Right', 'Up', 'Down'].map(direction => binding(`focus-${direction.toLowerCase()}`, `Arrow${direction}`, false, true)),
   binding('toggle-pane-zoom', 'KeyM', true, true),
@@ -27,6 +27,7 @@ const defaults = [
   binding('new-workspace', 'KeyN', true),
   binding('search-all-terminals', 'KeyF', true, true, true),
   binding('toggle-file-browser', 'KeyF', true, true),
+  binding('command-palette', 'KeyP', true, false, true),
 ];
 const configured = (bindings = defaults, revision = 'revision-a') => {
   const shortcuts = new PaneShortcuts(); shortcuts.configure(revision, bindings); return shortcuts;
@@ -34,7 +35,7 @@ const configured = (bindings = defaults, revision = 'revision-a') => {
 
 test('resolved defaults dispatch only one revision-tagged host shortcut', () => {
   const shortcuts = configured();
-  assert.equal(defaults.length, 28);
+  assert.equal(defaults.length, 29);
   for (const item of defaults) {
     assert.deepEqual(shortcuts.event(key(item.chord), false), { type: 'shortcut', ...item, revision: 'revision-a' });
     assert.equal(shortcuts.event(key(item.chord, { repeat: true }), false), 'consume');

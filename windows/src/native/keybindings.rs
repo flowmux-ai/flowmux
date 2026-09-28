@@ -37,6 +37,26 @@ impl App {
         {
             return Ok(());
         }
+        let Some(action) = ActionId::from_wire(action) else {
+            return Ok(());
+        };
+        self.keybinding_action(source, action)
+    }
+
+    pub(super) fn keybinding_action(
+        &mut self,
+        source: SurfaceId,
+        action: ActionId,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.close_accepted
+                && self.close_request.is_none()
+                && self.editor_barrier.is_none()
+                && !self.overview.is_open()
+                && !self.command_palette.is_open(),
+            "window is busy"
+        );
+        let action = action.as_str();
         use ActionId::*;
         let action = match ActionId::from_wire(action) {
             Some(SplitRight) => Action::Vertical,
@@ -102,6 +122,7 @@ impl App {
                 };
                 Action::Workspace(workspace.id)
             }
+            Some(CommandPalette) => Action::CommandPalette,
             Some(NewSurface) => Action::NewTab,
             Some(NewBrowserSurface) => Action::NewBrowser,
             Some(NewWorkspace) => Action::NewWorkspace,

@@ -47,6 +47,8 @@ mod appearance;
 mod browser;
 #[path = "chrome.rs"]
 mod chrome;
+#[path = "command_palette.rs"]
+mod command_palette;
 #[path = "downloads.rs"]
 mod downloads;
 #[path = "editor.rs"]
@@ -92,6 +94,7 @@ enum Event {
     Session(SurfaceId, SessionEvent),
     Command(Request, ipc::Reply),
     SearchUi(search::UiAction),
+    CommandPalette(command_palette::UiAction),
     BrowserFindUi(browser::find::UiAction),
     Pointer(panes::Pointer),
     ContextMenu(Action, i32, i32),
@@ -297,6 +300,7 @@ enum Action {
     NewBrowser,
     Notifications,
     Settings,
+    CommandPalette,
     Overview,
     NewWorkspace,
     Workspace(WorkspaceId),
@@ -389,6 +393,7 @@ struct App {
     drag: Option<panes::Drag>,
     metadata: Option<workspaces::Panel>,
     options: Option<appearance::Panel>,
+    command_palette: command_palette::Controller,
     overview: overview::Controller,
     pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
@@ -609,6 +614,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             drag: None,
             metadata: None,
             options: None,
+            command_palette: command_palette::Controller::default(),
             overview: overview::Controller::default(),
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
@@ -674,7 +680,8 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
-            if !app.overview_handle_message(&message)
+            if !app.command_palette.handle_message(&message)
+                && !app.overview_handle_message(&message)
                 && !app.options_handle_message(&message)
                 && !app.search.handle_message(&message)
                 && !app.files_handle_message(&message)
@@ -750,6 +757,7 @@ impl App {
             ("New workspace", Action::NewWorkspace),
             ("Workspaces", Action::WorkspaceMenu),
             ("Settings", Action::Settings),
+            ("Command Palette", Action::CommandPalette),
             ("Workspace overview", Action::Overview),
             ("Files", Action::ShowFiles),
             ("Search", Action::SearchAll),
@@ -1139,21 +1147,23 @@ impl App {
                 }
                 Action::Settings
                 | Action::Overview
+                | Action::CommandPalette
                 | Action::ShowFiles
                 | Action::SearchAll
                 | Action::OpenEditor => {
                     let x = match control.action {
                         Action::Settings => px(4),
                         Action::Overview => px(36),
+                        Action::CommandPalette => px(68),
                         Action::OpenEditor => sidebar - px(100),
                         Action::ShowFiles => sidebar - px(68),
                         _ => sidebar - px(36),
                     };
                     (sidebar
-                        >= px(if matches!(control.action, Action::OpenEditor) {
-                            168
-                        } else {
-                            136
+                        >= px(match control.action {
+                            Action::CommandPalette => 200,
+                            Action::OpenEditor => 168,
+                            _ => 136,
                         })
                         && footer_top >= px(40))
                     .then_some((x, footer_top + px(4), px(28), px(28)))
@@ -1249,7 +1259,7 @@ impl App {
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
-        if self.background_test || self.overview.is_open() {
+        if self.background_test || self.overview.is_open() || self.command_palette.is_open() {
             return Ok(());
         }
         self.ack_focused_notifications(self.active());
@@ -1324,6 +1334,7 @@ impl App {
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
+            Event::CommandPalette(action) => self.command_palette_ui(action)?,
             Event::OptionsUi(action) => self.options_ui(action)?,
             Event::Overview(signal) => self.overview_event(signal)?,
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
@@ -1435,7 +1446,11 @@ impl App {
                     self.editor_refresh_tick();
                 }
             }
-            Event::Button(action) => self.action(action)?,
+            Event::Button(action) => {
+                if !self.command_palette.is_open() {
+                    self.action(action)?;
+                }
+            }
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
             Event::Session(id, message) => {
                 let mut notices = Vec::new();
@@ -2319,6 +2334,9 @@ impl App {
             Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Settings => return self.settings_menu(),
+            Action::CommandPalette => {
+                return self.command_palette_ui(command_palette::UiAction::Show)
+            }
             Action::Overview => return self.overview_toggle(),
             Action::NewWorkspace => {
                 return self
@@ -2590,6 +2608,7 @@ impl App {
                         "close_accepted":self.close_accepted,
                         "popup":self.browser_popup_status(),
                         "search_dialog":self.search.diagnostics(),
+                        "command_palette":self.command_palette.diagnostics(),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,

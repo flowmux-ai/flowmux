@@ -46,6 +46,7 @@ pub(super) enum ChromeIcon {
     Settings,
     Files,
     Search,
+    CommandPalette,
     OpenFile,
     Notifications,
     Back,
@@ -1040,6 +1041,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 ChromeIcon::Search => {
                     Ellipse(item.hDC, x(-6), y(-6), x(3) + 1, y(3) + 1);
                     line(2, 2, 7, 7);
+                }
+                ChromeIcon::CommandPalette => {
+                    line(-6, -5, -1, 0);
+                    line(-1, 0, -6, 5);
+                    line(1, 5, 7, 5);
                 }
                 ChromeIcon::OpenFile => {
                     line(-6, -7, 2, -7);

@@ -95,6 +95,7 @@ pub fn supported() -> &'static [ActionId] {
         NewSurface,
         NewBrowserSurface,
         NewWorkspace,
+        CommandPalette,
         TerminalSearch,
         SearchAllTerminals,
         TogglePaneZoom,
@@ -434,7 +435,26 @@ mod tests {
     #[test]
     fn defaults_aliases_conflicts_reserved_and_unbind_are_validated() {
         let defaults = KeybindingOverrides::default();
-        assert_eq!(resolved(&defaults).unwrap().len(), 28);
+        let bindings = resolved(&defaults).unwrap();
+        assert_eq!(bindings.len(), 29);
+        let palette = bindings
+            .iter()
+            .find(|binding| binding.action == ActionId::CommandPalette.as_str())
+            .unwrap();
+        assert_eq!(palette.chord, parse("Ctrl+Shift+P").unwrap());
+        assert_eq!(
+            palette.chord,
+            parse(default_accels(ActionId::CommandPalette)[0]).unwrap()
+        );
+        assert!(change(
+            &defaults,
+            &Op::Set(SetArgs {
+                action: ActionId::ToggleWorktreePanel.as_str().into(),
+                accels: vec!["Ctrl+Alt+Y".into()],
+                expected: Some(defaults.clone()),
+            })
+        )
+        .is_err());
         assert_eq!(
             parse("<Ctrl><Shift>Page_Up").unwrap(),
             parse("Ctrl+Shift+PageUp").unwrap()
@@ -467,7 +487,7 @@ mod tests {
         assert!(change(&defaults, &set(vec!["Ctrl+N"])).is_err());
         assert!(change(&defaults, &set(vec!["Ctrl+Alt+K", "<Ctrl><Alt>k"])).is_err());
         let unbound = change(&defaults, &set(vec![])).unwrap();
-        assert_eq!(resolved(&unbound).unwrap().len(), 27);
+        assert_eq!(resolved(&unbound).unwrap().len(), 28);
         assert!(change(&unbound, &set(vec!["Ctrl+Alt+K"])).is_err());
         assert_eq!(
             change(

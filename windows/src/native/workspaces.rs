@@ -146,12 +146,14 @@ impl App {
             }
             Action::Settings
             | Action::Overview
+            | Action::CommandPalette
             | Action::ShowFiles
             | Action::SearchAll
             | Action::OpenEditor
             | Action::Notifications => chrome::Role::Icon {
                 kind: match action {
                     Action::Overview => chrome::ChromeIcon::Overview,
+                    Action::CommandPalette => chrome::ChromeIcon::CommandPalette,
                     Action::Settings => chrome::ChromeIcon::Settings,
                     Action::ShowFiles => chrome::ChromeIcon::Files,
                     Action::SearchAll => chrome::ChromeIcon::Search,
@@ -398,6 +400,7 @@ impl App {
                 Action::NewWorkspace=>("workspace_add",None,None,None,false),
                 Action::WorkspaceMenu=>("workspace_header",None,None,None,false),
                 Action::Settings=>("settings",None,None,None,false),
+                Action::CommandPalette=>("command_palette",None,None,None,false),
                 Action::Overview=>("overview",None,None,None,false),
                 Action::ShowFiles=>("files",None,None,None,false),
                 Action::SearchAll=>("search_all",None,None,None,false),
@@ -604,10 +607,12 @@ impl App {
                 "Move up",
                 "Move down",
                 "Close workspace…",
+                "Command Palette…",
             ],
             &disabled,
             point,
         )? {
+            7 => return self.action(Action::CommandPalette),
             1 => return self.edit_metadata(EditTarget::WorkspaceName(id)),
             2 => return self.edit_metadata(EditTarget::WorkspaceColor(id)),
             3 => {

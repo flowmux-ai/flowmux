@@ -32,6 +32,18 @@ public static class OptionsFixture {
     public static void SetTextAndNotify(long parent,long child,int owner,string value) {SetText(parent,child,owner,value);var hwnd=Child(parent,child,owner);Message(new IntPtr(parent),0x111,new IntPtr((0x300<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     public static void Select(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned combo is disabled");if(Message(hwnd,0x14E,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned combo selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     public static void ListSelect(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned list is disabled");if(Message(hwnd,0x186,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned list selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out Rect rect);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint message,IntPtr w,ref Rect l,uint flags,uint timeout,out IntPtr result);
+    // Real single-click at an owned LISTBOX row, including its already selected
+    // first row. Uses only system-marshalled messages below WM_USER.
+    public static void ClickListRow(long parent,long child,int owner,int index) {
+        var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd)||index<0)throw new InvalidOperationException("Owned list row is unavailable");
+        Rect row=new Rect(),client;IntPtr result;
+        if(SendMessageTimeout(hwnd,0x198,new IntPtr(index),ref row,2,1000,out result)==IntPtr.Zero||result.ToInt64()==-1||!GetClientRect(hwnd,out client))throw new InvalidOperationException("Cannot read owned list row bounds");
+        int x=(row.Left+row.Right)/2,y=(row.Top+row.Bottom)/2;
+        if(x<client.Left||x>=client.Right||y<client.Top||y>=client.Bottom)throw new InvalidOperationException("Owned list row is clipped");
+        var point=new IntPtr((y<<16)|(x&0xffff));Message(hwnd,0x201,new IntPtr(1),point);Message(hwnd,0x202,IntPtr.Zero,point);Owned(parent,owner);
+    }
     public sealed class Bounds {public long Parent;public int X,Y,Width,Height;}
     [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Rect rect,uint count);
     public static long Parent(long handle,int owner) {return GetParent(Owned(handle,owner)).ToInt64();}
@@ -50,6 +62,19 @@ public static class OptionsFixture {
     }
     public static void WindowCompositionGuard(long window,int owner,bool active) {Message(Owned(window,owner),active?0x10DU:0x10EU,IntPtr.Zero,IntPtr.Zero);}
     [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr w,IntPtr l);
+    // Exact owned queued key events, including held PROCESS/229 and repeat
+    // guards; no global key state or desktop input is read or changed.
+    public static void PostKey(long control,int owner,int key,bool up,bool repeat) {
+        var hwnd=Owned(control,owner);if(key<0||key>255)throw new ArgumentOutOfRangeException("Owned key");
+        if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned key target is disabled");
+        long flags=1L;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;
+        if(!PostMessage(hwnd,up?0x101U:0x100U,new IntPtr(key),new IntPtr(flags)))throw new InvalidOperationException("Could not post owned key event");
+    }
+    public static void PostEscape(long control,int owner) {
+        var hwnd=Owned(control,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned Escape target is disabled");
+        if(!PostMessage(hwnd,0x100,new IntPtr(27),new IntPtr(1L|(1L<<16))))throw new InvalidOperationException("Could not post owned Escape keydown");
+        if(!PostMessage(hwnd,0x101,new IntPtr(27),new IntPtr(1L|(1L<<16)|(1L<<30)|(1L<<31))))throw new InvalidOperationException("Could not post owned Escape keyup");
+    }
     // Post to the exact owned control so the real message loop chooses its
     // Enter action. No focus, physical keyboard or direct WM_COMMAND dispatch.
     public static void PostEnter(long control,int owner) {
