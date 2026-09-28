@@ -2,7 +2,7 @@
 # Bounded hidden native Monaco verification. Run through run-check.ps1 (120s).
 param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
+    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -15,7 +15,7 @@ $fixture=New-Object EditorFixture($directory)
 $process=$null;$pipeName=$null;$stdout=$null;$stderr=$null;$hostExitRecorded=$false;$hostForced=$false
 $hosts=@();$shells=@();$clients=@();$ownedEditors=@();$cleanupErrors=@();$storageObserved=@()
 $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';case=$Case;checks=@();observations=@();clipboardAccess=$false;desktopInput=$false;externalSites=$false;realImeTest=$false;unicodeComparison='ordinal';deferred=@(
-    'Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.',
+    'Physical keyboard/mouse/IME, glyph fidelity, native system dialogs, clipboard, DPI and accessibility are not exercised; owned app close dialogs use exact hidden HWND messages.',
     'The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.',
     'Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.',
     'Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.',
@@ -183,18 +183,59 @@ function Check-DetachedEditor($State,$Tree,[string]$Surface,$Before) {
     foreach($key in @('x','y','width','height')) {if($null -eq $window.area.$key -or $holder.bounds.$key -ne $window.area.$key -or $State.bounds.$key -ne $holder.bounds.$key) {throw ('Separate editor viewport differs from its window body: '+$key)}}
     return $window
 }
-function Wait-EditorCloseRejected([string]$Surface) {
+function Close-Fixtures {
+    if(-not ('FindFixture' -as [type])) {Add-Type -Path (Join-Path $PSScriptRoot 'FindFixture.cs')}
+    if(-not ('OptionsFixture' -as [type])) {Add-Type -Path (Join-Path $PSScriptRoot 'OptionsFixture.cs')}
+}
+function Wait-CloseDialog([long]$Owner,[string[]]$Names=@()) {
+    Close-Fixtures;$watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Owned editor close dialog did not appear within five seconds'}
+        if($process.HasExited) {throw 'Dirty native close terminated the host before a decision'}
+        $tree=Tree ([int]$remaining);$dialog=$tree.editor_close_dialog
+        if($dialog) {
+            $native=[OptionsFixture]::Describe([long]$dialog.window,$process.Id)
+            if($dialog.owner -ne $Owner -or $native.Owner -ne $Owner -or $native.OwnerEnabled -or -not $native.Enabled -or $dialog.native_visible -ne $false -or $dialog.busy) {throw 'Close dialog is not the ready, hidden modal owned by its closing window'}
+            foreach($key in @('body_handle','save','discard','cancel')) {
+                if(-not $dialog.$key -or [OptionsFixture]::Parent([long]$dialog.$key,$process.Id) -ne [long]$dialog.window) {throw ('Close dialog omitted its exact owned control: '+$key)}
+            }
+            $body=[OptionsFixture]::Text([long]$dialog.body_handle,$process.Id)
+            if(-not (Same-Text $body $dialog.body)) {throw 'Close dialog diagnostics differ from its actual native UTF-16 body'}
+            foreach($name in $Names) {if(-not $body.Contains($name)) {throw ('Close dialog lost the original Unicode document name: '+$name)}}
+            $script:evidence.observations+=@{kind='editor-close-dialog';owner=$Owner;id=$dialog.id;body=$body;hidden=$true;ownerEnabled=$native.OwnerEnabled}
+            return $dialog
+        }
+        Start-Sleep -Milliseconds 20
+    } while($true)
+}
+function Choose-Close($Dialog,[ValidateSet('save','discard','cancel')][string]$Choice) {
+    [OptionsFixture]::Click([long]$Dialog.window,[long]$Dialog.$Choice,$process.Id)
+}
+function Wait-EditorUnsealed([string]$Surface) {
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do {
-        $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Dirty separate editor close did not reject and unseal within five seconds'}
+        $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Editor close did not finish and unseal within five seconds'}
         if($process.HasExited) {throw 'Dirty separate editor close terminated its shared host'}
         $tree=Tree ([int]$remaining)
         if($tree.main_closed) {throw 'Separate editor close unexpectedly closed the main window'}
-        if(-not $tree.editor_synchronizing -and $tree.state.error -match 'unsaved changes') {
+        if(-not $tree.editor_close_dialog -and -not $tree.editor_synchronizing) {
             $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Separate close release budget expired'}
             $response=End-Command (Begin-Command @('editor','command',$Surface,'read')) @(0,1) ([int]$remaining)
             if($response.error) {if($response.error -notmatch 'editor synchronization (is )?in progress|editor is loading or another command is pending') {throw ('Unexpected separate-close release error: '+$response.error)}}
             else {$read=if($response.psobject.Properties.Name -contains 'result') {$response.result}else{$response};if($read.sealed -eq $false) {return $read}}
+        }
+        Start-Sleep -Milliseconds 20
+    } while($true)
+}
+function Wait-EditorRemoved([string]$Surface) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Decided editor close did not finish within five seconds'}
+        if($process.HasExited) {throw 'Closing one separate editor terminated its main host'}
+        $tree=Tree ([int]$remaining)
+        if(-not $tree.editor_close_dialog -and -not $tree.editor_synchronizing -and -not @($tree.editors|Where-Object {$_.id -eq $Surface}).Count -and -not @($tree.detached_windows|Where-Object {$_.surface -eq $Surface}).Count) {
+            if($tree.main_closed -or -not ([OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)).Enabled) {throw 'Separate editor close left its main window closed or disabled'}
+            Forget-Editor $Surface;return $tree
         }
         Start-Sleep -Milliseconds 20
     } while($true)
@@ -340,7 +381,7 @@ try {
     if(-not $doctor.background_testing -or $doctor.status -ne 'ok') {throw 'Working hidden debug build required; no host launched'}
     $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
     if($Case -eq 'startup') {Passed 'hidden_debug_doctor_and_owned_host_readiness'}
-    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
+    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
         if($Case -ne 'all' -and $Case -ne $group) {continue}
         Clean-Editors;$fixture.ReleaseLocks();Request @('focus-tab',$terminal.id)|Out-Null
         switch($group) {
@@ -846,6 +887,71 @@ try {
                 Request @('workspace','close',$other.workspace)|Out-Null
                 Passed 'dirty_tab_workspace_and_quit_reject_without_focus_change_explicit_save_or_discard_closes'
             }
+            'close-dialog' {
+                Close-Fixtures
+                $name='dialog cancel and save 한글 한.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false)
+                $opened=Open-Editor $path
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                $before=Status $opened.surface;$read=Assert-Text $opened.surface ([EditorFixture]::Edited) $true;$tree=Tree
+                $ipc=Request @('close-tab',$opened.surface) 1
+                if($ipc.error -notmatch 'unsaved changes' -or (Tree).editor_close_dialog) {throw 'IPC dirty close must fail promptly without opening a decision dialog'}
+                [FindFixture]::PostClose([long]$tree.window_handle,$process.Id)
+                $dialog=Wait-CloseDialog ([long]$tree.window_handle) @($name)
+                Choose-Close $dialog 'cancel';$released=Wait-EditorUnsealed $opened.surface;$after=Status $opened.surface
+                if($released.sealed -ne $false -or $released.document_focused -ne $false -or $released.document_id -ne $read.document_id -or $released.active_version -ne $read.active_version -or -not $released.dirty -or -not (Same-Text $released.content ([EditorFixture]::Edited)) -or $after.view_handle -ne $before.view_handle) {throw 'Main close Cancel changed the dirty Monaco identity/content/version or retained its seal'}
+                if(-not ([OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)).Enabled) {throw 'Main close Cancel did not restore the owner'}
+                Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
+                if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Cancelled or failed close lost Monaco undo history'}
+                Editor-Command $opened.surface 'redo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
+                Assert-Bytes $path ([EditorFixture]::Original);Assert-Terminal
+                Passed 'native_main_close_cancel_preserves_unicode_dirty_model_unseals_and_keeps_undo_ipc_stays_fast'
+
+                Request @('detach-tab',$opened.surface)|Out-Null
+                $frame=Check-DetachedEditor (Status $opened.surface) (Tree) $opened.surface $before
+                $lockedRead=Read-Editor $opened.surface;$previousError=(Tree).state.error;$fixture.LockAgainstReplacement($name)
+                try {
+                    [FindFixture]::PostClose([long]$frame.window_handle,$process.Id)
+                    $dialog=Wait-CloseDialog ([long]$frame.window_handle) @($name);Choose-Close $dialog 'save'
+                    $failed=Wait-EditorUnsealed $opened.surface;$failureTree=Tree;$failureState=Status $opened.surface
+                    if(-not $failureTree.state.error -or (Same-Text $failureTree.state.error $previousError) -or $failureTree.state.error -match 'unsaved changes' -or -not $failed.dirty -or $failed.document_id -ne $lockedRead.document_id -or $failed.active_version -ne $lockedRead.active_version -or -not (Same-Text $failed.content ([EditorFixture]::Edited))) {throw 'Failed native Save close did not report the worker error and preserve its dirty unsealed model'}
+                    if(-not ([OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)).Enabled) {throw 'Failed native Save did not restore its separate owner'}
+                    Check-DetachedEditor $failureState $failureTree $opened.surface $before|Out-Null
+                    Assert-Bytes $path ([EditorFixture]::Original)
+                    Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
+                    if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Cancelled or failed close lost Monaco undo history'}
+                    Editor-Command $opened.surface 'redo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
+                } finally {$fixture.ReleaseLocks()}
+                Passed 'native_save_close_sharing_failure_reports_error_preserves_disk_dirty_model_and_releases_input'
+
+                $secondName='dialog second 😀.txt';$second=$fixture.Write($secondName,[EditorFixture]::Original,$false,$false)
+                $detachedTarget=Request @('identify');$reused=Open-Editor $second $detachedTarget.pane
+                if($reused.surface -ne $opened.surface) {throw 'Multiple-document Save close did not reuse the detached editor'}
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::External)|Out-Null
+                $dirty=Status $opened.surface
+                if(@($dirty.documents|Where-Object {$_.dirty}).Count -ne 2) {throw 'Native Save close requires two dirty target documents'}
+                $otherName='dialog unrelated dirty 문서.txt';$otherPath=$fixture.Write($otherName,[EditorFixture]::Original,$false,$false)
+                $other=Open-Editor $otherPath $source.pane
+                if($other.surface -eq $opened.surface) {throw 'Scope check requires a separate main-window editor'}
+                Editor-Command $other.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                $otherRead=Read-Editor $other.surface;$otherState=Status $other.surface
+                [FindFixture]::PostClose([long]$frame.window_handle,$process.Id)
+                $dialog=Wait-CloseDialog ([long]$frame.window_handle) @($name,$secondName)
+                if(([OptionsFixture]::Text([long]$dialog.body_handle,$process.Id)).Contains($otherName)) {throw 'Separate close included an unrelated main-editor document'}
+                Choose-Close $dialog 'save';Wait-EditorRemoved $opened.surface|Out-Null
+                Assert-Bytes $path ([EditorFixture]::Edited);Assert-Bytes $second ([EditorFixture]::External)
+                $retained=Assert-Text $other.surface ([EditorFixture]::Edited) $true
+                if($retained.document_id -ne $otherRead.document_id -or $retained.active_version -ne $otherRead.active_version -or (Status $other.surface).view_handle -ne $otherState.view_handle) {throw 'Separate Save close changed an unrelated editor'}
+                Assert-Bytes $otherPath ([EditorFixture]::Original);Assert-Terminal
+                Passed 'native_separate_save_closes_only_target_window_saves_both_documents_and_preserves_unrelated_dirty_editor'
+
+                Request @('detach-tab',$other.surface)|Out-Null
+                $otherFrame=Check-DetachedEditor (Status $other.surface) (Tree) $other.surface $otherState
+                [FindFixture]::PostClose([long]$otherFrame.window_handle,$process.Id)
+                $dialog=Wait-CloseDialog ([long]$otherFrame.window_handle) @($otherName)
+                Choose-Close $dialog 'discard';Wait-EditorRemoved $other.surface|Out-Null
+                Assert-Bytes $otherPath ([EditorFixture]::Original);Assert-Terminal
+                Passed 'native_separate_discard_closes_only_target_window_without_writing_dirty_content'
+            }
             'move' {
                 $path=$fixture.Write('move root 한글\move 한글.txt',[EditorFixture]::Original,$false,$false);$editorRoot=$fixture.File('move root 한글');$opened=Open-Editor $path '' $editorRoot
                 Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
@@ -868,22 +974,8 @@ try {
                 # The existing helper validates exact PID and hidden HWND. No
                 # fixture/server is instantiated and no desktop input is sent.
                 [FindFixture]::PostClose([long]$tree.window_handle,$process.Id)
-                $closeWatch=[Diagnostics.Stopwatch]::StartNew();$released=$null
-                do {
-                    $remaining=5000-$closeWatch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Dirty main-window close did not reject and release its editor barrier within five seconds'}
-                    $tree=Tree ([int]$remaining)
-                    if($tree.main_closed -or $process.HasExited) {throw 'Dirty main-window close removed its live editor or terminated the shared host'}
-                    if($tree.state.error -match 'unsaved changes') {
-                        $remaining=5000-$closeWatch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Main-close barrier release budget expired'}
-                        # An earlier close can leave the same state.error text.
-                        # A real read must also pass the host barrier and report
-                        # the Monaco seal released before any reattachment.
-                        $response=End-Command (Begin-Command @('editor','command',$opened.surface,'read')) @(0,1) ([int]$remaining)
-                        if($response.error) {if($response.error -notmatch 'editor synchronization (is )?in progress|editor is loading or another command is pending') {throw ('Unexpected main-close release error: '+$response.error)}}
-                        else {$candidate=if($response.psobject.Properties.Name -contains 'result') {$response.result}else{$response};if($candidate.sealed -eq $false) {$released=$candidate;break}}
-                    }
-                    Start-Sleep -Milliseconds 20
-                } while($true)
+                $dialog=Wait-CloseDialog ([long]$tree.window_handle) @([IO.Path]::GetFileName($path))
+                Choose-Close $dialog 'cancel';$released=Wait-EditorUnsealed $opened.surface;$tree=Tree
                 if($released.document_focused -ne $false -or $released.content_truncated -or -not $released.dirty -or -not (Same-Text $released.content ([EditorFixture]::Edited)) -or $released.document_id -ne $read.document_id -or $released.active_version -ne $read.active_version) {throw 'Rejected main close altered the dirty Monaco document or left it sealed'}
                 if(@($tree.editors).Count -ne $editorsBefore.Count -or @($tree.detached_windows|Where-Object {$_.surface -eq $terminal.id}).Count -ne 1) {throw 'Rejected main close removed an editor or detached terminal'}
                 foreach($prior in $editorsBefore) {
@@ -894,20 +986,21 @@ try {
                 Request @('move-tab',$terminal.id,'--to-pane',$destination.pane)|Out-Null;$tree=Tree
                 if($tree.main_closed -or @($tree.detached_windows).Count) {throw 'Separate terminal did not reattach after dirty main-close rejection'}
                 Check-MoveHolder (Status $opened.surface) $tree $destination.pane
-                Passed 'dirty_main_window_close_with_detached_terminal_rejects_unseals_and_preserves_editor_documents'
+                Passed 'dirty_main_window_close_cancel_unseals_and_preserves_editor_and_detached_terminal'
                 Request @('detach-tab',$opened.surface)|Out-Null
                 $detachedEditor=Check-DetachedEditor (Status $opened.surface) (Tree) $opened.surface $before
                 $detachedRead=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
                 if($detachedRead.document_id -ne $read.document_id -or $detachedRead.active_version -ne $read.active_version) {throw 'Detach changed the dirty Monaco document identity or version'}
                 [FindFixture]::PostClose([long]$detachedEditor.window_handle,$process.Id)
-                $rejected=Wait-EditorCloseRejected $opened.surface
+                $dialog=Wait-CloseDialog ([long]$detachedEditor.window_handle) @([IO.Path]::GetFileName($path))
+                Choose-Close $dialog 'cancel';$rejected=Wait-EditorUnsealed $opened.surface
                 if($rejected.document_focused -ne $false -or $rejected.content_truncated -or -not $rejected.dirty -or -not (Same-Text $rejected.content ([EditorFixture]::Edited)) -or $rejected.document_id -ne $read.document_id -or $rejected.active_version -ne $read.active_version) {throw 'Native separate-window close altered the dirty document'}
                 $rejected=Request @('close-tab',$opened.surface) 1
                 if($rejected.error -notmatch 'unsaved changes') {throw 'Dirty separate editor CLI close did not reject unsaved changes'}
                 Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
                 Check-DetachedEditor (Status $opened.surface) (Tree) $opened.surface $before|Out-Null
                 Assert-Terminal;Assert-Bytes $path ([EditorFixture]::Original)
-                Passed 'dirty_detached_editor_native_and_cli_close_reject_with_stable_holder_document_and_version'
+                Passed 'dirty_detached_editor_native_close_cancel_and_cli_rejection_preserve_holder_document_and_version'
 
                 # The editor root deliberately differs from the terminal CWD.
                 # Omitting --root must retain that editor, not create a new tab.

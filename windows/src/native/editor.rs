@@ -9,6 +9,8 @@ use crate::{
 use flowmux_core::{EditorSessionState, PaneSurface};
 use flowmux_editor::{EditorMessage, HostMessage as EditorMessageOut};
 use std::collections::HashSet;
+#[path = "editor_close_panel.rs"]
+mod close_panel;
 #[path = "editor_picker.rs"]
 mod editor_picker;
 #[path = "editor_view.rs"]
@@ -19,6 +21,7 @@ mod refresh;
 pub(super) mod search;
 
 pub(super) enum Signal {
+    CloseChoice(u64, close_panel::Choice),
     Prepared(Prepared),
     Pick(PickerTarget),
     Bridge(SurfaceId, Uuid, String, String),
@@ -166,6 +169,9 @@ pub(super) struct Barrier {
     started: Instant,
     operation: Operation,
     reply: Option<ipc::Reply>,
+    prompt: Option<close_panel::Panel>,
+    resolving: bool,
+    failure: Option<String>,
 }
 impl Editor {
     pub(super) fn can_move(&self) -> bool {
@@ -408,6 +414,7 @@ impl App {
     }
     pub(super) fn editor_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::CloseChoice(id, choice) => self.editor_close_choice(id, choice)?,
             Signal::Search(response) => self.editor_search_completed(response),
             Signal::SearchTick => self.editor_search_tick(),
             Signal::SearchOpenFinished(surface, instance, token, value) => {
@@ -804,6 +811,11 @@ impl App {
                 }
             }
             Signal::Worker(surface, instance, response) => {
+                let resolving_close = self.editor_barrier.as_ref().is_some_and(|barrier| {
+                    barrier.id == response.id
+                        && barrier.resolving
+                        && barrier.waiting.contains(&surface)
+                });
                 let invalid_files_open = self
                     .editors
                     .get(&surface)
@@ -875,8 +887,20 @@ impl App {
                                 );
                                 return Ok(());
                             }
-                        } else {
-                            editor.send(&message)?
+                        } else if let Err(error) = editor.send(&message) {
+                            if !resolving_close {
+                                return Err(error);
+                            }
+                            // Consume the admitted worker response even if its
+                            // view failed. Other saves must drain before close
+                            // cancellation can release any surviving editor.
+                            failure.get_or_insert_with(|| error.to_string());
+                            editor.sync_failed = true;
+                            editor.refresh_ready();
+                            let _ = editor
+                                .view
+                                .view
+                                .evaluate_script("window.flowmuxWindowsEditor.quarantine()");
                         }
                     } else {
                         editor.deferred.push(message)
@@ -924,6 +948,23 @@ impl App {
                     .as_ref()
                     .is_some_and(|b| b.id == response.id && b.waiting.contains(&surface))
                 {
+                    if self.editor_barrier.as_ref().unwrap().resolving {
+                        let barrier = self.editor_barrier.as_mut().unwrap();
+                        barrier.waiting.remove(&surface);
+                        // A completion can arrive before the next timer tick.
+                        if barrier.started.elapsed() > Duration::from_secs(12) {
+                            barrier.failure.get_or_insert_with(|| {
+                                "Editor file operation timed out; the close was cancelled".into()
+                            });
+                        }
+                        if let Some(error) = failure {
+                            barrier.failure.get_or_insert(error);
+                        }
+                        if barrier.waiting.is_empty() {
+                            self.editor_finish_barrier()?;
+                        }
+                        return Ok(());
+                    }
                     if let Some(error) = failure {
                         self.editor_barrier_error(surface, response.id, &error)
                     } else {
@@ -1019,7 +1060,18 @@ impl App {
     }
     fn editor_barrier_error(&mut self, surface: SurfaceId, id: u64, error: &str) {
         if self.editor_barrier.as_ref().is_some_and(|b| b.id == id) {
-            let barrier = self.editor_barrier.take().unwrap();
+            let barrier = self.editor_barrier.as_mut().unwrap();
+            if barrier.resolving && !barrier.waiting.is_empty() {
+                // An accepted filesystem operation cannot be cancelled. Keep
+                // its renderer sealed until every original response arrives.
+                barrier.failure.get_or_insert_with(|| error.to_owned());
+                if let Some(prompt) = &barrier.prompt {
+                    prompt.status("Waiting for the current file operation to finish…");
+                }
+                return;
+            }
+            let mut barrier = self.editor_barrier.take().unwrap();
+            drop(barrier.prompt.take());
             for target in &barrier.targets {
                 if let Some(e) = self.editors.get(target) {
                     e.release(id)
@@ -1043,10 +1095,7 @@ impl App {
         error: &str,
     ) {
         let quiet = matches!(&operation, Operation::Checkpoint(_));
-        let owner = match &operation {
-            Operation::Tab(surface) => self.surface_window(*surface),
-            _ => self.window,
-        };
+        let owner = self.editor_close_owner(&operation);
         let reply = reply.or(match operation {
             Operation::Window(CloseRequest::Ipc(reply))
             | Operation::QuitDiscard(reply)
@@ -1122,6 +1171,9 @@ impl App {
             started: Instant::now(),
             operation,
             reply,
+            prompt: None,
+            resolving: false,
+            failure: None,
         });
         for surface in targets {
             if let Err(error) = self.editors[&surface].barrier(id, seal) {
@@ -1132,12 +1184,70 @@ impl App {
         Ok(true)
     }
     fn editor_finish_barrier(&mut self) -> anyhow::Result<()> {
-        let barrier = self.editor_barrier.take().unwrap();
+        let mut barrier = self.editor_barrier.take().unwrap();
+        if let Some(error) = barrier.failure.take() {
+            drop(barrier.prompt.take());
+            for id in &barrier.targets {
+                if let Some(editor) = self.editors.get(id) {
+                    editor.release(barrier.id);
+                }
+            }
+            self.editor_operation_error(barrier.operation, barrier.reply, &error);
+            return Ok(());
+        }
         let dirty = barrier
             .targets
             .iter()
             .any(|id| self.editors.get(id).is_some_and(|e| !e.dirty.is_empty()));
         if dirty && !matches!(barrier.operation, Operation::Checkpoint(_)) {
+            let native = barrier.reply.is_none()
+                && !matches!(
+                    barrier.operation,
+                    Operation::Window(CloseRequest::Ipc(_)) | Operation::QuitDiscard(_)
+                );
+            if native && !barrier.resolving {
+                let mut labels: Vec<_> = barrier
+                    .targets
+                    .iter()
+                    .filter_map(|id| self.editors.get(id))
+                    .flat_map(|editor| {
+                        editor.dirty.iter().map(|path| {
+                            path.strip_prefix(&editor.root)
+                                .unwrap_or(path)
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                    })
+                    .collect();
+                labels.sort();
+                labels.dedup();
+                match close_panel::Panel::new(
+                    self.editor_close_owner(&barrier.operation),
+                    barrier.id,
+                    &labels,
+                    self.background_test,
+                ) {
+                    Ok(prompt) => {
+                        barrier.prompt = Some(prompt);
+                        self.editor_barrier = Some(barrier);
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        for id in &barrier.targets {
+                            if let Some(editor) = self.editors.get(id) {
+                                editor.release(barrier.id);
+                            }
+                        }
+                        self.editor_operation_error(
+                            barrier.operation,
+                            barrier.reply,
+                            &error.to_string(),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            drop(barrier.prompt.take());
             for id in &barrier.targets {
                 if let Some(e) = self.editors.get(id) {
                     e.release(barrier.id)
@@ -1146,6 +1256,8 @@ impl App {
             self.editor_operation_error(barrier.operation,barrier.reply,"Editor documents have unsaved changes. Save them or explicitly discard the documents in the editor before closing.");
             return Ok(());
         }
+        // Destroy the owned dialog before its close action can destroy its owner.
+        drop(barrier.prompt.take());
         let closing = matches!(
             &barrier.operation,
             Operation::Window(_) | Operation::QuitDiscard(_)
@@ -1204,6 +1316,69 @@ impl App {
         }
         result
     }
+    fn editor_close_owner(&self, operation: &Operation) -> HWND {
+        match operation {
+            Operation::Tab(surface) => self.surface_window(*surface),
+            Operation::Window(CloseRequest::Native) => self.surface_window(self.active()),
+            _ => self.window,
+        }
+    }
+    pub(super) fn editor_close_diagnostics(&self) -> Value {
+        self.editor_barrier
+            .as_ref()
+            .and_then(|barrier| barrier.prompt.as_ref())
+            .map_or(Value::Null, close_panel::Panel::diagnostics)
+    }
+    pub(super) fn editor_close_handle_message(&self, message: &MSG) -> bool {
+        self.editor_barrier
+            .as_ref()
+            .and_then(|barrier| barrier.prompt.as_ref())
+            .is_some_and(|prompt| prompt.handle_message(message))
+    }
+    fn editor_close_choice(&mut self, id: u64, choice: close_panel::Choice) -> anyhow::Result<()> {
+        let Some(barrier) = self
+            .editor_barrier
+            .as_mut()
+            .filter(|barrier| barrier.id == id && barrier.prompt.is_some() && !barrier.resolving)
+        else {
+            return Ok(());
+        };
+        if choice == close_panel::Choice::Cancel {
+            let mut barrier = self.editor_barrier.take().unwrap();
+            drop(barrier.prompt.take());
+            for surface in &barrier.targets {
+                if let Some(editor) = self.editors.get(surface) {
+                    editor.release(id);
+                }
+            }
+            return self.focus_active();
+        }
+        barrier.resolving = true;
+        barrier.started = Instant::now();
+        barrier.waiting = barrier.targets.iter().copied().collect();
+        let prompt = barrier.prompt.as_ref().unwrap();
+        prompt.busy();
+        if choice == close_panel::Choice::Discard {
+            prompt.status("Discarding…");
+        }
+        let targets = barrier.targets.clone();
+        for surface in targets {
+            let work = if choice == close_panel::Choice::Save {
+                Work::SaveAll
+            } else {
+                Work::DiscardAll
+            };
+            if let Err(error) = self.editor_work(surface, id, work) {
+                let barrier = self.editor_barrier.as_mut().unwrap();
+                barrier.waiting.remove(&surface);
+                barrier.failure.get_or_insert_with(|| error.to_string());
+            }
+        }
+        if self.editor_barrier.as_ref().unwrap().waiting.is_empty() {
+            self.editor_finish_barrier()?;
+        }
+        Ok(())
+    }
     pub(super) fn editor_release_all(&self) {
         // releaseBarrier(0) is the host's explicit cancel-all path.
         for editor in self.editors.values() {
@@ -1226,7 +1401,11 @@ impl App {
         if let Some((surface, id)) = self
             .editor_barrier
             .as_ref()
-            .filter(|b| b.started.elapsed() > Duration::from_secs(12))
+            .filter(|b| {
+                (b.prompt.is_none() || b.resolving)
+                    && b.failure.is_none()
+                    && b.started.elapsed() > Duration::from_secs(12)
+            })
             .and_then(|b| b.targets.first().map(|s| (*s, b.id)))
         {
             self.editor_barrier_error(

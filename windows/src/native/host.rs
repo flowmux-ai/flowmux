@@ -818,7 +818,8 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             continue;
         }
         unsafe {
-            if !app.command_palette.handle_message(&message)
+            if !app.editor_close_handle_message(&message)
+                && !app.command_palette.handle_message(&message)
                 && !app.overview_handle_message(&message)
                 && !app.options_handle_message(&message)
                 && !app.search.handle_message(&message)
@@ -2884,6 +2885,7 @@ impl App {
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),
                         "editor_synchronizing":self.editor_barrier.is_some(),
+                        "editor_close_dialog":self.editor_close_diagnostics(),
                         "editor_open_admitted":self.editor_preparer.as_ref().map_or(0, |worker| worker.pending()),
                         "editor_picker_pending":self.editor_picker_pending,
                         "close_accepted":self.close_accepted,

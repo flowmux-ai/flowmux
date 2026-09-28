@@ -177,6 +177,7 @@ const TOOL_INFO_V2_SIZE: u32 = std::mem::offset_of!(TTTOOLINFOW, lpReserved) as 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Role {
     Button,
+    Destructive,
     Swatch(COLORREF),
     Workspace {
         selected: bool,
@@ -241,6 +242,7 @@ pub(super) struct Palette {
     pub hover: COLORREF,
     pub selected: COLORREF,
     pub accent: COLORREF,
+    pub destructive: COLORREF,
     pub high_contrast: bool,
 }
 
@@ -261,6 +263,7 @@ impl Palette {
                     hover: GetSysColor(COLOR_HIGHLIGHT),
                     selected: GetSysColor(COLOR_HIGHLIGHT),
                     accent: GetSysColor(COLOR_HIGHLIGHT),
+                    destructive: GetSysColor(COLOR_WINDOWTEXT),
                     high_contrast: true,
                 }
             };
@@ -275,6 +278,7 @@ impl Palette {
                 hover: rgb(55, 60, 70),
                 selected: rgb(49, 55, 65),
                 accent: rgb(120, 174, 237),
+                destructive: rgb(246, 97, 81),
                 high_contrast: false,
             },
             Theme::Light => Self {
@@ -286,6 +290,7 @@ impl Palette {
                 hover: rgb(226, 227, 230),
                 selected: rgb(218, 230, 245),
                 accent: rgb(32, 102, 186),
+                destructive: rgb(192, 28, 40),
                 high_contrast: false,
             },
         }
@@ -505,6 +510,7 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
                 .map(color_ref)
                 .unwrap_or_else(|| blend(fg, bg, 18));
             palette.accent = color_ref(&colors.palette[4]);
+            palette.destructive = color_ref(&colors.palette[1]);
         }
     }
     let swap = STATE.with(|slot| {
@@ -972,6 +978,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         palette.muted
     } else if palette.high_contrast && highlighted {
         unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) }
+    } else if !palette.high_contrast && matches!(role, Role::Destructive) {
+        palette.destructive
     } else if !palette.high_contrast && matches!(role, Role::Icon { marked: true, .. }) {
         palette.accent
     } else if !palette.high_contrast
