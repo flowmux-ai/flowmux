@@ -50,7 +50,7 @@ impl App {
                     for window in self.detached.values() {
                         chrome::window_theme(window.window, self.settings.terminal.theme);
                     }
-                    self.editor_apply_theme()?;
+                    self.editor_apply_settings()?;
                     self.worktrees.refresh_theme()?;
                     self.sessions.refresh_theme()?;
                     self.usage_render();

@@ -117,6 +117,7 @@ pub(super) struct Editor {
     initialization_failed: bool,
     sync_failed: bool,
     pub(super) ready: bool,
+    pub(super) keybindings_revision: Option<Uuid>,
     state: EditorSessionState,
     documents: Value,
     dirty: Vec<PathBuf>,
@@ -205,7 +206,7 @@ impl Editor {
             && self.documents.as_array().is_some_and(Vec::is_empty)
             && self.error.is_some()
     }
-    fn send(&self, message: &EditorMessageOut) -> anyhow::Result<()> {
+    pub(super) fn send(&self, message: &EditorMessageOut) -> anyhow::Result<()> {
         self.view
             .view
             .evaluate_script(&flowmux_editor::javascript_for_host_message(
@@ -265,6 +266,7 @@ impl Editor {
             "profile_path":self.data_root.join("editor-profile"),
             "recovery_root":self.data_root.join("editor-recovery"),
             "ready":self.ready,"visible":self.view.visible,"dirty":!self.dirty.is_empty(),
+            "keybindings_revision":self.keybindings_revision,
             "initialization_failed":self.initialization_failed,
             "synchronization_failed":self.sync_failed,
             "dirty_paths":self.dirty,"documents":self.documents,"active_document_id":active,
@@ -277,11 +279,18 @@ impl Editor {
     }
 }
 impl App {
-    pub(super) fn editor_apply_theme(&mut self) -> anyhow::Result<()> {
+    pub(super) fn editor_apply_settings(&mut self) -> anyhow::Result<()> {
         let colors = crate::theme::resolve(&self.settings.terminal);
-        for editor in self.editors.values().filter(|editor| editor.frontend_ready) {
+        for editor in self.editors.values_mut() {
+            editor.keybindings_revision = None;
+            if !editor.frontend_ready {
+                continue;
+            }
             if let Err(error) = editor.apply_theme(&colors) {
                 report(&format!("editor theme delivery: {error:#}"));
+            }
+            if let Err(error) = editor.view.keybindings(&self.settings) {
+                report(&format!("editor keybindings delivery: {error:#}"));
             }
         }
         // A delivery failure is reported without turning a successful settings
@@ -317,6 +326,7 @@ impl App {
             self.editor_context.as_mut().unwrap(),
             self.editor_assets.as_ref().unwrap(),
             self.background_test,
+            &self.settings,
             move |origin, body| {
                 sender.send(Event::Editor(Signal::Bridge(id, instance, origin, body)))
             },
@@ -345,6 +355,7 @@ impl App {
                 initialization_failed: false,
                 sync_failed: false,
                 ready: false,
+                keybindings_revision: None,
                 state,
                 documents: json!([]),
                 dirty: Vec::new(),
@@ -477,6 +488,35 @@ impl App {
                     "invalid editor instance credentials"
                 );
                 match value["kind"].as_str() {
+                    Some("keybindings_applied") => {
+                        let revision: Uuid = serde_json::from_value(value["revision"].clone())?;
+                        let bindings: Vec<crate::keybindings::Binding> =
+                            serde_json::from_value(value["bindings"].clone())?;
+                        if revision == self.settings.revision
+                            && bindings == crate::keybindings::resolved(&self.settings.keybindings)?
+                        {
+                            self.editors.get_mut(&surface).unwrap().keybindings_revision =
+                                Some(revision);
+                        }
+                    }
+                    Some("shortcut") => {
+                        let action = value["action"]
+                            .as_str()
+                            .context("invalid shortcut action")?;
+                        let chord = serde_json::from_value(value["chord"].clone())?;
+                        let revision = serde_json::from_value(value["revision"].clone())?;
+                        self.shortcut(surface, action, &chord, revision)?;
+                    }
+                    #[cfg(debug_assertions)]
+                    Some("shortcut_tested") => {
+                        self.shortcut_tested(
+                            surface,
+                            serde_json::from_value(value["request"].clone())?,
+                            value["forwarded"]
+                                .as_bool()
+                                .context("invalid shortcut test result")?,
+                        )?;
+                    }
                     Some("theme_error") => {
                         report(&format!(
                             "editor theme application: {}",
@@ -670,6 +710,11 @@ impl App {
                                     "editor synchronization failed; reopening is required"
                                 );
                                 editor.frontend_ready = true;
+                                if let Err(error) = editor.view.keybindings(&self.settings) {
+                                    report(&format!(
+                                        "initial editor keybindings delivery: {error:#}"
+                                    ));
+                                }
                                 if let Err(error) = editor.apply_theme(&colors) {
                                     report(&format!("initial editor theme delivery: {error:#}"));
                                 }

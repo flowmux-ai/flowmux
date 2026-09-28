@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Terminal shortcuts are authorized against the renderer's acknowledged settings.
+//! Surface shortcuts are authorized against the renderer's acknowledged settings.
 use super::*;
 use crate::keybindings::{ActionId, Chord};
 
@@ -234,27 +234,35 @@ impl App {
         chord: &Chord,
         revision: Uuid,
     ) -> anyhow::Result<()> {
-        let Some(surface) = self.surfaces.get(&source) else {
-            return Ok(());
-        };
+        let ready = self.surfaces.get(&source).is_some_and(|surface| {
+            surface.visible
+                && surface.ready
+                && !surface.restoring
+                && surface
+                    .applied_settings
+                    .as_ref()
+                    .and_then(|s| s.get("revision"))
+                    == Some(&json!(revision))
+        }) || self.editors.get(&source).is_some_and(|editor| {
+            editor.view.visible
+                && editor.can_move()
+                && editor.keybindings_revision == Some(revision)
+        });
         let authentication = self
             .ssh_auth_window
             .as_ref()
             .is_some_and(|(id, _)| *id == source);
         if (self.current_surface() != Some(source) && !authentication)
-            || !surface.visible
-            || !surface.ready
-            || surface.restoring
+            || !ready
+            || self.closing
             || self.close_accepted
             || self.close_request.is_some()
+            || self.pending_save.is_some()
             || self.editor_barrier.is_some()
             || self.overview.is_open()
+            || self.command_palette.is_open()
+            || unsafe { IsWindowEnabled(self.surface_window(source)) } == 0
             || revision != self.settings.revision
-            || surface
-                .applied_settings
-                .as_ref()
-                .and_then(|s| s.get("revision"))
-                != Some(&json!(revision))
         {
             return Ok(());
         }
@@ -287,6 +295,11 @@ impl App {
             "window is busy"
         );
         use ActionId::*;
+        if action == TerminalSearch {
+            if let Some(editor) = self.editors.get(&source).filter(|editor| editor.ready) {
+                return editor.send(&flowmux_editor::HostMessage::ShowWorkspaceSearch);
+            }
+        }
         let authentication = self
             .ssh_auth_window
             .as_ref()
@@ -408,6 +421,26 @@ impl App {
     }
 
     #[cfg(debug_assertions)]
+    pub(super) fn shortcut_tested(
+        &mut self,
+        source: SurfaceId,
+        request: Uuid,
+        forwarded: bool,
+    ) -> anyhow::Result<()> {
+        if let Some(pending) = self.pending_terminal_ui_tests.get(&request) {
+            anyhow::ensure!(
+                self.background_test && pending.surface == source,
+                "invalid shortcut test acknowledgement"
+            );
+            let pending = self.pending_terminal_ui_tests.remove(&request).unwrap();
+            let _ = pending
+                .reply
+                .try_send(json!({"surface":source,"request":request,"forwarded":forwarded}));
+        }
+        Ok(())
+    }
+
+    #[cfg(debug_assertions)]
     pub(super) fn test_shortcut(
         &mut self,
         source: SurfaceId,
@@ -425,7 +458,10 @@ impl App {
             .context("shortcut test event must be an object")?;
         for (key, value) in fields {
             let valid = match key.as_str() {
-                "type" => matches!(value.as_str(), Some("keydown" | "keyup")),
+                "type" => matches!(
+                    value.as_str(),
+                    Some("keydown" | "keyup" | "compositionstart" | "compositionend" | "blur")
+                ),
                 "key" | "code" => value.as_str().is_some_and(|s| s.len() <= 64),
                 "ctrlKey" | "altKey" | "shiftKey" | "metaKey" | "repeat" | "isComposing"
                 | "altGraph" => value.is_boolean(),
@@ -438,16 +474,29 @@ impl App {
             self.pending_terminal_ui_tests.len() < 2,
             "shortcut test already pending"
         );
-        let surface = self
-            .surfaces
-            .get(&source)
-            .context("shortcut test requires a terminal surface")?;
-        anyhow::ensure!(
-            surface.ready && !surface.restoring,
-            "shortcut test terminal is not ready"
-        );
         let request = Uuid::new_v4();
-        surface.send(&HostMessage::TestShortcut { request, event })?;
+        if let Some(editor) = self.editors.get(&source) {
+            anyhow::ensure!(editor.ready, "shortcut test editor is not ready");
+            editor.view.view.evaluate_script(&format!(
+                "window.__flowmuxWindowsEditorBridge({{kind:'shortcut_tested',request:{},forwarded:!window.__flowmuxWindowsEditorShortcuts.test({})}});",
+                serde_json::to_string(&request)?, serde_json::to_string(&event)?
+            ))?;
+        } else {
+            let surface = self
+                .surfaces
+                .get(&source)
+                .context("shortcut test requires a terminal or editor surface")?;
+            anyhow::ensure!(
+                surface.ready && !surface.restoring,
+                "shortcut test terminal is not ready"
+            );
+            anyhow::ensure!(
+                event.get("type").is_none()
+                    || matches!(event["type"].as_str(), Some("keydown" | "keyup")),
+                "terminal shortcut tests require key events"
+            );
+            surface.send(&HostMessage::TestShortcut { request, event })?;
+        }
         self.pending_terminal_ui_tests.insert(
             request,
             PendingRead {

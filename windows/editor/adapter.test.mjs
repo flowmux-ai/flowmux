@@ -10,20 +10,37 @@ import { Position } from "monaco-editor/esm/vs/editor/common/core/position.js";
 
 const initializer = await readFile(new URL("./initialize.js", import.meta.url), "utf8");
 const adapter = await readFile(new URL("./adapter.js", import.meta.url), "utf8");
+const paneShortcuts = await readFile(new URL("../terminal/src/pane-shortcuts.mjs", import.meta.url), "utf8");
 
 function initialization(background, actualUrl = "http://127.0.0.1:1234/token/index.html?surface=s") {
   const sent = [];
   const handlers = [];
+  const dialogs = [];
   class Element { focus() { this.focused = true; } }
   class Dialog extends Element {
+    constructor() { super(); dialogs.push(this); }
     show() { this.open = true; this.nonmodal = true; }
     showModal() { this.open = true; this.modal = true; }
   }
+  class DomEvent {
+    constructor(type, values = {}) { this.type = type; Object.assign(this, values); this.defaultPrevented = false; this.stopped = false; }
+    preventDefault() { this.defaultPrevented = true; }
+    stopImmediatePropagation() { this.stopped = true; }
+    getModifierState(name) { return name === "AltGraph" && !!this.modifierAltGraph; }
+  }
   const window = { location: { href: actualUrl }, ipc: { postMessage: (raw) => sent.push(JSON.parse(raw)) }, addEventListener: (name, handler) => handlers.push([name, handler]) };
+  window.dispatchEvent = (event) => {
+    for (const [name, handler] of handlers) {
+      if (event.type === name) handler(event);
+      if (event.stopped) break;
+    }
+    return !event.defaultPrevented;
+  };
   window.top = window;
-  const context = vm.createContext({ window, document: { addEventListener() {} }, HTMLElement: Element, HTMLDialogElement: Dialog });
-  const init = vm.runInContext(`(${initializer})`, context);
-  init({ url: "http://127.0.0.1:1234/token/index.html?surface=s", signal_id: "s", credential: "private", background });
+  const context = vm.createContext({ window, document: { addEventListener() {}, querySelector: () => dialogs.find(dialog => dialog.open) ?? null },
+    HTMLElement: Element, HTMLDialogElement: Dialog, KeyboardEvent: DomEvent, CompositionEvent: DomEvent, Event: DomEvent });
+  const init = vm.runInContext(`(() => { ${paneShortcuts.replace("export class PaneShortcuts", "class PaneShortcuts")}\nreturn (${initializer}); })()`, context);
+  init({ url: "http://127.0.0.1:1234/token/index.html?surface=s", signal_id: "s", credential: "private", background, revision: "revision-1", bindings: [] });
   return { window, sent, handlers, Element, Dialog };
 }
 
@@ -35,7 +52,8 @@ test("initialization authenticates the exact page and hidden focus guards preced
   assert.equal(dialog.nonmodal, true);
   assert.equal(dialog.modal, undefined);
   state.window.webkit.messageHandlers.flowmuxEditor.postMessage('{"type":"editor_ready"}');
-  assert.deepEqual(state.sent[0], { kind: "editor_message", message: { type: "editor_ready" }, signal_id: "s", credential: "private" });
+  assert.deepEqual(state.sent[0], { kind: "keybindings_applied", revision: "revision-1", bindings: [], signal_id: "s", credential: "private" });
+  assert.deepEqual(state.sent.at(-1), { kind: "editor_message", message: { type: "editor_ready" }, signal_id: "s", credential: "private" });
   const foreign = initialization(true, "http://127.0.0.1:1234/other/index.html?surface=s");
   assert.equal(foreign.window.webkit, undefined);
   const normal = initialization(false); const normalElement = new normal.Element(); normalElement.focus();
@@ -44,6 +62,66 @@ test("initialization authenticates the exact page and hidden focus guards preced
   let prevented = false, stopped = false;
   state.handlers.find(([name]) => name === "beforeinput")[1]({ preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } });
   assert.equal(prevented && stopped, true);
+});
+
+test("editor app shortcuts preserve composition, dialog and seal guards while replacing resolved bindings", () => {
+  const state = initialization(true), api = state.window.__flowmuxWindowsEditorShortcuts;
+  const binding = (code) => ({ action: "new-tab", chord: { code, ctrl: true, alt: false, shift: true } });
+  const key = (extra = {}) => ({ code: "KeyT", key: "t", ctrlKey: true, shiftKey: true, ...extra });
+  const dispatch = (extra = {}) => api.test(key(extra));
+  const releases = () => dispatch({ type: "keyup" });
+  api.configure("revision-2", [binding("KeyT")]);
+  assert.deepEqual(state.sent.at(-1), { kind: "keybindings_applied", revision: "revision-2", bindings: [binding("KeyT")], signal_id: "s", credential: "private" });
+  let localKeys = 0;
+  state.window.addEventListener("keydown", () => { localKeys += 1; });
+  assert.equal(dispatch(), true);
+  assert.deepEqual(state.sent.at(-1), { kind: "shortcut", action: "new-tab", chord: binding("KeyT").chord,
+    revision: "revision-2", signal_id: "s", credential: "private" });
+  const sent = state.sent.length;
+  assert.equal(dispatch({ repeat: true }), true);
+  assert.equal(state.sent.length, sent, "repeat consumes without another native action");
+  api.test({ type: "compositionstart", data: "한" });
+  assert.equal(dispatch(), false);
+  api.configure("revision-3", [binding("KeyY")]);
+  api.test({ type: "compositionend", data: "한" });
+  assert.equal(dispatch({ code: "KeyY" }), false);
+  assert.equal(api.test({ type: "keyup", code: "ControlLeft", key: "Control" }), false);
+  assert.equal(dispatch({ code: "KeyY" }), false, "modifier release must not complete composition settling");
+  releases();
+  assert.equal(dispatch(), false, "old binding was removed");
+  assert.equal(dispatch({ code: "KeyY" }), true);
+  assert.equal(state.sent.at(-1).revision, "revision-3");
+  api.configure("revision-4", [binding("KeyT")]);
+  for (const blocked of [{ isComposing: true }, { keyCode: 229 }, { key: "Dead" }, { key: "Process" }, { altGraph: true }, { metaKey: true }]) {
+    assert.equal(dispatch(blocked), false);
+    releases();
+  }
+  api.test({ code: "AltRight", key: "Alt", altKey: true });
+  assert.equal(dispatch(), false);
+  api.test({ type: "blur" });
+  assert.equal(dispatch(), true, "blur releases stale right-Alt state");
+  const dialog = new state.Dialog(); dialog.showModal();
+  const beforeBlocked = state.sent.length;
+  assert.equal(dispatch(), false);
+  dialog.open = false;
+  state.window.__flowmuxWindowsEditorSealed = true;
+  assert.equal(dispatch(), false);
+  api.test({ code: "AltRight", key: "Alt", altKey: true });
+  api.test({ type: "keyup", code: "AltRight", key: "Alt" });
+  assert.equal(state.sent.length, beforeBlocked);
+  state.window.__flowmuxWindowsEditorSealed = false;
+  assert.equal(dispatch(), true);
+  const beforeInvalid = JSON.stringify(api.snapshot());
+  assert.throws(() => api.configure("bad", [binding("KeyT"), binding("KeyT")]), /Conflicting/);
+  assert.equal(JSON.stringify(api.snapshot()), beforeInvalid);
+  api.configure("revision-5", []);
+  assert.equal(dispatch(), false);
+  assert.equal(localKeys, 0, "synthetic unhandled keys never reach Monaco's text handlers");
+  state.window.dispatchEvent({ type: "keydown", code: "KeyQ", key: "q",
+    preventDefault() { assert.fail("ordinary text must remain available to Monaco"); },
+    stopImmediatePropagation() { assert.fail("ordinary text must remain available to Monaco"); } });
+  assert.equal(localKeys, 1, "ordinary unmatched keys still reach local editor handlers");
+  assert.equal(initialization(false).window.__flowmuxWindowsEditorShortcuts.test, undefined);
 });
 
 function harness(content = "hello", empty = false) {

@@ -16,6 +16,73 @@
       try { forward({ kind: "editor_message", message: JSON.parse(raw) }); } catch (_) { /* invalid bridge input */ }
     },
   } } };
+  const shortcuts = new PaneShortcuts();
+  const handledShortcuts = new WeakSet();
+  const testEvents = new WeakSet();
+  let composing = false, settling = false;
+  const modifier = (event) => /^(Control|Shift|Alt|Meta)(Left|Right)$/.test(event.code) ||
+    ["Control", "Shift", "Alt", "Meta", "AltGraph"].includes(event.key);
+  window.addEventListener("compositionstart", () => { composing = true; settling = true; }, true);
+  window.addEventListener("compositionend", () => { composing = false; settling = true; }, true);
+  window.addEventListener("blur", () => {
+    shortcuts.reset(); composing = false; settling = false;
+  });
+  const shortcutKey = (event) => {
+    if (event.type === "keydown" && (event.isComposing || event.keyCode === 229 ||
+        ["Dead", "Process", "Unidentified"].includes(event.key))) settling = true;
+    const action = shortcuts.event(event, composing || settling ||
+      window.__flowmuxWindowsEditorSealed === true || !!document.querySelector("dialog[open]"));
+    if (event.type === "keyup" && !modifier(event) && !composing) settling = false;
+    if (!action) return;
+    handledShortcuts.add(event);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (action !== "consume") forward({ kind: "shortcut", action: action.action,
+      chord: action.chord, revision: action.revision });
+  };
+  // Track releases even while sealed, ahead of the input barrier below.
+  window.addEventListener("keydown", shortcutKey, true);
+  window.addEventListener("keyup", shortcutKey, true);
+  if (configuration.background) {
+    const finishTestKey = (event) => {
+      if (testEvents.has(event)) { event.preventDefault(); event.stopImmediatePropagation(); }
+    };
+    window.addEventListener("keydown", finishTestKey, true);
+    window.addEventListener("keyup", finishTestKey, true);
+  }
+  const snapshot = () => ({ revision: shortcuts.revision, bindings: shortcuts.snapshot() });
+  const shortcutApi = {
+    configure(revision, bindings) {
+      shortcuts.configure(revision, bindings);
+      const applied = snapshot();
+      forward({ kind: "keybindings_applied", ...applied });
+      return applied;
+    },
+    snapshot,
+  };
+  if (configuration.background) {
+    // Uses the production DOM listeners. Synthetic events are not OS IME proof.
+    shortcutApi.test = (spec) => {
+      const type = spec.type ?? "keydown";
+      let event;
+      if (type === "compositionstart" || type === "compositionend") {
+        event = new CompositionEvent(type, { bubbles: true, data: spec.data ?? "" });
+      } else if (type === "blur") {
+        event = new Event(type);
+      } else if (type === "keydown" || type === "keyup") {
+        event = new KeyboardEvent(type, { bubbles: true, cancelable: true,
+          code: spec.code ?? "", key: spec.key ?? spec.code ?? "", keyCode: spec.keyCode ?? 0,
+          ctrlKey: !!spec.ctrlKey, altKey: !!spec.altKey, shiftKey: !!spec.shiftKey,
+          metaKey: !!spec.metaKey, repeat: !!spec.repeat, isComposing: !!spec.isComposing,
+          modifierAltGraph: !!spec.altGraph });
+      } else { throw new Error("Unsupported editor shortcut test event"); }
+      testEvents.add(event);
+      window.dispatchEvent(event);
+      return handledShortcuts.has(event);
+    };
+  }
+  Object.defineProperty(window, "__flowmuxWindowsEditorShortcuts", { value: Object.freeze(shortcutApi) });
+  shortcutApi.configure(configuration.revision, configuration.bindings);
   // Register ahead of the frontend's key handlers. A close barrier seals native
   // edits and dialog/pointer actions until the host explicitly releases it.
   const blockSealedInput = (event) => {

@@ -2350,16 +2350,7 @@ impl App {
             }
             #[cfg(debug_assertions)]
             ClientMessage::ShortcutTested { request, forwarded } => {
-                if let Some(pending) = self.pending_terminal_ui_tests.get(&request) {
-                    anyhow::ensure!(
-                        self.background_test && pending.surface == id,
-                        "invalid shortcut test acknowledgement"
-                    );
-                    let pending = self.pending_terminal_ui_tests.remove(&request).unwrap();
-                    let _ = pending
-                        .reply
-                        .try_send(json!({"surface":id,"request":request,"forwarded":forwarded}));
-                }
+                self.shortcut_tested(id, request, forwarded)?;
             }
             ClientMessage::Title { title } => {
                 let title: String = title
@@ -3471,7 +3462,7 @@ impl App {
                     }
                 ) {
                     return Ok(Some(
-                        json!({"revision":self.settings.revision,"scope":"terminal","catalog":crate::keybindings::catalog(&self.settings.keybindings)?,"bindings":crate::keybindings::resolved(&self.settings.keybindings)?}),
+                        json!({"revision":self.settings.revision,"scope":"terminal_and_editor","catalog":crate::keybindings::catalog(&self.settings.keybindings)?,"bindings":crate::keybindings::resolved(&self.settings.keybindings)?}),
                     ));
                 }
                 if matches!(op, crate::command::SettingsOp::Show) {

@@ -43,13 +43,14 @@ impl View {
         context: &mut WebContext,
         assets: &EditorAssets,
         background: bool,
+        settings: &crate::settings::Document,
         emit: impl Fn(String, String) + 'static,
     ) -> anyhow::Result<Self> {
         let holder = surface_host::Host::new(window)?;
         let window = holder.window;
         let url = assets.url(surface);
         let credential = Uuid::new_v4().to_string();
-        let init = initialization(&url, surface, &credential, background)?;
+        let init = initialization(&url, surface, &credential, background, settings)?;
         let navigation_url = url.clone();
         let message_url = url.clone();
         let navigated = Cell::new(false);
@@ -98,6 +99,15 @@ impl View {
             window,
             bounds: None,
         })
+    }
+
+    pub fn keybindings(&self, settings: &crate::settings::Document) -> anyhow::Result<()> {
+        self.view.evaluate_script(&format!(
+            "window.__flowmuxWindowsEditorShortcuts.configure({}, {});",
+            serde_json::to_string(&settings.revision)?,
+            serde_json::to_string(&crate::keybindings::resolved(&settings.keybindings)?)?
+        ))?;
+        Ok(())
     }
 
     pub fn layout(&mut self, area: Option<model::Rect>) -> anyhow::Result<()> {
@@ -154,12 +164,16 @@ fn initialization(
     surface: SurfaceId,
     credential: &str,
     background: bool,
+    settings: &crate::settings::Document,
 ) -> anyhow::Result<String> {
     let configuration = serde_json::to_string(&serde_json::json!({
         "url": url, "signal_id": surface.0, "credential": credential, "background": background,
+        "revision": settings.revision, "bindings": crate::keybindings::resolved(&settings.keybindings)?,
     }))?;
     Ok(format!(
-        "({})({configuration});",
+        "(() => {{\n{}\n({})({configuration});\n}})();",
+        include_str!("../../terminal/src/pane-shortcuts.mjs")
+            .replace("export class PaneShortcuts", "class PaneShortcuts"),
         include_str!("../../editor/initialize.js")
     ))
 }

@@ -32,7 +32,7 @@ function Select-Entry($Tree,[string]$Id){
 function Closed {return Await {param($t) -not $t.command_palette -or -not $t.command_palette.open}}
 function Owner-Restored($Tree){Require ([OptionsFixture]::Describe([long]$Tree.window_handle,$owned.Id).Enabled) 'Main owner remains disabled'}
 function Same-Identity($Expected){$actual=Request @('identify');Require ($actual.workspace -ceq $Expected.workspace -and $actual.pane -ceq $Expected.pane -and $actual.surface -ceq $Expected.surface) 'Palette selected the wrong workspace/pane/tab UUID'}
-function Open-Palette([string]$Surface){$reply=Request @('test-shortcut',$Surface,'{"code":"KeyP","key":"p","ctrlKey":true,"shiftKey":true}');Require ($reply.surface -ceq $Surface -and -not $reply.forwarded) 'Ctrl+Shift+P was not handled by the actual terminal hook';return Await {param($t) $t.command_palette.open}}
+function Open-Palette([string]$Surface){$reply=Request @('test-shortcut',$Surface,'{"code":"KeyP","key":"p","ctrlKey":true,"shiftKey":true}');Require ($reply.surface -ceq $Surface -and -not $reply.forwarded) 'Ctrl+Shift+P was not handled by the actual renderer hook';return Await {param($t) $t.command_palette.open}}
 function Menu-Open{$tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'command_palette'});Require ($button.Count -eq 1) 'Command Palette toolbar entry missing';$handle=[long]$button[0].handle;[OptionsFixture]::Click([OptionsFixture]::Parent($handle,$owned.Id),$handle,$owned.Id);return Await {param($t) $t.command_palette.open}}
 function Execute($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEnter([long]$panel.query_handle,$owned.Id)}
 function Dismiss($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);$tree=Await {param($t) -not $t.command_palette -or -not $t.command_palette.open};Require ([OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Enabled) 'Palette dismissal left its main owner disabled';return $tree}
@@ -42,6 +42,10 @@ function Copy-Feedback([string]$Surface,[string]$Expected){
     Require ([OptionsFixture]::Parent([long]$feedback.window,$owned.Id) -eq $feedback.owner -and [OptionsFixture]::Text([long]$feedback.window,$owned.Id) -ceq $feedback.message) 'Copy result is not the actual owned hidden native feedback';Owner-Restored $tree
     return $tree
 }
+function Editor-Bindings([string]$Surface){$revision=(Request @('settings','show')).document.revision;return Await {param($t) @($t.editors|Where-Object {$_.id -ceq $Surface -and $_.keybindings_revision -ceq $revision}).Count -eq 1}}
+function Editor-Key([string]$Surface,[hashtable]$Event,[bool]$Forwarded){$reply=Request @('test-shortcut',$Surface,($Event|ConvertTo-Json -Compress));Require ($reply.surface -ceq $Surface -and $reply.forwarded -eq $Forwarded) 'Editor shortcut renderer ACK differs'}
+function Editor-Copy([string]$Surface,[hashtable]$Event,[string]$Expected){$before=Tree;Editor-Key $Surface $Event $false;$null=Await {param($t) $t.copy_feedback.source -ceq $Surface -and $t.copy_feedback.window -ne $before.copy_feedback.window};return Copy-Feedback $Surface $Expected}
+function Editor-NoAction([string]$Surface,[hashtable]$Event,[bool]$Forwarded){$before=Tree;Editor-Key $Surface $Event $Forwarded;$after=Tree;Require (-not $after.command_palette.open -and (Identities $after) -ceq (Identities $before) -and (-not $after.copy_feedback -or ($before.copy_feedback -and $after.copy_feedback.window -eq $before.copy_feedback.window -and $after.copy_feedback.source -ceq $before.copy_feedback.source -and $after.copy_feedback.text -ceq $before.copy_feedback.text))) 'Guarded or unbound editor shortcut dispatched a host action'}
 function Workspace($Tree,[string]$Id){$found=@($Tree.workspaces|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable workspace';return $found[0]}
 function Workspace-Caption($Tree,[string]$Id,[string]$Expected){
     $rows=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Id -and $_.layout_visible});Require ($rows.Count -eq 1) 'Named workspace has no unique visible native sidebar row'
@@ -171,6 +175,29 @@ try {
         $tree=Await {param($t) @($t.editors|Where-Object {$_.id -ceq $editor.surface -and $_.ready -and -not $_.dirty}).Count -eq 1};$editorBefore=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0]
         $tree=Menu-Open;$tree=Query $tree 'Copy focused pane path';$tree=Select-Entry $tree 'action:copy-pane-path';Execute $tree;$tree=Closed;$tree=Copy-Feedback $editor.surface $editorBefore.workspace_root;$editorAfter=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0]
         Require ($editorAfter.view_handle -eq $editorBefore.view_handle -and -not $editorAfter.dirty -and $editorAfter.workspace_root -ceq $editorBefore.workspace_root -and (Identities $tree) -ceq $identities -and $editorFixture.BytesEqual($editorPath,[EditorFixture]::Encode([EditorFixture]::Original,$false,$false))) 'Editor copy request changed its retained view, workspace root, document bytes or terminal PIDs'
+        # Synthetic DOM events exercise the editor's production listener and
+        # application guards; they do not establish physical keyboard/IME routing.
+        $tree=Editor-Bindings $editor.surface;$readReply=Request @('editor','command',$editor.surface,'read');$editorReadBefore=if($readReply.psobject.Properties.Name -contains 'result'){$readReply.result}else{$readReply}
+        Require ($editorReadBefore.search_open -eq $false) 'Editor search dialog was already open before the shortcut regression'
+        $tree=Open-Palette $editor.surface;$tree=Dismiss $tree
+        $copyKey=@{code='KeyK';key='k';ctrlKey=$true;shiftKey=$true};$tree=Editor-Copy $editor.surface $copyKey $editorBefore.workspace_root
+        Request @('settings','keybindings','set','copy-pane-path','Ctrl+Alt+H')|Out-Null;$tree=Editor-Bindings $editor.surface;Editor-NoAction $editor.surface $copyKey $true
+        $reboundCopy=@{code='KeyH';key='h';ctrlKey=$true;altKey=$true};$tree=Editor-Copy $editor.surface $reboundCopy $editorBefore.workspace_root
+        Request @('settings','keybindings','set','copy-pane-path')|Out-Null;$tree=Editor-Bindings $editor.surface;Editor-NoAction $editor.surface $reboundCopy $true
+        Request @('settings','keybindings','clear','copy-pane-path')|Out-Null;$tree=Editor-Bindings $editor.surface;$tree=Editor-Copy $editor.surface $copyKey $editorBefore.workspace_root
+        $paletteKey=@{code='KeyP';key='p';ctrlKey=$true;shiftKey=$true}
+        foreach($guard in @(@{repeat=$true;forwarded=$false},@{isComposing=$true;forwarded=$true},@{keyCode=229;forwarded=$true},@{altGraph=$true;forwarded=$true})){$event=$paletteKey.Clone();foreach($key in $guard.Keys){if($key -ne 'forwarded'){$event[$key]=$guard[$key]}};Editor-NoAction $editor.surface $event $guard.forwarded;Editor-Key $editor.surface @{type='keyup';code='KeyP';key='p'} $true}
+        Request @('test-shortcut',$editor.surface,'{"type":"compositionstart"}')|Out-Null
+        try{Editor-NoAction $editor.surface $paletteKey $true}finally{Request @('test-shortcut',$editor.surface,'{"type":"compositionend"}')|Out-Null}
+        Editor-Key $editor.surface @{type='keyup';code='KeyP';key='p'} $true;$tree=Open-Palette $editor.surface;$tree=Dismiss $tree
+        Request @('focus-tab',$initial.surface)|Out-Null;Same-Identity $initial;Editor-NoAction $editor.surface $paletteKey $false;Same-Identity $initial
+        Request @('focus-tab',$editor.surface)|Out-Null;$tree=Open-Palette $editor.surface;$tree=Dismiss $tree
+        Editor-Key $editor.surface @{code='KeyF';key='f';ctrlKey=$true;shiftKey=$true} $false
+        $readReply=Request @('editor','command',$editor.surface,'read');$searchRead=if($readReply.psobject.Properties.Name -contains 'result'){$readReply.result}else{$readReply};Require ($searchRead.search_open -eq $true -and $searchRead.search_mode -ceq 'workspace') 'Ctrl+Shift+F did not open the actual editor workspace search dialog'
+        Editor-NoAction $editor.surface $paletteKey $true
+        $readReply=Request @('editor','command',$editor.surface,'read');$editorReadAfter=if($readReply.psobject.Properties.Name -contains 'result'){$readReply.result}else{$readReply};$tree=Tree;$editorAfter=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0]
+        Require ($editorReadAfter.search_open -eq $true -and $editorReadAfter.search_mode -ceq 'workspace') 'Blocked Ctrl+Shift+P closed or changed the editor workspace search dialog'
+        Require ($editorReadBefore.content -ceq [EditorFixture]::Original -and $editorReadAfter.content -ceq $editorReadBefore.content -and $editorReadAfter.document_id -ceq $editorReadBefore.document_id -and $editorReadAfter.active_version -eq $editorReadBefore.active_version -and $editorReadAfter.document_focused -eq $false -and -not $editorAfter.dirty -and $editorAfter.view_handle -eq $editorBefore.view_handle -and (Identities $tree) -ceq $identities -and $editorFixture.BytesEqual($editorPath,[EditorFixture]::Encode([EditorFixture]::Original,$false,$false))) 'Editor shortcuts changed model content/version/focus, native view, disk bytes or terminal PIDs';Passed 'editor-renderer-palette-copy-rebind-unbind-reset-composition-229-AltGraph-repeat-and-inactive-source-guards-preserve-document'
         Request @('close-tab',$editor.surface)|Out-Null;$tree=Await {param($t) @($t.editors).Count -eq 0};Require ((Identities $tree) -ceq $identities) 'Closing the copy-path editor changed terminal PIDs';Passed 'editor-palette-copy-uses-workspace-root-and-preserves-clean-document-and-view'
     }finally{$editorFixture.Dispose()}
 

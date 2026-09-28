@@ -201,8 +201,12 @@ impl App {
                 anyhow::ensure!(
                     self.surfaces
                         .get(&self.active())
-                        .is_some_and(|s| s.ready && !s.restoring),
-                    "Find requires a ready terminal"
+                        .is_some_and(|s| s.ready && !s.restoring)
+                        || self
+                            .editors
+                            .get(&self.active())
+                            .is_some_and(|e| e.can_move()),
+                    "Find requires a ready terminal or editor"
                 );
             }
             Target::Keybinding(action) if action.as_str().starts_with("workspace-") => {

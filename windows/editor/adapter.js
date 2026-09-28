@@ -168,6 +168,8 @@ function windowsRead() {
     total_bytes: 0,
     diff_visible: diffDocumentId !== null,
     close_confirmation: closeDialog.open,
+    search_open: searchDialog.open,
+    search_mode: searchMode,
     recovery_available: recoveryDialogDocumentId !== null,
     composing: windowsComposingEditors.size !== 0,
     sealed: windowsSealedBarrier !== null || windowsUiSaveAll !== null,
