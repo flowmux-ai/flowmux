@@ -386,6 +386,12 @@ impl Browser {
         }
         Ok(())
     }
+    pub(super) fn handle_address_message(&self, message: &MSG) -> bool {
+        self.visible
+            && !self.native_closed.get()
+            && message.hwnd == self.chrome.address
+            && chrome::handle_message(message)
+    }
     fn navigate(&mut self, url: &str) -> anyhow::Result<()> {
         anyhow::ensure!(!self.preview_blocked.get(), "{PREVIEW_EXPIRED}");
         let url = domain::url(url)?;
@@ -841,6 +847,15 @@ impl App {
                 }
             }
             Signal::Ui(id, mut action) => {
+                if self.close_request.is_some()
+                    || self
+                        .browsers
+                        .get(&id)
+                        .is_none_or(|browser| !browser.visible || browser.native_closed.get())
+                    || unsafe { IsWindowEnabled(self.surface_window(id)) } == 0
+                {
+                    return Ok(());
+                }
                 if action == 11 {
                     let Some(browser) = self.browsers.get(&id) else {
                         return Ok(());
@@ -880,9 +895,6 @@ impl App {
                 }
                 if action == 9 {
                     self.download_show_for(id)?;
-                    return Ok(());
-                }
-                if self.close_request.is_some() {
                     return Ok(());
                 }
                 if let Some(browser) = self.browsers.get_mut(&id) {

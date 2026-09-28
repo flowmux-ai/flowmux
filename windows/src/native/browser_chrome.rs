@@ -1,12 +1,139 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Native child controls; never create a desktop window or intercept IME Enter.
+//! Native child controls; address navigation preserves native EDIT composition.
 use super::super::chrome as shell_chrome;
 use super::*;
 use windows_sys::Win32::UI::{
     Controls::EM_SETLIMITTEXT,
-    Input::KeyboardAndMouse::{EnableWindow, GetFocus},
+    Input::KeyboardAndMouse::{EnableWindow, GetFocus, GetKeyState, IsWindowEnabled},
+    Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
-thread_local! { static OWNERS: RefCell<HashMap<isize, SurfaceId>> = RefCell::new(HashMap::new()); }
+const ADDRESS_SUBCLASS: usize = 0x464d_4241;
+#[derive(Clone, Copy, Default)]
+struct AddressKeys {
+    composing: bool,
+    settling: bool,
+    modifiers: u16,
+    enter_down: bool,
+    blurred: bool,
+}
+impl AddressKeys {
+    fn update(&mut self, message: u32, w: WPARAM, l: LPARAM) -> (bool, bool) {
+        match message {
+            WM_IME_STARTCOMPOSITION => {
+                self.composing = true;
+                self.settling = true;
+            }
+            WM_IME_ENDCOMPOSITION => {
+                self.composing = false;
+                self.settling = true;
+            }
+            WM_SETFOCUS => self.blurred = false,
+            WM_KILLFOCUS => {
+                self.composing = false;
+                self.modifiers = 0;
+                self.enter_down = false;
+                self.blurred = true;
+            }
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP => {
+                let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
+                if let Some(bit) = crate::keybindings::native_modifier(w, l) {
+                    if down {
+                        self.modifiers |= bit;
+                    } else {
+                        self.modifiers &= !bit;
+                    }
+                } else if !down {
+                    self.settling = false;
+                }
+                if down && w == 229 {
+                    self.settling = true;
+                }
+                if w == 13 {
+                    let repeated = self.enter_down || l as usize & (1 << 30) != 0;
+                    self.enter_down = down;
+                    let plain = down
+                        && message == WM_KEYDOWN
+                        && self.modifiers == 0
+                        && l as usize & (1 << 29) == 0
+                        && !self.composing
+                        && !self.settling
+                        && !self.blurred;
+                    return (plain, repeated);
+                }
+            }
+            _ => {}
+        }
+        (false, false)
+    }
+}
+thread_local! {
+    static OWNERS: RefCell<HashMap<isize, SurfaceId>> = RefCell::new(HashMap::new());
+    static ADDRESS_KEYS: RefCell<HashMap<isize, AddressKeys>> = RefCell::new(HashMap::new());
+}
+unsafe extern "system" fn address_proc(
+    window: HWND,
+    message: u32,
+    w: WPARAM,
+    l: LPARAM,
+    id: usize,
+    _: usize,
+) -> LRESULT {
+    ADDRESS_KEYS.with(|keys| {
+        if let Some(keys) = keys.borrow_mut().get_mut(&(window as isize)) {
+            keys.update(message, w, l);
+        }
+    });
+    if message == WM_NCDESTROY {
+        ADDRESS_KEYS.with(|keys| keys.borrow_mut().remove(&(window as isize)));
+        RemoveWindowSubclass(window, Some(address_proc), id);
+    }
+    DefSubclassProc(window, message, w, l)
+}
+
+pub(super) fn handle_message(message: &MSG) -> bool {
+    if !matches!(
+        message.message,
+        WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
+    ) {
+        return false;
+    }
+    let state = ADDRESS_KEYS.with(|keys| {
+        keys.borrow_mut()
+            .get_mut(&(message.hwnd as isize))
+            .map(|keys| keys.update(message.message, message.wParam, message.lParam))
+    });
+    let Some((true, repeated)) = state else {
+        return false;
+    };
+    unsafe {
+        let root = GetAncestor(message.hwnd, GA_ROOT);
+        if IsWindowEnabled(message.hwnd) == 0 || IsWindowEnabled(root) == 0 {
+            return false;
+        }
+        // A modifier may already be held when the user clicks the address EDIT.
+        // Inspect this UI thread's queued key state only for the focused visible
+        // control; background probes rely entirely on their owned key messages.
+        if GetFocus() == message.hwnd
+            && IsWindowVisible(root) != 0
+            && [0x10, 0x11, 0x12, 0x5b, 0x5c]
+                .into_iter()
+                .any(|key| GetKeyState(key) < 0)
+        {
+            return false;
+        }
+    }
+    let owner = unsafe { GetParent(message.hwnd) };
+    let surface = OWNERS.with(|map| map.borrow().get(&(owner as isize)).copied());
+    let Some(surface) = surface else {
+        return false;
+    };
+    if !repeated {
+        post(Event::Browser(browser::Signal::Ui(surface, 5)));
+    }
+    // Consume before TranslateMessage: no generated WM_CHAR, and IME/modified
+    // keys continue through the complete native EDIT message path above.
+    true
+}
 unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if let Some(result) = shell_chrome::message(hwnd, msg, w, l) {
         return result;
@@ -31,7 +158,9 @@ pub(super) struct Chrome {
 impl Drop for Chrome {
     fn drop(&mut self) {
         OWNERS.with(|map| map.borrow_mut().remove(&(self.window as isize)));
+        ADDRESS_KEYS.with(|keys| keys.borrow_mut().remove(&(self.address as isize)));
         unsafe {
+            RemoveWindowSubclass(self.address, Some(address_proc), ADDRESS_SUBCLASS);
             DestroyWindow(self.window);
         }
     }
@@ -114,6 +243,16 @@ impl Chrome {
                 crate::browser::MAX_URL_BYTES,
                 0,
             );
+            ADDRESS_KEYS.with(|keys| {
+                keys.borrow_mut()
+                    .insert(chrome.address as isize, AddressKeys::default())
+            });
+            checked(SetWindowSubclass(
+                chrome.address,
+                Some(address_proc),
+                ADDRESS_SUBCLASS,
+                0,
+            ))?;
             chrome.status = chrome.child("STATIC", "", 0, 21)?;
             chrome.more = chrome.child(
                 "BUTTON",
@@ -322,7 +461,12 @@ impl Chrome {
                 wide(format!("Browser tools — {status}")).as_ptr(),
             );
             // Never overwrite live native EDIT composition/typing on a timer.
-            if GetFocus() != self.address && self.address() != url {
+            let guarded = ADDRESS_KEYS.with(|keys| {
+                keys.borrow()
+                    .get(&(self.address as isize))
+                    .is_some_and(|keys| keys.composing || keys.settling)
+            });
+            if GetFocus() != self.address && !guarded && self.address() != url {
                 SetWindowTextW(self.address, wide(url).as_ptr());
             }
             EnableWindow(self.buttons[0], back as i32);

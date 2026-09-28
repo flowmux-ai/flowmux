@@ -115,6 +115,14 @@ function Wait-Page([string]$Pane,[string]$Suffix,[string]$Title) {
         Start-Sleep -Milliseconds 50
     } while ($true)
 }
+function Address-Unchanged($Before,[string]$Draft) {
+    # Queued owned HWND messages precede this IPC roundtrip. This tests the
+    # native guard/dispatch path, not physical Korean IME or desktop focus.
+    $tree=Tree;$after=@($tree.browsers|Where-Object {$_.id -eq $Before.id})
+    if($after.Count -ne 1 -or $after[0].url -cne $Before.url -or $after[0].generation -ne $Before.generation -or $after[0].view_handle -ne $Before.view_handle -or -not (Same-Text ([BrowserFixture]::ReadText($Before.address_handle)) $Draft)){throw 'Guarded address input navigated, replaced its view or changed raw Unicode draft'}
+    $running=@($tree.surfaces|Where-Object {$_.id -eq $terminal.id})
+    if($running.Count -ne 1 -or $running[0].pid -ne $terminal.pid -or -not $running[0].running){throw 'Address input changed the sibling terminal process'}
+}
 function Check-Toolbar($Status) {
     $chrome=@([ChromeFixture]::Read([long]$Status.chrome_handle,$process.Id));$shown=@($chrome|Where-Object Shown)
     $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$Status.chrome_handle));$area=[ChromeFixture]::Size([long]$Status.chrome_handle,$process.Id)
@@ -255,9 +263,34 @@ try {
     $evidence.checks+=@{name='narrow_compact_and_restored_browser_toolbar_has_no_overlap';passed=$true;narrow=$narrowControls;compact=$compactControls}
 
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
-    Request @('browser','navigate',$first.pane,($origin+'/한글?q=한#😀'))|Out-Null
+    $addressBefore=Request @('browser','status',$first.pane);$address=[long]$addressBefore.address_handle;$addressDraft=$origin+'/한글?q=한#😀'
+    [OptionsFixture]::SetText([long]$addressBefore.chrome_handle,$address,$process.Id,$addressDraft)
+    [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$true)
+    [OptionsFixture]::PostKey($address,$process.Id,13,$false,$false);Address-Unchanged $addressBefore $addressDraft
+    [OptionsFixture]::PostKey($address,$process.Id,13,$true,$false);Address-Unchanged $addressBefore $addressDraft
+    [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$false)
+    # Neither a held Enter nor its repeat bit can mask a missing settling guard;
+    # releasing only a modifier must not settle the completed composition.
+    [OptionsFixture]::PostKey($address,$process.Id,17,$false,$false);[OptionsFixture]::PostKey($address,$process.Id,17,$true,$false)
+    [OptionsFixture]::PostKey($address,$process.Id,13,$false,$false);Address-Unchanged $addressBefore $addressDraft
+    [OptionsFixture]::PostKey($address,$process.Id,13,$true,$false)
+    [OptionsFixture]::PostKey($address,$process.Id,229,$false,$false)
+    [OptionsFixture]::PostKey($address,$process.Id,13,$false,$false);Address-Unchanged $addressBefore $addressDraft
+    [OptionsFixture]::PostKey($address,$process.Id,13,$true,$false);[OptionsFixture]::PostKey($address,$process.Id,229,$true,$false)
+    foreach($modifier in @(17,18,16)){
+        [OptionsFixture]::PostKey($address,$process.Id,$modifier,$false,$false)
+        [OptionsFixture]::PostEnter($address,$process.Id);Address-Unchanged $addressBefore $addressDraft
+        [OptionsFixture]::PostKey($address,$process.Id,$modifier,$true,$false)
+    }
+    [OptionsFixture]::PostEnter($address,$process.Id)
     $unicode=Wait-Page $first.pane '/%ED%95%9C%EA%B8%80' $oneTitle
     if ([BrowserFixture]::ReadText($unicode.address_handle) -ne $unicode.url -or -not (Same-Text (Eval-Page $first.pane 'decodeURI(location.href)') ($origin+'/한글?q=한#😀'))) {throw 'Unicode address changed codepoints'}
+    $addressLoad=Eval-Page $first.pane 'window.fixtureLoad';$repeatDraft=$origin+'/two?repeat-한'
+    [OptionsFixture]::SetText([long]$unicode.chrome_handle,$address,$process.Id,$repeatDraft)
+    [OptionsFixture]::PostKey($address,$process.Id,13,$false,$true);Address-Unchanged $unicode $repeatDraft
+    [OptionsFixture]::PostKey($address,$process.Id,13,$true,$false)
+    if((Eval-Page $first.pane 'window.fixtureLoad') -ne $addressLoad){throw 'Repeated address Enter reloaded the document'}
+    $evidence.checks+=@{name='native_address_enter_preserves_unicode_and_guards_composition_process_repeat_and_modifiers';passed=$true}
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/two'))|Out-Null
     $two=Wait-Page $first.pane '/two' $twoTitle
@@ -326,6 +359,17 @@ try {
     $down=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane,'--down')).browser_pane_opened
     if ($down.placement_strategy -ne 'split_down' -or $down.pane -eq $first.pane) {throw 'Down split differs'}
     Wait-Page $down.pane '/one' $oneTitle|Out-Null
+    $addressTree=Tree;$inactiveAddress=@($addressTree.browsers|Where-Object {$_.id -eq $first.surface})[0];$currentBefore=Request @('identify')
+    if($inactiveAddress.visible){throw 'Inactive address fixture still has a visible browser surface'}
+    $inactiveDraft=$origin+'/two?inactive-한'
+    [OptionsFixture]::SetText([long]$inactiveAddress.chrome_handle,[long]$inactiveAddress.address_handle,$process.Id,$inactiveDraft)
+    [OptionsFixture]::PostEnter([long]$inactiveAddress.address_handle,$process.Id);Address-Unchanged $inactiveAddress $inactiveDraft
+    $addressTreeAfter=Tree;$currentAfter=Request @('identify')
+    if($currentAfter.surface -ne $currentBefore.surface){throw 'Inactive address Enter changed the selected sibling surface'}
+    foreach($other in @($addressTree.browsers|Where-Object {$_.id -ne $first.surface})){
+        $same=@($addressTreeAfter.browsers|Where-Object {$_.id -eq $other.id})
+        if($same.Count -ne 1 -or $same[0].url -cne $other.url -or $same[0].generation -ne $other.generation -or $same[0].view_handle -ne $other.view_handle){throw 'Inactive address Enter was routed to a sibling browser'}
+    }
     Request @('focus-tab',$first.surface)|Out-Null
     Eval-Page $first.pane 'window.retained="한글 한 é 😀";localStorage.setItem("browser-persist",window.retained);null'|Out-Null
     $beforeMove=Request @('browser','status',$first.pane);$view=$beforeMove.view_handle
@@ -470,6 +514,11 @@ try {
     [OptionsFixture]::Click([long]$afterMainClose.chrome_handle,[long]$go[0].Handle,$process.Id)
     $controlled=Wait-Page $solePane '#after-main-close' $oneTitle
     if ($controlled.view_handle -ne $soleStatus.view_handle -or -not (Same-Text (Eval-Page $solePane 'window.survivor') '분리 생존 한 é 😀')) {throw 'Native browser controls failed or recreated the surviving same-document state'}
+    $detachedDraft=$origin+'/one#address-enter-한글-한-é-😀'
+    [OptionsFixture]::SetText([long]$controlled.chrome_handle,[long]$controlled.address_handle,$process.Id,$detachedDraft)
+    [OptionsFixture]::PostEnter([long]$controlled.address_handle,$process.Id)
+    $controlled=Wait-Page $solePane '#address-enter-' $oneTitle
+    if($controlled.view_handle -ne $soleStatus.view_handle -or $controlled.holder.window -ne $soleStatus.holder.window -or -not (Same-Text (Eval-Page $solePane 'decodeURI(location.href)') $detachedDraft) -or -not (Same-Text (Eval-Page $solePane 'window.survivor') '분리 생존 한 é 😀')){throw 'Detached address Enter lost its original view, DOM or Unicode URL'}
     Request @('browser','find-show',$solePane)|Out-Null
     if (-not (Request @('browser','find',$solePane,$oneTitle)).found) {throw 'Find failed after main window close'}
     Check-Find $solePane ([long]$soleFrame.window_handle) $oneTitle|Out-Null

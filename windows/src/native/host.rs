@@ -1014,6 +1014,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.downloads.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
                 && !app
+                    .browsers
+                    .values()
+                    .any(|browser| browser.handle_address_message(&message))
+                && !app
                     .metadata
                     .as_ref()
                     .is_some_and(|p| p.handle_message(&message))
