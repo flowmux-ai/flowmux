@@ -104,6 +104,15 @@ try {
     Shortcut $active @{code='KeyU';key='u';ctrlKey=$true;altKey=$true} $false;$tree=Await-Tree 4;$active=(Request @('identify')).surface;$status=Await {param($s) Ack $s};$identities=Identities $tree
     $evidence.checks+=@{name='comma_separated_Enter_OK_updates_row_and_renderer_both_chords_create_one_terminal_each';passed=$true}
 
+    # Keep the renderer guards separate from the native capture-popup guards.
+    $rebound=@{code='KeyY';key='y';ctrlKey=$true;altKey=$true};Require (Bound $status 'new-surface' 'KeyY' $true $true $false) 'Renderer guard checks require an actually bound chord'
+    foreach($guardEvent in @(@{repeat=$true;forwarded=$false},@{isComposing=$true;forwarded=$true},@{keyCode=229;forwarded=$true},@{altGraph=$true;forwarded=$true},@{key='Dead';forwarded=$true},@{metaKey=$true;forwarded=$true})){
+        $event=$rebound.Clone();$expected=$guardEvent.forwarded;foreach($name in $guardEvent.Keys){if($name -ne 'forwarded'){$event[$name]=$guardEvent[$name]}}
+        Shortcut $active $event $expected;Require ((Identities (Tree)) -ceq $identities) 'Guarded renderer shortcut dispatched or changed a terminal PID'
+    }
+    Shortcut $active @{code='AltRight';key='Alt';altKey=$true} $true;Shortcut $active $rebound $true;Shortcut $active @{type='keyup';code='AltRight';key='Alt'} $true;Require ((Identities (Tree)) -ceq $identities) 'Right-Alt renderer guard dispatched a shortcut'
+    $evidence.checks+=@{name='actual_renderer_repeat_composition_229_altgraph_dead_meta_rightalt_guards_do_not_dispatch';passed=$true;scope='controlled renderer hook, not physical keyboard routing or OS IME'}
+
     $status=Open-Editor $status 'new-surface';$edit=$status.options.keybindings.editor;$raw='Ctrl+Alt+Q, 한글 한 é 😀 &';[OptionsFixture]::CompositionGuard([long]$edit.window,[long]$edit.input,$owned.Id,$true);Draft $status 'Ctrl+Alt+Q'
     $status=Await {param($s) $s.options.keybindings.editor.composing -and (Editor-Text $s) -ceq 'Ctrl+Alt+Q'};$composingRevision=$status.document.revision;Edit-Click $status 'ok';$status=Request @('settings','show')
     Require ($status.options.keybindings.editor -and $status.options.keybindings.editor.id -eq $edit.id -and $status.options.keybindings.editor.composing -and -not $status.options.keybindings.editor.pending -and -not $status.options.keybindings.queued -and -not $status.options.keybindings.editor.error -and $status.document.revision -eq $composingRevision -and (Editor-Text $status) -ceq 'Ctrl+Alt+Q') 'OK committed, queued or rejected a valid draft during composition';Record 'valid-draft-OK-blocked-while-composing' $status;Draft $status $raw
@@ -142,7 +151,16 @@ try {
 
     $status=Open-Editor $status 'new-surface';Edit-Click $status 'unbind';Edit-Click $status 'ok';$status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and @($s.surfaces[0].applied.bindings|Where-Object {$_.action -eq 'new-surface'}).Count -eq 0};Require ([OptionsFixture]::Text([long](Row $status 'new-surface').accel_handle,$owned.Id) -ceq '(unbound)') 'Unbound row chip differs'
     $status=Open-Editor $status 'new-surface';Edit-Click $status 'reset';Edit-Click $status 'ok';$status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and (Bound $s 'new-surface' 'KeyT' $true $false $true)}
-    Require ($status.document.terminal.font_size -eq 17 -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled -and (Identities (Tree)) -ceq $identities) 'Unbind/Reset changed unrelated setting or left owner disabled';Record 'final-unbind-reset-modal-cleanup' $status;$evidence.checks+=@{name='OK_commits_unbind_reset_and_reenables_owner_without_terminal_recreation';passed=$true};$evidence.status='passed'
+    Require ($status.document.terminal.font_size -eq 17 -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled -and (Identities (Tree)) -ceq $identities) 'Unbind/Reset changed unrelated setting or left owner disabled';Record 'final-unbind-reset-modal-cleanup' $status;$evidence.checks+=@{name='OK_commits_unbind_reset_and_reenables_owner_without_terminal_recreation';passed=$true}
+    $generalBefore=$status.document.terminal|ConvertTo-Json -Depth 10 -Compress
+    Request @('settings','keybindings','set','toggle-pane-zoom','Ctrl+Alt+L')|Out-Null;$status=Await {param($s) (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyL' $true $true $false)}
+    Require ([OptionsFixture]::Text([long]$status.options.keybindings.reset,$owned.Id) -ceq 'Reset all keybindings to defaults') 'Reset-all native control differs';Native-Click ([long]$status.options.keybindings.reset)
+    $status=Await {param($s) -not $s.options.keybindings.pending -and -not $s.options.keybindings.queued -and (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Bound $s 'new-surface' 'KeyT' $true $false $true) -and @($s.surfaces[0].applied.bindings).Count -eq 29}
+    Require (($status.document.terminal|ConvertTo-Json -Depth 10 -Compress) -ceq $generalBefore -and (Identities (Tree)) -ceq $identities) 'Native Reset all changed general settings or terminal PIDs'
+    Click $status ([long]$status.options.close);$status=Await {param($s) -not $s.options.open};$tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});Require ($entry.Count -eq 1) 'Options reopen entry is missing';Native-Click ([long]$entry[0].handle)
+    $status=Await {param($s) $s.options.open};Click $status ([long]$status.options.tabs[2].handle);$status=Await {param($s) $s.options.page -eq 'keybindings' -and (Ack $s)}
+    Require (($status.document.terminal|ConvertTo-Json -Depth 10 -Compress) -ceq $generalBefore -and $status.document.terminal.font_size -eq 17 -and @($status.surfaces[0].applied.bindings).Count -eq 29 -and (Bound $status 'toggle-pane-zoom' 'KeyM' $true $true $false) -and (Identities (Tree)) -ceq $identities -and -not $status.options.keybindings.editor) 'Reset-all/close/reopen changed general settings, renderer bindings or surviving terminal PIDs'
+    Record 'reset-all-close-reopen' $status;$evidence.checks+=@{name='native_reset_all_and_options_reopen_preserve_general_settings_and_terminal_pids';passed=$true};$evidence.status='passed'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;$evidence.failureSettings=$status;throw}
 finally {
     $cleaning=$true
