@@ -542,11 +542,56 @@ regression checks. Final cases include deep-path Restore, expired queued Open,
 accepted close during paused preparation, direct/editor late quit, dirty close
 and failed-checkpoint unsealing. Controlled cases pause only exact owned hidden
 threads and record balanced resumption; they do not cover every timing race or
-exercise the physical picker. Final Windows debug/release builds, Clippy, format
-and all 172 actual Windows unit tests pass. Two earlier Restore failures remain
-preserved; package, entrypoint and cleanup results are recorded separately.
+exercise the physical picker. That stage's final Windows debug/release builds,
+Clippy, format and all 172 actual Windows unit tests pass. Two earlier Restore
+failures remain preserved; package, entrypoint and cleanup results are recorded
+separately.
+
+Automatic disk refresh is now implemented through one recursive native watcher
+per editor root and the ordered document worker. Notifications coalesce while
+one refresh is outstanding; each admitted scan checks all open files' bytes.
+Existing clean Monaco models can update without activating an inactive document
+or requesting focus. Dirty or deleted files retain their models and receive
+conflict status. Scheduling defers for busy editors, recent activity, Monaco
+composition, non-text Monaco widget focus and known editor HTML dialogs/diff
+state. Input remains guarded through actual frontend application acknowledgment,
+including after a timeout whose original I/O result is still pending. Close and
+model commands during busy work fail explicitly rather than being queued for replay; tab moves retain
+the editor/view identity without this readiness restriction.
+
+A partial scan error preserves completed clean replacements and their advancing
+versions alongside the error. `documents[].disk_status_known` exposes unresolved
+status; uncertainty can remain sticky after unlock or an empty successful retry.
+`automatic_refresh` distinguishes watch generations, applied acknowledgments,
+pending phase and failures. These counters are not write counts or proof of a
+fully successful scan. Unrelated root writes still cause full open-document
+scans. Automatic watcher restart, periodic fallback and explicit watched-root
+rename detection are not implemented. Known Monaco/HTML modal deferral is not
+physical IME or general desktop-modal acceptance.
+
+Eight final-debug-source hidden native refresh cases passed, with 58.397 seconds
+of summed runner time: clean/inactive updates, dirty conflict actions,
+deletion/recreation, equal-length restored-timestamp writes, partial denied reads,
+move/close ownership and write-burst/own-save handling. Actual Monaco models were
+read after apply acknowledgment without an explicit disk check. Partial-error
+coverage retained both the repaired model and the blocked model/error, then
+saved with the advanced version. The move/close case waited for idle and observed
+absence for 1,553 ms after close; it did not force a stale callback race. A
+32-write burst produced 64 observed generations and two completed refreshes,
+without assuming one event per write. The current Clippy, debug build and format
+checks passed in 17.285, 79.917 and 1.109 seconds respectively; 28 adapter tests
+also passed. Nine related editor cases passed in 59.789 summed runner seconds:
+Open, edit, encoding, explicit conflict, move, close, Restore, missing root and
+checkpoint failure. All 184 actual Windows unit tests passed in 13.084 seconds
+(12.99 seconds in the test binary). These include three native watcher tests
+for extended Unicode roots/atomic replacement, recursive notices with exact
+acknowledgment and cancellation drain, and missing-root failure. Source boundaries,
+release/package/cleanup results and remaining limitations are recorded in the
+[automatic-refresh evidence](evidence/2026-09-28/editor-refresh.md); the earlier
+editor evidence remains historical.
+
 F01–F05, F17 and G08 remain partial, with 57 partial/57 pending features and ten
 partial/three pending gates. Physical IME/GUI/clipboard/fonts/DPI/accessibility,
-automatic file watching, search/viewers, full ACL preservation, exhaustive
-long-path behavior, unsynchronized edit/close races and renderer-crash recovery
-remain pending.
+broader automatic-refresh acceptance and the stated watcher limits, search/viewers,
+full ACL preservation, exhaustive long-path behavior, unsynchronized edit/close
+races and renderer-crash recovery remain pending.

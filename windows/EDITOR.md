@@ -14,6 +14,13 @@ and the remaining limits in that evidence record are still pending. The later
 implementation from completed checks and outstanding verification. It records
 seven final-source editor cases, 36 related native checks and 172 Windows unit
 tests, with three earlier passes and two failed Restore attempts kept separate.
+Those results precede the automatic-refresh implementation described below.
+The later [automatic-refresh record](evidence/2026-09-28/editor-refresh.md)
+contains eight passing hidden native cases for actual Monaco updates, conflicts,
+partial failures and ownership, plus nine related editor cases and 184 actual
+Windows unit tests. Release, package and cleanup results are tracked separately
+in that record. Physical IME and desktop acceptance remain unverified; these
+results do not establish every notification or callback race.
 
 An editor tab can contain several documents. `editor open` uses an existing
 editor tab with the same canonical root in the target pane, or adds a new editor
@@ -92,11 +99,63 @@ response wraps its result in `result`; Open returns `editor_opened` with `pane`,
 `pending`, `last_error`, `restore_errors`, `documents`, `session` and the
 `storage_root`/`profile_path`/`recovery_root` diagnostic paths. Each document
 has its ID, display path, dirty state, version, encoding, EOL, active state,
-read-only state and external-change state. Historical per-file restore errors
+read-only state, external-change state and `disk_status_known`. A false
+`disk_status_known` means a failed scan could not establish that document's disk
+status; it does not mean unchanged. Historical per-file restore errors
 remain diagnostic; they do not make a later valid Open fail. `ready` requires
 both the frontend and backend and is false during unresolved replacement or
 timed-out work. Inspect status after an uncertain result rather than retrying a
 mutation automatically.
+
+Automatic refresh uses a native recursive directory watcher for each editor
+root. Notifications are hints: the ordered document worker compares actual disk
+bytes for all open documents, including writes with unchanged size and restored
+timestamps. Clean changed documents reload into their existing Monaco models;
+dirty documents retain their edits and report a conflict. A deleted file keeps
+its existing model and reports the missing-file conflict without recreating the
+file. Automatic replacements do not select an inactive document or request
+focus. Explicit `check-disk` and the save conflict check remain available.
+
+Refresh waits for editor work and recent activity to settle. It defers during
+Monaco composition, focus in a non-text Monaco widget, pending edits, diff
+display, and the editor's close, recovery, Save As or search dialogs. This covers
+those known Monaco/HTML states, not arbitrary operating-system dialogs or
+physical IME acceptance. An admitted refresh guards input until the frontend
+acknowledges applying its result.
+Close and model commands received while the editor is busy fail explicitly;
+the host does not queue or replay them. A tab move retains the editor/view
+identity and is not blocked by this readiness guard. Poll status for readiness
+before a new close or model command. A timeout after disk work starts retains
+the guard for the original result; it does not cancel the filesystem operation
+or unlock editing early.
+
+`automatic_refresh` reports watcher `mode`/`ready`, `pending`, `generation`,
+`applied_generation`, `completed_count`, `deferred_count`, `phase`, `timed_out`
+and `last_error`, plus nested watcher ownership and shutdown diagnostics.
+Completion counters advance only after the frontend apply acknowledgment,
+including an applied partial-error response. They do not count writes or prove
+that every file was readable. If a later file fails after an earlier clean file
+was reloaded, its advancing model/version is retained alongside the original
+error. Ambiguous documents have `disk_status_known: false`; unlocking a file or
+an empty successful retry may leave that uncertainty and its diagnostic sticky.
+
+Notifications are coalesced while one refresh is outstanding. Every observed
+root change currently prompts a scan of all open documents, so unrelated writes
+in a noisy root can cause repeated scans. There is no automatic watcher restart,
+periodic fallback, or explicit detection of the watched root directory itself
+being renamed. Watcher startup/failure remains visible in status. Shutdown
+signals cancellation without joining on the UI thread; the worker keeps pending
+I/O resources until Windows reports completion. The eight hidden native cases
+passed clean and inactive-document updates, dirty conflicts, deletion/recreation,
+equal-length writes with restored timestamps, partial sharing-denied reads,
+moved/closed ownership and write bursts followed by the editor's own save. They
+read actual Monaco models after apply acknowledgment without using `check-disk`
+to trigger refresh. The move/close case waited for idle before its mutations
+and observed the closed editor's absence for 1,553 ms; it did not force a queued
+callback race. The 32-write burst produced 64 observed generations and two
+completed refreshes in that run, not a fixed event-to-write relationship.
+Physical interaction, modal/composition deferral on a real desktop and exhaustive
+watcher failure/cancellation timing remain unverified.
 
 Files must be local Unicode paths contained in a canonical editor root. Windows
 validation rejects UNC paths, device namespaces, alternate data streams,
@@ -229,10 +288,9 @@ isolated root to make its recovery records available.
 
 Remaining scope includes physical acceptance of the native Open File dialog,
 Windows native editor clipboard/menu integration, Quick Open and workspace
-search, automatic filesystem watchers/polling, physical IME validation and
-renderer-crash recovery. Quick Open/search requests receive
-completion/error responses instead of hanging. Disk changes require explicit
-`check-disk` or are detected by the save conflict check. Native clipboard requests
+search, broader automatic-refresh acceptance and its watcher limitations,
+physical IME validation and renderer-crash recovery. Quick Open/search requests
+receive completion/error responses instead of hanging. Native clipboard requests
 report that integration is unavailable; background verification never accesses
 the OS clipboard. Concurrent-writer races, exhaustive ACL behavior, power-loss
 durability and complete desktop usability remain separate acceptance work.
@@ -240,6 +298,7 @@ durability and complete desktop usability remain separate acceptance work.
 Implementation sources: [command validation](src/editor.rs),
 [Open preparation](src/editor_open.rs), [native picker](src/native/editor_picker.rs),
 [ordered worker](src/editor_worker.rs),
+[directory watcher](src/editor_watch.rs), [automatic refresh](src/native/editor_refresh.rs),
 [Windows recovery writer](src/editor_recovery.rs), [native lifecycle](src/native/editor.rs),
 [editor WebView](src/native/editor_view.rs), [asset server](src/editor_assets.rs),
 [Windows adapter](editor/adapter.js) and [shared editor domain](../crates/flowmux-editor/).

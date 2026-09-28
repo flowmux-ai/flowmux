@@ -1,0 +1,16 @@
+{
+  "name": "editor-refresh-format",
+  "command": [
+    "cargo",
+    "fmt",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--",
+    "--check"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 334764,
+  "exitCode": 0,
+  "elapsedSeconds": 1.109
+}

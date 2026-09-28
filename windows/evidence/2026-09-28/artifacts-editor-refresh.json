@@ -1,0 +1,62 @@
+[
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+    "bytes": 26678272,
+    "sha256": "8900a00c2c6fdf6b7cc0e17b942950d6e2c8e0d8448c0e4f3eb5c80b66804b44"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmuxctl.exe",
+    "bytes": 3207680,
+    "sha256": "43e96a96299ec1f9a518123cc70748e7883f0bd26a22e852285c92705ecc8a36"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.com",
+    "bytes": 3318784,
+    "sha256": "cbc1473063565cd425841bb9093f8f3821b178cdf2cf5ba9faea3e251862109d"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmux.exe",
+    "bytes": 19664896,
+    "sha256": "988af28921f3278ebab4763d5e51dfb43cbc4114dd21c7684f8c3c6d6d438cbd"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmuxctl.exe",
+    "bytes": 1739776,
+    "sha256": "bad231dc539f6b100d14c4dcfb8a2abf328bdb7c12a571ead1f31710248a82d3"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/flowmux.com",
+    "bytes": 1798656,
+    "sha256": "6194de53358c91e40adafb2e453b826ed5d773e31d57463b75603c9163adfc58"
+  },
+  {
+    "path": "windows/dist/flowmux-windows-0.10.1-dev-x64-setup.exe",
+    "bytes": 5130083,
+    "sha256": "0e7395a7d4f6fc3f9c97a83d956448b5dc7d057a9f53ee5067bc699b2c6e85d9"
+  },
+  {
+    "path": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_windows-b2f2949a703e9e66.exe",
+    "bytes": 6551552,
+    "sha256": "b3c30f1c4274966b6fa6b0e0eea9232163f66c1ed00bfb9f95c13fa09d13eab1"
+  },
+  {
+    "path": "windows/EDITOR.md",
+    "bytes": 21386,
+    "sha256": "6f5080d9e10e7058c3e2f2e7f6ad86633936a27905f8a9d69d18f7d536934055"
+  },
+  {
+    "path": "windows/IMPLEMENTATION.md",
+    "bytes": 41060,
+    "sha256": "701b1b734c91730696adcb8cc8d73ee27c491db3137feea439f609c657149c11"
+  },
+  {
+    "path": "windows/acceptance.json",
+    "bytes": 59058,
+    "sha256": "d4af9bb39c1180ad974d9cabd6f9eee33fe489b09e8e3bfac4a43e98276ec0d2"
+  },
+  {
+    "path": "windows/assets/editor/main.js",
+    "bytes": 4259893,
+    "sha256": "8f02762dc920c2a8eb9c4e69952373ae9563b6c89d1d2853018869e17439a280"
+  }
+]

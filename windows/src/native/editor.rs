@@ -13,12 +13,15 @@ use std::collections::HashSet;
 mod editor_picker;
 #[path = "editor_view.rs"]
 mod editor_view;
+#[path = "editor_refresh.rs"]
+mod refresh;
 
 pub(super) enum Signal {
     Prepared(Prepared),
     Pick(PickerTarget),
     Bridge(SurfaceId, Uuid, String, String),
     Worker(SurfaceId, Uuid, Response),
+    Watch(SurfaceId, Uuid, crate::editor_watch::Notice),
 }
 pub(super) struct PickerTarget {
     source: SurfaceId,
@@ -85,6 +88,7 @@ pub(super) struct Editor {
     inflight: HashSet<u64>,
     replacements: HashSet<u64>,
     pending: Option<Pending>,
+    refresh: refresh::State,
 }
 struct Pending {
     id: u64,
@@ -120,10 +124,14 @@ pub(super) struct Barrier {
     reply: Option<ipc::Reply>,
 }
 impl Editor {
+    pub(super) fn checkpoint_ready(&self) -> bool {
+        self.unavailable_restore() || (self.ready && self.pending.is_none())
+    }
     fn refresh_ready(&mut self) {
         self.ready = self.frontend_ready
             && self.backend_ready
             && !self.sync_failed
+            && self.refresh.pending.is_none()
             && self.replacements.is_empty()
             && !self.pending.as_ref().is_some_and(|p| p.timed_out);
     }
@@ -187,6 +195,7 @@ impl Editor {
             "synchronization_failed":self.sync_failed,
             "dirty_paths":self.dirty,"documents":self.documents,"active_document_id":active,
             "last_error":self.error,"restore_errors":self.restore_errors,"pending":self.pending.is_some(),
+            "automatic_refresh":self.refresh.status(),
             "view_handle":self.view.view.hwnd().0 as usize,"session":self.state})
     }
 }
@@ -234,6 +243,7 @@ impl App {
         )?;
         let request = self.editor_next();
         worker.submit(request, Work::Initialize)?;
+        let refresh = refresh::State::start(root.clone(), id, instance, self.sender.clone());
         self.editors.insert(
             id,
             Editor {
@@ -256,6 +266,7 @@ impl App {
                 inflight: HashSet::from([request]),
                 replacements: HashSet::new(),
                 pending: None,
+                refresh,
             },
         );
         Ok(())
@@ -271,6 +282,9 @@ impl App {
     }
     pub(super) fn editor_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Watch(surface, instance, notice) => {
+                self.editor_watch_notice(surface, instance, notice);
+            }
             Signal::Pick(target) => {
                 self.editor_run_picker(target);
             }
@@ -310,6 +324,26 @@ impl App {
                     "invalid editor instance credentials"
                 );
                 match value["kind"].as_str() {
+                    Some("refresh_deferred") => {
+                        let id = value["id"].as_u64().context("invalid refresh id")?;
+                        self.editor_refresh_deferred(surface, id);
+                    }
+                    Some("refresh_error") => {
+                        let id = value["id"].as_u64().context("invalid refresh id")?;
+                        self.editor_refresh_failed(
+                            surface,
+                            id,
+                            value["error"]
+                                .as_str()
+                                .unwrap_or("automatic refresh could not be applied"),
+                        );
+                    }
+                    Some("refresh_applied") => {
+                        let id = value["id"].as_u64().context("invalid refresh id")?;
+                        if let Err(error) = self.editor_refresh_applied(surface, id) {
+                            self.editor_refresh_failed(surface, id, &error.to_string());
+                        }
+                    }
                     Some("command_result") => {
                         let id = value["id"].as_u64().context("invalid editor command id")?;
                         let editor = self.editors.get_mut(&surface).unwrap();
@@ -324,6 +358,21 @@ impl App {
                     }
                     Some("barrier_error") => {
                         let id = value["id"].as_u64().context("invalid editor barrier id")?;
+                        if self.editors[&surface]
+                            .refresh
+                            .pending
+                            .as_ref()
+                            .is_some_and(|p| p.id == id)
+                        {
+                            self.editor_refresh_failed(
+                                surface,
+                                id,
+                                value["error"]
+                                    .as_str()
+                                    .unwrap_or("automatic refresh could not synchronize"),
+                            );
+                            return Ok(());
+                        }
                         self.editor_barrier_error(
                             surface,
                             id,
@@ -364,6 +413,9 @@ impl App {
                                 }
                             }
                             EditorMessage::FlushCompleted { request_id, error } => {
+                                if self.editor_refresh_flush(surface, request_id, error.clone()) {
+                                    return Ok(());
+                                }
                                 if let Some(error) = error {
                                     self.editor_barrier_error(surface, request_id, &error)
                                 } else {
@@ -430,6 +482,8 @@ impl App {
                                 }
                             }
                             message => {
+                                self.editors.get_mut(&surface).unwrap().refresh.activity =
+                                    Instant::now();
                                 let id = self.editor_next();
                                 let replacing = matches!(
                                     &message,
@@ -479,6 +533,11 @@ impl App {
                 editor.dirty = response.dirty;
                 editor.documents = serde_json::to_value(response.documents)?;
                 editor.restore_errors = response.restored_errors;
+                let automatic = editor
+                    .refresh
+                    .pending
+                    .as_ref()
+                    .is_some_and(|p| p.id == response.id && p.phase == refresh::Phase::Working);
                 let mut failure = response.error;
                 for message in response.messages {
                     let failed = match &message {
@@ -493,7 +552,18 @@ impl App {
                         failure = failed;
                     }
                     if editor.frontend_ready {
-                        editor.send(&message)?
+                        if automatic {
+                            if let Err(error) = editor.refresh_send(response.id, &message) {
+                                self.editor_refresh_failed(
+                                    surface,
+                                    response.id,
+                                    &error.to_string(),
+                                );
+                                return Ok(());
+                            }
+                        } else {
+                            editor.send(&message)?
+                        }
                     } else {
                         editor.deferred.push(message)
                     }
@@ -518,7 +588,13 @@ impl App {
                         .set_surface_editor_session(pane, surface, state);
                     self.refresh_tab_title(surface);
                 }
-                if self
+                if automatic {
+                    if let Err(error) =
+                        self.editor_refresh_worker_done(surface, response.id, failure)
+                    {
+                        self.editor_refresh_failed(surface, response.id, &error.to_string());
+                    }
+                } else if self
                     .editor_barrier
                     .as_ref()
                     .is_some_and(|b| b.id == response.id && b.waiting.contains(&surface))
@@ -570,6 +646,7 @@ impl App {
                         editor.error = pending.error.clone();
                     }
                     editor.release(pending.id);
+                    editor.refresh.activity = Instant::now();
                     editor.refresh_ready();
                     if pending.timed_out {
                         editor.error = pending.error.clone().or_else(|| Some(
@@ -1185,6 +1262,7 @@ impl App {
                 };
                 let editor = self.editors.get_mut(&surface).unwrap();
                 editor.error = None;
+                editor.refresh.activity = Instant::now();
                 editor.view.view.evaluate_script(&script)?;
                 editor.pending = Some(Pending {
                     id,

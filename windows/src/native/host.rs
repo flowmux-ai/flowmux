@@ -1164,6 +1164,7 @@ impl App {
                     && self.pending_save.is_none()
                     && self.close_request.is_none()
                     && !self.close_accepted
+                    && self.editors.values().all(editor::Editor::checkpoint_ready)
                     && self.last_save_attempt.elapsed() > Duration::from_secs(30)
                 {
                     self.last_save_attempt = Instant::now();
@@ -1171,6 +1172,9 @@ impl App {
                         self.state_error = Some(error.to_string());
                     }
                 }
+                // Give due checkpoints first admission. A refresh already in
+                // progress defers the checkpoint until the next idle tick.
+                self.editor_refresh_tick();
             }
             Event::Button(action) => self.action(action)?,
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,

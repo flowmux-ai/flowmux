@@ -2,7 +2,7 @@
 # Bounded hidden native Monaco verification. Run through run-check.ps1 (120s).
 param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery')][string]$Case='all'
+    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -21,6 +21,8 @@ $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';case=$Ca
     'Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.',
     'Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.',
     'Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.',
+    'Automatic refresh burst observations do not assume one watcher event per write; partial-error application does not make unknown disk status healthy, and unlock alone may not replay a consumed status transition.',
+    'Automatic move/close waits for idle before mutations; post-close absence is bounded observation without a forced queued-callback race.',
     'Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established.'
 )}
 
@@ -147,8 +149,8 @@ function Finish-Host([bool]$Save=$false) {
     if($process.ExitCode -ne 0) {throw ('Owned host exited '+$process.ExitCode)}
     $process.Dispose();$script:process=$null;$script:pipeName=$null
 }
-function Status([string]$Surface) {
-    $r=Request @('editor','status',$Surface)
+function Status([string]$Surface,[ValidateRange(1,20000)][int]$TimeoutMilliseconds=5000) {
+    $r=Request @('editor','status',$Surface) 0 $TimeoutMilliseconds
     if($r.view_handle) {Check-Hidden ([long]$r.view_handle)}
     $expectedRoot=Join-Path $directory 'state';$expectedProfile=Join-Path $expectedRoot 'editor-profile';$expectedRecovery=Join-Path $expectedRoot 'editor-recovery'
     if(-not (Same-Text $r.storage_root $expectedRoot) -or -not (Same-Text $r.profile_path $expectedProfile) -or -not (Same-Text $r.recovery_root $expectedRecovery)) {throw ('Editor storage/profile/recovery escaped the explicit owned root: '+($r|ConvertTo-Json -Depth 5 -Compress))}
@@ -182,6 +184,46 @@ function Assert-Text([string]$Surface,[string]$Expected,[bool]$Dirty) {
 }
 function Assert-Bytes([string]$Path,[string]$Text,[bool]$Bom=$false,[bool]$CrLf=$false) {
     if(-not $fixture.BytesEqual($Path,[EditorFixture]::Encode($Text,$Bom,$CrLf))) {throw ('Exact file bytes differ: '+[IO.Path]::GetFileName($Path))}
+}
+function Auto-Document($State,[string]$Document) {
+    $matches=@($State.documents|Where-Object {$_.id -eq $Document})
+    if($matches.Count -ne 1) {throw ('Automatic refresh lost document identity '+$Document)}
+    return $matches[0]
+}
+function Wait-Automatic([string]$Surface,[scriptblock]$Condition,[bool]$AllowError=$false) {
+    $watch=[Diagnostics.Stopwatch]::StartNew();$state=$null
+    do {
+        $remaining=8000-$watch.ElapsedMilliseconds
+        if($remaining -le 0) {
+            $script:evidence.observations+=@{kind='automatic-refresh-timeout';surface=$Surface;elapsedMs=$watch.ElapsedMilliseconds;lastStatus=$state}
+            throw ('Automatic refresh did not satisfy its bounded condition: '+($state|ConvertTo-Json -Depth 8 -Compress))
+        }
+        $state=Status $Surface ([int][Math]::Min(5000,$remaining));$auto=$state.automatic_refresh
+        if($null -eq $auto) {throw 'Editor omitted automatic_refresh diagnostics'}
+        foreach($field in @('mode','ready','pending','generation','applied_generation','completed_count','deferred_count','last_error','phase','timed_out','watcher')) {
+            if($auto.psobject.Properties.Name -notcontains $field) {throw ('Automatic refresh omitted '+$field)}
+        }
+        if($auto.mode -ne 'native') {throw ('Native file watcher is unavailable: '+($auto|ConvertTo-Json -Depth 6 -Compress))}
+        if($state.synchronization_failed -or $auto.timed_out) {throw ('Automatic refresh lost synchronization: '+($state|ConvertTo-Json -Depth 8 -Compress))}
+        if(-not $AllowError -and $auto.last_error) {throw ('Automatic refresh reported an unexpected error: '+$auto.last_error)}
+        if($auto.ready -and $state.ready -and -not $auto.pending -and -not $state.pending -and (& $Condition $state)) {return $state}
+        Start-Sleep -Milliseconds 30
+    } while($true)
+}
+function Automatic-Baseline([string]$Surface) {
+    return Wait-Automatic $Surface {param($s) $s.automatic_refresh.applied_generation -eq $s.automatic_refresh.generation}
+}
+function Automatic-Advanced($State,$Baseline) {
+    return $State.automatic_refresh.completed_count -gt $Baseline.automatic_refresh.completed_count -and $State.automatic_refresh.applied_generation -gt $Baseline.automatic_refresh.applied_generation
+}
+function Assert-AutomaticText([string]$Surface,[string]$Expected,[bool]$Dirty,[string]$Document,[long]$Version) {
+    # No Flush/Open/CheckDisk here: only read the already acknowledged Monaco model.
+    $read=Read-Editor $Surface
+    if(-not (Same-Text $read.content $Expected) -or $read.dirty -ne $Dirty -or $read.document_id -ne $Document -or $read.active_version -ne $Version) {throw ('Automatic Monaco content/version differs: '+($read|ConvertTo-Json -Depth 6 -Compress))}
+    return $read
+}
+function Record-Automatic([string]$Group,[string]$Surface,$Before,$After,$Read) {
+    $script:evidence.observations+=@{kind='automatic-refresh-result';case=$Group;surface=$Surface;before=$Before.automatic_refresh;after=$After.automatic_refresh;documents=$After.documents;actualModel=$Read;explicitCheckDisk=$false}
 }
 function Owned-Recovery {
     $root=Join-Path (Join-Path $directory 'state') 'editor-recovery'
@@ -264,7 +306,7 @@ try {
     if(-not $doctor.background_testing -or $doctor.status -ne 'ok') {throw 'Working hidden debug build required; no host launched'}
     $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
     if($Case -eq 'startup') {Passed 'hidden_debug_doctor_and_owned_host_readiness'}
-    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery')) {
+    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
         if($Case -ne 'all' -and $Case -ne $group) {continue}
         Clean-Editors;$fixture.ReleaseLocks();Request @('focus-tab',$terminal.id)|Out-Null
         switch($group) {
@@ -437,6 +479,166 @@ try {
                 Finish-Host;$observation.cleanHostExit=$true
                 Passed 'accepted_quit_cancels_paused_owned_preparation_drains_late_result_without_tab_then_exits_when_peer_closes'
                 $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
+            }
+            'auto-refresh-clean' {
+                $name='auto clean 한글 한 😀.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$true,$true)
+                $opened=Open-Editor $path;$initial=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                $fixture.Write($name,[EditorFixture]::External,$true,$true)|Out-Null;$writtenTicks=$fixture.LastWriteTicks($name)
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and (Auto-Document $s $initial.document_id).version -gt $initial.active_version}
+                $doc=Auto-Document $after $initial.document_id;$read=Assert-AutomaticText $opened.surface ([EditorFixture]::External) $false $initial.document_id $doc.version
+                if($read.encoding -ne 'UTF-8 BOM' -or $read.eol -ne 'CRLF' -or $after.view_handle -ne $before.view_handle -or -not $doc.disk_status_known -or $doc.external_change -or $read.external_change) {throw 'Clean automatic reload changed identity/encoding or left uncertain/conflicting status'}
+                Assert-Bytes $path ([EditorFixture]::External) $true $true
+                if($fixture.LastWriteTicks($name) -ne $writtenTicks) {throw 'Automatic detection rewrote the external file timestamp'}
+                Record-Automatic $group $opened.surface $before $after $read
+                Passed 'native_watcher_clean_reload_updates_actual_unicode_monaco_after_apply_ack_preserving_bom_crlf_and_file_bytes'
+            }
+            'auto-refresh-inactive' {
+                $firstName='auto inactive first 한글.txt';$first=$fixture.Write($firstName,[EditorFixture]::Original,$true,$true)
+                $second=$fixture.Write('auto active second 😀.txt',[EditorFixture]::External,$false,$false)
+                $opened=Open-Editor $first;$firstRead=Read-Editor $opened.surface
+                Open-Editor $second $opened.pane|Out-Null;$active=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                $beforeTree=(Tree).workspaces|ConvertTo-Json -Depth 60 -Compress
+                $fixture.Write($firstName,[EditorFixture]::Edited,$true,$true)|Out-Null
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and (Auto-Document $s $firstRead.document_id).version -gt $firstRead.active_version}
+                $activeAfter=Assert-AutomaticText $opened.surface ([EditorFixture]::External) $false $active.document_id $active.active_version
+                if($after.active_document_id -ne $active.document_id -or $after.view_handle -ne $before.view_handle -or -not (Same-Text $beforeTree ((Tree).workspaces|ConvertTo-Json -Depth 60 -Compress))) {throw 'Inactive automatic reload changed active document, native view or pane/workspace state'}
+                $firstAfter=Auto-Document $after $firstRead.document_id
+                Editor-Command $opened.surface 'close-document'|Out-Null
+                $revealed=Assert-AutomaticText $opened.surface ([EditorFixture]::Edited) $false $firstRead.document_id $firstAfter.version
+                if($revealed.encoding -ne 'UTF-8 BOM' -or $revealed.eol -ne 'CRLF') {throw 'Inactive model lost BOM/CRLF metadata'}
+                Assert-Bytes $first ([EditorFixture]::Edited) $true $true;Assert-Bytes $second ([EditorFixture]::External)
+                Record-Automatic $group $opened.surface $before $after $revealed
+                $evidence.observations+=@{kind='inactive-model-proof';case=$group;activeBefore=$active;activeAfter=$activeAfter;revealedExistingModel=$revealed;reopenedFile=$false}
+                Passed 'inactive_document_auto_refresh_preserves_active_model_and_exposes_updated_existing_model_without_reopen'
+            }
+            'auto-refresh-conflict' {
+                $name='auto dirty conflict 한글.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                $dirty=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                $fixture.Write($name,[EditorFixture]::External,$false,$false)|Out-Null
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and (Auto-Document $s $dirty.document_id).external_change}
+                $read=Assert-AutomaticText $opened.surface ([EditorFixture]::Edited) $true $dirty.document_id $dirty.active_version
+                if(-not $read.external_change) {throw 'Automatic dirty conflict was not applied to the actual Monaco document'}
+                $saveFailure=Editor-Command $opened.surface 'save' @() 1
+                Assert-Bytes $path ([EditorFixture]::External)
+                Editor-Command $opened.surface 'keep-mine'|Out-Null;Assert-Bytes $path ([EditorFixture]::External)
+                Editor-Command $opened.surface 'save'|Out-Null;Assert-Bytes $path ([EditorFixture]::Edited)
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Original)|Out-Null
+                $secondDirty=Read-Editor $opened.surface;$reloadBefore=Automatic-Baseline $opened.surface
+                $fixture.Write($name,[EditorFixture]::External,$false,$false)|Out-Null
+                $reloadAfter=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $reloadBefore) -and (Auto-Document $s $secondDirty.document_id).external_change}
+                $reloadConflict=Assert-AutomaticText $opened.surface ([EditorFixture]::Original) $true $secondDirty.document_id $secondDirty.active_version
+                if(-not $reloadConflict.external_change) {throw 'Second automatic conflict was not applied before explicit Reload'}
+                Editor-Command $opened.surface 'reload'|Out-Null
+                $reloaded=Read-Editor $opened.surface
+                if(-not (Same-Text $reloaded.content ([EditorFixture]::External)) -or $reloaded.dirty -or $reloaded.document_id -ne $dirty.document_id) {throw 'Explicit reload did not resolve the automatic conflict on the same model'}
+                Assert-Bytes $path ([EditorFixture]::External)
+                Record-Automatic $group $opened.surface $before $after $read
+                $evidence.observations+=@{kind='automatic-conflict-actions';case=$group;saveFailure=$saveFailure;reloadRefresh=$reloadAfter.automatic_refresh;explicitReload=$reloaded}
+                Passed 'automatic_dirty_conflict_preserves_unsaved_monaco_and_external_bytes_until_explicit_keep_mine_save_or_reload'
+            }
+            'auto-refresh-delete-recreate' {
+                $name='auto deleted 한글 😀.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                $initial=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                $fixture.DeleteOwned($name)
+                $deleted=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and (Auto-Document $s $initial.document_id).external_change}
+                $retained=Assert-AutomaticText $opened.surface ([EditorFixture]::Original) $false $initial.document_id $initial.active_version
+                if(-not $retained.external_change) {throw 'Automatic deletion status was not applied to the retained Monaco document'}
+                if(Test-Path -LiteralPath $path) {throw 'Automatic refresh recreated the deleted file'}
+                $fixture.Write($name,[EditorFixture]::External,$false,$false)|Out-Null
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $deleted) -and (Auto-Document $s $initial.document_id).version -gt $initial.active_version -and -not (Auto-Document $s $initial.document_id).external_change}
+                $doc=Auto-Document $after $initial.document_id;$read=Assert-AutomaticText $opened.surface ([EditorFixture]::External) $false $initial.document_id $doc.version
+                if($before.view_handle -ne $after.view_handle -or $read.external_change) {throw 'Delete/recreate replaced the native editor view or retained a stale conflict'}
+                Assert-Bytes $path ([EditorFixture]::External)
+                Record-Automatic $group $opened.surface $before $after $read
+                $evidence.observations+=@{kind='automatic-deletion';case=$group;missingFileObserved=$true;deletedStatus=$deleted;retainedModel=$retained;implicitRecreation=$false}
+                Passed 'automatic_delete_retains_existing_model_without_recreating_file_then_recreated_file_refreshes_same_identity'
+            }
+            'auto-refresh-stamp' {
+                $name='auto same timestamp 한글 한.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$true,$true);$opened=Open-Editor $path
+                $initial=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface;$ticks=$fixture.LastWriteTicks($name)
+                $replacement=[EditorFixture]::Original.Replace('second','SECOND')
+                $returnedTicks=$fixture.RewritePreservingTimestamp($name,$replacement,$true,$true)
+                if($returnedTicks -ne $ticks -or $fixture.LastWriteTicks($name) -ne $ticks) {throw 'Equal-length fixture rewrite changed timestamp'}
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and (Auto-Document $s $initial.document_id).version -gt $initial.active_version}
+                $doc=Auto-Document $after $initial.document_id;$read=Assert-AutomaticText $opened.surface $replacement $false $initial.document_id $doc.version
+                Assert-Bytes $path $replacement $true $true
+                if($fixture.LastWriteTicks($name) -ne $ticks) {throw 'Same-stamp detection rewrote the fixture'}
+                Record-Automatic $group $opened.surface $before $after $read
+                $evidence.observations+=@{kind='equal-size-restored-timestamp';case=$group;beforeUtcTicks=$ticks;afterUtcTicks=$fixture.LastWriteTicks($name);bytes=[EditorFixture]::Encode($replacement,$true,$true).Length;metadataOnlyPoll=$false}
+                Passed 'native_watcher_forced_byte_check_detects_equal_length_external_write_with_exact_restored_timestamp'
+            }
+            'auto-refresh-partial-error' {
+                $firstName='auto partial first 한글.txt';$secondName='auto partial blocked 😀.txt'
+                $first=$fixture.Write($firstName,[EditorFixture]::Original,$true,$true);$second=$fixture.Write($secondName,[EditorFixture]::External,$false,$false)
+                $opened=Open-Editor $first;$firstRead=Read-Editor $opened.surface
+                Open-Editor $second $opened.pane|Out-Null;$secondRead=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                $fixture.LockAgainstRead($secondName)
+                try {
+                    $fixture.Write($firstName,[EditorFixture]::Edited,$true,$true)|Out-Null
+                    $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and $s.automatic_refresh.last_error -and (Auto-Document $s $firstRead.document_id).version -gt $firstRead.active_version} $true
+                    $firstAfter=Auto-Document $after $firstRead.document_id;$blocked=Auto-Document $after $secondRead.document_id
+                    if($blocked.disk_status_known -or $after.active_document_id -ne $secondRead.document_id -or $after.view_handle -ne $before.view_handle) {throw 'Partial scan lost active ownership or misreported blocked-file disk certainty'}
+                    $retained=Assert-AutomaticText $opened.surface ([EditorFixture]::External) $false $secondRead.document_id $secondRead.active_version
+                } finally {$fixture.ReleaseLocks()}
+                # Unlock alone does not prove unknown status was repaired: a shared
+                # failed poll can consume a status-only transition irreversibly.
+                Wait-Automatic $opened.surface {param($s) $true} $true|Out-Null
+                Editor-Command $opened.surface 'close-document'|Out-Null
+                $revealed=Assert-AutomaticText $opened.surface ([EditorFixture]::Edited) $false $firstRead.document_id $firstAfter.version
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::External)|Out-Null
+                Editor-Command $opened.surface 'save'|Out-Null
+                Assert-Bytes $first ([EditorFixture]::External) $true $true;Assert-Bytes $second ([EditorFixture]::External)
+                Record-Automatic $group $opened.surface $before $after $revealed
+                $evidence.observations+=@{kind='partial-refresh-error';case=$group;blockedModel=$retained;error=$after.automatic_refresh.last_error;advancedExistingModel=$revealed;advancedDiskStatusKnown=$firstAfter.disk_status_known;repeatedFailedPollMayMakeAdvancedStatusUnknown=$true;unlockAloneProvesHealthy=$false;explicitSaveWithAdvancedVersion=$true;forcedPollOrder=$false}
+                Passed 'partial_denied_read_preserves_advanced_clean_model_and_blocked_model_with_error_unknown_and_valid_following_save'
+            }
+            'auto-refresh-move-close' {
+                $name='auto move close 한글.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                $initial=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface
+                Request @('focus-tab',$terminal.id)|Out-Null;Request @('split','vertical')|Out-Null;$destination=Request @('identify')
+                $tree=Tree;$shells+=@($tree.surfaces|Where-Object {$_.pid -and $shells -notcontains $_.pid}|ForEach-Object {$_.pid})
+                Wait-Automatic $opened.surface {param($s) $true}|Out-Null
+                Request @('move-tab',$opened.surface,'--to-pane',$destination.pane)|Out-Null
+                Request @('focus-tab',$destination.surface)|Out-Null
+                $moved=Automatic-Baseline $opened.surface;$active=Request @('identify');$beforeTree=(Tree).workspaces|ConvertTo-Json -Depth 60 -Compress
+                $fixture.Write($name,[EditorFixture]::External,$false,$false)|Out-Null
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $moved) -and (Auto-Document $s $initial.document_id).version -gt $initial.active_version}
+                $read=Assert-AutomaticText $opened.surface ([EditorFixture]::External) $false $initial.document_id (Auto-Document $after $initial.document_id).version
+                $identity=Request @('identify')
+                if($after.view_handle -ne $before.view_handle -or $identity.surface -ne $active.surface -or -not (Same-Text $beforeTree ((Tree).workspaces|ConvertTo-Json -Depth 60 -Compress))) {throw 'Moved inactive refresh changed model/view/focused surface ownership'}
+                Wait-Automatic $opened.surface {param($s) $true}|Out-Null
+                Request @('close-tab',$opened.surface)|Out-Null;Forget-Editor $opened.surface
+                $afterClose=Tree;$fixture.Write($name,[EditorFixture]::Edited,$false,$false)|Out-Null
+                $stable=[Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $tree=Tree
+                    if(@($tree.editors|Where-Object {$_.id -eq $opened.surface}).Count -or -not (Same-Text ($afterClose.workspaces|ConvertTo-Json -Depth 60 -Compress) ($tree.workspaces|ConvertTo-Json -Depth 60 -Compress))) {throw 'Closed editor watcher resurrected a view or changed the model'}
+                    Assert-Terminal
+                    Start-Sleep -Milliseconds 30
+                } while($stable.ElapsedMilliseconds -lt 1500)
+                Assert-Bytes $path ([EditorFixture]::Edited)
+                Record-Automatic $group $opened.surface $before $after $read
+                $evidence.observations+=@{kind='automatic-move-close';case=$group;destinationPane=$destination.pane;focusedSurface=$active.surface;postCloseObservationMs=$stable.ElapsedMilliseconds;forcedQueuedCallback=$false}
+                Request @('close-tab',$destination.surface)|Out-Null
+                Passed 'moved_inactive_editor_refresh_keeps_identity_and_focus_then_closed_owner_stays_absent_after_external_write'
+            }
+            'auto-refresh-coalescing' {
+                $name='auto burst own save 한글.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                $initial=Read-Editor $opened.surface;$before=Automatic-Baseline $opened.surface;$writes=32
+                for($index=0;$index -lt $writes;$index++) {$last=([EditorFixture]::External+'burst '+$index+"`n");$fixture.Write($name,$last,$false,$false)|Out-Null}
+                $after=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $before) -and $s.automatic_refresh.applied_generation -eq $s.automatic_refresh.generation -and (Auto-Document $s $initial.document_id).version -gt $initial.active_version}
+                $read=Assert-AutomaticText $opened.surface $last $false $initial.document_id (Auto-Document $after $initial.document_id).version
+                Assert-Bytes $path $last
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                $saveBefore=Automatic-Baseline $opened.surface;Editor-Command $opened.surface 'save'|Out-Null;$saved=Read-Editor $opened.surface
+                $settled=Wait-Automatic $opened.surface {param($s) (Automatic-Advanced $s $saveBefore) -and $s.automatic_refresh.applied_generation -eq $s.automatic_refresh.generation}
+                $final=Assert-AutomaticText $opened.surface ([EditorFixture]::Edited) $false $initial.document_id $saved.active_version
+                if($final.external_change -or (Auto-Document $settled $initial.document_id).external_change -or (Auto-Document $settled $initial.document_id).version -ne $saved.active_version) {throw 'Own-save notification introduced a false conflict or repeated version bump'}
+                Assert-Bytes $path ([EditorFixture]::Edited)
+                Record-Automatic $group $opened.surface $before $settled $final
+                $evidence.observations+=@{kind='automatic-write-burst';case=$group;writes=$writes;generationDelta=($after.automatic_refresh.generation-$before.automatic_refresh.generation);completedDelta=($after.automatic_refresh.completed_count-$before.automatic_refresh.completed_count);oneEventPerWriteAssumed=$false;burstModel=$read;ownSaveVersion=$saved.active_version}
+                Passed 'automatic_write_burst_settles_at_final_bytes_and_own_save_notification_preserves_model_version_without_conflict'
             }
             'edit' {
                 $path=$fixture.Write('edit 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path

@@ -15,7 +15,7 @@ use flowmux_editor::{
 };
 use serde::Serialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -49,6 +49,9 @@ pub struct DocumentMeta {
     pub active: bool,
     pub read_only: bool,
     pub external_change: bool,
+    /// False after an incomplete disk scan until an authoritative status,
+    /// clean replacement or save result resolves this document's uncertainty.
+    pub disk_status_known: bool,
 }
 
 #[derive(Debug)]
@@ -244,6 +247,7 @@ struct Engine {
     recovery: Option<RecoveryStore>,
     recovery_pending: BTreeMap<PathBuf, RecoveryOperation>,
     documents: BTreeMap<String, DocumentMeta>,
+    disk_status_unknown: BTreeSet<String>,
     zoom: u16,
     restored_errors: Vec<String>,
     startup_error: Option<String>,
@@ -263,6 +267,7 @@ impl Engine {
             recovery: None,
             recovery_pending: BTreeMap::new(),
             documents: BTreeMap::new(),
+            disk_status_unknown: BTreeSet::new(),
             zoom: restored.zoom_percent.unwrap_or(EDITOR_ZOOM_DEFAULT),
             restored_errors: Vec::new(),
             startup_error: None,
@@ -378,6 +383,7 @@ impl Engine {
             return self.response(id, Vec::new(), self.startup_error.clone());
         }
         self.operation_error = None;
+        let disk_poll = matches!(&work, Work::PollDisk);
         let result = self.execute(work);
         let (messages, mut error) = match result {
             Ok(messages) => (messages, None),
@@ -387,6 +393,7 @@ impl Engine {
             append_error(&mut error, &operation);
         }
         self.update_metadata(&messages);
+        self.update_disk_certainty(disk_poll, error.is_some(), &messages);
         for message in &messages {
             let reason = match message {
                 HostMessage::SaveFailed { reason, .. }
@@ -421,12 +428,128 @@ impl Engine {
                 self.session.as_mut().unwrap().discard_all_dirty();
                 Ok(self.initialize())
             }
-            Work::PollDisk => Ok(self
-                .session
-                .as_mut()
-                .unwrap()
-                .poll_external_changes_after_fs_event()?),
+            Work::PollDisk => Ok(self.poll_disk()),
             Work::Snapshot => Ok(Vec::new()),
+        }
+    }
+
+    fn poll_disk(&mut self) -> Vec<HostMessage> {
+        // Automatic delivery uses the Windows refresh adapter's non-activating
+        // apply path. Do not add SetActiveDocument: the shared session already
+        // preserves its active document, and the adapter preserves its model.
+        let result = self
+            .session
+            .as_mut()
+            .unwrap()
+            .poll_external_changes_after_fs_event();
+        match result {
+            Ok(messages) => messages,
+            Err(error) => {
+                // The shared poll can reload earlier documents, then lose its
+                // accumulated messages when a later filesystem read fails.
+                // Preserve its error AND reconcile those completed changes.
+                self.operation_error = Some(format!("{error:#}"));
+                self.reconcile_partial_disk_poll()
+            }
+        }
+    }
+
+    fn reconcile_partial_disk_poll(&self) -> Vec<HostMessage> {
+        // This is the only public shared API exposing current document payloads.
+        // Use it only on the exceptional path, and never forward InitializeEditor:
+        // doing so would dispose every Monaco model and erase undo history.
+        let snapshot = self
+            .session
+            .as_ref()
+            .unwrap()
+            .initialize_messages(self.zoom);
+        let documents = snapshot.into_iter().flat_map(|message| match message {
+            HostMessage::InitializeEditor { documents, .. } => documents,
+            HostMessage::OpenDocument { document } => vec![document],
+            _ => Vec::new(),
+        });
+        let mut messages = Vec::new();
+        for document in documents {
+            let Some(previous) = self.documents.get(&document.id) else {
+                // Poll never adds/removes documents. An unexpected unknown ID
+                // must not create a second frontend model from an error path.
+                continue;
+            };
+            let status = self.reconciled_disk_status(&document);
+            let document_id = document.id.clone();
+            let document_version = document.version;
+            if document.version > previous.version && !document.dirty {
+                messages.push(HostMessage::ReplaceDocument { document });
+            }
+            // Same-version dirty buffers retain their model/undo/diff state.
+            // Recover status-only transitions that the shared poll also lost.
+            if let Some(status) = status {
+                messages.push(HostMessage::DocumentDiskStatus {
+                    document_id,
+                    document_version,
+                    status,
+                });
+            }
+        }
+        messages
+    }
+
+    fn reconciled_disk_status(&self, document: &DocumentPayload) -> Option<DocumentDiskStatus> {
+        if !document.external_change {
+            // The public payload accessor trusts size/mtime. A forced-byte poll
+            // may already have consumed a same-stamp Modified transition before
+            // the later error. Never clear a conflict from this weak snapshot.
+            return None;
+        }
+        // Payload.external_change also becomes true when its disk-status read
+        // fails. Do not misreport unreadability as a content conflict. A tiny
+        // readability probe distinguishes that failure and the deleted case;
+        // it does not re-read the entire file or mutate shared state.
+        use std::io::Read;
+        let path = self.root.join(&document.relative_path);
+        let readable = std::fs::File::open(&path).and_then(|mut file| {
+            let mut first_byte = [0];
+            file.read(&mut first_byte).map(|_| ())
+        });
+        match readable {
+            Ok(()) => Some(DocumentDiskStatus::Modified),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Some(DocumentDiskStatus::Deleted)
+            }
+            Err(_) => None, // Original poll error remains visible; keep prior UI status.
+        }
+    }
+
+    fn update_disk_certainty(&mut self, poll: bool, failed: bool, messages: &[HostMessage]) {
+        if poll && failed {
+            // The public shared API cannot identify the unreturned status of
+            // every document. Mark it explicitly instead of claiming an exact
+            // scan. Clean advancing replacements below still repair versions.
+            self.disk_status_unknown
+                .extend(self.documents.keys().cloned());
+        }
+        for message in messages {
+            let confirmed = match message {
+                HostMessage::ReplaceDocument { document } if !document.dirty => {
+                    Some(document.id.as_str())
+                }
+                HostMessage::SaveAsCompleted { document, .. } => Some(document.id.as_str()),
+                HostMessage::SaveCompleted { document_id, .. } => Some(document_id.as_str()),
+                HostMessage::DocumentDiskStatus { document_id, .. } if poll && !failed => {
+                    Some(document_id.as_str())
+                }
+                _ => None,
+            };
+            if let Some(id) = confirmed {
+                self.disk_status_unknown.remove(id);
+            }
+        }
+        // Empty successful polls cannot repair a previously consumed transition:
+        // the shared reported-status map may suppress the missing message again.
+        self.disk_status_unknown
+            .retain(|id| self.documents.contains_key(id));
+        for document in self.documents.values_mut() {
+            document.disk_status_known = !self.disk_status_unknown.contains(&document.id);
         }
     }
 
@@ -547,6 +670,7 @@ impl Engine {
             active: false,
             read_only: payload.read_only,
             external_change: payload.external_change,
+            disk_status_known: !self.disk_status_unknown.contains(&payload.id),
         }
     }
     fn update_metadata(&mut self, messages: &[HostMessage]) {
@@ -1032,5 +1156,375 @@ mod tests {
         assert!(response.error.as_deref().unwrap().contains("recovery"));
         assert_eq!(response.state, restored);
         assert_eq!(fs::read_to_string(obstructed).unwrap(), "do not replace");
+    }
+    // A regular file replaced by a directory makes reads fail on Windows and Linux
+    // without relying on administrator/root permission behavior or sleeps.
+
+    #[test]
+    fn partial_disk_poll_delivers_completed_clean_reload_and_preserves_active_document() {
+        let root = Directory::new();
+        let first = root.0.join("first 한글 한 😀.txt");
+        let second = root.0.join("second unreadable.txt");
+        fs::write(&first, "\u{feff}first\r\n").unwrap();
+        fs::write(&second, "second\n").unwrap();
+        let (worker, receive) = start(&root, EditorSessionState::default(), None);
+        let before_first = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+        let before_second = payload(&send(&worker, &receive, 2, Work::Open(second.clone())));
+        let updated = "외부 변경 한 e\u{301} 😀\nsecond line\n";
+        let disk_bytes = format!("\u{feff}{}", updated.replace('\n', "\r\n"));
+        fs::write(&first, &disk_bytes).unwrap();
+        fs::remove_file(&second).unwrap();
+        fs::create_dir(&second).unwrap();
+
+        let polled = send(&worker, &receive, 3, Work::PollDisk);
+        assert!(polled
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("inspect document"));
+        let replacements: Vec<_> = polled
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                HostMessage::ReplaceDocument { document } => Some(document),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].id, before_first.id);
+        assert_eq!(replacements[0].content, updated);
+        assert_eq!(replacements[0].version, before_first.version + 1);
+        assert_eq!(replacements[0].encoding, TextDocumentEncoding::Utf8Bom);
+        assert_eq!(replacements[0].eol, TextDocumentLineEnding::CrLf);
+        assert!(!replacements[0].dirty);
+        assert!(!polled.messages.iter().any(|message| matches!(
+            message,
+            HostMessage::InitializeEditor { .. } | HostMessage::OpenDocument { .. }
+        )));
+        assert!(
+            polled.messages.iter().all(|message| matches!(
+                message,
+                HostMessage::ReplaceDocument { .. } | HostMessage::DocumentDiskStatus { .. }
+            )),
+            "automatic refresh must not activate any document"
+        );
+        let synchronized = polled
+            .documents
+            .iter()
+            .find(|document| document.id == before_first.id)
+            .unwrap();
+        assert_eq!(synchronized.version, replacements[0].version);
+        assert!(!synchronized.dirty);
+        assert!(
+            synchronized.disk_status_known,
+            "the completed clean reload is authoritative"
+        );
+        let blocked = polled
+            .documents
+            .iter()
+            .find(|document| document.id == before_second.id)
+            .unwrap();
+        assert_eq!(blocked.version, before_second.version);
+        assert!(
+            !blocked.disk_status_known,
+            "the incomplete scan must be observable"
+        );
+        assert!(
+            !blocked.external_change,
+            "unreadable is an I/O error, not a proven content conflict"
+        );
+        assert_eq!(polled.state.active_file, Some(second.clone()));
+        assert_eq!(fs::read(&first).unwrap(), disk_bytes.as_bytes());
+
+        // Retry does not repeat the already-consumed shared reload; its payload had
+        // to be present in the partial-error response above or the model stays stale.
+        fs::remove_dir(&second).unwrap();
+        fs::write(&second, "second\n").unwrap();
+        let retried = send(&worker, &receive, 4, Work::PollDisk);
+        assert!(retried.error.is_none());
+        assert!(!retried.messages.iter().any(|message| matches!(message,
+        HostMessage::ReplaceDocument { document } if document.id == before_first.id)));
+        let edited = send(
+            &worker,
+            &receive,
+            5,
+            change(replacements[0], "edited after reload 한글\n"),
+        );
+        assert!(
+            edited.error.is_none(),
+            "the delivered replacement version must accept the next edit"
+        );
+        let saved = send(&worker, &receive, 6, Work::SaveAll);
+        assert!(saved.error.is_none());
+        assert_eq!(
+            fs::read(&first).unwrap(),
+            "\u{feff}edited after reload 한글\r\n".as_bytes()
+        );
+        assert_eq!(fs::read_to_string(second).unwrap(), "second\n");
+    }
+
+    #[test]
+    fn partial_disk_poll_delivers_dirty_conflict_without_replacing_unsaved_models() {
+        let root = Directory::new();
+        let first = root.0.join("dirty 한글.txt");
+        let second = root.0.join("later unreadable.txt");
+        fs::write(&first, "base\n").unwrap();
+        fs::write(&second, "untouched\n").unwrap();
+        let (worker, receive) = start(&root, EditorSessionState::default(), None);
+        let document = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+        let changed = send(
+            &worker,
+            &receive,
+            2,
+            change(&document, "unsaved 한 e\u{301} 😀\n"),
+        );
+        let version = changed.documents[0].version;
+        let other = payload(&send(&worker, &receive, 3, Work::Open(second.clone())));
+        fs::write(&first, "external\n").unwrap();
+        fs::remove_file(&second).unwrap();
+        fs::create_dir(&second).unwrap();
+
+        let polled = send(&worker, &receive, 4, Work::PollDisk);
+        assert!(polled.error.is_some());
+        assert!(
+            matches!(polled.messages.iter().find(|message| matches!(message,
+        HostMessage::DocumentDiskStatus { document_id, .. } if document_id == &document.id)),
+        Some(HostMessage::DocumentDiskStatus { document_version, status: DocumentDiskStatus::Modified, .. })
+        if *document_version == version)
+        );
+        assert!(!polled.messages.iter().any(|message| matches!(
+            message,
+            HostMessage::InitializeEditor { .. }
+                | HostMessage::OpenDocument { .. }
+                | HostMessage::ReplaceDocument { .. }
+        )));
+        let dirty = polled
+            .documents
+            .iter()
+            .find(|metadata| metadata.id == document.id)
+            .unwrap();
+        assert!(dirty.dirty && dirty.external_change);
+        assert!(!dirty.disk_status_known);
+        assert_eq!(dirty.version, version);
+        assert_eq!(polled.state.active_file, Some(second.clone()));
+        assert_eq!(
+            polled
+                .documents
+                .iter()
+                .find(|metadata| metadata.id == other.id)
+                .unwrap()
+                .version,
+            other.version
+        );
+
+        let failed = send(&worker, &receive, 5, Work::SaveAll);
+        assert!(failed.error.is_some());
+        assert_eq!(fs::read_to_string(&first).unwrap(), "external\n");
+        let kept = send(
+            &worker,
+            &receive,
+            6,
+            Work::Message(EditorMessage::ConflictActionRequested {
+                document_id: document.id.clone(),
+                document_version: version,
+                action: ConflictAction::KeepMine,
+            }),
+        );
+        assert!(kept.error.is_none());
+        let retained = payload(&kept);
+        assert_eq!(retained.id, document.id);
+        assert_eq!(retained.content, "unsaved 한 e\u{301} 😀\n");
+        assert!(retained.dirty);
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "external\n",
+            "Keep Mine must retain the buffer without saving it"
+        );
+        let saved = send(&worker, &receive, 7, Work::SaveAll);
+        assert!(saved.error.is_none() && saved.dirty.is_empty());
+        assert_eq!(
+            fs::read_to_string(&first).unwrap(),
+            "unsaved 한 e\u{301} 😀\n"
+        );
+        fs::remove_dir(&second).unwrap();
+        fs::write(&second, "untouched\n").unwrap();
+        assert!(send(&worker, &receive, 8, Work::PollDisk).error.is_none());
+    }
+
+    #[test]
+    fn partial_disk_poll_preserves_deleted_status_before_a_later_read_failure() {
+        let root = Directory::new();
+        let first = root.0.join("deleted first.txt");
+        let second = root.0.join("unreadable second.txt");
+        fs::write(&first, "keep buffer\n").unwrap();
+        fs::write(&second, "second\n").unwrap();
+        let (worker, receive) = start(&root, EditorSessionState::default(), None);
+        let document = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+        send(&worker, &receive, 2, Work::Open(second.clone()));
+        fs::remove_file(&first).unwrap();
+        fs::remove_file(&second).unwrap();
+        fs::create_dir(&second).unwrap();
+        let polled = send(&worker, &receive, 3, Work::PollDisk);
+        assert!(polled.error.is_some());
+        assert!(polled.messages.iter().any(|message| matches!(message,
+        HostMessage::DocumentDiskStatus { document_id, status: DocumentDiskStatus::Deleted, .. }
+        if document_id == &document.id)));
+        assert!(!polled
+            .messages
+            .iter()
+            .any(|message| matches!(message, HostMessage::ReplaceDocument { .. })));
+        assert!(
+            !first.exists(),
+            "automatic polling must not recreate a deleted file"
+        );
+        assert_eq!(
+            polled
+                .documents
+                .iter()
+                .find(|metadata| metadata.id == document.id)
+                .unwrap()
+                .version,
+            document.version
+        );
+    }
+
+    #[test]
+    fn successful_disk_reload_preserves_active_document_without_activation_messages() {
+        let root = Directory::new();
+        let first = root.0.join("changed background.txt");
+        let second = root.0.join("active.txt");
+        fs::write(&first, "before\n").unwrap();
+        fs::write(&second, "active\n").unwrap();
+        let (worker, receive) = start(&root, EditorSessionState::default(), None);
+        let first_document = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+        send(&worker, &receive, 2, Work::Open(second.clone()));
+        fs::write(first, "after\n").unwrap();
+        let polled = send(&worker, &receive, 3, Work::PollDisk);
+        assert!(polled.error.is_none());
+        assert!(polled.messages.iter().any(|message| matches!(message,
+        HostMessage::ReplaceDocument { document } if document.id == first_document.id && document.content == "after\n")));
+        assert!(
+            polled.messages.iter().all(|message| matches!(
+                message,
+                HostMessage::ReplaceDocument { .. } | HostMessage::DocumentDiskStatus { .. }
+            )),
+            "automatic refresh must not activate any document"
+        );
+        assert_eq!(polled.state.active_file, Some(second));
+    }
+
+    #[test]
+    fn partial_same_stamp_dirty_poll_marks_unknown_and_never_clears_known_conflict() {
+        for known_conflict in [false, true] {
+            let root = Directory::new();
+            let first = root.0.join("same stamp 한글.txt");
+            let second = root.0.join("later unreadable.txt");
+            fs::write(&first, "base\n").unwrap();
+            fs::write(&second, "second\n").unwrap();
+            let original_mtime = fs::metadata(&first).unwrap().modified().unwrap();
+            let (worker, receive) = start(&root, EditorSessionState::default(), None);
+            let document = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+            let changed = send(&worker, &receive, 2, change(&document, "mine\n"));
+            let version = changed.documents[0].version;
+            send(&worker, &receive, 3, Work::Open(second.clone()));
+            if known_conflict {
+                fs::write(&first, "previously observed external content\n").unwrap();
+                let conflict = send(&worker, &receive, 4, Work::PollDisk);
+                assert!(conflict.error.is_none());
+                let first_meta = conflict
+                    .documents
+                    .iter()
+                    .find(|meta| meta.id == document.id)
+                    .unwrap();
+                assert!(first_meta.external_change && first_meta.disk_status_known);
+            }
+            fs::write(&first, "disk\n").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&first)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(original_mtime))
+                .unwrap();
+            assert_eq!(
+                fs::metadata(&first).unwrap().modified().unwrap(),
+                original_mtime
+            );
+            assert_eq!(fs::metadata(&first).unwrap().len(), 5);
+            fs::remove_file(&second).unwrap();
+            fs::create_dir(&second).unwrap();
+
+            let polled = send(&worker, &receive, 5, Work::PollDisk);
+            assert!(polled.error.is_some());
+            assert!(!polled.messages.iter().any(|message| matches!(
+                message,
+                HostMessage::DocumentDiskStatus {
+                    status: DocumentDiskStatus::Unchanged,
+                    ..
+                } | HostMessage::ReplaceDocument { .. }
+            )));
+            let first_meta = polled
+                .documents
+                .iter()
+                .find(|meta| meta.id == document.id)
+                .unwrap();
+            assert_eq!(first_meta.external_change, known_conflict);
+            assert!(
+                !first_meta.disk_status_known,
+                "a metadata shortcut cannot establish disk equality"
+            );
+            assert!(first_meta.dirty);
+            assert_eq!(first_meta.version, version);
+            let reactivated = send(&worker, &receive, 6, Work::Open(first.clone()));
+            assert!(reactivated.error.is_none());
+            let reactivated_meta = reactivated
+                .documents
+                .iter()
+                .find(|meta| meta.id == document.id)
+                .unwrap();
+            assert!(!reactivated_meta.disk_status_known);
+            assert_eq!(reactivated_meta.external_change, known_conflict);
+            assert_eq!(reactivated_meta.version, version);
+            let failed_save = send(&worker, &receive, 7, Work::SaveAll);
+            assert!(failed_save.error.is_some());
+            assert_eq!(fs::read_to_string(&first).unwrap(), "disk\n");
+
+            fs::remove_dir(&second).unwrap();
+            fs::write(&second, "second\n").unwrap();
+            let retried = send(&worker, &receive, 8, Work::PollDisk);
+            assert!(retried.error.is_none());
+            assert!(
+                !retried
+                    .documents
+                    .iter()
+                    .find(|meta| meta.id == document.id)
+                    .unwrap()
+                    .disk_status_known,
+                "a successful empty poll does not replay the consumed transition"
+            );
+            let kept = send(
+                &worker,
+                &receive,
+                9,
+                Work::Message(EditorMessage::ConflictActionRequested {
+                    document_id: document.id.clone(),
+                    document_version: version,
+                    action: ConflictAction::KeepMine,
+                }),
+            );
+            assert!(kept.error.is_none());
+            assert_eq!(payload(&kept).content, "mine\n");
+            assert_eq!(fs::read_to_string(&first).unwrap(), "disk\n");
+            let saved = send(&worker, &receive, 10, Work::SaveAll);
+            assert!(saved.error.is_none());
+            assert!(
+                saved
+                    .documents
+                    .iter()
+                    .find(|meta| meta.id == document.id)
+                    .unwrap()
+                    .disk_status_known
+            );
+            assert_eq!(fs::read_to_string(&first).unwrap(), "mine\n");
+        }
     }
 }

@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-native-units",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\target\\x86_64-pc-windows-msvc\\release\\deps\\flowmux_windows-b2f2949a703e9e66.exe",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T04:38:45.4038161Z",
+    "pid":  14532,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  13.084,
+    "finished":  "2026-09-28T04:38:58.4909540Z"
+}

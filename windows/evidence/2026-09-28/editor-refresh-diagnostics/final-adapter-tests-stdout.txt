@@ -1,0 +1,178 @@
+TAP version 13
+# Subtest: initialization authenticates the exact page and hidden focus guards precede bundle execution
+ok 1 - initialization authenticates the exact page and hidden focus guards precede bundle execution
+  ---
+  duration_ms: 3.411648
+  type: 'test'
+  ...
+# Subtest: new Windows document and diff models use LF internally without changing disk metadata
+ok 2 - new Windows document and diff models use LF internally without changing disk metadata
+  ---
+  duration_ms: 1.11647
+  type: 'test'
+  ...
+# Subtest: bounded read preserves Unicode scalar boundaries and empty document state
+ok 3 - bounded read preserves Unicode scalar boundaries and empty document state
+  ---
+  duration_ms: 20.461828
+  type: 'test'
+  ...
+# Subtest: barrier refuses composition without cancelling it and seals until the matching release
+ok 4 - barrier refuses composition without cancelling it and seals until the matching release
+  ---
+  duration_ms: 1.762003
+  type: 'test'
+  ...
+# Subtest: dirty close preserves the document and requires confirmation; malformed fields cannot mutate
+ok 5 - dirty close preserves the document and requires confirmation; malformed fields cannot mutate
+  ---
+  duration_ms: 1.555766
+  type: 'test'
+  ...
+# Subtest: barrier reports current view state after content acknowledgment and before completion
+ok 6 - barrier reports current view state after content acknowledgment and before completion
+  ---
+  duration_ms: 1.162818
+  type: 'test'
+  ...
+# Subtest: replace uses a synchronous writable window while input and subsequent waits stay sealed
+ok 7 - replace uses a synchronous writable window while input and subsequent waits stay sealed
+  ---
+  duration_ms: 4.325558
+  type: 'test'
+  ...
+# Subtest: a timed-out mutation retains its seal until the native owner releases the matching command
+ok 8 - a timed-out mutation retains its seal until the native owner releases the matching command
+  ---
+  duration_ms: 2.770623
+  type: 'test'
+  ...
+# Subtest: normal UI replacement seals before dispatch and cannot be unlocked by a barrier release
+ok 9 - normal UI replacement seals before dispatch and cannot be unlocked by a barrier release
+  ---
+  duration_ms: 1.159399
+  type: 'test'
+  ...
+# Subtest: command completion waits for native replacement completion before exposing its result
+ok 10 - command completion waits for native replacement completion before exposing its result
+  ---
+  duration_ms: 3.001722
+  type: 'test'
+  ...
+# Subtest: overlapping Save All and close requests retain the input shield until every completion
+ok 11 - overlapping Save All and close requests retain the input shield until every completion
+  ---
+  duration_ms: 0.755843
+  type: 'test'
+  ...
+# Subtest: a deferred command result waits for all overlapping response completions
+ok 12 - a deferred command result waits for all overlapping response completions
+  ---
+  duration_ms: 5.871695
+  type: 'test'
+  ...
+# Subtest: ui Save All serializes ten dirty documents through change, save and native completion
+ok 13 - ui Save All serializes ten dirty documents through change, save and native completion
+  ---
+  duration_ms: 7.177763
+  type: 'test'
+  ...
+# Subtest: cli Save All serializes ten dirty documents through change, save and native completion
+ok 14 - cli Save All serializes ten dirty documents through change, save and native completion
+  ---
+  duration_ms: 6.638517
+  type: 'test'
+  ...
+# Subtest: UI Save All stops on save failure, preserves later edits, and holds its seal until completion
+ok 15 - UI Save All stops on save failure, preserves later edits, and holds its seal until completion
+  ---
+  duration_ms: 1.504126
+  type: 'test'
+  ...
+# Subtest: UI Save All timeout preserves the seal until its late content acknowledgment without saving
+ok 16 - UI Save All timeout preserves the seal until its late content acknowledgment without saving
+  ---
+  duration_ms: 0.904072
+  type: 'test'
+  ...
+# Subtest: UI Save All refuses active composition without changing read-only state
+ok 17 - UI Save All refuses active composition without changing read-only state
+  ---
+  duration_ms: 0.579414
+  type: 'test'
+  ...
+# Subtest: automatic refresh updates inactive existing model without activation or focus and waits for native release
+ok 18 - automatic refresh updates inactive existing model without activation or focus and waits for native release
+  ---
+  duration_ms: 0.893511
+  type: 'test'
+  ...
+# Subtest: automatic refresh defers composition without ending it or changing editability
+ok 19 - automatic refresh defers composition without ending it or changing editability
+  ---
+  duration_ms: 0.578725
+  type: 'test'
+  ...
+# Subtest: automatic refresh leaves the shared Quick Open and workspace search overlay editable
+ok 20 - automatic refresh leaves the shared Quick Open and workspace search overlay editable
+  ---
+  duration_ms: 0.527375
+  type: 'test'
+  ...
+# Subtest: automatic refresh defers focused Monaco widgets but permits ordinary noncomposing text focus
+ok 21 - automatic refresh defers focused Monaco widgets but permits ordinary noncomposing text focus
+  ---
+  duration_ms: 0.511745
+  type: 'test'
+  ...
+# Subtest: automatic refresh defers pending edits instead of consuming debounce state
+ok 22 - automatic refresh defers pending edits instead of consuming debounce state
+  ---
+  duration_ms: 0.422796
+  type: 'test'
+  ...
+# Subtest: automatic refresh never replaces dirty content and quarantines a contradictory backend replacement
+ok 23 - automatic refresh never replaces dirty content and quarantines a contradictory backend replacement
+  ---
+  duration_ms: 0.507426
+  type: 'test'
+  ...
+# Subtest: a stale automatic refresh cannot replace a model or release a later guard
+ok 24 - a stale automatic refresh cannot replace a model or release a later guard
+  ---
+  duration_ms: 0.710943
+  type: 'test'
+  ...
+# Subtest: composition starting after the refresh guard preserves content and requires native failure handling
+ok 25 - composition starting after the refresh guard preserves content and requires native failure handling
+  ---
+  duration_ms: 0.701784
+  type: 'test'
+  ...
+# Subtest: automatic disk status preserves dirty content and active document identity
+ok 26 - automatic disk status preserves dirty content and active document identity
+  ---
+  duration_ms: 0.764393
+  type: 'test'
+  ...
+# Subtest: automatic refresh rejects unknown documents and nonadvancing replacement versions
+ok 27 - automatic refresh rejects unknown documents and nonadvancing replacement versions
+  ---
+  duration_ms: 1.529656
+  type: 'test'
+  ...
+# Subtest: an empty automatic result still waits for completed content flush before acknowledgment
+ok 28 - an empty automatic result still waits for completed content flush before acknowledgment
+  ---
+  duration_ms: 0.506886
+  type: 'test'
+  ...
+1..28
+# tests 28
+# suites 0
+# pass 28
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 257.374766

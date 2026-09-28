@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-move",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-refresh-cases\\move.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T04:37:45.6451351Z",
+    "pid":  32224,
+    "exitCode":  0,
+    "activeBeforeCleanup":  3,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  5.005,
+    "finished":  "2026-09-28T04:37:50.6551347Z"
+}

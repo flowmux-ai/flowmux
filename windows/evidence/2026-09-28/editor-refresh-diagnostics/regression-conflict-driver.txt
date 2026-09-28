@@ -1,0 +1,141 @@
+[editor-refresh-conflict] started pid=37368, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\editor-refresh-conflict-a089d315-65db-4ff8-aa13-277a4243bc66
+[check] passed clean_external_reload_dirty_conflict_compare_keep_mine_then_save_and_explicit_reload
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08
+{
+    "started":  "2026-09-28T13:37:40.4573168+09:00",
+    "mode":  "background",
+    "case":  "conflict",
+    "checks":  [
+                   {
+                       "name":  "clean_external_reload_dirty_conflict_compare_keep_mine_then_save_and_explicit_reload",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  13576,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:37:40.5787074Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08\\files 한글 한 😀",
+                                                      "pane":  "8cf94df4-2383-4287-a340-6aad0dacebd8",
+                                                      "pid":  13576,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-13576-70e8582d-9ee2-44f6-8f3c-54437afd3329",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "3673c726-44cf-4cb7-b5c6-907dfede1a21",
+                                                      "workspace":  "d709e52e-ee74-44c9-8093-3a9f2da2d784"
+                                                  },
+                             "discoveryElapsedMs":  75,
+                             "identityBudgetMs":  7925,
+                             "identityElapsedMs":  717,
+                             "treeRequests":  2,
+                             "elapsedMs":  913,
+                             "finished":  "2026-09-28T04:37:41.4936489Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08\\state\\editor-profile",
+                             "surface":  "72b655d3-ba40-4804-b910-a79d1c5dd3a5",
+                             "pid":  13576,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "case":  "conflict",
+                             "saveConflict":  {
+                                                  "error":  "document changed on disk: C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08\\files 한글 한 😀\\conflict 한글.txt"
+                                              }
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  13576,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Automatic refresh burst observations do not assume one watcher event per write; partial-error application does not make unknown disk status healthy, and unlock alone may not replay a consumed status transition.",
+                     "Automatic move/close waits for idle before mutations; post-close absence is bounded observation without a forced queued-callback race.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  13576
+              ],
+    "shells":  [
+                   37916
+               ],
+    "clientPids":  [
+                       28552,
+                       33616,
+                       29532,
+                       26996,
+                       32464,
+                       39780,
+                       35436,
+                       36928,
+                       26172,
+                       37352,
+                       35992,
+                       32056,
+                       12076,
+                       37284,
+                       34988,
+                       31820,
+                       16376,
+                       35420,
+                       19176,
+                       25004,
+                       33776,
+                       36160,
+                       30140,
+                       9072,
+                       24744,
+                       38780,
+                       38592,
+                       28380,
+                       33852,
+                       37772,
+                       34144,
+                       25072,
+                       19912,
+                       16936,
+                       39692,
+                       6016,
+                       34044,
+                       31836,
+                       17764,
+                       34032,
+                       13404,
+                       31516
+                   ],
+    "finished":  "2026-09-28T13:37:44.6617123+09:00"
+}
+[editor-refresh-conflict] passed in 4.938s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\editor-refresh-conflict-a089d315-65db-4ff8-aa13-277a4243bc66\result.json

@@ -596,9 +596,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/editor.md",
-        "evidence/2026-09-28/editor-diagnostics/passed-conflict-native.json"
+        "evidence/2026-09-28/editor-diagnostics/passed-conflict-native.json",
+        "evidence/2026-09-28/editor-refresh.md"
       ],
-      "notes": "Explicit disk checks detect clean external changes and dirty conflicts; hidden native commands exercise compare, Keep Mine followed by Save, and explicit Reload against actual models and disk bytes. Automatic watching, physical diff/conflict UI, concurrent-writer races and complete failure coverage remain pending."
+      "notes": "Historical evidence covers explicit disk checks and conflict actions. Eight final-debug-source hidden native automatic-refresh cases now pass (58.397s summed runners): clean/inactive updates, dirty conflict, delete/recreate, same-size restored-timestamp writes, partial sharing-denied reads, move/close ownership and write-burst/own-save handling. Actual Monaco reads follow apply acknowledgment without check-disk. Partial errors retain advanced clean models and blocked models/errors; disk_status_known=false can remain sticky after unlock or an empty retry. Move/close testing waits for idle and observes bounded post-close absence, without forcing a queued-callback race. Busy close/model commands fail without replay; tab moves retain editor/view identity. Composition and known Monaco/HTML dialog deferral are implemented, with physical IME/UI unverified. No watcher restart, periodic fallback or explicit watched-root rename detection exists; noisy roots cause full scans. Concurrent-writer races and complete failure coverage remain pending."
     },
     {
       "id": "F05",
@@ -1018,9 +1019,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/editor.md",
-        "evidence/2026-09-28/editor-open.md"
+        "evidence/2026-09-28/editor-open.md",
+        "evidence/2026-09-28/editor-refresh.md"
       ],
-      "notes": "The initial editor stage has 15 unique native cases and 27 related checks in editor.md. The later Open/picker stage has seven final-source editor cases plus 36 related native checks, with three initial passes and two Restore failures kept separate in editor-open.md. Final Windows debug/release, Clippy, format and 172 actual Windows unit tests pass; entrypoint/package/cleanup results are recorded separately. F01-F05/F17 remain partial. Physical picker/UI/IME/clipboard/fonts/DPI/accessibility, UI-bound WebView construction, automatic watching, search/viewers, full ACL/path semantics and renderer-crash recovery remain open. No feature or complete Windows acceptance gate passes."
+      "notes": "The initial editor stage has 15 unique native cases and 27 related checks in editor.md. The Open/picker stage has seven final-source editor cases plus 36 related native checks, with three initial passes and two Restore failures kept separate in editor-open.md; its final Windows builds, Clippy, format and 172 Windows unit tests passed. The later automatic-refresh stage has eight passing hidden native cases (58.397s summed runners), nine related editor cases (59.789s), all 184 actual Windows unit tests (13.084s), current debug/Clippy/format and 28 adapter tests. Native units include three watcher tests for extended Unicode roots/atomic replacement, recursive acknowledgment/cancellation drain and missing-root failure. Release/package/cleanup results are recorded separately in editor-refresh.md; historical counts are not new-source results. F01-F05/F17 remain partial. Physical picker/UI/IME/clipboard/fonts/DPI/accessibility, UI-bound WebView construction, watcher restart/root-rename/noisy-root limits and sticky partial-error uncertainty, search/viewers, full ACL/path semantics and renderer-crash recovery remain open. No feature or complete Windows acceptance gate passes."
     },
     {
       "id": "G09",

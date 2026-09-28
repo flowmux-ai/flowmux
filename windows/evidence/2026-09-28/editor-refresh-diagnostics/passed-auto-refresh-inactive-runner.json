@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-auto-refresh-inactive",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-refresh-cases\\auto-refresh-inactive.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T04:36:02.3407399Z",
+    "pid":  38760,
+    "exitCode":  0,
+    "activeBeforeCleanup":  3,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  6.358,
+    "finished":  "2026-09-28T04:36:08.7030984Z"
+}

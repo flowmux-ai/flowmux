@@ -58,6 +58,30 @@ public sealed class EditorFixture : IDisposable {
     public void LockAgainstReplacement(string name) {
         locks.Add(new FileStream(File(name), FileMode.Open, FileAccess.Read, FileShare.Read));
     }
+    public void LockAgainstRead(string name) {
+        locks.Add(new FileStream(File(name), FileMode.Open, FileAccess.Read, FileShare.None));
+    }
+    public void DeleteOwned(string name) {
+        System.IO.File.Delete(File(name));
+    }
+    public long LastWriteTicks(string name) {
+        string path = File(name);
+        if (!System.IO.File.Exists(path)) throw new FileNotFoundException("Owned fixture is missing", path);
+        return System.IO.File.GetLastWriteTimeUtc(path).Ticks;
+    }
+    public long RewritePreservingTimestamp(string name, string text, bool bom, bool crlf) {
+        string path = File(name);
+        byte[] replacement = Encode(text, bom, crlf);
+        var original = new FileInfo(path);
+        if (!original.Exists || original.Length != replacement.Length)
+            throw new InvalidOperationException("Timestamp fixture rewrite requires equal byte lengths");
+        DateTime timestamp = original.LastWriteTimeUtc;
+        System.IO.File.WriteAllBytes(path, replacement);
+        System.IO.File.SetLastWriteTimeUtc(path, timestamp);
+        if (new FileInfo(path).Length != replacement.Length || System.IO.File.GetLastWriteTimeUtc(path).Ticks != timestamp.Ticks)
+            throw new InvalidOperationException("Owned rewrite did not preserve its length and exact UTC timestamp");
+        return timestamp.Ticks;
+    }
     public void LockStateAgainstReplacement(string path) {
         string full = Path.GetFullPath(path);
         if (!full.StartsWith(stateRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

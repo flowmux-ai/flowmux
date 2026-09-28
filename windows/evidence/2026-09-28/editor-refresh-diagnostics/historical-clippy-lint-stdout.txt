@@ -1,0 +1,46 @@
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error: this boolean expression can be simplified
+   --> src/native/editor_refresh.rs:134:12
+    |
+134 |           if !editor
+    |  ____________^
+135 | |             .refresh
+136 | |             .watcher
+137 | |             .as_ref()
+138 | |             .is_some_and(|w| w.status().epoch == notice.epoch)
+    | |______________________________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#nonminimal_bool
+    = note: `-D clippy::nonminimal-bool` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::nonminimal_bool)]`
+help: try
+    |
+134 ~         if editor
+135 +             .refresh
+136 +             .watcher
+137 +             .as_ref().is_none_or(|w| w.status().epoch != notice.epoch)
+    |
+
+error: this boolean expression can be simplified
+   --> src/native/editor_refresh.rs:184:12
+    |
+184 |           if !self.editors[&surface]
+    |  ____________^
+185 | |             .refresh
+186 | |             .pending
+187 | |             .as_ref()
+188 | |             .is_some_and(|p| p.id == id)
+    | |________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#nonminimal_bool
+help: try
+    |
+184 ~         if self.editors[&surface]
+185 +             .refresh
+186 +             .pending
+187 +             .as_ref().is_none_or(|p| p.id != id)
+    |
+
+error: could not compile `flowmux-windows` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `flowmux-windows` (lib test) due to 2 previous errors

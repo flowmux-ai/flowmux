@@ -1,0 +1,1785 @@
+{
+  "format_version": 1,
+  "collection": "Windows editor automatic refresh",
+  "parent_commit": "3f43fe215ec9f8c6a191fdb7280319a58138f70b",
+  "copied_at_utc": "2026-09-28T04:40:00.067667+00:00",
+  "encoding": "UTF-8 without BOM; LF; trailing whitespace and extra EOF blank lines removed. JSON values preserved.",
+  "scope": "Windows-only automatic refresh; partial acceptance; no physical input/IME/clipboard evidence.",
+  "artifacts": [
+    {
+      "path": "run-c6d83f94-8ae2-41b8-b97e-0fe423378369.json",
+      "source": "windows/dist/editor-refresh-runs/c6d83f94-8ae2-41b8-b97e-0fe423378369/manifest.json",
+      "source_bytes": 3618,
+      "source_sha256": "b9f5d761ed94fcd4ead493a96220732e4352fa3f983880b679bd847b2a8bba2f",
+      "bytes": 3618,
+      "sha256": "b9f5d761ed94fcd4ead493a96220732e4352fa3f983880b679bd847b2a8bba2f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-clean-native.json",
+      "source": "windows/dist/evidence/editor-a1b415c9-b506-4c58-bf82-2c77a3a14b7c/native-editor-background.json",
+      "source_bytes": 13985,
+      "source_sha256": "0222eff344cdff70c08dbc84a6e84e5607d9b490d6c6f245891b98778a1eda35",
+      "bytes": 13763,
+      "sha256": "369176633bc9f84a34d52f3120c54778481013b699815bded7d8882efc8f9858",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-clean-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-clean-575e5d98-9858-43f1-b6bd-d86dc41b34c0/result.json",
+      "source_bytes": 529,
+      "source_sha256": "50c67fd0c2a4cf75a2d6e166c00e1f88db968bd87f454e8db1426822dfff0351",
+      "bytes": 513,
+      "sha256": "d6d57313a56fccb357dada14ace98b2200529ae03c8672cad2059fddfdec9614",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-clean-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-clean-575e5d98-9858-43f1-b6bd-d86dc41b34c0/stdout.txt",
+      "source_bytes": 14275,
+      "source_sha256": "cdc229d89168e8dc4447b3c5f597965151984fa4f4ce1cdfd0f5060bbbb3d6ae",
+      "bytes": 14055,
+      "sha256": "6cb277abcc8fdfe3918347431a21ba10f19788b10257fa88b528598aeac87c58",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-clean-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-clean-575e5d98-9858-43f1-b6bd-d86dc41b34c0/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-clean-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/c6d83f94-8ae2-41b8-b97e-0fe423378369/auto-refresh-clean-driver.txt",
+      "source_bytes": 14862,
+      "source_sha256": "4405089110d51f9ca5cf14fdec75174f3ba0fb58c3ddeaced5d6cf618c8d987a",
+      "bytes": 14642,
+      "sha256": "f541569ef1fe4268edb41ad234f0c847708a64a77ec35a00d40650bb8e992b2d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/manifest.json",
+      "source_bytes": 24066,
+      "source_sha256": "e55933a16b996eb4c60a4f9178022fafda1d8f7b2caff0056aabebead37532d6",
+      "bytes": 24066,
+      "sha256": "e55933a16b996eb4c60a4f9178022fafda1d8f7b2caff0056aabebead37532d6",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-inactive-native.json",
+      "source": "windows/dist/evidence/editor-e2acef91-f79d-4631-a007-b88e40446222/native-editor-background.json",
+      "source_bytes": 21092,
+      "source_sha256": "debd35254375a72cdbb6144752f939ade487b81a3dd118d3c1a8f65ae3b3947e",
+      "bytes": 20773,
+      "sha256": "3e6b965014bcb2c5dc06b8c87365288525d6cb49de03a7e8906df0d0a8071244",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-inactive-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-inactive-3f1b974f-2d92-4288-8956-701e658292ba/result.json",
+      "source_bytes": 535,
+      "source_sha256": "7b6c878533e8e00add185aa9b8151f1f69ff7ace9f098c61eaf9ab1adbb30463",
+      "bytes": 519,
+      "sha256": "12ae7faca9ae768d062eb9d24d589cca09d5cf181914c3f3dd41ae4feadf6c1b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-inactive-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-inactive-3f1b974f-2d92-4288-8956-701e658292ba/stdout.txt",
+      "source_bytes": 21377,
+      "source_sha256": "b1d57d2d9d9ec78a0e5f22c9b64068408d2e2f44df809f7eab3655b791bfaa3f",
+      "bytes": 21060,
+      "sha256": "44e198fbac531d554292d808431f3f82da0a5d56d3e042219cfdbce396c10359",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-inactive-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-inactive-3f1b974f-2d92-4288-8956-701e658292ba/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-inactive-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-inactive-driver.txt",
+      "source_bytes": 21979,
+      "source_sha256": "e0e3b5b2cdd7cd27ce56818a9769673107ba7a89e2846e3ab0d00b272655336e",
+      "bytes": 21662,
+      "sha256": "40c71c3c3ef79692b5d554583eec5eb292911761679e9a92ebbbf3b26da40f2d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-conflict-native.json",
+      "source": "windows/dist/evidence/editor-20bacd6c-3384-4c81-9f22-26efdf41f441/native-editor-background.json",
+      "source_bytes": 19594,
+      "source_sha256": "da09c4e40ac19a9e2c8f31588f93715a7a1889bf240d51c1c11860771087a54c",
+      "bytes": 19273,
+      "sha256": "25bac513335a871e133c923cf5f958ef520914b7467a8f4388f860a3fda6cdab",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-conflict-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-conflict-cb1b089f-d177-4ac2-a626-1d27f9dd968f/result.json",
+      "source_bytes": 535,
+      "source_sha256": "04299439d223090f56b0d8228715452c1ff9b4e1ccf3b337a18150d77c1ae98c",
+      "bytes": 519,
+      "sha256": "d8b7f9a247b0c40aee43502392ffbd8f3ae0336d7ca641080af920a63910a1ad",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-conflict-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-conflict-cb1b089f-d177-4ac2-a626-1d27f9dd968f/stdout.txt",
+      "source_bytes": 19884,
+      "source_sha256": "5e136dc81375c893fd17e806e7b1aba40864fac56dc43a13285117f0488f4094",
+      "bytes": 19565,
+      "sha256": "7720f0f67430e43d7c37ad61c034dde651633ef5d5078a7d7ff9aa32400bd622",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-conflict-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-conflict-cb1b089f-d177-4ac2-a626-1d27f9dd968f/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-conflict-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-conflict-driver.txt",
+      "source_bytes": 20486,
+      "source_sha256": "5cf5363db74ca86ed8ff68025598a4d9cb05eb75a7d820136c601b1715f8cf08",
+      "bytes": 20167,
+      "sha256": "83e998e3fea8bddfc29aa384dce14b1f1350890b067e8d4b2e76dc77f50a409d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-delete-recreate-native.json",
+      "source": "windows/dist/evidence/editor-1e0bac5e-afe1-4252-aa8d-e9225f477dd7/native-editor-background.json",
+      "source_bytes": 24039,
+      "source_sha256": "02200bbdb432a1c9c7813562d7839ff0ef9dab8ba2f07f828e93b85007fc0d8e",
+      "bytes": 23709,
+      "sha256": "87764ede3abbf380ab4f2ba7d5e0209dd5624fa79d0d505b76fa85608539dba4",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-delete-recreate-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-delete-recreate-10c90986-5627-4d11-99a3-f23fb4623758/result.json",
+      "source_bytes": 549,
+      "source_sha256": "c9fa0edb339fd2b628d1af8d57437231f24887820b0855006d7b8765cf1fb972",
+      "bytes": 533,
+      "sha256": "ffaba52fb5d77e37270cd526731e65ef4070855393799d030615c8066a8ee563",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-delete-recreate-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-delete-recreate-10c90986-5627-4d11-99a3-f23fb4623758/stdout.txt",
+      "source_bytes": 24328,
+      "source_sha256": "5a265bd2b40f12ef7aaa9bcca44a896414eb6fc5f6506b8a6f110db01ba02473",
+      "bytes": 24000,
+      "sha256": "8414c28bff863ea4ecd5a7b2e105af1e4b781ddbcd1730dfd7ff565353cecbd5",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-delete-recreate-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-delete-recreate-10c90986-5627-4d11-99a3-f23fb4623758/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-delete-recreate-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-delete-recreate-driver.txt",
+      "source_bytes": 24965,
+      "source_sha256": "1e2e01555435d7435d36a59b0a8834c8cf5df3461f3c082760ac5256076cc62c",
+      "bytes": 24637,
+      "sha256": "9746c499ca3c6ab101a5f7d68cdd131bdea294187e7ccd4e722ab9947091ac8b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-stamp-native.json",
+      "source": "windows/dist/evidence/editor-c66fa2c2-5ab4-4d94-ba8b-762619bb7857/native-editor-background.json",
+      "source_bytes": 14518,
+      "source_sha256": "0fe47c0074a9763edb5aeb0acd748fa54d59203b1672e5e53cfcf9726642d573",
+      "bytes": 14284,
+      "sha256": "ac61155f26dbb5c9d7e5960a7eb8caa81e48fd98744e9c233b72bff941307448",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-stamp-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-stamp-31ca55d1-6bd2-4637-bb2d-56aceda4650b/result.json",
+      "source_bytes": 529,
+      "source_sha256": "cae9df6a8dc94e9929cdfe3422a643b4632fb852c4dbf26f65a8fdb5a550f3c1",
+      "bytes": 513,
+      "sha256": "ae8741d9646a10e097fe86963f231ed05721e97cedb3c92a524b5ab322db6322",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-stamp-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-stamp-31ca55d1-6bd2-4637-bb2d-56aceda4650b/stdout.txt",
+      "source_bytes": 14798,
+      "source_sha256": "5a2cebd73fe5a10719a56ec79b47185c05056ffc633e153b08998b4083519303",
+      "bytes": 14566,
+      "sha256": "ea0ddde322c7120ccee10faa5bf8c22ff3743870bdb73c543d6bb63029a8b02c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-stamp-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-stamp-31ca55d1-6bd2-4637-bb2d-56aceda4650b/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-stamp-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-stamp-driver.txt",
+      "source_bytes": 15385,
+      "source_sha256": "f1e68c3df1e831bf27aaddbb209512c6f43e520eb2b2c491bd41f6d52bd7dc2e",
+      "bytes": 15153,
+      "sha256": "96701f9078c5223f6002bae7609c41137227c4beaf6235119659a43054293b61",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-partial-error-native.json",
+      "source": "windows/dist/evidence/editor-95ee46be-dfc8-407e-92c7-82313da7e547/native-editor-background.json",
+      "source_bytes": 20471,
+      "source_sha256": "fb825141b695d2f198f22c0b4ac2a9aa5567e293ab227cfecdd2cc0c179c74fe",
+      "bytes": 20170,
+      "sha256": "1f35c1c7ac0d35848d246f2350dcec7289f65dcf7c650e0ce2c7943450afe7a4",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-partial-error-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-partial-error-af26573e-67e7-4d32-985a-a599c862a645/result.json",
+      "source_bytes": 545,
+      "source_sha256": "b8150a90b814c47d1c203d2e81936fe9475011f6ee250f530db090fd82e9dc2e",
+      "bytes": 529,
+      "sha256": "48a4249db330eed0169863efb03609cf3af279827bb231893f092c2901b12630",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-partial-error-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-partial-error-af26573e-67e7-4d32-985a-a599c862a645/stdout.txt",
+      "source_bytes": 20765,
+      "source_sha256": "1ebb217368e6624736248cd1fcec283681a6651174d1f507245c07b3b63f9efb",
+      "bytes": 20466,
+      "sha256": "b8d4e228229a5ef7e24def7dbc504c920ef7f889b4df61aa708879617356a12b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-partial-error-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-partial-error-af26573e-67e7-4d32-985a-a599c862a645/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-partial-error-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-partial-error-driver.txt",
+      "source_bytes": 21392,
+      "source_sha256": "9458d9d945c2fcf06a9c048902c5b9d1d10943643c4912e92d5518f6b198dd24",
+      "bytes": 21093,
+      "sha256": "ffdfa758c632cfd1a142277740ebb736434109afb9c3386c3799727c9d414238",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-move-close-native.json",
+      "source": "windows/dist/evidence/editor-a8b5be94-87d9-446a-b1e7-ba53dfcbf4b8/native-editor-background.json",
+      "source_bytes": 15314,
+      "source_sha256": "b5d798a0a1310162bfc42c51b6e2ace216c3cc8039596dbf595d2002f7c87af5",
+      "bytes": 15056,
+      "sha256": "8a7434e5fb4aeb76355d0c366d6c16bd8a1fabfd1b1d44f41c038c6244ca4c49",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-move-close-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-move-close-eb4de37b-067b-4e9c-b0df-03d812c24114/result.json",
+      "source_bytes": 538,
+      "source_sha256": "ae57bb661bb3c12717f1a6ff439e08b08323205556afee8219509ac5350abce2",
+      "bytes": 522,
+      "sha256": "f921f794edffdcdd2b158d7d0d79c50584c81c0ef0d6ef9b67e8c1b9e8664332",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-move-close-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-move-close-eb4de37b-067b-4e9c-b0df-03d812c24114/stdout.txt",
+      "source_bytes": 15602,
+      "source_sha256": "be4aceeefdfab786929add697ce792d42df43ee9620c6f40e165f76d75c463a6",
+      "bytes": 15346,
+      "sha256": "e1d7085e3a5c8ff123693b3eaed3681a8af93918c03f40a6878b6648d693f3a5",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-move-close-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-move-close-eb4de37b-067b-4e9c-b0df-03d812c24114/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-move-close-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-move-close-driver.txt",
+      "source_bytes": 16213,
+      "source_sha256": "48115753d30c957e6004f12dc0794abc9955dd9938897080d8eb147b5aea496e",
+      "bytes": 15957,
+      "sha256": "3f7ae49d74e02ca0b2338fa752fdfbc64d8ef37f01eedaa70ff3744ee3977ed4",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-coalescing-native.json",
+      "source": "windows/dist/evidence/editor-f363680a-7edb-4663-8d8a-1a23c6c9fc34/native-editor-background.json",
+      "source_bytes": 17465,
+      "source_sha256": "dba846e239a8a066136f081464a3564f93bf24420b54d7e67212a63fab81ae2a",
+      "bytes": 17169,
+      "sha256": "769a72d1455f5cc56d48614553211b327bcb1c96f557ad599435a68f2e99897b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-coalescing-runner.json",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-coalescing-b627483d-2c51-454b-9c1c-0c1901d47b7e/result.json",
+      "source_bytes": 539,
+      "source_sha256": "fbc00ba2e4f7ee598a30512aadf315637a293d4a39efdc74d6eeb9f1218d5856",
+      "bytes": 523,
+      "sha256": "34ef0e5289385ef6f682b34e3528c8dc4590ceb59b075f8beb73e95285d45e68",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-coalescing-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-coalescing-b627483d-2c51-454b-9c1c-0c1901d47b7e/stdout.txt",
+      "source_bytes": 17758,
+      "source_sha256": "394c672249625df827c0561a5771326ff19b6245465775431d7e34939f238743",
+      "bytes": 17464,
+      "sha256": "770c81a94274d8d0cadd91d5572a83f562a6e444551aeca40b165ff5b3e68b2a",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-auto-refresh-coalescing-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-auto-refresh-coalescing-b627483d-2c51-454b-9c1c-0c1901d47b7e/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-auto-refresh-coalescing-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/3c369798-9b94-4a8d-8837-20b345de75bf/auto-refresh-coalescing-driver.txt",
+      "source_bytes": 18370,
+      "source_sha256": "f531802af286053d7b4040857a51ac050c451529824be4cc8c7d4e7f3a9bf850",
+      "bytes": 18076,
+      "sha256": "25ef1e2e9991f16e2010b2d714943fdf5b5eb23fa4a4776039121d5435e5b83f",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/manifest.json",
+      "source_bytes": 28929,
+      "source_sha256": "4f417025e79930f2324169848e4ca6cebacc98c17dd30647090cd74a4357b577",
+      "bytes": 28929,
+      "sha256": "4f417025e79930f2324169848e4ca6cebacc98c17dd30647090cd74a4357b577",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-open-native.json",
+      "source": "windows/dist/evidence/editor-e1b26c62-e442-41a8-9499-9543e582ca1e/native-editor-background.json",
+      "source_bytes": 7449,
+      "source_sha256": "9960a793882303fc74b5a22abfcb5a022e40819da621fdf514791fbcb51923c4",
+      "bytes": 7317,
+      "sha256": "eea26dddba7ff7b441ed41fd6b5c5850ef1a8ba1df7d30f0aa9b8058458efa6f",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-runner.json",
+      "source": "windows/dist/checks/editor-refresh-open-33bd44ab-75a9-450d-bc71-97c6fcdacef6/result.json",
+      "source_bytes": 500,
+      "source_sha256": "5ac0d65ca709d6226a358102c4eebeb0d1ab5a25a82f3f8d4083a1287671986b",
+      "bytes": 484,
+      "sha256": "60128a90622d0d88d9a741f566c743420c81ab78fe280978f623d20586da8392",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-open-33bd44ab-75a9-450d-bc71-97c6fcdacef6/stdout.txt",
+      "source_bytes": 7712,
+      "source_sha256": "fc088a47e2dec51f9dac7874f2816390099ae87d97b6e332542404c46d2d699d",
+      "bytes": 7582,
+      "sha256": "ea807172f5b300a0c8609f3f0680f5f21206e23c9235580a25bcbbaebfa98e40",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-open-33bd44ab-75a9-450d-bc71-97c6fcdacef6/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-open-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/open-driver.txt",
+      "source_bytes": 8227,
+      "source_sha256": "b4a5003732ee8e5f95447404095255cecd383f52cfdbf550611e5aff187f9849",
+      "bytes": 8097,
+      "sha256": "f606210fc93a1f69bd75c12565fe064dd6aee4ba761698e9282a8f0988c1605e",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-edit-native.json",
+      "source": "windows/dist/evidence/editor-0bf34534-d98f-4df8-855e-bb8eb06e4c6e/native-editor-background.json",
+      "source_bytes": 7225,
+      "source_sha256": "29a9a886194ed2385928d3777073201b8865bc4885408cfd79429b5bc6b76b1b",
+      "bytes": 7100,
+      "sha256": "00ffe363e97b2af86ec90a1e73567ddf94aa5eb29f44086f58ac70f0562cdde9",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-edit-runner.json",
+      "source": "windows/dist/checks/editor-refresh-edit-ea00145d-378d-4df9-b743-b225514d437b/result.json",
+      "source_bytes": 500,
+      "source_sha256": "2f8d8cd8547b25b4d43390ac33718783ff0a182b148e0a46ac11f16160be2777",
+      "bytes": 484,
+      "sha256": "cbbdcf776b936bd2ede3d45a06357d9125588ea387ef65c2755a4bbe8807c0dd",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-edit-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-edit-ea00145d-378d-4df9-b743-b225514d437b/stdout.txt",
+      "source_bytes": 7480,
+      "source_sha256": "1aa0f31ef683bb8eddc83f12ae1789ca93831b03e05ad02b0d78a2694c0b24f0",
+      "bytes": 7357,
+      "sha256": "72604c6f2e16e1f3c86474f231ac28d790d060501200ed9a2d32de6f43b9538d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-edit-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-edit-ea00145d-378d-4df9-b743-b225514d437b/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-edit-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/edit-driver.txt",
+      "source_bytes": 7939,
+      "source_sha256": "a2f453aa0ac2c681316f20bd51500c43bcf3d18ab9d1bc39e5a3b69c4b58accd",
+      "bytes": 7816,
+      "sha256": "0ba769d2c3dd266b2de402687e7d667d0a0d689ce27c452341ee753651d18f92",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-encoding-native.json",
+      "source": "windows/dist/evidence/editor-0c86aab5-4a71-4ccf-a102-8c25cec253a8/native-editor-background.json",
+      "source_bytes": 11424,
+      "source_sha256": "930bcd072b4b14757be51c2ccd93d10d55d4d4d4eb42f48d9f66a3cd2fc562c2",
+      "bytes": 11226,
+      "sha256": "f86641bd8198c58ad4d39c19027a243d4eb61bfddd49db09f4fee4fbc353593d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-encoding-runner.json",
+      "source": "windows/dist/checks/editor-refresh-encoding-9ce62ac1-1a57-4fd5-b519-215d50bfae63/result.json",
+      "source_bytes": 509,
+      "source_sha256": "bfb77b8c74596baa0bab689ab84e90e9a82ac60162d258d5c2cc3a68413885a2",
+      "bytes": 493,
+      "sha256": "fdd6784a4be770ca8ddee48ae5aa2132706a50adc181009f91707831bc2e3052",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-encoding-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-encoding-9ce62ac1-1a57-4fd5-b519-215d50bfae63/stdout.txt",
+      "source_bytes": 11687,
+      "source_sha256": "808caf5623fbf7df52de20ea4badec2084bf757020fccfb3d48f9c098fa3a1d5",
+      "bytes": 11491,
+      "sha256": "cd9b41fcf471b7e1583befd3d4bd9a6af30641491a3bd76df2006c5b35bfc119",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-encoding-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-encoding-9ce62ac1-1a57-4fd5-b519-215d50bfae63/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-encoding-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/encoding-driver.txt",
+      "source_bytes": 12224,
+      "source_sha256": "98a6d458fda9f22e9a341ca56d7023c7ec5a2c0bd8724c1c0f931518e8e1acc1",
+      "bytes": 12028,
+      "sha256": "6a006aa0fa5a8a163c5c2efd4849ddf8252c29d6374e68ccbd9ce24184bd16e8",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-conflict-native.json",
+      "source": "windows/dist/evidence/editor-2ac94ebb-5f1f-4b5e-b2bd-64dec7916d08/native-editor-background.json",
+      "source_bytes": 8035,
+      "source_sha256": "6ef778ae4ac486a1f672145a9f4856cee76eb094a584693d662c400d8297c00f",
+      "bytes": 7895,
+      "sha256": "114cb10a9e9408e917df4f1638a54078d02539fe58d34d77d1b1ac97e44eed90",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-conflict-runner.json",
+      "source": "windows/dist/checks/editor-refresh-conflict-a089d315-65db-4ff8-aa13-277a4243bc66/result.json",
+      "source_bytes": 509,
+      "source_sha256": "804f6b8a92ef8d646fb2a5176459d3a800b9ae751907d65229b8948ae65e8db9",
+      "bytes": 493,
+      "sha256": "62a019d5fa888a7cd71704166f6e0902769f75ea8f575691803fe8672ecdf3f7",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-conflict-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-conflict-a089d315-65db-4ff8-aa13-277a4243bc66/stdout.txt",
+      "source_bytes": 8301,
+      "source_sha256": "c11be3117cfb785921b22aebf626b1c49d4c8fe7edd1e6a47f17812f598a2871",
+      "bytes": 8163,
+      "sha256": "5d7080be5217b4495685249ccd8d7a248e9d0af2f4841d88dc9234784ee02b9b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-conflict-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-conflict-a089d315-65db-4ff8-aa13-277a4243bc66/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-conflict-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/conflict-driver.txt",
+      "source_bytes": 8777,
+      "source_sha256": "d96eb2a20c69d0bd16e10e4dfc35b152cd921015653472f4afd676c1d3b14aaa",
+      "bytes": 8639,
+      "sha256": "d7c6063bd81fef4d5c0404fefa676421e33a1aadffb576a3073563c255bd74bc",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-move-native.json",
+      "source": "windows/dist/evidence/editor-3ddaceca-525c-48c2-bf72-7665684949c3/native-editor-background.json",
+      "source_bytes": 7232,
+      "source_sha256": "a0c37968c8bd541cc29295de2c2f54d0ccc4a814456171cdffa9a4c76770af52",
+      "bytes": 7107,
+      "sha256": "c1780275ccbbf70dc5e5c0e4da5587e2c584f14d936dfeac90b689d1ac8f22ea",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-move-runner.json",
+      "source": "windows/dist/checks/editor-refresh-move-62d7048d-db6a-4ef6-b23e-e8e400a0abcb/result.json",
+      "source_bytes": 501,
+      "source_sha256": "485afb2359db0c10ec19898bd56b1dc451ef8752d63417e10e282277f9a052eb",
+      "bytes": 485,
+      "sha256": "d1afeb37ee2877e2863a4cf07194cbedb64522b1fc16dcaf845c973f67b6e42f",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-move-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-move-62d7048d-db6a-4ef6-b23e-e8e400a0abcb/stdout.txt",
+      "source_bytes": 7495,
+      "source_sha256": "15408a32048a903c1ead1a888481280b0ec377fc25686f6352ac803a4dd80eef",
+      "bytes": 7372,
+      "sha256": "624a2e70868b7ff798bc640a3cc225384eb4f5944c1ecf11cd4e82d3112cfc31",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-move-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-move-62d7048d-db6a-4ef6-b23e-e8e400a0abcb/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-move-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/move-driver.txt",
+      "source_bytes": 7955,
+      "source_sha256": "c8fd3ca6ee3d0ea1466614abb1c9eb7505e23d23fd270c174b1dd8d7e63ba758",
+      "bytes": 7832,
+      "sha256": "3e68b0b403e91fe255891e18dcf8567626d469425638c04c7c43d8e57e2a2e8c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-close-native.json",
+      "source": "windows/dist/evidence/editor-6b5de8b4-7a84-4071-92d0-9ab900712e1b/native-editor-background.json",
+      "source_bytes": 8501,
+      "source_sha256": "f802e3d7a5af923f08129bccc3b983c951939fb83c570cfa73ce56233bb42bc4",
+      "bytes": 8358,
+      "sha256": "f092e1465741766b9f2687fbf69794a9ee82929c2fe6f938b39e21394010a000",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-close-runner.json",
+      "source": "windows/dist/checks/editor-refresh-close-2cfd1c9e-8003-4070-ad42-b60d5be35b96/result.json",
+      "source_bytes": 503,
+      "source_sha256": "7b24d849c0c970daac300a24ab30b6837725ba28353ee29dba102b10c1796d55",
+      "bytes": 487,
+      "sha256": "06cbfe560c932171ec8758ff06c5281322d79e4fd6014d890947f3bfbe5e34cf",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-close-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-close-2cfd1c9e-8003-4070-ad42-b60d5be35b96/stdout.txt",
+      "source_bytes": 8771,
+      "source_sha256": "444f17871fbf01b73de62a9c4abd767df9b32fcfd6dc569b2ed7a87db053455b",
+      "bytes": 8630,
+      "sha256": "d8d594e97cbdc9ec93dca6a6501c3d293af09e8a08f4a499242233bb7b6db20a",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-close-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-close-2cfd1c9e-8003-4070-ad42-b60d5be35b96/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-close-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/close-driver.txt",
+      "source_bytes": 9293,
+      "source_sha256": "446abb2ad66cb60f834ff1a8fea04a25ae2388dc04fb3cb122925aea96051945",
+      "bytes": 9152,
+      "sha256": "2786056f6f0e251b3187668fabaa4795dd56cd31e9513c8383b973dd7d8ce0e8",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-restore-native.json",
+      "source": "windows/dist/evidence/editor-70adb433-9a2b-4e80-838b-24211ddff5cb/native-editor-background.json",
+      "source_bytes": 18636,
+      "source_sha256": "8bcb90bd7e4311b44dd19acd21a6ddf0eba5e3f3098a344c3270a634f5c16ee2",
+      "bytes": 18353,
+      "sha256": "ec001d51595c4e31dd3c28fb06b42ef45a8a72d3309367de8f028de9a3f59a3f",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-restore-runner.json",
+      "source": "windows/dist/checks/editor-refresh-restore-59e75f8b-502e-4d8b-8d7b-a837999374b8/result.json",
+      "source_bytes": 506,
+      "source_sha256": "7391d04f2bd86a101f296840da2fc0533594b04ef5541a169dc529e1030abd99",
+      "bytes": 490,
+      "sha256": "b2144fca47cd6ba83a5a6576fd8d7adc0430260fcd9a9dee687829b9a46e30ec",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-restore-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-restore-59e75f8b-502e-4d8b-8d7b-a837999374b8/stdout.txt",
+      "source_bytes": 18902,
+      "source_sha256": "57cdef30de5af4e7813ed7b6a56e9130401bdcf9b07f062ca6fb59601d3cd58f",
+      "bytes": 18621,
+      "sha256": "cd09c6c9512fb4a078478ba521026e6a8deb5c8337e0f5a2cc664ea8780d5a0c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-restore-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-restore-59e75f8b-502e-4d8b-8d7b-a837999374b8/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-restore-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/restore-driver.txt",
+      "source_bytes": 19433,
+      "source_sha256": "bb0fb4f0c166ba1e23915f07b453b6eb20f96b1a31f4ee30a6d1081468fd912f",
+      "bytes": 19152,
+      "sha256": "d6d1d7069059ed46ece6c4565314aa82aa53aaaed96860a0f701242a1a051910",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-missing-root-native.json",
+      "source": "windows/dist/evidence/editor-885ef0f7-2a73-40c6-9901-ebfabd96ab5c/native-editor-background.json",
+      "source_bytes": 16052,
+      "source_sha256": "f46a643ffb7eeff65f105c41ef759e5d43111548c471566c59188e78ccc31c6e",
+      "bytes": 15819,
+      "sha256": "916cc4af3d3fb139c9c7ff9c6f44344166a3c330bf05d72728c63f47276c198f",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-missing-root-runner.json",
+      "source": "windows/dist/checks/editor-refresh-missing-root-0d91668f-1563-4b15-820b-6326a20f00e7/result.json",
+      "source_bytes": 517,
+      "source_sha256": "82dc47e3e1adc4e9fd451a57addd112d9815362bdd4ad48841ca9b6a72e23e85",
+      "bytes": 501,
+      "sha256": "080f4711f35b1167088707f17d2fd9298243a7147ff73ebc5c1e9ba64d92613d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-missing-root-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-missing-root-0d91668f-1563-4b15-820b-6326a20f00e7/stdout.txt",
+      "source_bytes": 16338,
+      "source_sha256": "35569a943dfa29472e52e866ed9e507bb30510b83c4cfca4a3b530f7b96491b7",
+      "bytes": 16107,
+      "sha256": "a0291e4704cb07bbadd7af42c17767e36075668fa3f88dba59e5634dedcf8db2",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-missing-root-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-missing-root-0d91668f-1563-4b15-820b-6326a20f00e7/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-missing-root-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/missing-root-driver.txt",
+      "source_bytes": 16894,
+      "source_sha256": "ce443fb0e0a95746f26a7801a8e6ce53592bc25a1e500f5089ddcb7f32f2b091",
+      "bytes": 16663,
+      "sha256": "616eb31978db7b2cedda092cb6926c18922a4115f475548e7036e80615a0c683",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-checkpoint-failure-native.json",
+      "source": "windows/dist/evidence/editor-a43a6c66-f88c-4bf6-847a-470ed68c8191/native-editor-background.json",
+      "source_bytes": 14454,
+      "source_sha256": "50963ded2fc1071eb9523e17e10d727d4a155f31186fce517ebb45f44dc70a45",
+      "bytes": 14215,
+      "sha256": "59eaa16c7952409a53534dcfe6a536b89d6fccf648dd877234c64cc2059f62d9",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-checkpoint-failure-runner.json",
+      "source": "windows/dist/checks/editor-refresh-checkpoint-failure-d3a64667-dd49-483e-940b-40a8cfc36557/result.json",
+      "source_bytes": 529,
+      "source_sha256": "d00b07bcfc1d1827ac7b24026ea42aafacee7f3f530371cb314eef55bd0b9a58",
+      "bytes": 513,
+      "sha256": "8a47e4ddddc84cb3c9e39e99904b0edc6486743067e2dc29aba4af069863cb46",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-checkpoint-failure-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-checkpoint-failure-d3a64667-dd49-483e-940b-40a8cfc36557/stdout.txt",
+      "source_bytes": 14726,
+      "source_sha256": "92c0e9081b37488cb97d32626789af757d02096dd165b73731ce98aff6b05118",
+      "bytes": 14489,
+      "sha256": "cfeea6fb712096ac6eedf634502b2074cfa9c59f7b3db1902c5b8450ee974172",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-checkpoint-failure-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-checkpoint-failure-d3a64667-dd49-483e-940b-40a8cfc36557/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-checkpoint-failure-driver.txt",
+      "source": "windows/dist/editor-refresh-runs/cd0f094d-163c-4940-979e-c77ec9a8130c/checkpoint-failure-driver.txt",
+      "source_bytes": 15313,
+      "source_sha256": "9783119103670f96ed2af85ea748b09a4e74729018a5986d518f2d57675b43d5",
+      "bytes": 15076,
+      "sha256": "05a4a92ed82516300f0f1b428422bd52dcee47f57d7a8dbcdea4094adf65a364",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-adapter-tests-runner.json",
+      "source": "windows/dist/checks/editor-refresh-widget-adapter-db9ffd74-0942-4a14-af09-f58481005289/result.json",
+      "source_bytes": 238,
+      "source_sha256": "fbbfe4def33be1eb779808aff7c2c0d9865182767a8e78dc6410d55bd8d8e6f9",
+      "bytes": 238,
+      "sha256": "fbbfe4def33be1eb779808aff7c2c0d9865182767a8e78dc6410d55bd8d8e6f9",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-adapter-tests-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-widget-adapter-db9ffd74-0942-4a14-af09-f58481005289/stdout.txt",
+      "source_bytes": 6913,
+      "source_sha256": "43cdb0280183ec190400eebf4efe9cb418abce08a03e500db8b3431ec1bb2433",
+      "bytes": 6913,
+      "sha256": "43cdb0280183ec190400eebf4efe9cb418abce08a03e500db8b3431ec1bb2433",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "linux-worker-watch-pure-tests-runner.json",
+      "source": "windows/dist/checks/editor-refresh-pure-5805b6d2-f128-498a-b9d1-0e7cabb36263/result.json",
+      "source_bytes": 283,
+      "source_sha256": "02164b0e853409c1d95e412d14e40b62f721f02f0407d53d5f4f8af6b2a9540f",
+      "bytes": 283,
+      "sha256": "02164b0e853409c1d95e412d14e40b62f721f02f0407d53d5f4f8af6b2a9540f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "linux-worker-watch-pure-tests-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-pure-5805b6d2-f128-498a-b9d1-0e7cabb36263/stdout.txt",
+      "source_bytes": 3404,
+      "source_sha256": "e545576cccc03501f9197bf6a5d312bbec24112a7e61d8d3cb83369737847793",
+      "bytes": 3403,
+      "sha256": "3d413b51189beb12768bc81d89139a611ecc8de5ca319a8d0133d12e303d8e95",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-format-runner.json",
+      "source": "windows/dist/checks/editor-refresh-format-9d2bde1c-3c6d-4cad-a2cb-6a0da19eacb7/result.json",
+      "source_bytes": 263,
+      "source_sha256": "9e4281e8231afe3be9db61c2386628c1f363bd14af951e477d5a4591fa2bf8c5",
+      "bytes": 263,
+      "sha256": "9e4281e8231afe3be9db61c2386628c1f363bd14af951e477d5a4591fa2bf8c5",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-format-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-format-9d2bde1c-3c6d-4cad-a2cb-6a0da19eacb7/stdout.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-clippy-runner.json",
+      "source": "windows/dist/checks/editor-refresh-clippy-b0bf5d49-4c10-4d2d-bb6c-f76961651506/result.json",
+      "source_bytes": 391,
+      "source_sha256": "9e88e4a0e74332e8c2b784f2d14b270ac16ae3ef88ac0237a3d74c1c9bc4a95d",
+      "bytes": 391,
+      "sha256": "9e88e4a0e74332e8c2b784f2d14b270ac16ae3ef88ac0237a3d74c1c9bc4a95d",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-clippy-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-clippy-b0bf5d49-4c10-4d2d-bb6c-f76961651506/stdout.txt",
+      "source_bytes": 206,
+      "source_sha256": "de0266006b3a0b04cb615703991b6c710317c4f0e22c8e43c9fdabd01a5f8771",
+      "bytes": 206,
+      "sha256": "de0266006b3a0b04cb615703991b6c710317c4f0e22c8e43c9fdabd01a5f8771",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-debug-build-runner.json",
+      "source": "windows/dist/checks/editor-refresh-debug-047bc0db-8bb2-4a7c-9b02-040f6bc1d627/result.json",
+      "source_bytes": 315,
+      "source_sha256": "3373567f20f62569f0fcd396c1c24fb6ff0f7815cda7c07dfa7e0ae9e117f4f6",
+      "bytes": 315,
+      "sha256": "3373567f20f62569f0fcd396c1c24fb6ff0f7815cda7c07dfa7e0ae9e117f4f6",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-debug-build-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-debug-047bc0db-8bb2-4a7c-9b02-040f6bc1d627/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "eb670b40e7058b55daec022fb18c4bdb3c5982a78cbd1125b3789ed150bf98a6",
+      "bytes": 216,
+      "sha256": "eb670b40e7058b55daec022fb18c4bdb3c5982a78cbd1125b3789ed150bf98a6",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-assets-build-runner.json",
+      "source": "windows/dist/checks/editor-refresh-assets-widgets-329cc03c-2d08-4fa4-b9bd-bed484350749/result.json",
+      "source_bytes": 248,
+      "source_sha256": "2fd64ef1ac1d2da3767385dfe5c2b5a896f769f7af73bcff46fbdb7ad1c705e3",
+      "bytes": 248,
+      "sha256": "2fd64ef1ac1d2da3767385dfe5c2b5a896f769f7af73bcff46fbdb7ad1c705e3",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-assets-build-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-assets-widgets-329cc03c-2d08-4fa4-b9bd-bed484350749/stdout.txt",
+      "source_bytes": 132,
+      "source_sha256": "99b1c462ecdef5b5bfcd319a8f32f5e3fb875cb4ae163a4bd56a7082c22fcc2a",
+      "bytes": 132,
+      "sha256": "99b1c462ecdef5b5bfcd319a8f32f5e3fb875cb4ae163a4bd56a7082c22fcc2a",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-native-unit-build-runner.json",
+      "source": "windows/dist/checks/editor-refresh-unit-build-c415220a-e2fa-49da-8193-b340a435d751/result.json",
+      "source_bytes": 365,
+      "source_sha256": "dd7ad0596b1771d6d25798d0a3a7dc09da0cb9bcbada37394cfe9b73dfde87cd",
+      "bytes": 365,
+      "sha256": "dd7ad0596b1771d6d25798d0a3a7dc09da0cb9bcbada37394cfe9b73dfde87cd",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-native-unit-build-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-unit-build-c415220a-e2fa-49da-8193-b340a435d751/stdout.txt",
+      "source_bytes": 330,
+      "source_sha256": "26c1da95009a8f349d04e6ec284da677e110c1913565cb0479b089bf0971f795",
+      "bytes": 330,
+      "sha256": "26c1da95009a8f349d04e6ec284da677e110c1913565cb0479b089bf0971f795",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-native-tests-runner.json",
+      "source": "windows/dist/checks/editor-refresh-native-units-32156d8b-5401-49b9-bfcc-8429a103b361/result.json",
+      "source_bytes": 556,
+      "source_sha256": "957ae2184ff263329de423d4553ea1d3065b040e2e5095a8385626561b338b2d",
+      "bytes": 540,
+      "sha256": "2dc96c1fba10ba3c7c0ff21695ae2543eb0d1eeb68a9c429e36239a50065f94d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-tests-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-native-units-32156d8b-5401-49b9-bfcc-8429a103b361/stdout.txt",
+      "source_bytes": 17646,
+      "source_sha256": "e3209d6faa144f52bebb7511b222d07cef41d2d0109a222fce68e8489d1d8abd",
+      "bytes": 17645,
+      "sha256": "1d75eceed1fb4b214db64d24a714c6b63b31951d5781a4c6ff717566a22c3558",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-tests-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-native-units-32156d8b-5401-49b9-bfcc-8429a103b361/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-verifier-static-runner.json",
+      "source": "windows/dist/checks/editor-auto-refresh-verifier-static-final-e2215931-e657-40ad-9c57-d4e98498c3cc/result.json",
+      "source_bytes": 524,
+      "source_sha256": "79c697271d4f24b6a6eb965b3224f232c5103f4e7d3641167d44a55f832166f2",
+      "bytes": 508,
+      "sha256": "a700f881b7a5dd9dbc0c59683c3d957682b7080f399e3a7a7be7110f8a630e78",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-verifier-static-stdout.txt",
+      "source": "windows/dist/checks/editor-auto-refresh-verifier-static-final-e2215931-e657-40ad-9c57-d4e98498c3cc/stdout.txt",
+      "source_bytes": 330,
+      "source_sha256": "6b452844e1859955debda8fe67ac9c6236e238d9662685c61206b8291715c8b4",
+      "bytes": 318,
+      "sha256": "a1cffc82fe5efb85b36f4b1c547e09abe372371253e462e0d99946b09947b9ce",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-verifier-static-stderr.txt",
+      "source": "windows/dist/checks/editor-auto-refresh-verifier-static-final-e2215931-e657-40ad-9c57-d4e98498c3cc/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-release-build-runner.json",
+      "source": "windows/dist/checks/editor-refresh-release-8ce9c807-fb66-4b51-aa3c-af45ad2922a4/result.json",
+      "source_bytes": 334,
+      "source_sha256": "4678fd170a9284575b4b801ded45ff71934bc106a96c1bee50fead4779e66ca8",
+      "bytes": 334,
+      "sha256": "4678fd170a9284575b4b801ded45ff71934bc106a96c1bee50fead4779e66ca8",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-release-build-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-release-8ce9c807-fb66-4b51-aa3c-af45ad2922a4/stdout.txt",
+      "source_bytes": 206,
+      "source_sha256": "ca92b1014738a41fa0d70be32dd2bd02523cbf56f0305acc09f640d67bbbbf21",
+      "bytes": 206,
+      "sha256": "ca92b1014738a41fa0d70be32dd2bd02523cbf56f0305acc09f640d67bbbbf21",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "historical-clippy-private-method-runner.json",
+      "source": "windows/dist/checks/editor-refresh-clippy-initial-66848248-ff82-4300-9168-5234368720fe/result.json",
+      "source_bytes": 401,
+      "source_sha256": "8e4388289886a336abe5cd1d9057840b02a8d325030112d322423d42c663a11e",
+      "bytes": 401,
+      "sha256": "8e4388289886a336abe5cd1d9057840b02a8d325030112d322423d42c663a11e",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "historical-clippy-private-method-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-clippy-initial-66848248-ff82-4300-9168-5234368720fe/stdout.txt",
+      "source_bytes": 831,
+      "source_sha256": "d08de8b28b2436672c9883caccec8d0daf91576c9202084228c3ec01c67ff103",
+      "bytes": 831,
+      "sha256": "d08de8b28b2436672c9883caccec8d0daf91576c9202084228c3ec01c67ff103",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "historical-clippy-lint-runner.json",
+      "source": "windows/dist/checks/editor-refresh-clippy-visibility-fix-3451d4fd-0940-4e3b-a633-1cb94cf1f592/result.json",
+      "source_bytes": 406,
+      "source_sha256": "6c9aee87de3c377e74e9468ab3973e4a215719ec22b97f24a3c3f6d0ea1c3b59",
+      "bytes": 406,
+      "sha256": "6c9aee87de3c377e74e9468ab3973e4a215719ec22b97f24a3c3f6d0ea1c3b59",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "historical-clippy-lint-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-clippy-visibility-fix-3451d4fd-0940-4e3b-a633-1cb94cf1f592/stdout.txt",
+      "source_bytes": 1827,
+      "source_sha256": "14504e77abb6174d09794eb8502fc4007ed476ad38332bdeffa3c9ed4fee99a7",
+      "bytes": 1827,
+      "sha256": "14504e77abb6174d09794eb8502fc4007ed476ad38332bdeffa3c9ed4fee99a7",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "frozen-source-hashes.json",
+      "source": "windows/dist/editor-refresh-source.json",
+      "source_bytes": 16369,
+      "source_sha256": "7d5f5e9829f9e8d40291309616fafcd6a023e0864371edd4faafe139be42a8b9",
+      "bytes": 16369,
+      "sha256": "7d5f5e9829f9e8d40291309616fafcd6a023e0864371edd4faafe139be42a8b9",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "verifier-verify-editor.ps1",
+      "source": "windows/scripts/verify-editor.ps1",
+      "source_bytes": 97045,
+      "source_sha256": "c67174852a1cfee3f37e960810c862909bd0d5f073ede821a4c8e4cd6ff207ba",
+      "bytes": 97042,
+      "sha256": "79ae8aa19025620fb29039414fa8329c94e9fcbe9788028fce29cccb63a3fd24",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "verifier-EditorFixture.cs",
+      "source": "windows/scripts/EditorFixture.cs",
+      "source_bytes": 11152,
+      "source_sha256": "5f35a4ca0db5d41c359f6f40ffe9df22c42df49be004e7e009e29aa255302da3",
+      "bytes": 11149,
+      "sha256": "d1274eba6e9cfb602a0efd3422b08c0f1fafd193c9b68c095c9792c98c56b6d0",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "verifier-CliProbe.cs",
+      "source": "windows/scripts/CliProbe.cs",
+      "source_bytes": 2829,
+      "source_sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "bytes": 2829,
+      "sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "verifier-EditorOpenLifetime.cs",
+      "source": "windows/scripts/EditorOpenLifetime.cs",
+      "source_bytes": 11738,
+      "source_sha256": "87c735d1a0c28e9b6e56a62338e87dd93d52afd550227b8ddd74c3e044403973",
+      "bytes": 11735,
+      "sha256": "149581ef69637cbbc2b9682456dac53dc10fc2ae2d5b4101841f3b2f0dfbbfa3",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "verifier-run-check.ps1",
+      "source": "windows/scripts/run-check.ps1",
+      "source_bytes": 3791,
+      "source_sha256": "be91420be27baaed5647ae8ba11963e6a38ed8ee5010151bf099dad5158d9ef3",
+      "bytes": 3791,
+      "sha256": "be91420be27baaed5647ae8ba11963e6a38ed8ee5010151bf099dad5158d9ef3",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "verifier-CheckJob.cs",
+      "source": "windows/scripts/CheckJob.cs",
+      "source_bytes": 6458,
+      "source_sha256": "ffd8ef338039da1d9a0df1fe633fd1ab5616deec3eee6a58b05ff356f6df55a9",
+      "bytes": 6458,
+      "sha256": "ffd8ef338039da1d9a0df1fe633fd1ab5616deec3eee6a58b05ff356f6df55a9",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "release-entrypoints.json",
+      "source": "windows/evidence/2026-09-28/native-editor-refresh-release-entrypoints.json",
+      "source_bytes": 954,
+      "source_sha256": "704676a235046516a4d05b36dd23c25f13d967cef0263f2440cd94cffe25be1c",
+      "bytes": 954,
+      "sha256": "704676a235046516a4d05b36dd23c25f13d967cef0263f2440cd94cffe25be1c",
+      "normalization_changed_bytes": false,
+      "prior_collection": {
+        "source_bytes": 1361,
+        "source_sha256": "18deed1bc0586148542efe7b422dd768726050f6ec4d65b13a217eb476fb9d8b",
+        "bytes": 1317,
+        "sha256": "aac893cbbf6820e1c632627fa88fbc3e59109a2c25077f8b61ffe3b43e12e085",
+        "note": "Parent normalized the top-level JSON after cleanup. Parsed entrypoint values and recorded process identities are unchanged; this copy and current source hashes were refreshed."
+      }
+    },
+    {
+      "path": "release-entrypoints-runner.json",
+      "source": "windows/dist/checks/editor-refresh-release-entrypoints-a1479b28-f0a3-4a45-96f5-fd1f45e7e248/result.json",
+      "source_bytes": 518,
+      "source_sha256": "51bc17be4f1b4724f28170dd1c75aad0fa8def24f074ba4c61a44554fc32e3ad",
+      "bytes": 502,
+      "sha256": "09491b33f3241d056fe1f2b4bedf059eec220bd215f533fb27a12392d502650c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "release-entrypoints-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-release-entrypoints-a1479b28-f0a3-4a45-96f5-fd1f45e7e248/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "release-entrypoints-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-release-entrypoints-a1479b28-f0a3-4a45-96f5-fd1f45e7e248/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-package-runner.json",
+      "source": "windows/dist/checks/editor-refresh-package-1d141364-21ea-4399-b730-b97595f6af4b/result.json",
+      "source_bytes": 263,
+      "source_sha256": "3d42849024011175fe15d1c361f90b2ee9059c1bc41779784afd926228df1da0",
+      "bytes": 263,
+      "sha256": "3d42849024011175fe15d1c361f90b2ee9059c1bc41779784afd926228df1da0",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-package-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-package-1d141364-21ea-4399-b730-b97595f6af4b/stdout.txt",
+      "source_bytes": 1157,
+      "source_sha256": "8a9a938d9283adda69f3145625220ead5e14555745c330d0b89bc2a04b633803",
+      "bytes": 1157,
+      "sha256": "8a9a938d9283adda69f3145625220ead5e14555745c330d0b89bc2a04b633803",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-cleanup-runner.json",
+      "source": "windows/dist/checks/editor-refresh-cleanup-5bbcc98f-4878-4321-b38d-0901a6672c15/result.json",
+      "source_bytes": 500,
+      "source_sha256": "b8681f006014d16760704f2b94c272efa9c0bad182ed4ef6ccd9886dbb0b17f2",
+      "bytes": 484,
+      "sha256": "f9645f3269a50146bfc698165bd8a51478418267ba72c16d8cf632d2e5ba2023",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-cleanup-stdout.txt",
+      "source": "windows/dist/checks/editor-refresh-cleanup-5bbcc98f-4878-4321-b38d-0901a6672c15/stdout.txt",
+      "source_bytes": 1033439,
+      "source_sha256": "135908fbce956eba62f2400d9b452bdd699beac5a6f0d88bfdabd985e29e12c4",
+      "bytes": 1033437,
+      "sha256": "a1bf0eaab7b9d847f2f25ac1f66ef8228befa82c4cf7946921eb927e9c54d3e7",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-cleanup-stderr.txt",
+      "source": "windows/dist/checks/editor-refresh-cleanup-5bbcc98f-4878-4321-b38d-0901a6672c15/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "artifacts.json",
+      "source": "windows/evidence/2026-09-28/artifacts-editor-refresh.json",
+      "source_bytes": 2111,
+      "source_sha256": "f1faa8c18c74ab9a171f4f1fcf088de093e0655bb9e8cc3697c90176ff9ff477",
+      "bytes": 2111,
+      "sha256": "f1faa8c18c74ab9a171f4f1fcf088de093e0655bb9e8cc3697c90176ff9ff477",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-cleanup.json",
+      "source": "windows/evidence/2026-09-28/native-editor-refresh-cleanup.json",
+      "source_bytes": 1033437,
+      "source_sha256": "a1bf0eaab7b9d847f2f25ac1f66ef8228befa82c4cf7946921eb927e9c54d3e7",
+      "bytes": 1033437,
+      "sha256": "a1bf0eaab7b9d847f2f25ac1f66ef8228befa82c4cf7946921eb927e9c54d3e7",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "cleanup-metadata.json",
+      "source": "windows/dist/editor-refresh-cleanup-metadata.json",
+      "source_bytes": 387482,
+      "source_sha256": "9cef4ee1a84b98e9ba34d685553a461099e2c30d6b14fdc503cbc3da244067b1",
+      "bytes": 387482,
+      "sha256": "9cef4ee1a84b98e9ba34d685553a461099e2c30d6b14fdc503cbc3da244067b1",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "cleanup-script.ps1",
+      "source": "windows/dist/editor-refresh-cleanup.ps1",
+      "source_bytes": 391558,
+      "source_sha256": "7d38c381604e74155c75fbdd92a516e2344cdf432f288e2ea7d87bd05f682de7",
+      "bytes": 391555,
+      "sha256": "7bf002e216befc8247f0e706e79a72abf4c452a7784f72c6d25883daa6c54e1e",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "cleanup-generator.py",
+      "source": "windows/dist/generate-editor-refresh-cleanup.py",
+      "source_bytes": 14443,
+      "source_sha256": "a3ca8dc6c192ee13a6d1186c9c70f234b3adf826561cc410f7d39fecbd72b71a",
+      "bytes": 14443,
+      "sha256": "a3ca8dc6c192ee13a6d1186c9c70f234b3adf826561cc410f7d39fecbd72b71a",
+      "normalization_changed_bytes": false
+    }
+  ],
+  "runs": [
+    {
+      "name": "auto-refresh-clean",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "native_watcher_clean_reload_updates_actual_unicode_monaco_after_apply_ack_preserving_bom_crlf_and_file_bytes",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.457,
+      "run_manifest": "run-c6d83f94-8ae2-41b8-b97e-0fe423378369.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-clean-native.json",
+        "runnerResult": "passed-auto-refresh-clean-runner.json",
+        "runnerStdout": "passed-auto-refresh-clean-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-clean-stderr.txt",
+        "driverOutput": "passed-auto-refresh-clean-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-inactive",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "inactive_document_auto_refresh_preserves_active_model_and_exposes_updated_existing_model_without_reopen",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.358,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-inactive-native.json",
+        "runnerResult": "passed-auto-refresh-inactive-runner.json",
+        "runnerStdout": "passed-auto-refresh-inactive-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-inactive-stderr.txt",
+        "driverOutput": "passed-auto-refresh-inactive-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-conflict",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "automatic_dirty_conflict_preserves_unsaved_monaco_and_external_bytes_until_explicit_keep_mine_save_or_reload",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 9.278,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-conflict-native.json",
+        "runnerResult": "passed-auto-refresh-conflict-runner.json",
+        "runnerStdout": "passed-auto-refresh-conflict-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-conflict-stderr.txt",
+        "driverOutput": "passed-auto-refresh-conflict-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-delete-recreate",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "automatic_delete_retains_existing_model_without_recreating_file_then_recreated_file_refreshes_same_identity",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.141,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-delete-recreate-native.json",
+        "runnerResult": "passed-auto-refresh-delete-recreate-runner.json",
+        "runnerStdout": "passed-auto-refresh-delete-recreate-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-delete-recreate-stderr.txt",
+        "driverOutput": "passed-auto-refresh-delete-recreate-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-stamp",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "native_watcher_forced_byte_check_detects_equal_length_external_write_with_exact_restored_timestamp",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.298,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-stamp-native.json",
+        "runnerResult": "passed-auto-refresh-stamp-runner.json",
+        "runnerStdout": "passed-auto-refresh-stamp-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-stamp-stderr.txt",
+        "driverOutput": "passed-auto-refresh-stamp-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-partial-error",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "partial_denied_read_preserves_advanced_clean_model_and_blocked_model_with_error_unknown_and_valid_following_save",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.757,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-partial-error-native.json",
+        "runnerResult": "passed-auto-refresh-partial-error-runner.json",
+        "runnerStdout": "passed-auto-refresh-partial-error-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-partial-error-stderr.txt",
+        "driverOutput": "passed-auto-refresh-partial-error-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-move-close",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "moved_inactive_editor_refresh_keeps_identity_and_focus_then_closed_owner_stays_absent_after_external_write",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 7.93,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-move-close-native.json",
+        "runnerResult": "passed-auto-refresh-move-close-runner.json",
+        "runnerStdout": "passed-auto-refresh-move-close-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-move-close-stderr.txt",
+        "driverOutput": "passed-auto-refresh-move-close-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "auto-refresh-coalescing",
+      "kind": "refresh",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "automatic_write_burst_settles_at_final_bytes_and_own_save_notification_preserves_model_version_without_conflict",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 9.178,
+      "run_manifest": "run-3c369798-9b94-4a8d-8837-20b345de75bf.json",
+      "files": {
+        "evidenceJson": "passed-auto-refresh-coalescing-native.json",
+        "runnerResult": "passed-auto-refresh-coalescing-runner.json",
+        "runnerStdout": "passed-auto-refresh-coalescing-stdout.txt",
+        "runnerStderr": "passed-auto-refresh-coalescing-stderr.txt",
+        "driverOutput": "passed-auto-refresh-coalescing-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "open",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "actual_monaco_unicode_open_duplicate_identity_language_and_invalid_text_isolation",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 5.124,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-open-native.json",
+        "runnerResult": "regression-open-runner.json",
+        "runnerStdout": "regression-open-stdout.txt",
+        "runnerStderr": "regression-open-stderr.txt",
+        "driverOutput": "regression-open-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "edit",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "actual_monaco_edit_undo_redo_and_acknowledged_save_preserve_unicode_bytes",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 5.01,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-edit-native.json",
+        "runnerResult": "regression-edit-runner.json",
+        "runnerStdout": "regression-edit-stdout.txt",
+        "runnerStderr": "regression-edit-stderr.txt",
+        "driverOutput": "regression-edit-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "encoding",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "utf8_lf_crlf_and_bom_crlf_round_trip_exact_file_bytes_without_normalizing_unicode",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 9.428,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-encoding-native.json",
+        "runnerResult": "regression-encoding-runner.json",
+        "runnerStdout": "regression-encoding-stdout.txt",
+        "runnerStderr": "regression-encoding-stderr.txt",
+        "driverOutput": "regression-encoding-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "conflict",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "clean_external_reload_dirty_conflict_compare_keep_mine_then_save_and_explicit_reload",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 4.938,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-conflict-native.json",
+        "runnerResult": "regression-conflict-runner.json",
+        "runnerStdout": "regression-conflict-stdout.txt",
+        "runnerStderr": "regression-conflict-stderr.txt",
+        "driverOutput": "regression-conflict-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "move",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "hidden_and_moved_editor_keeps_native_view_document_and_actual_monaco_undo_history",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 5.005,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-move-native.json",
+        "runnerResult": "regression-move-runner.json",
+        "runnerStdout": "regression-move-stdout.txt",
+        "runnerStderr": "regression-move-stderr.txt",
+        "driverOutput": "regression-move-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "close",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "dirty_tab_workspace_and_quit_reject_without_focus_change_explicit_save_or_discard_closes",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 6.643,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-close-native.json",
+        "runnerResult": "regression-close-runner.json",
+        "runnerStdout": "regression-close-stdout.txt",
+        "runnerStderr": "regression-close-stderr.txt",
+        "driverOutput": "regression-close-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "restore",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "mixed_checkpoint_restores_editor_files_and_active_document_without_terminal_metadata",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 8.007,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-restore-native.json",
+        "runnerResult": "regression-restore-runner.json",
+        "runnerStdout": "regression-restore-stdout.txt",
+        "runnerStderr": "regression-restore-stderr.txt",
+        "driverOutput": "regression-restore-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "missing-root",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "unavailable_editor_root_keeps_mixed_host_alive_preserves_checkpoint_metadata_and_allows_failed_tab_close",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 7.181,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-missing-root-native.json",
+        "runnerResult": "regression-missing-root-runner.json",
+        "runnerStdout": "regression-missing-root-stdout.txt",
+        "runnerStderr": "regression-missing-root-stderr.txt",
+        "driverOutput": "regression-missing-root-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    },
+    {
+      "name": "checkpoint-failure",
+      "kind": "regression",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "failed_checkpoint_replace_preserves_prior_state_unseals_monaco_and_allows_later_clean_quit",
+          "passed": true
+        }
+      ],
+      "elapsed_seconds": 8.453,
+      "run_manifest": "run-cd0f094d-163c-4940-979e-c77ec9a8130c.json",
+      "files": {
+        "evidenceJson": "regression-checkpoint-failure-native.json",
+        "runnerResult": "regression-checkpoint-failure-runner.json",
+        "runnerStdout": "regression-checkpoint-failure-stdout.txt",
+        "runnerStderr": "regression-checkpoint-failure-stderr.txt",
+        "driverOutput": "regression-checkpoint-failure-driver.txt"
+      },
+      "source_boundary": "frozen-source-hashes.json"
+    }
+  ],
+  "build_checks": [
+    {
+      "name": "final-adapter-tests",
+      "status": "passed",
+      "elapsed_seconds": 0.308,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-adapter-tests-runner.json",
+        "stdout": "final-adapter-tests-stdout.txt"
+      }
+    },
+    {
+      "name": "linux-worker-watch-pure-tests",
+      "status": "passed",
+      "elapsed_seconds": 41.097,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "linux-worker-watch-pure-tests-runner.json",
+        "stdout": "linux-worker-watch-pure-tests-stdout.txt"
+      }
+    },
+    {
+      "name": "final-format",
+      "status": "passed",
+      "elapsed_seconds": 1.109,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-format-runner.json",
+        "stdout": "final-format-stdout.txt"
+      }
+    },
+    {
+      "name": "final-clippy",
+      "status": "passed",
+      "elapsed_seconds": 17.285,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-clippy-runner.json",
+        "stdout": "final-clippy-stdout.txt"
+      }
+    },
+    {
+      "name": "final-debug-build",
+      "status": "passed",
+      "elapsed_seconds": 79.917,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-debug-build-runner.json",
+        "stdout": "final-debug-build-stdout.txt"
+      }
+    },
+    {
+      "name": "final-assets-build",
+      "status": "passed",
+      "elapsed_seconds": 11.268,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-assets-build-runner.json",
+        "stdout": "final-assets-build-stdout.txt"
+      }
+    },
+    {
+      "name": "final-native-unit-build",
+      "status": "passed",
+      "elapsed_seconds": 96.135,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-native-unit-build-runner.json",
+        "stdout": "final-native-unit-build-stdout.txt"
+      }
+    },
+    {
+      "name": "final-native-tests",
+      "status": "passed",
+      "elapsed_seconds": 13.084,
+      "process_platform": "windows",
+      "historical": false,
+      "files": {
+        "runner": "final-native-tests-runner.json",
+        "stdout": "final-native-tests-stdout.txt",
+        "stderr": "final-native-tests-stderr.txt"
+      }
+    },
+    {
+      "name": "final-verifier-static",
+      "status": "passed",
+      "elapsed_seconds": 0.947,
+      "process_platform": "windows",
+      "historical": false,
+      "files": {
+        "runner": "final-verifier-static-runner.json",
+        "stdout": "final-verifier-static-stdout.txt",
+        "stderr": "final-verifier-static-stderr.txt"
+      }
+    },
+    {
+      "name": "final-release-build",
+      "status": "passed",
+      "elapsed_seconds": 100.48,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "runner": "final-release-build-runner.json",
+        "stdout": "final-release-build-stdout.txt"
+      }
+    },
+    {
+      "name": "historical-clippy-private-method",
+      "status": "failed",
+      "elapsed_seconds": 14.989,
+      "process_platform": "posix",
+      "historical": true,
+      "files": {
+        "runner": "historical-clippy-private-method-runner.json",
+        "stdout": "historical-clippy-private-method-stdout.txt"
+      }
+    },
+    {
+      "name": "historical-clippy-lint",
+      "status": "failed",
+      "elapsed_seconds": 14.8,
+      "process_platform": "posix",
+      "historical": true,
+      "files": {
+        "runner": "historical-clippy-lint-runner.json",
+        "stdout": "historical-clippy-lint-stdout.txt"
+      }
+    },
+    {
+      "name": "release-entrypoints",
+      "status": "passed",
+      "elapsed_seconds": 0.985,
+      "process_platform": "windows",
+      "historical": false,
+      "files": {
+        "runner": "release-entrypoints-runner.json",
+        "native": "release-entrypoints.json",
+        "stdout": "release-entrypoints-stdout.txt",
+        "stderr": "release-entrypoints-stderr.txt"
+      }
+    },
+    {
+      "name": "final-package",
+      "status": "passed",
+      "elapsed_seconds": 11.055,
+      "process_platform": "posix",
+      "historical": false,
+      "files": {
+        "stdout": "final-package-stdout.txt",
+        "runner": "final-package-runner.json"
+      }
+    },
+    {
+      "name": "final-cleanup",
+      "status": "passed",
+      "elapsed_seconds": 10.987,
+      "process_platform": "windows",
+      "historical": false,
+      "files": {
+        "stdout": "final-cleanup-stdout.txt",
+        "stderr": "final-cleanup-stderr.txt",
+        "runner": "final-cleanup-runner.json"
+      }
+    }
+  ],
+  "new_native_cases": 8,
+  "related_native_cases": 9,
+  "native_passed_checks": 17,
+  "native_failed_runs": 0,
+  "source_hash_count": 151,
+  "limitations": [
+    "Unknown disk status may remain after an empty successful poll; apply ACK is not a complete filesystem scan.",
+    "POSIX runner PIDs are not Windows process identities.",
+    "Physical IME, desktop input, clipboard, focus, accessibility, native dialogs and arbitrary close/move callback races remain unverified."
+  ],
+  "updated_at_utc": "2026-09-28T04:46:27.977251+00:00",
+  "cleanup_provenance": {
+    "source": "final-cleanup.json",
+    "read_only": true,
+    "recorded_pids": 728,
+    "absent": 725,
+    "reused": 3,
+    "timestamp_fallback": "One bounded Win32_Process.CreationDate query; two direct process timestamps.",
+    "preparation_note": "The ignored generator first rejected a doctor runner object matched by its broad entrypoints filename pattern. Parent excluded *-runner.json from that array pass before generating the successful read-only check; this was not a native test failure.",
+    "descendant_limit": "Renderer descendants are not individually inventoried; Job activeAfterCleanup=0 is separate evidence."
+  },
+  "status": "complete_stage_evidence_partial_acceptance"
+}

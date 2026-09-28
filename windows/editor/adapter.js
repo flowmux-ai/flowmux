@@ -14,6 +14,9 @@ const windowsReadLimit = 128 * 1024;
 const windowsCompleteFlushRequests = completeFlushRequests;
 completeFlushRequests = (error) => {
   if (error === null) reportActiveViewState();
+  if (error === null && windowsDiskRefresh !== null && pendingFlushRequests.has(windowsDiskRefresh.id)) {
+    windowsDiskRefresh.phase = "flushed";
+  }
   windowsCompleteFlushRequests(error);
 };
 let windowsCommandBusy = false;
@@ -23,6 +26,7 @@ let windowsPendingReplacements = 0;
 let windowsQuarantined = false;
 let windowsDeferredCommandResult = null;
 let windowsUiSaveAll = null;
+let windowsDiskRefresh = null;
 const windowsComposingEditors = new Set();
 const windowsObservedEditors = new WeakSet();
 function windowsObserveComposition(target) {
@@ -368,7 +372,76 @@ window.flowmuxWindowsEditor = Object.freeze({
       window.__flowmuxWindowsEditorBridge({ kind: "barrier_error", id, error: String(error.message ?? error).slice(0, 4096) });
     }
   },
+  beginDiskRefresh(id) {
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    const busy = windowsCommandBusy || windowsSealedBarrier !== null || windowsUiSaveAll !== null ||
+      windowsPendingReplacements > 0 || windowsQuarantined || windowsDiskRefresh !== null ||
+      windowsComposingEditors.size !== 0 || closeDialog.open || recoveryDialogDocumentId !== null ||
+      saveAsDialog.open || searchDialog.open || (editor.hasWidgetFocus() && !editor.hasTextFocus()) ||
+      diffDocumentId !== null || [...documents.values()].some((document) =>
+        document.pendingChanges || document.outstandingChanges.size > 0);
+    if (busy || documents.size === 0) {
+      window.__flowmuxWindowsEditorBridge({ kind: "refresh_deferred", id });
+      return;
+    }
+    windowsDiskRefresh = { id, phase: "flushing" };
+    window.flowmuxWindowsEditor.barrier(id, true);
+  },
+  applyDiskRefreshMessage(id, message) {
+    // A stale completion may belong to a closed/replaced native view. It cannot
+    // consume the seal owned by a later refresh, even within this same document.
+    if (windowsDiskRefresh?.id !== id) return;
+    try {
+      windowsRequire(["flushed", "applying"].includes(windowsDiskRefresh.phase), "Refresh was not flushed.");
+      windowsRequire(windowsSealedBarrier === id && !windowsQuarantined, "Refresh no longer owns its input guard.");
+      windowsRequire(windowsComposingEditors.size === 0, "Composition began before the refresh could apply.");
+      windowsRequire(isHostMessage(message) && message.surfaceId === surfaceId, "Invalid refresh message.");
+      windowsRequire(["replace_document", "document_disk_status"].includes(message.type), "Unexpected refresh message type.");
+      if (message.type === "replace_document") {
+        const current = documents.get(message.document.id);
+        windowsRequire(current !== undefined, "Refresh cannot open a new document.");
+        windowsRequire(!current.payload.dirty && !current.pendingChanges && current.outstandingChanges.size === 0,
+          "Refresh cannot replace unacknowledged or dirty content.");
+        windowsRequire(!message.document.dirty && message.document.version > current.payload.version,
+          "Refresh replacement must advance a clean document version.");
+        // The existing shared function preserves the model, undo stack and
+        // active view state. Deliberately omit activateDocument/editor.focus.
+        addOrReplaceDocument(message.document);
+      } else {
+        windowsRequire(documents.has(message.documentId), "Refresh cannot report an unknown document.");
+        window.flowmuxEditorHost.receive(message);
+      }
+      windowsDiskRefresh.phase = "applying";
+      windowsApplySeal();
+    } catch (error) {
+      windowsDiskRefresh.phase = "failed";
+      windowsQuarantined = true;
+      windowsApplySeal();
+      window.__flowmuxWindowsEditorBridge({ kind: "refresh_error", id,
+        error: String(error.message ?? error).slice(0, 4096) });
+    }
+  },
+  completeDiskRefresh(id) {
+    if (windowsDiskRefresh?.id !== id || windowsQuarantined ||
+        !["flushed", "applying"].includes(windowsDiskRefresh.phase)) return;
+    windowsDiskRefresh.phase = "applied";
+    window.__flowmuxWindowsEditorBridge({ kind: "refresh_applied", id });
+    // Acknowledge actual application before native bookkeeping releases input.
+  },
+  releaseDiskRefresh(id) {
+    if (windowsDiskRefresh?.id !== id || windowsDiskRefresh.phase !== "applied" || windowsQuarantined) return;
+    windowsDiskRefresh = null;
+    window.flowmuxWindowsEditor.releaseBarrier(id);
+  },
+  abortDiskRefreshBeforeWork(id) {
+    // Native may call this ONLY before submitting Work::PollDisk. It must retain
+    // the seal after dispatch/timeouts until the original worker result applies.
+    if (windowsDiskRefresh?.id !== id || !["flushing", "flushed"].includes(windowsDiskRefresh.phase) || windowsQuarantined) return;
+    windowsDiskRefresh = null;
+    window.flowmuxWindowsEditor.releaseBarrier(id);
+  },
   releaseBarrier(id) {
+    if (windowsDiskRefresh !== null) return;
     // Zero is the native close-failure escape hatch, never a user command.
     if (id !== 0 && windowsSealedBarrier !== id) return;
     if (windowsSealedBarrier === null) return;

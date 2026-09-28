@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-auto-refresh-delete-recreate",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-refresh-cases\\auto-refresh-delete-recreate.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T04:36:19.6745756Z",
+    "pid":  31920,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  6.141,
+    "finished":  "2026-09-28T04:36:25.8191620Z"
+}

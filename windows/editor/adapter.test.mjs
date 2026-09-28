@@ -53,6 +53,7 @@ function harness(content = "hello", empty = false) {
   };
   const editor = {
     readOnly: false,
+    hasWidgetFocus: () => false, hasTextFocus: () => false,
     onDidCompositionStart(fn) { composition.start = fn; }, onDidCompositionEnd(fn) { composition.end = fn; }, onDidDispose() {},
     updateOptions(value) { this.readOnly = value.readOnly; calls.push(["options", value.readOnly]); },
     pushUndoStop() { calls.push(["undo-stop", this.readOnly]); return !this.readOnly; },
@@ -69,12 +70,13 @@ function harness(content = "hello", empty = false) {
       if (target !== undefined && message.surfaceId === "s") {
         if (message.type === "document_change_applied") target.outstandingChanges.delete(message.changeSequence);
         if (message.type === "save_completed" && message.changeSequence === target.changeSequence) target.payload.dirty = false;
+        if (message.type === "document_disk_status") target.payload.externalChange = message.status !== "unchanged";
       }
     } }, __flowmuxWindowsEditorBridge: (message) => sent.push(message) },
     editor, diffEditor: null, documents: new Map(empty ? [] : [[document.payload.id, document]]),
     monaco: { editor: { EndOfLineSequence: { LF: 0 }, onDidCreateModel(listener) { models.created = listener; } } },
     activeDocumentId: empty ? null : document.payload.id, surfaceId: "s", maxDocumentBytes: 16 * 1024 * 1024,
-    diffDocumentId: null, closeDialog: { open: false }, recoveryDialogDocumentId: null,
+    diffDocumentId: null, closeDialog: { open: false }, saveAsDialog: { open: false }, searchDialog: { open: false }, recoveryDialogDocumentId: null,
     pendingFlushRequests: pending, flushChangesForHost() { calls.push(["flush", ...pending]); },
     completeFlushRequests(error) { calls.push(["flush-completed", error]); },
     reportActiveViewState() { calls.push(["view-state", document.payload.version]); },
@@ -411,4 +413,182 @@ test("UI Save All refuses active composition without changing read-only state", 
   assert.match(state.document.saveError, /Finish text composition/);
   assert.equal(state.context.editor.readOnly, false);
   assert.equal(state.calls.filter(([kind]) => kind === "options").length, 0);
+});
+
+
+// These tests exercise adapter state ordering with spies, not real Monaco/IME.
+function refreshHarness() {
+  const state = harness("active 한글 한 é 😀");
+  const second = {
+    payload: { ...state.document.payload, id: "document-2", relativePath: "inactive 한.txt" },
+    model: { getValue: () => "old inactive", getLanguageId: () => "plaintext" },
+    pendingChanges: false, outstandingChanges: new Set(), changeSequence: 0,
+  };
+  state.context.documents.set(second.payload.id, second);
+  state.context.addOrReplaceDocument = (payload) => {
+    state.calls.push(["replace-existing", payload.id]);
+    const target = state.context.documents.get(payload.id);
+    assert.ok(target, "refresh preserves an existing model");
+    target.payload = { ...payload };
+    target.model.getValue = () => payload.content;
+  };
+  state.context.activateDocument = () => state.calls.push(["activate"]);
+  state.context.editor.focus = () => state.calls.push(["focus"]);
+  const replacement = () => ({ surfaceId: "s", type: "replace_document",
+    document: { ...second.payload, version: second.payload.version + 1,
+      content: "new inactive 한글 한 é 😀", dirty: false } });
+  return { ...state, second, replacement, api: state.context.window.flowmuxWindowsEditor };
+}
+function flushedRefresh(state, id) {
+  state.api.beginDiskRefresh(id);
+  state.context.completeFlushRequests(null);
+}
+
+test("automatic refresh updates inactive existing model without activation or focus and waits for native release", () => {
+  const state = refreshHarness(); const originalModel = state.second.model;
+  flushedRefresh(state, 71);
+  state.api.applyDiskRefreshMessage(71, state.replacement());
+  assert.equal(state.context.activeDocumentId, "document-1");
+  assert.equal(state.second.model, originalModel);
+  assert.equal(state.second.model.getValue(), "new inactive 한글 한 é 😀");
+  assert.equal(state.calls.some(([call]) => ["activate", "focus"].includes(call)), false);
+  state.api.completeDiskRefresh(71);
+  assert.equal(state.sent.at(-1).kind, "refresh_applied");
+  state.api.releaseBarrier(0);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  state.api.releaseDiskRefresh(70);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  state.api.releaseDiskRefresh(71);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
+});
+
+test("automatic refresh defers composition without ending it or changing editability", () => {
+  const state = refreshHarness(); state.composition.start();
+  state.api.beginDiskRefresh(72);
+  assert.equal(state.sent.at(-1).kind, "refresh_deferred");
+  assert.equal(state.calls.length, 0);
+  state.api.beginDiskRefresh(73);
+  assert.equal(state.sent.at(-1).kind, "refresh_deferred");
+  state.composition.end(); flushedRefresh(state, 74);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  state.api.abortDiskRefreshBeforeWork(74);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
+});
+
+test("automatic refresh leaves the shared Quick Open and workspace search overlay editable", () => {
+  const state = refreshHarness();
+  state.context.searchDialog.open = true;
+  const callsBefore = state.calls.length;
+  state.api.beginDiskRefresh(82);
+  assert.equal(state.sent.at(-1).kind, "refresh_deferred");
+  assert.equal(state.sent.at(-1).id, 82);
+  assert.equal(state.context.searchDialog.open, true);
+  assert.equal(state.context.editor.readOnly, false);
+  assert.notEqual(state.context.window.__flowmuxWindowsEditorSealed, true);
+  assert.equal(state.calls.length, callsBefore, "no flush, focus, or model operation while the overlay is open");
+  assert.equal(state.context.pendingFlushRequests.size, 0);
+  state.context.searchDialog.open = false;
+  flushedRefresh(state, 83);
+  state.api.completeDiskRefresh(83);
+  assert.equal(state.sent.at(-1).kind, "refresh_applied");
+  state.api.releaseDiskRefresh(83);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
+});
+
+test("automatic refresh defers focused Monaco widgets but permits ordinary noncomposing text focus", () => {
+  const state = refreshHarness();
+  state.context.editor.hasWidgetFocus = () => true;
+  state.context.editor.hasTextFocus = () => false;
+  const callsBefore = state.calls.length;
+  state.api.beginDiskRefresh(84);
+  assert.equal(state.sent.at(-1).kind, "refresh_deferred");
+  assert.equal(state.sent.at(-1).id, 84);
+  assert.equal(state.context.editor.readOnly, false);
+  assert.notEqual(state.context.window.__flowmuxWindowsEditorSealed, true);
+  assert.equal(state.calls.length, callsBefore);
+  assert.equal(state.context.pendingFlushRequests.size, 0);
+  // Focus state is a mocked preflight condition, not physical IME verification.
+  state.context.editor.hasTextFocus = () => true;
+  flushedRefresh(state, 85);
+  state.api.completeDiskRefresh(85);
+  assert.equal(state.sent.at(-1).kind, "refresh_applied");
+  state.api.releaseDiskRefresh(85);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
+});
+
+test("automatic refresh defers pending edits instead of consuming debounce state", () => {
+  const state = refreshHarness(); state.second.pendingChanges = true;
+  state.api.beginDiskRefresh(75);
+  assert.equal(state.sent.at(-1).kind, "refresh_deferred");
+  assert.equal(state.second.pendingChanges, true);
+  assert.equal(state.calls.length, 0);
+});
+
+test("automatic refresh never replaces dirty content and quarantines a contradictory backend replacement", () => {
+  const state = refreshHarness(); state.second.payload.dirty = true;
+  flushedRefresh(state, 76);
+  state.api.applyDiskRefreshMessage(76, state.replacement());
+  assert.equal(state.sent.at(-1).kind, "refresh_error");
+  assert.equal(state.second.model.getValue(), "old inactive");
+  state.api.completeDiskRefresh(76); state.api.releaseDiskRefresh(76);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+});
+
+test("a stale automatic refresh cannot replace a model or release a later guard", () => {
+  const state = refreshHarness(); flushedRefresh(state, 77);
+  state.api.applyDiskRefreshMessage(76, state.replacement());
+  state.api.completeDiskRefresh(76); state.api.releaseDiskRefresh(76);
+  assert.equal(state.second.model.getValue(), "old inactive");
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  state.api.abortDiskRefreshBeforeWork(77);
+});
+
+test("composition starting after the refresh guard preserves content and requires native failure handling", () => {
+  const state = refreshHarness(); flushedRefresh(state, 78);
+  state.composition.start(); state.api.applyDiskRefreshMessage(78, state.replacement());
+  assert.equal(state.sent.at(-1).kind, "refresh_error");
+  assert.equal(state.second.model.getValue(), "old inactive");
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+});
+
+test("automatic disk status preserves dirty content and active document identity", () => {
+  const state = refreshHarness(); state.second.payload.dirty = true;
+  flushedRefresh(state, 79);
+  state.api.applyDiskRefreshMessage(79, { surfaceId: "s", type: "document_disk_status",
+    documentId: state.second.payload.id, documentVersion: state.second.payload.version, status: "deleted" });
+  assert.equal(state.second.payload.dirty, true);
+  assert.equal(state.second.payload.externalChange, true);
+  assert.equal(state.second.model.getValue(), "old inactive");
+  assert.equal(state.context.activeDocumentId, "document-1");
+  assert.equal(state.calls.some(([call]) => ["replace-existing", "activate", "focus"].includes(call)), false);
+  state.api.completeDiskRefresh(79); state.api.releaseDiskRefresh(79);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
+});
+
+test("automatic refresh rejects unknown documents and nonadvancing replacement versions", () => {
+  for (const mutation of [
+    (message) => { message.document.id = "not-open"; },
+    (message) => { message.document.version = 1; },
+    (message) => { message.surfaceId = "other-surface"; },
+  ]) {
+    const state = refreshHarness(); flushedRefresh(state, 80);
+    const message = state.replacement(); mutation(message);
+    state.api.applyDiskRefreshMessage(80, message);
+    assert.equal(state.sent.at(-1).kind, "refresh_error");
+    assert.equal(state.second.model.getValue(), "old inactive");
+    assert.equal(state.calls.some(([call]) => call === "replace-existing"), false);
+    assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  }
+});
+
+test("an empty automatic result still waits for completed content flush before acknowledgment", () => {
+  const state = refreshHarness(); state.api.beginDiskRefresh(81);
+  state.api.completeDiskRefresh(81); state.api.releaseDiskRefresh(81);
+  assert.equal(state.sent.some((message) => message.kind === "refresh_applied"), false);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+  state.context.completeFlushRequests(null);
+  state.api.completeDiskRefresh(81);
+  assert.equal(state.sent.at(-1).kind, "refresh_applied");
+  state.api.releaseDiskRefresh(81);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, false);
 });
