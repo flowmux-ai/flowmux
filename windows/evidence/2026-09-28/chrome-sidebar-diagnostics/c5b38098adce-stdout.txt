@@ -1,0 +1,47 @@
+[
+    {
+        "pointerBytes":  8,
+        "structBytes":  72,
+        "reservedOffset":  64,
+        "lParamOffset":  56,
+        "cbSize":  72,
+        "init":  true,
+        "addMessageReturned":  true,
+        "getMessageReturned":  true,
+        "addResult":  0,
+        "getResult":  0,
+        "addError":  0,
+        "getError":  0,
+        "text":  ""
+    },
+    {
+        "pointerBytes":  8,
+        "structBytes":  72,
+        "reservedOffset":  64,
+        "lParamOffset":  56,
+        "cbSize":  64,
+        "init":  true,
+        "addMessageReturned":  true,
+        "getMessageReturned":  true,
+        "addResult":  1,
+        "getResult":  0,
+        "addError":  0,
+        "getError":  0,
+        "text":  "Settings 한글"
+    },
+    {
+        "pointerBytes":  8,
+        "structBytes":  72,
+        "reservedOffset":  64,
+        "lParamOffset":  56,
+        "cbSize":  56,
+        "init":  true,
+        "addMessageReturned":  true,
+        "getMessageReturned":  true,
+        "addResult":  1,
+        "getResult":  0,
+        "addError":  0,
+        "getError":  0,
+        "text":  "Settings 한글"
+    }
+]

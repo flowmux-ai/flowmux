@@ -1,0 +1,2 @@
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\workspaces-c3821b21-2f58-4139-b7c7-9771a0945b49
+{"status":"passed_background_workspace_subset","checks":6,"elapsedMs":15379}

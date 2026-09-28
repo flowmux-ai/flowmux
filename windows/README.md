@@ -382,28 +382,39 @@ discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
 accessibility acceptance remain pending. See
 [settings verification](evidence/2026-09-28/settings.md).
 
-The native shell uses a 260-DIP sidebar, reduced to at most one third of a
-narrow window, with a **Workspaces** header and 58-DIP rows beginning at 40 DIP.
-Each row shows its name and the active surface's current directory on separate
-lines, with an unread-count prefix when present. Rounded selection backgrounds
-and color stripes retain workspace colors. Compact 28-DIP pane tabs show
-terminal/browser/editor glyphs and distinguish the focused pane's selected tab.
-Each pane has right-edge **+** and **Pane actions** controls; overflowing tabs
-remain reachable from that menu. The footer places Settings/Files and Search/Open
-file in two columns, followed by full-width Notices. The terminal background,
-foreground and 16 ANSI colors match the Linux defaults (dark `#282c34`/`#ffffff`).
+The sidebar divider now adjusts a preferred width of 160–640 DIP, defaulting to
+260 DIP. Narrow windows temporarily reduce the displayed width to reserve 320 DIP
+for the main area where space permits; widening restores the preference. Capture
+loss or cancellation ends the drag. Press/release without movement preserves the
+preference even when the displayed sidebar is clamped. Width persists per window.
+Older checkpoints without the field load at 260 DIP, and default-width saves omit
+it. Older binaries reject checkpoints containing a nondefault width because their
+state schema rejects unknown fields.
 
-Hidden native checks verify Unicode cwd updates, rename/color changes with stable
-control handles and terminal PIDs, and focused-tab accents. Light/dark theme checks
-preserve identities and PIDs in a two-terminal split. A later mixed
-terminal/browser/editor capture provides visual inspection of the surface glyphs.
-A separate overflow check covers five workspaces with four visible rows at
-900×400, active first/last visibility, pager endpoints and bounds.
-See the [current chrome evidence](evidence/2026-09-28/chrome-details.md) and
-[earlier visual stage](evidence/2026-09-28/chrome.md). Agents and broader status
-metadata, the full icon set, physical IME/DPI, high contrast and accessibility
-remain open. These production native renders exclude composed WebView/GPU
-contents and do not establish full visual parity.
+The **Workspaces** header includes a notification bell. A 36-DIP footer holds one
+row of Settings, Files, Search and Open file icons. Icon buttons retain native text
+captions and tooltips. Workspace rows remain 58 DIP tall, beginning at 40 DIP,
+with name/current directory, unread counts, rounded selection and color stripes.
+Previous/Next controls reserve space only when the list overflows. Compact 28-DIP
+pane tabs retain surface glyphs, focused-pane accents and +/Pane actions controls.
+The terminal colors continue to match the Linux defaults.
+
+Native caption painting now applies Win32 NFC normalization to a temporary drawing
+copy so decomposed Hangul can display as composed syllables. Raw model/HWND
+captions, input, paths and persisted codepoints are unchanged by this drawing step.
+Memory-only native experiments found no improvement from Uniscribe or swapping
+the tested fonts; normalizing the drawing copy produced equivalent NFC/NFD pixels.
+Hidden native checks confirm matching NFC/NFD drawing pixels while preserving raw
+text, plus actual tooltips, width dragging/clamping/restart and workspace behavior.
+Debug build and Clippy pass; release packaging is deferred to the structural UI
+batch. Physical IME acceptance remains separate. See the
+[sidebar evidence](evidence/2026-09-28/chrome-sidebar.md).
+
+The [preceding metadata/theme evidence](evidence/2026-09-28/chrome-details.md) and
+[first visual stage](evidence/2026-09-28/chrome.md) retain their original results.
+Agents, broader status metadata, the full icon set, physical IME/DPI, high contrast
+and accessibility remain open. Native offscreen renders exclude composed
+WebView/GPU contents and do not establish full visual parity.
 
 The terminal minimap is enabled by default at 40 CSS pixels wide and 50% opacity.
 Width accepts 12–96 and opacity 0–100. It previews a movable window of retained

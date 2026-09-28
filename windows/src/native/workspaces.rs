@@ -26,7 +26,29 @@ pub(super) enum EditTarget {
     TabName(SurfaceId),
 }
 
+pub(super) struct SidebarLayout {
+    pub list_top: i32,
+    pub list_bottom: i32,
+    pub footer_top: i32,
+    pub capacity: usize,
+    pub pager: bool,
+}
 impl App {
+    pub(super) fn sidebar_layout(&self, height: i32, dpi: u32) -> SidebarLayout {
+        let px = |n: i32| (n as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
+        let footer_top = (height - px(36)).max(0);
+        let list_top = px(40).min(footer_top);
+        let without_pager = ((footer_top - list_top) / px(58).max(1)).max(0) as usize;
+        let pager = self.workspaces.len() > without_pager;
+        let list_bottom = (footer_top - if pager { px(28) } else { 0 }).max(list_top);
+        SidebarLayout {
+            list_top,
+            list_bottom,
+            footer_top,
+            capacity: ((list_bottom - list_top) / px(58).max(1)).max(0) as usize,
+            pager,
+        }
+    }
     pub(super) fn workspace_caption(&self, id: WorkspaceId) -> Option<String> {
         let workspace = self.workspaces.iter().find(|w| w.id == id)?;
         let cwd = self
@@ -88,6 +110,21 @@ impl App {
                     kind,
                 }
             }
+            Action::Settings
+            | Action::ShowFiles
+            | Action::SearchAll
+            | Action::OpenEditor
+            | Action::Notifications => chrome::Role::Icon {
+                kind: match action {
+                    Action::Settings => chrome::ChromeIcon::Settings,
+                    Action::ShowFiles => chrome::ChromeIcon::Files,
+                    Action::SearchAll => chrome::ChromeIcon::Search,
+                    Action::OpenEditor => chrome::ChromeIcon::OpenFile,
+                    _ => chrome::ChromeIcon::Notifications,
+                },
+                marked: matches!(action, Action::Notifications)
+                    && self.notifications.store.unread_count() > 0,
+            },
             Action::PaneAdd(..)
             | Action::PaneMenu(..)
             | Action::TabClose(..)
@@ -210,10 +247,16 @@ impl App {
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|p==self.workspace().focused),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|p==self.workspace().focused),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
-        json!({"theme":self.settings.terminal.theme,"dpi":unsafe{GetDpiForWindow(self.window)}.max(96),"sidebar_offset":self.sidebar_offset,"sidebar_width_dip":260,"workspace_row_height_dip":58,"controls":controls})
+        let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+        let mut client = RECT::default();
+        unsafe {
+            GetClientRect(self.window, &mut client);
+        }
+        let layout = self.sidebar_layout(client.bottom, dpi);
+        json!({"theme":self.settings.terminal.theme,"dpi":dpi,"sidebar_offset":self.sidebar_offset,"sidebar_width_dip":self.sidebar_width_dip,"sidebar_actual_width":self.sidebar_width(client.right,dpi),"sidebar_dragging":matches!(self.drag,Some(panes::Drag::Sidebar { .. })),"sidebar_gutter_width":(4.0*dpi as f64/96.0).round() as i32,"sidebar_footer_height_dip":36,"sidebar_list_top":layout.list_top,"sidebar_list_bottom":layout.list_bottom,"sidebar_footer_top":layout.footer_top,"sidebar_capacity":layout.capacity,"sidebar_pager_visible":layout.pager,"workspace_row_height_dip":58,"controls":controls})
     }
     pub(super) fn workspace_index(&self, id: WorkspaceId) -> anyhow::Result<usize> {
         self.workspaces

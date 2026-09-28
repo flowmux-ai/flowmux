@@ -1,0 +1,131 @@
+[
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFC",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFD",
+        "Engine":  "DrawTextW",
+        "InkWidth":  87,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFC",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFD",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  87,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFC",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFD",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFC",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "Segoe UI",
+        "Form":  "NFD",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFC",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFD",
+        "Engine":  "DrawTextW",
+        "InkWidth":  87,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFC",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFD",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  87,
+        "DrawingNormalizedC":  false,
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFC",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFD",
+        "Engine":  "DrawTextW",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFC",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    },
+    {
+        "SelectedFont":  "맑은 고딕",
+        "Form":  "NFD",
+        "Engine":  "ScriptStringAnalyse/Out",
+        "InkWidth":  30,
+        "DrawingNormalizedC":  true,
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f"
+    }
+]
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\nfddraw-matrix-f00c9863-f29f-4e0f-835a-619d4ceae278

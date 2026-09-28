@@ -1,0 +1,13 @@
+{
+    "name":  "chrome-sidebar-details-verified",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\chrome-sidebar-details.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T08:01:12.9820472Z",
+    "pid":  34920,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  11.785,
+    "finished":  "2026-09-28T08:01:24.7703842Z"
+}

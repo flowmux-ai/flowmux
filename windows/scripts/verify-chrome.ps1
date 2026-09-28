@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Owned hidden native chrome only. Run under a60s run-check.ps1 Job.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('details','overflow')][string]$Case='details')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('details','overflow','resize')][string]$Case='details')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -9,7 +9,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $directory=Join-Path $PSScriptRoot ('..\dist\evidence\chrome-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $cwd=Join-Path $directory 'workspace 한글';[IO.Directory]::CreateDirectory($cwd)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$pipeName=$null;$clients=@();$shells=@();$cleanup=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
-$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';case=$Case;baseline=$false;checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';case=$Case;baseline=$false;hosts=@();checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
 function Require([bool]$Condition,[string]$Message) {if(-not $Condition){throw $Message}}
 function Budget([int]$Maximum=5000) {
     $remaining=55000-$clock.ElapsedMilliseconds
@@ -43,6 +43,35 @@ function Ready([int]$Count,[int]$Maximum=5000) {
 }
 function Identities($Tree) {return (@($Tree.surfaces|Sort-Object id|ForEach-Object {$_.id.ToString()+':'+$_.pid.ToString()}) -join ',')}
 function ControlIds($Tree) {return (@($Tree.chrome.controls|Sort-Object handle|ForEach-Object {$_.handle.ToString()}) -join ',')}
+function Start-Owned([string[]]$LaunchArgs) {
+    $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$script:pipeName=$null
+    $script:hostProcess=[CliProbe]::Start($gui,$LaunchArgs,$cwd,$directory);$script:hostOut=$hostProcess.StandardOutput.ReadToEndAsync();$script:hostErr=$hostProcess.StandardError.ReadToEndAsync()
+    $evidence.hosts+=,$hostProcess.Id
+    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($hostProcess.Id).json"
+    do {
+        Require (-not $hostProcess.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Owned host discovery exceeded eight seconds or exited'
+        if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json;Require ($record.pid -eq $hostProcess.Id) 'Discovery belongs to another process';$script:pipeName=$record.pipe;break}
+        Start-Sleep -Milliseconds 20
+    } while($true)
+    $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$identity=Request @('identify') ([int][Math]::Min(5000,$left));Require ($identity.pid -eq $hostProcess.Id) 'IPC pipe belongs to another process'
+    $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left)
+    $evidence.observations+=@{kind='startup';pid=$hostProcess.Id;elapsedMs=$startup.ElapsedMilliseconds;pipe=$pipeName}
+    return $tree
+}
+function Record-Exit {
+    $outDone=$hostOut.Wait(500);$errDone=$hostErr.Wait(500);$evidence.observations+=@{kind='host-exit';pid=$hostProcess.Id;exitCode=$hostProcess.ExitCode;stdoutComplete=$outDone;stderrComplete=$errDone;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)}
+    $hostProcess.Dispose();$script:hostProcess=$null;$script:pipeName=$null
+}
+function Await-Width([int]$Width,[bool]$Dragging) {
+    $wait=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $left=5000-$wait.ElapsedMilliseconds;Require ($left -gt 0) 'Sidebar drag did not converge within five seconds'
+        $tree=Tree ([int]$left)
+        Require ([ChromeFixture]::CaptureHandle([long]$tree.window_handle,$hostProcess.Id) -eq 0) 'Hidden drag captured the desktop pointer'
+        if($tree.chrome.sidebar_width_dip -eq $Width -and $tree.chrome.sidebar_dragging -eq $Dragging){return $tree}
+        Start-Sleep -Milliseconds 20
+    }while($true)
+}
 function Capture([string]$Name,$Tree) {
     Budget|Out-Null;$handle=[long]$Tree.window_handle;$controls=@([ChromeFixture]::Read($handle,$hostProcess.Id));$size=[ChromeFixture]::Size($handle,$hostProcess.Id)
     $path=Join-Path $directory ($Name+'.png');$bmp=Join-Path $directory ($Name+'.bmp')
@@ -56,7 +85,7 @@ function Capture([string]$Name,$Tree) {
     $workspace=@($Tree.workspaces|Where-Object {$_.id -eq $Tree.active_workspace})[0]
     $rowInfo=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $workspace.id})[0]
     $row=@($shown|Where-Object {$_.Handle -eq $rowInfo.handle})
-    Require ($Tree.chrome.sidebar_width_dip -eq 260 -and $Tree.chrome.workspace_row_height_dip -eq 58) 'Sidebar dimensions differ from the Linux alignment baseline'
+    Require ($Tree.chrome.sidebar_width_dip -ge 160 -and $Tree.chrome.sidebar_width_dip -le 640 -and $Tree.chrome.workspace_row_height_dip -eq 58) 'Sidebar dimensions escaped supported bounds'
     Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its two-line native caption'
     $workspaceIndex=[Array]::IndexOf(@($Tree.workspaces.id),$workspace.id)
     Require ([Math]::Abs($row[0].Y-(40+58*($workspaceIndex-$Tree.chrome.sidebar_offset))*$scale) -le 2) 'Workspace row position differs from visible sidebar order'
@@ -64,6 +93,16 @@ function Capture([string]$Name,$Tree) {
     Require ($selectionPixel -eq $(if($Tree.chrome.theme -eq 'light'){'#dae6f5'}else{'#313741'})) 'Selected workspace was not actually painted in the owned hidden capture'
     $muted=if($Tree.chrome.theme -eq 'light'){'#5f6269'}else{'#abb1bc'}
     Require ([ChromeFixture]::ColorCount($path,($row[0].X+12),($row[0].Y+[int](27*$scale)),($row[0].Width-24),([int](20*$scale)),$muted) -gt 5) 'Native second-line path text was not painted'
+    $footerHandles=@($Tree.chrome.controls|Where-Object {$_.kind -in @('settings','files','search_all','open_file')}|ForEach-Object {$_.handle})
+    $footer=@($shown|Where-Object {$footerHandles -contains $_.Handle -and $_.X -lt $Tree.chrome.sidebar_actual_width})
+    Require ($footer.Count -eq 4 -and @($footer|Where-Object {[Math]::Abs($_.Y-($size[1]-32*$scale)) -gt 2 -or [Math]::Abs($_.Width-28*$scale) -gt 2}).Count -eq 0) 'Footer actions are not one compact icon row'
+    foreach($button in $footer){Require ([ChromeFixture]::ColorCount($path,$button.X,$button.Y,$button.Width,$button.Height,$muted) -gt 5) 'Footer glyph was not painted'}
+    if($Case -eq 'details'){foreach($button in $footer){
+        $info=@($Tree.chrome.controls|Where-Object {$_.handle -eq $button.Handle})[0]
+        Require ($info.tooltip -ceq $button.Text) 'Native tooltip text differs from its accessible button caption'
+    }}
+    $bell=@($shown|Where-Object {$_.Text -match '^Notifications \(\d+\)$'})
+    Require ($bell.Count -eq 1 -and [Math]::Abs($bell[0].Y-5*$scale) -le 2 -and [Math]::Abs($bell[0].X+$bell[0].Width-($Tree.chrome.sidebar_actual_width-4*$scale)) -le 2) 'Notification bell is not at the header right edge'
     foreach($control in $shown){
         Require ($control.X -ge 0 -and $control.Y -ge 0 -and $control.Width -gt 0 -and $control.Height -gt 0 -and $control.X+$control.Width -le $size[0]+1 -and $control.Y+$control.Height -le $size[1]+1) 'Native chrome control escaped client bounds'
         Require ($control.Text -notmatch '[●○]') 'Legacy circle markers remain in native chrome text'
@@ -108,19 +147,30 @@ function Theme([string]$Name,[string]$Identities) {
 }
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'A working hidden debug build is required; no host launched'
-    $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew()
-    $hostProcess=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$cwd),$cwd,$directory);$hostOut=$hostProcess.StandardOutput.ReadToEndAsync();$hostErr=$hostProcess.StandardError.ReadToEndAsync()
-    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($hostProcess.Id).json"
-    do {
-        Require (-not $hostProcess.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Owned host discovery exceeded eight seconds or exited'
-        if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json;Require ($record.pid -eq $hostProcess.Id) 'Discovery belongs to another process';$pipeName=$record.pipe;break}
-        Start-Sleep -Milliseconds 20
-    } while($true)
-    $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$identity=Request @('identify') ([int][Math]::Min(5000,$left));Require ($identity.pid -eq $hostProcess.Id) 'IPC pipe belongs to another process'
-    $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left)
-    $evidence.observations+=@{kind='startup';pid=$hostProcess.Id;elapsedMs=$startup.ElapsedMilliseconds;pipe=$pipeName}
+    $launch=@('--shell=cmd','--cwd',$cwd);if($Case -ne 'resize'){$launch+=,'--temporary'}
+    $tree=Start-Owned $launch
     $initial=Capture 'initial' $tree
     if($Case -eq 'details') {
+        $notification=(Request @('notify','--global','--title','한글 알림','chrome fixture')).id
+        $noticeTree=Tree;$notice=Capture 'unread-bell' $noticeTree
+        $bell=@($notice.controls|Where-Object {$_.Text -eq 'Notifications (1)'})[0]
+        Require ([ChromeFixture]::ColorCount($notice.path,$bell.X,$bell.Y,$bell.Width,$bell.Height,'#78aeed') -gt 5) 'Unread notification did not accent the actual bell glyph'
+        Require (@($noticeTree.chrome.controls|Where-Object {$_.handle -eq $bell.Handle -and $_.tooltip -ceq 'Notifications (1)'}).Count -eq 1) 'Native bell tooltip did not update unread count'
+        Request @('notifications','mark-read',$notification)|Out-Null;$tree=Tree
+        Require (@($tree.chrome.controls|Where-Object {$_.handle -eq $bell.Handle -and $_.tooltip -ceq 'Notifications (0)'}).Count -eq 1) 'Native bell tooltip retained a stale unread count'
+        $evidence.checks+=@{name='compact_footer_icons_native_tooltips_and_live_header_notification_accent';passed=$true}
+        $source=Request @('identify');$nfc='한글 & 표시';$nfd=([string][char]0x1112)+[char]0x1161+[char]0x11AB+[char]0x1100+[char]0x1173+[char]0x11AF+' & 표시'
+        Request @('workspace','rename',$source.workspace,$nfc)|Out-Null;Request @('rename-tab',$source.surface,$nfc)|Out-Null
+        $nfcCapture=Capture 'hangul-nfc' (Tree)
+        Request @('workspace','rename',$source.workspace,$nfd)|Out-Null;Request @('rename-tab',$source.surface,$nfd)|Out-Null
+        $tree=Tree;$nfdCapture=Capture 'hangul-nfd' $tree
+        Require ([string]::Equals($tree.workspaces[0].name,$nfd,[StringComparison]::Ordinal)) 'Display normalization changed the original model name'
+        Require (@($nfdCapture.controls|Where-Object {[string]::Equals($_.Text,$nfd.Replace('&','&&'),[StringComparison]::Ordinal)}).Count -eq 1) 'Display normalization changed the original native tab caption'
+        Require ((Get-FileHash -LiteralPath $nfcCapture.path -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $nfdCapture.path -Algorithm SHA256).Hash) 'Canonically equivalent Hangul captions do not paint identical native chrome'
+        $compat='ㅎㅏㄴㄱㅡㄹ & 표시';Request @('workspace','rename',$source.workspace,$compat)|Out-Null;Request @('rename-tab',$source.surface,$compat)|Out-Null
+        $compatCapture=Capture 'hangul-compatibility-jamo' (Tree)
+        Require ((Get-FileHash -LiteralPath $compatCapture.path -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $nfcCapture.path -Algorithm SHA256).Hash) 'Display path incorrectly composed independent compatibility Jamo'
+        $evidence.checks+=@{name='nfc_nfd_hangul_native_render_equivalence_preserves_original_model_and_hwnd_codepoints';passed=$true;nfc=$nfc;nfd=$nfd;compatibilityJamoRemainDistinct=$true;displayOnly=$true}
         $original=Identities $tree;$controls=ControlIds $tree;$source=Request @('identify');$name='한글 '+[char]0x1112+[char]0x1161+[char]0x11AB+' '+[char]::ConvertFromUtf32(0x1F600)+' & 작업'
         Request @('workspace','rename',$source.workspace,$name)|Out-Null;Request @('workspace','color',$source.workspace,'#12abef')|Out-Null
         $changed=Join-Path $cwd '경로 & 변경';[IO.Directory]::CreateDirectory($changed)|Out-Null
@@ -150,20 +200,53 @@ try {
         $tree=Tree;Require (@($tree.browsers).Count -eq 1 -and @($tree.editors).Count -eq 1 -and (Identities $tree) -eq $stable) 'Mixed surface chrome changed terminal identities or lost a surface'
         $mixed=Capture 'terminal-browser-editor' $tree;FocusPaint $tree $mixed
         $evidence.checks+=@{name='terminal_browser_editor_native_chrome_capture_and_terminal_identity_preservation';passed=$true}
-    } else {
+    } elseif($Case -eq 'overflow') {
         [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,400);$tree=Tree
         $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$tree.window_handle));$scale=[Math]::Max(96,$dpi)/96.0
-        $rows=[int][Math]::Floor((400-160*$scale)/(58*$scale));Require ($rows -ge 1 -and $rows -le 6) 'Owned resize did not produce a bounded sidebar overflow case'
+        $withoutPager=[int][Math]::Floor((400-76*$scale)/(58*$scale));Require ($withoutPager -ge 1 -and $withoutPager -le 6) 'Owned resize did not produce a bounded sidebar overflow case'
         $first=$tree.active_workspace
-        for($i=0;$i -lt $rows;$i++){Request @('new-workspace','--cwd',$cwd,'--shell=cmd')|Out-Null}
-        $tree=Ready ($rows+1);$last=$tree.active_workspace;$stable=Identities $tree
+        for($i=0;$i -lt $withoutPager;$i++){Request @('new-workspace','--cwd',$cwd,'--shell=cmd')|Out-Null}
+        $tree=Ready ($withoutPager+1);$last=$tree.active_workspace;$stable=Identities $tree
+        $rows=[int][Math]::Floor((400-104*$scale)/(58*$scale))
         $lastCapture=Capture 'overflow-last' $tree
-        Require ($tree.chrome.sidebar_offset -eq 1) 'Last active workspace did not scroll into view'
+        Require ($tree.chrome.sidebar_offset -eq $withoutPager+1-$rows) 'Last active workspace did not scroll into view'
         Require (@($lastCapture.controls|Where-Object {$_.Text -eq 'Next' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'Last-page Next control should be disabled'
         Request @('workspace','focus',$first)|Out-Null;$tree=Tree;$firstCapture=Capture 'overflow-first' $tree
         Require ($tree.chrome.sidebar_offset -eq 0 -and (Identities $tree) -eq $stable) 'First active workspace did not scroll into view or restarted a terminal'
         Require (@($firstCapture.controls|Where-Object {$_.Text -eq 'Previous' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'First-page Previous control should be disabled'
-        $evidence.checks+=@{name='overflow_active_workspace_visibility_footer_bounds_and_paging_endpoints';passed=$true;visibleRows=$rows;workspaces=$rows+1;first=$first;last=$last}
+        $evidence.checks+=@{name='overflow_active_workspace_visibility_footer_bounds_and_paging_endpoints';passed=$true;visibleRows=$rows;workspaces=$withoutPager+1;first=$first;last=$last}
+    } else {
+        Require ($tree.chrome.sidebar_width_dip -eq 260) 'Fresh isolated host did not use default sidebar width'
+        $stable=Identities $tree;$controls=ControlIds $tree;$originalWidth=$tree.layout.panes[0][1].width
+        $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$tree.window_handle));$scale=[Math]::Max(96,$dpi)/96.0
+        foreach($width in @(340,200)){
+            [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'down',([int]$tree.chrome.sidebar_actual_width+1),100)
+            $tree=Await-Width ([int]$tree.chrome.sidebar_width_dip) $true
+            [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'move',([int]($width*$scale)+1),100)
+            $tree=Await-Width $width $true
+            [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'up',([int]($width*$scale)+1),100)
+            $tree=Await-Width $width $false
+            Require ((Identities $tree) -eq $stable -and (ControlIds $tree) -eq $controls) 'Sidebar drag recreated native controls or terminal processes'
+            Capture ('width-'+$width) $tree|Out-Null
+        }
+        Require ($tree.layout.panes[0][1].width -gt $originalWidth) 'Narrower sidebar did not enlarge live terminal bounds'
+        [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'down',([int]$tree.chrome.sidebar_actual_width+1),100);$tree=Await-Width 200 $true
+        [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'cancel',0,0);$tree=Await-Width 200 $false
+        [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'move',400,100);$tree=Await-Width 200 $false
+        [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,480,400);$tree=Tree
+        Require ($tree.chrome.sidebar_width_dip -eq 200 -and $tree.chrome.sidebar_actual_width -le 160*$scale) 'Small-window clamp overwrote preferred sidebar width'
+        Capture 'width-clamped' $tree|Out-Null
+        $edge=[int]$tree.chrome.sidebar_actual_width+1
+        [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'down',$edge,100);$tree=Await-Width 200 $true
+        [ChromeFixture]::Pointer([long]$tree.window_handle,$hostProcess.Id,'up',$edge,100);$tree=Await-Width 200 $false
+        [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1000,600);$tree=Tree
+        Require ($tree.chrome.sidebar_width_dip -eq 200 -and [Math]::Abs($tree.chrome.sidebar_actual_width-200*$scale) -le 1) 'Sidebar width did not recover after window expansion'
+        $saved=Request @('save-state');Request @('quit')|Out-Null;Require ($hostProcess.WaitForExit((Budget 5000))) 'Width host did not save/quit within five seconds';Require ($hostProcess.ExitCode -eq 0) 'Width host failed on exit';Record-Exit
+        $tree=Start-Owned @('--restore-window',$saved.window)
+        Require ($tree.chrome.sidebar_width_dip -eq 200) 'Preferred sidebar width was lost on restart'
+        Capture 'width-restored' $tree|Out-Null
+        $evidence.checks+=@{name='owned_hidden_sidebar_drag_preserves_controls_processes_bounds_and_cancellation';passed=$true}
+        $evidence.checks+=@{name='preferred_sidebar_width_survives_narrow_window_clamp_and_restart';passed=$true}
     }
     Request @('quit','--discard-state')|Out-Null;Require ($hostProcess.WaitForExit((Budget 5000))) 'Owned host did not quit within five seconds';Require ($hostProcess.ExitCode -eq 0) 'Owned host exited with failure'
     $evidence.status='passed_background_chrome_subset'
@@ -172,7 +255,7 @@ finally {
     $cleanup=$true
     if($hostProcess){
         try {if(-not $hostProcess.HasExited -and $pipeName){Request @('quit','--discard-state')|Out-Null};if(-not $hostProcess.WaitForExit(5000)){$hostProcess.Kill();[CliProbe]::WaitAfterKill($hostProcess);$cleanupErrors+='Owned host required forced cleanup'}} catch {$cleanupErrors+=$_.Exception.Message;if(-not $hostProcess.HasExited){$hostProcess.Kill();[CliProbe]::WaitAfterKill($hostProcess)}}
-        $outDone=$hostOut.Wait(500);$errDone=$hostErr.Wait(500);$evidence.hosts=@($hostProcess.Id);$evidence.observations+=@{kind='host-exit';exitCode=$hostProcess.ExitCode;stdoutComplete=$outDone;stderrComplete=$errDone;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)};$hostProcess.Dispose()
+        Record-Exit
     }
     if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.shells=$shells;$evidence.clientPids=$clients;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o')

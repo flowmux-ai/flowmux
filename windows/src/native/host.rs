@@ -137,10 +137,7 @@ unsafe extern "system" fn window_proc(
                 y: (lparam >> 16) as u16 as i16 as i32,
             };
             ScreenToClient(window, &mut point);
-            let mut client = RECT::default();
-            GetClientRect(window, &mut client);
-            let sidebar = ((260.0 * GetDpiForWindow(window).max(96) as f64 / 96.0).round() as i32)
-                .min((client.right / 3).max(0));
+            let sidebar = panes::cached_sidebar_width();
             if point.x >= 0 && point.x < sidebar {
                 let delta = (wparam >> 16) as u16 as i16 as i32;
                 if delta != 0 {
@@ -374,6 +371,7 @@ struct App {
     surfaces: HashMap<SurfaceId, Surface>,
     controls: Vec<Control>,
     sidebar_offset: usize,
+    sidebar_width_dip: u32,
     sidebar_active: Option<WorkspaceId>,
     pane_layout: model::Layout,
     zoomed: Option<PaneId>,
@@ -430,6 +428,11 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         cwd.display()
     );
     let restoring_window = restored.is_some();
+    let sidebar_width_dip = restored
+        .as_ref()
+        .map_or(crate::state::DEFAULT_SIDEBAR_WIDTH, |state| {
+            state.sidebar_width_dip
+        });
     let (mut workspaces, active_workspace, restore_screens, mut shells) = match restored {
         Some(state) => {
             let active = state
@@ -584,6 +587,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             surfaces: HashMap::new(),
             controls: vec![],
             sidebar_offset: 0,
+            sidebar_width_dip,
             sidebar_active: None,
             pane_layout: model::Layout::default(),
             zoomed: None,
@@ -721,7 +725,7 @@ impl App {
         }
         let mut desired = Vec::new();
         for (name, action) in [
-            ("+", Action::NewWorkspace),
+            ("New workspace", Action::NewWorkspace),
             ("Workspaces", Action::WorkspaceMenu),
             ("Settings", Action::Settings),
             ("Files", Action::ShowFiles),
@@ -935,7 +939,8 @@ impl App {
         }
         let scale = unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0;
         let px = |value: i32| (value as f64 * scale).round() as i32;
-        let sidebar = px(260).min((client.right / 3).max(0));
+        let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
+        panes::cache_sidebar(sidebar, client.bottom, px(4), !self.background_test);
         let bar = px(28);
         chrome::configure(
             self.settings.terminal.theme,
@@ -1008,9 +1013,11 @@ impl App {
             }
         }
         let row_height = px(58).max(1);
-        let list_top = px(40);
-        let footer_top = (client.bottom - px(120)).max(list_top);
-        let visible_rows = ((footer_top - list_top) / row_height).max(0) as usize;
+        let sidebar_layout =
+            self.sidebar_layout(client.bottom, unsafe { GetDpiForWindow(self.window) });
+        let list_top = sidebar_layout.list_top;
+        let footer_top = sidebar_layout.footer_top;
+        let visible_rows = sidebar_layout.capacity;
         let max_offset = self.workspaces.len().saturating_sub(visible_rows.max(1));
         self.sidebar_offset = self.sidebar_offset.min(max_offset);
         if self.sidebar_active != Some(self.workspace().id) {
@@ -1024,11 +1031,21 @@ impl App {
         }
         for control in &self.controls {
             let rect = match control.action {
-                Action::NewWorkspace => Some((px(4), px(5), px(28), px(28))),
-                Action::WorkspaceMenu => Some((px(36), px(5), (sidebar - px(40)).max(1), px(28))),
+                Action::NewWorkspace => {
+                    (sidebar >= px(36)).then_some((px(4), px(5), px(28), px(28)))
+                }
+                Action::WorkspaceMenu => {
+                    (sidebar >= px(100)).then_some((px(36), px(5), sidebar - px(72), px(28)))
+                }
+                Action::Notifications => {
+                    (sidebar >= px(64)).then_some((sidebar - px(32), px(5), px(28), px(28)))
+                }
                 Action::Workspace(id) => {
                     let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
-                    if i < self.sidebar_offset || i >= self.sidebar_offset + visible_rows {
+                    if sidebar <= px(12)
+                        || i < self.sidebar_offset
+                        || i >= self.sidebar_offset + visible_rows
+                    {
                         None
                     } else {
                         Some((
@@ -1040,7 +1057,10 @@ impl App {
                     }
                 }
                 Action::SidebarScroll(direction) => {
-                    if self.workspaces.len() <= visible_rows {
+                    if !sidebar_layout.pager
+                        || sidebar < px(64)
+                        || sidebar_layout.list_bottom + px(28) > footer_top
+                    {
                         None
                     } else {
                         unsafe {
@@ -1055,34 +1075,24 @@ impl App {
                         }
                         Some((
                             if direction < 0 { px(4) } else { sidebar / 2 },
-                            footer_top,
+                            sidebar_layout.list_bottom,
                             (sidebar / 2 - px(6)).max(1),
                             px(24),
                         ))
                     }
                 }
-                Action::Settings
-                | Action::ShowFiles
-                | Action::SearchAll
-                | Action::OpenEditor
-                | Action::Notifications => {
-                    let (col, row) = match control.action {
-                        Action::Settings => (0, 0),
-                        Action::ShowFiles => (1, 0),
-                        Action::SearchAll => (0, 1),
-                        Action::OpenEditor => (1, 1),
-                        _ => (0, 2),
+                Action::Settings | Action::ShowFiles | Action::SearchAll | Action::OpenEditor => {
+                    let x = match control.action {
+                        Action::Settings => px(4),
+                        Action::OpenEditor => sidebar - px(100),
+                        Action::ShowFiles => sidebar - px(68),
+                        _ => sidebar - px(36),
                     };
-                    let cell = (sidebar - px(8)) / 2;
-                    Some((
-                        px(4) + col * cell,
-                        footer_top + px(28) + row * px(28),
-                        if matches!(control.action, Action::Notifications) {
-                            cell * 2
-                        } else {
-                            cell
-                        },
-                        px(26),
+                    (sidebar >= px(136) && footer_top >= px(40)).then_some((
+                        x,
+                        footer_top + px(4),
+                        px(28),
+                        px(28),
                     ))
                 }
                 Action::Tab(pane, surface)
@@ -1239,6 +1249,7 @@ impl App {
             }
             Event::Layout => {
                 self.cancel_drag();
+                self.sidebar_active = None;
                 self.layout()?;
             }
             Event::Pointer(pointer) => self.pointer(pointer)?,
@@ -1795,6 +1806,7 @@ impl App {
                 active_workspace: self.workspace().id,
                 screens: HashMap::new(),
                 shells: self.shells.clone(),
+                sidebar_width_dip: self.sidebar_width_dip,
             },
             waiting,
             started: Instant::now(),

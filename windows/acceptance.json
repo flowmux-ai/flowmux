@@ -8,9 +8,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-27/native-ime-bundled-conpty.json",
-        "evidence/2026-09-28/native-paste-background.json"
+        "evidence/2026-09-28/native-paste-background.json",
+        "evidence/2026-09-28/chrome-sidebar.md"
       ],
-      "notes": "Previous real IME evidence covers one Windows/IME/runtime combination. Hidden explicit-text paste now preserves completed Hangul, decomposed jamo and emoji exactly at pre-ConPTY and ReadConsoleW boundaries. This is not new OS clipboard or real IME acceptance."
+      "notes": "Previous real IME evidence covers one Windows/IME/runtime combination. Hidden explicit-text paste now preserves completed Hangul, decomposed jamo and emoji exactly at pre-ConPTY and ReadConsoleW boundaries. This is not new OS clipboard or real IME acceptance. Native caption painting now normalizes only a temporary drawing copy with Win32 NormalizationC, leaving raw model/HWND/input/path/persisted codepoints untouched. Memory-only font/Uniscribe probes did not improve decomposed Hangul, while the normalized drawing copy matched NFC/NFD pixels; hidden native rendering confirms equal NFC/NFD pixels with raw model/HWND captions preserved. Physical IME remains unverified."
     },
     {
       "id": "I02",
@@ -306,9 +307,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-workspaces-background.json",
-        "evidence/2026-09-28/chrome-details.md"
+        "evidence/2026-09-28/chrome-details.md",
+        "evidence/2026-09-28/chrome-sidebar.md"
       ],
-      "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Earlier hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. New hidden chrome checks verify name/current-cwd two-line captions, Unicode cwd and rename/color updates with stable HWNDs/PIDs, rounded/color styling, and five-workspace overflow with four visible rows, active first/last visibility and pager endpoints. Final workspace remains protected; empty-window UI, drag reorder, automatic name reset, broader status metadata, real menu/dialog/IME/DPI/high-contrast/accessibility remain pending."
+      "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Earlier hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. The preceding chrome stage verified name/current-cwd two-line captions, Unicode cwd and rename/color updates with stable HWNDs/PIDs, rounded/color styling, and five-workspace overflow with four visible rows, active first/last visibility and pager endpoints. Final workspace remains protected; empty-window UI, drag reorder, automatic name reset, broader status metadata, real menu/dialog/IME/DPI/high-contrast/accessibility remain pending. The sidebar now supports per-window preferred width 160–640 DIP (default 260), temporary clamping to reserve 320 DIP of main area, drag cancellation and preserving preference on no-movement clicks. Footer icons/header bell and overflow-only pager placement are implemented; current actual-host drag/layout/restore checks remain pending."
     },
     {
       "id": "U02",
@@ -366,9 +368,10 @@
       "feature": "메뉴·popover·dialog·drag preview",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-rust-tests-workspaces.txt"
+        "evidence/2026-09-28/native-rust-tests-workspaces.txt",
+        "evidence/2026-09-28/chrome-sidebar.md"
       ],
-      "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending."
+      "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending. A header notification bell and 36-DIP Settings/Files/Search/Open file icon row now retain native captions and tooltips. Actual-host checks of the new layout/tooltips remain pending."
     },
     {
       "id": "U09",
@@ -923,9 +926,10 @@
       "evidence": [
         "evidence/2026-09-27/native-state-background.json",
         "evidence/2026-09-28/native-settings-background.json",
-        "evidence/2026-09-28/native-shells-background.json"
+        "evidence/2026-09-28/native-shells-background.json",
+        "evidence/2026-09-28/chrome-sidebar.md"
       ],
-      "notes": "Versioned Windows state and shared terminal/default-shell config use exclusive OS leases/locks and atomic replacement. Config merges fields, rejects stale edits, preserves failed/invalid writes and polls external edits. Outgoing JSON also enforces 64KiB when Unicode argv expands UTF-8 size. Shell/argv persist per surface. Theme import, full configuration parity and remaining data/log/cache features are pending."
+      "notes": "Versioned Windows state and shared terminal/default-shell config use exclusive OS leases/locks and atomic replacement. Config merges fields, rejects stale edits, preserves failed/invalid writes and polls external edits. Outgoing JSON also enforces 64KiB when Unicode argv expands UTF-8 size. Shell/argv persist per surface. Theme import, full configuration parity and remaining data/log/cache features are pending. Sidebar preferred width now persists per window (160–640 DIP, default 260); older checkpoints default to 260 and default-width saves omit the field. Older binaries reject checkpoints with nondefault sidebar_width_dip because of deny_unknown_fields. Current native restore validation is pending."
     },
     {
       "id": "O07",

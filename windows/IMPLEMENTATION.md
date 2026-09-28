@@ -687,33 +687,39 @@ clipboard cut/paste, batch/directory/remote operations, overwrite and physical
 keyboard/IME/focus acceptance remain open.
 
 
-The native shell now has a 260-DIP sidebar capped at one third of client width,
-58-DIP workspace rows starting at 40 DIP, compact 28-DIP tabs, inline close and
-per-pane +/Pane actions controls. Workspace rows paint name and current active
-surface cwd on two lines, unread counts, rounded selection and custom-color
-stripes. Cwd/metadata refresh retains HWNDs. Terminal/browser/editor glyphs and
-focused-pane tab accents distinguish surface roles. Previous/Next handles sidebar
-overflow; the footer keeps two action columns and full-width Notices. Native
-controls use dark/light drawing and DPI-scaled fonts. Terminal background,
-foreground and 16 ANSI colors retain the Linux defaults; shared sources are unchanged.
+The sidebar now stores a per-window preferred width of 160–640 DIP, default 260.
+Its gutter uses the existing queued pointer/drag path; layout preserves native
+controls and embedded views. Capture loss/cancellation ends dragging, and a press
+and release without movement keeps the preference even under temporary clamping.
+Effective width reserves 320 DIP beside the sidebar where client space permits;
+shrinking the window does not overwrite the preference. WindowState accepts old
+checkpoints with a defaulted field and omits that field when width is 260. Older
+binaries reject nondefault-width checkpoints through their unknown-field guard.
 
-The second-stage hidden details case passes three checks in 9.597 seconds:
-Unicode cwd and rename/color updates preserve controls and PIDs, focused-tab
-accents follow the selected pane, and light/dark themes preserve terminal
-identities/PIDs in a two-terminal split. A later mixed terminal/browser/editor
-capture supports visual inspection of surface glyphs; it does not establish
-per-pixel icon identity or theme transitions across mixed surface types. The separate 6.431-second overflow case passes at 900×400 with five
-workspaces and four visible rows, checking active first/last visibility, pager
-endpoints and bounds. Debug build (83.345 seconds) and final Clippy (24.729 seconds)
-pass. See [current chrome evidence](evidence/2026-09-28/chrome-details.md).
-The six-check workspace lifecycle regression also passes in 16.076 seconds,
-including two-host restart, 41 reorders, descendant cleanup and Korean history.
-Release packaging and its verification boundary are recorded in the current
-chrome evidence. Replacement of the running application was not performed.
+The Workspaces header now holds the notification bell; a 36-DIP footer replaces
+the earlier multirow layout with Settings/Files/Search/Open file icons. Native
+captions and tooltips retain their action names. Overflow alone reserves a 28-DIP
+pager row. Workspace rows remain 58 DIP with name/cwd, unread counts, rounded
+selection and color stripes; pane tabs retain 28-DIP strips, surface glyphs and
+focused-pane accents. Terminal colors retain the Linux defaults.
 
-The [first-stage evidence](evidence/2026-09-28/chrome.md), including its 6.070-second
-render case, is historical. Agents, broader workspace status metadata, the full
-symbolic icon set and some popup/panel styling still differ. Physical pointer,
-keyboard/IME, per-monitor DPI, high contrast and accessibility remain unverified.
-Production native offscreen renders exclude composed WebView/GPU contents and do
-not establish full visual or installer parity.
+Caption painting uses Win32 NormalizeString(NormalizationC) on a temporary UTF-16
+drawing copy. The raw HWND caption, model/input/path identity and persisted text
+remain untouched. Unsupported input or sizing failure retains the original
+buffer; normalization does not edit documents or participate in IME composition.
+Memory-only native probes found no shaping improvement from Uniscribe or tested
+font swaps. The normalized drawing copy instead produced matching NFC/NFD raster
+hashes. Hidden native details (5 checks), overflow (1), resize/restart (2), and
+workspace regression (6) pass on the final debug binary. Debug build and Clippy
+pass. Release packaging is deferred to the structural UI batch. See
+[sidebar evidence](evidence/2026-09-28/chrome-sidebar.md).
+
+The [preceding metadata/theme stage](evidence/2026-09-28/chrome-details.md) records
+its 9.597-second details case, 6.431-second overflow case and 16.076-second workspace
+regression, with that stage's build/package boundaries. Those are historical
+results for its earlier footer and fixed sidebar width. The
+[first-stage evidence](evidence/2026-09-28/chrome.md) also remains historical.
+Agents, broader status metadata, the full symbolic icon set and some popup/panel
+styling still differ. Physical pointer/keyboard/IME, per-monitor DPI, high contrast
+and accessibility remain unverified. Native offscreen renders exclude composed
+WebView/GPU contents and do not establish full visual or installer parity.

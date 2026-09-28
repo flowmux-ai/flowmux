@@ -6,14 +6,20 @@ use super::*;
 use crate::settings::Theme;
 use windows_sys::Win32::UI::{
     Controls::{
-        DRAWITEMSTRUCT, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT, ODS_NOACCEL, ODS_NOFOCUSRECT,
-        ODS_SELECTED, ODT_BUTTON, WM_MOUSELEAVE,
+        InitCommonControlsEx, DRAWITEMSTRUCT, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, ODS_DISABLED,
+        ODS_FOCUS, ODS_HOTLIGHT, ODS_NOACCEL, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
+        TOOLTIPS_CLASSW, TTF_IDISHWND, TTF_SUBCLASS, TTM_ACTIVATE, TTM_ADDTOOLW, TTM_POP,
+        TTM_UPDATETIPTEXTW, TTS_NOPREFIX, TTTOOLINFOW, WM_MOUSELEAVE,
     },
     Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
 
 const SUBCLASS: usize = 0x464d_4348;
+// CommCtrl.h TTTOOLINFOW_V2_SIZE ends at lParam. The full structure includes
+// the v6-only lpReserved tail; this host does not require a v6 activation context.
+// Use the supported prefix consistently for add, update and read messages.
+const TOOL_INFO_V2_SIZE: u32 = std::mem::offset_of!(TTTOOLINFOW, lpReserved) as u32;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Role {
@@ -28,6 +34,19 @@ pub(super) enum Role {
         kind: SurfaceIcon,
     },
     Tool,
+    Icon {
+        kind: ChromeIcon,
+        marked: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum ChromeIcon {
+    Settings,
+    Files,
+    Search,
+    OpenFile,
+    Notifications,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -248,6 +267,7 @@ struct State {
     palette: Palette,
     resources: Resources,
     controls: HashMap<isize, Entry>,
+    tooltips: HashMap<isize, Tooltip>,
 }
 impl State {
     fn new() -> Self {
@@ -258,6 +278,7 @@ impl State {
             palette,
             resources: Resources::new(palette, 96),
             controls: HashMap::new(),
+            tooltips: HashMap::new(),
         }
     }
 }
@@ -340,9 +361,11 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
         }
         SendMessageW(window, WM_SETFONT, font as WPARAM, 0);
     }
+    update_tooltip(window);
 }
 
 pub(super) fn unregister(window: HWND) {
+    remove_tooltip(window);
     STATE.with(|slot| {
         slot.borrow_mut().controls.remove(&(window as isize));
     });
@@ -366,6 +389,7 @@ pub(super) fn set_role(window: HWND, role: Role) {
             entry.button = Some(role);
         }
     });
+    update_tooltip(window);
     unsafe {
         InvalidateRect(window, std::ptr::null(), 0);
     }
@@ -388,8 +412,14 @@ unsafe extern "system" fn control_proc(
     _id: usize,
     _data: usize,
 ) -> LRESULT {
+    if message == WM_SETTEXT {
+        let result = DefSubclassProc(window, message, wparam, lparam);
+        update_tooltip(window); // Caption changes, including unread counts, win immediately.
+        return result;
+    }
     match message {
         WM_MOUSEMOVE | WM_MOUSELEAVE => {
+            activate_tooltip(window);
             let hot = message == WM_MOUSEMOVE;
             let changed = STATE.with(|slot| {
                 let mut state = slot.borrow_mut();
@@ -418,14 +448,193 @@ unsafe extern "system" fn control_proc(
             }
         }
         WM_NCDESTROY => {
+            remove_tooltip(window);
             STATE.with(|slot| {
                 slot.borrow_mut().controls.remove(&(window as isize));
             });
             RemoveWindowSubclass(window, Some(control_proc), SUBCLASS);
         }
+        WM_SHOWWINDOW if wparam == 0 => {
+            let tooltip = STATE.with(|slot| {
+                slot.borrow()
+                    .tooltips
+                    .get(&(window as isize))
+                    .map(|tip| tip.window)
+            });
+            if let Some(tooltip) = tooltip {
+                SendMessageW(tooltip, TTM_ACTIVATE, 0, 0);
+                SendMessageW(tooltip, TTM_POP, 0, 0);
+            }
+        }
         _ => {}
     }
     DefSubclassProc(window, message, wparam, lparam)
+}
+
+struct Tooltip {
+    window: HWND,
+    text: Vec<u16>,
+}
+impl Drop for Tooltip {
+    fn drop(&mut self) {
+        unsafe {
+            if IsWindow(self.window) != 0 {
+                DestroyWindow(self.window);
+            }
+        }
+    }
+}
+fn remove_tooltip(window: HWND) {
+    let tooltip = STATE.with(|slot| slot.borrow_mut().tooltips.remove(&(window as isize)));
+    drop(tooltip); // No RefCell borrow may span native tooltip/subclass callbacks.
+}
+pub(super) fn tooltip_text(window: HWND) -> Option<String> {
+    let tooltip = STATE.with(|slot| {
+        slot.borrow()
+            .tooltips
+            .get(&(window as isize))
+            .map(|tip| tip.window)
+    })?;
+    let mut text = vec![0u16; 2048];
+    let mut info = TTTOOLINFOW {
+        cbSize: TOOL_INFO_V2_SIZE,
+        hwnd: unsafe { GetAncestor(window, GA_ROOT) },
+        uId: window as usize,
+        lpszText: text.as_mut_ptr(),
+        ..Default::default()
+    };
+    // TTM_GETTEXTW copies up to wParam UTF-16 units including NUL. Both tooltip
+    // and output buffer belong to this UI thread/process; no cross-process ptr.
+    unsafe {
+        SendMessageW(
+            tooltip,
+            windows_sys::Win32::UI::Controls::TTM_GETTEXTW,
+            text.len(),
+            (&mut info as *mut TTTOOLINFOW) as LPARAM,
+        );
+    }
+    let end = text
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(text.len());
+    String::from_utf16(&text[..end]).ok()
+}
+fn activate_tooltip(window: HWND) {
+    let tooltip = STATE.with(|slot| {
+        slot.borrow()
+            .tooltips
+            .get(&(window as isize))
+            .map(|tip| tip.window)
+    });
+    if let Some(tooltip) = tooltip {
+        unsafe {
+            let visible =
+                IsWindowVisible(window) != 0 && IsWindowVisible(GetAncestor(window, GA_ROOT)) != 0;
+            SendMessageW(tooltip, TTM_ACTIVATE, usize::from(visible), 0);
+            if !visible {
+                SendMessageW(tooltip, TTM_POP, 0, 0);
+            }
+        }
+    }
+}
+fn update_tooltip(window: HWND) {
+    let icon = STATE.with(|slot| {
+        slot.borrow()
+            .controls
+            .get(&(window as isize))
+            .is_some_and(|entry| matches!(entry.button, Some(Role::Icon { .. })))
+    });
+    if !icon {
+        remove_tooltip(window);
+        return;
+    }
+    let mut text = vec![0u16; 2048];
+    let length =
+        unsafe { GetWindowTextW(window, text.as_mut_ptr(), text.len() as i32) }.max(0) as usize;
+    text.truncate(length);
+    text.push(0);
+    let unchanged = STATE.with(|slot| {
+        slot.borrow()
+            .tooltips
+            .get(&(window as isize))
+            .is_some_and(|tip| tip.text == text)
+    });
+    if unchanged {
+        activate_tooltip(window);
+        return;
+    }
+    let existing = STATE.with(|slot| slot.borrow_mut().tooltips.remove(&(window as isize)));
+    let parent = unsafe { GetAncestor(window, GA_ROOT) };
+    let mut info = TTTOOLINFOW {
+        cbSize: TOOL_INFO_V2_SIZE,
+        uFlags: TTF_IDISHWND | TTF_SUBCLASS,
+        hwnd: parent,
+        uId: window as usize,
+        lpszText: text.as_mut_ptr(),
+        ..Default::default()
+    };
+    let tip = if let Some(mut tip) = existing {
+        unsafe {
+            SendMessageW(
+                tip.window,
+                TTM_UPDATETIPTEXTW,
+                0,
+                (&mut info as *mut TTTOOLINFOW) as LPARAM,
+            );
+        }
+        tip.text = text; // Old storage stays alive until the native update returns.
+        tip
+    } else {
+        unsafe {
+            let classes = INITCOMMONCONTROLSEX {
+                dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+                dwICC: ICC_BAR_CLASSES,
+            };
+            if InitCommonControlsEx(&classes) == 0 {
+                #[cfg(debug_assertions)]
+                eprintln!("native tooltip: InitCommonControlsEx failed");
+                return;
+            }
+            let tooltip = CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                TOOLTIPS_CLASSW,
+                std::ptr::null(),
+                WS_POPUP | TTS_NOPREFIX,
+                0,
+                0,
+                0,
+                0,
+                parent,
+                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            if tooltip.is_null() {
+                #[cfg(debug_assertions)]
+                eprintln!("native tooltip: CreateWindowExW failed");
+                return;
+            }
+            let tip = Tooltip {
+                window: tooltip,
+                text,
+            };
+            SendMessageW(tooltip, TTM_ACTIVATE, 0, 0);
+            if SendMessageW(
+                tooltip,
+                TTM_ADDTOOLW,
+                0,
+                (&mut info as *mut TTTOOLINFOW) as LPARAM,
+            ) == 0
+            {
+                #[cfg(debug_assertions)]
+                eprintln!("native tooltip: TTM_ADDTOOLW failed (cbSize={TOOL_INFO_V2_SIZE})");
+                return;
+            }
+            tip
+        }
+    };
+    STATE.with(|slot| slot.borrow_mut().tooltips.insert(window as isize, tip));
+    activate_tooltip(window);
 }
 
 fn fill(dc: HDC, rect: &RECT, color: COLORREF) {
@@ -433,6 +642,48 @@ fn fill(dc: HDC, rect: &RECT, color: COLORREF) {
         SetDCBrushColor(dc, color);
         FillRect(dc, rect, GetStockObject(DC_BRUSH));
     }
+}
+
+/// Canonical equivalence for a transient GDI drawing buffer only. Native probes
+/// showed decomposed Hangul rendered as separate Jamo even with font fallback;
+/// painting the equivalent NFC sequence fixes that display without changing the
+/// HWND caption, model/path identity, input, clipboard, or persisted codepoints.
+/// ASCII avoids native work. Unsupported/invalid input or sizing failure keeps
+/// the original drawing buffer, and allocation is capped independently of GDI.
+fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]> {
+    use std::borrow::Cow;
+    use windows_sys::Win32::Globalization::{NormalizationC, NormalizeString};
+    const MAX_DRAWING_UNITS: usize = 8192;
+    if original.len() > MAX_DRAWING_UNITS || original.iter().all(|unit| *unit <= 0x7f) {
+        return Cow::Borrowed(original);
+    }
+    let required = unsafe {
+        NormalizeString(
+            NormalizationC,
+            original.as_ptr(),
+            original.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if required <= 0 || required as usize > MAX_DRAWING_UNITS {
+        return Cow::Borrowed(original);
+    }
+    let mut drawing = vec![0u16; required as usize];
+    let written = unsafe {
+        NormalizeString(
+            NormalizationC,
+            original.as_ptr(),
+            original.len() as i32,
+            drawing.as_mut_ptr(),
+            drawing.len() as i32,
+        )
+    };
+    if written <= 0 || written as usize > drawing.len() {
+        return Cow::Borrowed(original);
+    }
+    drawing.truncate(written as usize);
+    Cow::Owned(drawing)
 }
 
 fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
@@ -480,7 +731,12 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         palette.muted
     } else if palette.high_contrast && highlighted {
         unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) }
-    } else if !palette.high_contrast && matches!(role, Role::Tab { focused: false, .. }) {
+    } else if !palette.high_contrast && matches!(role, Role::Icon { marked: true, .. }) {
+        palette.accent
+    } else if !palette.high_contrast
+        && ((matches!(role, Role::Icon { .. }) && !hot && item.itemState & ODS_FOCUS == 0)
+            || matches!(role, Role::Tab { focused: false, .. }))
+    {
         palette.muted
     } else {
         palette.foreground
@@ -562,21 +818,128 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         SetTextColor(item.hDC, text);
         SetBkMode(item.hDC, TRANSPARENT as i32);
         SelectObject(item.hDC, font);
-        let mut label = vec![0u16; 2048];
-        let length = GetWindowTextW(item.hwndItem, label.as_mut_ptr(), label.len() as i32);
-        let label_text = String::from_utf16_lossy(&label[..length.max(0) as usize]);
-        let symbol = matches!(role, Role::Tool)
-            && matches!(
-                label_text.as_str(),
-                "Close tab"
-                    | "Pane actions"
-                    | "+"
-                    | "New tab"
-                    | "Newtab"
-                    | "New workspace"
-                    | "Add workspace"
-            );
-        if symbol {
+        let mut original = vec![0u16; 2048];
+        let length = GetWindowTextW(item.hwndItem, original.as_mut_ptr(), original.len() as i32);
+        original.truncate(length.max(0) as usize);
+        let label = caption_for_paint(&original);
+        let length = label.len() as i32;
+        let label_text = String::from_utf16_lossy(&label);
+        let symbol = matches!(role, Role::Icon { .. })
+            || (matches!(role, Role::Tool)
+                && matches!(
+                    label_text.as_str(),
+                    "Close tab"
+                        | "Pane actions"
+                        | "+"
+                        | "New tab"
+                        | "Newtab"
+                        | "New workspace"
+                        | "Add workspace"
+                ));
+        if let Role::Icon { kind, marked } = role {
+            let cx = (item.rcItem.left + item.rcItem.right) / 2;
+            let cy = (item.rcItem.top + item.rcItem.bottom) / 2;
+            let x = |dip: i32| {
+                cx + if dip < 0 {
+                    -pixel(-dip)
+                } else if dip > 0 {
+                    pixel(dip)
+                } else {
+                    0
+                }
+            };
+            let y = |dip: i32| {
+                cy + if dip < 0 {
+                    -pixel(-dip)
+                } else if dip > 0 {
+                    pixel(dip)
+                } else {
+                    0
+                }
+            };
+            SelectObject(item.hDC, GetStockObject(DC_PEN));
+            SelectObject(item.hDC, GetStockObject(NULL_BRUSH));
+            SetDCPenColor(item.hDC, text);
+            let line = |a, b, c, d| {
+                MoveToEx(item.hDC, x(a), y(b), std::ptr::null_mut());
+                LineTo(item.hDC, x(c), y(d));
+            };
+            match kind {
+                ChromeIcon::Settings => {
+                    Ellipse(item.hDC, x(-5), y(-5), x(5) + 1, y(5) + 1);
+                    Ellipse(item.hDC, x(-2), y(-2), x(2) + 1, y(2) + 1);
+                    for (a, b, c, d) in [
+                        (-7, 0, -5, 0),
+                        (5, 0, 8, 0),
+                        (0, -7, 0, -5),
+                        (0, 5, 0, 8),
+                        (-5, -5, -4, -4),
+                        (4, 4, 6, 6),
+                        (-5, 5, -4, 4),
+                        (4, -4, 6, -6),
+                    ] {
+                        line(a, b, c, d);
+                    }
+                }
+                ChromeIcon::Files => {
+                    line(-7, -3, -7, 6);
+                    line(-7, 6, 7, 6);
+                    line(7, 6, 7, -3);
+                    line(7, -3, -7, -3);
+                    line(-7, -3, -7, -6);
+                    line(-7, -6, -2, -6);
+                    line(-2, -6, 0, -3);
+                }
+                ChromeIcon::Search => {
+                    Ellipse(item.hDC, x(-6), y(-6), x(3) + 1, y(3) + 1);
+                    line(2, 2, 7, 7);
+                }
+                ChromeIcon::OpenFile => {
+                    line(-6, -7, 2, -7);
+                    line(2, -7, 6, -3);
+                    line(6, -3, 6, 7);
+                    line(6, 7, -6, 7);
+                    line(-6, 7, -6, -7);
+                    line(2, -7, 2, -3);
+                    line(2, -3, 6, -3);
+                    line(-3, 2, 3, 2);
+                    line(0, -1, 3, 2);
+                    line(3, 2, 0, 5);
+                }
+                ChromeIcon::Notifications => {
+                    windows_sys::Win32::Graphics::Gdi::Arc(
+                        item.hDC,
+                        x(-5),
+                        y(-6),
+                        x(5) + 1,
+                        y(4),
+                        x(-5),
+                        y(-1),
+                        x(5),
+                        y(-1),
+                    );
+                    line(-5, -1, -5, 4);
+                    line(-5, 4, -7, 5);
+                    line(-7, 5, 7, 5);
+                    line(7, 5, 5, 4);
+                    line(5, 4, 5, -1);
+                    line(-2, 7, 3, 7);
+                    line(0, -8, 0, -6);
+                }
+            }
+            if marked {
+                SelectObject(item.hDC, GetStockObject(DC_BRUSH));
+                SetDCBrushColor(
+                    item.hDC,
+                    if palette.high_contrast {
+                        palette.foreground
+                    } else {
+                        palette.accent
+                    },
+                );
+                Ellipse(item.hDC, x(4), y(-8), x(8) + 1, y(-4) + 1);
+            }
+        } else if symbol {
             let cx = (item.rcItem.left + item.rcItem.right) / 2;
             let cy = (item.rcItem.top + item.rcItem.bottom) / 2;
             let radius =

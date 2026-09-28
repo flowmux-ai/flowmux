@@ -1,0 +1,13 @@
+{
+    "name":  "chrome-sidebar-nfd-matrix",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\UniscribeNfdProbe-matrix.ps1",
+    "deadlineSeconds":  20,
+    "status":  "failed",
+    "started":  "2026-09-28T07:48:26.4623376Z",
+    "pid":  30448,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.851,
+    "finished":  "2026-09-28T07:48:27.3178985Z"
+}

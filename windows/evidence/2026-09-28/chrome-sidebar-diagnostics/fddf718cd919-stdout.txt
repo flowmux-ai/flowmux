@@ -1,0 +1,59 @@
+[
+    {
+        "Engine":  "DrawTextW",
+        "Form":  "NFC",
+        "Text":  "한글",
+        "Utf8Hex":  "ed959ceab880",
+        "Utf16Hex":  "5cd500ae",
+        "SelectedFont":  "Segoe UI",
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f",
+        "Png":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\nfddraw-0e9ce358-f203-4846-b4ed-d03c17f6d530\\drawtext-nfc.png",
+        "InputUnchanged":  true,
+        "InkPixels":  173,
+        "InkWidth":  30,
+        "FontPoints":  11
+    },
+    {
+        "Engine":  "DrawTextW",
+        "Form":  "NFD",
+        "Text":  "ㅎㅏㄴㄱㅡㄹ",
+        "Utf8Hex":  "e18492e185a1e186abe18480e185b3e186af",
+        "Utf16Hex":  "12116111ab1100117311af11",
+        "SelectedFont":  "Segoe UI",
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9",
+        "Png":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\nfddraw-0e9ce358-f203-4846-b4ed-d03c17f6d530\\drawtext-nfd.png",
+        "InputUnchanged":  true,
+        "InkPixels":  184,
+        "InkWidth":  87,
+        "FontPoints":  11
+    },
+    {
+        "Engine":  "ScriptStringAnalyse/Out",
+        "Form":  "NFC",
+        "Text":  "한글",
+        "Utf8Hex":  "ed959ceab880",
+        "Utf16Hex":  "5cd500ae",
+        "SelectedFont":  "Segoe UI",
+        "PixelSha256":  "ebc0926595e8addc39c2801b20dbfa4a011072e543d4ec7f7afcebaeddda127f",
+        "Png":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\nfddraw-0e9ce358-f203-4846-b4ed-d03c17f6d530\\uniscribe-nfc.png",
+        "InputUnchanged":  true,
+        "InkPixels":  173,
+        "InkWidth":  30,
+        "FontPoints":  11
+    },
+    {
+        "Engine":  "ScriptStringAnalyse/Out",
+        "Form":  "NFD",
+        "Text":  "ㅎㅏㄴㄱㅡㄹ",
+        "Utf8Hex":  "e18492e185a1e186abe18480e185b3e186af",
+        "Utf16Hex":  "12116111ab1100117311af11",
+        "SelectedFont":  "Segoe UI",
+        "PixelSha256":  "9385ed9f00bac99de1c28e9a76b88e508e176e73c5291da89cb93effe7e2baa9",
+        "Png":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\nfddraw-0e9ce358-f203-4846-b4ed-d03c17f6d530\\uniscribe-nfd.png",
+        "InputUnchanged":  true,
+        "InkPixels":  184,
+        "InkWidth":  87,
+        "FontPoints":  11
+    }
+]
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\nfddraw-0e9ce358-f203-4846-b4ed-d03c17f6d530

@@ -10,6 +10,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 public static class ChromeFixture {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct ThreadInfo {
+        public uint Size,Flags;public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret;public Rect CaretRect;
+    }
     public sealed class Control {
         public long Handle; public string Class,Text; public int X,Y,Width,Height;
         public long Style,Font; public bool Shown,Enabled;
@@ -18,6 +21,7 @@ public static class ChromeFixture {
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
+    [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread,ref ThreadInfo info);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr hwnd);
     [DllImport("user32.dll",SetLastError=true)] private static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
@@ -74,6 +78,20 @@ public static class ChromeFixture {
         // NOMOVE | NOZORDER | NOACTIVATE, deliberately without SHOWWINDOW.
         if(!SetWindowPos(hwnd,IntPtr.Zero,0,0,width+outer.Right-outer.Left-client.Right,
             height+outer.Bottom-outer.Top-client.Bottom,0x16))throw new Win32Exception();
+        Owned(hwnd,owner);
+    }
+    public static long CaptureHandle(long root,int owner) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);uint pid;
+        var thread=GetWindowThreadProcessId(hwnd,out pid);var info=new ThreadInfo();info.Size=(uint)Marshal.SizeOf(info);
+        if(!GetGUIThreadInfo(thread,ref info))throw new Win32Exception();return info.Capture.ToInt64();
+    }
+    public static void Pointer(long root,int owner,string phase,int x,int y) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);
+        if(x<0 || y<0 || x>4096 || y>4096)throw new ArgumentOutOfRangeException("Owned pointer coordinates");
+        uint message;
+        switch(phase){case "down":message=0x201;break;case "move":message=0x200;break;case "up":message=0x202;break;case "cancel":message=0x1F;break;default:throw new ArgumentException("Pointer phase");}
+        if(CaptureHandle(root,owner)!=0)throw new InvalidOperationException("Hidden test must not capture the desktop pointer");
+        Message(hwnd,message,new IntPtr(phase=="down" || phase=="move" ? 1:0),new IntPtr((y<<16)|x));
         Owned(hwnd,owner);
     }
     public static int ColorCount(string path,int x,int y,int width,int height,string color) {

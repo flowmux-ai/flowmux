@@ -9,6 +9,17 @@ use uuid::Uuid;
 
 pub const MAX_STATE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_SCREEN_BYTES: usize = 128 * 1024;
+pub(crate) const DEFAULT_SIDEBAR_WIDTH: u32 = 260;
+pub(crate) const MIN_SIDEBAR_WIDTH: u32 = 160;
+pub(crate) const MAX_SIDEBAR_WIDTH: u32 = 640;
+
+fn default_sidebar_width() -> u32 {
+    DEFAULT_SIDEBAR_WIDTH
+}
+
+fn is_default_sidebar_width(width: &u32) -> bool {
+    *width == DEFAULT_SIDEBAR_WIDTH
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,6 +55,11 @@ pub struct WindowState {
     pub screens: HashMap<SurfaceId, SavedScreen>,
     #[serde(default)]
     pub shells: HashMap<SurfaceId, crate::shell::Shell>,
+    #[serde(
+        default = "default_sidebar_width",
+        skip_serializing_if = "is_default_sidebar_width"
+    )]
+    pub sidebar_width_dip: u32,
 }
 impl WindowState {
     pub fn decode(bytes: &[u8]) -> anyhow::Result<Self> {
@@ -60,6 +76,10 @@ impl WindowState {
     }
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(self.version == 1, "unsupported Windows state version");
+        ensure!(
+            (MIN_SIDEBAR_WIDTH..=MAX_SIDEBAR_WIDTH).contains(&self.sidebar_width_dip),
+            "invalid saved sidebar width"
+        );
         ensure!(
             !self.workspaces.is_empty() && self.workspaces.len() <= 64,
             "invalid workspace count"
@@ -202,11 +222,40 @@ pub(crate) fn sample() -> WindowState {
         )]),
         workspaces: vec![ws],
         shells: HashMap::new(),
+        sidebar_width_dip: DEFAULT_SIDEBAR_WIDTH,
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sidebar_width_preserves_old_state_and_rejects_invalid_saved_preferences() {
+        let mut state = sample();
+        let old = serde_json::to_value(&state).unwrap();
+        assert!(old.get("sidebar_width_dip").is_none());
+        assert_eq!(
+            WindowState::decode(&serde_json::to_vec(&old).unwrap())
+                .unwrap()
+                .sidebar_width_dip,
+            DEFAULT_SIDEBAR_WIDTH
+        );
+        for width in [MIN_SIDEBAR_WIDTH, 340, MAX_SIDEBAR_WIDTH] {
+            state.sidebar_width_dip = width;
+            let encoded = state.encode().unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&encoded).unwrap()["sidebar_width_dip"],
+                width
+            );
+            assert_eq!(WindowState::decode(&encoded).unwrap().sidebar_width_dip, width);
+        }
+        for width in [MIN_SIDEBAR_WIDTH - 1, MAX_SIDEBAR_WIDTH + 1] {
+            state.sidebar_width_dip = width;
+            assert!(state.encode().is_err());
+            let mut invalid = old.clone();
+            invalid["sidebar_width_dip"] = width.into();
+            assert!(WindowState::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        }
+    }
     #[test]
     fn browser_checkpoints_require_history_only_for_terminals() {
         let mut state = sample();
