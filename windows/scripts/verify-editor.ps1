@@ -165,6 +165,15 @@ function Ready([string]$Surface) {
     $deadline=(Get-Date).AddSeconds(5)
     do {$r=Status $Surface;if($r.ready) {return $r};if((Get-Date) -gt $deadline) {throw ('Editor not ready: '+($r|ConvertTo-Json -Compress -Depth 6))};Start-Sleep -Milliseconds 20} while($true)
 }
+function Check-MoveHolder($Status,$Tree,[string]$Pane) {
+    $holder=$Status.holder;$paneBounds=$null;$paneCount=0
+    foreach ($entry in $Tree.layout.panes) {if ($entry[0] -eq $Pane) {$paneBounds=$entry[1];$paneCount++}}
+    if (-not $holder.window -or -not $Status.view_handle -or $holder.window -eq $Status.view_handle -or $holder.parent -ne $Tree.window_handle -or $holder.root -ne $Tree.window_handle -or $holder.native_visible -ne $false -or $paneCount -ne 1) {throw 'Editor holder hierarchy, visibility or destination pane differs'}
+    Check-Hidden ([long]$holder.window)
+    $bar=[Math]::Round(28*[Math]::Max(96,$Tree.chrome.dpi)/96)
+    if (-not $holder.bounds -or $holder.bounds.x -ne $paneBounds.x -or $holder.bounds.y -ne ($paneBounds.y+$bar) -or $holder.bounds.width -ne $paneBounds.width -or $holder.bounds.height -ne [Math]::Max(1,$paneBounds.height-$bar)) {throw 'Editor holder does not occupy its destination pane body'}
+    foreach ($key in @('x','y','width','height')) {if ($null -eq $Status.bounds.$key -or $Status.bounds.$key -ne $holder.bounds.$key) {throw ('Editor root-coordinate viewport differs from holder: '+$key)}}
+}
 function Editor-Command([string]$Surface,[string]$Action,[string[]]$Options=@(),[int]$Exit=0) {
     $r=Request (@('editor','command',$Surface,$Action)+$Options) $Exit
     if($r -and $r.psobject.Properties.Name -contains 'result') {return $r.result}
@@ -816,13 +825,16 @@ try {
                 $path=$fixture.Write('move 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
                 Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
                 $before=Status $opened.surface;$read=Read-Editor $opened.surface
+                Check-MoveHolder $before (Tree) $opened.pane
                 Request @('focus-tab',$terminal.id)|Out-Null
                 Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
                 Request @('split','vertical')|Out-Null;$destination=Request @('identify');$tree=Tree
                 $shells+=@($tree.surfaces|Where-Object {$_.pid -and $shells -notcontains $_.pid}|ForEach-Object {$_.pid})
                 Request @('move-tab',$opened.surface,'--to-pane',$destination.pane)|Out-Null
                 $after=Status $opened.surface;$moved=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
+                Check-MoveHolder $after (Tree) $destination.pane
                 if($before.view_handle -ne $after.view_handle -or $moved.document_id -ne $read.document_id) {throw 'Move recreated editor WebView or document'}
+                if($before.holder.window -ne $after.holder.window -or $moved.active_version -ne $read.active_version) {throw 'Move replaced the editor holder or changed its dirty model version'}
                 Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
                 if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Move lost Monaco undo history'}
                 Editor-Command $opened.surface 'discard-document'|Out-Null
@@ -1030,8 +1042,9 @@ finally {
     $fixture.Dispose()
     if($cleanupErrors.Count) {$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.clientPids=@($clients|ForEach-Object {$_.pid});$evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 16|Set-Content -Encoding UTF8 (Join-Path $directory 'native-editor-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') {
+        $evidence|ConvertTo-Json -Depth 16|Set-Content -Encoding UTF8 (Join-Path $directory 'native-editor-background.json')
+    }
 }
 if($cleanupErrors.Count) {throw ($cleanupErrors -join '; ')}
-$evidence|ConvertTo-Json -Depth 16
+Write-Host ("[check] editor: "+$evidence.checks.Count+" groups passed")

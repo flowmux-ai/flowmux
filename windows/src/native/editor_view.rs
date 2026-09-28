@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Isolated Windows editor WebView; no terminal bridge or browser popup policy.
-use crate::{editor_assets::EditorAssets, model};
+use crate::{editor_assets::EditorAssets, model, native::host::surface_host};
 use anyhow::Context;
 use flowmux_core::SurfaceId;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
@@ -24,7 +24,9 @@ impl HasWindowHandle for Parent {
 }
 
 pub struct View {
+    // Field order is intentional: close WebView2 before destroying its parent.
     pub view: WebView,
+    pub holder: surface_host::Host,
     pub url: String,
     pub credential: String,
     /// Logical visibility; background verification never shows the native view.
@@ -43,6 +45,8 @@ impl View {
         background: bool,
         emit: impl Fn(String, String) + 'static,
     ) -> anyhow::Result<Self> {
+        let holder = surface_host::Host::new(window)?;
+        let window = holder.window;
         let url = assets.url(surface);
         let credential = Uuid::new_v4().to_string();
         let init = initialization(&url, surface, &credential, background)?;
@@ -86,6 +90,7 @@ impl View {
         }
         Ok(Self {
             view,
+            holder,
             url,
             credential,
             visible: false,
@@ -96,9 +101,10 @@ impl View {
     }
 
     pub fn layout(&mut self, area: Option<model::Rect>) -> anyhow::Result<()> {
+        self.holder.layout(area, self.background)?;
         if let Some(area) = area.filter(|area| self.bounds != Some(*area)) {
             self.view.set_bounds(wry::Rect {
-                position: wry::dpi::PhysicalPosition::new(area.x, area.y).into(),
+                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
                 size: wry::dpi::PhysicalSize::new(
                     area.width.max(1) as u32,
                     area.height.max(1) as u32,
@@ -106,6 +112,10 @@ impl View {
                 .into(),
             })?;
             self.bounds = Some(area);
+        }
+        // The holder can move while the WebView's local bounds remain unchanged.
+        unsafe {
+            self.view.controller().NotifyParentWindowPositionChanged()?;
         }
         let show = area.is_some();
         if self.visible != show {

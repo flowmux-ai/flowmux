@@ -73,6 +73,8 @@ mod paste;
 mod search;
 #[path = "shells.rs"]
 mod shells;
+#[path = "surface_host.rs"]
+pub(super) mod surface_host;
 #[path = "workspaces.rs"]
 mod workspaces;
 
@@ -86,6 +88,7 @@ enum Event {
     Files(files::Signal),
     Browser(browser::Signal),
     Layout,
+    WindowMoved,
     SidebarScroll(i32),
     Tick,
     Close,
@@ -178,7 +181,7 @@ pub(super) fn install_drag_escape(view: &WebView, window: HWND) -> anyhow::Resul
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     };
-    let owner = window as isize;
+    let holder = window as isize;
     let mut token = 0;
     unsafe {
         view.controller().add_AcceleratorKeyPressed(
@@ -186,7 +189,8 @@ pub(super) fn install_drag_escape(view: &WebView, window: HWND) -> anyhow::Resul
                 let Some(args) = args else {
                     return Ok(());
                 };
-                if GetCapture() != owner as HWND {
+                let owner = GetAncestor(holder as HWND, GA_ROOT);
+                if owner.is_null() || GetCapture() != owner {
                     return Ok(());
                 }
                 let mut key = 0;
@@ -272,7 +276,7 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(window, message, wparam, lparam)
         }
         WM_MOVE => {
-            post(Event::Pointer(panes::Pointer::Cancel));
+            post(Event::WindowMoved);
             DefWindowProcW(window, message, wparam, lparam)
         }
         WM_SETCURSOR if lparam as u16 == HTCLIENT as u16 => {
@@ -356,6 +360,8 @@ struct Surface {
     startup_error: Option<String>,
     applied_settings: Option<Value>,
     view: WebView,
+    // WebView2 must close before its stable native parent is destroyed.
+    holder: surface_host::Host,
     identity: Identity,
     session: Option<Session>,
     cols: u16,
@@ -1002,6 +1008,7 @@ impl App {
         } else {
             init
         };
+        let holder = surface_host::Host::new(self.window)?;
         let view = WebViewBuilder::new_with_web_context(&mut self.context)
             .with_background_color((40, 44, 52, 255))
             .with_devtools(false)
@@ -1050,21 +1057,22 @@ impl App {
                 }
             })
             .with_bounds(bounds(model::Rect {
-                x: 220,
-                y: 80,
+                x: 0,
+                y: 0,
                 width: 800,
                 height: 600,
             }))
             .with_url("flowmux-terminal://localhost/")
-            .build_as_child(&Parent(self.window))
+            .build_as_child(&Parent(holder.window))
             .context("Cannot create the terminal WebView2 view")?;
-        install_drag_escape(&view, self.window)?;
+        install_drag_escape(&view, holder.window)?;
         self.surfaces.insert(
             surface,
             Surface {
                 startup_error: None,
                 applied_settings: None,
                 view,
+                holder,
                 identity,
                 session: None,
                 cols: 80,
@@ -1137,6 +1145,23 @@ impl App {
             .collect();
         for (id, surface) in &mut self.surfaces {
             let show = visible.contains_key(id) && client.right > 0 && client.bottom > 0;
+            let area = visible.get(id).filter(|_| show).map(|area| model::Rect {
+                y: area.y + bar,
+                height: (area.height - bar).max(1),
+                ..*area
+            });
+            surface.holder.layout(area, self.background_test)?;
+            if let Some(area) = area {
+                surface
+                    .view
+                    .set_bounds(bounds(model::Rect { x: 0, y: 0, ..area }))?;
+                unsafe {
+                    surface
+                        .view
+                        .controller()
+                        .NotifyParentWindowPositionChanged()?;
+                }
+            }
             // Hiding and re-showing an already visible view can cancel native IME composition.
             if surface.visible != show {
                 surface.view.set_visible(show)?;
@@ -1167,16 +1192,6 @@ impl App {
                     ..*area
                 });
             browser.layout(area, scale)?;
-        }
-        for (pane, area) in &view_areas {
-            let id = self.workspace().root.active_surface_id(*pane).unwrap();
-            if let Some(surface) = self.surfaces.get(&id) {
-                surface.view.set_bounds(bounds(model::Rect {
-                    y: area.y + bar,
-                    height: (area.height - bar).max(1),
-                    ..*area
-                }))?;
-            }
         }
         let row_height = px(58).max(1);
         let sidebar_layout =
@@ -1429,6 +1444,26 @@ impl App {
                 self.cancel_drag();
                 self.sidebar_active = None;
                 self.layout()?;
+            }
+            Event::WindowMoved => {
+                self.cancel_drag();
+                // Child WebViews do not receive Wry's top-level WM_MOVE hook.
+                for view in self
+                    .surfaces
+                    .values()
+                    .map(|surface| &surface.view)
+                    .chain(
+                        self.browsers
+                            .values()
+                            .filter(|browser| !browser.native_closed.get())
+                            .map(|browser| &browser.view),
+                    )
+                    .chain(self.editors.values().map(|editor| &editor.view.view))
+                {
+                    unsafe {
+                        view.controller().NotifyParentWindowPositionChanged()?;
+                    }
+                }
             }
             Event::Pointer(pointer) if !self.overview.is_open() => self.pointer(pointer)?,
             Event::Pointer(_) | Event::SidebarScroll(_) => {}
@@ -2699,7 +2734,8 @@ impl App {
                     "visible":surface.visible,
                     "settings":surface.applied_settings,
                     "shell":self.shells[id],"startup_error":surface.startup_error,
-                    "bounds":surface.view.bounds().ok().map(|rect| { let p = rect.position.to_physical::<i32>(1.0); let s = rect.size.to_physical::<u32>(1.0); json!({"x":p.x,"y":p.y,"width":s.width,"height":s.height}) }),
+                    "bounds":surface.holder.view_bounds(&surface.view),"holder":surface.holder.diagnostics(),
+                    "view_handle":surface.view.hwnd().0 as usize,
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,

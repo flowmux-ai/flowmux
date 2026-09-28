@@ -81,9 +81,12 @@ impl Pending {
     }
 }
 pub(super) struct Browser {
-    // Drop the view before its chrome/context/parent HWND.
+    // Drop children before their stable holder; reparenting the holder retains
+    // the WebView controller, address EDIT, and their existing document state.
     pub(super) view: WebView,
     chrome: chrome::Chrome,
+    pub(super) holder: surface_host::Host,
+    background: bool,
     epoch: Arc<AtomicU64>,
     pub(super) visible: bool,
     visibility_revision: u64,
@@ -115,7 +118,8 @@ impl Browser {
         id: SurfaceId,
         environment: Option<ICoreWebView2Environment>,
     ) -> anyhow::Result<Self> {
-        let chrome = chrome::Chrome::new(app.window, id)?;
+        let holder = surface_host::Host::new(app.window)?;
+        let chrome = chrome::Chrome::new(holder.window, id)?;
         let instance = Uuid::new_v4();
         let popup_visibility = Rc::new(Cell::new(None));
         let native_closed = Rc::new(Cell::new(false));
@@ -149,8 +153,8 @@ impl Browser {
         if let Some(environment) = environment {
             builder = builder.with_environment(environment);
         }
-        let view = builder.build_as_child(&Parent(app.window))?;
-        install_drag_escape(&view, app.window)?;
+        let view = builder.build_as_child(&Parent(holder.window))?;
+        install_drag_escape(&view, holder.window)?;
         unsafe {
             let core = view.controller().CoreWebView2()?;
             app.downloads
@@ -245,6 +249,8 @@ impl Browser {
             instance,
             native_closed,
             chrome,
+            holder,
+            background,
             epoch,
             visible: false,
             visibility_revision: 0,
@@ -293,12 +299,14 @@ impl Browser {
         Ok(())
     }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
-        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize})
+        let viewport = self.holder.view_bounds(&self.view);
+        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
         if self.native_closed.get() {
             return Ok(());
         }
+        self.holder.layout(area, self.background)?;
         let viewport = area.map(|r| (r.x, r.y, r.width, r.height));
         if self.viewport != viewport {
             self.viewport_revision = self.viewport_revision.wrapping_add(1);
@@ -309,21 +317,25 @@ impl Browser {
             self.visibility_revision = self.visibility_revision.wrapping_add(1);
             self.refs.clear();
             self.view.set_visible(show)?;
-            unsafe {
-                ShowWindow(self.chrome.window, if show { SW_SHOWNA } else { SW_HIDE });
-            }
+            self.chrome.visible(show, self.background);
             self.visible = show;
             self.popup_visibility
                 .set(show.then_some(self.visibility_revision));
         }
         if let Some(area) = area {
+            let area = model::Rect { x: 0, y: 0, ..area };
             self.chrome.layout(area, scale);
             let height = chrome::Chrome::height(scale);
             self.view.set_bounds(bounds(model::Rect {
-                y: area.y + height,
+                y: height,
                 height: (area.height - height).max(1),
                 ..area
             }))?;
+            // Wry's child WebView path does not subclass its holder for parent
+            // movement. Its local bounds can stay unchanged when the pane moves.
+            unsafe {
+                self.view.controller().NotifyParentWindowPositionChanged()?;
+            }
         }
         Ok(())
     }

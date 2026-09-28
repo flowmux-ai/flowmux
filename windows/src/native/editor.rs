@@ -254,7 +254,9 @@ impl Editor {
             "last_error":self.error,"restore_errors":self.restore_errors,"pending":self.pending.is_some(),
             "automatic_refresh":self.refresh.status(),
             "search":self.search.status(),
-            "view_handle":self.view.view.hwnd().0 as usize,"session":self.state})
+            "view_handle":self.view.view.hwnd().0 as usize,
+            "bounds":self.view.holder.view_bounds(&self.view.view),"holder":self.view.holder.diagnostics(),
+            "session":self.state})
     }
 }
 impl App {

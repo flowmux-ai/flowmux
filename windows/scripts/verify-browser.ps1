@@ -47,6 +47,8 @@ function Tree {
     if (-not $tree.background_testing -or [CliProbe]::IsWindowVisible($window) -or [CliProbe]::GetForegroundWindow() -eq $window) {throw 'Owned host became visible or foreground'}
     foreach ($browser in $tree.browsers) {
         if ([CliProbe]::IsWindowVisible([IntPtr]([long]$browser.view_handle)) -or [CliProbe]::IsWindowVisible([IntPtr]([long]$browser.chrome_handle))) {throw 'Owned browser became visible'}
+        $holder=$browser.holder
+        if (-not $holder.window -or $holder.window -eq $browser.view_handle -or $holder.window -eq $browser.chrome_handle -or $holder.parent -ne $tree.window_handle -or $holder.root -ne $tree.window_handle -or $holder.native_visible -ne $false -or $browser.chrome.parent -ne $holder.window -or [CliProbe]::IsWindowVisible([IntPtr]([long]$holder.window))) {throw 'Browser holder hierarchy or hidden state differs'}
     }
     return $tree
 }
@@ -90,6 +92,8 @@ function Check-Toolbar($Status) {
     $chrome=@([ChromeFixture]::Read([long]$Status.chrome_handle,$process.Id));$shown=@($chrome|Where-Object Shown)
     $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$Status.chrome_handle));$area=[ChromeFixture]::Size([long]$Status.chrome_handle,$process.Id)
     if($Status.chrome.rows -ne 1 -or [Math]::Abs($area[1]-40*$dpi/96) -gt 1){throw 'Browser toolbar is not one40-DIP row'}
+    $holder=$Status.holder.bounds;$viewport=$Status.bounds
+    if (-not $holder -or -not $viewport -or $Status.chrome.parent -ne $Status.holder.window -or $holder.width -ne $area[0] -or $viewport.x -ne $holder.x -or $viewport.y -ne ($holder.y+$area[1]) -or $viewport.width -ne $holder.width -or $viewport.height -ne [Math]::Max(1,$holder.height-$area[1])) {throw 'Browser holder, toolbar and root-coordinate viewport geometry differ'}
     foreach($c in $shown){if($c.Y -lt 0 -or $c.Y+$c.Height -gt $area[1] -or $c.X -lt 0 -or $c.X+$c.Width -gt $area[0]){throw 'Browser toolbar control escapes its row'}}
     $ordered=@($shown|Sort-Object X);for($i=1;$i -lt $ordered.Count;$i++){if($ordered[$i].X -lt $ordered[$i-1].X+$ordered[$i-1].Width){throw 'Browser toolbar controls overlap'}}
     if(@($shown|Where-Object Class -eq 'Edit').Count -ne 1 -or @($shown|Where-Object Handle -eq $Status.chrome.tools_handle).Count -ne 1){throw 'Address or tools entry missing'}
@@ -194,9 +198,12 @@ try {
     Wait-Page $down.pane '/one' $oneTitle|Out-Null
     Request @('focus-tab',$first.surface)|Out-Null
     Eval-Page $first.pane 'window.retained="한글 한 é 😀";localStorage.setItem("browser-persist",window.retained);null'|Out-Null
-    $view=(Request @('browser','status',$first.pane)).view_handle
+    $beforeMove=Request @('browser','status',$first.pane);$view=$beforeMove.view_handle
     Request @('move-tab',$first.surface,'--to-pane',$source.pane)|Out-Null
     if (-not (Same-Text (Eval-Page $source.pane 'window.retained') '한글 한 é 😀') -or (Request @('browser','status',$source.pane)).view_handle -ne $view) {throw 'Browser move recreated document or view'}
+    $afterMove=Request @('browser','status',$source.pane)
+    if ($beforeMove.holder.window -ne $afterMove.holder.window -or $beforeMove.chrome_handle -ne $afterMove.chrome_handle) {throw 'Browser move replaced its holder or native toolbar'}
+    Check-Toolbar $afterMove|Out-Null
     $mixedSave=Request @('save-state')
     $mixed=Get-Content -Raw -Encoding UTF8 $mixedSave.path|ConvertFrom-Json
     if (@($mixed.screens.psobject.Properties).Count -ne 1 -or $mixed.screens.($first.surface) -or $mixed.shells.($first.surface)) {throw 'Mixed checkpoint confused browser and terminal'}
@@ -260,7 +267,8 @@ finally {
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
     if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') {
+        $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-background.json')
+    }
 }
-$evidence|ConvertTo-Json -Depth 12
+Write-Host ("[check] browser: "+$evidence.checks.Count+" groups passed")

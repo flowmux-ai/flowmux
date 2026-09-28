@@ -41,6 +41,10 @@ function Wait-Tree([scriptblock]$Condition) {
         $tree=Invoke-Flowmux @('tree')
         $window=[IntPtr]([long]$tree.window_handle)
         if (-not $tree.background_testing -or [NativeInput]::IsWindowVisible($window) -or [NativeInput]::GetForegroundWindow() -eq $window) { throw 'Test host became visible or foreground' }
+        foreach ($surface in $tree.surfaces) {
+            $holder=$surface.holder
+            if (-not $holder.window -or -not $surface.view_handle -or $holder.window -eq $surface.view_handle -or $holder.parent -ne $tree.window_handle -or $holder.root -ne $tree.window_handle -or $holder.native_visible -ne $false -or [NativeInput]::IsWindowVisible([IntPtr]([long]$holder.window))) { throw 'Terminal holder hierarchy or hidden state differs' }
+        }
         if (& $Condition $tree) { return $tree }
         Start-Sleep -Milliseconds 100
     } while ((Get-Date) -lt $deadline)
@@ -104,6 +108,7 @@ try {
     $bottom=Invoke-Flowmux @('identify')
     $tree=Wait-Tree { param($t) @($t.surfaces | Where-Object { -not $_.cwd_reported }).Count -eq 0 }
     $originalPids=@($tree.surfaces | Sort-Object id | ForEach-Object { "$($_.id):$($_.pid)" }) -join ','
+    $originalViews=@($tree.surfaces | Sort-Object id | ForEach-Object { "$($_.id):$($_.view_handle):$($_.holder.window)" }) -join ','
     $root=$tree.workspaces[0].root.id
     $inner=$tree.workspaces[0].root.second.id
     Invoke-Flowmux @('resize-pane',$root,'--ratio','0.6') | Out-Null
@@ -115,6 +120,7 @@ try {
         $r=Rect-Of $tree $identity.pane
         $s=$tree.surfaces | Where-Object { $_.id -eq $identity.surface }
         if ($s.bounds.x -ne $r.x -or $s.bounds.width -ne $r.width -or ($s.bounds.y+$s.bounds.height) -ne ($r.y+$r.height)) { throw 'Native WebView bounds do not match the pane geometry' }
+        foreach ($key in @('x','y','width','height')) { if ($null -eq $s.holder.bounds.$key -or $s.holder.bounds.$key -ne $s.bounds.$key) { throw ('Terminal holder and root-coordinate viewport differ: '+$key) } }
     }
     $evidence.checks+=@{ name='nested_ratios_update_native_webview_and_real_conpty_dimensions'; sizes=$sizes; layout=$tree.layout }
     $before=$tree.workspaces | ConvertTo-Json -Depth 50 -Compress
@@ -151,6 +157,7 @@ try {
     }
     $tree=Wait-Tree { param($t) $s=$t.surfaces | Where-Object { $_.id -eq $top.surface }; $s.cols -eq $sizes[1].cols -and $s.rows -eq $sizes[1].rows }
     if ((@($tree.surfaces | Sort-Object id | ForEach-Object { "$($_.id):$($_.pid)" }) -join ',') -ne $originalPids -or @($tree.surfaces | Where-Object { -not $_.running }).Count) { throw 'Repeated zoom restarted or lost a shell' }
+    if ((@($tree.surfaces | Sort-Object id | ForEach-Object { "$($_.id):$($_.view_handle):$($_.holder.window)" }) -join ',') -ne $originalViews) { throw 'Repeated zoom replaced a terminal WebView or holder' }
     Invoke-Flowmux @('toggle-pane-zoom',$top.pane) | Out-Null
     Check-Focus $top.pane 'down' $bottom.pane
     if ((Invoke-Flowmux @('tree')).zoomed_pane) { throw 'Directional navigation did not restore hidden destination' }
@@ -201,6 +208,8 @@ try {
 finally {
     foreach ($ownedHost in $hosts) { if (-not $ownedHost.HasExited) { $ownedHost.Kill(); $ownedHost.WaitForExit() } }
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 50 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-panes-background.json')
+    if ($evidence.status -eq 'failed') {
+        $evidence | ConvertTo-Json -Depth 50 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-panes-background.json')
+    }
 }
-$evidence | ConvertTo-Json -Depth 50
+Write-Host ("[check] panes: "+$evidence.checks.Count+" groups passed")

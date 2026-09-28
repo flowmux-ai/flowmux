@@ -173,6 +173,20 @@ impl Chrome {
     pub(super) fn height(scale: f64) -> i32 {
         (40.0 * scale).round() as i32
     }
+    pub(super) fn visible(&self, visible: bool, background: bool) {
+        unsafe {
+            // Keep the entire native toolbar hidden in background verification;
+            // child control geometry and text remain available to owned probes.
+            ShowWindow(
+                self.window,
+                if visible && !background {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
+            );
+        }
+    }
     pub(super) fn layout(&mut self, area: model::Rect, scale: f64) {
         let px = |v: i32| (v as f64 * scale).round() as i32;
         unsafe {
@@ -267,7 +281,7 @@ impl Chrome {
         unsafe {
             GetClientRect(self.window, &mut r);
         }
-        json!({"height":r.bottom,"rows":1,"tools_handle":self.more as usize,
+        json!({"parent":unsafe{GetParent(self.window)} as usize,"height":r.bottom,"rows":1,"tools_handle":self.more as usize,
             "status_handle":self.status as usize,"controls":self.buttons.iter().map(|h|*h as usize).collect::<Vec<_>>()})
     }
     pub(super) fn address(&self) -> String {
