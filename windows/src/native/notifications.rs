@@ -104,38 +104,18 @@ impl App {
             "panel_status":self.notifications.panel.as_ref().map(|p|p.status_text())})
     }
     pub(super) fn refresh_notifications(&self) {
-        let entries = self.notifications.store.entries();
+        self.refresh_chrome_metadata();
         for control in &self.controls {
-            let label = match control.action {
-                Action::Notifications => Some(self.notification_button_text()),
-                Action::Workspace(id) => self.workspaces.iter().find(|w| w.id == id).map(|w| {
-                    let count = entries
-                        .iter()
-                        .filter(|e| {
-                            !e.read
-                                && e.surface
-                                    .and_then(|s| self.locate(s))
-                                    .map(|(i, _, _)| self.workspaces[i].id)
-                                    .or(e.workspace)
-                                    == Some(id)
-                        })
-                        .count();
-                    let prefix = if count > 0 {
-                        format!("[{count}] ")
-                    } else {
-                        String::new()
-                    };
-                    format!("{prefix}{}", w.name)
-                }),
-                _ => None,
-            };
-            if let Some(label) = label {
-                unsafe {
-                    SetWindowTextW(control.hwnd, wide(label.replace('&', "&&")).as_ptr());
-                }
+            if matches!(control.action, Action::Notifications) {
+                workspaces::set_caption(control.hwnd, &self.notification_button_text());
             }
         }
-        for id in self.surfaces.keys().chain(self.browsers.keys()) {
+        for id in self
+            .surfaces
+            .keys()
+            .chain(self.browsers.keys())
+            .chain(self.editors.keys())
+        {
             self.refresh_tab_title(*id);
         }
         if let Some(panel) = &self.notifications.panel {

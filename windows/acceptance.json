@@ -264,9 +264,10 @@
       "feature": "폰트·테마·줌·커서 점멸",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-settings-background.json"
+        "evidence/2026-09-28/native-settings-background.json",
+        "evidence/2026-09-28/chrome-details.md"
       ],
-      "notes": "Native settings menu/editor and CLI implement shared font/fallback list, 6–72px size with larger/smaller/reset, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Real menu/IME/DPI, installed font fallback/width, custom themes, whole-app colors and configurable zoom shortcuts remain pending."
+      "notes": "Native settings menu/editor and CLI implement shared font/fallback list, 6–72px size with larger/smaller/reset, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Native chrome light/dark rendering now has hidden production-renderer evidence in a two-terminal split with stable terminal identities/PIDs. A later mixed terminal/browser/editor render is separate visual evidence. Real menu/IME/DPI, high contrast, installed font fallback/width, custom themes, remaining popup/panel styling and configurable zoom shortcuts remain pending."
     },
     {
       "id": "T21",
@@ -304,9 +305,10 @@
       "feature": "workspace 생성·이름·색·순서·닫기",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-workspaces-background.json"
+        "evidence/2026-09-28/native-workspaces-background.json",
+        "evidence/2026-09-28/chrome-details.md"
       ],
-      "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. Final workspace remains protected; empty-window UI, drag reorder, sidebar overflow, automatic name reset, real menu/dialog/IME/DPI/accessibility remain pending."
+      "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Earlier hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. New hidden chrome checks verify name/current-cwd two-line captions, Unicode cwd and rename/color updates with stable HWNDs/PIDs, rounded/color styling, and five-workspace overflow with four visible rows, active first/last visibility and pager endpoints. Final workspace remains protected; empty-window UI, drag reorder, automatic name reset, broader status metadata, real menu/dialog/IME/DPI/high-contrast/accessibility remain pending."
     },
     {
       "id": "U02",
@@ -323,18 +325,20 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-27/native-tab-move-background.json",
-        "evidence/2026-09-28/native-workspaces-background.json"
+        "evidence/2026-09-28/native-workspaces-background.json",
+        "evidence/2026-09-28/chrome-details.md"
       ],
-      "notes": "Hidden native hosts verify tab moves/reorder with stable process, surface, output, cwd and calling-surface routing; user-locked Unicode tab names survive shell title output and restart without activation. Native rename dialog constructs hidden and preserves UTF-16 values, but actual menu/dialog IME and keyboard remain pending. Drag/drop, automatic title reset, cross-window and broader feature coverage remain."
+      "notes": "Hidden native hosts verify tab moves/reorder with stable process, surface, output, cwd and calling-surface routing; user-locked Unicode tab names survive shell title output and restart without activation. New hidden chrome checks verify focused-pane tab accents. Terminal/browser/editor glyphs were visually inspected in a separate mixed-surface capture; per-pixel icon identity is not asserted. Native rename dialog constructs hidden and preserves UTF-16 values, but actual menu/dialog IME and keyboard remain pending. Drag/drop, automatic title reset, cross-window and broader feature coverage remain."
     },
     {
       "id": "U04",
       "feature": "pane 방향 이동·zoom/maximize",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-panes-background.json"
+        "evidence/2026-09-28/native-panes-background.json",
+        "evidence/2026-09-28/chrome-details.md"
       ],
-      "notes": "Directional focus and temporary maximize/restore implemented with CLI, native button and guarded fixed shortcuts. Hidden Windows verification checks hidden Korean output, 40 zoom transitions with size convergence, stable processes, structural transitions and restart restoring normal layout. Physical keyboard/button, real IME, visual focus and accessibility remain pending."
+      "notes": "Directional focus and temporary maximize/restore implemented with CLI, native button and guarded fixed shortcuts. Hidden Windows verification checks hidden Korean output, 40 zoom transitions with size convergence, stable processes, structural transitions and restart restoring normal layout. New production native renders verify focused-pane selected-tab accents. Physical keyboard/button/focus, real IME, DPI/high-contrast rendering and accessibility remain pending."
     },
     {
       "id": "U05",
@@ -377,9 +381,10 @@
       "feature": "옵션·테마·font·zoom 실시간 반영",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-settings-background.json"
+        "evidence/2026-09-28/native-settings-background.json",
+        "evidence/2026-09-28/chrome-details.md"
       ],
-      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI, per-tab options and full settings parity remain pending."
+      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Native chrome theme changes now have production-renderer evidence with stable terminal identities/PIDs in a two-terminal split. Mixed terminal/browser/editor rendering is captured separately; theme transitions across mixed types and control-handle preservation during theme changes are not established. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI/high-contrast, per-tab options and full settings parity remain pending."
     },
     {
       "id": "U11",

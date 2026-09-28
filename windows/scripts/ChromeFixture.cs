@@ -12,13 +12,15 @@ public static class ChromeFixture {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
     public sealed class Control {
         public long Handle; public string Class,Text; public int X,Y,Width,Height;
-        public long Style,Font; public bool Shown;
+        public long Style,Font; public bool Shown,Enabled;
     }
     private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("user32.dll",SetLastError=true)] private static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out Rect rect);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out Rect rect);
@@ -53,7 +55,7 @@ public static class ChromeFixture {
             long style=GetWindowLongPtr(hwnd,-16).ToInt64();
             found.Add(new Control {Handle=hwnd.ToInt64(),Class=cls.ToString(),Text=text.ToString(),X=bounds.Left,Y=bounds.Top,
                 Width=bounds.Right-bounds.Left,Height=bounds.Bottom-bounds.Top,Style=style,
-                Font=Message(hwnd,0x31,IntPtr.Zero,IntPtr.Zero).ToInt64(),Shown=(style&0x10000000)!=0});
+                Font=Message(hwnd,0x31,IntPtr.Zero,IntPtr.Zero).ToInt64(),Shown=(style&0x10000000)!=0,Enabled=IsWindowEnabled(hwnd)});
             return true;
         },IntPtr.Zero);
         return found.ToArray();
@@ -64,6 +66,23 @@ public static class ChromeFixture {
     }
     public static string Pixel(string path,int x,int y) {
         using(var bitmap=new Bitmap(path)) {var c=bitmap.GetPixel(x,y);return String.Format("#{0:x2}{1:x2}{2:x2}",c.R,c.G,c.B);}
+    }
+    public static void Resize(long root,int owner,int width,int height) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);Rect client,outer;
+        if(width<400 || height<300 || width>1600 || height>1200)throw new ArgumentOutOfRangeException("Owned test dimensions");
+        if(!GetClientRect(hwnd,out client) || !GetWindowRect(hwnd,out outer))throw new Win32Exception();
+        // NOMOVE | NOZORDER | NOACTIVATE, deliberately without SHOWWINDOW.
+        if(!SetWindowPos(hwnd,IntPtr.Zero,0,0,width+outer.Right-outer.Left-client.Right,
+            height+outer.Bottom-outer.Top-client.Bottom,0x16))throw new Win32Exception();
+        Owned(hwnd,owner);
+    }
+    public static int ColorCount(string path,int x,int y,int width,int height,string color) {
+        int count=0;var expected=ColorTranslator.FromHtml(color).ToArgb();
+        using(var bitmap=new Bitmap(path)) {
+            for(int row=y;row<y+height;row++)for(int column=x;column<x+width;column++)
+                if(bitmap.GetPixel(column,row).ToArgb()==expected)count++;
+        }
+        return count;
     }
     public static void Png(string bitmapPath,string pngPath) {
         using(var bitmap=new Bitmap(bitmapPath)) bitmap.Save(pngPath,ImageFormat.Png);

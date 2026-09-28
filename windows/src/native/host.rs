@@ -139,7 +139,7 @@ unsafe extern "system" fn window_proc(
             ScreenToClient(window, &mut point);
             let mut client = RECT::default();
             GetClientRect(window, &mut client);
-            let sidebar = ((185.0 * GetDpiForWindow(window).max(96) as f64 / 96.0).round() as i32)
+            let sidebar = ((260.0 * GetDpiForWindow(window).max(96) as f64 / 96.0).round() as i32)
                 .min((client.right / 3).max(0));
             if point.x >= 0 && point.x < sidebar {
                 let delta = (wparam >> 16) as u16 as i16 as i32;
@@ -166,18 +166,8 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
-        WM_CTLCOLORSTATIC => {
-            if let Some(color) = workspaces::swatch_color(lparam as HWND) {
-                let brush = chrome::message(window, message, wparam, lparam)
-                    .unwrap_or_else(|| GetSysColorBrush(COLOR_WINDOW) as LRESULT);
-                SetTextColor(wparam as HDC, color);
-                SetBkMode(wparam as HDC, TRANSPARENT as i32);
-                brush
-            } else {
-                chrome::message(window, message, wparam, lparam)
-                    .unwrap_or_else(|| DefWindowProcW(window, message, wparam, lparam))
-            }
-        }
+        WM_CTLCOLORSTATIC => chrome::message(window, message, wparam, lparam)
+            .unwrap_or_else(|| DefWindowProcW(window, message, wparam, lparam)),
         WM_LBUTTONDOWN | WM_MOUSEMOVE | WM_LBUTTONUP => {
             let x = (lparam as u16 as i16) as i32;
             let y = ((lparam >> 16) as u16 as i16) as i32;
@@ -297,7 +287,7 @@ impl Surface {
         Ok(())
     }
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum Action {
     OpenEditor,
     ShowFiles,
@@ -307,7 +297,6 @@ enum Action {
     NewWorkspace,
     Workspace(WorkspaceId),
     WorkspaceMenu,
-    WorkspaceColor(WorkspaceId),
     NewTab,
     Vertical,
     Horizontal,
@@ -703,7 +692,6 @@ impl App {
     }
     fn rebuild_without_focus(&mut self) -> anyhow::Result<()> {
         self.cancel_drag();
-        workspaces::clear_swatches();
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
         let mut missing = Vec::new();
         for workspace in &self.workspaces {
@@ -731,12 +719,7 @@ impl App {
                 _ => anyhow::bail!("unsupported Windows surface"),
             }
         }
-        for control in self.controls.drain(..) {
-            chrome::unregister(control.hwnd);
-            unsafe {
-                DestroyWindow(control.hwnd);
-            }
-        }
+        let mut desired = Vec::new();
         for (name, action) in [
             ("+", Action::NewWorkspace),
             ("Workspaces", Action::WorkspaceMenu),
@@ -748,23 +731,47 @@ impl App {
             ("Previous", Action::SidebarScroll(-1)),
             ("Next", Action::SidebarScroll(1)),
         ] {
-            self.button(name, action)?;
+            desired.push((name.to_owned(), action));
         }
         for index in 0..self.workspaces.len() {
             let id = self.workspaces[index].id;
-            let name = self.workspaces[index].name.clone();
-            self.button(&name, Action::Workspace(id))?;
-            if let Some(color) = self.workspaces[index].color.clone() {
-                self.swatch(id, &color)?;
-            }
+            desired.push((
+                self.workspace_caption(id).unwrap_or_default(),
+                Action::Workspace(id),
+            ));
         }
         for (pane, active, tabs) in self.workspace().leaves() {
             for tab in tabs {
-                self.button(&tab.title, Action::Tab(pane, tab.id))?;
-                self.button("Close tab", Action::TabClose(pane, tab.id))?;
+                desired.push((tab.title.clone(), Action::Tab(pane, tab.id)));
+                desired.push(("Close tab".into(), Action::TabClose(pane, tab.id)));
             }
-            self.button("+", Action::PaneAdd(pane, active))?;
-            self.button("Pane actions", Action::PaneMenu(pane, active))?;
+            desired.push(("+".into(), Action::PaneAdd(pane, active)));
+            desired.push(("Pane actions".into(), Action::PaneMenu(pane, active)));
+        }
+        let same_controls=self.controls.len()==desired.len() && self.controls.iter().zip(&desired).all(|(control,(_,action))| {
+            control.action==*action || matches!((&control.action,action),(Action::PaneAdd(a,_),Action::PaneAdd(b,_))|(Action::PaneMenu(a,_),Action::PaneMenu(b,_)) if a==b)
+        });
+        if same_controls {
+            for (control, (label, action)) in self.controls.iter_mut().zip(&desired) {
+                control.action = action.clone();
+                CONTROL_ACTIONS.with(|actions| {
+                    actions
+                        .borrow_mut()
+                        .insert(control.hwnd as isize, action.clone())
+                });
+                workspaces::set_caption(control.hwnd, label);
+            }
+            self.refresh_chrome_metadata();
+        } else {
+            for control in self.controls.drain(..) {
+                chrome::unregister(control.hwnd);
+                unsafe {
+                    DestroyWindow(control.hwnd);
+                }
+            }
+            for (label, action) in desired {
+                self.button(&label, action)?;
+            }
         }
         self.refresh_notifications();
         self.layout()
@@ -797,19 +804,7 @@ impl App {
                 1,
             );
         }
-        let role = match action {
-            Action::Workspace(id) => chrome::Role::Workspace {
-                selected: self.workspace().id == id,
-            },
-            Action::Tab(pane, surface) => chrome::Role::Tab {
-                selected: self.workspace().root.active_surface_id(pane) == Some(surface),
-            },
-            Action::PaneAdd(..)
-            | Action::PaneMenu(..)
-            | Action::TabClose(..)
-            | Action::NewWorkspace => chrome::Role::Tool,
-            _ => chrome::Role::Button,
-        };
+        let role = self.chrome_role(&action);
         chrome::register_button(hwnd, role);
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().insert(hwnd as isize, action.clone()));
         self.controls.push(Control { hwnd, action });
@@ -940,7 +935,7 @@ impl App {
         }
         let scale = unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0;
         let px = |value: i32| (value as f64 * scale).round() as i32;
-        let sidebar = px(185).min((client.right / 3).max(0));
+        let sidebar = px(260).min((client.right / 3).max(0));
         let bar = px(28);
         chrome::configure(
             self.settings.terminal.theme,
@@ -1012,7 +1007,7 @@ impl App {
                 }))?;
             }
         }
-        let row_height = px(38).max(1);
+        let row_height = px(58).max(1);
         let list_top = px(40);
         let footer_top = (client.bottom - px(120)).max(list_top);
         let visible_rows = ((footer_top - list_top) / row_height).max(0) as usize;
@@ -1031,20 +1026,15 @@ impl App {
             let rect = match control.action {
                 Action::NewWorkspace => Some((px(4), px(5), px(28), px(28))),
                 Action::WorkspaceMenu => Some((px(36), px(5), (sidebar - px(40)).max(1), px(28))),
-                Action::Workspace(id) | Action::WorkspaceColor(id) => {
+                Action::Workspace(id) => {
                     let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
                     if i < self.sidebar_offset || i >= self.sidebar_offset + visible_rows {
                         None
                     } else {
-                        let swatch = matches!(control.action, Action::WorkspaceColor(_));
                         Some((
-                            if swatch { px(5) } else { px(14) },
+                            px(6),
                             list_top + (i - self.sidebar_offset) as i32 * row_height,
-                            if swatch {
-                                px(5)
-                            } else {
-                                (sidebar - px(19)).max(1)
-                            },
+                            (sidebar - px(12)).max(1),
                             row_height - px(2),
                         ))
                     }
@@ -1502,6 +1492,7 @@ impl App {
                             .is_some_and(|surface| surface.visible)
                     {
                         self.workspace_mut().focused = pane;
+                        self.refresh_chrome_metadata();
                         self.ack_focused_notifications(id);
                     }
                 }
@@ -1962,6 +1953,7 @@ impl App {
                 surface.cwd_reported = true;
             }
             self.refresh_tab_title(id);
+            self.refresh_chrome_metadata();
         }
     }
     fn refresh_tab_title(&self, id: SurfaceId) {
@@ -1981,9 +1973,8 @@ impl App {
                 }
                 for control in &self.controls {
                     if matches!(control.action, Action::Tab(_, surface) if surface == id) {
-                        unsafe {
-                            SetWindowTextW(control.hwnd, wide(label.replace('&', "&&")).as_ptr());
-                        }
+                        workspaces::set_caption(control.hwnd, &label);
+                        chrome::set_role(control.hwnd, self.chrome_role(&control.action));
                     }
                 }
             }
@@ -2038,6 +2029,7 @@ impl App {
         self.active_workspace = workspace;
         self.workspace_mut().focused = pane;
         self.workspace_mut().root.set_active_surface(pane, id);
+        self.refresh_chrome_metadata();
         Ok(())
     }
     fn move_tab(&mut self, surface: SurfaceId, target: PaneId, index: usize) -> anyhow::Result<()> {
@@ -2228,7 +2220,6 @@ impl App {
                 self.active_workspace = index;
             }
             Action::WorkspaceMenu => return self.workspace_menu(self.workspace().id, None),
-            Action::WorkspaceColor(_) => return Ok(()),
             Action::NewTab => {
                 return self
                     .new_terminal(self.active(), None, None, shells::NewTerminal::Tab)

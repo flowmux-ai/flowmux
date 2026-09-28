@@ -1,0 +1,506 @@
+{
+  "stage": "native-chrome-details",
+  "status": "frozen",
+  "artifacts": {
+    "4627e5e9f9f9-result.json": {
+      "source": "windows/dist/checks/chrome-details-clippy-aeb357bf-b33b-4ddd-a32b-635196306fab/result.json",
+      "source_bytes": 2594,
+      "source_sha256": "7119adf71cd9f1648ee8a4508c79924d0afd44257f52d2d5846100b80e6076b3",
+      "bytes": 2594,
+      "sha256": "7119adf71cd9f1648ee8a4508c79924d0afd44257f52d2d5846100b80e6076b3"
+    },
+    "0a18ed3ed8fe-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-clippy-aeb357bf-b33b-4ddd-a32b-635196306fab/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "8e24c2e294a683510268a0c41f3777e8fc6f92a697d6e6a63d5058f4c1467e4d",
+      "bytes": 216,
+      "sha256": "8e24c2e294a683510268a0c41f3777e8fc6f92a697d6e6a63d5058f4c1467e4d"
+    },
+    "f079bd8289ba-result.json": {
+      "source": "windows/dist/checks/chrome-details-debug-b1d536fa-3c36-4c5e-babf-c68698d4b6e5/result.json",
+      "source_bytes": 2611,
+      "source_sha256": "4665613a56323a423033cc5f82c0550fcca3b28d180f0745f0de7afa4fd73b78",
+      "bytes": 2611,
+      "sha256": "4665613a56323a423033cc5f82c0550fcca3b28d180f0745f0de7afa4fd73b78"
+    },
+    "9b42e5c7bf86-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-debug-b1d536fa-3c36-4c5e-babf-c68698d4b6e5/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "e13c9d8900761b83045e88f3551aa246b21a08c775ab091c6725a6c42789510f",
+      "bytes": 216,
+      "sha256": "e13c9d8900761b83045e88f3551aa246b21a08c775ab091c6725a6c42789510f"
+    },
+    "b4dd0c7f8fd1-result.json": {
+      "source": "windows/dist/checks/chrome-details-final-clippy-67ebb808-f460-4c41-a92f-76193672fce1/result.json",
+      "source_bytes": 2600,
+      "source_sha256": "353c6afde59dde87b43d77e7d2758c6c44558bc218c4bd6030792702632a03d1",
+      "bytes": 2600,
+      "sha256": "353c6afde59dde87b43d77e7d2758c6c44558bc218c4bd6030792702632a03d1"
+    },
+    "8d44642b8ea0-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-final-clippy-67ebb808-f460-4c41-a92f-76193672fce1/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "d60082c99f73ef77e0d6bc30bb732a4165a9568b1b286eaa4a3e42533992fd06",
+      "bytes": 216,
+      "sha256": "d60082c99f73ef77e0d6bc30bb732a4165a9568b1b286eaa4a3e42533992fd06"
+    },
+    "3fab437da257-result.json": {
+      "source": "windows/dist/checks/chrome-details-native-fd3d1b62-fe7e-42c7-b9f9-41a8aaddd9b1/result.json",
+      "source_bytes": 496,
+      "source_sha256": "a78b357e9f30b94201c16c6b4c8b8803926582044fc464e76425c10837b11bbe",
+      "bytes": 480,
+      "sha256": "82351d183cc31b01bed279060a7d298bfc122f5405fa675faeae003a6cab9fae"
+    },
+    "ef87b06e1f8b-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-native-fd3d1b62-fe7e-42c7-b9f9-41a8aaddd9b1/stdout.txt",
+      "source_bytes": 260,
+      "source_sha256": "51e876ae35b0965158da6cde15252eb5c2be53d8dbfdafb42a7049aa3ba28f4a",
+      "bytes": 258,
+      "sha256": "79fe0bce044cac98a82b0375cbd79d4ff0cc4b5c34968d5a7a86f802b3502d1c"
+    },
+    "56d11515d1d3-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-native-fd3d1b62-fe7e-42c7-b9f9-41a8aaddd9b1/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "ccd0bf66519d-result.json": {
+      "source": "windows/dist/checks/chrome-details-overflow-f7501a62-7bfb-455e-bf8b-1dd7af9a93db/result.json",
+      "source_bytes": 501,
+      "source_sha256": "cfb77b34c5d180552d47d77d0067dbecf7c70a0a943bb5c07047d0609acee65b",
+      "bytes": 485,
+      "sha256": "b6e4633187a250e000843637fcd8ba197b7a5bdf07a624211a4b0c89df0bebf9"
+    },
+    "a2393c83ade4-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-overflow-f7501a62-7bfb-455e-bf8b-1dd7af9a93db/stdout.txt",
+      "source_bytes": 260,
+      "source_sha256": "7dd12bfb18a2ae662d2ef7b58609820d5d47afbe1310175d880b42d883315cea",
+      "bytes": 258,
+      "sha256": "0e588998773d05d6e2691f35edf669a07622e675eff2b0cf7465f49e212ca75d"
+    },
+    "75a649fbdf2f-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-overflow-f7501a62-7bfb-455e-bf8b-1dd7af9a93db/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "086fa69f4000-result.json": {
+      "source": "windows/dist/checks/chrome-details-syntax-57a38e7a-c906-4241-a776-4b66c050bbf0/result.json",
+      "source_bytes": 493,
+      "source_sha256": "addf8ae890293b8aeaa3e93984cce6cd9cb7afef5a7c176a3028f5f582de6000",
+      "bytes": 477,
+      "sha256": "f9198662d7244612f5b38b9d03a16787de7e8e241dd7eee8882a4af86d3deb1c"
+    },
+    "70338cc8bf9a-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-syntax-57a38e7a-c906-4241-a776-4b66c050bbf0/stdout.txt",
+      "source_bytes": 60,
+      "source_sha256": "f670b08b5b5dc647df2a45de7a148188fab3199380e1a564e212ee3c23f93bbd",
+      "bytes": 59,
+      "sha256": "c0f9720288eadfbb796365453dcd95accb58d57a059265c2cd71390717c6fec8"
+    },
+    "ee349a70cb31-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-syntax-57a38e7a-c906-4241-a776-4b66c050bbf0/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "c64a81842623-native-chrome-background.json": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/native-chrome-background.json",
+      "source_bytes": 410030,
+      "source_sha256": "132fcd4719c89f979c8cd58f273e1b4a94610015c14e6e18a510ab057fab4fab",
+      "bytes": 404692,
+      "sha256": "8cbae91b5980adaea249939d2f76d821320b960d4933e155447d363f69571894"
+    },
+    "be8918a785b1-initial.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/initial.png",
+      "source_bytes": 11226,
+      "source_sha256": "c08faed6dc170729e0b86422c1081d709508eaf4899d0fcc6abb8ad4b8fb1f20",
+      "bytes": 11226,
+      "sha256": "c08faed6dc170729e0b86422c1081d709508eaf4899d0fcc6abb8ad4b8fb1f20"
+    },
+    "e5224231729a-unicode-cwd.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/unicode-cwd.png",
+      "source_bytes": 11110,
+      "source_sha256": "9eab8a406bec6c5c5b4d0e0046421291c71d97ed3dda4de7f6b1cbd690172842",
+      "bytes": 11110,
+      "sha256": "9eab8a406bec6c5c5b4d0e0046421291c71d97ed3dda4de7f6b1cbd690172842"
+    },
+    "88bd357f0458-split.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/split.png",
+      "source_bytes": 11957,
+      "source_sha256": "15c1046e660b896c443ede4a298d984cbdd083b8ec9ae6ccf3b1468ebff0a103",
+      "bytes": 11957,
+      "sha256": "15c1046e660b896c443ede4a298d984cbdd083b8ec9ae6ccf3b1468ebff0a103"
+    },
+    "4eb8e59fe60f-focus-original.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/focus-original.png",
+      "source_bytes": 11943,
+      "source_sha256": "36f244f4989c7493f14875117b5723f79373678cac8c3900135b0f52b002fbd3",
+      "bytes": 11943,
+      "sha256": "36f244f4989c7493f14875117b5723f79373678cac8c3900135b0f52b002fbd3"
+    },
+    "f8d3b6ee90d7-light.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/light.png",
+      "source_bytes": 11907,
+      "source_sha256": "5810adad26cb7b14bbe041c5862df78f16084d5e19a2ed7d3745bb2cac24e525",
+      "bytes": 11907,
+      "sha256": "5810adad26cb7b14bbe041c5862df78f16084d5e19a2ed7d3745bb2cac24e525"
+    },
+    "582c38cd23d1-dark.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/dark.png",
+      "source_bytes": 11956,
+      "source_sha256": "32227b56481542dd9f397a6a0701c6e10dd74da892868b3762df196c27afc7ed",
+      "bytes": 11956,
+      "sha256": "32227b56481542dd9f397a6a0701c6e10dd74da892868b3762df196c27afc7ed"
+    },
+    "925fe7f57fa8-terminal-browser-editor.png": {
+      "source": "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/terminal-browser-editor.png",
+      "source_bytes": 12747,
+      "source_sha256": "c9ed4a1fcad9118f42b0cdcc863f3978f566907314356df2dad5722534870344",
+      "bytes": 12747,
+      "sha256": "c9ed4a1fcad9118f42b0cdcc863f3978f566907314356df2dad5722534870344"
+    },
+    "60aa9fc34c0d-native-chrome-background.json": {
+      "source": "windows/dist/evidence/chrome-f39d4de8-6337-4245-8faa-c59b98712125/native-chrome-background.json",
+      "source_bytes": 166432,
+      "source_sha256": "91d6f2859eae044c9be351d070920651f70037999a3362aef960e7a5c66ccd19",
+      "bytes": 164273,
+      "sha256": "573313aabf927bfc33d9034827818fb40d0f8270a3241f93f6254ce9786350e6"
+    },
+    "beb60b1e7762-initial.png": {
+      "source": "windows/dist/evidence/chrome-f39d4de8-6337-4245-8faa-c59b98712125/initial.png",
+      "source_bytes": 11226,
+      "source_sha256": "c08faed6dc170729e0b86422c1081d709508eaf4899d0fcc6abb8ad4b8fb1f20",
+      "bytes": 11226,
+      "sha256": "c08faed6dc170729e0b86422c1081d709508eaf4899d0fcc6abb8ad4b8fb1f20"
+    },
+    "b0620ddc51c6-overflow-last.png": {
+      "source": "windows/dist/evidence/chrome-f39d4de8-6337-4245-8faa-c59b98712125/overflow-last.png",
+      "source_bytes": 14074,
+      "source_sha256": "3421e387beecf611ad2b4cc4e2f6bc628292ec44f5e26545f26a984e7758f145",
+      "bytes": 14074,
+      "sha256": "3421e387beecf611ad2b4cc4e2f6bc628292ec44f5e26545f26a984e7758f145"
+    },
+    "5ee2f739b93f-overflow-first.png": {
+      "source": "windows/dist/evidence/chrome-f39d4de8-6337-4245-8faa-c59b98712125/overflow-first.png",
+      "source_bytes": 14075,
+      "source_sha256": "1d330d8a5459b240888771f6d82abd14fe505853697cccbb5586aa6be17f1c63",
+      "bytes": 14075,
+      "sha256": "1d330d8a5459b240888771f6d82abd14fe505853697cccbb5586aa6be17f1c63"
+    },
+    "44c8d31bff22-chrome-details-source.json": {
+      "source": "windows/dist/chrome-details-source.json",
+      "source_bytes": 23123,
+      "source_sha256": "b7dbfc4343092ee6589eb311267a09ce164950dab136b046fb794b2c7dc07912",
+      "bytes": 23123,
+      "sha256": "b7dbfc4343092ee6589eb311267a09ce164950dab136b046fb794b2c7dc07912"
+    },
+    "744a9546d805-result.json": {
+      "source": "windows/dist/checks/chrome-details-browser-78e42ce3-8531-4874-a038-507ccbf50284/result.json",
+      "source_bytes": 492,
+      "source_sha256": "be2ec51251d238e128afa09b626d4d5b376146eb078f6e0a4aa22f2525c722af",
+      "bytes": 476,
+      "sha256": "ab31ebdfa69e834739b093bf9b9fc458eff1483861efe61e4fe0a2304ba0b38b"
+    },
+    "1f41c6a9a90b-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-browser-78e42ce3-8531-4874-a038-507ccbf50284/stdout.txt",
+      "source_bytes": 3514,
+      "source_sha256": "56b901c0cef65d440158694fe7edc246ae51ac4d73e274f761a700018169c1a9",
+      "bytes": 3448,
+      "sha256": "7c50a59c2e9dc07995d048be8bcf5ef02253a02406e8c937b44f09485d42d04c"
+    },
+    "6b3130df4752-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-browser-78e42ce3-8531-4874-a038-507ccbf50284/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "7cabb9463922-result.json": {
+      "source": "windows/dist/checks/chrome-details-workspaces-46bb2d47-003a-474e-8ece-e329cd49812b/result.json",
+      "source_bytes": 507,
+      "source_sha256": "06b88b3b0bf62c08701d40ea898570dc1d017bc555e1da58b0f0e633bfea8b97",
+      "bytes": 491,
+      "sha256": "e9d59af4fc5f3d6e3fdfab5ecca99465a7d4d342b6867c03765693a4a4526afa"
+    },
+    "b291da318793-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-workspaces-46bb2d47-003a-474e-8ece-e329cd49812b/stdout.txt",
+      "source_bytes": 251,
+      "source_sha256": "88718bee2c2cdb872e4ab95a3a7212d5c7001baca5b8d918a1593ee9c62b086c",
+      "bytes": 249,
+      "sha256": "0ab54f4c6e8f305fbe2c6c69ee2f6cb39d0da72fe976c5d53c93dc1aa6cc5c69"
+    },
+    "99d37b77c92e-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-workspaces-46bb2d47-003a-474e-8ece-e329cd49812b/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "039428ca54e4-native-workspaces-background.json": {
+      "source": "windows/dist/evidence/workspaces-00380155-7076-4e02-95bb-565210bec402/native-workspaces-background.json",
+      "source_bytes": 8616,
+      "source_sha256": "0d2e37a49dcb2e808fea207858ea788da7586b94a9a463c34a7a7cb81f77d193",
+      "bytes": 8378,
+      "sha256": "128bacec9e89d401ef7c13c2aaaf1d1f5429cc4f35b53519c7643c6f0a0456b0"
+    },
+    "58c61072cbf8-result.json": {
+      "source": "windows/dist/checks/chrome-details-release-57c61849-2360-4d6f-8739-5911c8cb6ce9/result.json",
+      "source_bytes": 2653,
+      "source_sha256": "7d614777a9a72b62c5e87b4fc8dca11a60f8406393e38f6cef67cc99362dbbec",
+      "bytes": 2653,
+      "sha256": "7d614777a9a72b62c5e87b4fc8dca11a60f8406393e38f6cef67cc99362dbbec"
+    },
+    "01528c73a2c7-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-release-57c61849-2360-4d6f-8739-5911c8cb6ce9/stdout.txt",
+      "source_bytes": 374,
+      "source_sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df",
+      "bytes": 374,
+      "sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df"
+    },
+    "29cfb0cef75d-result.json": {
+      "source": "windows/dist/checks/chrome-details-release-doctor-50f5d2c1-e5f7-4ed1-932a-7a54b201bc83/result.json",
+      "source_bytes": 513,
+      "source_sha256": "1e72e47b3ea6843b25520cf2b28ab906e124f8498b1a8627382f29cf1437e9b5",
+      "bytes": 497,
+      "sha256": "466b0893c472261a894c0b4a469b1656eda9fd9bfd0db741b1b843e23e9ffc9e"
+    },
+    "1c5ef13c3e66-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-release-doctor-50f5d2c1-e5f7-4ed1-932a-7a54b201bc83/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f"
+    },
+    "c09c95acbcb0-stderr.txt": {
+      "source": "windows/dist/checks/chrome-details-release-doctor-50f5d2c1-e5f7-4ed1-932a-7a54b201bc83/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "65e0b7d3648c-native-browser-background.json": {
+      "source": "windows/dist/evidence/browser-e93978e2-bce1-4d69-9f79-3b4229a93c09/native-browser-background.json",
+      "source_bytes": 2859,
+      "source_sha256": "58ac459601a5ab29c657417b102960ece347061d55d026697039cf78d974651e",
+      "bytes": 2791,
+      "sha256": "706f2a4fd56cefbfc115a3f4e0e632803a99454bc65fd9c56b4e341a82308d09"
+    },
+    "fe7ce7349a7b-chrome-details-release-staging.json": {
+      "source": "windows/dist/chrome-details-release-staging.json",
+      "source_bytes": 1439,
+      "source_sha256": "170794e08e61b39c12288d5f720f6bc58f3a501381e3500440cdc84b038448e1",
+      "bytes": 1439,
+      "sha256": "170794e08e61b39c12288d5f720f6bc58f3a501381e3500440cdc84b038448e1"
+    },
+    "81a3487f5c4c-result.json": {
+      "source": "windows/dist/checks/chrome-details-package-9434f190-8830-444d-ae0e-41805e118226/result.json",
+      "source_bytes": 497,
+      "source_sha256": "71f95b4c4d9c0b6ccbdbe63d6f5a43fac9c9549fe750f8176a7b9d16103f19fd",
+      "bytes": 497,
+      "sha256": "71f95b4c4d9c0b6ccbdbe63d6f5a43fac9c9549fe750f8176a7b9d16103f19fd"
+    },
+    "d144234a36eb-stdout.txt": {
+      "source": "windows/dist/checks/chrome-details-package-9434f190-8830-444d-ae0e-41805e118226/stdout.txt",
+      "source_bytes": 1332,
+      "source_sha256": "3738993fe91606781ab8441a7228feb3f6630be0e83e73f72f8bb76a409642d5",
+      "bytes": 1332,
+      "sha256": "3738993fe91606781ab8441a7228feb3f6630be0e83e73f72f8bb76a409642d5"
+    },
+    "badc8e7c2b48-native-chrome-details-release-entrypoints.json": {
+      "source": "windows/evidence/2026-09-28/native-chrome-details-release-entrypoints.json",
+      "source_bytes": 1361,
+      "source_sha256": "1d8be99c8dd9944fd6bce528326bbed8d07c16ba0d82a8aa7ca8a2b42e940c99",
+      "bytes": 1317,
+      "sha256": "99e5176ec28c9708125f20ad1b4c5f7ee9b10a6fe87463bd9389684e70a18a3f"
+    }
+  },
+  "checks": {
+    "windows/dist/checks/chrome-details-clippy-aeb357bf-b33b-4ddd-a32b-635196306fab/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 25.727,
+      "files": {
+        "result": "4627e5e9f9f9-result.json",
+        "stdout.txt": "0a18ed3ed8fe-stdout.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-debug-b1d536fa-3c36-4c5e-babf-c68698d4b6e5/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 83.345,
+      "files": {
+        "result": "f079bd8289ba-result.json",
+        "stdout.txt": "9b42e5c7bf86-stdout.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-final-clippy-67ebb808-f460-4c41-a92f-76193672fce1/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 24.729,
+      "files": {
+        "result": "b4dd0c7f8fd1-result.json",
+        "stdout.txt": "8d44642b8ea0-stdout.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-native-fd3d1b62-fe7e-42c7-b9f9-41a8aaddd9b1/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 9.597,
+      "files": {
+        "result": "3fab437da257-result.json",
+        "stdout.txt": "ef87b06e1f8b-stdout.txt",
+        "stderr.txt": "56d11515d1d3-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-overflow-f7501a62-7bfb-455e-bf8b-1dd7af9a93db/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 6.431,
+      "files": {
+        "result": "ccd0bf66519d-result.json",
+        "stdout.txt": "a2393c83ade4-stdout.txt",
+        "stderr.txt": "75a649fbdf2f-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-syntax-57a38e7a-c906-4241-a776-4b66c050bbf0/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.87,
+      "files": {
+        "result": "086fa69f4000-result.json",
+        "stdout.txt": "70338cc8bf9a-stdout.txt",
+        "stderr.txt": "ee349a70cb31-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-browser-78e42ce3-8531-4874-a038-507ccbf50284/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 16.869,
+      "files": {
+        "result": "744a9546d805-result.json",
+        "stdout.txt": "1f41c6a9a90b-stdout.txt",
+        "stderr.txt": "6b3130df4752-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-workspaces-46bb2d47-003a-474e-8ece-e329cd49812b/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 16.076,
+      "files": {
+        "result": "7cabb9463922-result.json",
+        "stdout.txt": "b291da318793-stdout.txt",
+        "stderr.txt": "99d37b77c92e-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-release-57c61849-2360-4d6f-8739-5911c8cb6ce9/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 112.324,
+      "files": {
+        "result": "58c61072cbf8-result.json",
+        "stdout.txt": "01528c73a2c7-stdout.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-release-doctor-50f5d2c1-e5f7-4ed1-932a-7a54b201bc83/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.063,
+      "files": {
+        "result": "29cfb0cef75d-result.json",
+        "stdout.txt": "1c5ef13c3e66-stdout.txt",
+        "stderr.txt": "c09c95acbcb0-stderr.txt"
+      }
+    },
+    "windows/dist/checks/chrome-details-package-9434f190-8830-444d-ae0e-41805e118226/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 11.358,
+      "files": {
+        "result": "81a3487f5c4c-result.json",
+        "stdout.txt": "d144234a36eb-stdout.txt"
+      }
+    }
+  },
+  "native": {
+    "windows/dist/evidence/chrome-a423f449-2842-4922-ab68-977901beb618/native-chrome-background.json": {
+      "original_status": "passed_background_chrome_subset",
+      "acceptance": "native_chrome_subset_only",
+      "sampled_backgrounds": [
+        "#24272e",
+        "#24272e",
+        "#24272e",
+        "#24272e",
+        "#f2f1f0",
+        "#24272e",
+        "#24272e"
+      ],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "c64a81842623-native-chrome-background.json",
+        "png0": "be8918a785b1-initial.png",
+        "png1": "e5224231729a-unicode-cwd.png",
+        "png2": "88bd357f0458-split.png",
+        "png3": "4eb8e59fe60f-focus-original.png",
+        "png4": "f8d3b6ee90d7-light.png",
+        "png5": "582c38cd23d1-dark.png",
+        "png6": "925fe7f57fa8-terminal-browser-editor.png"
+      }
+    },
+    "windows/dist/evidence/chrome-f39d4de8-6337-4245-8faa-c59b98712125/native-chrome-background.json": {
+      "original_status": "passed_background_chrome_subset",
+      "acceptance": "native_chrome_subset_only",
+      "sampled_backgrounds": [
+        "#24272e",
+        "#24272e",
+        "#24272e"
+      ],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "60aa9fc34c0d-native-chrome-background.json",
+        "png0": "beb60b1e7762-initial.png",
+        "png1": "b0620ddc51c6-overflow-last.png",
+        "png2": "5ee2f739b93f-overflow-first.png"
+      }
+    },
+    "windows/dist/evidence/workspaces-00380155-7076-4e02-95bb-565210bec402/native-workspaces-background.json": {
+      "original_status": "passed_background_workspace_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "039428ca54e4-native-workspaces-background.json"
+      }
+    },
+    "windows/dist/evidence/browser-e93978e2-bce1-4d69-9f79-3b4229a93c09/native-browser-background.json": {
+      "original_status": "passed_background_browser_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "65e0b7d3648c-native-browser-background.json"
+      }
+    }
+  },
+  "hashes": {
+    "windows/target/x86_64-pc-windows-msvc/debug/flowmux.exe#ae50b13c5d34cbc625085cd4520fab50e98b76c813ca6ad70603bdaa664e76c8": {
+      "path": "windows/target/x86_64-pc-windows-msvc/debug/flowmux.exe",
+      "bytes": 32200192,
+      "sha256": "ae50b13c5d34cbc625085cd4520fab50e98b76c813ca6ad70603bdaa664e76c8"
+    },
+    "windows/dist/chrome-details-release/flowmux.exe#92923a0343fa45861b0de2eb375939a027084bbbcb1a78108756579bd926a661": {
+      "path": "windows/dist/chrome-details-release/flowmux.exe",
+      "bytes": 22193152,
+      "sha256": "92923a0343fa45861b0de2eb375939a027084bbbcb1a78108756579bd926a661"
+    },
+    "windows/dist/chrome-details-release/flowmuxctl.exe#f3988a4f86c7383c6e4aa9de8f640a8ba28dbb6110c6821318f37159143a52dd": {
+      "path": "windows/dist/chrome-details-release/flowmuxctl.exe",
+      "bytes": 1917952,
+      "sha256": "f3988a4f86c7383c6e4aa9de8f640a8ba28dbb6110c6821318f37159143a52dd"
+    },
+    "windows/dist/chrome-details-release/flowmux-command.exe#cf7b11996a4645cc1800160005302996dd9e476bb3735bedc19e84e67d6ac46d": {
+      "path": "windows/dist/chrome-details-release/flowmux-command.exe",
+      "bytes": 1977344,
+      "sha256": "cf7b11996a4645cc1800160005302996dd9e476bb3735bedc19e84e67d6ac46d"
+    },
+    "windows/dist/flowmux-windows-0.10.1-dev-chrome-details-x64-setup.exe#ddc25c7c38249b76968aadaf54908e0ebd1249d090e3114b8fd4dd43aed5fee8": {
+      "path": "windows/dist/flowmux-windows-0.10.1-dev-chrome-details-x64-setup.exe",
+      "bytes": 5830069,
+      "sha256": "ddc25c7c38249b76968aadaf54908e0ebd1249d090e3114b8fd4dd43aed5fee8"
+    }
+  },
+  "updated_utc": "2026-09-28T07:33:16.976095+00:00",
+  "scope": "Native chrome details and bounded workspace verifier; partial Windows parity. Physical IME, NFD shaping, DPI/high contrast/accessibility and composed WebViews not accepted."
+}

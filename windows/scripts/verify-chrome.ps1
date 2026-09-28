@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Owned hidden native chrome only. Run under a60s run-check.ps1 Job.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('details','overflow')][string]$Case='details')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -9,7 +9,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $directory=Join-Path $PSScriptRoot ('..\dist\evidence\chrome-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $cwd=Join-Path $directory 'workspace 한글';[IO.Directory]::CreateDirectory($cwd)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$pipeName=$null;$clients=@();$shells=@();$cleanup=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
-$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';baseline=$false;checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-chrome';case=$Case;baseline=$false;checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;webviewCapture=$false;deferred=@('No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.','PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent.')}
 function Require([bool]$Condition,[string]$Message) {if(-not $Condition){throw $Message}}
 function Budget([int]$Maximum=5000) {
     $remaining=55000-$clock.ElapsedMilliseconds
@@ -42,21 +42,28 @@ function Ready([int]$Count,[int]$Maximum=5000) {
     } while($true)
 }
 function Identities($Tree) {return (@($Tree.surfaces|Sort-Object id|ForEach-Object {$_.id.ToString()+':'+$_.pid.ToString()}) -join ',')}
+function ControlIds($Tree) {return (@($Tree.chrome.controls|Sort-Object handle|ForEach-Object {$_.handle.ToString()}) -join ',')}
 function Capture([string]$Name,$Tree) {
     Budget|Out-Null;$handle=[long]$Tree.window_handle;$controls=@([ChromeFixture]::Read($handle,$hostProcess.Id));$size=[ChromeFixture]::Size($handle,$hostProcess.Id)
     $path=Join-Path $directory ($Name+'.png');$bmp=Join-Path $directory ($Name+'.bmp')
     $capture=Request @('chrome-capture',$bmp)
     [ChromeFixture]::Png($bmp,$path);$background=[ChromeFixture]::Pixel($path,1,100)
-    $record=[ordered]@{name=$Name;window=$handle;client=$size;dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]$handle);controls=$controls;background=$background;layout=$Tree.layout;terminalIdentities=(Identities $Tree);capture=$capture}
+    $record=[ordered]@{name=$Name;path=$path;window=$handle;client=$size;dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]$handle);controls=$controls;background=$background;layout=$Tree.layout;chrome=$Tree.chrome;terminalIdentities=(Identities $Tree);capture=$capture}
     $script:evidence.observations+=$record;$script:evidence.artifacts+=@{path=$path;bytes=(Get-Item -LiteralPath $path).Length;sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant();scope='owned hidden native chrome only'}
     Require ($background -eq $(if($Tree.chrome.theme -eq 'light'){'#f2f1f0'}else{'#24272e'})) 'Actual native background pixels do not match the configured palette'
     $scale=[Math]::Max(96,$record.dpi)/96.0;$shown=@($controls|Where-Object {$_.Shown})
     Require (@($shown|Where-Object {$_.Text -eq 'Workspaces'}).Count -eq 1) 'Workspaces header missing or duplicated'
     $workspace=@($Tree.workspaces|Where-Object {$_.id -eq $Tree.active_workspace})[0]
-    $row=@($shown|Where-Object {$_.Text -eq $workspace.name -and $_.X -lt 185*$scale})
-    Require ($row.Count -eq 1 -and [Math]::Abs($row[0].Y-40*$scale) -le 2) 'Workspace row does not begin near40DIP'
-    $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-8),($row[0].Y+5))
+    $rowInfo=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $workspace.id})[0]
+    $row=@($shown|Where-Object {$_.Handle -eq $rowInfo.handle})
+    Require ($Tree.chrome.sidebar_width_dip -eq 260 -and $Tree.chrome.workspace_row_height_dip -eq 58) 'Sidebar dimensions differ from the Linux alignment baseline'
+    Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its two-line native caption'
+    $workspaceIndex=[Array]::IndexOf(@($Tree.workspaces.id),$workspace.id)
+    Require ([Math]::Abs($row[0].Y-(40+58*($workspaceIndex-$Tree.chrome.sidebar_offset))*$scale) -le 2) 'Workspace row position differs from visible sidebar order'
+    $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-8),($row[0].Y+12))
     Require ($selectionPixel -eq $(if($Tree.chrome.theme -eq 'light'){'#dae6f5'}else{'#313741'})) 'Selected workspace was not actually painted in the owned hidden capture'
+    $muted=if($Tree.chrome.theme -eq 'light'){'#5f6269'}else{'#abb1bc'}
+    Require ([ChromeFixture]::ColorCount($path,($row[0].X+12),($row[0].Y+[int](27*$scale)),($row[0].Width-24),([int](20*$scale)),$muted) -gt 5) 'Native second-line path text was not painted'
     foreach($control in $shown){
         Require ($control.X -ge 0 -and $control.Y -ge 0 -and $control.Width -gt 0 -and $control.Height -gt 0 -and $control.X+$control.Width -le $size[0]+1 -and $control.Y+$control.Height -le $size[1]+1) 'Native chrome control escaped client bounds'
         Require ($control.Text -notmatch '[●○]') 'Legacy circle markers remain in native chrome text'
@@ -73,6 +80,15 @@ function Capture([string]$Name,$Tree) {
         Require ($tabs.Count -ge 4 -and @($tabs|Where-Object {$_.Height -gt 30*$scale}).Count -eq 0) 'Pane tab strip is not compact'
     }
     return $record
+}
+function FocusPaint($Tree,$Capture) {
+    $selected=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.selected -and $_.layout_visible})
+    Require (@($selected|Where-Object {$_.focused}).Count -eq 1) 'Exactly one visible selected tab must be in the focused pane'
+    foreach($tab in $selected){
+        $r=$tab.rect;$actual=[ChromeFixture]::Pixel($Capture.path,($r.x+[int]($r.width/2)),($r.y+$r.height-1))
+        $expected=if($Tree.chrome.theme -eq 'light'){if($tab.focused){'#2066ba'}else{'#d1d1d3'}}else{if($tab.focused){'#78aeed'}else{'#454a55'}}
+        Require ($actual -eq $expected) 'Native active-tab accent does not distinguish the focused pane'
+    }
 }
 function Theme([string]$Name,[string]$Identities) {
     Request @('settings','set','theme',$Name)|Out-Null;$wait=[Diagnostics.Stopwatch]::StartNew()
@@ -104,13 +120,50 @@ try {
     $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left)
     $evidence.observations+=@{kind='startup';pid=$hostProcess.Id;elapsedMs=$startup.ElapsedMilliseconds;pipe=$pipeName}
     $initial=Capture 'initial' $tree
-    & {
-        $original=Identities $tree;Request @('split','vertical')|Out-Null;$tree=Ready 2
+    if($Case -eq 'details') {
+        $original=Identities $tree;$controls=ControlIds $tree;$source=Request @('identify');$name='한글 '+[char]0x1112+[char]0x1161+[char]0x11AB+' '+[char]::ConvertFromUtf32(0x1F600)+' & 작업'
+        Request @('workspace','rename',$source.workspace,$name)|Out-Null;Request @('workspace','color',$source.workspace,'#12abef')|Out-Null
+        $changed=Join-Path $cwd '경로 & 변경';[IO.Directory]::CreateDirectory($changed)|Out-Null
+        Request @('send-keys',$source.pane,('cd /d "'+$changed+'"'))|Out-Null;Request @('send-key','Enter','--pane',$source.pane)|Out-Null
+        $wait=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $left=5000-$wait.ElapsedMilliseconds;Require ($left -gt 0) 'CWD metadata did not converge within five seconds'
+            $tree=Tree ([int]$left)
+            if($tree.surfaces[0].cwd -eq $changed -and $tree.surfaces[0].cwd_reported){break};Start-Sleep -Milliseconds 20
+        }while($true)
+        Require ((Identities $tree) -eq $original -and (ControlIds $tree) -eq $controls) 'Metadata change replaced a terminal or native chrome control'
+        $metadata=Capture 'unicode-cwd' $tree;$row=@($metadata.controls|Where-Object {$_.Text -eq ($name+"`n"+$changed).Replace('&','&&')})
+        Require ($row.Count -eq 1 -and [ChromeFixture]::Pixel($metadata.path,($row[0].X+1),($row[0].Y+15)) -eq '#12abef') 'Live Unicode path/name or actual model color stripe was lost'
+        $evidence.checks+=@{name='unicode_cwd_metadata_and_color_update_preserve_native_handles_and_terminal_process';passed=$true}
+        Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 2
         Require ((Identities $tree).Contains($original)) 'Split replaced the original terminal process'
-        Capture 'split' $tree|Out-Null;$stable=Identities $tree
+        $split=Capture 'split' $tree;FocusPaint $tree $split;$stable=Identities $tree;$controls=ControlIds $tree
+        Request @('focus-pane',$source.pane)|Out-Null;$tree=Tree
+        Require ((ControlIds $tree) -eq $controls -and (Identities $tree) -eq $stable) 'Pane focus replaced native controls or terminal processes'
+        $focused=Capture 'focus-original' $tree;FocusPaint $tree $focused
         $light=Theme 'light' $stable;$dark=Theme 'dark' $stable
         Require ($light.background -ne $dark.background) 'Light/dark setting did not change actual native background pixels'
         $evidence.checks+=@{name='hidden_native_workspace_tab_geometry_owner_draw_and_theme_pixels_preserve_terminal_processes';passed=$true}
+        $browser=(Request @('browser','open','about:blank','--pane',$source.pane)).browser_pane_opened
+        $file=Join-Path $changed '편집 한글.txt';[IO.File]::WriteAllText($file,'한글 editor chrome fixture', (New-Object Text.UTF8Encoding($false)))
+        Request @('editor','open',$file,'--root',$changed,'--pane',$source.pane)|Out-Null
+        $tree=Tree;Require (@($tree.browsers).Count -eq 1 -and @($tree.editors).Count -eq 1 -and (Identities $tree) -eq $stable) 'Mixed surface chrome changed terminal identities or lost a surface'
+        $mixed=Capture 'terminal-browser-editor' $tree;FocusPaint $tree $mixed
+        $evidence.checks+=@{name='terminal_browser_editor_native_chrome_capture_and_terminal_identity_preservation';passed=$true}
+    } else {
+        [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,400);$tree=Tree
+        $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$tree.window_handle));$scale=[Math]::Max(96,$dpi)/96.0
+        $rows=[int][Math]::Floor((400-160*$scale)/(58*$scale));Require ($rows -ge 1 -and $rows -le 6) 'Owned resize did not produce a bounded sidebar overflow case'
+        $first=$tree.active_workspace
+        for($i=0;$i -lt $rows;$i++){Request @('new-workspace','--cwd',$cwd,'--shell=cmd')|Out-Null}
+        $tree=Ready ($rows+1);$last=$tree.active_workspace;$stable=Identities $tree
+        $lastCapture=Capture 'overflow-last' $tree
+        Require ($tree.chrome.sidebar_offset -eq 1) 'Last active workspace did not scroll into view'
+        Require (@($lastCapture.controls|Where-Object {$_.Text -eq 'Next' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'Last-page Next control should be disabled'
+        Request @('workspace','focus',$first)|Out-Null;$tree=Tree;$firstCapture=Capture 'overflow-first' $tree
+        Require ($tree.chrome.sidebar_offset -eq 0 -and (Identities $tree) -eq $stable) 'First active workspace did not scroll into view or restarted a terminal'
+        Require (@($firstCapture.controls|Where-Object {$_.Text -eq 'Previous' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'First-page Previous control should be disabled'
+        $evidence.checks+=@{name='overflow_active_workspace_visibility_footer_bounds_and_paging_endpoints';passed=$true;visibleRows=$rows;workspaces=$rows+1;first=$first;last=$last}
     }
     Request @('quit','--discard-state')|Out-Null;Require ($hostProcess.WaitForExit((Budget 5000))) 'Owned host did not quit within five seconds';Require ($hostProcess.ExitCode -eq 0) 'Owned host exited with failure'
     $evidence.status='passed_background_chrome_subset'

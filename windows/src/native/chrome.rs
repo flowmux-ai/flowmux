@@ -18,9 +18,23 @@ const SUBCLASS: usize = 0x464d_4348;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Role {
     Button,
-    Workspace { selected: bool },
-    Tab { selected: bool },
+    Workspace {
+        selected: bool,
+        color: Option<COLORREF>,
+    },
+    Tab {
+        selected: bool,
+        focused: bool,
+        kind: SurfaceIcon,
+    },
     Tool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum SurfaceIcon {
+    Terminal,
+    Browser,
+    Editor,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -434,23 +448,26 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         entry.hot,
                         state.palette,
                         state.resources.body,
+                        state.resources.caption,
                         state.dpi,
                     )
                 })
             })
     });
-    let Some((role, hot, palette, font, dpi)) = paint else {
+    let Some((role, hot, palette, font, caption_font, dpi)) = paint else {
         return false;
     };
     let selected = matches!(
         role,
-        Role::Workspace { selected: true } | Role::Tab { selected: true }
+        Role::Workspace { selected: true, .. } | Role::Tab { selected: true, .. }
     );
     let pressed = item.itemState & ODS_SELECTED != 0;
     let hot = hot || item.itemState & ODS_HOTLIGHT != 0;
     let disabled = item.itemState & ODS_DISABLED != 0;
     let highlighted = selected || pressed || hot;
-    let color = if pressed || selected {
+    let color = if selected && matches!(role, Role::Tab { focused: false, .. }) {
+        palette.hover
+    } else if pressed || selected {
         palette.selected
     } else if hot {
         palette.hover
@@ -463,6 +480,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         palette.muted
     } else if palette.high_contrast && highlighted {
         unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) }
+    } else if !palette.high_contrast && matches!(role, Role::Tab { focused: false, .. }) {
+        palette.muted
     } else {
         palette.foreground
     };
@@ -472,20 +491,69 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         if saved == 0 {
             return false;
         }
-        fill(item.hDC, &item.rcItem, color);
-        if selected {
-            let stripe = if matches!(role, Role::Workspace { .. }) {
-                RECT {
-                    right: item.rcItem.left + pixel(4),
+        if matches!(role, Role::Workspace { .. }) && !palette.high_contrast {
+            fill(item.hDC, &item.rcItem, palette.background);
+            SelectObject(item.hDC, GetStockObject(NULL_PEN));
+            SelectObject(item.hDC, GetStockObject(DC_BRUSH));
+            SetDCBrushColor(item.hDC, color);
+            RoundRect(
+                item.hDC,
+                item.rcItem.left,
+                item.rcItem.top,
+                item.rcItem.right,
+                item.rcItem.bottom,
+                pixel(12),
+                pixel(12),
+            );
+        } else {
+            fill(item.hDC, &item.rcItem, color);
+        }
+        match role {
+            Role::Workspace {
+                color: workspace_color,
+                ..
+            } if selected || workspace_color.is_some() => {
+                let inset = if selected {
+                    pixel(6)
+                } else {
+                    ((item.rcItem.bottom - item.rcItem.top - pixel(18)) / 2).max(0)
+                };
+                let stripe = RECT {
+                    left: item.rcItem.left,
+                    right: item.rcItem.left + pixel(if selected { 5 } else { 2 }),
+                    top: item.rcItem.top + inset,
+                    bottom: item.rcItem.bottom - inset,
+                };
+                fill(
+                    item.hDC,
+                    &stripe,
+                    if palette.high_contrast {
+                        palette.accent
+                    } else {
+                        workspace_color.unwrap_or(palette.accent)
+                    },
+                );
+            }
+            Role::Tab {
+                selected: true,
+                focused,
+                ..
+            } => {
+                let stripe = RECT {
+                    top: item.rcItem.bottom - pixel(if focused { 2 } else { 1 }),
                     ..item.rcItem
-                }
-            } else {
-                RECT {
-                    top: item.rcItem.bottom - pixel(2),
-                    ..item.rcItem
-                }
-            };
-            fill(item.hDC, &stripe, palette.accent);
+                };
+                fill(
+                    item.hDC,
+                    &stripe,
+                    if focused {
+                        palette.accent
+                    } else {
+                        palette.border
+                    },
+                );
+            }
+            _ => {}
         }
         if palette.high_contrast {
             SetDCBrushColor(item.hDC, palette.border);
@@ -551,6 +619,50 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             right: item.rcItem.right - inset,
             ..item.rcItem
         };
+        if let Role::Tab { kind, .. } = role {
+            if rect.right - rect.left >= pixel(24) {
+                let cx = rect.left + pixel(6);
+                let cy = (rect.top + rect.bottom) / 2;
+                let r = pixel(5);
+                SelectObject(item.hDC, GetStockObject(DC_PEN));
+                SelectObject(item.hDC, GetStockObject(NULL_BRUSH));
+                SetDCPenColor(item.hDC, text);
+                match kind {
+                    SurfaceIcon::Terminal => {
+                        MoveToEx(item.hDC, cx - r, cy - r + pixel(1), std::ptr::null_mut());
+                        LineTo(item.hDC, cx - pixel(1), cy);
+                        LineTo(item.hDC, cx - r, cy + r - pixel(1));
+                        MoveToEx(
+                            item.hDC,
+                            cx + pixel(1),
+                            cy + r - pixel(1),
+                            std::ptr::null_mut(),
+                        );
+                        LineTo(item.hDC, cx + r + 1, cy + r - pixel(1));
+                    }
+                    SurfaceIcon::Browser => {
+                        Ellipse(item.hDC, cx - r, cy - r, cx + r + 1, cy + r + 1);
+                        Ellipse(
+                            item.hDC,
+                            cx - pixel(2),
+                            cy - r,
+                            cx + pixel(2) + 1,
+                            cy + r + 1,
+                        );
+                        MoveToEx(item.hDC, cx - r, cy, std::ptr::null_mut());
+                        LineTo(item.hDC, cx + r + 1, cy);
+                    }
+                    SurfaceIcon::Editor => {
+                        Rectangle(item.hDC, cx - r + pixel(1), cy - r, cx + r, cy + r + 1);
+                        for y in [cy - pixel(2), cy + pixel(1), cy + pixel(3)] {
+                            MoveToEx(item.hDC, cx - r + pixel(3), y, std::ptr::null_mut());
+                            LineTo(item.hDC, cx + r - pixel(1), y);
+                        }
+                    }
+                }
+                rect.left += pixel(20);
+            }
+        }
         let align = if matches!(role, Role::Workspace { .. } | Role::Tab { .. }) {
             DT_LEFT
         } else {
@@ -561,7 +673,55 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         } else {
             0
         };
-        if !symbol && rect.right > rect.left {
+        if matches!(role, Role::Workspace { .. }) && rect.right > rect.left {
+            let (title, path) = label_text.split_once('\n').unwrap_or((&label_text, ""));
+            let title: Vec<u16> = title.encode_utf16().collect();
+            let path: Vec<u16> = path.trim_end_matches('\r').encode_utf16().collect();
+            if !path.is_empty() && rect.bottom - rect.top >= pixel(44) {
+                let mut title_rect = RECT {
+                    top: rect.top + pixel(5),
+                    bottom: rect.top + pixel(27),
+                    ..rect
+                };
+                DrawTextW(
+                    item.hDC,
+                    title.as_ptr(),
+                    title.len() as i32,
+                    &mut title_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | accelerator,
+                );
+                SelectObject(item.hDC, caption_font);
+                SetTextColor(
+                    item.hDC,
+                    if palette.high_contrast && highlighted && !disabled {
+                        text
+                    } else {
+                        palette.muted
+                    },
+                );
+                let mut path_rect = RECT {
+                    top: rect.top + pixel(27),
+                    bottom: rect.bottom - pixel(5),
+                    ..rect
+                };
+                DrawTextW(
+                    item.hDC,
+                    path.as_ptr(),
+                    path.len() as i32,
+                    &mut path_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS | accelerator,
+                );
+                SelectObject(item.hDC, font);
+            } else {
+                DrawTextW(
+                    item.hDC,
+                    title.as_ptr(),
+                    title.len() as i32,
+                    &mut rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | accelerator,
+                );
+            }
+        } else if !symbol && rect.right > rect.left {
             DrawTextW(
                 item.hDC,
                 label.as_ptr(),

@@ -63,7 +63,7 @@ impl App {
         }
         let scale = unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0;
         let px = |value: i32| (value as f64 * scale).round() as i32;
-        let sidebar = px(185).min((client.right / 3).max(0));
+        let sidebar = px(260).min((client.right / 3).max(0));
         let content = model::Rect {
             x: sidebar + px(4),
             y: px(4),

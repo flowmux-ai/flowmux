@@ -1,0 +1,2156 @@
+{
+    "started":  "2026-09-28T07:30:20.8057687Z",
+    "mode":  "hidden-native-chrome",
+    "case":  "overflow",
+    "baseline":  false,
+    "checks":  [
+                   {
+                       "passed":  true,
+                       "name":  "overflow_active_workspace_visibility_footer_bounds_and_paging_endpoints",
+                       "first":  "f1215e98-6247-4058-bf0f-c4e55e11dfcd",
+                       "visibleRows":  4,
+                       "workspaces":  5,
+                       "last":  "13d84188-c7ac-4645-9e64-35578ff069d3"
+                   }
+               ],
+    "observations":  [
+                         {
+                             "pid":  35312,
+                             "pipe":  "\\\\.\\pipe\\flowmux-35312-9d96cb5f-f9b1-4329-a6a5-923431f41d1d",
+                             "elapsedMs":  922,
+                             "kind":  "startup"
+                         },
+                         {
+                             "name":  "initial",
+                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\initial.png",
+                             "window":  462192,
+                             "client":  [
+                                            1184,
+                                            761
+                                        ],
+                             "dpi":  96,
+                             "controls":  [
+                                              {
+                                                  "Handle":  1969838,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  4,
+                                                  "Y":  5,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1445742,
+                                                  "Class":  "Button",
+                                                  "Text":  "Workspaces",
+                                                  "X":  36,
+                                                  "Y":  5,
+                                                  "Width":  220,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13044996,
+                                                  "Class":  "Button",
+                                                  "Text":  "Settings",
+                                                  "X":  4,
+                                                  "Y":  669,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  23006268,
+                                                  "Class":  "Button",
+                                                  "Text":  "Files",
+                                                  "X":  130,
+                                                  "Y":  669,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13045274,
+                                                  "Class":  "Button",
+                                                  "Text":  "Search",
+                                                  "X":  4,
+                                                  "Y":  697,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2295436,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open file",
+                                                  "X":  130,
+                                                  "Y":  697,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  266182,
+                                                  "Class":  "Button",
+                                                  "Text":  "Notifications (0)",
+                                                  "X":  4,
+                                                  "Y":  725,
+                                                  "Width":  252,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  12979174,
+                                                  "Class":  "Button",
+                                                  "Text":  "Previous",
+                                                  "X":  0,
+                                                  "Y":  0,
+                                                  "Width":  1,
+                                                  "Height":  1,
+                                                  "Style":  1073807371,
+                                                  "Font":  1896488099,
+                                                  "Shown":  false,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  397304,
+                                                  "Class":  "Button",
+                                                  "Text":  "Next",
+                                                  "X":  0,
+                                                  "Y":  0,
+                                                  "Width":  1,
+                                                  "Height":  1,
+                                                  "Style":  1073807371,
+                                                  "Font":  1896488099,
+                                                  "Shown":  false,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2494070,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  40,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  397320,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글",
+                                                  "X":  264,
+                                                  "Y":  4,
+                                                  "Width":  168,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1249270,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close tab",
+                                                  "X":  432,
+                                                  "Y":  4,
+                                                  "Width":  22,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1118236,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  1120,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1118206,
+                                                  "Class":  "Button",
+                                                  "Text":  "Pane actions",
+                                                  "X":  1152,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              }
+                                          ],
+                             "background":  "#24272e",
+                             "layout":  {
+                                            "dividers":  [
+
+                                                         ],
+                                            "panes":  [
+                                                          [
+                                                              "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                              {
+                                                                  "height":  753,
+                                                                  "width":  916,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              }
+                                                          ]
+                                                      ]
+                                        },
+                             "chrome":  {
+                                            "controls":  [
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1969838,
+                                                                 "kind":  "workspace_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  4,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1445742,
+                                                                 "kind":  "workspace_header",
+                                                                 "label":  "Workspaces",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  220,
+                                                                              "x":  36,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13044996,
+                                                                 "kind":  "settings",
+                                                                 "label":  "Settings",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  669
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  23006268,
+                                                                 "kind":  "files",
+                                                                 "label":  "Files",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  669
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13045274,
+                                                                 "kind":  "search_all",
+                                                                 "label":  "Search",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  697
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2295436,
+                                                                 "kind":  "open_file",
+                                                                 "label":  "Open file",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  697
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  266182,
+                                                                 "kind":  "notifications",
+                                                                 "label":  "Notifications (0)",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  252,
+                                                                              "x":  4,
+                                                                              "y":  725
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  12979174,
+                                                                 "kind":  "sidebar_previous",
+                                                                 "label":  "Previous",
+                                                                 "layout_visible":  false,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  1,
+                                                                              "width":  1,
+                                                                              "x":  0,
+                                                                              "y":  0
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  397304,
+                                                                 "kind":  "sidebar_next",
+                                                                 "label":  "Next",
+                                                                 "layout_visible":  false,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  1,
+                                                                              "width":  1,
+                                                                              "x":  0,
+                                                                              "y":  0
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2494070,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  40
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  null,
+                                                                 "workspace":  "f1215e98-6247-4058-bf0f-c4e55e11dfcd"
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  397320,
+                                                                 "kind":  "tab",
+                                                                 "label":  "workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  168,
+                                                                              "x":  264,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1249270,
+                                                                 "kind":  "tab_close",
+                                                                 "label":  "Close tab",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  22,
+                                                                              "x":  432,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1118236,
+                                                                 "kind":  "pane_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  1120,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1118206,
+                                                                 "kind":  "pane_menu",
+                                                                 "label":  "Pane actions",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  1152,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             }
+                                                         ],
+                                            "dpi":  96,
+                                            "sidebar_offset":  0,
+                                            "sidebar_width_dip":  260,
+                                            "theme":  "dark",
+                                            "workspace_row_height_dip":  58
+                                        },
+                             "terminalIdentities":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6:35036",
+                             "capture":  {
+                                             "background":  "#24272e",
+                                             "controls":  [
+                                                              {
+                                                                  "handle":  1118236,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  1120,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  23006268,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  669
+                                                              },
+                                                              {
+                                                                  "handle":  1445742,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  220,
+                                                                  "x":  36,
+                                                                  "y":  5
+                                                              },
+                                                              {
+                                                                  "handle":  13044996,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  669
+                                                              },
+                                                              {
+                                                                  "handle":  397320,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  168,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  1249270,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  22,
+                                                                  "x":  432,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  266182,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  252,
+                                                                  "x":  4,
+                                                                  "y":  725
+                                                              },
+                                                              {
+                                                                  "handle":  1969838,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  4,
+                                                                  "y":  5
+                                                              },
+                                                              {
+                                                                  "handle":  1118206,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  1152,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  2295436,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  697
+                                                              },
+                                                              {
+                                                                  "handle":  2494070,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  40
+                                                              },
+                                                              {
+                                                                  "handle":  13045274,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  697
+                                                              }
+                                                          ],
+                                             "format":  "bmp-rgb32",
+                                             "height":  761,
+                                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\initial.bmp",
+                                             "scope":  "actual native chrome painters; WebView pixels omitted",
+                                             "width":  1184
+                                         }
+                         },
+                         {
+                             "name":  "overflow-last",
+                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-last.png",
+                             "window":  462192,
+                             "client":  [
+                                            900,
+                                            400
+                                        ],
+                             "dpi":  96,
+                             "controls":  [
+                                              {
+                                                  "Handle":  397292,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  4,
+                                                  "Y":  5,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  527750,
+                                                  "Class":  "Button",
+                                                  "Text":  "Workspaces",
+                                                  "X":  36,
+                                                  "Y":  5,
+                                                  "Width":  220,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2231982,
+                                                  "Class":  "Button",
+                                                  "Text":  "Settings",
+                                                  "X":  4,
+                                                  "Y":  308,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1707886,
+                                                  "Class":  "Button",
+                                                  "Text":  "Files",
+                                                  "X":  130,
+                                                  "Y":  308,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13307140,
+                                                  "Class":  "Button",
+                                                  "Text":  "Search",
+                                                  "X":  4,
+                                                  "Y":  336,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  23268412,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open file",
+                                                  "X":  130,
+                                                  "Y":  336,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13307418,
+                                                  "Class":  "Button",
+                                                  "Text":  "Notifications (0)",
+                                                  "X":  4,
+                                                  "Y":  364,
+                                                  "Width":  252,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2557580,
+                                                  "Class":  "Button",
+                                                  "Text":  "Previous",
+                                                  "X":  4,
+                                                  "Y":  280,
+                                                  "Width":  124,
+                                                  "Height":  24,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  528326,
+                                                  "Class":  "Button",
+                                                  "Text":  "Next",
+                                                  "X":  130,
+                                                  "Y":  280,
+                                                  "Width":  124,
+                                                  "Height":  24,
+                                                  "Style":  1476460555,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  false
+                                              },
+                                              {
+                                                  "Handle":  13241318,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  0,
+                                                  "Y":  0,
+                                                  "Width":  1,
+                                                  "Height":  1,
+                                                  "Style":  1073807371,
+                                                  "Font":  1896488099,
+                                                  "Shown":  false,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  659448,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  40,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2756214,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  98,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  659464,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  156,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1511414,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  214,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1380380,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글",
+                                                  "X":  264,
+                                                  "Y":  4,
+                                                  "Width":  168,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1380350,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close tab",
+                                                  "X":  432,
+                                                  "Y":  4,
+                                                  "Width":  22,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  659322,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  836,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  986486,
+                                                  "Class":  "Button",
+                                                  "Text":  "Pane actions",
+                                                  "X":  868,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              }
+                                          ],
+                             "background":  "#24272e",
+                             "layout":  {
+                                            "dividers":  [
+
+                                                         ],
+                                            "panes":  [
+                                                          [
+                                                              "cdf7830e-f297-4852-800b-ddd18c1e0f2f",
+                                                              {
+                                                                  "height":  392,
+                                                                  "width":  632,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              }
+                                                          ]
+                                                      ]
+                                        },
+                             "chrome":  {
+                                            "controls":  [
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  397292,
+                                                                 "kind":  "workspace_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  4,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  527750,
+                                                                 "kind":  "workspace_header",
+                                                                 "label":  "Workspaces",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  220,
+                                                                              "x":  36,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2231982,
+                                                                 "kind":  "settings",
+                                                                 "label":  "Settings",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  308
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1707886,
+                                                                 "kind":  "files",
+                                                                 "label":  "Files",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  308
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13307140,
+                                                                 "kind":  "search_all",
+                                                                 "label":  "Search",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  336
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  23268412,
+                                                                 "kind":  "open_file",
+                                                                 "label":  "Open file",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  336
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13307418,
+                                                                 "kind":  "notifications",
+                                                                 "label":  "Notifications (0)",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  252,
+                                                                              "x":  4,
+                                                                              "y":  364
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2557580,
+                                                                 "kind":  "sidebar_previous",
+                                                                 "label":  "Previous",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  24,
+                                                                              "width":  124,
+                                                                              "x":  4,
+                                                                              "y":  280
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  528326,
+                                                                 "kind":  "sidebar_next",
+                                                                 "label":  "Next",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  24,
+                                                                              "width":  124,
+                                                                              "x":  130,
+                                                                              "y":  280
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13241318,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  false,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  1,
+                                                                              "width":  1,
+                                                                              "x":  0,
+                                                                              "y":  0
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "f1215e98-6247-4058-bf0f-c4e55e11dfcd"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  659448,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  40
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "a09c13ec-c158-4bb7-a712-ff40eefed341"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2756214,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  98
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "f5c0d5e4-88de-4ec7-9a55-4d67e86a6d55"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  659464,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  156
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "abf22049-2df9-4527-9914-c1476944510b"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1511414,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  214
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  null,
+                                                                 "workspace":  "13d84188-c7ac-4645-9e64-35578ff069d3"
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1380380,
+                                                                 "kind":  "tab",
+                                                                 "label":  "cmd",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "cdf7830e-f297-4852-800b-ddd18c1e0f2f",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  168,
+                                                                              "x":  264,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  "c2551161-4909-438f-839e-8512917c1735",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1380350,
+                                                                 "kind":  "tab_close",
+                                                                 "label":  "Close tab",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "cdf7830e-f297-4852-800b-ddd18c1e0f2f",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  22,
+                                                                              "x":  432,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "c2551161-4909-438f-839e-8512917c1735",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  659322,
+                                                                 "kind":  "pane_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "cdf7830e-f297-4852-800b-ddd18c1e0f2f",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  836,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "c2551161-4909-438f-839e-8512917c1735",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  986486,
+                                                                 "kind":  "pane_menu",
+                                                                 "label":  "Pane actions",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "cdf7830e-f297-4852-800b-ddd18c1e0f2f",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  868,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "c2551161-4909-438f-839e-8512917c1735",
+                                                                 "workspace":  null
+                                                             }
+                                                         ],
+                                            "dpi":  96,
+                                            "sidebar_offset":  1,
+                                            "sidebar_width_dip":  260,
+                                            "theme":  "dark",
+                                            "workspace_row_height_dip":  58
+                                        },
+                             "terminalIdentities":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6:35036,7192c07f-8148-4400-acb4-8ee6b6fce957:26100,a392140d-22fc-454b-99d6-09bb66499a2a:27352,a5610c05-9c53-4a86-92ca-843b89f4493a:31800,c2551161-4909-438f-839e-8512917c1735:29260",
+                             "capture":  {
+                                             "background":  "#24272e",
+                                             "controls":  [
+                                                              {
+                                                                  "handle":  528326,
+                                                                  "height":  24,
+                                                                  "kind":  "button",
+                                                                  "width":  124,
+                                                                  "x":  130,
+                                                                  "y":  280
+                                                              },
+                                                              {
+                                                                  "handle":  397292,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  4,
+                                                                  "y":  5
+                                                              },
+                                                              {
+                                                                  "handle":  2756214,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  98
+                                                              },
+                                                              {
+                                                                  "handle":  2557580,
+                                                                  "height":  24,
+                                                                  "kind":  "button",
+                                                                  "width":  124,
+                                                                  "x":  4,
+                                                                  "y":  280
+                                                              },
+                                                              {
+                                                                  "handle":  2231982,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  308
+                                                              },
+                                                              {
+                                                                  "handle":  13307140,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  336
+                                                              },
+                                                              {
+                                                                  "handle":  659448,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  40
+                                                              },
+                                                              {
+                                                                  "handle":  1380350,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  22,
+                                                                  "x":  432,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  527750,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  220,
+                                                                  "x":  36,
+                                                                  "y":  5
+                                                              },
+                                                              {
+                                                                  "handle":  986486,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  868,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  23268412,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  336
+                                                              },
+                                                              {
+                                                                  "handle":  659464,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  156
+                                                              },
+                                                              {
+                                                                  "handle":  659322,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  836,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  13307418,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  252,
+                                                                  "x":  4,
+                                                                  "y":  364
+                                                              },
+                                                              {
+                                                                  "handle":  1707886,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  308
+                                                              },
+                                                              {
+                                                                  "handle":  1511414,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  214
+                                                              },
+                                                              {
+                                                                  "handle":  1380380,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  168,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              }
+                                                          ],
+                                             "format":  "bmp-rgb32",
+                                             "height":  400,
+                                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-last.bmp",
+                                             "scope":  "actual native chrome painters; WebView pixels omitted",
+                                             "width":  900
+                                         }
+                         },
+                         {
+                             "name":  "overflow-first",
+                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-first.png",
+                             "window":  462192,
+                             "client":  [
+                                            900,
+                                            400
+                                        ],
+                             "dpi":  96,
+                             "controls":  [
+                                              {
+                                                  "Handle":  1052022,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  4,
+                                                  "Y":  5,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  724858,
+                                                  "Class":  "Button",
+                                                  "Text":  "Workspaces",
+                                                  "X":  36,
+                                                  "Y":  5,
+                                                  "Width":  220,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1445886,
+                                                  "Class":  "Button",
+                                                  "Text":  "Settings",
+                                                  "X":  4,
+                                                  "Y":  308,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1445916,
+                                                  "Class":  "Button",
+                                                  "Text":  "Files",
+                                                  "X":  130,
+                                                  "Y":  308,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1576950,
+                                                  "Class":  "Button",
+                                                  "Text":  "Search",
+                                                  "X":  4,
+                                                  "Y":  336,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  725000,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open file",
+                                                  "X":  130,
+                                                  "Y":  336,
+                                                  "Width":  126,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2821750,
+                                                  "Class":  "Button",
+                                                  "Text":  "Notifications (0)",
+                                                  "X":  4,
+                                                  "Y":  364,
+                                                  "Width":  252,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  724984,
+                                                  "Class":  "Button",
+                                                  "Text":  "Previous",
+                                                  "X":  4,
+                                                  "Y":  280,
+                                                  "Width":  124,
+                                                  "Height":  24,
+                                                  "Style":  1476460555,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  false
+                                              },
+                                              {
+                                                  "Handle":  13306854,
+                                                  "Class":  "Button",
+                                                  "Text":  "Next",
+                                                  "X":  130,
+                                                  "Y":  280,
+                                                  "Width":  124,
+                                                  "Height":  24,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  593862,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  40,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2623116,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  98,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13372954,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  156,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  23333948,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  6,
+                                                  "Y":  214,
+                                                  "Width":  248,
+                                                  "Height":  56,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  13372676,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                  "X":  0,
+                                                  "Y":  0,
+                                                  "Width":  1,
+                                                  "Height":  1,
+                                                  "Style":  1073807371,
+                                                  "Font":  1896488099,
+                                                  "Shown":  false,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  1773422,
+                                                  "Class":  "Button",
+                                                  "Text":  "workspace 한글",
+                                                  "X":  264,
+                                                  "Y":  4,
+                                                  "Width":  168,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  2297518,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close tab",
+                                                  "X":  432,
+                                                  "Y":  4,
+                                                  "Width":  22,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  593286,
+                                                  "Class":  "Button",
+                                                  "Text":  "+",
+                                                  "X":  836,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  462828,
+                                                  "Class":  "Button",
+                                                  "Text":  "Pane actions",
+                                                  "X":  868,
+                                                  "Y":  4,
+                                                  "Width":  28,
+                                                  "Height":  28,
+                                                  "Style":  1342242827,
+                                                  "Font":  1896488099,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              }
+                                          ],
+                             "background":  "#24272e",
+                             "layout":  {
+                                            "dividers":  [
+
+                                                         ],
+                                            "panes":  [
+                                                          [
+                                                              "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                              {
+                                                                  "height":  392,
+                                                                  "width":  632,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              }
+                                                          ]
+                                                      ]
+                                        },
+                             "chrome":  {
+                                            "controls":  [
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1052022,
+                                                                 "kind":  "workspace_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  4,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  724858,
+                                                                 "kind":  "workspace_header",
+                                                                 "label":  "Workspaces",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  220,
+                                                                              "x":  36,
+                                                                              "y":  5
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1445886,
+                                                                 "kind":  "settings",
+                                                                 "label":  "Settings",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  308
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1445916,
+                                                                 "kind":  "files",
+                                                                 "label":  "Files",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  308
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  1576950,
+                                                                 "kind":  "search_all",
+                                                                 "label":  "Search",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  4,
+                                                                              "y":  336
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  725000,
+                                                                 "kind":  "open_file",
+                                                                 "label":  "Open file",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  126,
+                                                                              "x":  130,
+                                                                              "y":  336
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2821750,
+                                                                 "kind":  "notifications",
+                                                                 "label":  "Notifications (0)",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  26,
+                                                                              "width":  252,
+                                                                              "x":  4,
+                                                                              "y":  364
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  724984,
+                                                                 "kind":  "sidebar_previous",
+                                                                 "label":  "Previous",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  24,
+                                                                              "width":  124,
+                                                                              "x":  4,
+                                                                              "y":  280
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13306854,
+                                                                 "kind":  "sidebar_next",
+                                                                 "label":  "Next",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  24,
+                                                                              "width":  124,
+                                                                              "x":  130,
+                                                                              "y":  280
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  593862,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  40
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  null,
+                                                                 "workspace":  "f1215e98-6247-4058-bf0f-c4e55e11dfcd"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  2623116,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  98
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "a09c13ec-c158-4bb7-a712-ff40eefed341"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13372954,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  156
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "f5c0d5e4-88de-4ec7-9a55-4d67e86a6d55"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  23333948,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  56,
+                                                                              "width":  248,
+                                                                              "x":  6,
+                                                                              "y":  214
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "abf22049-2df9-4527-9914-c1476944510b"
+                                                             },
+                                                             {
+                                                                 "focused":  false,
+                                                                 "handle":  13372676,
+                                                                 "kind":  "workspace",
+                                                                 "label":  "workspace 한글\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\workspace 한글",
+                                                                 "layout_visible":  false,
+                                                                 "native_visible":  false,
+                                                                 "pane":  null,
+                                                                 "rect":  {
+                                                                              "height":  1,
+                                                                              "width":  1,
+                                                                              "x":  0,
+                                                                              "y":  0
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  null,
+                                                                 "workspace":  "13d84188-c7ac-4645-9e64-35578ff069d3"
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  1773422,
+                                                                 "kind":  "tab",
+                                                                 "label":  "workspace 한글",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  168,
+                                                                              "x":  264,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  true,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  2297518,
+                                                                 "kind":  "tab_close",
+                                                                 "label":  "Close tab",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  22,
+                                                                              "x":  432,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  593286,
+                                                                 "kind":  "pane_add",
+                                                                 "label":  "+",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  836,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             },
+                                                             {
+                                                                 "focused":  true,
+                                                                 "handle":  462828,
+                                                                 "kind":  "pane_menu",
+                                                                 "label":  "Pane actions",
+                                                                 "layout_visible":  true,
+                                                                 "native_visible":  false,
+                                                                 "pane":  "3a8cdfd1-ceba-48eb-b425-201ac799de75",
+                                                                 "rect":  {
+                                                                              "height":  28,
+                                                                              "width":  28,
+                                                                              "x":  868,
+                                                                              "y":  4
+                                                                          },
+                                                                 "selected":  false,
+                                                                 "surface":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6",
+                                                                 "workspace":  null
+                                                             }
+                                                         ],
+                                            "dpi":  96,
+                                            "sidebar_offset":  0,
+                                            "sidebar_width_dip":  260,
+                                            "theme":  "dark",
+                                            "workspace_row_height_dip":  58
+                                        },
+                             "terminalIdentities":  "518b6c19-dbd1-49f4-acdd-8210b9f23ab6:35036,7192c07f-8148-4400-acb4-8ee6b6fce957:26100,a392140d-22fc-454b-99d6-09bb66499a2a:27352,a5610c05-9c53-4a86-92ca-843b89f4493a:31800,c2551161-4909-438f-839e-8512917c1735:29260",
+                             "capture":  {
+                                             "background":  "#24272e",
+                                             "controls":  [
+                                                              {
+                                                                  "handle":  2623116,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  98
+                                                              },
+                                                              {
+                                                                  "handle":  1576950,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  336
+                                                              },
+                                                              {
+                                                                  "handle":  2821750,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  252,
+                                                                  "x":  4,
+                                                                  "y":  364
+                                                              },
+                                                              {
+                                                                  "handle":  2297518,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  22,
+                                                                  "x":  432,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  1052022,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  4,
+                                                                  "y":  5
+                                                              },
+                                                              {
+                                                                  "handle":  1773422,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  168,
+                                                                  "x":  264,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  593286,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  836,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  1445916,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  308
+                                                              },
+                                                              {
+                                                                  "handle":  1445886,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  4,
+                                                                  "y":  308
+                                                              },
+                                                              {
+                                                                  "handle":  725000,
+                                                                  "height":  26,
+                                                                  "kind":  "button",
+                                                                  "width":  126,
+                                                                  "x":  130,
+                                                                  "y":  336
+                                                              },
+                                                              {
+                                                                  "handle":  724984,
+                                                                  "height":  24,
+                                                                  "kind":  "button",
+                                                                  "width":  124,
+                                                                  "x":  4,
+                                                                  "y":  280
+                                                              },
+                                                              {
+                                                                  "handle":  13306854,
+                                                                  "height":  24,
+                                                                  "kind":  "button",
+                                                                  "width":  124,
+                                                                  "x":  130,
+                                                                  "y":  280
+                                                              },
+                                                              {
+                                                                  "handle":  462828,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  28,
+                                                                  "x":  868,
+                                                                  "y":  4
+                                                              },
+                                                              {
+                                                                  "handle":  593862,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  40
+                                                              },
+                                                              {
+                                                                  "handle":  23333948,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  214
+                                                              },
+                                                              {
+                                                                  "handle":  13372954,
+                                                                  "height":  56,
+                                                                  "kind":  "button",
+                                                                  "width":  248,
+                                                                  "x":  6,
+                                                                  "y":  156
+                                                              },
+                                                              {
+                                                                  "handle":  724858,
+                                                                  "height":  28,
+                                                                  "kind":  "button",
+                                                                  "width":  220,
+                                                                  "x":  36,
+                                                                  "y":  5
+                                                              }
+                                                          ],
+                                             "format":  "bmp-rgb32",
+                                             "height":  400,
+                                             "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-first.bmp",
+                                             "scope":  "actual native chrome painters; WebView pixels omitted",
+                                             "width":  900
+                                         }
+                         },
+                         {
+                             "stdoutComplete":  true,
+                             "exitCode":  0,
+                             "stderrComplete":  true,
+                             "stderr":  "",
+                             "kind":  "host-exit",
+                             "stdout":  ""
+                         }
+                     ],
+    "artifacts":  [
+                      {
+                          "scope":  "owned hidden native chrome only",
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\initial.png",
+                          "sha256":  "c08faed6dc170729e0b86422c1081d709508eaf4899d0fcc6abb8ad4b8fb1f20",
+                          "bytes":  11226
+                      },
+                      {
+                          "scope":  "owned hidden native chrome only",
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-last.png",
+                          "sha256":  "3421e387beecf611ad2b4cc4e2f6bc628292ec44f5e26545f26a984e7758f145",
+                          "bytes":  14074
+                      },
+                      {
+                          "scope":  "owned hidden native chrome only",
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-f39d4de8-6337-4245-8faa-c59b98712125\\overflow-first.png",
+                          "sha256":  "1d330d8a5459b240888771f6d82abd14fe505853697cccbb5586aa6be17f1c63",
+                          "bytes":  14075
+                      }
+                  ],
+    "desktopInput":  false,
+    "clipboardAccess":  false,
+    "webviewCapture":  false,
+    "deferred":  [
+                     "No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.",
+                     "PNG uses the production native button renderer and live HWND geometry on an offscreen DIB; it is not a composed desktop/GPU screenshot. WebView pixels are absent."
+                 ],
+    "status":  "passed_background_chrome_subset",
+    "hosts":  [
+                  35312
+              ],
+    "shells":  [
+                   31800,
+                   27352,
+                   29260,
+                   35036,
+                   26100
+               ],
+    "clientPids":  [
+                       35320,
+                       20908,
+                       37324,
+                       32132,
+                       33292,
+                       30068,
+                       33248,
+                       14704,
+                       16536,
+                       36084,
+                       27852,
+                       7872,
+                       30728,
+                       13068,
+                       31496,
+                       17812,
+                       38396
+                   ],
+    "elapsedMs":  5544,
+    "finished":  "2026-09-28T07:30:26.3510074Z"
+}

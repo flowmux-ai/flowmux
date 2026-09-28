@@ -382,20 +382,28 @@ discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
 accessibility acceptance remain pending. See
 [settings verification](evidence/2026-09-28/settings.md).
 
-The native shell uses a 185-DIP sidebar with a **Workspaces** header, workspace
-rows beginning at 40 DIP, and 28-DIP pane tab strips. Each pane has a right-edge
-**+** and **Pane actions** menu; overflowing tabs remain reachable from that menu.
-The footer places Settings/Files and Search/Open file in two columns, followed by
-full-width Notices. Theme and DPI updates retain native controls and embedded views while applying
-selection marks and scaled typography. The terminal background/foreground and
-16 ANSI colors now match the existing Linux defaults (dark `#282c34`/`#ffffff`).
+The native shell uses a 260-DIP sidebar, reduced to at most one third of a
+narrow window, with a **Workspaces** header and 58-DIP rows beginning at 40 DIP.
+Each row shows its name and the active surface's current directory on separate
+lines, with an unread-count prefix when present. Rounded selection backgrounds
+and color stripes retain workspace colors. Compact 28-DIP pane tabs show
+terminal/browser/editor glyphs and distinguish the focused pane's selected tab.
+Each pane has right-edge **+** and **Pane actions** controls; overflowing tabs
+remain reachable from that menu. The footer places Settings/Files and Search/Open
+file in two columns, followed by full-width Notices. The terminal background,
+foreground and 16 ANSI colors match the Linux defaults (dark `#282c34`/`#ffffff`).
 
-This is the first visual alignment step. A hidden native check passes for live
-control geometry, Korean labels, light/dark rendering and unchanged terminal
-identities. Workspace metadata presentation, Agents, symbolic icons, full physical
-DPI/IME and accessibility parity remain open. Offscreen renders use the production
-native renderer and exclude WebView/GPU contents; they cannot establish full
-visual parity. See the [chrome evidence](evidence/2026-09-28/chrome.md).
+Hidden native checks verify Unicode cwd updates, rename/color changes with stable
+control handles and terminal PIDs, and focused-tab accents. Light/dark theme checks
+preserve identities and PIDs in a two-terminal split. A later mixed
+terminal/browser/editor capture provides visual inspection of the surface glyphs.
+A separate overflow check covers five workspaces with four visible rows at
+900×400, active first/last visibility, pager endpoints and bounds.
+See the [current chrome evidence](evidence/2026-09-28/chrome-details.md) and
+[earlier visual stage](evidence/2026-09-28/chrome.md). Agents and broader status
+metadata, the full icon set, physical IME/DPI, high contrast and accessibility
+remain open. These production native renders exclude composed WebView/GPU
+contents and do not establish full visual parity.
 
 The terminal minimap is enabled by default at 40 CSS pixels wide and 50% opacity.
 Width accepts 12–96 and opacity 0–100. It previews a movable window of retained

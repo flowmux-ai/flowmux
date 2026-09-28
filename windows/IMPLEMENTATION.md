@@ -187,15 +187,17 @@ See [pane evidence](evidence/2026-09-28/panes.md); U02 and U04 remain partial.
 Workspace metadata/lifecycle now has native menus and a UTF-16 name/color editor,
 plus list/current/focus/rename/color/reorder/close CLI operations. Tab rename uses
 the existing shared title-lock semantics. Unicode names retain their codepoints;
-Win32 button/menu captions escape literal ampersands. Metadata updates rebuild
-controls without requesting terminal focus; workspace actions use stable IDs.
+Win32 button/menu captions escape literal ampersands. Name, color and cwd updates
+refresh existing native controls without requesting terminal focus; workspace
+actions use stable IDs.
 Native hidden tests verify 41 reorders with stable processes, hidden caller
 context, close of three terminals plus three descendants without affecting
 survivors, and restart preserving order/color/locked Unicode names/history.
 The editor detects metadata changed elsewhere before applying a pending edit.
 Native Rust tests construct its controls hidden and check UTF-16 values.
-Real menus/IME/DPI/accessibility, drag reordering, side panel overflow,
-automatic-name reset and an empty-window UI remain pending. The final workspace
+Sidebar Previous/Next controls now have hidden overflow evidence. Real
+menus/IME/DPI/accessibility, drag reordering, automatic-name reset and an
+empty-window UI remain pending. The final workspace
 is protected until empty-window behavior is implemented. See
 [workspace evidence](evidence/2026-09-28/workspaces.md).
 
@@ -685,20 +687,33 @@ clipboard cut/paste, batch/directory/remote operations, overwrite and physical
 keyboard/IME/focus acceptance remain open.
 
 
-The first native shell visual alignment stage implements a 185-DIP sidebar,
-Workspaces header and rows starting at 40 DIP, compact 28-DIP tabs, inline close,
-and per-pane +/Pane actions controls with an overflow menu. Sidebar overflow has
-Previous/Next controls; its footer uses two columns for Settings/Files and
-Search/Open file, followed by full-width Notices. Native HWND controls receive
-dark/light drawing and DPI-scaled fonts. The Windows terminal copies the existing
-Linux background, foreground and 16 ANSI colors; Linux/macOS sources are unchanged.
+The native shell now has a 260-DIP sidebar capped at one third of client width,
+58-DIP workspace rows starting at 40 DIP, compact 28-DIP tabs, inline close and
+per-pane +/Pane actions controls. Workspace rows paint name and current active
+surface cwd on two lines, unread counts, rounded selection and custom-color
+stripes. Cwd/metadata refresh retains HWNDs. Terminal/browser/editor glyphs and
+focused-pane tab accents distinguish surface roles. Previous/Next handles sidebar
+overflow; the footer keeps two action columns and full-width Notices. Native
+controls use dark/light drawing and DPI-scaled fonts. Terminal background,
+foreground and 16 ANSI colors retain the Linux defaults; shared sources are unchanged.
 
-The hidden native chrome check passes in 6.070 seconds using the production
-renderer on an offscreen DIB with actual live control identities. It checks
-non-overlapping geometry, exact light/dark background and selection colors,
-Linux terminal background settings and stable terminal IDs/PIDs. Inspection
-of the dark artifact found legible Korean labels. Initial empty PrintWindow
-captures remain historical capture-only evidence. Workspace metadata presentation,
-Agents, symbolic icons and physical DPI/IME/accessibility parity remain open.
-See [chrome evidence](evidence/2026-09-28/chrome.md); these native-only renders
-exclude WebView/GPU contents and do not establish full visual or installer parity.
+The second-stage hidden details case passes three checks in 9.597 seconds:
+Unicode cwd and rename/color updates preserve controls and PIDs, focused-tab
+accents follow the selected pane, and light/dark themes preserve terminal
+identities/PIDs in a two-terminal split. A later mixed terminal/browser/editor
+capture supports visual inspection of surface glyphs; it does not establish
+per-pixel icon identity or theme transitions across mixed surface types. The separate 6.431-second overflow case passes at 900×400 with five
+workspaces and four visible rows, checking active first/last visibility, pager
+endpoints and bounds. Debug build (83.345 seconds) and final Clippy (24.729 seconds)
+pass. See [current chrome evidence](evidence/2026-09-28/chrome-details.md).
+The six-check workspace lifecycle regression also passes in 16.076 seconds,
+including two-host restart, 41 reorders, descendant cleanup and Korean history.
+Release packaging and its verification boundary are recorded in the current
+chrome evidence. Replacement of the running application was not performed.
+
+The [first-stage evidence](evidence/2026-09-28/chrome.md), including its 6.070-second
+render case, is historical. Agents, broader workspace status metadata, the full
+symbolic icon set and some popup/panel styling still differ. Physical pointer,
+keyboard/IME, per-monitor DPI, high contrast and accessibility remain unverified.
+Production native offscreen renders exclude composed WebView/GPU contents and do
+not establish full visual or installer parity.

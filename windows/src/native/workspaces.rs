@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Workspace metadata/lifecycle and native entry points. IDs survive reordering.
 use super::*;
-use windows_sys::Win32::System::SystemServices::{SS_CENTER, SS_CENTERIMAGE};
 #[path = "metadata_panel.rs"]
 mod editor;
 pub(super) use editor::{EditAction, Panel};
 
-thread_local! { static SWATCHES: RefCell<HashMap<isize, COLORREF>> = RefCell::new(HashMap::new()); }
-pub(super) fn clear_swatches() {
-    SWATCHES.with(|colors| colors.borrow_mut().clear());
-}
-pub(super) fn swatch_color(hwnd: HWND) -> Option<COLORREF> {
-    SWATCHES.with(|colors| colors.borrow().get(&(hwnd as isize)).copied())
+pub(super) fn set_caption(window: HWND, caption: &str) {
+    let escaped = caption.replace('&', "&&");
+    unsafe {
+        let length = GetWindowTextLengthW(window).max(0) as usize;
+        let mut current = vec![0u16; length + 1];
+        let read =
+            GetWindowTextW(window, current.as_mut_ptr(), current.len() as i32).max(0) as usize;
+        if current[..read] != escaped.encode_utf16().collect::<Vec<_>>() {
+            SetWindowTextW(window, wide(&escaped).as_ptr());
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +27,84 @@ pub(super) enum EditTarget {
 }
 
 impl App {
+    pub(super) fn workspace_caption(&self, id: WorkspaceId) -> Option<String> {
+        let workspace = self.workspaces.iter().find(|w| w.id == id)?;
+        let cwd = self
+            .locate(workspace.active())
+            .map(|(_, _, cwd)| cwd)
+            .unwrap_or_else(|| workspace.cwd.clone());
+        let count = self
+            .notifications
+            .store
+            .entries()
+            .iter()
+            .filter(|entry| {
+                !entry.read
+                    && entry
+                        .surface
+                        .and_then(|s| self.locate(s))
+                        .map(|(i, _, _)| self.workspaces[i].id)
+                        .or(entry.workspace)
+                        == Some(id)
+            })
+            .count();
+        let prefix = if count > 0 {
+            format!("[{count}] ")
+        } else {
+            String::new()
+        };
+        Some(format!("{prefix}{}\n{}", workspace.name, cwd.display()))
+    }
+    pub(super) fn chrome_role(&self, action: &Action) -> chrome::Role {
+        match *action {
+            Action::Workspace(id) => {
+                let color = self
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == id)
+                    .and_then(|w| w.color.as_deref())
+                    .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
+                    .map(|rgb| ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff));
+                chrome::Role::Workspace {
+                    selected: self.workspace().id == id,
+                    color,
+                }
+            }
+            Action::Tab(pane, surface) => {
+                let kind = self
+                    .workspaces
+                    .iter()
+                    .flat_map(|w| w.leaves())
+                    .flat_map(|(_, _, tabs)| tabs)
+                    .find(|tab| tab.id == surface)
+                    .map_or(chrome::SurfaceIcon::Terminal, |tab| match tab.kind {
+                        SurfaceKind::Browser { .. } => chrome::SurfaceIcon::Browser,
+                        SurfaceKind::Editor { .. } => chrome::SurfaceIcon::Editor,
+                        _ => chrome::SurfaceIcon::Terminal,
+                    });
+                chrome::Role::Tab {
+                    selected: self.workspace().root.active_surface_id(pane) == Some(surface),
+                    focused: self.workspace().focused == pane,
+                    kind,
+                }
+            }
+            Action::PaneAdd(..)
+            | Action::PaneMenu(..)
+            | Action::TabClose(..)
+            | Action::NewWorkspace => chrome::Role::Tool,
+            _ => chrome::Role::Button,
+        }
+    }
+    pub(super) fn refresh_chrome_metadata(&self) {
+        for control in &self.controls {
+            if let Action::Workspace(id) = control.action {
+                if let Some(label) = self.workspace_caption(id) {
+                    set_caption(control.hwnd, &label);
+                }
+            }
+            chrome::set_role(control.hwnd, self.chrome_role(&control.action));
+        }
+    }
     pub(super) fn pane_actions_menu(
         &mut self,
         pane: PaneId,
@@ -109,7 +191,6 @@ impl App {
         let controls=self.controls.iter().map(|control| {
             let (kind,pane,surface,workspace,selected)=match control.action {
                 Action::Workspace(id)=>("workspace",None,None,Some(id),id==self.workspace().id),
-                Action::WorkspaceColor(id)=>("workspace_color",None,None,Some(id),false),
                 Action::Tab(pane,surface)=>("tab",Some(pane),Some(surface),None,self.workspace().root.active_surface_id(pane)==Some(surface)),
                 Action::TabClose(pane,surface)=>("tab_close",Some(pane),Some(surface),None,false),
                 Action::PaneAdd(pane,surface)=>("pane_add",Some(pane),Some(surface),None,false),
@@ -129,10 +210,10 @@ impl App {
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|p==self.workspace().focused),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
-        json!({"theme":self.settings.terminal.theme,"dpi":unsafe{GetDpiForWindow(self.window)}.max(96),"sidebar_offset":self.sidebar_offset,"controls":controls})
+        json!({"theme":self.settings.terminal.theme,"dpi":unsafe{GetDpiForWindow(self.window)}.max(96),"sidebar_offset":self.sidebar_offset,"sidebar_width_dip":260,"workspace_row_height_dip":58,"controls":controls})
     }
     pub(super) fn workspace_index(&self, id: WorkspaceId) -> anyhow::Result<usize> {
         self.workspaces
@@ -172,7 +253,7 @@ impl App {
                 model::validate_name(&name)?;
                 let index = self.workspace_index(WorkspaceId(workspace))?;
                 self.workspaces[index].name = name;
-                self.rebuild_without_focus()?;
+                self.refresh_chrome_metadata();
             }
             WorkspaceOp::Color {
                 workspace,
@@ -183,7 +264,7 @@ impl App {
                 let color = model::parse_color(color.as_deref().unwrap_or(""))?;
                 let index = self.workspace_index(WorkspaceId(workspace))?;
                 self.workspaces[index].color = color;
-                self.rebuild_without_focus()?;
+                self.refresh_chrome_metadata();
             }
             WorkspaceOp::Reorder { workspace, index } => {
                 model::reorder_workspace(
@@ -219,40 +300,6 @@ impl App {
         }
         Ok(json!({"ok":true}))
     }
-    pub(super) fn swatch(&mut self, id: WorkspaceId, color: &str) -> anyhow::Result<()> {
-        let rgb = u32::from_str_radix(&color[1..], 16)?;
-        let native = ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff);
-        unsafe {
-            let hwnd = CreateWindowExW(
-                0,
-                wide("STATIC").as_ptr(),
-                wide("■").as_ptr(),
-                WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-                0,
-                0,
-                1,
-                1,
-                self.window,
-                (self.controls.len() + 100) as HMENU,
-                GetModuleHandleW(std::ptr::null()),
-                std::ptr::null(),
-            );
-            checked((!hwnd.is_null()) as i32)?;
-            SendMessageW(
-                hwnd,
-                WM_SETFONT,
-                GetStockObject(DEFAULT_GUI_FONT) as WPARAM,
-                1,
-            );
-            chrome::register_control(hwnd, chrome::ControlRole::Static);
-            SWATCHES.with(|colors| colors.borrow_mut().insert(hwnd as isize, native));
-            let action = Action::WorkspaceColor(id);
-            CONTROL_ACTIONS
-                .with(|actions| actions.borrow_mut().insert(hwnd as isize, action.clone()));
-            self.controls.push(Control { hwnd, action });
-        }
-        Ok(())
-    }
     pub(super) fn context_menu(&mut self, action: Action, x: i32, y: i32) -> anyhow::Result<()> {
         let point = (x, y);
         match action {
@@ -266,9 +313,7 @@ impl App {
                 self.select(surface)?;
                 self.shell_menu(point)
             }
-            Action::Workspace(id) | Action::WorkspaceColor(id) => {
-                self.workspace_menu(id, Some(point))
-            }
+            Action::Workspace(id) => self.workspace_menu(id, Some(point)),
             Action::Tab(_, id) => {
                 if self.popup(&["Rename tab…"], &[], point)? == 1 {
                     self.edit_metadata(EditTarget::TabName(id))?;
