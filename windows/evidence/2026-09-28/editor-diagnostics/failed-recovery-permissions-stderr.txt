@@ -1,0 +1,25 @@
+Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windo
+ws\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowmux-3744-23cb1f7c-b4d9-4a2b-a4e4-e0cf
+5cc71f14","--json","editor","command","1f17f79e-1b6b-4fa3-a5e0-29249bffa557","replace-text","--text","edited 한글 한 é 
+😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nlast line\n"]; Owned CLI exit 1: {"error":"editor recovery was not persis
+ted: failed to set file permissions editor recovery data at C:\\Users\\jundu\\AppData\\Local\\flowmux\\windows\\editor-
+recovery\\editor-recovery\\481b33a89643083ea88116b9934758137e749c466ba78e908233abce51c0c0d3\\0483f022915bacdb0d0f9bdfa8
+6952ea306d2f4df12d53afad97bcca1b0ebd32-58ecd07861235728649584c0fa0682492f8a686e58cb7c09be2bb64db3410767.json: 매개 변수가 틀립
+니다. (os error 87)"}
+ 
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-e
+ditor.ps1:43 문자:9
++         throw ('Owned command failed: '+$Job.file+' '+($Job.arguments ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Owned command f...s error 87)"}
+ :String) [], RuntimeException
+    + FullyQualifiedErrorId : Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-gith 
+   ub-com-jsuya\work\flowmux\windows\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowm  
+  ux-3744-23cb1f7c-b4d9-4a2b-a4e4-e0cf5cc71f14","--json","editor","command","1f17f79e-1b6b-4fa3-a5e0-29249bffa557","   
+ replace-text","--text","edited 한글 한 é 😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nlast line\n"]; Owned CLI ex    
+it 1: {"error":"editor recovery was not persisted: failed to set file permissions editor recovery data at C:\\User    s
+\\jundu\\AppData\\Local\\flowmux\\windows\\editor-recovery\\editor-recovery\\481b33a89643083ea88116b9934758137e74    9c
+466ba78e908233abce51c0c0d3\\0483f022915bacdb0d0f9bdfa86952ea306d2f4df12d53afad97bcca1b0ebd32-58ecd07861235728649    584
+c0fa0682492f8a686e58cb7c09be2bb64db3410767.json: 매개 변수가 틀립니다. (os error 87)"}
+ 
+ 

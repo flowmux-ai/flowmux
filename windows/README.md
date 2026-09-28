@@ -22,6 +22,10 @@ windows/target/debug/flowmuxctl.exe doctor
 windows/target/debug/flowmuxctl.exe --json tree
 ```
 
+Windows editor development is documented in [EDITOR.md](EDITOR.md): the native host
+embeds Monaco in dedicated editor tabs and exposes file operations through the
+`editor` CLI. Desktop entry points and acceptance checks are still in progress.
+
 The committed terminal assets allow builds without Node. To change them:
 
 ```sh

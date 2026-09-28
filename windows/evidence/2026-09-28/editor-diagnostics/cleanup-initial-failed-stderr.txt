@@ -1,0 +1,8 @@
+Recorded processes are possibly alive or could not be identified; no process was stopped
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\editor-clea
+nup.ps1:1805 문자:23
++ ... fied.Count){throw 'Recorded processes are possibly alive or could not ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Recorded proces...ess was stopped:String) [], RuntimeException
+    + FullyQualifiedErrorId : Recorded processes are possibly alive or could not be identified; no process was stopped
+ 

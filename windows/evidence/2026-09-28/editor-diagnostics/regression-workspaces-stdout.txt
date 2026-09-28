@@ -1,0 +1,63 @@
+{
+    "started":  "2026-09-28T11:58:43.1703364+09:00",
+    "mode":  "background",
+    "checks":  [
+                   {
+                       "color":  "#12abef",
+                       "locked":  true,
+                       "name":  "korean_nfd_emoji_and_ampersands_preserved_in_metadata_and_native_captions",
+                       "tabName":  "TAB-한글 한 é 😀 \u0026 \u0026\u0026 name",
+                       "workspaceName":  "한글 한 é 😀 \u0026 \u0026\u0026 name"
+                   },
+                   {
+                       "name":  "invalid_names_colors_reorders_and_missing_ids_leave_model_unchanged"
+                   },
+                   {
+                       "name":  "forty_one_reorders_preserve_all_pids_active_identity_and_hidden_child_context",
+                       "count":  41,
+                       "order":  [
+                                     "9f9c553c-4f95-4fd2-af16-e922b4e697e5",
+                                     "62ee1abc-79fc-4b32-bc4c-f1791ebafa04",
+                                     "cde06eac-289f-416d-8980-2b449270b139"
+                                 ]
+                   },
+                   {
+                       "survivorPids":  [
+                                            33560,
+                                            30664
+                                        ],
+                       "name":  "inactive_workspace_close_terminates_all_three_terminals_and_three_descendants_only",
+                       "stoppedPids":  [
+                                           28404,
+                                           38032,
+                                           33540,
+                                           32840,
+                                           39464,
+                                           37524
+                                       ]
+                   },
+                   {
+                       "name":  "restart_restores_workspace_order_color_unicode_names_locked_tab_title_and_korean_history"
+                   },
+                   {
+                       "name":  "active_workspace_close_selects_survivor_color_clear_and_final_workspace_protection"
+                   }
+               ],
+    "hosts":  [
+                  {
+                      "launchedUtc":  "2026-09-28T02:58:43.1781532Z",
+                      "pid":  37832,
+                      "pipe":  "\\\\.\\pipe\\flowmux-37832-53d6d2e9-8c69-450e-b6a5-0026fdebc464",
+                      "discoveryWrittenUtc":  "2026-09-28T02:58:43.4142340Z"
+                  },
+                  {
+                      "launchedUtc":  "2026-09-28T02:58:52.0398084Z",
+                      "pid":  23084,
+                      "pipe":  "\\\\.\\pipe\\flowmux-23084-db8fa3bb-2ef6-4f0b-8041-6b015014afc0",
+                      "discoveryWrittenUtc":  "2026-09-28T02:58:52.1950394Z"
+                  }
+              ],
+    "status":  "passed_background_workspace_subset",
+    "pending":  "Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and empty-window UI remain pending.",
+    "finished":  "2026-09-28T11:58:54.9187973+09:00"
+}

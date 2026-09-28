@@ -1,0 +1,159 @@
+{
+    "started":  "2026-09-28T11:54:56.1205832+09:00",
+    "mode":  "background",
+    "case":  "encoding",
+    "checks":  [
+                   {
+                       "name":  "utf8_lf_crlf_and_bom_crlf_round_trip_exact_file_bytes_without_normalizing_unicode",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-profile",
+                             "surface":  "70e7f57e-5c45-436d-9aca-b26a29df22b8",
+                             "pid":  34384,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "content":  "edited 한글 한 é 😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nlast line\n",
+                             "variant":  "lf",
+                             "case":  "encoding",
+                             "encoding":  "UTF-8",
+                             "eol":  "LF"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-profile",
+                             "surface":  "3ac7c843-94e4-49ed-9b4e-c4677222e1df",
+                             "pid":  34384,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "content":  "edited 한글 한 é 😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nlast line\n",
+                             "variant":  "crlf",
+                             "case":  "encoding",
+                             "encoding":  "UTF-8",
+                             "eol":  "CRLF"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-profile",
+                             "surface":  "6c1bcd1f-4b7f-48ac-8f2e-c41395a21c2f",
+                             "pid":  34384,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-be655572-326d-4afd-bb9a-3bf51e9e34e4\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "content":  "edited 한글 한 é 😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nlast line\n",
+                             "variant":  "bom-crlf",
+                             "case":  "encoding",
+                             "encoding":  "UTF-8 BOM",
+                             "eol":  "CRLF"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  34384,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths, exhaustive ACL semantics, power loss and crash recovery are not established by ordinary save/restore cases."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  34384
+              ],
+    "shells":  [
+                   9832
+               ],
+    "clientPids":  [
+                       37960,
+                       29028,
+                       37572,
+                       33004,
+                       11248,
+                       27888,
+                       36088,
+                       39164,
+                       39776,
+                       32328,
+                       16328,
+                       34172,
+                       29456,
+                       38456,
+                       38884,
+                       32120,
+                       33840,
+                       31784,
+                       10080,
+                       29260,
+                       37692,
+                       8940,
+                       17912,
+                       14704,
+                       21844,
+                       36024,
+                       14532,
+                       39136,
+                       36364,
+                       31480,
+                       35464,
+                       15228,
+                       35032,
+                       33932,
+                       35336,
+                       21764,
+                       38060,
+                       31476,
+                       32960,
+                       39388,
+                       16044,
+                       32172,
+                       38536,
+                       36084,
+                       37248,
+                       28148,
+                       35504,
+                       31424,
+                       4796,
+                       23224,
+                       31716,
+                       3372,
+                       18460,
+                       33292,
+                       38336,
+                       37572,
+                       37964,
+                       31216,
+                       37380,
+                       11092,
+                       36484,
+                       23592,
+                       39168,
+                       30296,
+                       33020,
+                       3568,
+                       34568,
+                       23336,
+                       19212
+                   ],
+    "finished":  "2026-09-28T11:55:04.9057549+09:00"
+}

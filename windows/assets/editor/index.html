@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self'; font-src 'self' data:; img-src data:"
+    >
+    <title>flowmux Editor</title>
+    <link rel="stylesheet" href="./main.css">
+  </head>
+  <body>
+    <main class="editor-shell" aria-label="flowmux editor">
+      <section id="empty-state" class="empty-state">
+        <p>Click a text file in Files to edit it.</p>
+      </section>
+      <div id="editor" class="editor-surface" aria-label="Text editor"></div>
+      <div
+        id="diff-editor"
+        class="editor-surface diff-editor"
+        aria-label="Compare base and working versions"
+      ></div>
+      <span id="document-state" class="document-state" aria-live="polite" hidden></span>
+      <output id="zoom-toast" class="zoom-toast" aria-live="polite" hidden></output>
+      <div id="conflict-banner" class="conflict-banner" role="alert" hidden>
+        <span id="conflict-message"></span>
+        <button id="conflict-compare" type="button">Compare</button>
+        <button id="conflict-keep" type="button">Keep Mine</button>
+        <button id="conflict-reload" type="button">Reload from Disk</button>
+        <button id="conflict-save-as" type="button">Save As…</button>
+        <button id="conflict-close-diff" type="button" hidden>Close Compare</button>
+      </div>
+      <dialog id="search-dialog" class="search-dialog" aria-labelledby="search-dialog-title">
+        <div class="search-dialog-header">
+          <h2 id="search-dialog-title">Open File</h2>
+          <button id="search-dialog-close" class="icon-button" type="button" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <input id="search-query" type="search" autocomplete="off" spellcheck="false">
+        <div id="search-options" class="search-options" hidden>
+          <button id="search-case" type="button" aria-pressed="false" title="Match case">Aa</button>
+          <button id="search-word" type="button" aria-pressed="false" title="Match whole word">ab</button>
+          <button id="search-regex" type="button" aria-pressed="false" title="Use regular expression">.*</button>
+          <input id="search-include" type="text" placeholder="Include: src/**" aria-label="Files to include">
+          <input id="search-exclude" type="text" placeholder="Exclude: **/*.min.js" aria-label="Files to exclude">
+        </div>
+        <p id="search-status" class="search-status" aria-live="polite"></p>
+        <div id="search-results" class="search-results" role="listbox"></div>
+      </dialog>
+      <dialog id="save-as-dialog" class="close-dialog" aria-labelledby="save-as-dialog-title">
+        <h2 id="save-as-dialog-title">Save As</h2>
+        <p>Enter a path relative to this workspace.</p>
+        <input id="save-as-path" class="dialog-path" type="text" autocomplete="off" spellcheck="false">
+        <p id="save-as-error" class="dialog-error" aria-live="polite"></p>
+        <div class="close-dialog-actions">
+          <button id="save-as-cancel" type="button">Cancel</button>
+          <button id="save-as-submit" class="suggested" type="button">Save</button>
+        </div>
+      </dialog>
+      <dialog id="close-dialog" class="close-dialog" aria-labelledby="close-dialog-title">
+        <h2 id="close-dialog-title">Save changes?</h2>
+        <p><span id="close-dialog-document"></span> has unsaved changes.</p>
+        <div class="close-dialog-actions">
+          <button id="close-dialog-cancel" type="button">Cancel</button>
+          <button id="close-dialog-discard" class="destructive" type="button">Discard</button>
+          <button id="close-dialog-save" class="suggested" type="button">Save</button>
+        </div>
+      </dialog>
+      <dialog id="recovery-dialog" class="close-dialog" aria-labelledby="recovery-dialog-title">
+        <h2 id="recovery-dialog-title">Recover unsaved changes?</h2>
+        <p>
+          A recovery copy is available for <span id="recovery-dialog-document"></span>.
+          <span id="recovery-dialog-warning"></span>
+        </p>
+        <div class="close-dialog-actions">
+          <button id="recovery-dialog-discard" class="destructive" type="button">
+            Discard Recovery
+          </button>
+          <button id="recovery-dialog-restore" class="suggested" type="button">Restore</button>
+        </div>
+      </dialog>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

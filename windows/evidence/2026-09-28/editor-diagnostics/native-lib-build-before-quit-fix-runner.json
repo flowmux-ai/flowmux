@@ -1,0 +1,22 @@
+{
+  "name": "editor-native-lib-build",
+  "command": [
+    "cargo",
+    "xwin",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--lib",
+    "--no-run",
+    "--message-format=json"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 312322,
+  "exitCode": 0,
+  "elapsedSeconds": 96.344
+}

@@ -1,0 +1,13 @@
+{
+    "name":  "editor-regression-workspaces",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-workspaces.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T02:58:42.4377277Z",
+    "pid":  32524,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  12.582,
+    "finished":  "2026-09-28T02:58:55.0338145Z"
+}

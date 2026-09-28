@@ -164,6 +164,13 @@ fn validate_pane(
                         cwd.as_ref().is_none_or(|p| p.as_os_str().len() <= 32767),
                         "cwd exceeds limit"
                     ),
+                    SurfaceKind::Editor {
+                        workspace_root,
+                        session,
+                    } => {
+                        crate::editor::validate_path(workspace_root)?;
+                        crate::editor::validate_session(session)?;
+                    }
                     SurfaceKind::Browser { initial_url } => {
                         crate::browser::url(initial_url.as_deref().unwrap_or("about:blank"))?;
                     }

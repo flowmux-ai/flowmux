@@ -1,0 +1,13 @@
+{
+    "name":  "editor-late-quit-native",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-late-quit-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T03:15:23.3612504Z",
+    "pid":  29640,
+    "exitCode":  0,
+    "activeBeforeCleanup":  1,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  8.949,
+    "finished":  "2026-09-28T03:15:32.3211206Z"
+}

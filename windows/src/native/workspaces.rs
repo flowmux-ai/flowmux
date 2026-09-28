@@ -85,6 +85,9 @@ impl App {
             }
             WorkspaceOp::Close { workspace } => {
                 let id = WorkspaceId(workspace);
+                if self.editor_guard(super::editor::Operation::Workspace(id), None)? {
+                    return Ok(json!({"pending":true}));
+                }
                 let active = self.workspace().id == id;
                 let removed =
                     model::remove_workspace(&mut self.workspaces, &mut self.active_workspace, id)?;

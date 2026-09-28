@@ -1,0 +1,159 @@
+[check] passed acknowledged_dirty_recovery_survives_owned_host_termination_and_saves_only_after_explicit_monaco_recover
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\editor-da561ad3-1cf6-4930-a077-4ba690c34acb
+{
+    "started":  "2026-09-28T11:59:35.6342347+09:00",
+    "mode":  "background",
+    "case":  "recovery",
+    "checks":  [
+                   {
+                       "name":  "acknowledged_dirty_recovery_survives_owned_host_termination_and_saves_only_after_explicit_monaco_recover",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  31064,
+                             "exitCode":  0
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\editor-profile",
+                             "surface":  "25985beb-4e93-4bed-ae16-8cdfd00765d6",
+                             "pid":  33132,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "checkpoint":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\e92a8b1c-9424-4161-afeb-9b73283481f5.json",
+                             "pid":  33132,
+                             "surface":  "25985beb-4e93-4bed-ae16-8cdfd00765d6",
+                             "case":  "recovery",
+                             "diskStillOriginal":  true,
+                             "window":  "e92a8b1c-9424-4161-afeb-9b73283481f5",
+                             "unsynchronizedEditTest":  false,
+                             "kind":  "crash-boundary",
+                             "recoveryFile":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\editor-recovery\\d17d214db1362f0595844286d77b33814ac233ff725c2db9f5d38435e275097c\\5ad8c447da4c0b7060b958d01a35841b5c207e2b4110a80cf9878f255c4cb900-ec6ba4b9be9d2b82576cba85a1d8b820ebe34c16cccb18efeeb2b63526eaf030.json",
+                             "checkpointCompleted":  true,
+                             "powerLossTest":  false,
+                             "document":  "document-1",
+                             "editAcknowledged":  true
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  true,
+                             "pid":  33132,
+                             "exitCode":  -1
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\editor-profile",
+                             "surface":  "25985beb-4e93-4bed-ae16-8cdfd00765d6",
+                             "pid":  25144,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-da561ad3-1cf6-4930-a077-4ba690c34acb\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "crashedPid":  33132,
+                             "document":  "document-1",
+                             "kind":  "recovery-result",
+                             "case":  "recovery",
+                             "surface":  "25985beb-4e93-4bed-ae16-8cdfd00765d6",
+                             "diskChangedOnlyAfterSave":  true,
+                             "encoding":  "UTF-8 BOM",
+                             "proposalObserved":  true,
+                             "window":  "e92a8b1c-9424-4161-afeb-9b73283481f5",
+                             "restoredPid":  25144,
+                             "eol":  "CRLF"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  25144,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  31064,
+                  33132,
+                  25144
+              ],
+    "shells":  [
+                   14648,
+                   2076,
+                   27076
+               ],
+    "clientPids":  [
+                       36356,
+                       37128,
+                       19804,
+                       37040,
+                       5680,
+                       19068,
+                       18852,
+                       28664,
+                       34080,
+                       27316,
+                       38232,
+                       36400,
+                       39104,
+                       23248,
+                       12972,
+                       19260,
+                       17976,
+                       35552,
+                       39668,
+                       6484,
+                       39816,
+                       15388,
+                       9016,
+                       39236,
+                       31856,
+                       37908,
+                       3076,
+                       27920,
+                       9340,
+                       23452,
+                       13584,
+                       29564,
+                       10308,
+                       4640,
+                       33332,
+                       19804,
+                       12352,
+                       31448,
+                       3372,
+                       33752,
+                       36452
+                   ],
+    "finished":  "2026-09-28T11:59:43.3810736+09:00"
+}

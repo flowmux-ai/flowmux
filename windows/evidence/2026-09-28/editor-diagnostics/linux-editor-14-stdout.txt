@@ -1,0 +1,22 @@
+   Compiling flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 43.60s
+     Running unittests src/lib.rs (windows/target/debug/deps/flowmux_windows-d05d4a2a2b489748)
+
+running 14 tests
+test editor_assets::tests::only_embedded_editor_assets_are_addressable ... ok
+test editor::tests::text_and_session_limits_are_explicit ... ok
+test editor_worker::tests::missing_restored_root_retains_saved_state_without_failing_another_worker ... ok
+test editor_worker::tests::queue_capacity_rejects_busy_and_drop_cancels_accepted_work ... ok
+test editor::tests::windows_paths_reject_devices_streams_and_aliases_without_normalizing_unicode ... ok
+test editor_worker::tests::scoped_recovery_creation_failure_is_reported_as_uninitialized_with_state_intact ... ok
+test editor_worker::tests::external_conflict_keeps_dirty_text_until_explicit_keep_mine ... ok
+test editor_worker::tests::recovery_write_failure_is_reported_and_retained_for_next_operation ... ok
+test editor_worker::tests::partial_save_all_retains_successful_replacements_and_later_conflict ... ok
+test editor_worker::tests::save_as_denial_retains_version_and_explicit_overwrite_updates_path ... ok
+test editor_worker::tests::worker_preserves_bom_crlf_unicode_and_rejects_stale_edits ... ok
+test editor_recovery::tests::recovery_validation_failure_preserves_previous_snapshot ... ok
+test editor_recovery::tests::recovery_round_trip_replace_remove_preserves_unicode_and_shared_format ... ok
+test editor_worker::tests::recovery_is_persisted_before_reply_and_offered_after_worker_restart ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; finished in 0.09s
+

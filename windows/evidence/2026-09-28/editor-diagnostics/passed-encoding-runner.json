@@ -1,0 +1,13 @@
+{
+    "name":  "editor-encoding-native",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-encoding-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T02:54:55.4524215Z",
+    "pid":  16996,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  9.506,
+    "finished":  "2026-09-28T02:55:04.9622407Z"
+}

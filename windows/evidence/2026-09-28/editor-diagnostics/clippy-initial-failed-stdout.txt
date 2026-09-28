@@ -1,0 +1,52 @@
+    Checking memchr v2.8.3
+    Checking typenum v1.20.1
+   Compiling crossbeam-utils v0.8.23
+   Compiling crossbeam-epoch v0.9.20
+    Checking windows-sys v0.61.2
+   Compiling generic-array v0.14.7
+    Checking regex-syntax v0.8.11
+   Compiling crossbeam-deque v0.8.7
+    Checking log v0.4.34
+    Checking cpufeatures v0.2.17
+    Checking fastrand v2.5.0
+    Checking aho-corasick v1.1.5
+    Checking serde_json v1.0.151
+    Checking bstr v1.12.1
+    Checking flowmux-core v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/crates/flowmux-core)
+    Checking flowmux-browser v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/crates/flowmux-browser)
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking regex-automata v0.4.18
+    Checking digest v0.10.7
+    Checking sha2 v0.10.9
+    Checking globset v0.4.19
+    Checking regex v1.13.1
+    Checking winapi-util v0.1.11
+    Checking anstyle-wincon v3.0.11
+    Checking anstyle-query v1.1.5
+    Checking tempfile v3.27.0
+    Checking anstream v1.0.0
+    Checking same-file v1.0.6
+    Checking walkdir v2.5.0
+    Checking clap_builder v4.6.7
+    Checking ignore v0.4.30
+    Checking clap v4.6.7
+    Checking flowmux-editor v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/crates/flowmux-editor)
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error: field assignment outside of initializer for an instance created with Default::default()
+   --> src/editor.rs:324:9
+    |
+324 |         state.active_file = Some("missing.txt".into());
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: consider initializing the variable with `flowmux_core::EditorSessionState { active_file: Some("missing.txt".into()), ..Default::default() }` and removing relevant reassignments
+   --> src/editor.rs:323:9
+    |
+323 |         let mut state = EditorSessionState::default();
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#field_reassign_with_default
+    = note: `-D clippy::field-reassign-with-default` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::field_reassign_with_default)]`
+
+error: could not compile `flowmux-windows` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

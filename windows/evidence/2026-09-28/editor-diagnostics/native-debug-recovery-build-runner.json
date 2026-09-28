@@ -1,0 +1,19 @@
+{
+  "name": "editor-native-recovery-fix",
+  "command": [
+    "cargo",
+    "xwin",
+    "build",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--locked",
+    "--timings"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 308225,
+  "exitCode": 0,
+  "elapsedSeconds": 74.322
+}

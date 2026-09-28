@@ -1,0 +1,92 @@
+{
+    "started":  "2026-09-28T11:55:26.7733073+09:00",
+    "mode":  "background",
+    "case":  "save-as",
+    "checks":  [
+                   {
+                       "name":  "unicode_save_as_overwrite_save_all_replacement_lock_failure_recovery_and_root_boundary",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-f0367bff-f8c0-4f47-96cf-29ea17259953\\state\\editor-profile",
+                             "surface":  "c472d955-64ce-4887-a92a-a80d3d6f9234",
+                             "pid":  19828,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-f0367bff-f8c0-4f47-96cf-29ea17259953\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-f0367bff-f8c0-4f47-96cf-29ea17259953\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  19828,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths, exhaustive ACL semantics, power loss and crash recovery are not established by ordinary save/restore cases."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  19828
+              ],
+    "shells":  [
+                   27884
+               ],
+    "clientPids":  [
+                       28380,
+                       21180,
+                       36276,
+                       38460,
+                       38080,
+                       2616,
+                       21596,
+                       33904,
+                       33708,
+                       38132,
+                       33932,
+                       6432,
+                       23428,
+                       34132,
+                       13060,
+                       32152,
+                       29756,
+                       10608,
+                       25828,
+                       5804,
+                       28780,
+                       33268,
+                       4324,
+                       34668,
+                       34740,
+                       33724,
+                       36356,
+                       37392,
+                       33924,
+                       26312,
+                       19256,
+                       4468,
+                       37192,
+                       17764,
+                       37432,
+                       32072,
+                       32960,
+                       37380,
+                       37472
+                   ],
+    "finished":  "2026-09-28T11:55:31.7424149+09:00"
+}

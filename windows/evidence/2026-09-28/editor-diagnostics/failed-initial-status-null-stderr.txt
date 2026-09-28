@@ -1,0 +1,11 @@
+Owned CLI exit 1: {"error":"IPC error"}
+ 
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-e
+ditor.ps1:37 문자:47
++ ... tcontains $code) {throw ('Owned CLI exit '+$code+': '+$err+' '+$out)}
++                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Owned CLI exit ...:"IPC error"}
+ :String) [], RuntimeException
+    + FullyQualifiedErrorId : Owned CLI exit 1: {"error":"IPC error"}
+ 
+ 

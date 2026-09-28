@@ -1,0 +1,116 @@
+
+> flowmux-windows-editor@0.1.0 test
+> node --test adapter.test.mjs
+
+TAP version 13
+# Subtest: initialization authenticates the exact page and hidden focus guards precede bundle execution
+ok 1 - initialization authenticates the exact page and hidden focus guards precede bundle execution
+  ---
+  duration_ms: 3.836764
+  type: 'test'
+  ...
+# Subtest: new Windows document and diff models use LF internally without changing disk metadata
+ok 2 - new Windows document and diff models use LF internally without changing disk metadata
+  ---
+  duration_ms: 1.252958
+  type: 'test'
+  ...
+# Subtest: bounded read preserves Unicode scalar boundaries and empty document state
+ok 3 - bounded read preserves Unicode scalar boundaries and empty document state
+  ---
+  duration_ms: 15.631153
+  type: 'test'
+  ...
+# Subtest: barrier refuses composition without cancelling it and seals until the matching release
+ok 4 - barrier refuses composition without cancelling it and seals until the matching release
+  ---
+  duration_ms: 2.678725
+  type: 'test'
+  ...
+# Subtest: dirty close preserves the document and requires confirmation; malformed fields cannot mutate
+ok 5 - dirty close preserves the document and requires confirmation; malformed fields cannot mutate
+  ---
+  duration_ms: 1.565195
+  type: 'test'
+  ...
+# Subtest: barrier reports current view state after content acknowledgment and before completion
+ok 6 - barrier reports current view state after content acknowledgment and before completion
+  ---
+  duration_ms: 0.776933
+  type: 'test'
+  ...
+# Subtest: replace uses a synchronous writable window while input and subsequent waits stay sealed
+ok 7 - replace uses a synchronous writable window while input and subsequent waits stay sealed
+  ---
+  duration_ms: 3.799005
+  type: 'test'
+  ...
+# Subtest: a timed-out mutation retains its seal until the native owner releases the matching command
+ok 8 - a timed-out mutation retains its seal until the native owner releases the matching command
+  ---
+  duration_ms: 3.658746
+  type: 'test'
+  ...
+# Subtest: normal UI replacement seals before dispatch and cannot be unlocked by a barrier release
+ok 9 - normal UI replacement seals before dispatch and cannot be unlocked by a barrier release
+  ---
+  duration_ms: 1.107479
+  type: 'test'
+  ...
+# Subtest: command completion waits for native replacement completion before exposing its result
+ok 10 - command completion waits for native replacement completion before exposing its result
+  ---
+  duration_ms: 5.26268
+  type: 'test'
+  ...
+# Subtest: overlapping Save All and close requests retain the input shield until every completion
+ok 11 - overlapping Save All and close requests retain the input shield until every completion
+  ---
+  duration_ms: 0.854252
+  type: 'test'
+  ...
+# Subtest: a deferred command result waits for all overlapping response completions
+ok 12 - a deferred command result waits for all overlapping response completions
+  ---
+  duration_ms: 3.987932
+  type: 'test'
+  ...
+# Subtest: ui Save All serializes ten dirty documents through change, save and native completion
+ok 13 - ui Save All serializes ten dirty documents through change, save and native completion
+  ---
+  duration_ms: 7.815575
+  type: 'test'
+  ...
+# Subtest: cli Save All serializes ten dirty documents through change, save and native completion
+ok 14 - cli Save All serializes ten dirty documents through change, save and native completion
+  ---
+  duration_ms: 8.025125
+  type: 'test'
+  ...
+# Subtest: UI Save All stops on save failure, preserves later edits, and holds its seal until completion
+ok 15 - UI Save All stops on save failure, preserves later edits, and holds its seal until completion
+  ---
+  duration_ms: 1.976342
+  type: 'test'
+  ...
+# Subtest: UI Save All timeout preserves the seal until its late content acknowledgment without saving
+ok 16 - UI Save All timeout preserves the seal until its late content acknowledgment without saving
+  ---
+  duration_ms: 1.203679
+  type: 'test'
+  ...
+# Subtest: UI Save All refuses active composition without changing read-only state
+ok 17 - UI Save All refuses active composition without changing read-only state
+  ---
+  duration_ms: 0.815752
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 139.05821

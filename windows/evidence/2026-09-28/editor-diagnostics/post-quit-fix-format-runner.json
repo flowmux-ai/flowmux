@@ -1,0 +1,17 @@
+{
+  "name": "editor-quit-fix-format",
+  "command": [
+    "cargo",
+    "fmt",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--all",
+    "--",
+    "--check"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 314771,
+  "exitCode": 0,
+  "elapsedSeconds": 10.06
+}

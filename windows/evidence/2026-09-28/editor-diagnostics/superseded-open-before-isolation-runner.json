@@ -1,0 +1,13 @@
+{
+    "name":  "editor-open-sync-fixed",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-open-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T02:45:29.2193353Z",
+    "pid":  38812,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  5.798,
+    "finished":  "2026-09-28T02:45:35.0240461Z"
+}

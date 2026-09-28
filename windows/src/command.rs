@@ -173,6 +173,11 @@ pub enum Command {
         #[command(subcommand)]
         op: crate::browser::Op,
     },
+    /// Open and control a local Monaco editor tab.
+    Editor {
+        #[command(subcommand)]
+        op: crate::editor::Op,
+    },
     /// Add an in-app notification. Desktop delivery is not yet implemented.
     Notify {
         #[arg(long, default_value = "Terminal")]

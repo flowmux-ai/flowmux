@@ -1,0 +1,139 @@
+[check] passed unavailable_editor_root_keeps_mixed_host_alive_preserves_checkpoint_metadata_and_allows_failed_tab_close
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\editor-433cf1ff-406c-4ed7-8929-af5c343140e8
+{
+    "started":  "2026-09-28T11:56:12.8047879+09:00",
+    "mode":  "background",
+    "case":  "missing-root",
+    "checks":  [
+                   {
+                       "name":  "unavailable_editor_root_keeps_mixed_host_alive_preserves_checkpoint_metadata_and_allows_failed_tab_close",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  27972,
+                             "exitCode":  0
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state\\editor-profile",
+                             "surface":  "d09fefad-7186-4a9b-af42-5114a97c18da",
+                             "pid":  13004,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  13004,
+                             "exitCode":  0
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state\\editor-profile",
+                             "surface":  "d09fefad-7186-4a9b-af42-5114a97c18da",
+                             "pid":  15416,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "checkpoint":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\state\\57fa69e1-6aa9-4759-9736-03bd5450ef8c.json",
+                             "surface":  "d09fefad-7186-4a9b-af42-5114a97c18da",
+                             "restoreErrors":  [
+                                                   "Cannot initialize editor at C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\files 한글 한 😀\\unavailable editor root 한글: cannot resolve editor root: 지정된 파일을 찾을 수 없습니다. (os error 2)"
+                                               ],
+                             "failure":  "Cannot initialize editor at C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\files 한글 한 😀\\unavailable editor root 한글: cannot resolve editor root: 지정된 파일을 찾을 수 없습니다. (os error 2)",
+                             "case":  "missing-root",
+                             "retainedSession":  {
+                                                     "open_files":  [
+                                                                        {
+                                                                            "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\files 한글 한 😀\\unavailable editor root 한글\\retained 😀.txt",
+                                                                            "cursor_line":  0,
+                                                                            "cursor_column":  0,
+                                                                            "scroll_top":  0.0
+                                                                        }
+                                                                    ],
+                                                     "active_file":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-433cf1ff-406c-4ed7-8929-af5c343140e8\\files 한글 한 😀\\unavailable editor root 한글\\retained 😀.txt",
+                                                     "zoom_percent":  100
+                                                 }
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  15416,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths, exhaustive ACL semantics, power loss and crash recovery are not established by ordinary save/restore cases."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  27972,
+                  13004,
+                  15416
+              ],
+    "shells":  [
+                   33932,
+                   22092,
+                   31064
+               ],
+    "clientPids":  [
+                       16336,
+                       39104,
+                       27304,
+                       27476,
+                       37692,
+                       38032,
+                       38856,
+                       36428,
+                       13680,
+                       27068,
+                       31232,
+                       11844,
+                       39832,
+                       12744,
+                       30168,
+                       37264,
+                       27980,
+                       15348,
+                       39656,
+                       31160,
+                       37716,
+                       39932,
+                       9744,
+                       37472,
+                       29540,
+                       1824,
+                       8948,
+                       39136,
+                       30980
+                   ],
+    "finished":  "2026-09-28T11:56:19.1901080+09:00"
+}

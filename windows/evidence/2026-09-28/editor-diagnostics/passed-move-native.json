@@ -1,0 +1,87 @@
+{
+    "started":  "2026-09-28T11:55:49.4175127+09:00",
+    "mode":  "background",
+    "case":  "move",
+    "checks":  [
+                   {
+                       "name":  "hidden_and_moved_editor_keeps_native_view_document_and_actual_monaco_undo_history",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-17662de4-640f-47b3-88e1-792934945efe\\state\\editor-profile",
+                             "surface":  "64543a9a-1c1a-4646-a535-8a009de15426",
+                             "pid":  16212,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-17662de4-640f-47b3-88e1-792934945efe\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-17662de4-640f-47b3-88e1-792934945efe\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  16212,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths, exhaustive ACL semantics, power loss and crash recovery are not established by ordinary save/restore cases."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  16212
+              ],
+    "shells":  [
+                   13344,
+                   1820
+               ],
+    "clientPids":  [
+                       28420,
+                       37460,
+                       29236,
+                       36136,
+                       30976,
+                       37968,
+                       16768,
+                       33824,
+                       16820,
+                       37256,
+                       9896,
+                       27244,
+                       14504,
+                       38544,
+                       8728,
+                       38868,
+                       21760,
+                       39072,
+                       19168,
+                       15768,
+                       20668,
+                       27588,
+                       28220,
+                       37332,
+                       31544,
+                       21764,
+                       38736,
+                       29528,
+                       35912,
+                       33708,
+                       39744,
+                       39696,
+                       37384
+                   ],
+    "finished":  "2026-09-28T11:55:53.8911833+09:00"
+}

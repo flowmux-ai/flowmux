@@ -1,0 +1,17 @@
+{
+  "name": "flowmux-windows-editor",
+  "private": true,
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test adapter.test.mjs"
+  },
+  "dependencies": {
+    "monaco-editor": "0.53.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

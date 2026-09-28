@@ -553,32 +553,64 @@
     {
       "id": "F01",
       "feature": "Monaco 편집·syntax·선택·undo/redo·minimap",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-open-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-edit-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-move-native.json"
+      ],
+      "notes": "Hidden native WebView2 tests read and edit actual offline Monaco models, verify language IDs and undo/redo, and retain the existing WebView/document/undo history after a pane move. Physical editing, selection, syntax appearance, minimap, fonts, clipboard, IME, DPI and accessibility remain unverified."
     },
     {
       "id": "F02",
       "feature": "파일 열기·저장·Save As·Save All",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-open-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-save-as-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json"
+      ],
+      "notes": "CLI Open, duplicate identity, Save, explicit-overwrite Save As and the shared UI/CLI serial Save All helper have hidden native evidence, including ten dirty Unicode documents with exact saved bytes. Opening is CLI-only; native Open UI and fully asynchronous Open-path validation remain pending. The shared helper test does not establish physical Save All button/shortcut behavior."
     },
     {
       "id": "F03",
       "feature": "UTF-8/BOM·CRLF/LF",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-encoding-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-encoding-defaults-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json"
+      ],
+      "notes": "Hidden real Monaco/file round trips preserve UTF-8, BOM, LF/CRLF and exact Hangul/NFD/emoji codepoints. Empty and single-line models remain LF internally while disk EOL metadata is retained. Physical text input, clipboard, glyph/width rendering, other encodings and exhaustive file-format cases remain pending."
     },
     {
       "id": "F04",
       "feature": "외부 수정·diff·Keep Mine/Reload",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-conflict-native.json"
+      ],
+      "notes": "Explicit disk checks detect clean external changes and dirty conflicts; hidden native commands exercise compare, Keep Mine followed by Save, and explicit Reload against actual models and disk bytes. Automatic watching, physical diff/conflict UI, concurrent-writer races and complete failure coverage remain pending."
     },
     {
       "id": "F05",
       "feature": "dirty close·crash recovery·다중 문서",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-close-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-restore-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-restore-errors-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-missing-root-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-checkpoint-failure-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-recovery-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-late-quit-native.json"
+      ],
+      "notes": "Hidden native cases reject dirty document/tab/workspace/quit closure, allow explicit save/discard, retain multiple documents across restart, preserve failed initialization metadata, and recover acknowledged dirty content after a completed checkpoint and owned-host termination. Accepted clean discard-state quit also exits after an actual IPC deadline and balanced resume of the owned hidden UI thread. Unsynchronized edit-debounce/close races, in-flight checkpoint overlap, renderer crashes, power loss and physical confirmation/IME behavior remain pending."
     },
     {
       "id": "F06",
@@ -649,8 +681,15 @@
     {
       "id": "F17",
       "feature": "Windows 경로·권한·원자적 저장",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-diagnostics/passed-save-as-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-recovery-native.json",
+        "evidence/2026-09-28/editor-diagnostics/passed-checkpoint-failure-native.json"
+      ],
+      "notes": "Hidden native evidence covers Unicode paths, root-boundary rejection, explicit overwrite, denied replacement preserving old file/checkpoint bytes, and isolated recovery storage. Windows recovery uses a dedicated protected-DACL temporary-file writer. Full ACL/ownership preservation, concurrent writers, UNC/network/reparse paths, power-loss durability and exhaustive long-path behavior remain pending; implementation is not complete filesystem acceptance."
     },
     {
       "id": "A01",
@@ -961,8 +1000,11 @@
     {
       "id": "G08",
       "gate": "파일·editor·viewer",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/editor.md"
+      ],
+      "notes": "Stage evidence contains 15 unique passing hidden native editor checks and 27 related native state/pane/workspace/browser regression checks; exact source boundaries and repeated cases are recorded in editor.md. F01-F05/F17 are partial. CLI-only Open, physical UI/IME/clipboard/fonts/DPI/accessibility, fully asynchronous Open validation, automatic watching, search, viewers, complete ACL semantics and renderer-crash recovery remain pending. Windows debug/release builds passed; native unit-test and package evidence is tracked separately in editor.md. No complete Windows acceptance gate passes in this stage."
     },
     {
       "id": "G09",

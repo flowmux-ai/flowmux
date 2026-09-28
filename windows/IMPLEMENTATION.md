@@ -489,3 +489,39 @@ groups and installer packaging passed; results and remaining limits are in the
 [popup record](evidence/2026-09-28/browser-popups.md).
 B11/G09 remain partial and the browser CLI operation count remains 34. No shared
 Linux/macOS source or acceptance status is changed by this Windows implementation.
+
+Windows editor tabs now embed the existing Monaco frontend and offline workers
+in a trusted WebView2 page. A separate Windows build appends its bridge adapter
+without changing shared sources. CLI Open creates or reuses an editor tab;
+actual model commands cover edits, undo/redo, saving, explicit Save As, conflicts,
+recovery and document close. UI and CLI Save All use the same serial helper,
+waiting for each document and native response before submitting the next file
+to the bounded I/O worker. Main and diff models use LF internally while the
+shared document service retains disk BOM/EOL metadata.
+
+Authenticated surface/generation messages, content acknowledgments and flush
+barriers order worker snapshots and dirty-close decisions. Pending mutations
+seal editing; timed-out replacement work retains the seal until its response,
+and synchronization failure keeps it read-only. Pane moves retain the WebView,
+documents and undo history. Checkpoints retain editor file/session metadata;
+recovery snapshots use a Windows-specific private temporary-file writer after
+native testing exposed directory attributes copied onto a file by the shared
+recovery fallback. Hidden hosts keep both editor profiles and recovery data
+inside their explicit isolated state directory.
+
+Fifteen unique hidden native editor checks passed, covering actual Monaco content,
+Unicode/BOM/EOL bytes, ten-document Save All, dirty closure, conflict actions,
+moves, restore failures, checkpoint failure and recovery after acknowledged
+edits plus a completed checkpoint. A clean discard-state quit now completes even
+when its IPC reply receiver expired before the editor barrier ran. The late-quit
+case observed the real 15-second server deadline while only the owned hidden UI
+thread was suspended, then verified balanced resume and clean host exit. The
+close case also passed again after this fix. Twenty-seven related state, pane, workspace
+and browser regression checks also passed. These are bounded case results,
+not physical UI or complete editor acceptance. Final Windows debug and release
+builds passed; source boundaries, repeated cases, native unit/package results
+and preserved failures are tracked in the [editor record](evidence/2026-09-28/editor.md).
+F01–F05, F17 and G08 remain partial. Opening is CLI-only; native Open UI, fully
+asynchronous Open-path validation, automatic file watching, search/viewers,
+physical IME/GUI/clipboard/fonts/DPI/accessibility, full ACL preservation,
+unsynchronized edit/close races and renderer-crash recovery remain pending.

@@ -1,0 +1,13 @@
+{
+    "name":  "editor-save-all-many-native",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-save-all-many-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T02:55:32.5601929Z",
+    "pid":  32264,
+    "exitCode":  0,
+    "activeBeforeCleanup":  3,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  7.85,
+    "finished":  "2026-09-28T02:55:40.4146671Z"
+}

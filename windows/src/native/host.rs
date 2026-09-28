@@ -47,6 +47,8 @@ mod appearance;
 mod browser;
 #[path = "downloads.rs"]
 mod downloads;
+#[path = "editor.rs"]
+mod editor;
 #[path = "keys.rs"]
 mod keys;
 #[path = "notifications.rs"]
@@ -68,6 +70,7 @@ thread_local! {
     static CONTROL_ACTIONS: RefCell<HashMap<isize, Action>> = RefCell::new(HashMap::new());
 }
 enum Event {
+    Editor(editor::Signal),
     Browser(browser::Signal),
     Layout,
     Tick,
@@ -317,6 +320,12 @@ struct App {
     browser_popups: browser::popup::Controller,
     downloads: downloads::Controller,
     browsers: HashMap<SurfaceId, browser::Browser>,
+    editors: HashMap<SurfaceId, editor::Editor>,
+    editor_assets: Option<crate::editor_assets::EditorAssets>,
+    editor_context: Option<WebContext>,
+    editor_request: u64,
+    editor_barrier: Option<editor::Barrier>,
+    editor_bypass: bool,
     browser_context: Option<WebContext>,
     pending_browser: HashMap<Uuid, browser::Pending>,
     pending_captures: HashMap<Uuid, browser::capture::Pending>,
@@ -506,6 +515,12 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             browser_context: None,
             browser_popups: browser::popup::Controller::default(),
             browsers: HashMap::new(),
+            editors: HashMap::new(),
+            editor_assets: None,
+            editor_context: None,
+            editor_request: 0,
+            editor_barrier: None,
+            editor_bypass: false,
             pending_browser: HashMap::new(),
             pending_captures: HashMap::new(),
             browser_waits: HashMap::new(),
@@ -553,6 +568,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.browsers.clear();
+        app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
@@ -617,7 +633,9 @@ impl App {
         for workspace in &self.workspaces {
             for (_, _, tabs) in workspace.leaves() {
                 for tab in tabs {
-                    if !self.surfaces.contains_key(&tab.id) && !self.browsers.contains_key(&tab.id)
+                    if !self.surfaces.contains_key(&tab.id)
+                        && !self.browsers.contains_key(&tab.id)
+                        && !self.editors.contains_key(&tab.id)
                     {
                         missing.push((tab.id, tab.kind));
                     }
@@ -627,6 +645,10 @@ impl App {
         for (id, kind) in missing {
             match kind {
                 SurfaceKind::Terminal { .. } => self.add_view(id)?,
+                SurfaceKind::Editor {
+                    workspace_root,
+                    session,
+                } => self.add_editor_view(id, workspace_root, session)?,
                 SurfaceKind::Browser { initial_url } => {
                     self.add_browser_view(id, initial_url.unwrap_or_else(|| "about:blank".into()))?
                 }
@@ -881,6 +903,17 @@ impl App {
                 }
             }
         }
+        for (id, editor) in &mut self.editors {
+            let area = visible
+                .get(id)
+                .filter(|_| client.right > 0 && client.bottom > 0)
+                .map(|area| model::Rect {
+                    y: area.y + bar,
+                    height: (area.height - bar).max(1),
+                    ..*area
+                });
+            editor.view.layout(area)?;
+        }
         for (id, browser) in &mut self.browsers {
             let area = visible
                 .get(id)
@@ -970,6 +1003,9 @@ impl App {
             return Ok(());
         }
         self.ack_focused_notifications(self.active());
+        if let Some(editor) = self.editors.get(&self.active()) {
+            return editor.view.focus();
+        }
         if let Some(browser) = self
             .browsers
             .get(&self.active())
@@ -1013,6 +1049,7 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
+            Event::Editor(event) => self.editor_event(event)?,
             Event::Browser(event) => self.browser_event(event)?,
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
@@ -1030,6 +1067,7 @@ impl App {
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
+                self.editor_tick();
                 self.browser_tick();
                 self.search_tick()?;
                 self.pending_selections.retain(|_, request| {
@@ -1531,6 +1569,9 @@ impl App {
         Ok(())
     }
     fn begin_save(&mut self, reply: Option<ipc::Reply>) -> anyhow::Result<()> {
+        if self.editor_guard(editor::Operation::Checkpoint(reply.clone()), None)? {
+            return Ok(());
+        }
         let store = self
             .store
             .as_ref()
@@ -1591,6 +1632,13 @@ impl App {
         Ok(())
     }
     fn request_close(&mut self, request: CloseRequest) -> anyhow::Result<()> {
+        let copy = match &request {
+            CloseRequest::Native => CloseRequest::Native,
+            CloseRequest::Ipc(reply) => CloseRequest::Ipc(reply.clone()),
+        };
+        if self.editor_guard(editor::Operation::Window(copy), None)? {
+            return Ok(());
+        }
         anyhow::ensure!(self.close_request.is_none(), "window is already closing");
         if self.store.is_none() {
             match request {
@@ -1647,12 +1695,18 @@ impl App {
         } else if self.close_request.is_some() {
             // A checkpoint captured an older layout. Closing always captures again
             // after structural changes have stopped, even if that checkpoint failed.
-            if let Err(error) = self.begin_save(None) {
+            // The close barrier already synchronized and sealed editor models.
+            // A second editor barrier would reject that still-active seal.
+            self.editor_bypass = true;
+            let result = self.begin_save(None);
+            self.editor_bypass = false;
+            if let Err(error) = result {
                 self.close_failed(&error.to_string());
             }
         }
     }
     fn close_failed(&mut self, error: &str) {
+        self.editor_release_all();
         match self.close_request.take() {
             Some(CloseRequest::Ipc(reply)) => {
                 let _ = reply.try_send(json!({"error":error}));
@@ -1853,6 +1907,7 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.editor_remove(surface);
         self.browser_cancel(surface, "browser closed during script request");
         self.browsers.remove(&surface);
         self.pending_selections.retain(|_, request| {
@@ -1931,6 +1986,10 @@ impl App {
     }
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
         anyhow::ensure!(
+            self.editor_bypass || self.editor_barrier.is_none(),
+            "editor synchronization is in progress"
+        );
+        anyhow::ensure!(
             self.close_request.is_none(),
             "window is saving before close"
         );
@@ -1982,6 +2041,9 @@ impl App {
                     .map(|_| ());
             }
             Action::CloseTab => {
+                if self.editor_guard(editor::Operation::Tab(self.active()), None)? {
+                    return Ok(());
+                }
                 let surface = self
                     .workspace_mut()
                     .close_active()
@@ -2031,7 +2093,21 @@ impl App {
                 ),
             "window is saving before close"
         );
+        anyhow::ensure!(
+            self.editor_barrier.is_none()
+                || matches!(
+                    &command,
+                    Command::Tree
+                        | Command::Identify
+                        | Command::Capabilities
+                        | Command::Editor {
+                            op: crate::editor::Op::Status(_)
+                        }
+                ),
+            "editor synchronization is in progress"
+        );
         match command {
+            Command::Editor { op } => return self.editor_command(op, caller, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),
             Command::LaunchWindow { context } => {
                 let caller = caller.context("Window launch requires a calling terminal")?;
@@ -2078,7 +2154,8 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode",
-                "commands":["browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "editor_status":"partial","editor_commands":["open","status","command","check-disk","flush"],
+                "commands":["editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
@@ -2098,6 +2175,7 @@ impl App {
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
+                        "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "popup":self.browser_popup_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,
                         "background_testing":self.background_test,"window_handle":self.window as usize,
@@ -2383,7 +2461,17 @@ impl App {
                     shells::NewTerminal::Workspace,
                 )?;
             }
-            Command::Workspace { op } => return self.workspace_command(op, caller).map(Some),
+            Command::Workspace { op } => {
+                if let WorkspaceOp::Close { workspace } = &op {
+                    if self.editor_guard(
+                        editor::Operation::Workspace(WorkspaceId(*workspace)),
+                        Some(reply.clone()),
+                    )? {
+                        return Ok(None);
+                    }
+                }
+                return self.workspace_command(op, caller).map(Some);
+            }
             Command::RenameTab { surface, name } => {
                 self.rename_tab(SurfaceId(surface), name)?;
             }
@@ -2409,6 +2497,11 @@ impl App {
             }
             Command::FocusTab { surface } | Command::CloseTab { surface } => {
                 let id = SurfaceId(surface);
+                if matches!(command, Command::CloseTab { .. })
+                    && self.editor_guard(editor::Operation::Tab(id), Some(reply.clone()))?
+                {
+                    return Ok(None);
+                }
                 self.select(id)?;
                 if matches!(command, Command::CloseTab { .. }) {
                     self.action(Action::CloseTab)?;
@@ -2436,7 +2529,10 @@ impl App {
             Command::Quit {
                 discard_state: true,
             } => {
-                // Explicit recovery escape hatch. A completed checkpoint is never deleted.
+                if self.editor_guard(editor::Operation::QuitDiscard(reply.clone()), None)? {
+                    return Ok(None);
+                }
+                // Explicit state recovery escape hatch; dirty editor buffers remain protected.
                 return Ok(Some(json!({"ok":true})));
             }
             Command::Quit {
