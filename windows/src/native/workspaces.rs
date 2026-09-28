@@ -313,88 +313,6 @@ impl App {
         }
         self.focus_active()
     }
-    fn tab_actions_menu(
-        &mut self,
-        pane: PaneId,
-        surface: SurfaceId,
-        point: (i32, i32),
-    ) -> anyhow::Result<()> {
-        let (workspace, current, _) = self.locate(surface).context("Tab no longer exists")?;
-        anyhow::ensure!(current == pane, "Tab moved before opening its menu");
-        let tabs = self.workspaces[workspace]
-            .leaves()
-            .into_iter()
-            .find(|(id, _, _)| *id == pane)
-            .context("Pane no longer exists")?
-            .2;
-        let mut labels: Vec<String> = [
-            "Rename tab…",
-            "Move tab…",
-            "Close tab",
-            "Find in terminal",
-            "Search all terminals",
-            "Open file…",
-            "New terminal tab",
-            "New browser tab",
-            "Split right",
-            "Split down",
-            "Maximize / restore pane",
-            "Workspace actions…",
-            "Move to new window",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-        labels.extend(
-            tabs.iter()
-                .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
-        );
-        let disabled = vec![];
-        let choice = self.popup(
-            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-            &disabled,
-            point,
-        )?;
-        if choice == 0 {
-            return self.focus_active();
-        }
-        anyhow::ensure!(
-            self.locate(surface)
-                .is_some_and(|(_, current, _)| current == pane),
-            "Tab moved while menu was open"
-        );
-        if choice >= 14 {
-            let target = tabs
-                .get(choice - 14)
-                .context("Tab selection no longer exists")?
-                .id;
-            anyhow::ensure!(
-                self.locate(target)
-                    .is_some_and(|(_, current, _)| current == pane),
-                "Selected tab moved"
-            );
-            self.select(target)?;
-            return self.rebuild();
-        }
-        self.select(surface)?;
-        if choice == 1 {
-            return self.edit_metadata(EditTarget::TabName(surface));
-        }
-        self.action(match choice {
-            2 => Action::MoveTabMenu,
-            3 => Action::CloseTab,
-            4 => Action::Find,
-            5 => Action::SearchAll,
-            6 => Action::OpenEditor,
-            7 => Action::NewTab,
-            8 => Action::NewBrowser,
-            9 => Action::Vertical,
-            10 => Action::Horizontal,
-            11 => Action::TogglePaneZoom,
-            13 => Action::DetachTab,
-            _ => Action::WorkspaceMenu,
-        })
-    }
     pub(super) fn chrome_status(&self) -> Value {
         let controls=self.controls.iter().map(|control| {
             let (kind,pane,surface,workspace,selected)=match control.action {
@@ -554,7 +472,7 @@ impl App {
             }
             Action::Workspace(id) => self.workspace_menu(id, Some(point)),
             Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
-                self.tab_actions_menu(pane, surface, point)
+                self.show_tab_menu(pane, surface, point)
             }
             _ => Ok(()),
         }

@@ -23,6 +23,7 @@ pub(super) enum Signal {
     Moved,
     Activated,
     RenameTab,
+    ContextMenu(i32, i32),
     Close,
     Pointer(u32, i32, i32),
 }
@@ -650,6 +651,23 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
         return result;
     }
     match message {
+        WM_CONTEXTMENU
+            if w == GetDlgItem(window, TAB as i32) as usize
+                || w == GetDlgItem(window, CLOSE as i32) as usize =>
+        {
+            if IsWindowEnabled(window) != 0 {
+                let mut x = l as u16 as i16 as i32;
+                let mut y = (l >> 16) as u16 as i16 as i32;
+                if x == -1 && y == -1 {
+                    let mut rect = RECT::default();
+                    GetWindowRect(w as HWND, &mut rect);
+                    x = rect.left;
+                    y = rect.bottom;
+                }
+                emit(window, Signal::ContextMenu(x, y));
+            }
+            0
+        }
         WM_CLOSE => {
             emit(window, Signal::Close);
             0

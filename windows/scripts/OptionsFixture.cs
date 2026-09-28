@@ -25,7 +25,24 @@ public static class OptionsFixture {
     private static IntPtr Message(IntPtr hwnd,uint message,IntPtr w,IntPtr l) {IntPtr result;if(SendMessageTimeout(hwnd,message,w,l,2,1000,out result)==IntPtr.Zero)throw new TimeoutException("Owned UI message exceeded one second");return result;}
     public static string Text(long handle,int owner) {var hwnd=Owned(handle,owner);var text=new StringBuilder(2048);IntPtr result;if(SendMessageTimeout(hwnd,0xD,new IntPtr(text.Capacity),text,2,1000,out result)==IntPtr.Zero)throw new TimeoutException("Owned text read failed");return text.ToString();}
     public static Window Describe(long handle,int owner) {var hwnd=Owned(handle,owner);Rect bounds;if(!GetWindowRect(hwnd,out bounds))throw new InvalidOperationException("Cannot inspect owned window");var parent=GetWindow(hwnd,4);return new Window{Handle=handle,Owner=parent.ToInt64(),Style=GetWindowLongPtr(hwnd,-16).ToInt64(),Title=Text(handle,owner),Width=bounds.Right-bounds.Left,Height=bounds.Bottom-bounds.Top,Dpi=GetDpiForWindow(hwnd),Enabled=IsWindowEnabled(hwnd),OwnerEnabled=parent==IntPtr.Zero||IsWindowEnabled(parent)};}
+    public static void ContextMenu(long parent,long child,int owner) {
+        var hwnd=Child(parent,child,owner);var root=new IntPtr(parent);
+        if(!IsWindowEnabled(root)||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned context target is disabled");
+        Message(root,0x7B,hwnd,new IntPtr(-1));Owned(parent,owner);
+    }
+    // Exercise only the popup's deactivation handler; never change focus.
+    public static void DeactivateMenu(long popup,int owner,long newActive) {
+        var hwnd=Owned(popup,owner);var target=newActive==0?IntPtr.Zero:Owned(newActive,owner);
+        Message(hwnd,0x6,IntPtr.Zero,target);
+    }
     public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    // Selecting a menu item may destroy the popup before this call returns.
+    // Verify ownership before dispatch; the caller checks the resulting model.
+    public static void ClickMenu(long parent,long child,int owner) {
+        var hwnd=Child(parent,child,owner);var root=new IntPtr(parent);
+        if(!IsWindowEnabled(root)||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned menu action is disabled");
+        Message(root,0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);
+    }
     public static void SetText(long parent,long child,int owner,string value) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned input is disabled");IntPtr result;if(SendMessageTimeout(hwnd,0xC,IntPtr.Zero,value,2,1000,out result)==IntPtr.Zero||result==IntPtr.Zero)throw new InvalidOperationException("Owned text edit failed");Owned(parent,owner);}
     // WM_SETTEXT does not emit EN_CHANGE for multiline EDIT. Notify its exact
     // owned parent explicitly when testing the same draft-change handler.

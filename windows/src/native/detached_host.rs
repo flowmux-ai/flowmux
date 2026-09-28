@@ -258,6 +258,10 @@ impl App {
                 self.select(surface)?;
                 self.edit_metadata(workspaces::EditTarget::TabName(surface))
             }
+            detached::Signal::ContextMenu(x, y) => {
+                let (_, pane, _) = self.locate(surface).context("Tab no longer exists")?;
+                self.show_tab_menu(pane, surface, (x, y))
+            }
         }
     }
 
@@ -334,6 +338,7 @@ impl App {
         self.editor_cancel_opens(None, "main window closed before editor Open completed");
         self.options.take();
         self.metadata.take();
+        self.tab_menu.take();
         let detached: Vec<_> = self
             .detached
             .values()

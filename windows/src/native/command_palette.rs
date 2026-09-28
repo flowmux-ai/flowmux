@@ -78,6 +78,7 @@ impl App {
             ("open-file", "Open file…", Action::OpenEditor),
             ("notifications", "Notifications", Action::Notifications),
             ("move-tab", "Move tab…", Action::MoveTabMenu),
+            ("detach-tab", "Move to new window", Action::DetachTab),
         ] {
             entries.push(Entry {
                 id: format!("native:{id}"),

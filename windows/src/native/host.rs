@@ -79,6 +79,8 @@ mod search;
 mod shells;
 #[path = "surface_host.rs"]
 pub(super) mod surface_host;
+#[path = "tab_menu.rs"]
+mod tab_menu;
 #[path = "workspaces.rs"]
 mod workspaces;
 
@@ -88,6 +90,7 @@ thread_local! {
     static CONTROL_ACTIONS: RefCell<HashMap<isize, Action>> = RefCell::new(HashMap::new());
 }
 enum Event {
+    TabMenu(Uuid, tab_menu::UiAction),
     Editor(editor::Signal),
     Files(files::Signal),
     Browser(browser::Signal),
@@ -499,6 +502,7 @@ struct App {
     drag: Option<panes::Drag>,
     drop_preview: Option<chrome::DropPreview>,
     metadata: Option<workspaces::Panel>,
+    tab_menu: Option<tab_menu::Menu>,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
     overview: overview::Controller,
@@ -730,6 +734,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             drag: None,
             drop_preview: None,
             metadata: None,
+            tab_menu: None,
             options: None,
             command_palette: command_palette::Controller::default(),
             overview: overview::Controller::default(),
@@ -790,6 +795,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.metadata.take();
+        app.tab_menu.take();
         app.browsers.clear();
         app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
@@ -832,7 +838,11 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             continue;
         }
         unsafe {
-            if !app.editor_close_handle_message(&message)
+            if !app
+                .tab_menu
+                .as_ref()
+                .is_some_and(|menu| menu.handle_message(&message))
+                && !app.editor_close_handle_message(&message)
                 && !app.command_palette.handle_message(&message)
                 && !app.overview_handle_message(&message)
                 && !app.options_handle_message(&message)
@@ -1581,6 +1591,7 @@ impl App {
             Event::Overview(signal) => self.overview_event(signal)?,
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(id, action) => self.metadata_action(id, action)?,
+            Event::TabMenu(id, action) => self.tab_menu_action(id, action)?,
             Event::ContextMenu(action, x, y) if !self.overview.is_open() => {
                 self.cancel_drag();
                 self.context_menu(action, x, y)?
@@ -2447,6 +2458,7 @@ impl App {
         );
         let mut candidate = self.workspaces.clone();
         let active = model::move_surface(&mut candidate, surface, target, index)?;
+        self.tab_menu_surface_closing(surface);
         if self.detached.contains_key(&surface) {
             self.surface_holder(surface)?.reparent(self.window)?;
             if let Some(browser) = self.browsers.get_mut(&surface) {
@@ -2543,6 +2555,7 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.tab_menu_surface_closing(surface);
         if let Some(owner) = self.detached.get(&surface).map(|window| window.window) {
             self.metadata_owner_closing(owner);
             self.download_owner_closing(owner);
@@ -2894,9 +2907,14 @@ impl App {
                     "chrome capture requires an owned hidden debug host"
                 );
                 return if let Some(window) = self
-                    .options
+                    .tab_menu
                     .as_ref()
-                    .and_then(appearance::Panel::capture_window)
+                    .map(tab_menu::Menu::capture_window)
+                    .or_else(|| {
+                        self.options
+                            .as_ref()
+                            .and_then(appearance::Panel::capture_window)
+                    })
                     .or_else(|| self.overview_capture_window())
                 {
                     chrome::capture_subtree(window, &path)
@@ -2932,6 +2950,7 @@ impl App {
                         "search_dialog":self.search.diagnostics(),
                         "command_palette":self.command_palette.diagnostics(),
                         "metadata":self.metadata.as_ref().map(workspaces::Panel::diagnostics),
+                        "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,
