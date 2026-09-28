@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use super::*;
 use crate::{command::SettingsOp, settings::SettingKey};
+#[path = "options_panel.rs"]
+mod options_panel;
+pub(super) use options_panel::{Panel, UiAction};
 
 impl App {
     pub(super) fn settings_status(&self) -> Value {
         json!({"document":self.settings,"path":self.settings_worker.path,
             "persistent":self.settings_worker.path.is_some(),"config_error":self.settings_error,
             "pending_writes":self.settings_pending.len(),
+            "options":self.options.as_ref().map(Panel::diagnostics),
             "surfaces":self.surfaces.iter().map(|(id,s)|json!({"surface":id,"applied":s.applied_settings})).collect::<Vec<_>>()})
     }
     pub(super) fn settings_submit(
@@ -31,6 +35,7 @@ impl App {
         let pending = update
             .request
             .and_then(|id| self.settings_pending.remove(&id));
+        let options_request = pending.as_ref().and_then(|(_, editor)| *editor);
         let result = match update.result {
             Ok(document) => {
                 self.settings_error = None;
@@ -61,6 +66,13 @@ impl App {
                 Err(error)
             }
         };
+        if let Some(panel) = self.options.as_mut() {
+            panel.update(
+                &self.settings,
+                self.settings_error.as_deref(),
+                options_request == Some(panel.edit_id),
+            );
+        }
         if let Some((reply, editor)) = pending {
             if let Some(reply) = reply {
                 let value = match &result {
@@ -84,9 +96,9 @@ impl App {
                     SetWindowTextW(
                         control.hwnd,
                         wide(if self.settings_error.is_some() {
-                            "Settings (!)…"
+                            "Options (!)…"
                         } else {
-                            "Settings…"
+                            "Options…"
                         })
                         .as_ptr(),
                     );
@@ -96,107 +108,67 @@ impl App {
         Ok(())
     }
     pub(super) fn settings_menu(&mut self) -> anyhow::Result<()> {
-        let value = &self.settings.terminal;
-        let labels = vec![
-            format!("Font family… ({})", value.font_family.replace('&', "&&")),
-            format!("Font size… ({})", value.font_size),
-            "Larger text".into(),
-            "Smaller text".into(),
-            "Reset text size".into(),
-            "Dark terminal theme".into(),
-            "Light terminal theme".into(),
-            format!("Cursor blink: {} (toggle)", value.cursor_blink),
-            "Block cursor".into(),
-            "Underline cursor".into(),
-            "Bar cursor".into(),
-            format!("Scrollback… ({})", value.scrollback),
-            "Reset settings (including default shell)".into(),
-            self.settings_error
-                .clone()
-                .unwrap_or_else(|| "Settings apply to all flowmux windows".into())
-                .replace('&', "&&"),
-            "Default shell: Windows PowerShell".into(),
-            "Default shell: Command Prompt".into(),
-            "Default shell: PowerShell 7".into(),
-            format!(
-                "New tab with shell… (default: {})",
-                self.settings.default_shell.program.replace('&', "&&")
-            ),
-            format!("Terminal minimap: {} (toggle)", value.minimap_enabled),
-            format!("Minimap width… ({})", value.minimap_width),
-            format!("Minimap opacity… ({}%)", value.minimap_opacity),
-        ];
-        let mut rect = RECT::default();
-        let hwnd = self
-            .controls
-            .iter()
-            .find(|c| matches!(c.action, Action::Settings))
-            .map_or(self.window, |c| c.hwnd);
-        unsafe {
-            GetWindowRect(hwnd, &mut rect);
+        if self.options.is_none() {
+            self.options = Some(Panel::new(self.window)?);
         }
-        let choice = self.popup(
-            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-            &[14],
-            (rect.left, rect.bottom),
-        )?;
-        if (15..=17).contains(&choice) {
-            self.settings_submit(
-                SettingsOp::Shell {
-                    program: ["powershell", "cmd", "pwsh"][choice - 15].into(),
-                    args: vec![],
-                },
-                None,
-                None,
-            )?;
-            return self.focus_active();
-        }
-        if choice == 18 {
-            return self.shell_menu((rect.left, rect.bottom));
-        }
-        let edit = match choice {
-            1 => Some(SettingKey::FontFamily),
-            2 => Some(SettingKey::FontSize),
-            12 => Some(SettingKey::Scrollback),
-            20 => Some(SettingKey::MinimapWidth),
-            21 => Some(SettingKey::MinimapOpacity),
-            _ => None,
+        self.options.as_mut().unwrap().show(
+            &self.settings,
+            self.settings_error.as_deref(),
+            self.background_test,
+        );
+        Ok(())
+    }
+    pub(super) fn options_handle_message(&self, message: &MSG) -> bool {
+        self.options
+            .as_ref()
+            .is_some_and(|panel| panel.handle_message(message))
+    }
+    pub(super) fn options_ui(&mut self, action: UiAction) -> anyhow::Result<()> {
+        let Some(panel) = self.options.as_mut() else {
+            return Ok(());
         };
-        if let Some(key) = edit {
-            return self.edit_metadata(workspaces::EditTarget::Setting(key));
-        }
-        let changed = match choice {
-            3 => (
-                SettingKey::FontSize,
-                (value.font_size + 1).min(72).to_string(),
-            ),
-            4 => (
-                SettingKey::FontSize,
-                value.font_size.saturating_sub(1).max(6).to_string(),
-            ),
-            5 => (SettingKey::FontSize, "14".into()),
-            6 => (SettingKey::Theme, "dark".into()),
-            7 => (SettingKey::Theme, "light".into()),
-            8 => (SettingKey::CursorBlink, (!value.cursor_blink).to_string()),
-            9 => (SettingKey::CursorStyle, "block".into()),
-            10 => (SettingKey::CursorStyle, "underline".into()),
-            11 => (SettingKey::CursorStyle, "bar".into()),
-            13 => return self.settings_submit(SettingsOp::Reset, None, None),
-            19 => (
-                SettingKey::MinimapEnabled,
-                (!value.minimap_enabled).to_string(),
-            ),
-            _ => return self.focus_active(),
+        let index = match action {
+            UiAction::Layout => {
+                panel.layout();
+                return Ok(());
+            }
+            UiAction::Tab(page) => {
+                panel.select(page);
+                return Ok(());
+            }
+            UiAction::Close => {
+                panel.hide();
+                if !self.background_test {
+                    self.focus_active()?;
+                }
+                return Ok(());
+            }
+            UiAction::Reload => {
+                if panel.reset_ready() {
+                    panel.reload(&self.settings, self.settings_error.as_deref());
+                }
+                return Ok(());
+            }
+            UiAction::Reset => usize::MAX,
+            UiAction::Apply(index) => index,
         };
-        self.settings_submit(
-            SettingsOp::Set {
-                key: changed.0,
-                value: changed.1,
-                expected: Some(value.value(changed.0)),
-            },
-            None,
-            None,
-        )?;
-        self.focus_active()
+        let operation = if index == usize::MAX {
+            if !panel.reset_ready() {
+                return Ok(());
+            }
+            Ok(SettingsOp::Reset)
+        } else {
+            panel.operation(index, &self.settings)
+        };
+        let edit_id = panel.edit_id;
+        let result =
+            operation.and_then(|operation| self.settings_submit(operation, None, Some(edit_id)));
+        if let Some(panel) = self.options.as_mut() {
+            match result {
+                Ok(()) => panel.begin(index),
+                Err(error) => panel.status(&format!("{error:#}")),
+            }
+        }
+        Ok(())
     }
 }

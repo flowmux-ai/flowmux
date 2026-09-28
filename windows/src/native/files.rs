@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Bounded pane-owned Files controls. Filesystem work belongs to files_service.
+//! Window-wide Files dock with bounded source-pane state. Filesystem work belongs to files_service.
 use super::*;
 use crate::{files_model as domain, files_service as worker};
 use std::collections::HashSet;
@@ -21,8 +21,33 @@ pub(super) enum Signal {
     OpenFinished(domain::Owner, Value),
     Tick,
 }
+#[derive(Clone, Copy)]
+enum FormKind {
+    Copy,
+    Rename,
+    Move,
+}
+impl FormKind {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Copy => "Copy to",
+            Self::Rename => "Rename to",
+            Self::Move => "Move to",
+        }
+    }
+}
+#[derive(Clone)]
+struct Form {
+    kind: FormKind,
+    token: Uuid,
+    index: usize,
+    label: String,
+}
 #[derive(Clone)]
 enum Action {
+    Menu(i32, i32),
+    Begin(FormKind),
+    DismissForm,
     Refresh,
     More,
     Open,
@@ -54,6 +79,7 @@ struct Binding {
     indices: Vec<usize>,
     list: isize,
     destination: isize,
+    form: Option<Form>,
 }
 thread_local! {
     static ACTIVE_OPERATION: std::cell::Cell<Option<Uuid>> = const { std::cell::Cell::new(None) };
@@ -70,14 +96,54 @@ unsafe extern "system" fn procedure(
         return result;
     }
     match message {
+        WM_CONTEXTMENU => {
+            let binding = BINDINGS.with(|map| map.borrow().get(&(window as isize)).cloned());
+            if let Some(binding) = binding {
+                let at = SendMessageW(binding.list as HWND, LB_GETCARETINDEX, 0, 0);
+                let mut index = usize::try_from(at)
+                    .ok()
+                    .and_then(|at| binding.indices.get(at).copied());
+                let mut x = lparam as u16 as i16 as i32;
+                let mut y = (lparam >> 16) as u16 as i16 as i32;
+                if x >= 0 && y >= 0 && wparam as isize == binding.list {
+                    let mut point = POINT { x, y };
+                    ScreenToClient(binding.list as HWND, &mut point);
+                    let hit = SendMessageW(
+                        binding.list as HWND,
+                        LB_ITEMFROMPOINT,
+                        0,
+                        ((point.y as u16 as usize) << 16 | point.x as u16 as usize) as isize,
+                    );
+                    index = if (hit as usize >> 16) == 0 {
+                        binding.indices.get(hit as u16 as usize).copied()
+                    } else {
+                        None
+                    };
+                }
+                if x == -1 && y == -1 {
+                    let mut r = RECT::default();
+                    GetWindowRect(binding.list as HWND, &mut r);
+                    x = r.left;
+                    y = r.top;
+                }
+                post(Event::Files(Signal::Ui(UiRequest {
+                    owner: binding.owner,
+                    token: binding.token,
+                    index,
+                    action: Action::Menu(x, y),
+                })));
+            }
+            0
+        }
         WM_COMMAND => {
             let binding = BINDINGS.with(|map| map.borrow().get(&(window as isize)).cloned());
             let Some(binding) = binding else { return 0 };
             let list = binding.list as HWND;
             let native_index = SendMessageW(list, LB_GETCARETINDEX, 0, 0);
-            let index = usize::try_from(native_index)
+            let mut index = usize::try_from(native_index)
                 .ok()
                 .and_then(|index| binding.indices.get(index).copied());
+            let mut token = binding.token;
             let code = (wparam >> 16) as u32;
             let destination = || {
                 let edit = binding.destination as HWND;
@@ -87,15 +153,30 @@ unsafe extern "system" fn procedure(
                 String::from_utf16(&text[..read.max(0) as usize]).ok()
             };
             let action = match (wparam & 0xffff, code) {
+                (13, BN_CLICKED) => {
+                    let mut r = RECT::default();
+                    GetWindowRect(lparam as HWND, &mut r);
+                    Some(Action::Menu(r.left, r.bottom))
+                }
+                (14, BN_CLICKED) => binding.form.as_ref().and_then(|form| {
+                    index = Some(form.index);
+                    token = Some(form.token);
+                    destination().map(|text| match form.kind {
+                        FormKind::Copy => Action::Copy(text),
+                        FormKind::Rename => Action::Rename(text),
+                        FormKind::Move => Action::Move(text),
+                    })
+                }),
+                (15, BN_CLICKED) => Some(Action::DismissForm),
                 (1, BN_CLICKED) => Some(Action::Refresh),
                 (2, BN_CLICKED) => Some(Action::More),
                 (3, BN_CLICKED) | (LIST_ID, LBN_DBLCLK) => Some(Action::Open),
                 (4, BN_CLICKED) => Some(Action::Expand),
                 (5, BN_CLICKED) => Some(Action::Collapse),
                 (6, BN_CLICKED) => Some(Action::Hide),
-                (7, BN_CLICKED) => destination().map(Action::Copy),
-                (8, BN_CLICKED) => destination().map(Action::Rename),
-                (9, BN_CLICKED) => destination().map(Action::Move),
+                (7, BN_CLICKED) => Some(Action::Begin(FormKind::Copy)),
+                (8, BN_CLICKED) => Some(Action::Begin(FormKind::Rename)),
+                (9, BN_CLICKED) => Some(Action::Begin(FormKind::Move)),
                 (10, BN_CLICKED) => ACTIVE_OPERATION
                     .with(|id| id.get())
                     .map(Action::CancelOperation),
@@ -138,7 +219,7 @@ unsafe extern "system" fn procedure(
             if let Some(action) = action {
                 post(Event::Files(Signal::Ui(UiRequest {
                     owner: binding.owner,
-                    token: binding.token,
+                    token,
                     index,
                     action,
                 })));
@@ -159,12 +240,20 @@ struct Panel {
     window: HWND,
     list: HWND,
     heading: HWND,
+    path: HWND,
+    form_label: HWND,
     destination: HWND,
     status: HWND,
     buttons: Vec<HWND>,
     indices: Vec<usize>,
     token: Option<Uuid>,
     shown: bool,
+    form: Option<Form>,
+    more: bool,
+    area: Option<model::Rect>,
+    scale: f64,
+    background: bool,
+    list_top: i32,
 }
 impl Drop for Panel {
     fn drop(&mut self) {
@@ -210,14 +299,24 @@ impl Panel {
                 window,
                 list: std::ptr::null_mut(),
                 heading: std::ptr::null_mut(),
+                path: std::ptr::null_mut(),
+                form_label: std::ptr::null_mut(),
                 destination: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
                 buttons: Vec::new(),
                 indices: Vec::new(),
                 token: None,
                 shown: false,
+                form: None,
+                more: false,
+                area: None,
+                scale: 1.0,
+                background: true,
+                list_top: 58,
             };
-            panel.heading = panel.child("STATIC", "Files", 10, 0)?;
+            panel.heading = panel.child("STATIC", "Files", 16, 0)?;
+            panel.path = panel.child("STATIC", "", 17, 0)?;
+            panel.form_label = panel.child("STATIC", "", 18, 0)?;
             panel.status = panel.child("STATIC", "", 11, 0)?;
             panel.destination = panel.child(
                 "EDIT",
@@ -230,7 +329,7 @@ impl Panel {
                 panel.destination,
                 0x1501,
                 1,
-                wide("Destination path / new name").as_ptr() as isize,
+                wide("Path relative to Files root / new name").as_ptr() as isize,
             );
             panel.list = panel.child(
                 "LISTBOX",
@@ -255,6 +354,9 @@ impl Panel {
                 (8, "Rename to"),
                 (9, "Move to"),
                 (10, "Cancel job"),
+                (13, "Actions"),
+                (14, "Apply"),
+                (15, "Cancel"),
             ] {
                 panel
                     .buttons
@@ -297,6 +399,9 @@ impl Panel {
         }
     }
     fn layout(&mut self, area: Option<model::Rect>, scale: f64, background: bool) {
+        self.area = area;
+        self.scale = scale;
+        self.background = background;
         let show = area.is_some() && !background;
         unsafe {
             if self.shown != show {
@@ -314,42 +419,72 @@ impl Panel {
                 area.height.max(1),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            let margin = px(5);
+            let margin = px(6);
             let width = (area.width - margin * 2).max(1);
-            let button_width = ((width - margin * 2) / 3).max(1);
-            for (index, button) in self.buttons.iter().enumerate() {
-                SetWindowPos(
-                    *button,
-                    std::ptr::null_mut(),
-                    margin + (index % 3) as i32 * (button_width + margin),
-                    px(29) + (index / 3) as i32 * px(28) + if index >= 6 { px(28) } else { 0 },
-                    button_width,
-                    px(24),
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
+            let operation = ACTIVE_OPERATION.with(|id| id.get().is_some());
+            let form = self.form.is_some();
+            self.list_top = px(if form { 140 } else { 58 });
+            let status_y = (area.height - px(26)).max(self.list_top);
+            let more_y = status_y - if self.more || operation { px(28) } else { 0 };
+            let position = |window: HWND, rect: Option<(i32, i32, i32, i32)>| {
+                if let Some((x, y, w, h)) = rect.filter(|(x, y, w, h)| {
+                    *x >= 0
+                        && *y >= 0
+                        && *w > 0
+                        && *h > 0
+                        && x + w <= area.width
+                        && y + h <= area.height
+                }) {
+                    SetWindowPos(
+                        window,
+                        std::ptr::null_mut(),
+                        x,
+                        y,
+                        w,
+                        h,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                } else {
+                    ShowWindow(window, SW_HIDE);
+                }
+            };
+            for (at, button) in self.buttons.iter().enumerate() {
+                let rect = match at {
+                    5 => Some((area.width - px(46), px(4), px(40), px(26))),
+                    10 => Some((area.width - px(112), px(4), px(62), px(26))),
+                    1 if self.more => Some((margin, more_y, (width / 2 - px(2)).max(1), px(24))),
+                    9 if operation => {
+                        Some((margin + width / 2, more_y, (width / 2).max(1), px(24)))
+                    }
+                    11 if form => Some((margin, px(108), (width / 2 - px(2)).max(1), px(26))),
+                    12 if form => Some((margin + width / 2, px(108), (width / 2).max(1), px(26))),
+                    _ => None,
+                };
+                position(*button, rect);
             }
-            for (window, x, y, w, h) in [
-                (self.heading, margin, px(4), width, px(21)),
-                (self.destination, margin, px(86), width, px(24)),
-                (self.status, margin, px(172), width, px(35)),
-                (
-                    self.list,
+            position(
+                self.heading,
+                Some((margin, px(5), (width - px(112)).max(1), px(22))),
+            );
+            position(self.path, Some((margin, px(32), width, px(20))));
+            position(
+                self.form_label,
+                form.then_some((margin, px(58), width, px(20))),
+            );
+            position(
+                self.destination,
+                form.then_some((margin, px(80), width, px(24))),
+            );
+            position(self.status, Some((margin, status_y, width, px(22))));
+            position(
+                self.list,
+                Some((
                     margin,
-                    px(209),
+                    self.list_top,
                     width,
-                    (area.height - px(214)).max(1),
-                ),
-            ] {
-                SetWindowPos(
-                    window,
-                    std::ptr::null_mut(),
-                    x,
-                    y,
-                    w,
-                    h,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-            }
+                    (more_y - self.list_top - px(4)).max(0),
+                )),
+            );
             SendMessageW(
                 self.list,
                 LB_SETHORIZONTALEXTENT,
@@ -362,6 +497,13 @@ impl Panel {
         let rows = state.model.rendered_rows();
         let indices: Vec<_> = rows.iter().map(|row| row.index).collect();
         let changed = self.token != state.model.token() || self.indices != indices;
+        if self
+            .form
+            .as_ref()
+            .is_some_and(|form| Some(form.token) != state.model.token())
+        {
+            self.form = None;
+        }
         unsafe {
             let top = SendMessageW(self.list, LB_GETTOPINDEX, 0, 0).max(0);
             if changed {
@@ -421,11 +563,15 @@ impl Panel {
                 SendMessageW(self.list, WM_SETREDRAW, 1, 0);
                 InvalidateRect(self.list, std::ptr::null(), 1);
             }
-            SetWindowTextW(
-                self.heading,
-                wide(format!("Files — {}", state.root.display())).as_ptr(),
-            );
+            SetWindowTextW(self.path, wide(state.root.display().to_string()).as_ptr());
             let page = state.model.page(0)?;
+            self.more = page.more_available;
+            if let Some(form) = &self.form {
+                SetWindowTextW(
+                    self.form_label,
+                    wide(format!("{}: {}", form.kind.title(), form.label)).as_ptr(),
+                );
+            }
             let text = if state.pending.is_some() {
                 "Loading files…".to_owned()
             } else if let Some(error) = state.message.as_ref().or(page.error.as_ref()) {
@@ -444,7 +590,9 @@ impl Panel {
             };
             SetWindowTextW(self.status, wide(text).as_ptr());
             for (at, button) in self.buttons.iter().enumerate() {
-                let enabled = at == 9
+                let enabled = at == 10
+                    || at == 12
+                    || at == 9
                     || at == 0
                     || at == 5
                     || (state.pending.is_none() && !page.stale && (at != 1 || page.more_available));
@@ -460,9 +608,11 @@ impl Panel {
                     indices: self.indices.clone(),
                     list: self.list as isize,
                     destination: self.destination as isize,
+                    form: self.form.clone(),
                 },
             );
         });
+        self.layout(self.area, self.scale, self.background);
         Ok(())
     }
     fn native_count(&self) -> usize {
@@ -534,6 +684,7 @@ impl PaneState {
 }
 #[derive(Default)]
 pub(super) struct Controller {
+    active: Option<PaneId>,
     states: HashMap<PaneId, PaneState>,
     service: Option<worker::Service>,
     clock: u64,
@@ -555,6 +706,9 @@ impl Controller {
     fn remove(&mut self, pane: PaneId, reason: &str) {
         self.cancel(pane, reason);
         self.states.remove(&pane);
+        if self.active == Some(pane) {
+            self.active = None;
+        }
     }
     fn capacity(&mut self, pane: PaneId, bytes: usize) -> anyhow::Result<()> {
         anyhow::ensure!(bytes <= MAX_CACHE, "Files pane exceeds the cache limit");
@@ -583,6 +737,45 @@ impl Controller {
 }
 
 impl App {
+    fn files_activate(&mut self, pane: PaneId) {
+        if let Some(previous) = self.files.active.filter(|previous| *previous != pane) {
+            if let Some(state) = self.files.states.get(&previous) {
+                self.editor_cancel_files_opens(state.owner.instance, "Files source changed");
+            }
+            self.files.cancel(previous, "Files source changed");
+            if let Some(state) = self.files.states.get_mut(&previous) {
+                state.visible = false;
+                if let Some(panel) = &mut state.panel {
+                    panel.form = None;
+                }
+            }
+        }
+        self.files.active = Some(pane);
+        if let Some(state) = self.files.states.get_mut(&pane) {
+            state.visible = true;
+        }
+        self.files_operation_tick();
+    }
+    pub(super) fn files_dock_width(
+        &self,
+        workspace: usize,
+        workbench_width: i32,
+        scale: f64,
+    ) -> i32 {
+        let visible = self
+            .files
+            .active
+            .and_then(|pane| self.files.states.get(&pane))
+            .is_some_and(|state| {
+                state.visible && state.owner.workspace == self.workspaces[workspace].id.0
+            });
+        if visible {
+            ((320.0 * scale).round() as i32)
+                .min((workbench_width - (160.0 * scale).round() as i32).max(0))
+        } else {
+            0
+        }
+    }
     pub(super) fn files_command(
         &mut self,
         op: domain::Op,
@@ -591,6 +784,17 @@ impl App {
         self.files_dispatch(op, Some(reply))
     }
     pub(super) fn files_show_current(&mut self) -> anyhow::Result<()> {
+        let pane = self.workspace().focused;
+        if self.files.active == Some(pane)
+            && self
+                .files
+                .states
+                .get(&pane)
+                .is_some_and(|state| state.visible)
+        {
+            self.files_dispatch(domain::Op::Hide(domain::PaneArgs { pane: pane.0 }), None)?;
+            return Ok(());
+        }
         self.files_dispatch(
             domain::Op::Show(domain::ShowArgs {
                 pane: self.workspace().focused.0,
@@ -613,7 +817,12 @@ impl App {
                 | domain::Op::OperationStatus(_)
                 | domain::Op::OperationCancel(_)
         ) {
-            return self.files_operation_command(op, reply);
+            let changes_controls = !matches!(&op, domain::Op::OperationStatus(_));
+            let result = self.files_operation_command(op, reply)?;
+            if changes_controls {
+                self.layout()?;
+            }
+            return Ok(result);
         }
         if matches!(&op, domain::Op::Show(_)) {
             anyhow::ensure!(
@@ -716,12 +925,13 @@ impl App {
                 }
                 self.files.remove(pane, "Files root was replaced");
                 self.files.states.insert(pane, state);
+                self.files_activate(pane);
                 self.files_schedule();
                 self.layout()?;
                 return Ok(None);
             }
             self.files_scan(pane, None, reply)?;
-            self.files.states.get_mut(&pane).unwrap().visible = true;
+            self.files_activate(pane);
             self.layout()?;
             return Ok(None);
         }
@@ -734,6 +944,10 @@ impl App {
         let expand = matches!(&op, domain::Op::Expand(_));
         match op {
             domain::Op::Refresh(_) => {
+                anyhow::ensure!(
+                    self.files.states[&pane].visible,
+                    "Files is hidden; show it before refreshing"
+                );
                 self.files_scan(pane, None, reply)?;
                 return Ok(None);
             }
@@ -741,6 +955,9 @@ impl App {
                 let instance = self.files.states[&pane].owner.instance;
                 self.editor_cancel_files_opens(instance, "Files panel was hidden");
                 self.files.cancel(pane, "Files panel was hidden");
+                if self.files.active == Some(pane) {
+                    self.files.active = None;
+                }
                 let state = self.files.states.get_mut(&pane).unwrap();
                 state.visible = false;
                 state.owner.generation = state
@@ -900,7 +1117,10 @@ impl App {
     pub(super) fn files_event(&mut self, signal: Signal) -> anyhow::Result<()> {
         match signal {
             Signal::Tick => self.files_tick(),
-            Signal::Operation(event) => self.files_operation_event(event)?,
+            Signal::Operation(event) => {
+                self.files_operation_event(event)?;
+                self.layout()?;
+            }
             Signal::Worker(mut response) => {
                 self.files_reconcile();
                 let pane = PaneId(response.owner.pane);
@@ -1016,6 +1236,100 @@ impl App {
                 })
             };
             let op = match request.action {
+                Action::Menu(x, y) => {
+                    let labels = [
+                        "Open",
+                        "Expand",
+                        "Collapse",
+                        "Copy to…",
+                        "Rename…",
+                        "Move to…",
+                        "Refresh",
+                        "Load more",
+                        "Hide Files",
+                    ];
+                    let selected = request.index.is_some() && request.token.is_some();
+                    let disabled = if selected {
+                        Vec::new()
+                    } else {
+                        vec![1, 2, 3, 4, 5, 6]
+                    };
+                    let choice = self.popup(&labels, &disabled, (x, y))?;
+                    let action = match choice {
+                        1 => Action::Open,
+                        2 => Action::Expand,
+                        3 => Action::Collapse,
+                        4 => Action::Begin(FormKind::Copy),
+                        5 => Action::Begin(FormKind::Rename),
+                        6 => Action::Begin(FormKind::Move),
+                        7 => Action::Refresh,
+                        8 => Action::More,
+                        9 => Action::Hide,
+                        _ => {
+                            if !self.background_test {
+                                if let Some(panel) = self.files.states[&pane]
+                                    .panel
+                                    .as_ref()
+                                    .filter(|panel| panel.shown)
+                                {
+                                    unsafe {
+                                        SetFocus(panel.list);
+                                    }
+                                }
+                            }
+                            return Ok(());
+                        }
+                    };
+                    self.files_ui(UiRequest {
+                        owner: request.owner.clone(),
+                        token: request.token,
+                        index: request.index,
+                        action,
+                    });
+                    return Ok(());
+                }
+                Action::Begin(kind) => {
+                    let row = row()?;
+                    let state = self.files.states.get_mut(&pane).unwrap();
+                    anyhow::ensure!(state.pending.is_none(), "Files is loading");
+                    state.model.open_path(row.token, row.index)?;
+                    let label = state
+                        .model
+                        .rendered_rows()
+                        .into_iter()
+                        .find(|row| row.index == request.index.unwrap())
+                        .context("Selected Files row disappeared")?
+                        .row
+                        .name;
+                    if let Some(panel) = &mut state.panel {
+                        panel.form = Some(Form {
+                            kind,
+                            token: row.token,
+                            index: row.index,
+                            label,
+                        });
+                        unsafe {
+                            SetWindowTextW(panel.destination, wide("").as_ptr());
+                        }
+                    }
+                    state.render()?;
+                    if !self.background_test {
+                        if let Some(panel) = state.panel.as_ref().filter(|panel| panel.shown) {
+                            unsafe {
+                                SetFocus(panel.destination);
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                Action::DismissForm => {
+                    let state = self.files.states.get_mut(&pane).unwrap();
+                    if let Some(panel) = &mut state.panel {
+                        panel.form = None;
+                    }
+                    state.render()?;
+                    return Ok(());
+                }
                 Action::Refresh => domain::Op::Refresh(domain::PaneArgs { pane: pane.0 }),
                 Action::More => domain::Op::More(domain::TokenArgs {
                     pane: pane.0,
@@ -1091,6 +1405,7 @@ impl App {
                 }
             };
             self.files_dispatch(op, None)?;
+            self.layout()?;
             Ok(())
         })();
         if let Err(error) = action {
@@ -1116,6 +1431,20 @@ impl App {
         value["pane"] = json!(pane);
         value["source"] = json!(state.source);
         value["visible"] = json!(state.visible);
+        value["dock_source_pane"] = json!(self.files.active);
+        value["dock_visible"] = json!(
+            self.files.active == Some(pane)
+                && state.visible
+                && state.owner.workspace == self.workspace().id.0
+        );
+        value["dock_scope"] = json!("window");
+        value["dock_bounds"] = json!(state
+            .panel
+            .as_ref()
+            .and_then(|panel| panel.area)
+            .map(|r| json!({"x":r.x,"y":r.y,"width":r.width,"height":r.height})));
+        value["list_top"] = json!(state.panel.as_ref().map(|panel| panel.list_top));
+        value["operation_form"] = json!(state.panel.as_ref().and_then(|panel|panel.form.as_ref()).map(|form|json!({"kind":form.kind.title(),"token":form.token,"index":form.index,"source_label":form.label})));
         value["loading"] = json!(state.pending.is_some());
         value["current_owner"] = json!(state.owner);
         value["captured_root"] = json!(state.root);
@@ -1274,29 +1603,17 @@ impl App {
     }
     pub(super) fn files_layout(
         &mut self,
-        areas: &mut [(PaneId, model::Rect)],
-        bar: i32,
+        area: Option<model::Rect>,
         scale: f64,
     ) -> anyhow::Result<()> {
         self.files_reconcile();
+        let workspace = self.workspace().id.0;
         for (pane, state) in &mut self.files.states {
-            let area = areas
-                .iter_mut()
-                .find(|(id, _)| id == pane)
-                .filter(|_| state.visible)
-                .map(|(_, area)| {
-                    let width = ((300.0 * scale).round() as i32).min(area.width / 2).max(1);
-                    let panel = model::Rect {
-                        x: area.x + area.width - width,
-                        y: area.y + bar,
-                        width,
-                        height: (area.height - bar).max(1),
-                    };
-                    area.width = (area.width - width).max(1);
-                    panel
-                });
+            let visible = self.files.active == Some(*pane)
+                && state.visible
+                && state.owner.workspace == workspace;
             if let Some(panel) = &mut state.panel {
-                panel.layout(area, scale, self.background_test);
+                panel.layout(area.filter(|_| visible), scale, self.background_test);
             }
         }
         Ok(())

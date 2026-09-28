@@ -47,6 +47,11 @@ pub(super) enum ChromeIcon {
     Search,
     OpenFile,
     Notifications,
+    Back,
+    Forward,
+    Reload,
+    Stop,
+    More,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -283,6 +288,10 @@ impl State {
     }
 }
 thread_local! { static STATE: RefCell<State> = RefCell::new(State::new()); }
+
+pub(super) fn palette() -> Palette {
+    STATE.with(|slot| slot.borrow().palette)
+}
 
 pub(super) fn configure(theme: Theme, dpi: u32) {
     let dpi = dpi.clamp(48, 768);
@@ -650,7 +659,7 @@ fn fill(dc: HDC, rect: &RECT, color: COLORREF) {
 /// HWND caption, model/path identity, input, clipboard, or persisted codepoints.
 /// ASCII avoids native work. Unsupported/invalid input or sizing failure keeps
 /// the original drawing buffer, and allocation is capped independently of GDI.
-fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]> {
+pub(super) fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]> {
     use std::borrow::Cow;
     use windows_sys::Win32::Globalization::{NormalizationC, NormalizeString};
     const MAX_DRAWING_UNITS: usize = 8192;
@@ -865,6 +874,39 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 LineTo(item.hDC, x(c), y(d));
             };
             match kind {
+                ChromeIcon::Back | ChromeIcon::Forward => {
+                    let sign = if matches!(kind, ChromeIcon::Back) {
+                        -1
+                    } else {
+                        1
+                    };
+                    line(-6 * sign, 0, 6 * sign, 0);
+                    line(6 * sign, 0, sign, -5);
+                    line(6 * sign, 0, sign, 5);
+                }
+                ChromeIcon::Reload => {
+                    windows_sys::Win32::Graphics::Gdi::Arc(
+                        item.hDC,
+                        x(-6),
+                        y(-6),
+                        x(6) + 1,
+                        y(6) + 1,
+                        x(6),
+                        y(0),
+                        x(0),
+                        y(-6),
+                    );
+                    line(0, -6, 5, -6);
+                    line(5, -6, 5, -1);
+                }
+                ChromeIcon::Stop => {
+                    Rectangle(item.hDC, x(-5), y(-5), x(5) + 1, y(5) + 1);
+                }
+                ChromeIcon::More => {
+                    for offset in [-5, 0, 5] {
+                        Ellipse(item.hDC, x(offset - 1), y(-1), x(offset + 1) + 1, y(1) + 1);
+                    }
+                }
                 ChromeIcon::Settings => {
                     Ellipse(item.hDC, x(-5), y(-5), x(5) + 1, y(5) + 1);
                     Ellipse(item.hDC, x(-2), y(-2), x(2) + 1, y(2) + 1);

@@ -146,11 +146,13 @@ to the same text. `result.error` reports an invalid range or oversized selection
 transport/target errors use the normal CLI error response. See
 [selection evidence](evidence/2026-09-28/selection.md).
 
-The side panel's Notifications button opens a native list with unread counts on
-workspace and tab captions. Entries can reopen their original terminal after a
-move, including its retained screen after process exit. Opening a closed source
-returns an error; it does not select a replacement tab or mark the entry read.
-The list is per window, memory-only, oldest first, and retains at most 50 entries.
+The header bell opens an owned 320-DIP notification popup anchored to the button,
+with newest-first title/body/time rows, bounded scrolling, Open/Delete and All Clear.
+The first visible snapshot retains unread styling before the store is acknowledged.
+Entries reopen their original terminal after a move, including retained output
+after process exit; a closed source reports an error without selecting a replacement.
+The per-window store is memory-only and retains at most 50 entries. Verification
+of this new popup is tracked in [UI structure evidence](evidence/2026-09-28/ui-structure.md).
 
 ```powershell
 flowmux notify --surface surface:<id> --title "작업 완료" --level attention "확인이 필요합니다"
@@ -335,10 +337,14 @@ UI, drag reordering, automatic-name reset and native menu/dialog/IME/DPI accepta
 remain pending. Hidden verification
 is available in `scripts/verify-workspaces.ps1`.
 
-The side panel's **Settings** menu changes terminal font/fallback list, size
-(6–72 pixels), dark/light theme, cursor blink/style and scrollback (0–100000
-lines), plus minimap enable/width/opacity. Larger/smaller/reset text commands change the shared font size. Lowering
-scrollback discards the oldest retained lines. Terminal settings are shared
+The side panel's **Options** entry opens an owned nonmodal window with **General**
+and **Theme** pages. General groups terminal font/fallback list, size (6–72 pixels),
+scrollback (0–100000 lines), cursor/minimap settings and the default shell. Theme
+selects dark/light colors. Text fields use per-row **Apply**; combo selections apply
+immediately. Failed saves retain the edited value and show an error. **Reload values**,
+**Reset to defaults** and **Close** remain in the window. Keybindings, Update and
+full Linux theme editing are not included. Lowering scrollback discards the oldest
+retained lines. Terminal settings are shared
 across this user's Windows flowmux windows and apply to existing and new tabs
 without restarting their shells or requesting focus. An active terminal IME
 composition or history restore defers changes until it ends.
@@ -367,7 +373,7 @@ Other windows and external edits are observed about once per idle second.
 applied acknowledgement; a successful set means the file was saved, while an
 IME composition can still defer an individual terminal's application.
 
-Invalid or future-version files are preserved and reported by **Settings (!)…**.
+Invalid or future-version files are preserved and reported by **Options (!)…**.
 An already running window retains its last valid options; a newly opened window
 uses defaults. Only an explicit reset replaces an invalid file. Reset also
 restores the default shell to Windows PowerShell. Temporary
@@ -380,7 +386,10 @@ availability and glyph coverage are not validated. Dark/light settings now also
 select native shell colors; custom themes, font
 discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
 accessibility acceptance remain pending. See
-[settings verification](evidence/2026-09-28/settings.md).
+[settings verification](evidence/2026-09-28/settings.md). Five current hidden Options
+checks pass in 5.285 seconds: owned nonmodal layout, Unicode edit/Apply and terminal
+acknowledgement, theme selection, invalid draft retention, and Reset/Close with
+stable terminal identity. See [UI structure evidence](evidence/2026-09-28/ui-structure.md).
 
 The sidebar divider now adjusts a preferred width of 160–640 DIP, defaulting to
 260 DIP. Narrow windows temporarily reduce the displayed width to reserve 320 DIP
@@ -392,7 +401,7 @@ it. Older binaries reject checkpoints containing a nondefault width because thei
 state schema rejects unknown fields.
 
 The **Workspaces** header includes a notification bell. A 36-DIP footer holds one
-row of Settings, Files, Search and Open file icons. Icon buttons retain native text
+row of Options, Files, Search and Open file icons. Icon buttons retain native text
 captions and tooltips. Workspace rows remain 58 DIP tall, beginning at 40 DIP,
 with name/current directory, unread counts, rounded selection and color stripes.
 Previous/Next controls reserve space only when the list overflows. Compact 28-DIP
@@ -751,7 +760,11 @@ The same pane tree/tab model places a page to the right of the source, reuses an
 existing browser pane there, or splits down with `--down`. Browser and terminal
 tabs can share a pane and move without recreating their views. The native
 address EDIT uses an explicit **Go** button; Enter is left to native text/IME
-handling. Back/Forward/Reload/Stop and 50–300% zoom have native controls.
+handling. Navigation now occupies one 40-DIP row with address, Back/Forward,
+Reload/Stop, Go and **Browser tools**. Narrow panes move navigation into the tools
+menu; zoom, Downloads and Find in page are available there. Existing WebView2
+services remain unchanged; current layout/interaction acceptance is tracked in
+[UI structure evidence](evidence/2026-09-28/ui-structure.md).
 
 ```powershell
 flowmuxctl.exe browser open https://example.com --pane pane:<source-id>
@@ -1007,8 +1020,8 @@ remain open. See [capture evidence](evidence/2026-09-28/browser-capture.md).
 
 ### Browser downloads (partial)
 
-Browser attachments now use a native download manager. The browser toolbar's
-**Downloads** button opens its list, with byte progress, open-file/folder, cancel,
+Browser attachments use a native download manager. **Browser tools → Downloads**
+opens its list, with byte progress, open-file/folder, cancel,
 remove and clear controls. Downloads go to the Windows Known Folder for Downloads.
 The default WebView2 download dialog is suppressed. In hidden debug tests, the
 folder is redirected below the explicitly isolated test state directory and the
@@ -1079,7 +1092,7 @@ not establish real Korean IME behavior.
 
 ### Browser page find (partial)
 
-The browser toolbar's **Find** button opens a native query field with **Previous**,
+**Browser tools → Find in page** opens a native query field with **Previous**,
 **Next**, **Match case** and **Close** controls. While editing the query, Enter and
 Escape pass through to the native EDIT/IME path; they do not search or close the
 panel. Use the explicit buttons. Physical Korean IME behavior remains unverified.
@@ -1257,14 +1270,20 @@ behavior.
 
 ## Files panel (partial)
 
-**Files** opens a native file list beside the current pane, including a
-terminal-only pane. Expand or collapse folders, select a range or toggle individual
+**Files** opens one visible dock on the right of the entire window workbench,
+using the selected source pane's root, including a terminal-only pane. The dock is
+320 DIP where space permits. Switching source panes retains bounded per-pane tree,
+selection and expansion caches; Open still targets the retained source pane.
+A 58-DIP header/path area replaces the permanent action rows. **Actions** and row
+context menus expose operations; a destination form appears only for a requested
+Copy/Rename/Move operation. Expand or collapse folders, select a range or toggle individual
 rows, use **More** to show another 500 rows, and **Open** to send one retained text
 file to the existing Monaco editor. **Refresh** rereads the pinned root; **Hide**
 closes the panel while retaining bounded in-memory selection and expansion state.
 The listing includes hidden/generated names; search ignore rules do not hide them.
 Reparse entries appear as unsupported leaves. The root remains pinned when the
-terminal changes its working directory.
+terminal changes its working directory. Current dock/source-switch/form acceptance
+is tracked in [UI structure evidence](evidence/2026-09-28/ui-structure.md).
 
 ```powershell
 flowmux --json files show --pane <pane-id> --root C:\work\project

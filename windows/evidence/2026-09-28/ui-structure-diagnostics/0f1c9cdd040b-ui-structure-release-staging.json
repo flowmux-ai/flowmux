@@ -1,0 +1,50 @@
+{
+  "cargo_result": "windows/dist/checks/ui-structure-static-release-84e313b7-8ca0-4d03-a5c2-2bcbf76ce904/result.json",
+  "cargo_status": "failed",
+  "crt": "static",
+  "note": "Fresh linked deps outputs from bounded static-CRT build; canonical publication failedOS5; no existing executable touched.",
+  "files": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux.exe",
+      "path": "windows/dist/ui-structure-release/flowmux.exe",
+      "sha256": "75c6367ada6fe0fa5f6c0d76973bae2bb00438a175d9d1b8a7915cfe2b3f9700",
+      "bytes": 22368768,
+      "mtime_utc": "2026-09-28T08:29:11.374084+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmuxctl.exe",
+      "path": "windows/dist/ui-structure-release/flowmuxctl.exe",
+      "sha256": "fe039d851f348461b13d8dbf912b72820b954b9dd600cf9f028a4166744f03b3",
+      "bytes": 1917952,
+      "mtime_utc": "2026-09-28T08:28:44.571041+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_command.exe",
+      "path": "windows/dist/ui-structure-release/flowmux-command.exe",
+      "sha256": "3565db1708c8217068d7951b31b3545b9da2038f4256c233d053e3f893a8dcc5",
+      "bytes": 1977344,
+      "mtime_utc": "2026-09-28T08:28:44.573042+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_command.exe",
+      "path": "windows/dist/ui-structure-release/flowmux.com",
+      "sha256": "3565db1708c8217068d7951b31b3545b9da2038f4256c233d053e3f893a8dcc5",
+      "bytes": 1977344,
+      "mtime_utc": "2026-09-28T08:28:44.573042+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/conpty.dll",
+      "path": "windows/dist/ui-structure-release/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920,
+      "mtime_utc": "2026-09-27T12:20:12.289442+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/x64/OpenConsole.exe",
+      "path": "windows/dist/ui-structure-release/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296,
+      "mtime_utc": "2026-09-27T12:20:12.306707+00:00"
+    }
+  ]
+}

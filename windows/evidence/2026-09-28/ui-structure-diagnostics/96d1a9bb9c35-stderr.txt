@@ -1,0 +1,15 @@
+Add-Type : c:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\
+ChromeFixture.cs(8) : 'System.Drawing' 네임스페이스에 'Imaging' 형식 또는 네임스페이스 이름이 없습니다. 어셈블리 참조가 있는지 확인하십시오.
+c:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\ChromeFixtu
+re.cs(7) : using System.Drawing;
+c:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\ChromeFixtu
+re.cs(8) : >>> using System.Drawing.Imaging;
+c:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\ChromeFixtu
+re.cs(9) : using System.Runtime.InteropServices;
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-b
+rowser.ps1:13 문자:1
++ Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidData: (Microsoft.Power...peCompilerError:AddTypeCompilerError) [Add-Type], Except
+   ion
+    + FullyQualifiedErrorId : SOURCE_CODE_ERROR,Microsoft.PowerShell.Commands.AddTypeCommand

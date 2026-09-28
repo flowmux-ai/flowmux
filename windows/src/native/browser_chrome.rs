@@ -23,7 +23,9 @@ pub(super) struct Chrome {
     pub(super) window: HWND,
     pub(super) address: HWND,
     status: HWND,
-    find: HWND,
+    more: HWND,
+    loading: bool,
+    navigation_visible: bool,
     buttons: Vec<HWND>,
 }
 impl Drop for Chrome {
@@ -73,7 +75,9 @@ impl Chrome {
                 window,
                 address: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
-                find: std::ptr::null_mut(),
+                more: std::ptr::null_mut(),
+                loading: false,
+                navigation_visible: false,
                 buttons: vec![],
             };
             OWNERS.with(|map| map.borrow_mut().insert(window as isize, id));
@@ -111,7 +115,28 @@ impl Chrome {
                 0,
             );
             chrome.status = chrome.child("STATIC", "", 0, 21)?;
-            chrome.find = chrome.child("BUTTON", "Find", WS_TABSTOP | BS_PUSHBUTTON as u32, 10)?;
+            chrome.more = chrome.child(
+                "BUTTON",
+                "Browser tools",
+                WS_TABSTOP | BS_PUSHBUTTON as u32,
+                11,
+            )?;
+            for (button, kind) in [
+                (chrome.buttons[0], shell_chrome::ChromeIcon::Back),
+                (chrome.buttons[1], shell_chrome::ChromeIcon::Forward),
+                (chrome.buttons[2], shell_chrome::ChromeIcon::Reload),
+                (chrome.buttons[3], shell_chrome::ChromeIcon::Stop),
+                (chrome.buttons[4], shell_chrome::ChromeIcon::Forward),
+                (chrome.more, shell_chrome::ChromeIcon::More),
+            ] {
+                shell_chrome::set_role(
+                    button,
+                    shell_chrome::Role::Icon {
+                        kind,
+                        marked: false,
+                    },
+                );
+            }
             Ok(chrome)
         }
     }
@@ -146,9 +171,9 @@ impl Chrome {
         Ok(hwnd)
     }
     pub(super) fn height(scale: f64) -> i32 {
-        (98.0 * scale).round() as i32
+        (40.0 * scale).round() as i32
     }
-    pub(super) fn layout(&self, area: model::Rect, scale: f64) {
+    pub(super) fn layout(&mut self, area: model::Rect, scale: f64) {
         let px = |v: i32| (v as f64 * scale).round() as i32;
         unsafe {
             SetWindowPos(
@@ -160,56 +185,90 @@ impl Chrome {
                 Self::height(scale),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            let widths = [50, 62, 60, 48, 42, 30, 30, 48, 86];
-            let mut x = px(2);
+            let mut left = px(4);
+            let full = area.width >= px(250);
+            self.navigation_visible = area.width >= px(104);
+            let go = area.width >= px(168);
             for (i, button) in self.buttons.iter().enumerate() {
-                // Go belongs to the address row; remaining controls stay stable.
-                let (left, top, width) = if i == 4 {
-                    ((area.width - px(46)).max(0), px(35), px(44))
-                } else {
-                    (x, px(2), px(widths[i]))
+                let shown = match i {
+                    0 | 1 => full,
+                    2 => self.navigation_visible && !self.loading,
+                    3 => self.navigation_visible && self.loading,
+                    4 => go,
+                    _ => false,
                 };
-                SetWindowPos(
-                    *button,
-                    std::ptr::null_mut(),
-                    left,
-                    top,
-                    width,
-                    px(29),
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-                if i != 4 {
-                    x += width + px(2);
+                let x = if i == 4 { area.width - px(68) } else { left };
+                // Both Reload and Stop keep current bounds while hidden. Metadata
+                // only switches visibility, so a stale slot cannot shrink a button.
+                if shown || matches!(i, 2 | 3) {
+                    SetWindowPos(
+                        *button,
+                        std::ptr::null_mut(),
+                        x.max(0),
+                        px(4),
+                        px(30),
+                        px(30),
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+                ShowWindow(*button, if shown { SW_SHOWNA } else { SW_HIDE });
+                if (i < 2 && full) || (i == 3 && self.navigation_visible) {
+                    left += px(32);
                 }
             }
+            ShowWindow(
+                self.address,
+                if area.width >= px(50) {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
+            );
             SetWindowPos(
                 self.address,
                 std::ptr::null_mut(),
-                px(2),
-                px(35),
-                (area.width - px(52)).max(1),
+                left,
+                px(5),
+                (area.width - left - px(if go { 72 } else { 38 })).max(1),
                 px(28),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            SetWindowPos(
-                self.status,
-                std::ptr::null_mut(),
-                px(2),
-                px(68),
-                (area.width - px(68)).max(1),
-                px(26),
-                SWP_NOZORDER | SWP_NOACTIVATE,
+            let tool_width = px(30).min((area.width - px(8)).max(1));
+            ShowWindow(
+                self.more,
+                if area.width >= px(10) {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
             );
             SetWindowPos(
-                self.find,
+                self.more,
                 std::ptr::null_mut(),
-                (area.width - px(64)).max(0),
-                px(68),
-                px(62),
-                px(26),
+                (area.width - px(4) - tool_width).max(0),
+                px(4),
+                tool_width,
+                px(30),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
+            // Status is available through the tools caption/tooltip and native diagnostics.
+            ShowWindow(self.status, SW_HIDE);
         }
+    }
+    pub(super) fn tools_anchor(&self) -> (i32, i32) {
+        let mut r = RECT::default();
+        unsafe {
+            GetWindowRect(self.more, &mut r);
+        }
+        (r.left, r.bottom)
+    }
+    pub(super) fn diagnostics(&self) -> Value {
+        let mut r = RECT::default();
+        unsafe {
+            GetClientRect(self.window, &mut r);
+        }
+        json!({"height":r.bottom,"rows":1,"tools_handle":self.more as usize,
+            "status_handle":self.status as usize,"controls":self.buttons.iter().map(|h|*h as usize).collect::<Vec<_>>()})
     }
     pub(super) fn address(&self) -> String {
         unsafe {
@@ -218,8 +277,36 @@ impl Chrome {
             String::from_utf16_lossy(&value[..n.max(0) as usize])
         }
     }
-    pub(super) fn update(&self, url: &str, back: bool, forward: bool, status: &str) {
+    pub(super) fn update(
+        &mut self,
+        url: &str,
+        back: bool,
+        forward: bool,
+        status: &str,
+        loading: bool,
+    ) {
+        self.loading = loading;
         unsafe {
+            ShowWindow(
+                self.buttons[2],
+                if self.navigation_visible && !loading {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
+            );
+            ShowWindow(
+                self.buttons[3],
+                if self.navigation_visible && loading {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
+            );
+            SetWindowTextW(
+                self.more,
+                wide(format!("Browser tools — {status}")).as_ptr(),
+            );
             // Never overwrite live native EDIT composition/typing on a timer.
             if GetFocus() != self.address && self.address() != url {
                 SetWindowTextW(self.address, wide(url).as_ptr());

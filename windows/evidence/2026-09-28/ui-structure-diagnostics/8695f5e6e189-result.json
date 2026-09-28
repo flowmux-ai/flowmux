@@ -1,0 +1,13 @@
+{
+    "name":  "ui-structure-reference",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\ui-reference-frames.ps1",
+    "deadlineSeconds":  20,
+    "status":  "passed",
+    "started":  "2026-09-28T08:17:31.2920670Z",
+    "pid":  31796,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  1.011,
+    "finished":  "2026-09-28T08:17:32.3082847Z"
+}

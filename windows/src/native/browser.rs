@@ -287,11 +287,12 @@ impl Browser {
             self.error
                 .as_deref()
                 .unwrap_or(if self.loading { "Loading…" } else { "Ready" }),
+            self.loading,
         );
         Ok(())
     }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
-        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"address_handle":self.chrome.address as usize})
+        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize})
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
         if self.native_closed.get() {
@@ -559,7 +560,35 @@ impl App {
                 self.browser_refresh(id)?;
             }
             Signal::Metadata(id) => self.browser_refresh(id)?,
-            Signal::Ui(id, action) => {
+            Signal::Ui(id, mut action) => {
+                if action == 11 {
+                    let Some(browser) = self.browsers.get(&id) else {
+                        return Ok(());
+                    };
+                    let labels = [
+                        "Back",
+                        "Forward",
+                        "Reload",
+                        "Stop",
+                        "Go",
+                        "Zoom out",
+                        "Zoom in",
+                        "Reset zoom",
+                        "Downloads…",
+                        "Find in page…",
+                    ];
+                    let disabled = [
+                        (!browser.back).then_some(1),
+                        (!browser.forward).then_some(2),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
+                    action = self.popup(&labels, &disabled, browser.chrome.tools_anchor())? as u16;
+                    if action == 0 {
+                        return Ok(());
+                    }
+                }
                 if action == 10 {
                     self.browser_find_show(id)?;
                     return Ok(());

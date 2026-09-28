@@ -50,7 +50,7 @@ public static class ChromeFixture {
         EnumChildWindows(parent,delegate(IntPtr hwnd,IntPtr unused) {
             if(GetParent(hwnd)!=parent) return true;
             var cls=new StringBuilder(256);GetClassName(hwnd,cls,cls.Capacity);
-            if(cls.ToString()!="Button" && cls.ToString()!="Static") return true;
+            if(cls.ToString()!="Button" && cls.ToString()!="Static" && cls.ToString()!="Edit") return true;
             Owned(hwnd,owner);var text=new StringBuilder(4096);IntPtr result;
             if(SendMessageTimeout(hwnd,0x000D,new IntPtr(text.Capacity),text,2,1000,out result)==IntPtr.Zero)
                 throw new InvalidOperationException("Cannot read owned native label");

@@ -94,6 +94,7 @@ enum Event {
     Metadata(workspaces::EditAction),
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
+    OptionsUi(appearance::UiAction),
     Download(downloads::Signal),
     Activated,
 }
@@ -377,6 +378,7 @@ struct App {
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
     metadata: Option<workspaces::Panel>,
+    options: Option<appearance::Panel>,
     pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
@@ -593,6 +595,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             zoomed: None,
             drag: None,
             metadata: None,
+            options: None,
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
@@ -654,7 +657,8 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
-            if !app.search.handle_message(&message)
+            if !app.options_handle_message(&message)
+                && !app.search.handle_message(&message)
                 && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
                 && !app.downloads.handle_message(&message)
@@ -946,6 +950,7 @@ impl App {
             self.settings.terminal.theme,
             unsafe { GetDpiForWindow(self.window) }.max(96),
         );
+        self.files_reconcile();
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
         if let Some(pane) = self.zoomed {
             geometry.panes = vec![(pane, content)];
@@ -956,9 +961,21 @@ impl App {
         } else {
             &geometry.dividers
         });
-        self.files_reconcile();
-        let mut view_areas = geometry.panes.clone();
-        self.files_layout(&mut view_areas, bar, scale)?;
+        let view_areas = geometry.panes.clone();
+        let dock_width = self.files_dock_width(
+            self.active_workspace,
+            (client.right - content.x - px(4)).max(1),
+            scale,
+        );
+        self.files_layout(
+            (dock_width > 0).then_some(model::Rect {
+                x: client.right - px(4) - dock_width,
+                y: content.y,
+                width: dock_width,
+                height: content.height,
+            }),
+            scale,
+        )?;
         let areas = &geometry.panes;
         let visible: HashMap<_, _> = view_areas
             .iter()
@@ -1257,6 +1274,7 @@ impl App {
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
+            Event::OptionsUi(action) => self.options_ui(action)?,
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,

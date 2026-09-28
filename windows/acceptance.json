@@ -266,9 +266,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-settings-background.json",
-        "evidence/2026-09-28/chrome-details.md"
+        "evidence/2026-09-28/chrome-details.md",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Native settings menu/editor and CLI implement shared font/fallback list, 6–72px size with larger/smaller/reset, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Native chrome light/dark rendering now has hidden production-renderer evidence in a two-terminal split with stable terminal identities/PIDs. A later mixed terminal/browser/editor render is separate visual evidence. Real menu/IME/DPI, high contrast, installed font fallback/width, custom themes, remaining popup/panel styling and configurable zoom shortcuts remain pending."
+      "notes": "Native Options and CLI implement shared font/fallback list, 6–72px size, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Native chrome light/dark rendering now has hidden production-renderer evidence in a two-terminal split with stable terminal identities/PIDs. A later mixed terminal/browser/editor render is separate visual evidence. Real menu/IME/DPI, high contrast, installed font fallback/width, custom themes, remaining popup/panel styling and configurable zoom shortcuts remain pending. The new owned nonmodal Options window groups General/Theme settings; text fields use Apply and combo changes are immediate. Five hidden Options checks pass in 5.285s, including Unicode values, live terminal ACK, validation errors/draft retention and Reset/Close with stable terminal identity. Full theme editing, Keybindings/Update and physical interaction remain open."
     },
     {
       "id": "T21",
@@ -369,9 +370,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-rust-tests-workspaces.txt",
-        "evidence/2026-09-28/chrome-sidebar.md"
+        "evidence/2026-09-28/chrome-sidebar.md",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending. A header notification bell and 36-DIP Settings/Files/Search/Open file icon row now retain native captions and tooltips. Actual-host checks of the new layout/tooltips remain pending."
+      "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending. A header notification bell and 36-DIP Settings/Files/Search/Open file icon row now retain native captions and tooltips. The earlier sidebar stage has hidden layout/tooltip evidence. Current structural changes add a nonmodal General/Theme Options window, a 320-DIP owned bell popup, one workbench-right Files dock with conditional forms, and 40-DIP browser toolbar/tools. Hidden native groups pass for Options (5), notifications (9), global Files dock (2), browser geometry/lifecycle (8) and file-operation regression (5). Full popup/dialog/drag-preview and physical interaction acceptance remain open."
     },
     {
       "id": "U09",
@@ -385,9 +387,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-settings-background.json",
-        "evidence/2026-09-28/chrome-details.md"
+        "evidence/2026-09-28/chrome-details.md",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Native chrome theme changes now have production-renderer evidence with stable terminal identities/PIDs in a two-terminal split. Mixed terminal/browser/editor rendering is captured separately; theme transitions across mixed types and control-handle preservation during theme changes are not established. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI/high-contrast, per-tab options and full settings parity remain pending."
+      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Native chrome theme changes now have production-renderer evidence with stable terminal identities/PIDs in a two-terminal split. Mixed terminal/browser/editor rendering is captured separately; theme transitions across mixed types and control-handle preservation during theme changes are not established. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI/high-contrast, per-tab options and full settings parity remain pending. The new General/Theme Options window reuses asynchronous field updates and expected-value validation. Its native edit/Apply, theme selection, error draft retention and Reset/Close pass within the five-check 5.285s hidden case. Text fields require Apply, unlike Linux immediate editing; Keybindings/Update and full theme/settings parity remain pending."
     },
     {
       "id": "U11",
@@ -421,9 +424,10 @@
       "feature": "알림 bell·활동 표시·usage bar·panel 전환",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-notifications-background.json"
+        "evidence/2026-09-28/native-notifications-background.json",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Native Notifications button/list, unread workspace/tab captions, CLI list/read/delete/clear/jump and stable source routing are implemented. Hidden controls and source lifecycle are verified. Output counters are observations only; activity/usage panels, panel switching and real input/accessibility remain pending."
+      "notes": "Native Notifications button/list, unread workspace/tab captions, CLI list/read/delete/clear/jump and stable source routing are implemented. Hidden controls and source lifecycle are verified. Output counters are observations only; activity/usage panels, panel switching and real input/accessibility remain pending. The bell now opens a 320-DIP owned popup with newest-first bounded rows and Open/Delete/All Clear. Its presentation snapshot retains unread styling before store acknowledgement. Nine current hidden popup/source-routing groups pass; physical activation/focus remains unverified; activity/usage and full panel switching remain unavailable."
     },
     {
       "id": "B01",
@@ -441,9 +445,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-browser-background.json",
-        "evidence/2026-09-28/native-browser-ordinal-background.json"
+        "evidence/2026-09-28/native-browser-ordinal-background.json",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Native address/Go, history, reload/stop, 0.5–3.0 zoom and loading/error status implemented. Native navigation IDs guard old completions. Hidden fixture verifies Unicode DOM/address text, back/forward, reload, redirect, stop recovery and network errors. Actual address IME/keyboard/button interaction, visual rendering/DPI/accessibility and HTTP/TLS breadth remain pending."
+      "notes": "Native address/Go, history, reload/stop, 0.5–3.0 zoom and loading/error status implemented. Native navigation IDs guard old completions. Hidden fixture verifies Unicode DOM/address text, back/forward, reload, redirect, stop recovery and network errors. Actual address IME/keyboard/button interaction, visual rendering/DPI/accessibility and HTTP/TLS breadth remain pending. Current browser chrome is a 40-DIP single row with address, navigation, reload/stop, Go and tools; narrow-pane navigation uses the tools menu. Eight hidden native browser groups pass, including stable Reload/Stop bounds, compact/narrow/restored toolbar geometry and navigation/lifecycle; physical input remains unverified."
     },
     {
       "id": "B03",
@@ -524,9 +529,10 @@
       "evidence": [
         "evidence/2026-09-28/browser-downloads.md",
         "evidence/2026-09-28/native-browser-downloads-background.json",
-        "evidence/2026-09-28/native-browser-downloads-shutdown.json"
+        "evidence/2026-09-28/native-browser-downloads-shutdown.json",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Hidden native WebView2 downloads preserve UTF-8 filename* codepoints and payload bytes; staging/no-replace publication handles collisions, cancellation and native retries. Eight active transfers, ninth rejection, hidden list/remove/clear and source/host closure have live evidence. Destination UI, pause/resume, persistence, physical UI/DPI/accessibility, MOTW/security checks and exhaustive races remain pending."
+      "notes": "Hidden native WebView2 downloads preserve UTF-8 filename* codepoints and payload bytes; staging/no-replace publication handles collisions, cancellation and native retries. Eight active transfers, ninth rejection, hidden list/remove/clear and source/host closure have live evidence. Destination UI, pause/resume, persistence, physical UI/DPI/accessibility, MOTW/security checks and exhaustive races remain pending. The current browser toolbar exposes Downloads through Browser tools; existing transfer semantics are unchanged. Single-row native geometry passes; physical tools-menu navigation remains unverified."
     },
     {
       "id": "B11",
@@ -536,9 +542,10 @@
         "evidence/2026-09-28/browser-find.md",
         "evidence/2026-09-28/native-browser-find-background.json",
         "evidence/2026-09-28/browser-popups.md",
-        "evidence/2026-09-28/native-browser-popups-background.json"
+        "evidence/2026-09-28/native-browser-popups-background.json",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Page find now uses the actual engine with next/previous, case/wrap options, a native panel and CLI; eight hidden groups cover Unicode transport, owned selection cleanup, queued dismissal, surface pinning, navigation and closure. Native matching equivalence may differ from query codepoints. Popup routing now attaches a never-navigated child in the opener's actual WebView2 environment through SetNewWindow, creating an active tab in the original source pane. Live/pending bounds are 16/8; stale, hidden, closed and invalid-URL requests are rejected. Native close removes the exact browser and replaces a workspace's final browser with a fresh-ID blank view. Fourteen hidden popup groups passed in 45.107 seconds, including opener/Unicode/routing/close/capacity behavior; the ordinary-browser close case records the engine's outcome. Release builds, 141 actual Windows unit tests, 49 related native regression groups and installer packaging passed; results and remaining limits are tracked in the popup record. Full Find API parity, counts/highlight-all/regex, shadow/text-control selection cleanup, exhaustive popup races and cross-origin/named-target policies, physical IME/UI/DPI/accessibility, DevTools and site-permission UI remain pending."
+      "notes": "Page find now uses the actual engine with next/previous, case/wrap options, a native panel and CLI; eight hidden groups cover Unicode transport, owned selection cleanup, queued dismissal, surface pinning, navigation and closure. Native matching equivalence may differ from query codepoints. Popup routing now attaches a never-navigated child in the opener's actual WebView2 environment through SetNewWindow, creating an active tab in the original source pane. Live/pending bounds are 16/8; stale, hidden, closed and invalid-URL requests are rejected. Native close removes the exact browser and replaces a workspace's final browser with a fresh-ID blank view. Fourteen hidden popup groups passed in 45.107 seconds, including opener/Unicode/routing/close/capacity behavior; the ordinary-browser close case records the engine's outcome. Release builds, 141 actual Windows unit tests, 49 related native regression groups and installer packaging passed; results and remaining limits are tracked in the popup record. Full Find API parity, counts/highlight-all/regex, shadow/text-control selection cleanup, exhaustive popup races and cross-origin/named-target policies, physical IME/UI/DPI/accessibility, DevTools and site-permission UI remain pending. The current browser toolbar exposes Find in page through Browser tools. This entrypoint change adds no new Find/DevTools/permissions capabilities; toolbar geometry passes while physical tools-menu navigation remains unverified."
     },
     {
       "id": "B12",
@@ -647,18 +654,20 @@
       "feature": "파일 트리·확장·다중 선택·추가 500행",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/files.md"
+        "evidence/2026-09-28/files.md",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Native Windows Files child panel implements bounded local tree expansion/collapse, path-based multiple selection, another 500 rendered rows, explicit refresh and retained-row editor Open. Seven distinct hidden native cases pass: nested Unicode >300 UTF-16-unit roots with new/reused Monaco documents, 1105-row paging, selection, refresh/stale tokens, reparse confinement, source-pane ownership/show-hide, and actual queued IPC expiry preserving prior state. One worker/eight admitted requests retain permits through response consumption; four-second original deadlines, 20k entries/four-MiB path cache, 64 expansion/depth, one-MiB status pages and 32-pane/16-MiB host cache are bounded. Listing acceptance is tracked here; single-file mutations are tracked under F08. Physical keyboard/mouse/IME/focus, glyphs/DPI/accessibility, all limits and hostile filesystem races, automatic tree watching and persisted tree restoration remain unverified or unsupported. See source boundaries and preserved failed verification attempts in the evidence."
+      "notes": "Native Windows Files child panel implements bounded local tree expansion/collapse, path-based multiple selection, another 500 rendered rows, explicit refresh and retained-row editor Open. Seven distinct hidden native cases pass: nested Unicode >300 UTF-16-unit roots with new/reused Monaco documents, 1105-row paging, selection, refresh/stale tokens, reparse confinement, source-pane ownership/show-hide, and actual queued IPC expiry preserving prior state. One worker/eight admitted requests retain permits through response consumption; four-second original deadlines, 20k entries/four-MiB path cache, 64 expansion/depth, one-MiB status pages and 32-pane/16-MiB host cache are bounded. Listing acceptance is tracked here; single-file mutations are tracked under F08. Physical keyboard/mouse/IME/focus, glyphs/DPI/accessibility, all limits and hostile filesystem races, automatic tree watching and persisted tree restoration remain unverified or unsupported. See source boundaries and preserved failed verification attempts in the evidence. The current UI uses one visible 320-DIP dock at the right of the whole workbench, retaining source-pane caches and editor routing. A 58-DIP header/path and Actions/context menus restore tree space; two hidden dock/source-switch/native-form groups pass. Historical Files cases do not establish this new layout."
     },
     {
       "id": "F08",
       "feature": "파일 복사·잘라내기·붙여넣기·이름 변경",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/files-actions.md"
+        "evidence/2026-09-28/files-actions.md",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "Single-file local Copy/Rename/Move use retained Files tokens, one host-wide worker, accepted operation IDs and 64 terminal receipts. Existing destinations and open editor sources (clean or dirty) are rejected; Copy preserves raw bytes up to 16 MiB. Five affected hidden native cases pass: long nested Unicode roundtrip with actual LISTBOX/Monaco, BOM/CRLF and binary NUL copy, invalid destinations, editor guards and stale tokens. Preparation pins handles; NtCreateFile/NtSetInformationFile avoid path re-traversal for mutation. Cancellation/deadlines are cooperative and close/editor operations reject while active. Related regressions and final builds/package are tracked separately in the evidence. Clipboard cut/paste, batch/directory/remote/reparse/case-sensitive paths, overwrite and physical keyboard/IME/focus acceptance remain unsupported or unverified."
+      "notes": "Single-file local Copy/Rename/Move use retained Files tokens, one host-wide worker, accepted operation IDs and 64 terminal receipts. Existing destinations and open editor sources (clean or dirty) are rejected; Copy preserves raw bytes up to 16 MiB. Five affected hidden native cases pass: long nested Unicode roundtrip with actual LISTBOX/Monaco, BOM/CRLF and binary NUL copy, invalid destinations, editor guards and stale tokens. Preparation pins handles; NtCreateFile/NtSetInformationFile avoid path re-traversal for mutation. Cancellation/deadlines are cooperative and close/editor operations reject while active. Related regressions and final builds/package are tracked separately in the evidence. Clipboard cut/paste, batch/directory/remote/reparse/case-sensitive paths, overwrite and physical keyboard/IME/focus acceptance remain unsupported or unverified. Current UI routes the existing single-file operations through Actions/context menus and a conditional destination form. Two hidden groups verify the form/dock flow and five file-operation regression groups pass; existing operation scope and guards are unchanged."
     },
     {
       "id": "F09",
@@ -765,9 +774,10 @@
       "feature": "bell list·desktop toast·click 복귀·배지",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-notifications-background.json"
+        "evidence/2026-09-28/native-notifications-background.json",
+        "evidence/2026-09-28/ui-structure.md"
       ],
-      "notes": "An in-memory per-window 50-entry log reuses the existing eight-second source dedup and severity escalation. Hidden native tests verify Unicode detail/captions, unread state, current workspace/pane after moves, preserved exited screens and atomic closed-source rejection. Desktop toast delivery/activation, OS taskbar badges, preferences, real foreground suppression/focus and native mouse/keyboard interaction remain pending."
+      "notes": "An in-memory per-window 50-entry log reuses the existing eight-second source dedup and severity escalation. Hidden native tests verify Unicode detail/captions, unread state, current workspace/pane after moves, preserved exited screens and atomic closed-source rejection. Desktop toast delivery/activation, OS taskbar badges, preferences, real foreground suppression/focus and native mouse/keyboard interaction remain pending. The current bell UI changes to an anchored 320-DIP owned popup, with unread snapshot-before-ack and row/clear actions; nine hidden native groups pass; physical activation/focus remains unverified. Desktop toast/taskbar and real input acceptance remain open."
     },
     {
       "id": "A08",

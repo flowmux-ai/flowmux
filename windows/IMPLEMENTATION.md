@@ -236,7 +236,7 @@ sustained load/fairness, full discovery/multi-user/deployment coverage and real
 IME remain pending. See [IPC limits evidence](evidence/2026-09-28/ipc-limits.md).
 O02 remains partial.
 
-Terminal settings now have a native menu/editor and CLI, with versioned shared
+Terminal settings now have a native Options window and CLI, with versioned shared
 Windows config for font/fallback list, integer size, dark/light terminal theme,
 scrollback and cursor blink/style. A dedicated worker validates and atomically
 saves under an OS writer lock, re-reading before per-field updates. Stale edit
@@ -349,7 +349,7 @@ multi-pane budgets and OSC palette mutation remain open. T14/T15 are partial;
 see [minimap evidence](evidence/2026-09-28/minimap.md).
 
 Windows notifications now reuse the existing pure Rust streaming OSC parser and
-bounded notification store by read-only module inclusion. A native list and
+bounded notification store by read-only module inclusion. An owned bell popup and
 workspace/tab captions expose unread notices; CLI operations inspect, acknowledge,
 remove or reopen their stable source after moves and process exit. Explicit
 notifications and simple OSC 9/99/777 share deduplication and priority rules.
@@ -723,3 +723,44 @@ Agents, broader status metadata, the full symbolic icon set and some popup/panel
 styling still differ. Physical pointer/keyboard/IME, per-monitor DPI, high contrast
 and accessibility remain unverified. Native offscreen renders exclude composed
 WebView/GPU contents and do not establish full visual or installer parity.
+
+
+The structural UI stage replaces the long settings popup with an owned nonmodal
+Options window (760×720 DIP): General and Theme only, existing per-field async
+settings writes, text-field Apply, immediate combo changes, errors that retain
+input, Reload/Reset/Close. Linux Keybindings/Update and full theme editing remain
+unimplemented; text Apply still differs from Linux's immediate-edit workflow.
+The five-check hidden Options case passes in 5.285 seconds on separately staged
+fresh debug binaries, including Unicode native edits, backend/terminal ACK,
+invalid draft retention and stable terminal identity.
+
+The bell now opens a 320-DIP owned popup with bounded scrolling, newest-first
+rows, Open/Delete/All Clear and an unread presentation snapshot taken before ack.
+Files moves to one visible right-side dock for the whole workbench, preferred
+width 320 DIP, preserving bounded source-pane caches and editor routing. Its 58-DIP
+header/path area and Actions/context menus replace permanent operation rows;
+Copy/Rename/Move opens a conditional destination form. Browser chrome is one
+40-DIP row with address/navigation and a tools menu for overflow, zoom, downloads
+and page find. Existing notification, Files/editor and browser services are reused.
+Hidden native verification passes for Files dock (2 groups,7.922 s), notifications
+(9,16 s), browser (8,22.945 s) and existing file operations (5,17.839 s). Browser
+checks include narrow/compact/restored geometry and a correction that keeps
+Reload/Stop bounds stable across metadata refresh.
+
+Final Clippy after the browser correction passes in 26.945 seconds. The 97.796-second Cargo debug invocation
+failed only while publishing the canonical GUI executable (OS error 5), after
+linking; this is not a successful whole Cargo invocation. Three freshly linked
+GUI/CLI/console entrypoint binaries were verified and staged separately. A second GUI build linked the browser correction but also failed canonical
+publication (113.554 s). Its separately staged GUI passed the browser checks;
+unchanged CLI entrypoints came from the first staged build. Package results are
+tracked in
+[UI structure evidence](evidence/2026-09-28/ui-structure.md). Historical chrome
+results retain their original source boundaries. All 114 feature rows remain
+60 partial/54 pending. See [UI_PARITY](UI_PARITY.md) for remaining screen/workflow
+gaps; Agents, worktrees, full physical IME/DPI/accessibility and composed
+WebView/GPU screenshots are not completed by these changes.
+
+The static-CRT release build also linked all three entrypoints before canonical
+GUI publication failed (117.627 s). Fresh outputs were verified and staged; all
+three release doctor entrypoints passed in 1.035 s. The development installer is
+packaged separately and is not installed into the running user session.

@@ -190,20 +190,6 @@ impl Panel {
         self.original = value.to_owned();
         self.original_locked = locked;
         let (title, hint) = match target {
-            EditTarget::Setting(key) => match key {
-                crate::settings::SettingKey::FontFamily => (
-                    "Terminal font",
-                    "Font family / fallback list (installed fonts)",
-                ),
-                crate::settings::SettingKey::FontSize => {
-                    ("Terminal font size", "Font size in pixels, 6–72")
-                }
-                crate::settings::SettingKey::Scrollback => (
-                    "Terminal scrollback",
-                    "0–100000 lines; lowering discards the oldest history",
-                ),
-                _ => ("Terminal setting", "Value"),
-            },
             EditTarget::WorkspaceName(_) => ("Rename workspace", "Workspace name"),
             EditTarget::WorkspaceColor(_) => {
                 ("Workspace color", "Color as #RRGGBB; leave empty to clear")

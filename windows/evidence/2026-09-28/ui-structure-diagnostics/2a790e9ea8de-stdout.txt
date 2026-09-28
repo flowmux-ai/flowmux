@@ -1,0 +1,4 @@
+Syntax passed verify-files-dock.ps1
+Syntax passed verify-options.ps1
+Syntax passed verify-notifications.ps1
+Syntax passed verify-browser.ps1

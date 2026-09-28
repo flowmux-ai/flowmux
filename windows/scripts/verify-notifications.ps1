@@ -5,11 +5,17 @@ $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
-$doctor=& $cli doctor|ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $directory=Join-Path $PSScriptRoot ('..\dist\evidence\notifications-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+$doctorProcess=[CliProbe]::Start($cli,@('doctor'),$directory,$directory)
+try {
+    $doctorOut=$doctorProcess.StandardOutput.ReadToEndAsync();$doctorErr=$doctorProcess.StandardError.ReadToEndAsync()
+    if (-not $doctorProcess.WaitForExit(5000)) {throw 'Debug doctor timed out; no host was launched'}
+    if (-not $doctorOut.Wait(1000) -or -not $doctorErr.Wait(1000) -or $doctorProcess.ExitCode -ne 0) {throw 'Debug doctor failed; no host was launched'}
+    $doctor=[CliProbe]::Output($doctorOut)|ConvertFrom-Json
+    if (-not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
+} finally {if (-not $doctorProcess.HasExited) {$doctorProcess.Kill();[CliProbe]::WaitAfterKill($doctorProcess)};$doctorProcess.Dispose()}
 $probe=Join-Path $directory 'notifications-probe.exe';$control=Join-Path $directory 'control.txt'
 Add-Type -Path (Join-Path $PSScriptRoot 'NotificationProbe.cs') -OutputAssembly $probe -OutputType ConsoleApplication
 $pipeName=$null;$process=$null;$otherProcess=$null;$otherPipe=$null
@@ -19,12 +25,12 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();$p.WaitForExit();throw 'Owned CLI timed out; not retried'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output pipes did not close'}
+        if (-not $p.WaitForExit(5000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
+        if (-not $out.Wait(1000) -or -not $err.Wait(1000)) {throw 'Owned output pipes did not close'}
         if ($p.ExitCode -ne $Exit) {throw "CLI exit $($p.ExitCode): $($err.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
         return ($err.Result|ConvertFrom-Json)
-    } finally {$p.Dispose()}
+    } finally {if (-not $p.HasExited) {$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
 }
 function Tree {
     $tree=Request @('tree');$window=[IntPtr]([long]$tree.window_handle)
@@ -32,7 +38,7 @@ function Tree {
     return $tree
 }
 function Wait-Screen([string]$Text) {
-    $deadline=(Get-Date).AddSeconds(20)
+    $deadline=(Get-Date).AddSeconds(8)
     do {
         $screen=Request @('read-screen','--surface',$script:surface,'--recent')
         if ($screen.text.Contains($Text)) {return $screen}
@@ -60,6 +66,28 @@ public static class NotificationInspect {
         var list=new List<string>(); EnumChildWindows(parent,delegate(IntPtr h,IntPtr data) {list.Add(Text(h));return true;},IntPtr.Zero);return list.ToArray();
     }
     [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h,uint command);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr h);
+    [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
+    [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] static extern IntPtr WindowLong(IntPtr h,int index);
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h,out Rect rect);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,EntryPoint="SendMessageTimeoutW")] static extern IntPtr SendNative(IntPtr h,uint msg,IntPtr w,IntPtr l,uint flags,uint timeout,out IntPtr result);
+    public static long Style(IntPtr h) { return WindowLong(h,-16).ToInt64() & 0xffffffffL; }
+    public static Rect Bounds(IntPtr h) {Rect r;if(!GetWindowRect(h,out r))throw new Exception("Owned window geometry unavailable");return r;}
+    static void Owned(IntPtr h,int expectedPid) {uint pid;GetWindowThreadProcessId(h,out pid);if(h==IntPtr.Zero||pid!=(uint)expectedPid)throw new Exception("Native message target is not the owned host");}
+    // Deliver the control's ordinary WM_COMMAND notification. BM_CLICK can move
+    // native focus; this hidden verifier never sends it or desktop input.
+    public static void Click(IntPtr button,int expectedPid) {
+        Owned(button,expectedPid);var parent=GetParent(button);Owned(parent,expectedPid);IntPtr result;
+        if(SendNative(parent,0x0111,(IntPtr)GetDlgCtrlID(button),button,2,1000,out result)==IntPtr.Zero)throw new Exception("Owned native control command timed out");
+    }
+    public static void Close(IntPtr popup,int expectedPid) {
+        Owned(popup,expectedPid);IntPtr result;
+        if(SendNative(popup,0x0010,IntPtr.Zero,IntPtr.Zero,2,1000,out result)==IntPtr.Zero)throw new Exception("Owned popup close timed out");
+    }
     [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h,uint msg,IntPtr w,StringBuilder text,uint flags,uint timeout,out IntPtr result);
     public static string Text(IntPtr h) {
         var b=new StringBuilder(16384);IntPtr result;
@@ -71,7 +99,7 @@ public static class NotificationInspect {
 try {
     $process=[CliProbe]::Start($gui,@('--temporary',('--shell='+$probe),('--shell-arg='+$control)),$directory,$directory)
     $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-    $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(25)
+    $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(8)
     do {
         if ($process.HasExited -or (Get-Date) -gt $deadline) {throw 'Owned host startup failed'}
         if (Test-Path $discovery) {
@@ -126,16 +154,50 @@ try {
     Request @('notifications','mark-read',$first.id)|Out-Null
     if ((Request @('notifications','list')).unread_count -ne 2) {throw 'Mark read failed'}
     $shown=Request @('notifications','show')
+    $evidence.popoverShowResponse=$shown
     $panel=[IntPtr]([long]$shown.panel_handle)
     if ($shown.unread_count -ne 0 -or $shown.panel_rows -ne 3 -or [CliProbe]::IsWindowVisible($panel) -or [CliProbe]::GetForegroundWindow() -eq $panel) {throw 'Panel was visible or failed to mark existing entries read'}
-    if ([NotificationInspect]::Text([NotificationInspect]::GetDlgItem($panel,12)) -cne ($title+"`r`n`r`n"+$body.Replace("`n","`r`n"))) {throw 'Native Unicode detail differs'}
+    $snapshot=$shown.panel_snapshot;$popupBounds=[NotificationInspect]::Bounds($panel)
+    $popupStyle=[NotificationInspect]::Style($panel);$dpi=[NotificationInspect]::GetDpiForWindow($panel)
+    $anchor=[IntPtr]([long]$snapshot.anchor_handle);$anchorBounds=[NotificationInspect]::Bounds($anchor)
+    $popupOwner=[NotificationInspect]::GetWindow($panel,4);$expectedOwner=[IntPtr]([long]$tree.window_handle)
+    $evidence.popoverObserved=@{snapshot=$snapshot;style=$popupStyle;styleHex=('0x{0:X8}' -f $popupStyle);owner=$popupOwner.ToInt64();expectedOwner=$expectedOwner.ToInt64();bounds=$popupBounds;anchorBounds=$anchorBounds;dpi=$dpi;nativeVisible=[CliProbe]::IsWindowVisible($panel);foreground=[CliProbe]::GetForegroundWindow().ToInt64()}
+    # WS_CAPTION includes WS_BORDER. A thin WS_BORDER is intentional; reject
+    # WS_DLGFRAME and WS_THICKFRAME instead of rejecting the shared border bit.
+    if ($snapshot.kind -ne 'bell-popover' -or -not $snapshot.open -or $snapshot.visible -or
+        ($popupStyle -band 0x80000000L) -eq 0 -or ($popupStyle -band 0x00440000L) -ne 0 -or
+        $popupOwner -ne $expectedOwner) {throw 'Notifications are not an owned captionless bell popover'}
+    if ($snapshot.rect.width -ne [Math]::Round(320*$dpi/96) -or $snapshot.rect.height -gt [Math]::Round(468*$dpi/96) -or
+        $snapshot.rect.height -lt [Math]::Round(208*$dpi/96) -or
+        $snapshot.rect.x -ne $popupBounds.Left -or $snapshot.rect.y -ne $popupBounds.Top -or
+        $snapshot.rect.width -ne ($popupBounds.Right-$popupBounds.Left) -or $snapshot.rect.height -ne ($popupBounds.Bottom-$popupBounds.Top) -or
+        $snapshot.anchor_rect.x -ne $anchorBounds.Left -or $snapshot.anchor_rect.y -ne $anchorBounds.Top -or
+        [Math]::Abs($popupBounds.Right-$anchorBounds.Right) -gt [Math]::Round(320*$dpi/96) -or
+        [NotificationInspect]::Text($anchor) -cne 'Notifications (0)') {throw 'Popover native geometry/anchor differs from the bounded 320-DIP contract'}
+    if (@($snapshot.rows|Where-Object {-not $_.read}).Count -ne 2 -or $snapshot.rows[0].id -ne $errorNotice.id -or $snapshot.rows[-1].id -ne $first.id) {throw 'First-open snapshot did not preserve unread styling and newest-first order before acknowledgement'}
+    $unicodeRow=$snapshot.rows|Where-Object {$_.id -eq $first.id}
+    if ($unicodeRow.title -cne $title -or $unicodeRow.body -cne $body -or $unicodeRow.time -notmatch '^\d{2}:\d{2}:\d{2}$' -or
+        [NotificationInspect]::Text([IntPtr]([long]$unicodeRow.open_handle)) -cne ($title+"`n"+$body+"`n"+$unicodeRow.time) -or
+        [NotificationInspect]::Text([IntPtr]([long]$unicodeRow.delete_handle)) -cne ('Delete notification: '+$title)) {throw 'Notification row changed original Unicode HWND/model text or omitted time/delete controls'}
+    $evidence.checks+=@{name='owned_bell_popover_geometry_newest_rows_original_unicode_and_snapshot_before_ack';passed=$true;popup=$snapshot;style=$popupStyle;dpi=$dpi}
+    [NotificationInspect]::Close($panel,$process.Id)
+    $closedPanel=Request @('notifications','list')
+    if ($closedPanel.panel_snapshot.open -or [CliProbe]::IsWindowVisible($panel)) {throw 'Owned native close did not dismiss the hidden popup'}
+    $reopened=Request @('notifications','show')
+    if (-not $reopened.panel_snapshot.open -or @($reopened.panel_snapshot.rows|Where-Object {-not $_.read}).Count -ne 0) {throw 'Second opening did not refresh acknowledged read appearance'}
     $global=Request @('notify','--global','global')
     $shown=Request @('notifications','list')
     if ($shown.panel_rows -ne 4 -or $shown.unread_count -ne 1 -or $shown.button_text -ne 'Notifications (1)') {throw 'Panel live update did not preserve new unread notice'}
-    $evidence.checks+=@{name='native_hidden_panel_unicode_detail_and_live_rows';passed=$true;panel=$shown}
-    Request @('notifications','delete',$global.id)|Out-Null
-    if ((Request @('notifications','list')).entries.Count -ne 3) {throw 'Delete failed'}
-    Request @('notifications','clear')|Out-Null
+    $evidence.checks+=@{name='native_hidden_popover_close_reopen_and_live_rows';passed=$true;panel=$shown}
+    $globalRow=$shown.panel_snapshot.rows|Where-Object {$_.id -eq $global.id}
+    [NotificationInspect]::Click([IntPtr]([long]$globalRow.delete_handle),$process.Id)
+    $afterDelete=Request @('notifications','list')
+    if ($afterDelete.entries.Count -ne 3 -or $afterDelete.panel_rows -ne 3) {throw 'Per-row native delete failed'}
+    [NotificationInspect]::Click([IntPtr]([long]$afterDelete.panel_snapshot.clear_handle),$process.Id)
+    $afterClear=Request @('notifications','list')
+    if ($afterClear.entries.Count -ne 0 -or -not $afterClear.panel_snapshot.empty -or $afterClear.panel_snapshot.open) {throw 'Native All Clear failed to empty and dismiss popover'}
+    if ([NotificationInspect]::Text([NotificationInspect]::GetDlgItem([IntPtr]([long]$afterClear.panel_snapshot.viewport_handle),12)) -cne 'No notifications yet.') {throw 'Empty notification state is missing'}
+    $evidence.checks+=@{name='native_row_delete_all_clear_and_empty_state';passed=$true;afterDelete=$afterDelete;afterClear=$afterClear}
     Request @('new-workspace','--shell=cmd')|Out-Null;$target=Request @('identify')
     $newNotice=Request @('notify-complete','--surface',$surface,'--agent','에이전트','--message','완료_😀')
     if (-not $newNotice.accepted -or (Request @('identify')).surface -ne $target.surface) {throw 'Notice activated its source'}
@@ -146,7 +208,7 @@ try {
     Request @('notifications','open',$newNotice.id)|Out-Null
     if ((Request @('identify')).surface -ne $surface -or ((Tree).surfaces|Where-Object {$_.id -eq $surface}).pid -ne $probePid -or (Request @('notifications','list')).unread_count -ne 0) {throw 'Notification did not reopen same source/process'}
     $evidence.checks+=@{name='completion_stays_inactive_and_moves_resolve_same_surface_process';passed=$true}
-    Control 'exit';$deadline=(Get-Date).AddSeconds(15)
+    Control 'exit';$deadline=(Get-Date).AddSeconds(8)
     do {
         $stopped=(Tree).surfaces|Where-Object {$_.id -eq $surface}
         if ($stopped.resources_released -and $stopped.exit_code -eq 7) {break}
@@ -180,7 +242,7 @@ try {
     $otherDirectory=Join-Path $directory 'other';[IO.Directory]::CreateDirectory($otherDirectory)|Out-Null
     $otherProcess=[CliProbe]::Start($gui,@('--temporary','--shell=cmd'),$otherDirectory,$otherDirectory)
     $otherOut=$otherProcess.StandardOutput.ReadToEndAsync();$otherErr=$otherProcess.StandardError.ReadToEndAsync()
-    $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($otherProcess.Id).json";$deadline=(Get-Date).AddSeconds(25)
+    $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($otherProcess.Id).json";$deadline=(Get-Date).AddSeconds(8)
     do {
         if ($otherProcess.HasExited -or (Get-Date) -gt $deadline) {throw 'Second owned host startup failed'}
         if (Test-Path $discovery) {
@@ -208,12 +270,12 @@ try {
     if ($otherProcess) {
         $savedPipe=$script:pipeName
         if ($otherPipe) {try {$script:pipeName=$otherPipe;Request @('quit','--discard-state')|Out-Null} catch {} finally {$script:pipeName=$savedPipe}}
-        if (-not $otherProcess.HasExited -and -not $otherProcess.WaitForExit(10000)) {$otherProcess.Kill();$otherProcess.WaitForExit()}
+        if (-not $otherProcess.HasExited -and -not $otherProcess.WaitForExit(5000)) {$otherProcess.Kill();[CliProbe]::WaitAfterKill($otherProcess)}
         $otherProcess.Dispose()
     }
     if ($pipeName) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
     if ($process) {
-        if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();$process.WaitForExit()}
+        if (-not $process.HasExited -and -not $process.WaitForExit(5000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)}
         $process.Dispose()
     }
     $evidence.finished=(Get-Date).ToString('o')

@@ -9,6 +9,8 @@ $doctor=& $cli doctor|ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'Working debug build required; no host launched'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')
+Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 $directory=Join-Path $PSScriptRoot ('..\dist\evidence\browser-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object BrowserFixture;$origin=$fixture.Origin
@@ -53,7 +55,7 @@ function Start-Owned([string[]]$Launch) {
     $script:process=[CliProbe]::Start($gui,$Launch,$directory,$directory)
     $script:hosts+= $process.Id
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
-    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(40)
+    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(8)
     do {
         if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
@@ -74,7 +76,7 @@ function Start-Owned([string[]]$Launch) {
 function Same-Text([string]$Left,[string]$Right) {return [string]::Equals($Left,$Right,[StringComparison]::Ordinal)}
 function Eval-Page([string]$Pane,[string]$Source) {return (Request @('browser','eval',('pane:'+$Pane),$Source)).result}
 function Wait-Page([string]$Pane,[string]$Suffix,[string]$Title) {
-    $deadline=(Get-Date).AddSeconds(20)
+    $deadline=(Get-Date).AddSeconds(8)
     do {
         $status=Request @('browser','status',('pane:'+$Pane))
         if (-not $status.loading -and $status.url.Contains($Suffix) -and (Same-Text $status.title $Title)) {
@@ -83,6 +85,17 @@ function Wait-Page([string]$Pane,[string]$Suffix,[string]$Title) {
         if ((Get-Date) -gt $deadline) {throw ('Page did not load: '+($status|ConvertTo-Json -Compress))}
         Start-Sleep -Milliseconds 50
     } while ($true)
+}
+function Check-Toolbar($Status) {
+    $chrome=@([ChromeFixture]::Read([long]$Status.chrome_handle,$process.Id));$shown=@($chrome|Where-Object Shown)
+    $dpi=[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$Status.chrome_handle));$area=[ChromeFixture]::Size([long]$Status.chrome_handle,$process.Id)
+    if($Status.chrome.rows -ne 1 -or [Math]::Abs($area[1]-40*$dpi/96) -gt 1){throw 'Browser toolbar is not one40-DIP row'}
+    foreach($c in $shown){if($c.Y -lt 0 -or $c.Y+$c.Height -gt $area[1] -or $c.X -lt 0 -or $c.X+$c.Width -gt $area[0]){throw 'Browser toolbar control escapes its row'}}
+    $ordered=@($shown|Sort-Object X);for($i=1;$i -lt $ordered.Count;$i++){if($ordered[$i].X -lt $ordered[$i-1].X+$ordered[$i-1].Width){throw 'Browser toolbar controls overlap'}}
+    if(@($shown|Where-Object Class -eq 'Edit').Count -ne 1 -or @($shown|Where-Object Handle -eq $Status.chrome.tools_handle).Count -ne 1){throw 'Address or tools entry missing'}
+    $reload=@($chrome|Where-Object Text -ceq 'Reload')[0];$stop=@($chrome|Where-Object Text -ceq 'Stop')[0]
+    if($reload.Width -ne [Math]::Round(30*$dpi/96) -or $reload.X -ne $stop.X -or $reload.Y -ne $stop.Y -or $reload.Width -ne $stop.Width -or $reload.Height -ne $stop.Height){throw 'Reload/Stop geometry changed during metadata refresh'}
+    return $chrome
 }
 try {
     $initial=Start-Owned @('--new-window','--shell=cmd','--cwd',$directory);$source=(Request @('identify'));$terminal=$initial.surfaces[0]
@@ -95,6 +108,18 @@ try {
     if (-not (Same-Text $page.text $oneTitle) -or $page.ipc -ne 'undefined' -or $page.host -ne 'undefined' -or $page.identity -ne 'undefined' -or $page.settings -ne 'undefined') {throw 'Unicode page or bridge isolation differs'}
     if ([BrowserFixture]::ReadText($loaded.address_handle) -ne ($origin+'/one')) {throw 'Native address differs'}
     $evidence.checks+=@{name='native_webview_unicode_dom_address_and_no_terminal_bridge';passed=$true;page=$page}
+    $evidence.checks+=@{name='single_row_native_browser_geometry_and_tools_entry';passed=$true;controls=(Check-Toolbar $loaded);diagnostics=$loaded.chrome}
+    $root=Tree
+    [ChromeFixture]::Resize([long]$root.window_handle,$process.Id,400,500)
+    Request @('resize-pane',$first.pane,'--ratio','0.7')|Out-Null
+    $narrow=Request @('browser','status',$first.pane);$narrowControls=Check-Toolbar $narrow
+    Request @('resize-pane',$first.pane,'--ratio','0.4')|Out-Null
+    $compact=Request @('browser','status',$first.pane);$compactControls=Check-Toolbar $compact
+    [ChromeFixture]::Resize([long]$root.window_handle,$process.Id,1184,761)
+    Request @('resize-pane',$first.pane,'--ratio','0.5')|Out-Null
+    Check-Toolbar (Request @('browser','status',$first.pane))|Out-Null
+    $evidence.checks+=@{name='narrow_compact_and_restored_browser_toolbar_has_no_overlap';passed=$true;narrow=$narrowControls;compact=$compactControls}
+
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     Request @('browser','navigate',$first.pane,($origin+'/한글?q=한#😀'))|Out-Null
     $unicode=Wait-Page $first.pane '/%ED%95%9C%EA%B8%80' $oneTitle
@@ -119,7 +144,7 @@ try {
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/redirect'))|Out-Null;Wait-Page $first.pane '/two' $twoTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/fail'))|Out-Null
-    $deadline=(Get-Date).AddSeconds(20)
+    $deadline=(Get-Date).AddSeconds(8)
     do {
         $failed=Request @('browser','status',$first.pane)
         if (-not $failed.loading -and $failed.navigation_error) {break}
@@ -127,6 +152,7 @@ try {
         Start-Sleep -Milliseconds 50
     } while ($true)
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
+    Check-Toolbar (Request @('browser','status',$first.pane))|Out-Null
     $evidence.checks+=@{name='native_history_reload_stop_redirect_failure_recovery_and_bounded_zoom';passed=$true;failure=$failed.navigation_error}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     foreach ($url in @('file:///C:/private','javascript:1','data:text/html,no','http://flowmux-terminal.localhost/')) {Request @('browser','navigate',$first.pane,$url) 1|Out-Null}
@@ -186,7 +212,7 @@ try {
     if ($raw.error) {throw ('Inactive caller failed: '+$raw.error)}
     $fromInactive=Request @('identify')
     if ($fromInactive.cwd -ne $directory -or $fromInactive.surface -eq $otherTerminal.surface) {throw 'Inactive terminal inherited another active tab cwd'}
-    $deadline=(Get-Date).AddSeconds(20)
+    $deadline=(Get-Date).AddSeconds(8)
     do {
         $children=@((Tree).surfaces|Where-Object {$_.id -eq $fromInactive.surface -or $_.id -eq $otherTerminal.surface})
         if (@($children|Where-Object {-not $_.ready -or -not $_.pid}).Count -eq 0) {break}
@@ -200,7 +226,7 @@ try {
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     # A terminal split from a browser must use the configured shell rather than indexing browser shell metadata.
     Request @('split','vertical')|Out-Null
-    $new=(Request @('identify'));$deadline=(Get-Date).AddSeconds(20)
+    $new=(Request @('identify'));$deadline=(Get-Date).AddSeconds(8)
     do {
         $newSurface=(Tree).surfaces|Where-Object {$_.id -eq $new.surface}
         if ($newSurface.ready -and $newSurface.pid) {break}

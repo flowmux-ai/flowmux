@@ -1,0 +1,725 @@
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\notifications-3ec869f4-9d7f-492e-bc70-13ef475b84e6
+{
+    "started":  "2026-09-28T17:23:40.6504473+09:00",
+    "mode":  "background",
+    "checks":  [
+                   {
+                       "activity":  408,
+                       "name":  "live_conpty_osc_9_99_777_unicode_and_metadata_filter",
+                       "passed":  true
+                   },
+                   {
+                       "captions":  [
+                                        "",
+                                        "",
+                                        "flowmux terminal",
+                                        "Chrome Legacy Window",
+                                        "",
+                                        "",
+                                        "New workspace",
+                                        "Workspaces",
+                                        "Settings",
+                                        "Files",
+                                        "Search",
+                                        "Open file",
+                                        "Notifications (3)",
+                                        "Previous",
+                                        "Next",
+                                        "[3] jundu\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\notifications-3ec869f4-9d7f-492e-bc70-13ef475b84e6\\cwd_한글",
+                                        "[3] cwd_한글",
+                                        "Close tab",
+                                        "+",
+                                        "Pane actions"
+                                    ],
+                       "name":  "explicit_unicode_dedup_escalation_read_only_list_and_native_badges",
+                       "passed":  true
+                   },
+                   {
+                       "dpi":  96,
+                       "popup":  {
+                                     "anchor_handle":  2755946,
+                                     "anchor_rect":  {
+                                                         "height":  28,
+                                                         "width":  28,
+                                                         "x":  522,
+                                                         "y":  322
+                                                     },
+                                     "clear_handle":  86772726,
+                                     "empty":  false,
+                                     "kind":  "bell-popover",
+                                     "open":  true,
+                                     "rect":  {
+                                                  "height":  350,
+                                                  "width":  320,
+                                                  "x":  236,
+                                                  "y":  356
+                                              },
+                                     "rows":  [
+                                                  {
+                                                      "body":  "failed",
+                                                      "delete_handle":  593598,
+                                                      "height":  96,
+                                                      "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                      "open_handle":  1379740,
+                                                      "read":  false,
+                                                      "time":  "17:23:42",
+                                                      "title":  "Terminal",
+                                                      "visible":  true
+                                                  },
+                                                  {
+                                                      "body":  "needs input",
+                                                      "delete_handle":  397014,
+                                                      "height":  96,
+                                                      "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                      "open_handle":  855980,
+                                                      "read":  false,
+                                                      "time":  "17:23:42",
+                                                      "title":  "Terminal",
+                                                      "visible":  true
+                                                  },
+                                                  {
+                                                      "body":  "완료 한글 é\n두 번째 줄",
+                                                      "delete_handle":  9768238,
+                                                      "height":  110,
+                                                      "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                      "open_handle":  855988,
+                                                      "read":  true,
+                                                      "time":  "17:23:42",
+                                                      "title":  "알림_한_😀",
+                                                      "visible":  true
+                                                  }
+                                              ],
+                                     "scroll_offset":  0,
+                                     "viewport_handle":  593596,
+                                     "visible":  false
+                                 },
+                       "style":  2256535552,
+                       "name":  "owned_bell_popover_geometry_newest_rows_original_unicode_and_snapshot_before_ack",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "native_hidden_popover_close_reopen_and_live_rows",
+                       "panel":  {
+                                     "button_text":  "Notifications (1)",
+                                     "desktop_delivery":  "not_implemented",
+                                     "duplicate_window_ms":  8000,
+                                     "entries":  [
+                                                     {
+                                                         "body":  "완료 한글 é\n두 번째 줄",
+                                                         "closed":  false,
+                                                         "created_at":  "2026-09-28T08:23:42.026214200Z",
+                                                         "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                         "level":  "info",
+                                                         "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                         "read":  true,
+                                                         "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                         "title":  "알림_한_😀",
+                                                         "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                         "workspace_name":  "jundu"
+                                                     },
+                                                     {
+                                                         "body":  "needs input",
+                                                         "closed":  false,
+                                                         "created_at":  "2026-09-28T08:23:42.133871500Z",
+                                                         "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                         "level":  "needs_input",
+                                                         "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                         "read":  true,
+                                                         "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                         "title":  "Terminal",
+                                                         "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                         "workspace_name":  "jundu"
+                                                     },
+                                                     {
+                                                         "body":  "failed",
+                                                         "closed":  false,
+                                                         "created_at":  "2026-09-28T08:23:42.168918200Z",
+                                                         "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                         "level":  "error",
+                                                         "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                         "read":  true,
+                                                         "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                         "title":  "Terminal",
+                                                         "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                         "workspace_name":  "jundu"
+                                                     },
+                                                     {
+                                                         "body":  "global",
+                                                         "closed":  false,
+                                                         "created_at":  "2026-09-28T08:23:42.694012400Z",
+                                                         "id":  "0e7326c6-506d-4197-a57b-12e49a681f49",
+                                                         "level":  "info",
+                                                         "pane":  null,
+                                                         "read":  false,
+                                                         "surface":  null,
+                                                         "title":  "Terminal",
+                                                         "workspace":  null,
+                                                         "workspace_name":  null
+                                                     }
+                                                 ],
+                                     "panel_handle":  3018414,
+                                     "panel_rows":  4,
+                                     "panel_snapshot":  {
+                                                            "anchor_handle":  2755946,
+                                                            "anchor_rect":  {
+                                                                                "height":  28,
+                                                                                "width":  28,
+                                                                                "x":  522,
+                                                                                "y":  322
+                                                                            },
+                                                            "clear_handle":  86772726,
+                                                            "empty":  false,
+                                                            "kind":  "bell-popover",
+                                                            "open":  true,
+                                                            "rect":  {
+                                                                         "height":  446,
+                                                                         "width":  320,
+                                                                         "x":  236,
+                                                                         "y":  356
+                                                                     },
+                                                            "rows":  [
+                                                                         {
+                                                                             "body":  "global",
+                                                                             "delete_handle":  724670,
+                                                                             "height":  96,
+                                                                             "id":  "0e7326c6-506d-4197-a57b-12e49a681f49",
+                                                                             "open_handle":  1510812,
+                                                                             "read":  false,
+                                                                             "time":  "17:23:42",
+                                                                             "title":  "Terminal",
+                                                                             "visible":  true
+                                                                         },
+                                                                         {
+                                                                             "body":  "failed",
+                                                                             "delete_handle":  528086,
+                                                                             "height":  96,
+                                                                             "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                                             "open_handle":  987052,
+                                                                             "read":  true,
+                                                                             "time":  "17:23:42",
+                                                                             "title":  "Terminal",
+                                                                             "visible":  true
+                                                                         },
+                                                                         {
+                                                                             "body":  "needs input",
+                                                                             "delete_handle":  9899310,
+                                                                             "height":  96,
+                                                                             "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                                             "open_handle":  987060,
+                                                                             "read":  true,
+                                                                             "time":  "17:23:42",
+                                                                             "title":  "Terminal",
+                                                                             "visible":  true
+                                                                         },
+                                                                         {
+                                                                             "body":  "완료 한글 é\n두 번째 줄",
+                                                                             "delete_handle":  7015672,
+                                                                             "height":  110,
+                                                                             "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                                             "open_handle":  23138130,
+                                                                             "read":  true,
+                                                                             "time":  "17:23:42",
+                                                                             "title":  "알림_한_😀",
+                                                                             "visible":  true
+                                                                         }
+                                                                     ],
+                                                            "scroll_offset":  0,
+                                                            "viewport_handle":  593596,
+                                                            "visible":  false
+                                                        },
+                                     "panel_status":  "Notifications",
+                                     "retained_limit":  50,
+                                     "unread_count":  1
+                                 },
+                       "passed":  true
+                   },
+                   {
+                       "afterClear":  {
+                                          "button_text":  "Notifications (0)",
+                                          "desktop_delivery":  "not_implemented",
+                                          "duplicate_window_ms":  8000,
+                                          "entries":  [
+
+                                                      ],
+                                          "panel_handle":  3018414,
+                                          "panel_rows":  0,
+                                          "panel_snapshot":  {
+                                                                 "anchor_handle":  2755946,
+                                                                 "anchor_rect":  {
+                                                                                     "height":  28,
+                                                                                     "width":  28,
+                                                                                     "x":  522,
+                                                                                     "y":  322
+                                                                                 },
+                                                                 "clear_handle":  86772726,
+                                                                 "empty":  true,
+                                                                 "kind":  "bell-popover",
+                                                                 "open":  false,
+                                                                 "rect":  {
+                                                                              "height":  208,
+                                                                              "width":  320,
+                                                                              "x":  236,
+                                                                              "y":  356
+                                                                          },
+                                                                 "rows":  [
+
+                                                                          ],
+                                                                 "scroll_offset":  0,
+                                                                 "viewport_handle":  593596,
+                                                                 "visible":  false
+                                                             },
+                                          "panel_status":  "Notifications",
+                                          "retained_limit":  50,
+                                          "unread_count":  0
+                                      },
+                       "afterDelete":  {
+                                           "button_text":  "Notifications (0)",
+                                           "desktop_delivery":  "not_implemented",
+                                           "duplicate_window_ms":  8000,
+                                           "entries":  [
+                                                           {
+                                                               "body":  "완료 한글 é\n두 번째 줄",
+                                                               "closed":  false,
+                                                               "created_at":  "2026-09-28T08:23:42.026214200Z",
+                                                               "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                               "level":  "info",
+                                                               "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                               "read":  true,
+                                                               "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                               "title":  "알림_한_😀",
+                                                               "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                               "workspace_name":  "jundu"
+                                                           },
+                                                           {
+                                                               "body":  "needs input",
+                                                               "closed":  false,
+                                                               "created_at":  "2026-09-28T08:23:42.133871500Z",
+                                                               "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                               "level":  "needs_input",
+                                                               "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                               "read":  true,
+                                                               "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                               "title":  "Terminal",
+                                                               "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                               "workspace_name":  "jundu"
+                                                           },
+                                                           {
+                                                               "body":  "failed",
+                                                               "closed":  false,
+                                                               "created_at":  "2026-09-28T08:23:42.168918200Z",
+                                                               "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                               "level":  "error",
+                                                               "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                               "read":  true,
+                                                               "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                               "title":  "Terminal",
+                                                               "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                               "workspace_name":  "jundu"
+                                                           }
+                                                       ],
+                                           "panel_handle":  3018414,
+                                           "panel_rows":  3,
+                                           "panel_snapshot":  {
+                                                                  "anchor_handle":  2755946,
+                                                                  "anchor_rect":  {
+                                                                                      "height":  28,
+                                                                                      "width":  28,
+                                                                                      "x":  522,
+                                                                                      "y":  322
+                                                                                  },
+                                                                  "clear_handle":  86772726,
+                                                                  "empty":  false,
+                                                                  "kind":  "bell-popover",
+                                                                  "open":  true,
+                                                                  "rect":  {
+                                                                               "height":  350,
+                                                                               "width":  320,
+                                                                               "x":  236,
+                                                                               "y":  356
+                                                                           },
+                                                                  "rows":  [
+                                                                               {
+                                                                                   "body":  "failed",
+                                                                                   "delete_handle":  23203666,
+                                                                                   "height":  96,
+                                                                                   "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                                                   "open_handle":  7081208,
+                                                                                   "read":  true,
+                                                                                   "time":  "17:23:42",
+                                                                                   "title":  "Terminal",
+                                                                                   "visible":  true
+                                                                               },
+                                                                               {
+                                                                                   "body":  "needs input",
+                                                                                   "delete_handle":  1052596,
+                                                                                   "height":  96,
+                                                                                   "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                                                   "open_handle":  9964846,
+                                                                                   "read":  true,
+                                                                                   "time":  "17:23:42",
+                                                                                   "title":  "Terminal",
+                                                                                   "visible":  true
+                                                                               },
+                                                                               {
+                                                                                   "body":  "완료 한글 é\n두 번째 줄",
+                                                                                   "delete_handle":  1052588,
+                                                                                   "height":  110,
+                                                                                   "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                                                   "open_handle":  593622,
+                                                                                   "read":  true,
+                                                                                   "time":  "17:23:42",
+                                                                                   "title":  "알림_한_😀",
+                                                                                   "visible":  true
+                                                                               }
+                                                                           ],
+                                                                  "scroll_offset":  0,
+                                                                  "viewport_handle":  593596,
+                                                                  "visible":  false
+                                                              },
+                                           "panel_status":  "Notifications",
+                                           "retained_limit":  50,
+                                           "unread_count":  0
+                                       },
+                       "name":  "native_row_delete_all_clear_and_empty_state",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "completion_stays_inactive_and_moves_resolve_same_surface_process",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "natural_exit_keeps_source_readable_and_closed_source_is_atomic_error",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "bounded_retention_delete_clear_jump_and_invalid_title",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "two_hidden_windows_keep_explicit_pipe_notification_stores_isolated",
+                       "passed":  true
+                   }
+               ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "host":  {
+                 "pid":  15656,
+                 "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                 "probePid":  26064
+             },
+    "osc":  {
+                "button_text":  "Notifications (3)",
+                "desktop_delivery":  "not_implemented",
+                "duplicate_window_ms":  8000,
+                "entries":  [
+                                {
+                                    "body":  "OSC9_한글_한_😀",
+                                    "closed":  false,
+                                    "created_at":  "2026-09-28T08:23:41.665652300Z",
+                                    "id":  "4e2f946e-bc75-464c-a3e0-2752a712399d",
+                                    "level":  "info",
+                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                    "read":  false,
+                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                    "title":  "Terminal",
+                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                    "workspace_name":  "jundu"
+                                },
+                                {
+                                    "body":  "needs approval_한글",
+                                    "closed":  false,
+                                    "created_at":  "2026-09-28T08:23:41.667042900Z",
+                                    "id":  "483595ba-8ed0-4062-ae32-744f8db8825a",
+                                    "level":  "needs_input",
+                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                    "read":  false,
+                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                    "title":  "Terminal",
+                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                    "workspace_name":  "jundu"
+                                },
+                                {
+                                    "body":  "error_한_😀",
+                                    "closed":  false,
+                                    "created_at":  "2026-09-28T08:23:41.668065Z",
+                                    "id":  "8f77daa4-5c8e-45f7-b78b-dfc24ec01ff4",
+                                    "level":  "error",
+                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                    "read":  false,
+                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                    "title":  "Build_한글",
+                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                    "workspace_name":  "jundu"
+                                }
+                            ],
+                "panel_handle":  null,
+                "panel_rows":  null,
+                "panel_snapshot":  null,
+                "panel_status":  null,
+                "retained_limit":  50,
+                "unread_count":  3
+            },
+    "burst":  {
+                  "button_text":  "Notifications (2)",
+                  "desktop_delivery":  "not_implemented",
+                  "duplicate_window_ms":  8000,
+                  "entries":  [
+                                  {
+                                      "body":  "done",
+                                      "closed":  false,
+                                      "created_at":  "2026-09-28T08:23:41.849246700Z",
+                                      "id":  "8885b446-faf4-4ef9-b4e2-2e3370fae248",
+                                      "level":  "info",
+                                      "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                      "read":  false,
+                                      "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                      "title":  "Terminal",
+                                      "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                      "workspace_name":  "jundu"
+                                  },
+                                  {
+                                      "body":  "error after burst",
+                                      "closed":  false,
+                                      "created_at":  "2026-09-28T08:23:41.856170700Z",
+                                      "id":  "91c4feb1-1be2-4280-96ec-f255b24acde7",
+                                      "level":  "error",
+                                      "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                      "read":  false,
+                                      "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                      "title":  "Terminal",
+                                      "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                      "workspace_name":  "jundu"
+                                  }
+                              ],
+                  "panel_handle":  null,
+                  "panel_rows":  null,
+                  "panel_snapshot":  null,
+                  "panel_status":  null,
+                  "retained_limit":  50,
+                  "unread_count":  2
+              },
+    "popoverShowResponse":  {
+                                "button_text":  "Notifications (0)",
+                                "desktop_delivery":  "not_implemented",
+                                "duplicate_window_ms":  8000,
+                                "entries":  [
+                                                {
+                                                    "body":  "완료 한글 é\n두 번째 줄",
+                                                    "closed":  false,
+                                                    "created_at":  "2026-09-28T08:23:42.026214200Z",
+                                                    "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                    "level":  "info",
+                                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                    "read":  true,
+                                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                    "title":  "알림_한_😀",
+                                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                    "workspace_name":  "jundu"
+                                                },
+                                                {
+                                                    "body":  "needs input",
+                                                    "closed":  false,
+                                                    "created_at":  "2026-09-28T08:23:42.133871500Z",
+                                                    "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                    "level":  "needs_input",
+                                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                    "read":  true,
+                                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                    "title":  "Terminal",
+                                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                    "workspace_name":  "jundu"
+                                                },
+                                                {
+                                                    "body":  "failed",
+                                                    "closed":  false,
+                                                    "created_at":  "2026-09-28T08:23:42.168918200Z",
+                                                    "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                    "level":  "error",
+                                                    "pane":  "f091fff9-c67c-41ae-9cf6-960acd985f51",
+                                                    "read":  true,
+                                                    "surface":  "99fedbc5-1afa-46cf-b88d-ea9ea0a8815b",
+                                                    "title":  "Terminal",
+                                                    "workspace":  "d60b8d72-207b-4eab-b0e1-5fecf8c37d59",
+                                                    "workspace_name":  "jundu"
+                                                }
+                                            ],
+                                "panel_handle":  3018414,
+                                "panel_rows":  3,
+                                "panel_snapshot":  {
+                                                       "anchor_handle":  2755946,
+                                                       "anchor_rect":  {
+                                                                           "height":  28,
+                                                                           "width":  28,
+                                                                           "x":  522,
+                                                                           "y":  322
+                                                                       },
+                                                       "clear_handle":  86772726,
+                                                       "empty":  false,
+                                                       "kind":  "bell-popover",
+                                                       "open":  true,
+                                                       "rect":  {
+                                                                    "height":  350,
+                                                                    "width":  320,
+                                                                    "x":  236,
+                                                                    "y":  356
+                                                                },
+                                                       "rows":  [
+                                                                    {
+                                                                        "body":  "failed",
+                                                                        "delete_handle":  593598,
+                                                                        "height":  96,
+                                                                        "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                                        "open_handle":  1379740,
+                                                                        "read":  false,
+                                                                        "time":  "17:23:42",
+                                                                        "title":  "Terminal",
+                                                                        "visible":  true
+                                                                    },
+                                                                    {
+                                                                        "body":  "needs input",
+                                                                        "delete_handle":  397014,
+                                                                        "height":  96,
+                                                                        "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                                        "open_handle":  855980,
+                                                                        "read":  false,
+                                                                        "time":  "17:23:42",
+                                                                        "title":  "Terminal",
+                                                                        "visible":  true
+                                                                    },
+                                                                    {
+                                                                        "body":  "완료 한글 é\n두 번째 줄",
+                                                                        "delete_handle":  9768238,
+                                                                        "height":  110,
+                                                                        "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                                        "open_handle":  855988,
+                                                                        "read":  true,
+                                                                        "time":  "17:23:42",
+                                                                        "title":  "알림_한_😀",
+                                                                        "visible":  true
+                                                                    }
+                                                                ],
+                                                       "scroll_offset":  0,
+                                                       "viewport_handle":  593596,
+                                                       "visible":  false
+                                                   },
+                                "panel_status":  "Notifications",
+                                "retained_limit":  50,
+                                "unread_count":  0
+                            },
+    "popoverObserved":  {
+                            "snapshot":  {
+                                             "anchor_handle":  2755946,
+                                             "anchor_rect":  {
+                                                                 "height":  28,
+                                                                 "width":  28,
+                                                                 "x":  522,
+                                                                 "y":  322
+                                                             },
+                                             "clear_handle":  86772726,
+                                             "empty":  false,
+                                             "kind":  "bell-popover",
+                                             "open":  true,
+                                             "rect":  {
+                                                          "height":  350,
+                                                          "width":  320,
+                                                          "x":  236,
+                                                          "y":  356
+                                                      },
+                                             "rows":  [
+                                                          {
+                                                              "body":  "failed",
+                                                              "delete_handle":  593598,
+                                                              "height":  96,
+                                                              "id":  "259414e1-e812-4b7e-bc15-bd0da288f285",
+                                                              "open_handle":  1379740,
+                                                              "read":  false,
+                                                              "time":  "17:23:42",
+                                                              "title":  "Terminal",
+                                                              "visible":  true
+                                                          },
+                                                          {
+                                                              "body":  "needs input",
+                                                              "delete_handle":  397014,
+                                                              "height":  96,
+                                                              "id":  "427fcb48-b871-4e48-85ca-2145c3710873",
+                                                              "open_handle":  855980,
+                                                              "read":  false,
+                                                              "time":  "17:23:42",
+                                                              "title":  "Terminal",
+                                                              "visible":  true
+                                                          },
+                                                          {
+                                                              "body":  "완료 한글 é\n두 번째 줄",
+                                                              "delete_handle":  9768238,
+                                                              "height":  110,
+                                                              "id":  "53761cf6-15ae-416d-bd9a-b951f35c078a",
+                                                              "open_handle":  855988,
+                                                              "read":  true,
+                                                              "time":  "17:23:42",
+                                                              "title":  "알림_한_😀",
+                                                              "visible":  true
+                                                          }
+                                                      ],
+                                             "scroll_offset":  0,
+                                             "viewport_handle":  593596,
+                                             "visible":  false
+                                         },
+                            "style":  2256535552,
+                            "expectedOwner":  659176,
+                            "styleHex":  "0x86800000",
+                            "foreground":  1379736,
+                            "owner":  659176,
+                            "dpi":  96,
+                            "bounds":  {
+                                           "Left":  236,
+                                           "Top":  356,
+                                           "Right":  556,
+                                           "Bottom":  706
+                                       },
+                            "anchorBounds":  {
+                                                 "Left":  522,
+                                                 "Top":  322,
+                                                 "Right":  550,
+                                                 "Bottom":  350
+                                             },
+                            "nativeVisible":  false
+                        },
+    "otherHost":  {
+                      "surfaces":  [
+                                       {
+                                           "bounds":  {
+                                                          "height":  725,
+                                                          "width":  916,
+                                                          "x":  264,
+                                                          "y":  32
+                                                      },
+                                           "cols":  80,
+                                           "cwd":  "C:\\Users\\jundu",
+                                           "cwd_reported":  false,
+                                           "exit_code":  null,
+                                           "id":  "af404664-012e-4e65-94b3-022db487f38e",
+                                           "last_output_ms":  null,
+                                           "observed_output_bytes":  0,
+                                           "output_sequence":  0,
+                                           "parsed_sequence":  0,
+                                           "pid":  null,
+                                           "ready":  false,
+                                           "resources_released":  false,
+                                           "rows":  24,
+                                           "running":  false,
+                                           "settings":  null,
+                                           "shell":  {
+                                                         "args":  [
+
+                                                                  ],
+                                                         "program":  "cmd"
+                                                     },
+                                           "startup_error":  null,
+                                           "visible":  true
+                                       }
+                                   ],
+                      "pid":  29448
+                  },
+    "status":  "passed_background_notifications_subset",
+    "finished":  "2026-09-28T17:23:55.5809930+09:00"
+}

@@ -1,0 +1,7 @@
+[check] passed long_nested_unicode_copy_rename_move_preserve_bom_crlf_bytes_and_reach_actual_listbox_and_monaco
+[check] passed long_nested_unicode_copy_preserves_exact_utf8_bom_crlf_and_binary_nul_bytes_without_editor
+[check] passed collisions_missing_parent_invalid_names_and_reparse_paths_reject_without_source_destination_or_outside_changes
+[check] passed copy_rename_and_move_reject_clean_or_dirty_open_editor_source_preserving_disk_and_actual_monaco
+[check] passed stale_tokens_and_out_of_range_indices_reject_all_file_actions_without_mutation
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-5606b0e8-9ba7-4bde-8ce4-3404189e7c1c
+{"status":"passed_background_files_actions_subset","case":"all","checks":5,"elapsedMs":16913}

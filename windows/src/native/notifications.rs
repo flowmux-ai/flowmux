@@ -101,9 +101,16 @@ impl App {
             "button_text":self.notification_button_text(),
             "panel_handle":self.notifications.panel.as_ref().map(|p|p.window as usize),
             "panel_rows":self.notifications.panel.as_ref().map(|p|p.rows()),
-            "panel_status":self.notifications.panel.as_ref().map(|p|p.status_text())})
+            "panel_status":self.notifications.panel.as_ref().map(|p|p.status_text()),
+            "panel_snapshot":self.notifications.panel.as_ref().map(|p|p.snapshot())})
     }
     pub(super) fn refresh_notifications(&self) {
+        self.refresh_notification_chrome();
+        if let Some(panel) = &self.notifications.panel {
+            panel.results(&self.notification_rows(false));
+        }
+    }
+    fn refresh_notification_chrome(&self) {
         self.refresh_chrome_metadata();
         for control in &self.controls {
             if matches!(control.action, Action::Notifications) {
@@ -117,9 +124,6 @@ impl App {
             .chain(self.editors.keys())
         {
             self.refresh_tab_title(*id);
-        }
-        if let Some(panel) = &self.notifications.panel {
-            panel.results(&self.notification_rows(false));
         }
     }
     pub(super) fn ack_focused_notifications(&self, source: SurfaceId) {
@@ -217,19 +221,23 @@ impl App {
             if self.notifications.panel.is_none() {
                 self.notifications.panel = Some(panel::Panel::new(self.window)?);
             }
+            // Match Linux's first-open contract: preserve the unread appearance
+            // in the presented snapshot, then acknowledge its entries in store.
+            let panel = self.notifications.panel.as_ref().unwrap();
+            panel.results(&self.notification_rows(false));
+            let anchor = self
+                .controls
+                .iter()
+                .find(|control| matches!(control.action, Action::Notifications))
+                .map_or(self.window, |control| control.hwnd);
+            panel.show(self.background_test, anchor);
             self.notifications.store.mark_all_unread_read();
-            self.refresh_notifications();
-            self.notifications
-                .panel
-                .as_ref()
-                .unwrap()
-                .show(self.background_test);
+            self.refresh_notification_chrome();
             return Ok(());
         }
         let Some(panel) = &self.notifications.panel else {
             return Ok(());
         };
-        let id = panel.selected();
         let op = match action {
             UiAction::Layout => {
                 panel.layout();
@@ -239,23 +247,33 @@ impl App {
                 panel.hide();
                 return Ok(());
             }
-            UiAction::Selected => {
-                panel.detail();
+            UiAction::Scroll(delta) => {
+                panel.scroll_by(delta);
                 return Ok(());
             }
-            UiAction::Open => id.map(|id| Op::Open { id }),
-            UiAction::Read => id.map(|id| Op::MarkRead { id }),
-            UiAction::Delete => id.map(|id| Op::Delete { id }),
+            UiAction::ScrollTo(offset) => {
+                panel.scroll(offset);
+                return Ok(());
+            }
+            UiAction::Navigate(direction) => {
+                panel.navigate(direction);
+                return Ok(());
+            }
+            UiAction::Open(id) => Some(Op::Open { id }),
+            UiAction::Delete(id) => Some(Op::Delete { id }),
             UiAction::Clear => Some(Op::Clear {}),
             UiAction::Show => unreachable!(),
         };
         if let Some(op) = op {
+            let dismiss = matches!(op, Op::Open { .. } | Op::Clear {});
             if let Err(error) = self.notification_command(op) {
                 self.notifications
                     .panel
                     .as_ref()
                     .unwrap()
                     .status(&error.to_string());
+            } else if dismiss {
+                self.notifications.panel.as_ref().unwrap().hide();
             }
         }
         Ok(())

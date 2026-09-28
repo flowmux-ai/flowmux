@@ -1,0 +1,37 @@
+{
+  "gui_build": "windows/dist/checks/ui-structure-browser-debug-8828a41c-d889-4865-bcbc-8c235220fd8c/result.json",
+  "previous_stage": "windows/dist/ui-structure-debug-staging.json",
+  "note": "Only GUI rebuilt for browser layout and Files placeholder correction. CLI commands unchanged; retained previously verified fresh staged entrypoints. GUI canonical publication still OS5.",
+  "files": [
+    {
+      "path": "windows/dist/ui-structure-verified-debug/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920
+    },
+    {
+      "path": "windows/dist/ui-structure-verified-debug/flowmux-command.exe",
+      "sha256": "109eb3dc41b0f9384071968ca34139e15c32abf602d62a6c7d21a616233685d8",
+      "bytes": 3473408
+    },
+    {
+      "path": "windows/dist/ui-structure-verified-debug/flowmux.com",
+      "sha256": "109eb3dc41b0f9384071968ca34139e15c32abf602d62a6c7d21a616233685d8",
+      "bytes": 3473408
+    },
+    {
+      "path": "windows/dist/ui-structure-verified-debug/flowmux.exe",
+      "sha256": "f1369c3735f2c794a850ee337c315fe28c5eb353b1c35ad1509218f6ac3a1987",
+      "bytes": 32515072
+    },
+    {
+      "path": "windows/dist/ui-structure-verified-debug/flowmuxctl.exe",
+      "sha256": "cedc1b738aa3a7e8394b680c113084f6e0650f1b3ae55c8953df55739545cd95",
+      "bytes": 3361792
+    },
+    {
+      "path": "windows/dist/ui-structure-verified-debug/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296
+    }
+  ]
+}

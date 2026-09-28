@@ -104,7 +104,11 @@ impl App {
         let content = model::Rect {
             x: sidebar + px(4),
             y: px(4),
-            width: (client.right - sidebar - px(8)).max(1),
+            width: (client.right
+                - sidebar
+                - px(8)
+                - self.files_dock_width(workspace, (client.right - sidebar - px(8)).max(1), scale))
+            .max(1),
             height: (client.bottom - px(8)).max(1),
         };
         let mut geometry = model::Layout::default();

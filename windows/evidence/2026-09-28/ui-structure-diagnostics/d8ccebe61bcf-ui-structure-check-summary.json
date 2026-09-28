@@ -1,0 +1,128 @@
+[
+  {
+    "path": "windows/dist/checks/ui-structure-browser-debug-8828a41c-d889-4865-bcbc-8c235220fd8c/result.json",
+    "status": "failed",
+    "elapsed": 113.554,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-browser-fix-clippy-16dd50d6-bbce-4672-bb41-a69fa525c99b/result.json",
+    "status": "passed",
+    "elapsed": 26.945,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-browser-geometry-035fc833-810d-4609-bb96-ecd307b6596b/result.json",
+    "status": "passed",
+    "elapsed": 22.945,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-browser-initial-7cead6a9-5607-435c-a23d-ecfa428c39b9/result.json",
+    "status": "failed",
+    "elapsed": 1.397,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-clippy-8395cb71-bc67-4774-a506-7689ee0e9fb5/result.json",
+    "status": "failed",
+    "elapsed": 22.311,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-debug-d0b8aa1e-7959-4384-a5f1-c722c7eb3c9e/result.json",
+    "status": "failed",
+    "elapsed": 97.796,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-files-actions-2b79ceda-5e7e-48c4-8cd1-9bbee6bfbfa9/result.json",
+    "status": "passed",
+    "elapsed": 17.839,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-files-dock-93886424-c4a0-4287-9c28-123beb842407/result.json",
+    "status": "failed",
+    "elapsed": 10.337,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-files-dock-relative-b7a4b657-4ea1-4317-aa6d-77068bcc1aea/result.json",
+    "status": "passed",
+    "elapsed": 7.922,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-final-clippy-1989cd70-b4f4-4315-a31d-8914fde3a073/result.json",
+    "status": "passed",
+    "elapsed": 27.858,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-import-clippy-0ffc1c73-9d3f-4a55-bb95-da5abc377a01/result.json",
+    "status": "failed",
+    "elapsed": 19.306,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-notifications-835c90d1-49df-440d-92da-097a2dd01406/result.json",
+    "status": "failed",
+    "elapsed": 5.472,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-notifications-border-7422c840-4a3e-4340-aa7a-7c7d4e2ba185/result.json",
+    "status": "passed",
+    "elapsed": 16,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-options-e9f84822-a7b4-417c-81d8-1686683a4dae/result.json",
+    "status": "passed",
+    "elapsed": 5.285,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-package-6c4894e4-13dd-4b1c-bae2-0a145aa36967/result.json",
+    "status": "failed",
+    "elapsed": 0.109,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-package-resources-6577a679-bc2d-474c-9c02-349051f306c5/result.json",
+    "status": "passed",
+    "elapsed": 12.973,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-reference-8235d5a3-9164-42e2-b694-30dc1fda49fb/result.json",
+    "status": "passed",
+    "elapsed": 1.011,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-release-2a9d2da5-9c9f-4098-8758-7736c85cc0d0/result.json",
+    "status": "failed",
+    "elapsed": 64.493,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-release-doctor-89b47498-267c-4518-8134-25badb44b244/result.json",
+    "status": "passed",
+    "elapsed": 1.035,
+    "activeAfterCleanup": 0
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-static-release-84e313b7-8ca0-4d03-a5c2-2bcbf76ce904/result.json",
+    "status": "failed",
+    "elapsed": 117.627,
+    "activeAfterCleanup": null
+  },
+  {
+    "path": "windows/dist/checks/ui-structure-syntax-290e90d8-a9a5-42cf-a2c5-32eb3da8c7e6/result.json",
+    "status": "passed",
+    "elapsed": 0.638,
+    "activeAfterCleanup": 0
+  }
+]
