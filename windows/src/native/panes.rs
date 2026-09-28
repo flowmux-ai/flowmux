@@ -415,7 +415,7 @@ impl App {
                                 if target.pane != pane || source_index != Some(index) {
                                     self.move_tab(surface, target.pane, index)?;
                                 }
-                            } else if self.surfaces.contains_key(&surface) {
+                            } else {
                                 let mut point = POINT { x, y };
                                 let mut rect = RECT::default();
                                 let outside = unsafe {

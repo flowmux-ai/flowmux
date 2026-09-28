@@ -168,6 +168,9 @@ pub(super) struct Barrier {
     reply: Option<ipc::Reply>,
 }
 impl Editor {
+    pub(super) fn can_move(&self) -> bool {
+        self.ready && self.pending.is_none() && self.inflight.is_empty()
+    }
     pub(super) fn checkpoint_ready(&self) -> bool {
         self.unavailable_restore() || (self.ready && self.pending.is_none())
     }
@@ -1040,6 +1043,10 @@ impl App {
         error: &str,
     ) {
         let quiet = matches!(&operation, Operation::Checkpoint(_));
+        let owner = match &operation {
+            Operation::Tab(surface) => self.surface_window(*surface),
+            _ => self.window,
+        };
         let reply = reply.or(match operation {
             Operation::Window(CloseRequest::Ipc(reply))
             | Operation::QuitDiscard(reply)
@@ -1052,7 +1059,7 @@ impl App {
         } else if !self.background_test && !quiet {
             unsafe {
                 MessageBoxW(
-                    self.window,
+                    owner,
                     wide(error).as_ptr(),
                     wide("flowmux editor").as_ptr(),
                     MB_OK | MB_ICONWARNING,
@@ -1142,7 +1149,8 @@ impl App {
         let closing = matches!(
             &barrier.operation,
             Operation::Window(_) | Operation::QuitDiscard(_)
-        );
+        ) || matches!(&barrier.operation, Operation::Tab(surface)
+            if self.workspaces.len() == 1 && self.detached.contains_key(surface));
         self.editor_bypass = true;
         let result = (|| -> anyhow::Result<()> {
             match barrier.operation {
@@ -1381,14 +1389,22 @@ impl App {
             "editor Open cannot begin during synchronization or window close"
         );
         let source = self.target(args.pane, caller)?;
-        self.ensure_attached(source)?;
+        if !self.editors.contains_key(&source) {
+            self.ensure_attached(source)?;
+        }
         let (index, pane, _) = self
             .locate(source)
             .context("editor source pane disappeared")?;
         let workspace = self.workspaces[index].id;
-        let root = args
-            .root
-            .unwrap_or_else(|| self.workspaces[index].cwd.clone());
+        let root = args.root.unwrap_or_else(|| {
+            self.editors
+                .get(&source)
+                .filter(|_| self.detached.contains_key(&source))
+                .map_or_else(
+                    || self.workspaces[index].cwd.clone(),
+                    |editor| editor.root.clone(),
+                )
+        });
         anyhow::ensure!(
             !self.editor_open_pending.values().any(|p| p.pane == pane),
             "this pane already has an editor Open preparation pending"
@@ -1440,7 +1456,9 @@ impl App {
                 && !self.closing,
             "editor Open was cancelled because synchronization or window close began"
         );
-        self.ensure_attached(pending.source)?;
+        if !self.editors.contains_key(&pending.source) {
+            self.ensure_attached(pending.source)?;
+        }
         let (index, pane, _) = self
             .locate(pending.source)
             .context("editor Open source closed")?;
@@ -1459,6 +1477,10 @@ impl App {
             .and_then(|(_, _, tabs)| tabs.into_iter().find(|tab|
                 matches!(&tab.kind, SurfaceKind::Editor { workspace_root, .. } if *workspace_root == root)))
             .map(|tab| tab.id);
+        anyhow::ensure!(
+            !self.detached.contains_key(&pending.source) || reuse == Some(pending.source),
+            "a separate editor can only open documents in its existing workspace root; move it back before creating another editor tab"
+        );
         let (id, placement, request, open_path) = if let Some(id) = reuse {
             anyhow::ensure!(
                 self.editors
@@ -1564,7 +1586,14 @@ impl App {
             source,
             pane,
             workspace: self.workspaces[index].id,
-            root: self.workspaces[index].cwd.clone(),
+            root: self
+                .editors
+                .get(&source)
+                .filter(|_| self.detached.contains_key(&source))
+                .map_or_else(
+                    || self.workspaces[index].cwd.clone(),
+                    |editor| editor.root.clone(),
+                ),
         })
     }
     fn editor_show_picker(
@@ -1590,7 +1619,11 @@ impl App {
             pane == target.pane && self.workspaces[index].id == target.workspace,
             "editor picker source moved before the dialog opened"
         );
-        let Some(path) = editor_picker::pick(self.window, &target.root, self.background_test)?
+        let Some(path) = editor_picker::pick(
+            self.surface_window(target.source),
+            &target.root,
+            self.background_test,
+        )?
         else {
             return Ok(());
         };
@@ -1608,7 +1641,7 @@ impl App {
         )
     }
     fn editor_run_picker(&mut self, target: PickerTarget) {
-        let completion = Completion::User(self.window);
+        let completion = Completion::User(self.surface_window(target.source));
         let result = self.editor_show_picker(target, completion.clone());
         self.editor_picker_pending = false;
         if let Err(error) = result {

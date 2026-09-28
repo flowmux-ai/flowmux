@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Commit deferred native new-window requests as ordinary browser tabs.
+//! Commit deferred popups as tabs or independent children of detached browsers.
 use super::*;
 use crate::browser_popup as domain;
 use flowmux_core::PaneSurface;
@@ -30,7 +30,7 @@ impl App {
     }
     fn browser_popup_open(&mut self, mut request: popup::Request) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.close_request.is_none() && !self.closing,
+            self.close_request.is_none() && !self.close_accepted && !self.closing,
             "window is closing"
         );
         anyhow::ensure!(
@@ -46,13 +46,35 @@ impl App {
         let (index, _, _) = self
             .locate(request.surface)
             .context("popup opener no longer exists")?;
+        let opener = self
+            .browsers
+            .get(&request.surface)
+            .context("popup opener is not a browser")?;
         anyhow::ensure!(
-            index == self.active_workspace,
-            "popup opener workspace is hidden"
+            opener.visible && !opener.native_closed.get(),
+            "popup opener is hidden or closed"
         );
-        let previous = self.workspaces[index].clone();
+        let separate = if let Some(window) = self.detached.get(&request.surface) {
+            anyhow::ensure!(
+                window.workspace == self.workspaces[index].id,
+                "popup opener window changed"
+            );
+            true
+        } else {
+            anyhow::ensure!(
+                index == self.active_workspace,
+                "popup opener workspace is hidden"
+            );
+            false
+        };
+        let previous = self.workspaces.clone();
         let mut candidate = previous.clone();
-        let opened = domain::open(&mut candidate, request.surface, request.uri.clone())?;
+        let opened = domain::open(&mut candidate[index], request.surface, request.uri.clone())?;
+        let destination = if separate {
+            Some(model::detach_surface(&mut candidate, opened.surface)?)
+        } else {
+            None
+        };
         let child = Browser::new_in_environment(self, opened.surface, Some(request.environment()));
         let mut child = match child {
             Ok(child) => child,
@@ -78,25 +100,79 @@ impl App {
                 return Err(error.into());
             }
         };
+        // Keep the frame local and hidden until SetNewWindow completes. Its
+        // holder is moved intact; the new browser still has the opener's native
+        // environment and has not been independently navigated.
+        let window = if let Some(destination) = destination {
+            let workspace = &candidate[destination];
+            let window = match detached::Window::new(opened.surface, workspace.id, "Browser") {
+                Ok(window) => window,
+                Err(error) => {
+                    self.browser_cancel(opened.surface, "popup window construction failed");
+                    drop(core);
+                    drop(child);
+                    return Err(error);
+                }
+            };
+            super::super::chrome::window_theme(window.window, self.settings.terminal.theme);
+            window.caption("Browser", super::super::chrome::SurfaceIcon::Browser);
+            if let Err(error) = child.holder.reparent(window.window) {
+                self.browser_cancel(opened.surface, "popup window attachment failed");
+                drop(core);
+                drop(child);
+                drop(window);
+                return Err(error);
+            }
+            Some(window)
+        } else {
+            None
+        };
+        if !request.valid() {
+            self.browser_cancel(
+                opened.surface,
+                "popup opener changed during window construction",
+            );
+            drop(core);
+            drop(child); // WebView and holder must precede their frame on every path.
+            drop(window);
+            anyhow::bail!("popup opener changed during window construction");
+        }
         // Install the model before completing the deferral: completion may cause
         // navigation or window.close callbacks. There is no separate Navigate.
-        self.workspaces[index] = candidate;
+        self.workspaces = candidate;
         self.browsers.insert(opened.surface, child);
+        if let Some(window) = window {
+            self.detached.insert(opened.surface, window);
+        }
         if let Err(error) = request.attach(&core) {
             drop(request);
             drop(core);
-            self.workspaces[index] = previous;
+            self.workspaces = previous;
             self.browser_cancel(opened.surface, "native popup attachment failed");
             self.browsers.remove(&opened.surface);
+            self.detached.remove(&opened.surface);
             return Err(error.context("cannot attach native popup"));
         }
         drop(core);
         drop(request);
         self.browser_popups.opened();
         self.zoomed = None;
+        if separate {
+            self.detached_focus = Some(opened.surface);
+        }
         // Once attached, a WindowProxy may already refer to the child. Retain it
         // if a layout update fails instead of undoing a completed native action.
-        if let Err(error) = self.rebuild() {
+        let layout = if separate {
+            let layout = self.rebuild_without_focus();
+            self.detached[&opened.surface].show(self.background_test);
+            layout.and_then(|()| {
+                self.select(opened.surface)?;
+                self.focus_active()
+            })
+        } else {
+            self.rebuild()
+        };
+        if let Err(error) = layout {
             report(&format!("popup tab layout: {error:#}"));
             if let Some(browser) = self.browsers.get_mut(&opened.surface) {
                 browser.error = Some(format!("Popup opened; layout update failed: {error}"));
@@ -115,6 +191,9 @@ impl App {
             .is_none_or(|b| b.instance != instance || !b.native_closed.get())
         {
             return Ok(());
+        }
+        if self.detached.contains_key(&id) {
+            return self.close_detached(id);
         }
         let (index, pane, _) = self
             .locate(id)

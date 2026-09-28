@@ -298,6 +298,11 @@ impl Browser {
         );
         Ok(())
     }
+    pub(super) fn parent_changed(&mut self) {
+        // Root-relative bounds can stay equal across windows: captures still
+        // need to reject their old native viewport after a reparent.
+        self.viewport_revision = self.viewport_revision.wrapping_add(1);
+    }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
         let viewport = self.holder.view_bounds(&self.view);
         json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
@@ -343,7 +348,8 @@ impl Browser {
         let url = domain::url(url)?;
         self.refs.clear();
         self.view.load_url(&url)?;
-        self.loading = true;
+        // NavigationStarting owns loading state: fragment-only navigation does
+        // not emit the navigation lifecycle and must not remain busy forever.
         self.error = None;
         Ok(())
     }
@@ -614,7 +620,12 @@ impl App {
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>();
-                    action = self.popup(&labels, &disabled, browser.chrome.tools_anchor())? as u16;
+                    action = self.popup_for(
+                        self.surface_window(id),
+                        &labels,
+                        &disabled,
+                        browser.chrome.tools_anchor(),
+                    )? as u16;
                     if action == 0 {
                         return Ok(());
                     }
@@ -624,7 +635,7 @@ impl App {
                     return Ok(());
                 }
                 if action == 9 {
-                    self.download_ui(downloads::UiAction::Show)?;
+                    self.download_show_for(id)?;
                     return Ok(());
                 }
                 if self.close_request.is_some() {

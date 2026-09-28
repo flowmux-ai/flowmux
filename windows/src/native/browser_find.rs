@@ -57,13 +57,20 @@ impl App {
         json!({"query":state.query,"found":state.found,
             "busy":self.pending_browser.values().any(|p|p.surface == id && p.response.is_find()),
             "panel_handle":panel.map(|p|p.window as usize),
+            "panel_owner":panel.map(|p|p.owner() as usize),
             "panel_query_handle":panel.map(|p|p.query_handle() as usize),
             "panel_status":panel.map(|p|p.status_text())})
     }
     pub(super) fn browser_find_show(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         self.browser_find_available(id)?;
-        if self.browser_find.panel.is_none() {
-            self.browser_find.panel = Some(panel::Panel::new(self.window)?);
+        let owner = self.surface_window(id);
+        if self
+            .browser_find
+            .panel
+            .as_ref()
+            .is_none_or(|p| p.owner() != owner)
+        {
+            self.browser_find.panel = Some(panel::Panel::new(owner)?);
         }
         self.browser_find.deferred_close.remove(&id);
         self.browser_find.surface = Some(id);
@@ -84,6 +91,34 @@ impl App {
             },
         });
         panel.show(self.background_test);
+        Ok(())
+    }
+    pub(crate) fn browser_find_reparent(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        if self.browser_find.surface != Some(id) {
+            return Ok(());
+        }
+        let Some(previous) = self.browser_find.panel.as_ref() else {
+            return Ok(());
+        };
+        let owner = self.surface_window(id);
+        if previous.owner() == owner {
+            return Ok(());
+        }
+        // Preserve the current edit draft independently of the last executed
+        // find query/result. Reparenting must not execute a search or take focus.
+        let query = previous.query();
+        let case_sensitive = previous.case_sensitive();
+        let status = previous.status_text();
+        let visible = unsafe { IsWindowVisible(previous.window) != 0 };
+        let panel = panel::Panel::new(owner)?;
+        panel.set_query(&query, case_sensitive);
+        panel.status(&status);
+        self.browser_find.panel = Some(panel);
+        self.browser_find
+            .panel
+            .as_ref()
+            .unwrap()
+            .restore_visibility(self.background_test, visible);
         Ok(())
     }
     pub(super) fn browser_find_start(
@@ -147,15 +182,14 @@ impl App {
         }
         Ok(())
     }
-    pub(super) fn browser_find_reset(&mut self, id: SurfaceId, reason: &str) {
+    pub(crate) fn browser_find_reset(&mut self, id: SurfaceId, reason: &str) {
         self.browser_find.deferred_close.remove(&id);
         if let Some(browser) = self.browsers.get_mut(&id) {
             browser.find.found = None;
         }
         if self.browser_find.surface == Some(id) {
-            if let Some(panel) = &self.browser_find.panel {
+            if let Some(panel) = self.browser_find.panel.take() {
                 panel.status(reason);
-                panel.hide();
             }
             self.browser_find.surface = None;
         }
@@ -223,14 +257,28 @@ impl App {
         }
     }
     pub(crate) fn browser_find_ui(&mut self, action: UiAction) {
-        if matches!(action, UiAction::Layout) {
+        let generation = match action {
+            UiAction::Next(generation)
+            | UiAction::Previous(generation)
+            | UiAction::Close(generation)
+            | UiAction::Layout(generation) => generation,
+        };
+        if self
+            .browser_find
+            .panel
+            .as_ref()
+            .is_none_or(|p| p.generation != generation)
+        {
+            return;
+        }
+        if matches!(action, UiAction::Layout(_)) {
             if let Some(panel) = &self.browser_find.panel {
                 panel.layout();
             }
             return;
         }
         let result = if let Some(id) = self.browser_find.surface {
-            if matches!(action, UiAction::Close) {
+            if matches!(action, UiAction::Close(_)) {
                 // Always let the user dismiss a stale/hidden panel. Only a current
                 // visible document may have its owned selection cleared.
                 let result = if self.browser_find_idle(id).is_err() {
@@ -259,7 +307,7 @@ impl App {
                     crate::browser_find::Args {
                         pane: id.0,
                         query: panel.query(),
-                        backward: matches!(action, UiAction::Previous),
+                        backward: matches!(action, UiAction::Previous(_)),
                         case_sensitive: panel.case_sensitive(),
                         no_wrap: false,
                     },

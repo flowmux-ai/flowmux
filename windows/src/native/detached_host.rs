@@ -47,6 +47,38 @@ impl App {
             .map_or(self.window, |window| window.window)
     }
 
+    pub(super) fn surface_holder(&self, id: SurfaceId) -> anyhow::Result<&surface_host::Host> {
+        self.surfaces
+            .get(&id)
+            .map(|surface| &surface.holder)
+            .or_else(|| self.browsers.get(&id).map(|browser| &browser.holder))
+            .or_else(|| self.editors.get(&id).map(|editor| &editor.view.holder))
+            .context("surface no longer exists")
+    }
+
+    pub(super) fn surface_view(&self, id: SurfaceId) -> Option<&WebView> {
+        self.surfaces
+            .get(&id)
+            .map(|surface| &surface.view)
+            .or_else(|| {
+                self.browsers
+                    .get(&id)
+                    .filter(|browser| !browser.native_closed.get())
+                    .map(|browser| &browser.view)
+            })
+            .or_else(|| self.editors.get(&id).map(|editor| &editor.view.view))
+    }
+
+    pub(super) fn surface_icon(&self, id: SurfaceId) -> chrome::SurfaceIcon {
+        if self.browsers.contains_key(&id) {
+            chrome::SurfaceIcon::Browser
+        } else if self.editors.contains_key(&id) {
+            chrome::SurfaceIcon::Editor
+        } else {
+            chrome::SurfaceIcon::Terminal
+        }
+    }
+
     fn normalize_main_workspace(&mut self) {
         let indices = self.main_workspace_indices();
         if !indices.contains(&self.active_workspace) {
@@ -65,10 +97,10 @@ impl App {
         );
         self.ensure_attached(surface)?;
         anyhow::ensure!(
-            self.surfaces
-                .get(&surface)
-                .is_some_and(|terminal| terminal.ready && !terminal.restoring),
-            "only a ready terminal can currently move to a separate window"
+            self.surfaces.get(&surface).is_some_and(|terminal| terminal.ready && !terminal.restoring)
+                || self.browsers.get(&surface).is_some_and(|browser| !browser.native_closed.get())
+                || self.editors.get(&surface).is_some_and(editor::Editor::can_move),
+            "wait for the surface to finish its current operation before moving to a separate window"
         );
         let main = self.workspace().id;
         let mut candidate = self.workspaces.clone();
@@ -80,8 +112,9 @@ impl App {
             .unwrap_or("Terminal");
         let window = detached::Window::new(surface, workspace.id, title)?;
         chrome::window_theme(window.window, self.settings.terminal.theme);
+        window.caption(title, self.surface_icon(surface));
         // Native construction can pump messages; domain state is still untouched.
-        self.surfaces[&surface].holder.reparent(window.window)?;
+        self.surface_holder(surface)?.reparent(window.window)?;
         self.workspaces = candidate;
         self.detached.insert(surface, window);
         self.active_workspace = self
@@ -92,7 +125,12 @@ impl App {
         self.normalize_main_workspace();
         self.detached_focus = Some(surface);
         self.zoomed = None;
-        let layout = self.rebuild_without_focus();
+        if let Some(browser) = self.browsers.get_mut(&surface) {
+            browser.parent_changed();
+        }
+        let layout = self
+            .rebuild_without_focus()
+            .and_then(|()| self.browser_find_reparent(surface));
         self.detached[&surface].show(self.background_test);
         layout?;
         self.select(surface)?;
@@ -103,27 +141,34 @@ impl App {
         let Some(window) = self.detached.get(&surface) else {
             return Ok(());
         };
+        if unsafe { IsIconic(window.window) } != 0 {
+            return Ok(());
+        }
         window.layout()?;
         let area = window.area()?;
-        let terminal = self
-            .surfaces
-            .get_mut(&surface)
-            .context("detached terminal disappeared")?;
-        terminal.holder.layout(Some(area), self.background_test)?;
-        terminal
-            .view
-            .set_bounds(bounds(model::Rect { x: 0, y: 0, ..area }))?;
-        unsafe {
+        let scale = unsafe { GetDpiForWindow(window.window) }.max(96) as f64 / 96.0;
+        if let Some(terminal) = self.surfaces.get_mut(&surface) {
+            terminal.holder.layout(Some(area), self.background_test)?;
             terminal
                 .view
-                .controller()
-                .NotifyParentWindowPositionChanged()?;
+                .set_bounds(bounds(model::Rect { x: 0, y: 0, ..area }))?;
+            unsafe {
+                terminal
+                    .view
+                    .controller()
+                    .NotifyParentWindowPositionChanged()?;
+            }
+            if !terminal.visible {
+                terminal.view.set_visible(true)?;
+                terminal.visible = true;
+                terminal.send(&HostMessage::Visibility { visible: true })?;
+            }
+        } else if let Some(browser) = self.browsers.get_mut(&surface) {
+            browser.layout(Some(area), scale)?;
+        } else if let Some(editor) = self.editors.get_mut(&surface) {
+            editor.view.layout(Some(area))?;
         }
-        if !terminal.visible {
-            terminal.view.set_visible(true)?;
-            terminal.visible = true;
-            terminal.send(&HostMessage::Visibility { visible: true })?;
-        }
+
         Ok(())
     }
 
@@ -138,12 +183,9 @@ impl App {
         match signal {
             detached::Signal::Layout => self.detached_layout(surface),
             detached::Signal::Moved => {
-                if let Some(terminal) = self.surfaces.get(&surface) {
+                if let Some(view) = self.surface_view(surface) {
                     unsafe {
-                        terminal
-                            .view
-                            .controller()
-                            .NotifyParentWindowPositionChanged()?;
+                        view.controller().NotifyParentWindowPositionChanged()?;
                     }
                 }
                 Ok(())
@@ -157,21 +199,34 @@ impl App {
     }
 
     pub(super) fn close_detached(&mut self, surface: SurfaceId) -> anyhow::Result<()> {
-        self.files_operation_guard()?;
+        let native_closed = self
+            .browsers
+            .get(&surface)
+            .is_some_and(|browser| browser.native_closed.get());
+        if !native_closed {
+            self.files_operation_guard()?;
+        }
         let window = self
             .detached
             .get(&surface)
             .context("separate window no longer exists")?;
         if self.workspaces.len() == 1 {
+            if native_closed && self.close_request.is_some() {
+                return Ok(());
+            }
             return self.request_close(CloseRequest::Native);
         }
         anyhow::ensure!(
-            self.pending_save.is_none()
-                && self.editor_barrier.is_none()
-                && self.close_request.is_none(),
+            native_closed
+                || (self.pending_save.is_none()
+                    && self.editor_barrier.is_none()
+                    && self.close_request.is_none()),
             "window is busy"
         );
         let workspace = window.workspace;
+        if !native_closed && self.editor_guard(editor::Operation::Tab(surface), None)? {
+            return Ok(());
+        }
         model::remove_workspace(&mut self.workspaces, &mut self.active_workspace, workspace)?;
         // Close the WebView and holder before destroying their top-level HWND.
         self.remove_surface(surface);
@@ -230,6 +285,7 @@ impl App {
             }
         }
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
+        self.download_owner_closing(self.window);
         self.main_closed = true;
         self.detached_focus = self.detached.keys().next().copied();
         unsafe {
@@ -238,7 +294,12 @@ impl App {
         // Keep the dispatch HWND, timers, IPC endpoint and contexts alive until
         // the last separate window closes. Save only the remaining sessions.
         if self.store.is_some() {
-            self.begin_save(None)?;
+            // A MainWindow barrier seals only attached editors. Detached editors
+            // must perform their own checkpoint synchronization after it closes.
+            let previous = std::mem::replace(&mut self.editor_bypass, false);
+            let saved = self.begin_save(None);
+            self.editor_bypass = previous;
+            saved?;
         }
         Ok(())
     }

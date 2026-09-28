@@ -6,15 +6,17 @@ use std::cell::RefCell;
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
     Show,
-    Open,
-    Folder,
-    Cancel,
-    Remove,
-    Clear,
-    Close,
-    Selected,
-    Layout,
+    Open(usize),
+    Folder(usize),
+    Cancel(usize),
+    Remove(usize),
+    Clear(usize),
+    Close(usize),
+    Selected(usize),
+    Layout(usize),
 }
+static NEXT_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
 fn emit(action: UiAction) {
     post(Event::Download(Signal::Ui(action)));
 }
@@ -24,9 +26,10 @@ unsafe extern "system" fn procedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let generation = GetWindowLongPtrW(window, GWLP_USERDATA) as usize;
     match message {
         WM_CLOSE => {
-            emit(UiAction::Close);
+            emit(UiAction::Close(generation));
             0
         }
         WM_GETMINMAXINFO => {
@@ -37,7 +40,7 @@ unsafe extern "system" fn procedure(
             0
         }
         WM_SIZE => {
-            emit(UiAction::Layout);
+            emit(UiAction::Layout(generation));
             0
         }
         WM_DPICHANGED => {
@@ -51,19 +54,19 @@ unsafe extern "system" fn procedure(
                 r.bottom - r.top,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            emit(UiAction::Layout);
+            emit(UiAction::Layout(generation));
             0
         }
         WM_COMMAND => {
             let code = (wparam >> 16) as u32;
             let action = match (wparam & 0xffff, code) {
-                (1, BN_CLICKED) | (10, LBN_DBLCLK) => Some(UiAction::Open),
-                (2, BN_CLICKED) => Some(UiAction::Close),
-                (3, BN_CLICKED) => Some(UiAction::Folder),
-                (6, BN_CLICKED) => Some(UiAction::Cancel),
-                (4, BN_CLICKED) => Some(UiAction::Remove),
-                (5, BN_CLICKED) => Some(UiAction::Clear),
-                (10, LBN_SELCHANGE) => Some(UiAction::Selected),
+                (1, BN_CLICKED) | (10, LBN_DBLCLK) => Some(UiAction::Open(generation)),
+                (2, BN_CLICKED) => Some(UiAction::Close(generation)),
+                (3, BN_CLICKED) => Some(UiAction::Folder(generation)),
+                (6, BN_CLICKED) => Some(UiAction::Cancel(generation)),
+                (4, BN_CLICKED) => Some(UiAction::Remove(generation)),
+                (5, BN_CLICKED) => Some(UiAction::Clear(generation)),
+                (10, LBN_SELCHANGE) => Some(UiAction::Selected(generation)),
                 _ => None,
             };
             if let Some(action) = action {
@@ -76,6 +79,7 @@ unsafe extern "system" fn procedure(
 }
 pub(super) struct Panel {
     pub(super) window: HWND,
+    pub(super) generation: usize,
     list: HWND,
     detail: HWND,
     status: HWND,
@@ -123,8 +127,11 @@ impl Panel {
                 std::ptr::null(),
             );
             anyhow::ensure!(!window.is_null(), "cannot create download window");
+            let generation = NEXT_PANEL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            SetWindowLongPtrW(window, GWLP_USERDATA, generation as isize);
             let mut panel = Self {
                 window,
+                generation,
                 list: std::ptr::null_mut(),
                 detail: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
@@ -262,6 +269,9 @@ impl Panel {
                 && IsDialogMessageW(self.window, message) != 0
         }
     }
+    pub(super) fn owner(&self) -> HWND {
+        unsafe { GetWindow(self.window, GW_OWNER) }
+    }
     pub(super) fn show(&self, background: bool) {
         if !background {
             unsafe {
@@ -301,6 +311,21 @@ impl Panel {
                     .and_then(|s| Uuid::parse_str(s).ok())
             })
             .flatten()
+    }
+    pub(super) fn select(&self, id: Option<Uuid>) {
+        let index = id.and_then(|id| {
+            self.values.borrow().iter().position(|v| {
+                v["id"]
+                    .as_str()
+                    .is_some_and(|value| value == id.to_string())
+            })
+        });
+        if let Some(index) = index {
+            unsafe {
+                SendMessageW(self.list, LB_SETCURSEL, index, 0);
+            }
+            self.detail();
+        }
     }
     pub(super) fn rows(&self) -> usize {
         unsafe { SendMessageW(self.list, LB_GETCOUNT, 0, 0).max(0) as usize }

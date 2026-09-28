@@ -174,6 +174,31 @@ function Check-MoveHolder($Status,$Tree,[string]$Pane) {
     if (-not $holder.bounds -or $holder.bounds.x -ne $paneBounds.x -or $holder.bounds.y -ne ($paneBounds.y+$bar) -or $holder.bounds.width -ne $paneBounds.width -or $holder.bounds.height -ne [Math]::Max(1,$paneBounds.height-$bar)) {throw 'Editor holder does not occupy its destination pane body'}
     foreach ($key in @('x','y','width','height')) {if ($null -eq $Status.bounds.$key -or $Status.bounds.$key -ne $holder.bounds.$key) {throw ('Editor root-coordinate viewport differs from holder: '+$key)}}
 }
+function Check-DetachedEditor($State,$Tree,[string]$Surface,$Before) {
+    $windows=@($Tree.detached_windows|Where-Object {$_.surface -eq $Surface})
+    if($windows.Count -ne 1) {throw 'Editor requires exactly one owned separate window'}
+    $window=$windows[0];$holder=$State.holder
+    if($window.native_visible -ne $false -or $holder.native_visible -ne $false -or $holder.parent -ne $window.window_handle -or $holder.root -ne $window.window_handle -or $State.view_handle -ne $Before.view_handle -or $holder.window -ne $Before.holder.window) {throw 'Separate editor changed its native WebView/holder identity or hierarchy'}
+    Check-Hidden ([long]$window.window_handle);Check-Hidden ([long]$holder.window)
+    foreach($key in @('x','y','width','height')) {if($null -eq $window.area.$key -or $holder.bounds.$key -ne $window.area.$key -or $State.bounds.$key -ne $holder.bounds.$key) {throw ('Separate editor viewport differs from its window body: '+$key)}}
+    return $window
+}
+function Wait-EditorCloseRejected([string]$Surface) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Dirty separate editor close did not reject and unseal within five seconds'}
+        if($process.HasExited) {throw 'Dirty separate editor close terminated its shared host'}
+        $tree=Tree ([int]$remaining)
+        if($tree.main_closed) {throw 'Separate editor close unexpectedly closed the main window'}
+        if(-not $tree.editor_synchronizing -and $tree.state.error -match 'unsaved changes') {
+            $remaining=5000-$watch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Separate close release budget expired'}
+            $response=End-Command (Begin-Command @('editor','command',$Surface,'read')) @(0,1) ([int]$remaining)
+            if($response.error) {if($response.error -notmatch 'editor synchronization (is )?in progress|editor is loading or another command is pending') {throw ('Unexpected separate-close release error: '+$response.error)}}
+            else {$read=if($response.psobject.Properties.Name -contains 'result') {$response.result}else{$response};if($read.sealed -eq $false) {return $read}}
+        }
+        Start-Sleep -Milliseconds 20
+    } while($true)
+}
 function Editor-Command([string]$Surface,[string]$Action,[string[]]$Options=@(),[int]$Exit=0) {
     $r=Request (@('editor','command',$Surface,$Action)+$Options) $Exit
     if($r -and $r.psobject.Properties.Name -contains 'result') {return $r.result}
@@ -822,7 +847,7 @@ try {
                 Passed 'dirty_tab_workspace_and_quit_reject_without_focus_change_explicit_save_or_discard_closes'
             }
             'move' {
-                $path=$fixture.Write('move 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                $path=$fixture.Write('move root 한글\move 한글.txt',[EditorFixture]::Original,$false,$false);$editorRoot=$fixture.File('move root 한글');$opened=Open-Editor $path '' $editorRoot
                 Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
                 $before=Status $opened.surface;$read=Read-Editor $opened.surface
                 Check-MoveHolder $before (Tree) $opened.pane
@@ -854,7 +879,7 @@ try {
                         # A real read must also pass the host barrier and report
                         # the Monaco seal released before any reattachment.
                         $response=End-Command (Begin-Command @('editor','command',$opened.surface,'read')) @(0,1) ([int]$remaining)
-                        if($response.error) {if($response.error -notmatch 'editor synchronization in progress|editor is loading or another command is pending') {throw ('Unexpected main-close release error: '+$response.error)}}
+                        if($response.error) {if($response.error -notmatch 'editor synchronization (is )?in progress|editor is loading or another command is pending') {throw ('Unexpected main-close release error: '+$response.error)}}
                         else {$candidate=if($response.psobject.Properties.Name -contains 'result') {$response.result}else{$response};if($candidate.sealed -eq $false) {$released=$candidate;break}}
                     }
                     Start-Sleep -Milliseconds 20
@@ -870,12 +895,65 @@ try {
                 if($tree.main_closed -or @($tree.detached_windows).Count) {throw 'Separate terminal did not reattach after dirty main-close rejection'}
                 Check-MoveHolder (Status $opened.surface) $tree $destination.pane
                 Passed 'dirty_main_window_close_with_detached_terminal_rejects_unseals_and_preserves_editor_documents'
+                Request @('detach-tab',$opened.surface)|Out-Null
+                $detachedEditor=Check-DetachedEditor (Status $opened.surface) (Tree) $opened.surface $before
+                $detachedRead=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
+                if($detachedRead.document_id -ne $read.document_id -or $detachedRead.active_version -ne $read.active_version) {throw 'Detach changed the dirty Monaco document identity or version'}
+                [FindFixture]::PostClose([long]$detachedEditor.window_handle,$process.Id)
+                $rejected=Wait-EditorCloseRejected $opened.surface
+                if($rejected.document_focused -ne $false -or $rejected.content_truncated -or -not $rejected.dirty -or -not (Same-Text $rejected.content ([EditorFixture]::Edited)) -or $rejected.document_id -ne $read.document_id -or $rejected.active_version -ne $read.active_version) {throw 'Native separate-window close altered the dirty document'}
+                $rejected=Request @('close-tab',$opened.surface) 1
+                if($rejected.error -notmatch 'unsaved changes') {throw 'Dirty separate editor CLI close did not reject unsaved changes'}
+                Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
+                Check-DetachedEditor (Status $opened.surface) (Tree) $opened.surface $before|Out-Null
+                Assert-Terminal;Assert-Bytes $path ([EditorFixture]::Original)
+                Passed 'dirty_detached_editor_native_and_cli_close_reject_with_stable_holder_document_and_version'
+
+                # The editor root deliberately differs from the terminal CWD.
+                # Omitting --root must retain that editor, not create a new tab.
+                $second=$fixture.Write('move root 한글\second 분리 문서.txt',[EditorFixture]::External,$false,$false)
+                $detachedTarget=Request @('identify')
+                $reuse=Request @('editor','open',$second,'--pane',$detachedTarget.pane)
+                if($reuse.editor_opened.surface -ne $opened.surface -or $reuse.editor_opened.placement_strategy -ne 'reuse_tab') {throw 'Separate editor Open without a root did not reuse its actual workspace root'}
+                Ready $opened.surface|Out-Null
+                $secondRead=Read-Editor $opened.surface
+                if(-not (Same-Text $secondRead.content ([EditorFixture]::External)) -or $secondRead.dirty -or -not (Status $opened.surface).dirty) {throw 'Opening a clean second document lost the retained dirty first document'}
+                $secondClosed=Editor-Command $opened.surface 'close-document'
+                if($secondClosed.closed -ne $true) {throw 'Clean second document did not close inside the separate editor'}
+                $retained=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
+                if($retained.document_id -ne $read.document_id -or $retained.active_version -ne $read.active_version) {throw 'Same-root Open changed the original dirty document'}
+                Request @('move-tab',$opened.surface,'--to-pane',$destination.pane)|Out-Null
+                $tree=Tree;$reattached=Status $opened.surface
+                Check-MoveHolder $reattached $tree $destination.pane
+                if(@($tree.detached_windows).Count -or $reattached.view_handle -ne $before.view_handle -or $reattached.holder.window -ne $before.holder.window) {throw 'Editor reattachment recreated its native view or retained a separate window'}
                 Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
-                if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Move lost Monaco undo history'}
-                Editor-Command $opened.surface 'discard-document'|Out-Null
+                if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Move/detach/reattach lost Monaco undo history'}
+                Editor-Command $opened.surface 'redo'|Out-Null
+                $beforeMainClose=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
+                Passed 'detached_editor_reuses_its_root_and_reattaches_with_actual_monaco_undo_redo_history'
+
+                Request @('detach-tab',$opened.surface)|Out-Null;$tree=Tree
+                Check-DetachedEditor (Status $opened.surface) $tree $opened.surface $before|Out-Null
+                [FindFixture]::PostClose([long]$tree.window_handle,$process.Id)
+                $closeWatch=[Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $remaining=5000-$closeWatch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Main close did not retain and synchronize the separate editor within five seconds'}
+                    if($process.HasExited) {throw 'Closing the original main window killed the separate editor'}
+                    $tree=Tree ([int]$remaining)
+                    if($tree.main_closed -and -not $tree.editor_synchronizing -and -not $tree.state.saving) {break}
+                    Start-Sleep -Milliseconds 20
+                } while($true)
+                if(@($tree.surfaces).Count -or @($tree.editors).Count -ne 1) {throw 'Original main close did not remove only its attached sessions'}
+                Check-DetachedEditor (Status $opened.surface) $tree $opened.surface $before|Out-Null
+                $survivor=Assert-Text $opened.surface ([EditorFixture]::Edited) $true
+                if($survivor.document_id -ne $beforeMainClose.document_id -or $survivor.active_version -ne $beforeMainClose.active_version) {throw 'Main close changed the surviving editor model'}
+                Editor-Command $opened.surface 'save'|Out-Null
+                Assert-Text $opened.surface ([EditorFixture]::Edited) $false|Out-Null;Assert-Bytes $path ([EditorFixture]::Edited)
                 Request @('close-tab',$opened.surface)|Out-Null;Forget-Editor $opened.surface
-                Request @('close-tab',$destination.surface)|Out-Null
-                Passed 'hidden_and_moved_editor_keeps_native_view_document_and_actual_monaco_undo_history'
+                if(-not $process.WaitForExit(5000)) {throw 'Clean final separate editor did not close the shared host within five seconds'}
+                Finish-Host
+                Passed 'detached_editor_survives_main_close_saves_exact_bytes_and_clean_final_close_exits'
+                if($Case -eq 'all') {$tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]}
             }
             'restore' {
                 Finish-Host

@@ -45,6 +45,9 @@ impl App {
                         GetDpiForWindow(self.window)
                     });
                     chrome::window_theme(self.window, self.settings.terminal.theme);
+                    for window in self.detached.values() {
+                        chrome::window_theme(window.window, self.settings.terminal.theme);
+                    }
                     self.editor_apply_theme()?;
                     unsafe {
                         InvalidateRect(self.window, std::ptr::null(), 1);

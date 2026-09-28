@@ -1117,6 +1117,10 @@ impl App {
         Ok(())
     }
     fn layout(&mut self) -> anyhow::Result<()> {
+        chrome::configure_settings(
+            &self.settings.terminal,
+            unsafe { GetDpiForWindow(self.window) }.max(96),
+        );
         for surface in self.detached.keys().copied().collect::<Vec<_>>() {
             self.detached_layout(surface)?;
         }
@@ -1208,6 +1212,9 @@ impl App {
             }
         }
         for (id, editor) in &mut self.editors {
+            if self.detached.contains_key(id) {
+                continue;
+            }
             let area = visible
                 .get(id)
                 .filter(|_| client.right > 0 && client.bottom > 0)
@@ -1219,6 +1226,9 @@ impl App {
             editor.view.layout(area)?;
         }
         for (id, browser) in &mut self.browsers {
+            if self.detached.contains_key(id) {
+                continue;
+            }
             let area = visible
                 .get(id)
                 .filter(|_| client.right > 0 && client.bottom > 0)
@@ -2277,7 +2287,7 @@ impl App {
             let root = &self.workspaces[workspace].root;
             if let Some(title) = root.surface_title(pane, id) {
                 if let Some(window) = self.detached.get(&id) {
-                    window.caption(title, chrome::SurfaceIcon::Terminal);
+                    window.caption(title, self.surface_icon(id));
                 }
                 let mut label = title.to_owned();
                 let unread = self
@@ -2374,8 +2384,19 @@ impl App {
         let mut candidate = self.workspaces.clone();
         let active = model::move_surface(&mut candidate, surface, target, index)?;
         if self.detached.contains_key(&surface) {
-            self.surfaces[&surface].holder.reparent(self.window)?;
-            self.detached.remove(&surface);
+            self.surface_holder(surface)?.reparent(self.window)?;
+            if let Some(browser) = self.browsers.get_mut(&surface) {
+                browser.parent_changed();
+            }
+            let window = self.detached.remove(&surface).unwrap();
+            self.download_owner_closing(window.window);
+            // A find panel owned by the old frame must move before it is destroyed.
+            let find = self.browser_find_reparent(surface);
+            if let Err(error) = find {
+                self.browser_find_reset(surface, "Search window could not move");
+                report(&format!("browser find moved: {error:#}"));
+            }
+            drop(window);
         }
         self.workspaces = candidate;
         self.active_workspace = active;
@@ -2457,6 +2478,9 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        if let Some(owner) = self.detached.get(&surface).map(|window| window.window) {
+            self.download_owner_closing(owner);
+        }
         self.editor_remove(surface);
         self.browser_cancel(surface, "browser closed during script request");
         self.browsers.remove(&surface);
@@ -2782,7 +2806,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
-                "named_key_protocol":"send_key_mode","detached_surfaces":["terminal"],"detached_window_restore":false,
+                "named_key_protocol":"send_key_mode","detached_surfaces":["terminal","browser","editor"],"detached_window_restore":false,
                 "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
@@ -2833,6 +2857,7 @@ impl App {
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),
+                        "editor_synchronizing":self.editor_barrier.is_some(),
                         "editor_open_admitted":self.editor_preparer.as_ref().map_or(0, |worker| worker.pending()),
                         "editor_picker_pending":self.editor_picker_pending,
                         "close_accepted":self.close_accepted,

@@ -9,6 +9,7 @@ $doctor=& $cli doctor|ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'Working debug build required; no host launched'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 $directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('browser-'+[guid]::NewGuid())
@@ -45,10 +46,16 @@ function Raw-Request($Body) {
 function Tree {
     $tree=Request @('tree');$window=[IntPtr]([long]$tree.window_handle)
     if (-not $tree.background_testing -or [CliProbe]::IsWindowVisible($window) -or [CliProbe]::GetForegroundWindow() -eq $window) {throw 'Owned host became visible or foreground'}
+    foreach ($frame in $tree.detached_windows) {
+        $native=[OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)
+        if ($native.Owner -ne 0 -or $frame.native_visible -ne $false) {throw 'Detached browser frame is owned or visible'}
+    }
     foreach ($browser in $tree.browsers) {
         if ([CliProbe]::IsWindowVisible([IntPtr]([long]$browser.view_handle)) -or [CliProbe]::IsWindowVisible([IntPtr]([long]$browser.chrome_handle))) {throw 'Owned browser became visible'}
         $holder=$browser.holder
-        if (-not $holder.window -or $holder.window -eq $browser.view_handle -or $holder.window -eq $browser.chrome_handle -or $holder.parent -ne $tree.window_handle -or $holder.root -ne $tree.window_handle -or $holder.native_visible -ne $false -or $browser.chrome.parent -ne $holder.window -or [CliProbe]::IsWindowVisible([IntPtr]([long]$holder.window))) {throw 'Browser holder hierarchy or hidden state differs'}
+        $frames=@($tree.detached_windows|Where-Object {$_.surface -eq $browser.id});if ($frames.Count -gt 1) {throw 'Browser has multiple detached frames'}
+        $expectedRoot=$tree.window_handle;if ($frames.Count -eq 1) {$expectedRoot=$frames[0].window_handle}
+        if (-not $holder.window -or $holder.window -eq $browser.view_handle -or $holder.window -eq $browser.chrome_handle -or $holder.parent -ne $expectedRoot -or $holder.root -ne $expectedRoot -or $holder.native_visible -ne $false -or $browser.chrome.parent -ne $holder.window -or [OptionsFixture]::Parent([long]$holder.window,$process.Id) -ne $expectedRoot -or [CliProbe]::IsWindowVisible([IntPtr]([long]$holder.window))) {throw 'Browser holder hierarchy or hidden state differs'}
     }
     return $tree
 }
@@ -57,7 +64,7 @@ function Start-Owned([string[]]$Launch) {
     $script:process=[CliProbe]::Start($gui,$Launch,$directory,$directory)
     $script:hosts+= $process.Id
     $script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync()
-    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(8)
+    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(5)
     do {
         if ($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+([CliProbe]::Output($stderr)))}
         if ((Test-Path $file) -and (Get-Item $file).LastWriteTimeUtc -ge $utc) {
@@ -76,9 +83,25 @@ function Start-Owned([string[]]$Launch) {
     } while ($true)
 }
 function Same-Text([string]$Left,[string]$Right) {return [string]::Equals($Left,$Right,[StringComparison]::Ordinal)}
+function Leaves($Node) {if ($Node.content) {$Node} else {Leaves $Node.first;Leaves $Node.second}}
+function Location($Tree,[string]$Surface) {
+    $panes=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|Where-Object {@($_.content.surfaces.id) -contains $Surface})
+    if ($panes.Count -ne 1) {throw 'Browser surface location is missing or ambiguous'}
+    return $panes[0].id
+}
+function Check-Find([string]$Pane,[long]$Owner,[string]$Query) {
+    $find=(Request @('browser','status',$Pane)).find
+    if (-not $find.panel_handle -or -not $find.panel_query_handle -or $find.panel_owner -ne $Owner -or ([OptionsFixture]::Describe([long]$find.panel_handle,$process.Id)).Owner -ne $Owner -or -not (Same-Text ([FindFixture]::ReadText([long]$find.panel_query_handle)) $Query)) {throw 'Browser find owner or raw native query changed'}
+    return $find
+}
+function Check-Stable($Before,$After) {
+    foreach ($field in @('id','view_handle','chrome_handle','address_handle','url','zoom','generation')) {if ($Before.$field -cne $After.$field) {throw ('Browser reparent changed '+$field)}}
+    if ($Before.holder.window -ne $After.holder.window) {throw 'Browser reparent replaced its holder'}
+    Check-Toolbar $After|Out-Null
+}
 function Eval-Page([string]$Pane,[string]$Source) {return (Request @('browser','eval',('pane:'+$Pane),$Source)).result}
 function Wait-Page([string]$Pane,[string]$Suffix,[string]$Title) {
-    $deadline=(Get-Date).AddSeconds(8)
+    $deadline=(Get-Date).AddSeconds(5)
     do {
         $status=Request @('browser','status',('pane:'+$Pane))
         if (-not $status.loading -and $status.url.Contains($Suffix) -and (Same-Text $status.title $Title)) {
@@ -148,7 +171,7 @@ try {
     Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' $oneTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/redirect'))|Out-Null;Wait-Page $first.pane '/two' $twoTitle|Out-Null
     Request @('browser','navigate',$first.pane,($origin+'/fail'))|Out-Null
-    $deadline=(Get-Date).AddSeconds(8)
+    $deadline=(Get-Date).AddSeconds(5)
     do {
         $failed=Request @('browser','status',$first.pane)
         if (-not $failed.loading -and $failed.navigation_error) {break}
@@ -168,7 +191,7 @@ try {
     Request @('browser','eval',$first.pane,'"한".repeat(100000)') 1|Out-Null
     $popupResult=Eval-Page $first.pane 'window.fixturePopup=window.open("/two");({returned:window.fixturePopup!==null})'
     if (-not $popupResult.returned) {throw 'Native popup did not return a WindowProxy'}
-    $deadline=(Get-Date).AddSeconds(8)
+    $deadline=(Get-Date).AddSeconds(5)
     do {
         $popupTree=Tree;$children=@($popupTree.browsers|Where-Object {$_.popup_opener -eq $first.surface})
         if ($children.Count -gt 1 -or @($popupTree.browsers).Count -gt 2) {throw 'One popup request created multiple browser tabs'}
@@ -204,6 +227,59 @@ try {
     $afterMove=Request @('browser','status',$source.pane)
     if ($beforeMove.holder.window -ne $afterMove.holder.window -or $beforeMove.chrome_handle -ne $afterMove.chrome_handle) {throw 'Browser move replaced its holder or native toolbar'}
     Check-Toolbar $afterMove|Out-Null
+    Request @('browser','find-show',$source.pane)|Out-Null
+    if (-not (Request @('browser','find',$source.pane,$oneTitle)).found) {throw 'Known Korean browser text was not found before detachment'}
+    $mainFind=Check-Find $source.pane ([long]$root.window_handle) $oneTitle
+    $draftQuery='미실행 한 é 😀'
+    [OptionsFixture]::SetText([long]$mainFind.panel_handle,[long]$mainFind.panel_query_handle,$process.Id,$draftQuery)
+    $detachedReply=Request @('detach-tab',$first.surface);$detachedTree=Tree
+    $frames=@($detachedTree.detached_windows|Where-Object {$_.surface -eq $first.surface})
+    if ($frames.Count -ne 1 -or $frames[0].window_handle -ne $detachedReply.window_handle) {throw 'Browser detachment did not create exactly one frame'}
+    $browserFrame=$frames[0];$detachedPane=Location $detachedTree $first.surface
+    $detachedStatus=Request @('browser','status',$detachedPane);Check-Stable $afterMove $detachedStatus
+    if (-not (Same-Text (Eval-Page $detachedPane 'window.retained') '한글 한 é 😀')) {throw 'Detached browser lost its Korean DOM state'}
+    $detachedFind=Check-Find $detachedPane ([long]$browserFrame.window_handle) $draftQuery
+    if ($detachedFind.panel_handle -eq $mainFind.panel_handle -or -not (Same-Text $detachedFind.query $oneTitle)) {throw 'Detach did not recreate find owner while preserving executed query and native draft separately'}
+    Request @('downloads','show')|Out-Null;$downloads=Request @('downloads','list')
+    if (-not $downloads.panel_handle -or $downloads.panel_owner -ne $browserFrame.window_handle -or ([OptionsFixture]::Describe([long]$downloads.panel_handle,$process.Id)).Owner -ne $browserFrame.window_handle) {throw 'Downloads panel did not use detached browser owner'}
+    $popupResult=Eval-Page $detachedPane 'window.fixtureDetachedPopup=window.open("/two");window.fixtureDetachedPopup!==null'
+    if (-not $popupResult) {throw 'Detached browser popup did not return a WindowProxy'}
+    $deadline=(Get-Date).AddSeconds(5)
+    do {
+        $popupTree=Tree;$children=@($popupTree.browsers|Where-Object {$_.popup_opener -eq $first.surface})
+        if ($children.Count -gt 1 -or @($popupTree.browsers).Count -gt (@($detachedTree.browsers).Count+1)) {throw 'Detached popup created duplicate browsers'}
+        if ($children.Count -eq 1 -and $popupTree.popup.pending -eq 0) {break}
+        if ((Get-Date) -gt $deadline) {throw 'Detached popup did not attach within five seconds'}
+        Start-Sleep -Milliseconds 30
+    } while ($true)
+    $popupChild=$children[0];$childPane=Location $popupTree $popupChild.id
+    $childFrames=@($popupTree.detached_windows|Where-Object {$_.surface -eq $popupChild.id})
+    $openerTabs=@($popupTree.workspaces|Where-Object {$_.id -eq $browserFrame.workspace}|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces})
+    if ($childFrames.Count -ne 1 -or $childFrames[0].window_handle -eq $browserFrame.window_handle -or $openerTabs.Count -ne 1 -or $openerTabs[0].id -ne $first.surface) {throw 'Detached popup was added to its opener instead of an independent single-surface window'}
+    $childTabs=@($popupTree.workspaces|Where-Object {$_.id -eq $childFrames[0].workspace}|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces})
+    if ($childTabs.Count -ne 1 -or $childTabs[0].id -ne $popupChild.id) {throw 'Independent popup contains extra tabs'}
+    Wait-Page $childPane '/two' $twoTitle|Out-Null
+    $relation=Eval-Page $childPane '({related:window.opener!==null&&window.opener.fixtureDetachedPopup===window,raw:document.querySelector("#label").textContent=window.opener.retained})'
+    if (-not $relation.related -or -not (Same-Text $relation.raw '한글 한 é 😀')) {throw 'Detached popup lost WindowProxy/opener or Korean DOM relationship'}
+    Eval-Page $detachedPane 'window.fixtureDetachedPopup.close();null'|Out-Null
+    $deadline=(Get-Date).AddSeconds(5)
+    do {
+        $closedPopup=Tree
+        if (@($closedPopup.browsers|Where-Object {$_.id -eq $popupChild.id}).Count -eq 0 -and @($closedPopup.detached_windows|Where-Object {$_.surface -eq $popupChild.id}).Count -eq 0) {break}
+        if ((Get-Date) -gt $deadline) {throw 'WindowProxy.close did not remove the detached popup'}
+        Start-Sleep -Milliseconds 30
+    } while ($true)
+    if (@($closedPopup.browsers).Count -ne @($detachedTree.browsers).Count -or -not (Eval-Page $detachedPane 'window.fixtureDetachedPopup.closed')) {throw 'Detached popup close left a blank replacement or stale WindowProxy'}
+    Request @('move-tab',$first.surface,'--to-pane',$source.pane)|Out-Null
+    $reattached=Tree;$returned=Request @('browser','status',$source.pane);Check-Stable $afterMove $returned
+    if (@($reattached.detached_windows).Count -ne 0 -or -not (Same-Text (Eval-Page $source.pane 'window.retained') '한글 한 é 😀')) {throw 'Browser reattach lost its DOM or left detached windows'}
+    $returnedFind=Check-Find $source.pane ([long]$root.window_handle) $draftQuery
+    if ($returnedFind.panel_handle -eq $detachedFind.panel_handle) {throw 'Reattach kept the find panel owned by the destroyed frame'}
+    Request @('downloads','show')|Out-Null;$downloads=Request @('downloads','list')
+    if ($downloads.panel_owner -ne $root.window_handle -or ([OptionsFixture]::Describe([long]$downloads.panel_handle,$process.Id)).Owner -ne $root.window_handle) {throw 'Downloads owner was not restored to main window'}
+    Request @('browser','find-close',$source.pane)|Out-Null
+    $evidence.checks+=@{name='browser_detach_popup_windowproxy_korean_dom_find_download_owners_and_reattach';passed=$true;surface=$first.surface;popup=$popupChild.id;retainedView=$returned.view_handle}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     $mixedSave=Request @('save-state')
     $mixed=Get-Content -Raw -Encoding UTF8 $mixedSave.path|ConvertFrom-Json
     if (@($mixed.screens.psobject.Properties).Count -ne 1 -or $mixed.screens.($first.surface) -or $mixed.shells.($first.surface)) {throw 'Mixed checkpoint confused browser and terminal'}
@@ -219,7 +295,7 @@ try {
     if ($raw.error) {throw ('Inactive caller failed: '+$raw.error)}
     $fromInactive=Request @('identify')
     if ($fromInactive.cwd -ne $directory -or $fromInactive.surface -eq $otherTerminal.surface) {throw 'Inactive terminal inherited another active tab cwd'}
-    $deadline=(Get-Date).AddSeconds(8)
+    $deadline=(Get-Date).AddSeconds(5)
     do {
         $children=@((Tree).surfaces|Where-Object {$_.id -eq $fromInactive.surface -or $_.id -eq $otherTerminal.surface})
         if (@($children|Where-Object {-not $_.ready -or -not $_.pid}).Count -eq 0) {break}
@@ -233,7 +309,7 @@ try {
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     # A terminal split from a browser must use the configured shell rather than indexing browser shell metadata.
     Request @('split','vertical')|Out-Null
-    $new=(Request @('identify'));$deadline=(Get-Date).AddSeconds(8)
+    $new=(Request @('identify'));$deadline=(Get-Date).AddSeconds(5)
     do {
         $newSurface=(Tree).surfaces|Where-Object {$_.id -eq $new.surface}
         if ($newSurface.ready -and $newSurface.pid) {break}
@@ -251,7 +327,7 @@ try {
     $saved=Request @('save-state');$checkpoint=Get-Content -Raw -Encoding UTF8 $saved.path|ConvertFrom-Json
     if (@($checkpoint.screens.psobject.Properties).Count -ne 0 -or @($checkpoint.shells.psobject.Properties).Count -ne 0) {throw 'Browser was saved as terminal'}
     Request @('quit')|Out-Null
-    if (-not $process.WaitForExit(15000)) {throw 'Browser-only host did not close'}
+    if (-not $process.WaitForExit(5000)) {throw 'Browser-only host did not close'}
     $process.Dispose();$process=$null
     $restored=Start-Owned @('--restore-window',$saved.window)
     if (@($restored.surfaces).Count -ne 0 -or @($restored.browsers).Count -ne 1 -or $restored.browsers[0].id -ne $first.surface) {throw 'Browser-only restore lost identity'}
@@ -260,12 +336,52 @@ try {
     if (-not (Same-Text (Eval-Page $restoredPane 'localStorage.getItem("browser-persist")') '한글 한 é 😀')) {throw 'Isolated browser profile did not persist'}
     $evidence.checks+=@{name='browser_only_checkpoint_restart_and_separate_profile_persistence';passed=$true;window=$saved.window;surface=$first.surface}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
-    Tree|Out-Null
+    Eval-Page $restoredPane 'window.survivor="분리 생존 한 é 😀";window.survivor'|Out-Null
+    Request @('browser','find-show',$restoredPane)|Out-Null
+    if (-not (Request @('browser','find',$restoredPane,$oneTitle)).found) {throw 'Restored browser find failed before sole-tab detachment'}
+    $beforeSole=Request @('browser','status',$restoredPane)
+    Request @('detach-tab',$first.surface)|Out-Null
+    $sole=Tree;$solePane=Location $sole $first.surface;$soleFrames=@($sole.detached_windows)
+    if ($soleFrames.Count -ne 1 -or @($sole.browsers).Count -ne 1 -or @($sole.surfaces).Count -ne 0) {throw 'Sole browser detachment created replacement surfaces'}
+    $soleFrame=$soleFrames[0];$soleStatus=Request @('browser','status',$solePane);Check-Stable $beforeSole $soleStatus
+    Check-Find $solePane ([long]$soleFrame.window_handle) $oneTitle|Out-Null
+    [FindFixture]::PostClose([long]$sole.window_handle,$process.Id)
+    $deadline=(Get-Date).AddSeconds(5)
+    do {
+        if ($process.HasExited) {throw 'Closing main window terminated the detached browser'}
+        $survived=Tree
+        if ($survived.main_closed -and -not $survived.state.saving) {break}
+        if ((Get-Date) -gt $deadline) {throw 'Main window did not close while keeping its browser alive'}
+        Start-Sleep -Milliseconds 30
+    } while ($true)
+    if (@($survived.detached_windows).Count -ne 1 -or @($survived.browsers).Count -ne 1 -or @($survived.surfaces).Count -ne 0) {throw 'Main close changed detached browser ownership'}
+    $afterMainClose=Request @('browser','status',$solePane);Check-Stable $soleStatus $afterMainClose
+    if (-not (Same-Text (Eval-Page $solePane 'window.survivor') '분리 생존 한 é 😀')) {throw 'Main close recreated or destroyed the detached DOM'}
+    $toolbar=@([ChromeFixture]::Read([long]$afterMainClose.chrome_handle,$process.Id));$go=@($toolbar|Where-Object Text -ceq 'Go')
+    if ($go.Count -ne 1) {throw 'Detached native Go control is missing'}
+    [OptionsFixture]::SetText([long]$afterMainClose.chrome_handle,[long]$afterMainClose.address_handle,$process.Id,($origin+'/one#after-main-close'))
+    [OptionsFixture]::Click([long]$afterMainClose.chrome_handle,[long]$go[0].Handle,$process.Id)
+    $controlled=Wait-Page $solePane '#after-main-close' $oneTitle
+    if ($controlled.view_handle -ne $soleStatus.view_handle -or -not (Same-Text (Eval-Page $solePane 'window.survivor') '분리 생존 한 é 😀')) {throw 'Native browser controls failed or recreated the surviving same-document state'}
+    Request @('browser','find-show',$solePane)|Out-Null
+    if (-not (Request @('browser','find',$solePane,$oneTitle)).found) {throw 'Find failed after main window close'}
+    Check-Find $solePane ([long]$soleFrame.window_handle) $oneTitle|Out-Null
+    Request @('downloads','show')|Out-Null;$downloads=Request @('downloads','list')
+    if ($downloads.panel_owner -ne $soleFrame.window_handle -or ([OptionsFixture]::Describe([long]$downloads.panel_handle,$process.Id)).Owner -ne $soleFrame.window_handle) {throw 'Downloads no longer belongs to the surviving browser'}
+    $evidence.lastLiveState=@{mainClosed=$survived.main_closed;surface=$first.surface;frame=$soleFrame.window_handle;view=$controlled.view_handle;findOwner=$soleFrame.window_handle}
+    [FindFixture]::PostClose([long]$soleFrame.window_handle,$process.Id)
+    if (-not $process.WaitForExit(5000)) {throw 'Closing the final detached browser did not terminate the owned host'}
+    if ($process.ExitCode -ne 0) {throw 'Final detached browser close exited with failure'}
+    $evidence.hostExitCode=$process.ExitCode
+    if ($stderr.Wait(1000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))}
+    $process.Dispose();$process=$null;$pipeName=$null
+    $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
+    Write-Host ("[check] passed "+$evidence.checks[-1].name)
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
     if ($pipeName -and $process -and -not $process.HasExited) {try {Request @('quit','--discard-state')|Out-Null} catch {}}
-    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
+    if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(5000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
     if ($evidence.status -eq 'failed') {
         $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-background.json')

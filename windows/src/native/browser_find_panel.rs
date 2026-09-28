@@ -12,11 +12,13 @@ use windows_sys::Win32::{
 
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
-    Next,
-    Previous,
-    Close,
-    Layout,
+    Next(usize),
+    Previous(usize),
+    Close(usize),
+    Layout(usize),
 }
+
+static NEXT_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
 fn emit(action: UiAction) {
     post(Event::BrowserFindUi(action));
@@ -28,9 +30,10 @@ unsafe extern "system" fn procedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let generation = GetWindowLongPtrW(window, GWLP_USERDATA) as usize;
     match message {
         WM_CLOSE => {
-            emit(UiAction::Close);
+            emit(UiAction::Close(generation));
             0
         }
         WM_GETMINMAXINFO => {
@@ -41,7 +44,7 @@ unsafe extern "system" fn procedure(
             0
         }
         WM_SIZE => {
-            emit(UiAction::Layout);
+            emit(UiAction::Layout(generation));
             0
         }
         WM_DPICHANGED => {
@@ -55,14 +58,14 @@ unsafe extern "system" fn procedure(
                 rect.bottom - rect.top,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            emit(UiAction::Layout);
+            emit(UiAction::Layout(generation));
             0
         }
         WM_COMMAND => {
             let action = match (wparam & 0xffff, (wparam >> 16) as u32) {
-                (30, BN_CLICKED) => Some(UiAction::Previous),
-                (31, BN_CLICKED) => Some(UiAction::Next),
-                (2, BN_CLICKED) => Some(UiAction::Close),
+                (30, BN_CLICKED) => Some(UiAction::Previous(generation)),
+                (31, BN_CLICKED) => Some(UiAction::Next(generation)),
+                (2, BN_CLICKED) => Some(UiAction::Close(generation)),
                 // Query and checkbox edits are applied only by explicit find actions.
                 _ => None,
             };
@@ -77,6 +80,7 @@ unsafe extern "system" fn procedure(
 
 pub(super) struct Panel {
     pub(super) window: HWND,
+    pub(super) generation: usize,
     label: HWND,
     query: HWND,
     case: HWND,
@@ -128,9 +132,12 @@ impl Panel {
                 std::ptr::null(),
             );
             anyhow::ensure!(!window.is_null(), "cannot create page find window");
+            let generation = NEXT_PANEL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            SetWindowLongPtrW(window, GWLP_USERDATA, generation as isize);
             // Own the HWND before creating children so an error destroys all controls.
             let mut panel = Self {
                 window,
+                generation,
                 label: std::ptr::null_mut(),
                 query: std::ptr::null_mut(),
                 case: std::ptr::null_mut(),
@@ -234,6 +241,18 @@ impl Panel {
                         SWP_NOZORDER | SWP_NOACTIVATE,
                     );
                 }
+            }
+        }
+    }
+
+    pub(super) fn owner(&self) -> HWND {
+        unsafe { GetWindow(self.window, GW_OWNER) }
+    }
+
+    pub(super) fn restore_visibility(&self, background: bool, visible: bool) {
+        if !background && visible {
+            unsafe {
+                ShowWindow(self.window, SW_SHOWNOACTIVATE);
             }
         }
     }

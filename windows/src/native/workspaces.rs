@@ -341,11 +341,7 @@ impl App {
             tabs.iter()
                 .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
         );
-        let disabled = if self.surfaces.contains_key(&surface) {
-            vec![]
-        } else {
-            vec![13]
-        };
+        let disabled = vec![];
         let choice = self.popup(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
             &disabled,
@@ -562,6 +558,15 @@ impl App {
         disabled: &[usize],
         point: (i32, i32),
     ) -> anyhow::Result<usize> {
+        self.popup_for(self.window, items, disabled, point)
+    }
+    pub(super) fn popup_for(
+        &self,
+        owner: HWND,
+        items: &[&str],
+        disabled: &[usize],
+        point: (i32, i32),
+    ) -> anyhow::Result<usize> {
         if self.background_test {
             return Ok(0);
         }
@@ -581,13 +586,13 @@ impl App {
                 }
             }
             // Route menu keyboard navigation away from the embedded terminal.
-            SetFocus(self.window);
+            SetFocus(owner);
             let result = TrackPopupMenuEx(
                 menu,
                 TPM_RETURNCMD | TPM_RIGHTBUTTON,
                 point.0,
                 point.1,
-                self.window,
+                owner,
                 std::ptr::null(),
             ) as usize;
             DestroyMenu(menu);

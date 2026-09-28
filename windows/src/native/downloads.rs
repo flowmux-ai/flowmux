@@ -240,7 +240,7 @@ impl Controller {
     }
     fn status(&self) -> Value {
         json!({"entries":self.rows(),"active":self.entries.iter().filter(|e|e.record.phase.active()).count(),"active_limit":domain::MAX_ACTIVE,"retained_limit":domain::MAX_ROWS,"rejected_at_capacity":self.rejected,
-            "panel_handle":self.panel.as_ref().map(|p|p.window as usize),"panel_rows":self.panel.as_ref().map(|p|p.rows()),"panel_status":self.panel.as_ref().map(|p|p.status_text())})
+            "panel_handle":self.panel.as_ref().map(|p|p.window as usize),"panel_owner":self.panel.as_ref().map(|p|p.owner() as usize),"panel_rows":self.panel.as_ref().map(|p|p.rows()),"panel_status":self.panel.as_ref().map(|p|p.status_text())})
     }
     fn refresh(&self) {
         if let Some(panel) = &self.panel {
@@ -773,40 +773,82 @@ impl App {
         self.downloads.refresh();
         Ok(self.downloads.status())
     }
-    pub(super) fn download_ui(&mut self, action: UiAction) -> anyhow::Result<()> {
-        if matches!(action, UiAction::Show) {
-            if self.downloads.panel.is_none() {
-                self.downloads.panel = Some(panel::Panel::new(self.window)?);
-            }
-            self.downloads.refresh();
-            self.downloads
+    pub(super) fn download_owner_closing(&mut self, owner: HWND) {
+        if self
+            .downloads
+            .panel
+            .as_ref()
+            .is_some_and(|panel| panel.owner() == owner)
+        {
+            self.downloads.panel.take();
+        }
+    }
+    pub(super) fn download_show_for(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.locate(id).is_some(),
+            "download window source no longer exists"
+        );
+        let owner = self.surface_window(id);
+        if self
+            .downloads
+            .panel
+            .as_ref()
+            .is_none_or(|panel| panel.owner() != owner)
+        {
+            let selected = self
+                .downloads
                 .panel
                 .as_ref()
-                .unwrap()
-                .show(self.background_test);
-            return Ok(());
+                .and_then(|panel| panel.selected());
+            let panel = panel::Panel::new(owner)?;
+            panel.results(&self.downloads.rows());
+            panel.select(selected);
+            self.downloads.panel = Some(panel);
         }
+        self.downloads.refresh();
+        self.downloads
+            .panel
+            .as_ref()
+            .unwrap()
+            .show(self.background_test);
+        Ok(())
+    }
+    pub(super) fn download_ui(&mut self, action: UiAction) -> anyhow::Result<()> {
+        let generation = match action {
+            UiAction::Show => return self.download_show_for(self.active()),
+            UiAction::Open(generation)
+            | UiAction::Folder(generation)
+            | UiAction::Cancel(generation)
+            | UiAction::Remove(generation)
+            | UiAction::Clear(generation)
+            | UiAction::Close(generation)
+            | UiAction::Selected(generation)
+            | UiAction::Layout(generation) => generation,
+        };
         let Some(panel) = &self.downloads.panel else {
             return Ok(());
         };
+        if panel.generation != generation {
+            return Ok(());
+        }
         let id = panel.selected();
         match action {
-            UiAction::Close => panel.hide(),
-            UiAction::Layout => panel.layout(),
-            UiAction::Selected => panel.detail(),
-            UiAction::Clear => {
+            UiAction::Close(_) => panel.hide(),
+            UiAction::Layout(_) => panel.layout(),
+            UiAction::Selected(_) => panel.detail(),
+            UiAction::Clear(_) => {
                 self.download_command(Op::Clear {})?;
             }
-            UiAction::Cancel | UiAction::Remove => {
+            UiAction::Cancel(_) | UiAction::Remove(_) => {
                 if let Some(id) = id {
-                    self.download_command(if matches!(action, UiAction::Cancel) {
+                    self.download_command(if matches!(action, UiAction::Cancel(_)) {
                         Op::Cancel { id }
                     } else {
                         Op::Remove { id }
                     })?;
                 }
             }
-            UiAction::Open | UiAction::Folder => {
+            UiAction::Open(_) | UiAction::Folder(_) => {
                 anyhow::ensure!(
                     !self.background_test,
                     "opening downloads/folders is disabled in background hosts"
@@ -823,14 +865,14 @@ impl App {
                         .path
                         .as_ref()
                         .context("download path unavailable")?;
-                    let target = if matches!(action, UiAction::Folder) {
+                    let target = if matches!(action, UiAction::Folder(_)) {
                         path.parent().context("download parent missing")?
                     } else {
                         path.as_path()
                     };
                     unsafe {
                         let result = ShellExecuteW(
-                            self.window,
+                            panel.owner(),
                             wide("open").as_ptr(),
                             wide(target).as_ptr(),
                             std::ptr::null(),
