@@ -3,18 +3,18 @@
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
 $base=if($env:FLOWMUX_TEST_ARTIFACT_ROOT){$env:FLOWMUX_TEST_ARTIFACT_ROOT}else{[IO.Path]::GetTempPath()};$directory=Join-Path $base ('tab-drag-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
-$clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$checks=@();$failure=$null;$last=$null;$commandFailure=$null;$cleanupErrors=@();$cleaning=$false
+$clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$checks=@();$failure=$null;$last=$null;$commandFailure=$null;$cleanupErrors=@();$cleaning=$false;$terminalProcesses=@()
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Budget([int]$Maximum=5000){if($cleaning){return $Maximum};$left=50000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Tab drag work budget expired';return [int][Math]::Min($Maximum,$left)}
-function Probe([string[]]$Arguments,[int]$Maximum=5000){
+function Probe([string[]]$Arguments,[int]$Maximum=5000,[int]$ExpectedExit=0){
     Budget|Out-Null;$p=[CliProbe]::Start($cli,$Arguments,$directory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-    try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline; no retry';Require ($out.Wait(500) -and $err.Wait(500)) 'CLI output did not close';Require ($p.ExitCode -eq 0) ('CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
+    try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline; no retry';Require ($out.Wait(500) -and $err.Wait(500)) 'CLI output did not close';Require ($p.ExitCode -eq $ExpectedExit) ('CLI exit differs: '+[CliProbe]::Output($err)+' '+[CliProbe]::Output($out));if($ExpectedExit -ne 0){return ([CliProbe]::Output($err)|ConvertFrom-Json)};return ([CliProbe]::Output($out)|ConvertFrom-Json)}
     catch{$script:commandFailure=@{arguments=$Arguments;stdout=[CliProbe]::Output($out);stderr=[CliProbe]::Output($err)};throw}
     finally{if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
 }
-function Request([string[]]$Arguments,[int]$Maximum=5000){Require ([bool]$pipeName) 'Explicit owned pipe required';return Probe (@('--pipe',$pipeName,'--json')+$Arguments) $Maximum}
+function Request([string[]]$Arguments,[int]$Maximum=5000,[int]$ExpectedExit=0){Require ([bool]$pipeName) 'Explicit owned pipe required';return Probe (@('--pipe',$pipeName,'--json')+$Arguments) $Maximum $ExpectedExit}
 function Tree([int]$Maximum=5000){$t=Request @('tree') $Maximum;Require ($t.background_testing) 'Host is not hidden';[OptionsFixture]::Describe([long]$t.window_handle,$owned.Id)|Out-Null;$script:last=$t;return $t}
 function Await([scriptblock]$Condition){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -gt 0) 'Tab drag condition exceeded five seconds';$tree=Tree ([int]$left);if(& $Condition $tree){return $tree};Start-Sleep -Milliseconds 20}while($true)}
 function Leaves($Node){if($Node.content){$Node}else{Leaves $Node.first;Leaves $Node.second}}
@@ -50,6 +50,19 @@ function Workspace-Order($Tree){return (@($Tree.workspaces.id)-join ',')}
 function Workspace-Metadata($Tree){return ($Tree.workspaces|Sort-Object id|ForEach-Object {[ordered]@{id=$_.id;name=$_.name;color=$_.color}}|ConvertTo-Json -Compress)}
 function Stable-Workspaces($Tree){Stable $Tree;Require ((Workspace-Metadata $Tree) -ceq $workspaceMetadata) 'Workspace drag altered Unicode names or colors';No-Preview $Tree}
 function Stable($Tree){Require ((Identities $Tree) -ceq $identities) 'Tab drag replaced a terminal process';foreach($item in $names.GetEnumerator()){$tabs=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces}|Where-Object {$_.id -ceq $item.Key});Require ($tabs.Count -eq 1 -and $tabs[0].title -ceq $item.Value) 'Drag changed a Unicode title or lost a tab'}}
+function Terminal($Tree,[string]$Id){$items=@($Tree.surfaces|Where-Object {$_.id -ceq $Id});Require ($items.Count -eq 1) ('Missing live terminal '+$Id);return $items[0]}
+function Same-Terminal($Tree,$Before){$now=Terminal $Tree $Before.id;Require ($now.ready -and $now.running -and $now.pid -eq $Before.pid -and $now.view_handle -eq $Before.view_handle -and $now.holder.window -eq $Before.holder.window) 'Tear-out replaced or stopped the terminal, WebView or holder';return $now}
+function Detached($Tree,$Before){
+    $windows=@($Tree.detached_windows|Where-Object {$_.surface -ceq $Before.id});Require ($windows.Count -eq 1 -and @($Tree.detached_windows).Count -eq 1) 'Expected exactly one detached terminal window';$window=$windows[0];$now=Same-Terminal $Tree $Before
+    Require ($window.window_handle -ne 0 -and $window.window_handle -ne $Tree.window_handle -and -not $window.native_visible -and -not $now.holder.native_visible) 'Separate window or holder became visible'
+    $native=[OptionsFixture]::Describe([long]$window.window_handle,$owned.Id);Require ($native.Owner -eq 0 -and [OptionsFixture]::Parent([long]$window.window_handle,$owned.Id) -eq 0 -and ($native.Style -band 0x40000000) -eq 0) 'Detached HWND is a child or owned by the main window'
+    Require ($now.holder.parent -eq $window.window_handle -and $now.holder.root -eq $window.window_handle -and [OptionsFixture]::Parent([long]$now.holder.window,$owned.Id) -eq $window.window_handle -and [OptionsFixture]::Parent([long]$now.view_handle,$owned.Id) -eq $now.holder.window) 'Live terminal parent chain did not move to the detached root'
+    $bounds=[OptionsFixture]::RelativeBounds([long]$window.window_handle,[long]$now.holder.window,$owned.Id);foreach($key in @('x','y','width','height')){Require ($bounds.$key -eq $now.holder.bounds.$key -and $now.bounds.$key -eq $now.holder.bounds.$key -and $now.holder.bounds.$key -eq $window.area.$key) ('Detached terminal bounds differ: '+$key)}
+    $tabs=@($Tree.workspaces|Where-Object {$_.id -ceq $window.workspace}|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces});Require ($tabs.Count -eq 1 -and $tabs[0].id -ceq $Before.id -and $tabs[0].title -ceq $names[$Before.id]) 'Detached workspace lost its sole tab or Unicode title'
+    return $window
+}
+function Rejected-Attached([string[]]$Arguments){$result=Request $Arguments 5000 1;Require ($result.error -like '*requires a tab in the main window*') ('Wrong detached rejection: '+($result|ConvertTo-Json -Compress))}
+function Terminal-Command($Tree,[string]$Surface,[string]$Command){$pane=Location $Tree $Surface;Request @('send-keys',$pane,$Command)|Out-Null;Request @('send-key','Enter','--surface',$Surface)|Out-Null}
 function Passed([string]$Name){$script:checks+=$Name}
 function Screen-Contains([string]$Surface,[string]$Text){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -gt 0) 'Owned terminal output exceeded five seconds';$screen=Request @('read-screen','--surface',$Surface,'--recent') ([int]$left);if($screen.text.Contains($Text)){return};Start-Sleep -Milliseconds 20}while($true)}
 try {
@@ -61,6 +74,27 @@ try {
     do {$left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup readiness exceeded eight seconds';$tree=Tree ([int][Math]::Min(5000,$left));if(@($tree.surfaces).Count -eq 1 -and $tree.surfaces[0].ready -and $tree.surfaces[0].running){break};Start-Sleep -Milliseconds 20}while($true)
     $a=Request @('identify');$names=@{};$marker='FM_DRAG_한글_한_é_925b';$names[$a.surface]='한글 한 é & 원본'
     Request @('rename-tab',$a.surface,$names[$a.surface])|Out-Null;Request @('send-keys',$a.pane,('echo '+$marker))|Out-Null;Request @('send-key','Enter','--pane',$a.pane)|Out-Null;Screen-Contains $a.surface $marker
+
+    # The only main-window tab can detach without creating a replacement PTY.
+    $tree=Tree;$singleBefore=Terminal $tree $a.surface;$originalSurface=$a.surface
+    $singleReply=Request @('detach-tab',$originalSurface);$tree=Await {param($t) @($t.detached_windows).Count -eq 1};$singleWindow=Detached $tree $singleBefore
+    Require ($singleReply.surface -ceq $originalSurface -and $singleReply.window_handle -eq $singleWindow.window_handle -and @($tree.surfaces).Count -eq 1 -and -not $tree.main_closed -and @($tree.chrome.controls|Where-Object {$_.kind -in @('workspace','tab')}).Count -eq 0) 'Last-tab detach left a main row, created a replacement session or closed the main window'
+    Screen-Contains $originalSurface $marker
+    Request @('new-workspace','--cwd',$directory,'--shell=cmd')|Out-Null;$dummy=Request @('identify')
+    Require ($dummy.surface -cne $originalSurface -and $dummy.workspace -cne $singleWindow.workspace) 'New Workspace did not return from the detached terminal to a new main workspace'
+    $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};Detached $tree $singleBefore|Out-Null
+    Require (@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace'}).Count -eq 1 -and @($tree.chrome.controls|Where-Object {$_.kind -eq 'tab'}).Count -eq 1) 'Explicit New Workspace did not create exactly one main workspace and tab'
+    Require (@($tree.workspaces).Count -eq 2 -and $tree.workspaces[0].id -ceq $singleWindow.workspace -and $tree.workspaces[1].id -ceq $dummy.workspace) 'Workspace index regression fixture no longer has detached-before-main ordering'
+    $mainList=@((Request @('workspace','list')).workspaces);Require ($mainList.Count -eq 1 -and $mainList[0].id -ceq $dummy.workspace -and $mainList[0].index -eq 0 -and $mainList[0].active) 'Workspace list exposed a detached row or its raw internal index'
+    Request @('workspace','reorder',$dummy.workspace,'0')|Out-Null;$mainList=@((Request @('workspace','list')).workspaces);Require ($mainList.Count -eq 1 -and $mainList[0].id -ceq $dummy.workspace -and $mainList[0].index -eq 0 -and $mainList[0].active) 'Workspace reorder did not use the visible main-workspace index'
+    $tree=Tree;Detached $tree $singleBefore|Out-Null;Require ((Request @('identify')).surface -ceq $dummy.surface -and @($tree.surfaces).Count -eq 2) 'Visible workspace reorder changed the active tab or detached session'
+    Passed 'main-workspace-list-and-reorder-index-excludes-detached-prefix'
+    Request @('move-tab',$originalSurface,'--to-pane',$dummy.pane)|Out-Null;Request @('close-tab',$dummy.surface)|Out-Null;Request @('focus-tab',$originalSurface)|Out-Null;$a=Request @('identify')
+    $tree=Await {param($t) @($t.detached_windows).Count -eq 0 -and @($t.surfaces).Count -eq 1};$singleAfter=Same-Terminal $tree $singleBefore
+    Require ($a.surface -ceq $originalSurface -and $a.workspace -ceq $dummy.workspace -and $a.pane -ceq $dummy.pane -and $singleAfter.holder.parent -eq $tree.window_handle -and $singleAfter.holder.root -eq $tree.window_handle -and [OptionsFixture]::Parent([long]$singleAfter.holder.window,$owned.Id) -eq $tree.window_handle) 'Single-tab return lost its original session or retained stale pane/workspace context'
+    $originalTab=@((Pane $tree $a.pane).content.surfaces);Require ($originalTab.Count -eq 1 -and $originalTab[0].title -ceq $names[$originalSurface]) 'Single-tab round trip changed the Unicode title';Screen-Contains $originalSurface $marker
+    Passed 'last-tab-detach-empty-main-explicit-workspace-return-same-live-session'
+
     Request @('new-tab','--shell=cmd')|Out-Null;$b=Request @('identify');$names[$b.surface]='둘째 한글';Request @('rename-tab',$b.surface,$names[$b.surface])|Out-Null
     Request @('new-tab','--shell=cmd')|Out-Null;$c=Request @('identify');$names[$c.surface]='셋째 한 é & 탭';Request @('rename-tab',$c.surface,$names[$c.surface])|Out-Null
     $tree=Await {param($t) @($t.surfaces).Count -eq 3 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};$identities=Identities $tree;$original=Order $tree $a.pane
@@ -94,7 +128,7 @@ try {
         $tree=Await {param($t) -not $t.chrome.tab_dragging};$tree=Release $tree $point;Require ((Mapping $tree) -ceq $before) ('Cancelled drag committed: '+$cancel)
     };Stable $tree;Passed 'Escape-cancelmode-capturechanged-cancel'
 
-    $before=Mapping $tree;$outside=@{x=-20;y=-20};$tree=Drag $tree $c.surface $outside;Require ((Mapping $tree) -ceq $before) 'Outside-client drop changed tabs';Stable $tree;Passed 'outside-client-drop-noop'
+    $before=Mapping $tree;$outside=@{x=-100;y=-100};$tree=Begin $tree $c.surface;Motion $tree $outside;[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id);$tree=Await {param($t) -not $t.chrome.tab_dragging};$tree=Release $tree $outside;Require ((Mapping $tree) -ceq $before -and @($tree.detached_windows).Count -eq 0) 'Cancelled outside-client drop changed tabs or detached a window';Stable $tree;Passed 'outside-client-Escape-cancel-noop'
 
     $point=Tab-Point $tree $f.surface $false;$tree=Begin $tree $c.surface;Motion $tree $point
     Request @('move-tab',$c.surface,'--to-pane',$a.pane)|Out-Null;$tree=Await {param($t) -not $t.chrome.tab_dragging};$afterMutation=Mapping $tree;$tree=Release $tree $point
@@ -115,7 +149,7 @@ try {
     Request @('focus-tab',$d.surface)|Out-Null;$tree=Tree
     foreach($cancel in @('escape','cancelmode','outside')){
         $before=Topology $tree;$body=Body-Rect $tree $a.pane;$point=Body $tree $a.pane 'right';$tree=Begin $tree $d.surface;Motion $tree $point;$tree=Await {param($t) $t.chrome.tab_drop_preview -and $t.chrome.tab_drop_preview.active};Preview $tree $a.pane 'right' $body
-        if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}elseif($cancel -ceq 'cancelmode'){[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x1f,0,0)}else{$point=@{x=-20;y=-20};Motion $tree $point}
+        if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}elseif($cancel -ceq 'cancelmode'){[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x1f,0,0)}else{$point=@{x=-100;y=-100};Motion $tree $point;[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id);$tree=Await {param($t) -not $t.chrome.tab_dragging}}
         $tree=Await {param($t) -not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active};$tree=Release $tree $point;No-Preview $tree;Require ((Topology $tree) -ceq $before) ('Split preview cancellation changed model: '+$cancel)
     };Stable $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'split-preview-Escape-cancel-outside-cleanup-and-Unicode-output-preservation'
 
@@ -135,7 +169,7 @@ try {
 
     foreach($cancel in @('escape','cancelmode','capturechanged','outside')){
         $point=Workspace-Point $tree $a.workspace $false;$tree=Begin-Workspace $tree $e.workspace;Motion $tree $point
-        if($cancel -ceq 'outside'){$point=@{x=-20;y=-20};Motion $tree $point}else{if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}else{$message=if($cancel -ceq 'cancelmode'){0x1f}else{0x215};[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,$message,0,0)};$tree=Await {param($t) -not $t.chrome.workspace_dragging}}
+        if($cancel -ceq 'outside'){$point=@{x=-100;y=-100};Motion $tree $point}else{if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}else{$message=if($cancel -ceq 'cancelmode'){0x1f}else{0x215};[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,$message,0,0)};$tree=Await {param($t) -not $t.chrome.workspace_dragging}}
         $tree=Release $tree $point;Require ((Workspace-Order $tree) -ceq $workspaceOrder -and $tree.active_workspace -ceq $workspaceActive) ('Cancelled workspace drag changed order or active workspace: '+$cancel)
     };Stable-Workspaces $tree;Passed 'workspace-Escape-cancelmode-capturechanged-outside-noop'
 
@@ -143,9 +177,39 @@ try {
     Request @('workspace','reorder',$a.workspace,'1')|Out-Null;$tree=Await {param($t) -not $t.chrome.workspace_dragging};$winner=Workspace-Order $tree;$tree=Release $tree $point
     Require ($winner -ceq (@($e.workspace,$a.workspace)-join ',') -and (Workspace-Order $tree) -ceq $winner -and $tree.active_workspace -ceq $workspaceActive) 'Stale workspace release overwrote the CLI reorder winner'
     Stable-Workspaces $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'workspace-stale-rebuild-cancel-and-name-color-PTY-output-preservation'
+
+    # Move one existing live terminal into an independent hidden top-level HWND.
+    Request @('focus-tab',$c.surface)|Out-Null;$tree=Tree;$retained=Terminal $tree $c.surface;$sourcePane=Location $tree $c.surface
+    Require ($retained.holder.parent -eq $tree.window_handle -and $retained.holder.root -eq $tree.window_handle) 'Tear-out source is not attached to the main window'
+    $shellState='FM_RETAINED_한글_한_é_925b';Terminal-Command $tree $c.surface ('set FM_TEAROUT='+$shellState)
+    $tree=Drag $tree $c.surface @{x=-100;y=-100};$window=Detached $tree $retained;Stable $tree;Screen-Contains $c.surface $marker
+    Require ((Request @('identify')).surface -ceq $c.surface -and (Location $tree $c.surface) -cne $sourcePane) 'Separate window did not retain the selected surface in a new pane'
+    Terminal-Command $tree $c.surface 'echo DETACHED_%FM_TEAROUT%';Screen-Contains $c.surface ('DETACHED_'+$shellState)
+    $beforeRejected=Topology $tree
+    foreach($arguments in @(@('detach-tab',$c.surface),@('new-tab','--shell=cmd'),@('split','vertical','--shell=cmd'),@('browser','open','about:blank','--pane',(Location $tree $c.surface)),@('editor','open',(Join-Path $directory 'not-opened.txt'),'--root',$directory,'--pane',(Location $tree $c.surface)))){Rejected-Attached $arguments}
+    $stale=Request @('detach-tab',([guid]::NewGuid().ToString())) 5000 1;Require ($stale.error -like '*only a ready terminal*' -or $stale.error -like '*source surface not found*') 'Stale detach-tab did not reject its missing source'
+    $tree=Tree;Detached $tree $retained|Out-Null;Stable $tree;Require ((Topology $tree) -ceq $beforeRejected -and @($tree.browsers).Count -eq 0 -and @($tree.editors).Count -eq 0 -and $tree.editor_open_pending -eq 0 -and $tree.editor_open_admitted -eq 0) 'Rejected detached actions mutated the model or admitted editor work'
+    Passed 'outside-drop-independent-hidden-window-same-PTY-WebView-holder-Unicode-and-detached-action-guards'
+
+    $reattachPane=Location $tree $a.surface;Request @('move-tab',$c.surface,'--to-pane',$reattachPane)|Out-Null;$tree=Await {param($t) @($t.detached_windows).Count -eq 0};$reattached=Same-Terminal $tree $retained
+    Require ((Location $tree $c.surface) -ceq $reattachPane -and $reattached.holder.parent -eq $tree.window_handle -and $reattached.holder.root -eq $tree.window_handle -and [OptionsFixture]::Parent([long]$reattached.holder.window,$owned.Id) -eq $tree.window_handle) 'move-tab did not reattach the same live holder to the main window'
+    Stable $tree;Screen-Contains $c.surface $marker;Terminal-Command $tree $c.surface 'echo REATTACHED_%FM_TEAROUT%';Screen-Contains $c.surface ('REATTACHED_'+$shellState)
+    $tree=Drag $tree $c.surface @{x=-100;y=-100};$window=Detached $tree $retained;Stable $tree;Passed 'move-tab-reattach-and-second-tear-out-preserve-live-session-and-view'
+
+    # Closing the main workbench removes only its attached sessions. The broker
+    # and original inherited pipe remain alive for the independent window.
+    $terminalProcesses=@($tree.surfaces|ForEach-Object {$process=[Diagnostics.Process]::GetProcessById([int]$_.pid);$process.Handle|Out-Null;$process});$mainHandle=[long]$tree.window_handle;[FindFixture]::PostClose($mainHandle,$owned.Id)
+    $tree=Await {param($t) $t.main_closed -and -not $t.state.saving};Require (-not $owned.HasExited -and @($tree.surfaces).Count -eq 1 -and @($tree.workspaces).Count -eq 1 -and $tree.window_handle -eq $mainHandle) 'Main close terminated the detached host or retained attached sessions'
+    $exitWatch=[Diagnostics.Stopwatch]::StartNew();foreach($process in $terminalProcesses|Where-Object {$_.Id -ne $retained.pid}){$left=5000-$exitWatch.ElapsedMilliseconds;Require ($left -gt 0 -and $process.WaitForExit((Budget ([int][Math]::Max(1,$left))))) 'Main window close retained an attached shell process'}
+    $window=Detached $tree $retained;Screen-Contains $c.surface $marker;Terminal-Command $tree $c.surface 'echo MAIN_CLOSED_%FM_TEAROUT%';Screen-Contains $c.surface ('MAIN_CLOSED_'+$shellState)
+    Terminal-Command $tree $c.surface ('"'+$cli+'" --json identify');Screen-Contains $c.surface $c.surface
+    Passed 'main-WM_CLOSE-removes-attached-sessions-preserves-detached-PTY-and-inherited-pipe'
+    [FindFixture]::PostClose([long]$window.window_handle,$owned.Id);Require ($owned.WaitForExit((Budget 5000))) 'Final detached WM_CLOSE did not stop the host within five seconds';Require ($owned.ExitCode -eq 0) 'Final detached window exit was not clean';$terminal=@($terminalProcesses|Where-Object {$_.Id -eq $retained.pid});Require ($terminal.Count -eq 1 -and $terminal[0].WaitForExit((Budget 2000))) 'Final detached close retained its shell process';Passed 'final-detached-WM_CLOSE-ends-process'
+
 }catch{$failure=$_.Exception.Message}
 finally{
     $cleaning=$true
+    foreach($process in $terminalProcesses){$process.Dispose()}
     if($owned){
         try{if(-not $owned.HasExited){$stop=[Diagnostics.Stopwatch]::StartNew();if($pipeName){Request @('quit','--discard-state') 2500|Out-Null};Require ($owned.WaitForExit([int][Math]::Max(1,5000-$stop.ElapsedMilliseconds))) 'Owned host cleanup deadline exceeded'}}catch{$cleanupErrors+=$_.Exception.Message}
         if(-not $owned.HasExited){try{$owned.Kill();[CliProbe]::WaitAfterKill($owned)}catch{$cleanupErrors+=$_.Exception.Message}}

@@ -56,8 +56,21 @@ impl App {
                 && !self.command_palette.is_open(),
             "window is busy"
         );
-        let action = action.as_str();
         use ActionId::*;
+        if self.detached.contains_key(&source) {
+            match action {
+                CloseSurface => return self.close_detached(source),
+                TerminalSearch => {
+                    self.surfaces[&source].send(&HostMessage::OpenFind {
+                        focus: !self.background_test,
+                    })?;
+                    return Ok(());
+                }
+                QuitApp => return self.request_close(CloseRequest::Native),
+                _ => return Ok(()), // Single-surface window tools match Linux's disabled controls.
+            }
+        }
+        let action = action.as_str();
         let action = match ActionId::from_wire(action) {
             Some(SplitRight) => Action::Vertical,
             Some(SplitDown) => Action::Horizontal,
@@ -98,14 +111,16 @@ impl App {
             }
             Some(NextWorkspace | PrevWorkspace) => {
                 let previous = ActionId::from_wire(action) == Some(PrevWorkspace);
-                let next = (self.active_workspace
-                    + if previous {
-                        self.workspaces.len() - 1
-                    } else {
-                        1
-                    })
-                    % self.workspaces.len();
-                Action::Workspace(self.workspaces[next].id)
+                let indices = self.main_workspace_indices();
+                if indices.is_empty() {
+                    return Ok(());
+                }
+                let at = indices
+                    .iter()
+                    .position(|i| *i == self.active_workspace)
+                    .unwrap_or(0);
+                let next = (at + if previous { indices.len() - 1 } else { 1 }) % indices.len();
+                Action::Workspace(self.workspaces[indices[next]].id)
             }
             Some(
                 Workspace1 | Workspace2 | Workspace3 | Workspace4 | Workspace5 | Workspace6
@@ -116,7 +131,11 @@ impl App {
                     .next()
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
-                let Some(workspace) = index.checked_sub(1).and_then(|i| self.workspaces.get(i))
+                let indices = self.main_workspace_indices();
+                let Some(workspace) = index
+                    .checked_sub(1)
+                    .and_then(|i| indices.get(i))
+                    .map(|i| &self.workspaces[*i])
                 else {
                     return Ok(());
                 };

@@ -402,6 +402,7 @@ pub(super) fn profile(background: bool) -> anyhow::Result<PathBuf> {
 }
 impl App {
     pub(super) fn new_browser_tab(&mut self, source: SurfaceId) -> anyhow::Result<()> {
+        self.ensure_attached(source)?;
         let (index, pane, _) = self.locate(source).context("source pane not found")?;
         let mut candidate = self.workspaces[index].clone();
         let tab = flowmux_core::PaneSurface::browser("Browser", "about:blank".into());
@@ -422,6 +423,7 @@ impl App {
         url: String,
         down: bool,
     ) -> anyhow::Result<Value> {
+        self.ensure_attached(source)?;
         let url = domain::url(&url)?;
         let (index, pane, _) = self.locate(source).context("source pane not found")?;
         let mut candidate = self.workspaces[index].clone();

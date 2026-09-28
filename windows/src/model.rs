@@ -323,6 +323,49 @@ pub fn split_move_surface(
     Ok(active)
 }
 
+/// Give an existing surface its own workspace without creating a replacement
+/// terminal. The host must attach its existing holder to the new window before
+/// publishing the candidate model; this function only relocates domain state.
+pub fn detach_surface(
+    workspaces: &mut Vec<Workspace>,
+    surface: SurfaceId,
+) -> anyhow::Result<usize> {
+    let (title, cwd) = workspaces
+        .iter()
+        .find_map(|workspace| {
+            workspace.leaves().into_iter().find_map(|(_, _, tabs)| {
+                tabs.into_iter().find(|tab| tab.id == surface).map(|tab| {
+                    let cwd = match tab.kind {
+                        flowmux_core::SurfaceKind::Terminal { cwd, .. } => cwd,
+                        _ => None,
+                    }
+                    .unwrap_or_else(|| workspace.cwd.clone());
+                    (tab.title, cwd)
+                })
+            })
+        })
+        .context("source surface not found")?;
+    let pane = PaneId::new();
+    let mut candidate = workspaces.clone();
+    candidate.push(Workspace {
+        id: WorkspaceId::new(),
+        name: title,
+        color: None,
+        cwd,
+        root: Pane::Leaf {
+            id: pane,
+            content: PaneContent::Tabs {
+                active: surface,
+                surfaces: Vec::new(),
+            },
+        },
+        focused: pane,
+    });
+    let active = move_surface(&mut candidate, surface, pane, 0)?;
+    *workspaces = candidate;
+    Ok(active)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Rect {
     pub x: i32,
@@ -767,6 +810,84 @@ mod tests {
         let tab = workspace.new_tab();
         assert_eq!(workspace.close_active(), Some(tab));
         assert_eq!(workspace.active(), original);
+    }
+
+    #[test]
+    fn detach_retains_unicode_metadata_and_handles_last_tab_tabs_and_split_sources() {
+        for shape in 0..3 {
+            let mut workspaces = vec![Workspace::new("원본 root".into())];
+            match shape {
+                1 => {
+                    workspaces[0].new_tab();
+                }
+                2 => {
+                    workspaces[0].split(SplitDirection::Vertical);
+                }
+                _ => {}
+            }
+            let source_workspace = workspaces[0].id;
+            let source_pane = workspaces[0].focused;
+            let surface = workspaces[0].active();
+            let title = "한글 한 e\u{301} 😀 & 탭";
+            let cwd = PathBuf::from("C:/작업/한/😀");
+            assert!(workspaces[0]
+                .root
+                .rename_surface(source_pane, surface, title.into()));
+            assert!(workspaces[0]
+                .root
+                .set_surface_cwd(source_pane, surface, cwd.clone()));
+            let original = workspaces[0]
+                .root
+                .find_surface(source_pane, surface)
+                .unwrap();
+            let original_count: usize = workspaces[0]
+                .leaves()
+                .iter()
+                .map(|(_, _, tabs)| tabs.len())
+                .sum();
+            let before = serde_json::to_value(&workspaces).unwrap();
+            assert!(detach_surface(&mut workspaces, SurfaceId::new()).is_err());
+            assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+
+            let detached = detach_surface(&mut workspaces, surface).unwrap();
+            assert_eq!(detached, workspaces.len() - 1);
+            let workspace = &workspaces[detached];
+            assert_ne!(workspace.id, source_workspace);
+            assert_ne!(workspace.focused, source_pane);
+            assert_eq!(workspace.name, title);
+            assert_eq!(workspace.cwd, cwd);
+            assert_eq!(workspace.active(), surface);
+            assert_eq!(workspace.leaves().len(), 1);
+            assert_eq!(
+                serde_json::to_value(
+                    workspace
+                        .root
+                        .find_surface(workspace.focused, surface)
+                        .unwrap()
+                )
+                .unwrap(),
+                serde_json::to_value(original).unwrap()
+            );
+            assert_eq!(
+                workspaces
+                    .iter()
+                    .flat_map(Workspace::leaves)
+                    .map(|(_, _, tabs)| tabs.len())
+                    .sum::<usize>(),
+                original_count
+            );
+            if shape == 0 {
+                assert_eq!(workspaces.len(), 1);
+            } else {
+                assert_eq!(workspaces.len(), 2);
+                assert_eq!(workspaces[0].id, source_workspace);
+                assert_eq!(workspaces[0].leaves().len(), 1);
+                assert_eq!(
+                    workspaces[0].root.find_leaf_content(source_pane).is_none(),
+                    shape == 2
+                );
+            }
+        }
     }
 
     #[test]

@@ -291,9 +291,9 @@ impl App {
                 }) = self.drag
                 {
                     let Some(source) = self
-                        .workspaces
+                        .main_workspace_indices()
                         .iter()
-                        .position(|candidate| candidate.id == workspace)
+                        .position(|i| self.workspaces[*i].id == workspace)
                     else {
                         self.cancel_drag();
                         return Ok(());
@@ -415,6 +415,20 @@ impl App {
                                 if target.pane != pane || source_index != Some(index) {
                                     self.move_tab(surface, target.pane, index)?;
                                 }
+                            } else if self.surfaces.contains_key(&surface) {
+                                let mut point = POINT { x, y };
+                                let mut rect = RECT::default();
+                                let outside = unsafe {
+                                    ClientToScreen(self.window, &mut point) != 0
+                                        && GetWindowRect(self.window, &mut rect) != 0
+                                        && (point.x < rect.left
+                                            || point.x >= rect.right
+                                            || point.y < rect.top
+                                            || point.y >= rect.bottom)
+                                };
+                                if outside {
+                                    self.detach_tab(surface)?;
+                                }
                             }
                         } else if self.controls.iter().any(|control| {
                             matches!(control.action, Action::Tab(p, s) if p == pane && s == surface)
@@ -491,9 +505,9 @@ impl App {
                 return None;
             }
             let index = self
-                .workspaces
+                .main_workspace_indices()
                 .iter()
-                .position(|candidate| candidate.id == workspace)?;
+                .position(|i| self.workspaces[*i].id == workspace)?;
             let before = y < rect.y + rect.height / 2;
             Some((control.hwnd, index + usize::from(!before), before))
         })
@@ -675,6 +689,7 @@ impl App {
     }
 
     pub(super) fn toggle_zoom(&mut self, surface: SurfaceId) -> anyhow::Result<()> {
+        self.ensure_attached(surface)?;
         self.select(surface)?;
         self.cancel_drag();
         let pane = self.workspace().focused;

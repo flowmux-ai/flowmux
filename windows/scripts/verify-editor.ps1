@@ -835,6 +835,41 @@ try {
                 Check-MoveHolder $after (Tree) $destination.pane
                 if($before.view_handle -ne $after.view_handle -or $moved.document_id -ne $read.document_id) {throw 'Move recreated editor WebView or document'}
                 if($before.holder.window -ne $after.holder.window -or $moved.active_version -ne $read.active_version) {throw 'Move replaced the editor holder or changed its dirty model version'}
+                if(-not ('FindFixture' -as [type])) {Add-Type -Path (Join-Path $PSScriptRoot 'FindFixture.cs')}
+                Request @('detach-tab',$terminal.id)|Out-Null;$tree=Tree;$editorsBefore=@($tree.editors)
+                $detached=@($tree.detached_windows|Where-Object {$_.surface -eq $terminal.id})
+                if($detached.Count -ne 1 -or $tree.main_closed) {throw 'Dirty main-close test requires one separate terminal and an open main window'}
+                Check-Hidden ([long]$detached[0].window_handle)
+                # The existing helper validates exact PID and hidden HWND. No
+                # fixture/server is instantiated and no desktop input is sent.
+                [FindFixture]::PostClose([long]$tree.window_handle,$process.Id)
+                $closeWatch=[Diagnostics.Stopwatch]::StartNew();$released=$null
+                do {
+                    $remaining=5000-$closeWatch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Dirty main-window close did not reject and release its editor barrier within five seconds'}
+                    $tree=Tree ([int]$remaining)
+                    if($tree.main_closed -or $process.HasExited) {throw 'Dirty main-window close removed its live editor or terminated the shared host'}
+                    if($tree.state.error -match 'unsaved changes') {
+                        $remaining=5000-$closeWatch.ElapsedMilliseconds;if($remaining -le 0) {throw 'Main-close barrier release budget expired'}
+                        # An earlier close can leave the same state.error text.
+                        # A real read must also pass the host barrier and report
+                        # the Monaco seal released before any reattachment.
+                        $response=End-Command (Begin-Command @('editor','command',$opened.surface,'read')) @(0,1) ([int]$remaining)
+                        if($response.error) {if($response.error -notmatch 'editor synchronization in progress|editor is loading or another command is pending') {throw ('Unexpected main-close release error: '+$response.error)}}
+                        else {$candidate=if($response.psobject.Properties.Name -contains 'result') {$response.result}else{$response};if($candidate.sealed -eq $false) {$released=$candidate;break}}
+                    }
+                    Start-Sleep -Milliseconds 20
+                } while($true)
+                if($released.document_focused -ne $false -or $released.content_truncated -or -not $released.dirty -or -not (Same-Text $released.content ([EditorFixture]::Edited)) -or $released.document_id -ne $read.document_id -or $released.active_version -ne $read.active_version) {throw 'Rejected main close altered the dirty Monaco document or left it sealed'}
+                if(@($tree.editors).Count -ne $editorsBefore.Count -or @($tree.detached_windows|Where-Object {$_.surface -eq $terminal.id}).Count -ne 1) {throw 'Rejected main close removed an editor or detached terminal'}
+                foreach($prior in $editorsBefore) {
+                    $retained=@($tree.editors|Where-Object {$_.id -eq $prior.id})
+                    if($retained.Count -ne 1 -or $retained[0].dirty -ne $prior.dirty -or $retained[0].view_handle -ne $prior.view_handle -or $retained[0].holder.window -ne $prior.holder.window -or -not (Same-Text ($retained[0].documents|ConvertTo-Json -Depth 10 -Compress) ($prior.documents|ConvertTo-Json -Depth 10 -Compress))) {throw 'Rejected main close changed a main editor identity or document list'}
+                }
+                Assert-Terminal;Assert-Bytes $path ([EditorFixture]::Original)
+                Request @('move-tab',$terminal.id,'--to-pane',$destination.pane)|Out-Null;$tree=Tree
+                if($tree.main_closed -or @($tree.detached_windows).Count) {throw 'Separate terminal did not reattach after dirty main-close rejection'}
+                Check-MoveHolder (Status $opened.surface) $tree $destination.pane
+                Passed 'dirty_main_window_close_with_detached_terminal_rejects_unseals_and_preserves_editor_documents'
                 Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
                 if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))) {throw 'Move lost Monaco undo history'}
                 Editor-Command $opened.surface 'discard-document'|Out-Null

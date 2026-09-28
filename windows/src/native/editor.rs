@@ -152,6 +152,9 @@ pub(super) enum Operation {
         surfaces: Vec<SurfaceId>,
     },
     Workspace(WorkspaceId),
+    MainWindow {
+        surfaces: Vec<SurfaceId>,
+    },
     Window(CloseRequest),
     QuitDiscard(ipc::Reply),
     Checkpoint(Option<ipc::Reply>),
@@ -1073,7 +1076,7 @@ impl App {
                 .then_some(*id)
                 .into_iter()
                 .collect(),
-            Operation::Pane { surfaces, .. } => surfaces
+            Operation::Pane { surfaces, .. } | Operation::MainWindow { surfaces } => surfaces
                 .iter()
                 .filter(|id| self.editors.contains_key(id))
                 .copied()
@@ -1156,6 +1159,13 @@ impl App {
                 }
                 Operation::Workspace(id) => {
                     self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;
+                }
+                Operation::MainWindow { surfaces } => {
+                    anyhow::ensure!(
+                        self.main_surface_ids() == surfaces,
+                        "Main window surfaces changed while editor close was pending"
+                    );
+                    self.close_main_window()?;
                 }
                 Operation::Window(request) => self.request_close(request)?,
                 Operation::QuitDiscard(reply) => {
@@ -1371,6 +1381,7 @@ impl App {
             "editor Open cannot begin during synchronization or window close"
         );
         let source = self.target(args.pane, caller)?;
+        self.ensure_attached(source)?;
         let (index, pane, _) = self
             .locate(source)
             .context("editor source pane disappeared")?;
@@ -1429,6 +1440,7 @@ impl App {
                 && !self.closing,
             "editor Open was cancelled because synchronization or window close began"
         );
+        self.ensure_attached(pending.source)?;
         let (index, pane, _) = self
             .locate(pending.source)
             .context("editor Open source closed")?;

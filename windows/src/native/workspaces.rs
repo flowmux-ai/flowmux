@@ -73,7 +73,7 @@ impl App {
         let footer_top = (height - px(36)).max(0);
         let list_top = px(40).min(footer_top);
         let without_pager = ((footer_top - list_top) / px(58).max(1)).max(0) as usize;
-        let pager = self.workspaces.len() > without_pager;
+        let pager = self.main_workspace_indices().len() > without_pager;
         let list_bottom = (footer_top - if pager { px(28) } else { 0 }).max(list_top);
         SidebarLayout {
             list_top,
@@ -332,6 +332,7 @@ impl App {
             "Split down",
             "Maximize / restore pane",
             "Workspace actions…",
+            "Move to new window",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -340,9 +341,14 @@ impl App {
             tabs.iter()
                 .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
         );
+        let disabled = if self.surfaces.contains_key(&surface) {
+            vec![]
+        } else {
+            vec![13]
+        };
         let choice = self.popup(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-            &[],
+            &disabled,
             point,
         )?;
         if choice == 0 {
@@ -353,9 +359,9 @@ impl App {
                 .is_some_and(|(_, current, _)| current == pane),
             "Tab moved while menu was open"
         );
-        if choice >= 13 {
+        if choice >= 14 {
             let target = tabs
-                .get(choice - 13)
+                .get(choice - 14)
                 .context("Tab selection no longer exists")?
                 .id;
             anyhow::ensure!(
@@ -381,6 +387,7 @@ impl App {
             9 => Action::Vertical,
             10 => Action::Horizontal,
             11 => Action::TogglePaneZoom,
+            13 => Action::DetachTab,
             _ => Action::WorkspaceMenu,
         })
     }
@@ -445,7 +452,7 @@ impl App {
         match op {
             WorkspaceOp::List => {
                 return Ok(
-                    json!({"workspaces":self.workspaces.iter().enumerate().map(|(index,w)|json!({"id":w.id,"name":w.name,"color":w.color,"index":index,"active":index==self.active_workspace})).collect::<Vec<_>>()}),
+                    json!({"workspaces":self.main_workspace_indices().into_iter().enumerate().map(|(index,i)| {let w=&self.workspaces[i];json!({"id":w.id,"name":w.name,"color":w.color,"index":index,"active":i==self.active_workspace})}).collect::<Vec<_>>()}),
                 )
             }
             WorkspaceOp::Current => {
@@ -476,6 +483,14 @@ impl App {
                 self.refresh_chrome_metadata();
             }
             WorkspaceOp::Reorder { workspace, index } => {
+                anyhow::ensure!(
+                    !self.is_detached_workspace(WorkspaceId(workspace)),
+                    "separate windows are not sidebar workspaces"
+                );
+                let index = *self
+                    .main_workspace_indices()
+                    .get(index)
+                    .context("workspace index is outside the list")?;
                 model::reorder_workspace(
                     &mut self.workspaces,
                     &mut self.active_workspace,
@@ -486,6 +501,18 @@ impl App {
             }
             WorkspaceOp::Close { workspace } => {
                 let id = WorkspaceId(workspace);
+                if let Some(surface) = self
+                    .detached
+                    .iter()
+                    .find_map(|(surface, window)| (window.workspace == id).then_some(*surface))
+                {
+                    self.close_detached(surface)?;
+                    return Ok(json!({"ok":true}));
+                }
+                anyhow::ensure!(
+                    self.main_workspace_indices().len() > 1,
+                    "cannot close the final workspace; close the window instead"
+                );
                 if self.editor_guard(super::editor::Operation::Workspace(id), None)? {
                     return Ok(json!({"pending":true}));
                 }
@@ -576,7 +603,12 @@ impl App {
             self.close_request.is_none(),
             "window is saving before close"
         );
-        let index = self.workspace_index(id)?;
+        let actual = self.workspace_index(id)?;
+        let indices = self.main_workspace_indices();
+        let index = indices
+            .iter()
+            .position(|i| *i == actual)
+            .context("separate windows have no workspace menu")?;
         let point = point.unwrap_or_else(|| {
             let mut rect = RECT::default();
             let hwnd = self
@@ -593,10 +625,10 @@ impl App {
         if index == 0 {
             disabled.push(4);
         }
-        if index + 1 == self.workspaces.len() {
+        if index + 1 == indices.len() {
             disabled.push(5);
         }
-        if self.workspaces.len() == 1 {
+        if indices.len() == 1 {
             disabled.push(6);
         }
         match self.popup(
@@ -629,7 +661,7 @@ impl App {
                 let next = if choice == 4 {
                     index.saturating_sub(1)
                 } else {
-                    (index + 1).min(self.workspaces.len() - 1)
+                    (index + 1).min(indices.len() - 1)
                 };
                 self.workspace_command(
                     WorkspaceOp::Reorder {
@@ -640,10 +672,10 @@ impl App {
                 )?;
             }
             6 => {
-                if self.workspaces.len() == 1 {
+                if indices.len() == 1 {
                     anyhow::bail!("cannot close the final workspace; close the window instead");
                 }
-                let ws = &self.workspaces[index];
+                let ws = &self.workspaces[actual];
                 let count: usize = ws.leaves().iter().map(|(_, _, tabs)| tabs.len()).sum();
                 let confirmed = unsafe {
                     MessageBoxW(

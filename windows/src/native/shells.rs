@@ -20,6 +20,9 @@ impl App {
             self.close_request.is_none(),
             "window is saving before close"
         );
+        if !matches!(kind, NewTerminal::Workspace) {
+            self.ensure_attached(source)?;
+        }
         let (workspace, pane, fallback) = self.locate(source).context("source tab missing")?;
         let source_cwd = if self.browsers.contains_key(&source) {
             self.workspaces[workspace]
@@ -56,7 +59,9 @@ impl App {
             _ => self.settings.default_shell.clone(),
         });
         shell::resolve(&spec)?; // Invalid requests leave layout and focus untouched.
-        self.select(source)?;
+        if !matches!(kind, NewTerminal::Workspace) || !self.detached.contains_key(&source) {
+            self.select(source)?;
+        }
         match kind {
             NewTerminal::Tab => {
                 self.workspace_mut().new_tab();
@@ -69,6 +74,15 @@ impl App {
             NewTerminal::Split(direction) => {
                 self.zoomed = None;
                 self.workspace_mut().split(direction);
+            }
+        }
+        self.detached_focus = None;
+        if self.main_closed {
+            self.main_closed = false;
+            if !self.background_test {
+                unsafe {
+                    ShowWindow(self.window, SW_SHOWNOACTIVATE);
+                }
             }
         }
         let id = self.active();

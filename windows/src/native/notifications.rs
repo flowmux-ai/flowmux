@@ -21,7 +21,9 @@ impl Controller {
 impl App {
     fn source_is_focused(&self, source: Option<SurfaceId>) -> bool {
         !self.background_test
-            && unsafe { GetForegroundWindow() == self.window }
+            && unsafe {
+                GetForegroundWindow() == source.map_or(self.window, |id| self.surface_window(id))
+            }
             && source.is_some_and(|id| {
                 id == self.active()
                     && (self.surfaces.get(&id).is_some_and(|s| s.visible)
@@ -162,14 +164,14 @@ impl App {
         if !self.background_test {
             unsafe {
                 ShowWindow(
-                    self.window,
-                    if IsIconic(self.window) != 0 {
+                    self.surface_window(self.active()),
+                    if IsIconic(self.surface_window(self.active())) != 0 {
                         SW_RESTORE
                     } else {
                         SW_SHOW
                     },
                 );
-                SetForegroundWindow(self.window);
+                SetForegroundWindow(self.surface_window(self.active()));
             }
             self.focus_active()?;
         }

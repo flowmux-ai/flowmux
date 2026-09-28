@@ -7,6 +7,19 @@ pub struct Host {
 }
 
 impl Host {
+    pub fn reparent(&self, parent: HWND) -> anyhow::Result<()> {
+        unsafe {
+            SetLastError(0);
+            let previous = SetParent(self.window, parent);
+            anyhow::ensure!(
+                !previous.is_null() || GetLastError() == 0,
+                "cannot move surface container: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(())
+    }
+
     pub fn new(parent: HWND) -> anyhow::Result<Self> {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());

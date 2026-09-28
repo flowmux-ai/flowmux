@@ -415,6 +415,11 @@ pub enum Command {
         #[arg(long)]
         index: Option<usize>,
     },
+    /// Move an existing terminal tab into its own window without restarting it.
+    DetachTab {
+        #[arg(value_parser = parse_id)]
+        surface: Uuid,
+    },
     /// Close this Windows window and terminate its terminal process trees.
     Quit {
         /// Close even when saving fails; keep the last completed checkpoint.
@@ -528,6 +533,10 @@ mod tests {
     fn extracted_command_args_preserve_cli_and_flat_tagged_wire() {
         let id = Uuid::new_v4().to_string();
         for (args, expected) in [
+            (
+                vec!["detach-tab", &id],
+                serde_json::json!({"method":"detach_tab","surface":id}),
+            ),
             (
                 vec![
                     "notify",

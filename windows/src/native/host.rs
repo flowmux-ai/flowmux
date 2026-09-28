@@ -51,6 +51,10 @@ mod browser;
 mod chrome;
 #[path = "command_palette.rs"]
 mod command_palette;
+#[path = "detached.rs"]
+mod detached;
+#[path = "detached_host.rs"]
+mod detached_host;
 #[path = "downloads.rs"]
 mod downloads;
 #[path = "editor.rs"]
@@ -89,6 +93,7 @@ enum Event {
     Browser(browser::Signal),
     Layout,
     WindowMoved,
+    Detached(SurfaceId, detached::Signal),
     SidebarScroll(i32),
     Tick,
     Close,
@@ -405,6 +410,7 @@ enum Action {
     Horizontal,
     CloseTab,
     MoveTabMenu,
+    DetachTab,
     Find,
     SearchAll,
     TogglePaneZoom,
@@ -479,6 +485,9 @@ struct App {
     workspaces: Vec<Workspace>,
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
+    detached: HashMap<SurfaceId, detached::Window>,
+    detached_focus: Option<SurfaceId>,
+    main_closed: bool,
     controls: Vec<Control>,
     sidebar_offset: usize,
     sidebar_width_dip: u32,
@@ -701,6 +710,9 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             workspaces,
             active_workspace,
             surfaces: HashMap::new(),
+            detached: HashMap::new(),
+            detached_focus: None,
+            main_closed: false,
             controls: vec![],
             sidebar_offset: 0,
             sidebar_width_dip,
@@ -760,6 +772,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.browsers.clear();
         app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
+        app.detached.clear();
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
         DestroyWindow(window);
@@ -824,7 +837,9 @@ impl App {
         &mut self.workspaces[self.active_workspace]
     }
     fn active(&self) -> SurfaceId {
-        self.workspace().active()
+        self.detached_focus
+            .filter(|id| self.detached.contains_key(id))
+            .unwrap_or_else(|| self.workspace().active())
     }
     fn rebuild(&mut self) -> anyhow::Result<()> {
         self.rebuild_without_focus()?;
@@ -832,6 +847,9 @@ impl App {
     }
     fn rebuild_without_focus(&mut self) -> anyhow::Result<()> {
         self.cancel_drag();
+        if self.main_closed {
+            return self.layout();
+        }
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
         let mut missing = Vec::new();
         for workspace in &self.workspaces {
@@ -875,14 +893,19 @@ impl App {
         ] {
             desired.push((name.to_owned(), action));
         }
-        for index in 0..self.workspaces.len() {
+        for index in self.main_workspace_indices() {
             let id = self.workspaces[index].id;
             desired.push((
                 self.workspace_caption(id).unwrap_or_default(),
                 Action::Workspace(id),
             ));
         }
-        for (pane, active, tabs) in self.workspace().leaves() {
+        for (pane, active, tabs) in self
+            .workspace()
+            .leaves()
+            .into_iter()
+            .filter(|_| !self.main_workspace_indices().is_empty())
+        {
             for tab in tabs {
                 desired.push((tab.title.clone(), Action::Tab(pane, tab.id)));
                 desired.push(("Close tab".into(), Action::TabClose(pane, tab.id)));
@@ -1094,6 +1117,12 @@ impl App {
         Ok(())
     }
     fn layout(&mut self) -> anyhow::Result<()> {
+        for surface in self.detached.keys().copied().collect::<Vec<_>>() {
+            self.detached_layout(surface)?;
+        }
+        if self.main_closed {
+            return Ok(());
+        }
         let mut client: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             checked(GetClientRect(self.window, &mut client))?;
@@ -1118,6 +1147,10 @@ impl App {
         } else {
             &geometry.dividers
         });
+        if self.main_workspace_indices().is_empty() {
+            geometry.panes.clear();
+            geometry.dividers.clear();
+        }
         let view_areas = geometry.panes.clone();
         let dock_width = self.files_dock_width(
             self.active_workspace,
@@ -1144,6 +1177,9 @@ impl App {
             })
             .collect();
         for (id, surface) in &mut self.surfaces {
+            if self.detached.contains_key(id) {
+                continue;
+            }
             let show = visible.contains_key(id) && client.right > 0 && client.bottom > 0;
             let area = visible.get(id).filter(|_| show).map(|area| model::Rect {
                 y: area.y + bar,
@@ -1199,15 +1235,20 @@ impl App {
         let list_top = sidebar_layout.list_top;
         let footer_top = sidebar_layout.footer_top;
         let visible_rows = sidebar_layout.capacity;
-        let max_offset = self.workspaces.len().saturating_sub(visible_rows.max(1));
+        let main_indices = self.main_workspace_indices();
+        let main_active = main_indices
+            .iter()
+            .position(|i| *i == self.active_workspace)
+            .unwrap_or(0);
+        let max_offset = main_indices.len().saturating_sub(visible_rows.max(1));
         self.sidebar_offset = self.sidebar_offset.min(max_offset);
         if self.sidebar_active != Some(self.workspace().id) {
             self.sidebar_active = Some(self.workspace().id);
-            if self.active_workspace < self.sidebar_offset {
-                self.sidebar_offset = self.active_workspace;
+            if main_active < self.sidebar_offset {
+                self.sidebar_offset = main_active;
             }
-            if self.active_workspace >= self.sidebar_offset + visible_rows.max(1) {
-                self.sidebar_offset = self.active_workspace + 1 - visible_rows.max(1);
+            if main_active >= self.sidebar_offset + visible_rows.max(1) {
+                self.sidebar_offset = main_active + 1 - visible_rows.max(1);
             }
         }
         for control in &self.controls {
@@ -1222,7 +1263,10 @@ impl App {
                     (sidebar >= px(64)).then_some((sidebar - px(32), px(5), px(28), px(28)))
                 }
                 Action::Workspace(id) => {
-                    let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
+                    let i = main_indices
+                        .iter()
+                        .position(|i| self.workspaces[*i].id == id)
+                        .unwrap();
                     if sidebar <= px(12)
                         || i < self.sidebar_offset
                         || i >= self.sidebar_offset + visible_rows
@@ -1431,7 +1475,13 @@ impl App {
             Event::Browser(event) => self.browser_event(event)?,
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
-            Event::Activated => self.ack_focused_notifications(self.active()),
+            Event::Activated => {
+                if !self.main_closed {
+                    self.detached_focus = None;
+                    self.ack_focused_notifications(self.active());
+                }
+            }
+            Event::Detached(surface, signal) => self.detached_event(surface, signal)?,
             Event::SidebarScroll(delta) if !self.overview.is_open() => {
                 self.sidebar_offset = if delta < 0 {
                     self.sidebar_offset.saturating_sub(1)
@@ -1467,7 +1517,7 @@ impl App {
             }
             Event::Pointer(pointer) if !self.overview.is_open() => self.pointer(pointer)?,
             Event::Pointer(_) | Event::SidebarScroll(_) => {}
-            Event::Close => self.request_close(CloseRequest::Native)?,
+            Event::Close => self.close_main_window()?,
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
@@ -1585,6 +1635,7 @@ impl App {
                 }
             }
             Event::Button(action) => {
+                self.detached_focus = None;
                 if !self.command_palette.is_open() {
                     self.action(action)?;
                 }
@@ -2225,6 +2276,9 @@ impl App {
         if let Some((workspace, pane, _)) = self.locate(id) {
             let root = &self.workspaces[workspace].root;
             if let Some(title) = root.surface_title(pane, id) {
+                if let Some(window) = self.detached.get(&id) {
+                    window.caption(title, chrome::SurfaceIcon::Terminal);
+                }
                 let mut label = title.to_owned();
                 let unread = self
                     .notifications
@@ -2287,6 +2341,16 @@ impl App {
         }
     }
     fn select(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        if self.detached.contains_key(&id) {
+            self.detached_focus = Some(id);
+            if !self.background_test {
+                unsafe {
+                    SetForegroundWindow(self.detached[&id].window);
+                }
+            }
+            return Ok(());
+        }
+        self.detached_focus = None;
         let (workspace, pane, _) = self.locate(id).context("surface not found")?;
         if workspace != self.active_workspace || self.zoomed.is_some_and(|zoomed| zoomed != pane) {
             self.zoomed = None;
@@ -2298,7 +2362,24 @@ impl App {
         Ok(())
     }
     fn move_tab(&mut self, surface: SurfaceId, target: PaneId, index: usize) -> anyhow::Result<()> {
-        self.active_workspace = model::move_surface(&mut self.workspaces, surface, target, index)?;
+        let destination = self
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.root.find_leaf_content(target).is_some())
+            .context("destination pane not found")?;
+        anyhow::ensure!(
+            !self.is_detached_workspace(destination.id),
+            "cannot add tabs to a separate window"
+        );
+        let mut candidate = self.workspaces.clone();
+        let active = model::move_surface(&mut candidate, surface, target, index)?;
+        if self.detached.contains_key(&surface) {
+            self.surfaces[&surface].holder.reparent(self.window)?;
+            self.detached.remove(&surface);
+        }
+        self.workspaces = candidate;
+        self.active_workspace = active;
+        self.detached_focus = None;
         self.zoomed = None;
         // No surface is removed or recreated: its WebView, parser, IME target and
         // native process stay attached to the same identity throughout the move.
@@ -2391,6 +2472,7 @@ impl App {
         });
         self.shells.remove(&surface);
         self.surfaces.remove(&surface);
+        self.detached.remove(&surface);
         if self
             .pending_save
             .as_ref()
@@ -2483,10 +2565,15 @@ impl App {
             }
             Action::Workspace(id) => {
                 let index = self.workspace_index(id)?;
+                if self.is_detached_workspace(id) {
+                    self.select(self.workspaces[index].active())?;
+                    return self.focus_active();
+                }
                 if self.active_workspace != index {
                     self.zoomed = None;
                 }
                 self.active_workspace = index;
+                self.detached_focus = None;
             }
             Action::WorkspaceMenu => return self.workspace_menu(self.workspace().id, None),
             Action::NewTab => {
@@ -2515,6 +2602,9 @@ impl App {
                     .map(|_| ());
             }
             Action::CloseTab => {
+                if self.detached.contains_key(&self.active()) {
+                    return self.close_detached(self.active());
+                }
                 if self.editor_guard(editor::Operation::Tab(self.active()), None)? {
                     return Ok(());
                 }
@@ -2526,6 +2616,7 @@ impl App {
                 self.remove_surface(surface);
             }
             Action::MoveTabMenu => return self.move_menu(),
+            Action::DetachTab => return self.detach_tab(self.active()),
             Action::SearchAll => return self.search_ui(search::UiAction::Show),
             Action::TogglePaneZoom => return self.toggle_zoom(self.active()),
             Action::Find => {
@@ -2691,13 +2782,13 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
-                "named_key_protocol":"send_key_mode",
+                "named_key_protocol":"send_key_mode","detached_surfaces":["terminal"],"detached_window_restore":false,
                 "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
                 "files_limits":{"pending":crate::files_service::MAX_ADMITTED,"budget_ms":crate::files_service::BUDGET.as_millis(),"page_rows":crate::files_model::PAGE_SIZE,"entries":crate::files_model::MAX_ENTRIES,"expanded":crate::files_model::MAX_EXPANDED},
                 "commands":["files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
-                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
+                    "new-workspace","focus-pane","focus-tab","close-tab","move-tab","detach-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
@@ -2751,6 +2842,8 @@ impl App {
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,
+                        "main_closed":self.main_closed,
+                        "detached_windows":self.detached.iter().map(|(id,window)| {let mut value=window.diagnostics(); value["surface"]=json!(id); value}).collect::<Vec<_>>(),
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
                             "saving":self.pending_save.is_some(),"error":self.state_error}}),
                 ));
@@ -3085,6 +3178,13 @@ impl App {
                 } else {
                     self.rebuild()?;
                 }
+            }
+            Command::DetachTab { surface } => {
+                let id = SurfaceId(surface);
+                self.detach_tab(id)?;
+                return Ok(Some(
+                    json!({"ok":true,"surface":id,"window_handle":self.detached[&id].window as usize}),
+                ));
             }
             Command::MoveTab {
                 surface,
