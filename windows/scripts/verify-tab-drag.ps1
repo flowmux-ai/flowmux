@@ -40,8 +40,15 @@ function Split-Drag($Tree,[string]$Source,[string]$Target,[string]$Zone){$body=B
 function Tab-Point($Tree,[string]$Id,[bool]$After){$c=Tab $Tree $Id;$right=$c.rect.x+$c.rect.width;$close=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'tab_close' -and $_.surface -ceq $Id -and $_.layout_visible});if($close.Count -eq 1){[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$close[0].handle,$owned.Id)|Out-Null;$right=[Math]::Max($right,$close[0].rect.x+$close[0].rect.width)};return @{x=[int]$(if($After){$right-3}else{$c.rect.x+3});y=[int]($c.rect.y+$c.rect.height/2)}}
 function Begin($Tree,[string]$Id){$c=Tab $Tree $Id;$x=[int]($c.rect.width/2);$y=[int]($c.rect.height/2);$script:press=@{x=[int]($c.rect.x+$x);y=[int]($c.rect.y+$y)};[OptionsFixture]::TabPointerDown([long]$Tree.window_handle,[long]$c.handle,$owned.Id,$x,$y);return Await {param($t) $t.chrome.tab_dragging}}
 function Motion($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x200,[int]$Point.x,[int]$Point.y)}
-function Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,[int]$Point.x,[int]$Point.y);return Await {param($t) -not $t.chrome.tab_dragging -and (-not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active)}}
+function Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,[int]$Point.x,[int]$Point.y);return Await {param($t) -not $t.chrome.tab_dragging -and -not $t.chrome.workspace_dragging -and (-not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active)}}
 function Drag($Tree,[string]$Source,$Point){$tree=Begin $Tree $Source;Motion $tree $Point;return Release $tree $Point}
+function Workspace-Row($Tree,[string]$Id){$rows=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Id -and $_.layout_visible});Require ($rows.Count -eq 1) ('Visible workspace row missing '+$Id);[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$rows[0].handle,$owned.Id)|Out-Null;return $rows[0]}
+function Workspace-Point($Tree,[string]$Id,[bool]$After){$r=(Workspace-Row $Tree $Id).rect;return @{x=[int]($r.x+$r.width/2);y=[int]$(if($After){$r.y+$r.height-3}else{$r.y+3})}}
+function Begin-Workspace($Tree,[string]$Id){$row=Workspace-Row $Tree $Id;$x=[int]($row.rect.width/2);$y=[int]($row.rect.height/2);$script:press=@{x=[int]($row.rect.x+$x);y=[int]($row.rect.y+$y)};[OptionsFixture]::TabPointerDown([long]$Tree.window_handle,[long]$row.handle,$owned.Id,$x,$y);return Await {param($t) $t.chrome.workspace_dragging -and -not $t.chrome.tab_dragging}}
+function Drag-Workspace($Tree,[string]$Source,$Point){$tree=Begin-Workspace $Tree $Source;Motion $tree $Point;return Release $tree $Point}
+function Workspace-Order($Tree){return (@($Tree.workspaces.id)-join ',')}
+function Workspace-Metadata($Tree){return ($Tree.workspaces|Sort-Object id|ForEach-Object {[ordered]@{id=$_.id;name=$_.name;color=$_.color}}|ConvertTo-Json -Compress)}
+function Stable-Workspaces($Tree){Stable $Tree;Require ((Workspace-Metadata $Tree) -ceq $workspaceMetadata) 'Workspace drag altered Unicode names or colors';No-Preview $Tree}
 function Stable($Tree){Require ((Identities $Tree) -ceq $identities) 'Tab drag replaced a terminal process';foreach($item in $names.GetEnumerator()){$tabs=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces}|Where-Object {$_.id -ceq $item.Key});Require ($tabs.Count -eq 1 -and $tabs[0].title -ceq $item.Value) 'Drag changed a Unicode title or lost a tab'}}
 function Passed([string]$Name){$script:checks+=$Name}
 function Screen-Contains([string]$Surface,[string]$Text){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -gt 0) 'Owned terminal output exceeded five seconds';$screen=Request @('read-screen','--surface',$Surface,'--recent') ([int]$left);if($screen.text.Contains($Text)){return};Start-Sleep -Milliseconds 20}while($true)}
@@ -111,6 +118,31 @@ try {
         if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}elseif($cancel -ceq 'cancelmode'){[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x1f,0,0)}else{$point=@{x=-20;y=-20};Motion $tree $point}
         $tree=Await {param($t) -not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active};$tree=Release $tree $point;No-Preview $tree;Require ((Topology $tree) -ceq $before) ('Split preview cancellation changed model: '+$cancel)
     };Stable $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'split-preview-Escape-cancel-outside-cleanup-and-Unicode-output-preservation'
+
+    # Reuse both existing workspaces and all six PTYs for sidebar ordering.
+    Request @('workspace','rename',$a.workspace,'원본 한 é & 작업공간')|Out-Null;Request @('workspace','color',$a.workspace,'#12abef')|Out-Null;Request @('workspace','color',$e.workspace,'#e67129')|Out-Null
+    $tree=Tree;$workspaceMetadata=Workspace-Metadata $tree;$workspaceOrder=Workspace-Order $tree;$workspaceActive=$tree.active_workspace;Require (@($tree.workspaces).Count -eq 2 -and $workspaceActive -ceq $a.workspace) 'Workspace drag fixture changed'
+    $point=Workspace-Point $tree $a.workspace $false;$tree=Drag-Workspace $tree $e.workspace $point
+    Require ((Workspace-Order $tree) -ceq (@($e.workspace,$a.workspace)-join ',') -and $tree.active_workspace -ceq $workspaceActive) 'Moving workspace upward changed active workspace or insertion index'
+    $point=Workspace-Point $tree $a.workspace $true;$tree=Drag-Workspace $tree $e.workspace $point
+    Require ((Workspace-Order $tree) -ceq $workspaceOrder -and $tree.active_workspace -ceq $workspaceActive) 'Moving workspace downward did not correct removal index'
+    foreach($after in @($false,$true)){$point=Workspace-Point $tree $e.workspace $after;$tree=Drag-Workspace $tree $e.workspace $point;Require ((Workspace-Order $tree) -ceq $workspaceOrder -and $tree.active_workspace -ceq $workspaceActive) 'Workspace self drop reordered or activated its row'}
+    Stable-Workspaces $tree;Passed 'workspace-up-down-index-adjustment-self-drop-and-active-preservation'
+
+    $tree=Begin-Workspace $tree $e.workspace;$tree=Release $tree $press;Require ($tree.active_workspace -ceq $e.workspace -and (Workspace-Order $tree) -ceq $workspaceOrder) 'Normal workspace row click did not activate without reordering'
+    $tree=Begin-Workspace $tree $a.workspace;$near=@{x=$press.x+1;y=$press.y+1};Motion $tree $near;$tree=Release $tree $near
+    Require ($tree.active_workspace -ceq $a.workspace -and (Workspace-Order $tree) -ceq $workspaceOrder) 'Below-threshold workspace movement reordered or failed activation';Stable-Workspaces $tree;Passed 'workspace-click-and-below-threshold-activation'
+
+    foreach($cancel in @('escape','cancelmode','capturechanged','outside')){
+        $point=Workspace-Point $tree $a.workspace $false;$tree=Begin-Workspace $tree $e.workspace;Motion $tree $point
+        if($cancel -ceq 'outside'){$point=@{x=-20;y=-20};Motion $tree $point}else{if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}else{$message=if($cancel -ceq 'cancelmode'){0x1f}else{0x215};[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,$message,0,0)};$tree=Await {param($t) -not $t.chrome.workspace_dragging}}
+        $tree=Release $tree $point;Require ((Workspace-Order $tree) -ceq $workspaceOrder -and $tree.active_workspace -ceq $workspaceActive) ('Cancelled workspace drag changed order or active workspace: '+$cancel)
+    };Stable-Workspaces $tree;Passed 'workspace-Escape-cancelmode-capturechanged-outside-noop'
+
+    $point=Workspace-Point $tree $a.workspace $false;$tree=Begin-Workspace $tree $e.workspace;Motion $tree $point
+    Request @('workspace','reorder',$a.workspace,'1')|Out-Null;$tree=Await {param($t) -not $t.chrome.workspace_dragging};$winner=Workspace-Order $tree;$tree=Release $tree $point
+    Require ($winner -ceq (@($e.workspace,$a.workspace)-join ',') -and (Workspace-Order $tree) -ceq $winner -and $tree.active_workspace -ceq $workspaceActive) 'Stale workspace release overwrote the CLI reorder winner'
+    Stable-Workspaces $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'workspace-stale-rebuild-cancel-and-name-color-PTY-output-preservation'
 }catch{$failure=$_.Exception.Message}
 finally{
     $cleaning=$true

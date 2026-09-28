@@ -72,6 +72,11 @@ pub(super) enum Pointer {
         x: i32,
         y: i32,
     },
+    WorkspaceDown {
+        workspace: WorkspaceId,
+        x: i32,
+        y: i32,
+    },
     Move(i32, i32),
     Up(i32, i32),
     Cancel,
@@ -92,6 +97,12 @@ pub(super) enum Drag {
         workspace: WorkspaceId,
         pane: PaneId,
         surface: SurfaceId,
+        start_x: i32,
+        start_y: i32,
+        moved: bool,
+    },
+    Workspace {
+        workspace: WorkspaceId,
         start_x: i32,
         start_y: i32,
         moved: bool,
@@ -171,6 +182,33 @@ impl App {
             return Ok(());
         }
         match pointer {
+            Pointer::WorkspaceDown { workspace, x, y } => {
+                self.cancel_drag();
+                if !self
+                    .workspaces
+                    .iter()
+                    .any(|candidate| candidate.id == workspace)
+                    || !self.controls.iter().any(|control| {
+                        matches!(control.action, Action::Workspace(id) if id == workspace)
+                            && self
+                                .tab_control_rect(control.hwnd)
+                                .is_some_and(|rect| rect.contains(x, y))
+                    })
+                {
+                    return Ok(());
+                }
+                self.drag = Some(Drag::Workspace {
+                    workspace,
+                    start_x: x,
+                    start_y: y,
+                    moved: false,
+                });
+                if !self.background_test {
+                    unsafe {
+                        SetCapture(self.window);
+                    }
+                }
+            }
             Pointer::TabDown {
                 pane,
                 surface,
@@ -245,6 +283,61 @@ impl App {
                 }
             }
             Pointer::Move(x, y) | Pointer::Up(x, y) => {
+                if let Some(Drag::Workspace {
+                    workspace,
+                    start_x,
+                    start_y,
+                    moved,
+                }) = self.drag
+                {
+                    let Some(source) = self
+                        .workspaces
+                        .iter()
+                        .position(|candidate| candidate.id == workspace)
+                    else {
+                        self.cancel_drag();
+                        return Ok(());
+                    };
+                    let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+                    let moved = moved
+                        || (i64::from(x) - i64::from(start_x)).abs()
+                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) }.max(1))
+                        || (i64::from(y) - i64::from(start_y)).abs()
+                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) }.max(1));
+                    self.drag = Some(Drag::Workspace {
+                        workspace,
+                        start_x,
+                        start_y,
+                        moved,
+                    });
+                    let target = moved.then(|| self.workspace_drop_target(x, y)).flatten();
+                    chrome::set_workspace_drop(target.map(|(window, _, before)| (window, before)));
+                    if matches!(pointer, Pointer::Up(..)) {
+                        self.cancel_drag();
+                        if moved {
+                            if let Some((_, boundary, _)) = target {
+                                let index = boundary.saturating_sub(usize::from(source < boundary));
+                                if index != source {
+                                    self.workspace_command(
+                                        WorkspaceOp::Reorder {
+                                            workspace: workspace.0,
+                                            index,
+                                        },
+                                        None,
+                                    )?;
+                                }
+                            }
+                        } else if self.controls.iter().any(|control| {
+                            matches!(control.action, Action::Workspace(id) if id == workspace)
+                                && self
+                                    .tab_control_rect(control.hwnd)
+                                    .is_some_and(|rect| rect.contains(x, y))
+                        }) {
+                            self.action(Action::Workspace(workspace))?;
+                        }
+                    }
+                    return Ok(());
+                }
                 if let Some(Drag::Tab {
                     workspace,
                     pane,
@@ -369,7 +462,9 @@ impl App {
                             }
                             SplitDirection::Vertical
                         }
-                        Drag::Tab { .. } => unreachable!("tab drag handled above"),
+                        Drag::Tab { .. } | Drag::Workspace { .. } => {
+                            unreachable!("item drag handled above")
+                        }
                     };
                     if !self.background_test {
                         unsafe {
@@ -384,6 +479,24 @@ impl App {
             Pointer::Cancel => self.cancel_drag(),
         }
         Ok(())
+    }
+
+    fn workspace_drop_target(&self, x: i32, y: i32) -> Option<(HWND, usize, bool)> {
+        self.controls.iter().find_map(|control| {
+            let Action::Workspace(workspace) = control.action else {
+                return None;
+            };
+            let rect = self.tab_control_rect(control.hwnd)?;
+            if !rect.contains(x, y) {
+                return None;
+            }
+            let index = self
+                .workspaces
+                .iter()
+                .position(|candidate| candidate.id == workspace)?;
+            let before = y < rect.y + rect.height / 2;
+            Some((control.hwnd, index + usize::from(!before), before))
+        })
     }
 
     // Check the child's own WS_VISIBLE bit: hidden test hosts deliberately keep

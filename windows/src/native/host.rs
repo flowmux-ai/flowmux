@@ -130,9 +130,9 @@ fn post(event: Event) {
     });
 }
 
-// Intercept tab buttons before BUTTON's default handler takes capture/focus.
+// Intercept reorderable rows before BUTTON's default handler takes capture/focus.
 // Stable IDs are queued now; a later rebuild must not retarget this gesture.
-unsafe fn tab_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
+unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
     if !matches!(
         message,
         WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEMOVE | WM_LBUTTONUP
@@ -140,7 +140,7 @@ unsafe fn tab_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
         return false;
     }
     let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(window as isize)).cloned());
-    let Some(Action::Tab(pane, surface)) = action else {
+    let Some(action @ (Action::Tab(..) | Action::Workspace(_))) = action else {
         return false;
     };
     let parent = GetParent(window);
@@ -151,11 +151,19 @@ unsafe fn tab_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
     MapWindowPoints(window, parent, &mut point, 1);
     if IsWindowEnabled(parent) != 0 {
         post(Event::Pointer(match message {
-            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => panes::Pointer::TabDown {
-                pane,
-                surface,
-                x: point.x,
-                y: point.y,
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => match action {
+                Action::Tab(pane, surface) => panes::Pointer::TabDown {
+                    pane,
+                    surface,
+                    x: point.x,
+                    y: point.y,
+                },
+                Action::Workspace(workspace) => panes::Pointer::WorkspaceDown {
+                    workspace,
+                    x: point.x,
+                    y: point.y,
+                },
+                _ => unreachable!("reorderable control checked above"),
             },
             WM_LBUTTONUP => panes::Pointer::Up(point.x, point.y),
             _ => panes::Pointer::Move(point.x, point.y),
@@ -764,7 +772,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         anyhow::ensure!(result != -1, "Windows message loop failed");
         if message.message == WM_KEYDOWN
             && message.wParam == 0x1b
-            && matches!(app.drag, Some(panes::Drag::Tab { .. }))
+            && matches!(
+                app.drag,
+                Some(panes::Drag::Tab { .. } | panes::Drag::Workspace { .. })
+            )
         {
             app.cancel_drag();
             continue;

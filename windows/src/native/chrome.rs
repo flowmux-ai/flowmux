@@ -17,14 +17,20 @@ use windows_sys::Win32::UI::{
 
 const SUBCLASS: usize = 0x464d_4348;
 thread_local! {
-    static TAB_DROP: RefCell<Option<(isize, bool)>> = const { RefCell::new(None) };
+    static TAB_DROP: RefCell<Option<(isize, bool, bool)>> = const { RefCell::new(None) };
 }
 
 pub(super) fn set_tab_drop(target: Option<(HWND, bool)>) {
-    let next = target.map(|(window, before)| (window as isize, before));
+    set_drop_marker(target, false);
+}
+pub(super) fn set_workspace_drop(target: Option<(HWND, bool)>) {
+    set_drop_marker(target, true);
+}
+fn set_drop_marker(target: Option<(HWND, bool)>, horizontal: bool) {
+    let next = target.map(|(window, before)| (window as isize, before, horizontal));
     let previous = TAB_DROP.with(|slot| slot.replace(next));
     if previous != next {
-        for (window, _) in previous.into_iter().chain(next) {
+        for (window, _, _) in previous.into_iter().chain(next) {
             unsafe {
                 InvalidateRect(window as HWND, std::ptr::null(), 0);
             }
@@ -593,7 +599,7 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
 pub(super) fn unregister(window: HWND) {
     if TAB_DROP.with(|slot| {
         slot.borrow()
-            .is_some_and(|(target, _)| target == window as isize)
+            .is_some_and(|(target, _, _)| target == window as isize)
     }) {
         set_tab_drop(None);
     }
@@ -644,7 +650,7 @@ unsafe extern "system" fn control_proc(
     _id: usize,
     _data: usize,
 ) -> LRESULT {
-    if tab_pointer(window, message, lparam) {
+    if row_pointer(window, message, lparam) {
         return 0;
     }
     if message == WM_SETTEXT {
@@ -1412,24 +1418,34 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             };
             DrawFocusRect(item.hDC, &focus);
         }
-        if let Some((_, before)) = TAB_DROP
+        if let Some((_, before, horizontal)) = TAB_DROP
             .with(|slot| *slot.borrow())
-            .filter(|(window, _)| *window == item.hwndItem as isize)
+            .filter(|(window, _, _)| *window == item.hwndItem as isize)
         {
-            let edge = if before {
-                item.rcItem.left
-            } else {
-                item.rcItem.right - pixel(3)
-            };
-            fill(
-                item.hDC,
-                &RECT {
-                    left: edge,
-                    right: edge + pixel(3),
+            let stripe = if horizontal {
+                let top = if before {
+                    item.rcItem.top
+                } else {
+                    item.rcItem.bottom - pixel(3)
+                };
+                RECT {
+                    top,
+                    bottom: top + pixel(3),
                     ..item.rcItem
-                },
-                palette.accent,
-            );
+                }
+            } else {
+                let left = if before {
+                    item.rcItem.left
+                } else {
+                    item.rcItem.right - pixel(3)
+                };
+                RECT {
+                    left,
+                    right: left + pixel(3),
+                    ..item.rcItem
+                }
+            };
+            fill(item.hDC, &stripe, palette.accent);
         }
         RestoreDC(item.hDC, saved);
     }
