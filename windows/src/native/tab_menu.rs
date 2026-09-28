@@ -12,13 +12,13 @@ enum MenuAction {
     Move,
     Destination(WorkspaceId),
     NewWorkspace,
+    NewSshWorkspace,
     RenameWorkspace,
     WorkspaceColor,
     CloseWorkspace,
     CloseAllWorkspaces,
     ClosePane,
     Separator,
-    Unsupported,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -146,7 +146,11 @@ impl App {
                     !self.background_test,
                     "Clipboard access is disabled in background hosts"
                 );
-                copy_text(owner, &cwd.to_string_lossy())?;
+                let path = match self.remote_directory(source) {
+                    Some(remote) => remote.context("Remote directory has not been reported")?,
+                    None => cwd.to_string_lossy().into_owned(),
+                };
+                copy_text(owner, &path)?;
             }
         }
         Ok(())
@@ -162,6 +166,7 @@ impl App {
             .context("Tab no longer exists")?;
         match &tab.kind {
             SurfaceKind::Terminal { .. } => Ok((cwd.to_string_lossy().into_owned(), Some(cwd))),
+            SurfaceKind::SshTerminal { cwd, .. } => Ok((cwd.clone().unwrap_or_default(), None)),
             SurfaceKind::Editor { workspace_root, .. } => {
                 Ok((workspace_root.to_string_lossy().into_owned(), None))
             }
@@ -175,7 +180,6 @@ impl App {
                     .unwrap_or_default();
                 Ok((url, None))
             }
-            _ => anyhow::bail!("Tab has no path or URL"),
         }
     }
     pub(super) fn show_tab_menu(
@@ -186,6 +190,7 @@ impl App {
     ) -> anyhow::Result<()> {
         let (workspace, current, _) = self.locate(surface).context("Tab no longer exists")?;
         anyhow::ensure!(current == pane, "Tab moved before opening its menu");
+        let source_ssh = self.workspaces[workspace].ssh.clone();
         let workspace = self.workspaces[workspace].id;
         let (copy_text, folder) = self.tab_copy_text(surface)?;
         let destinations: Vec<_> = self
@@ -194,7 +199,7 @@ impl App {
             .enumerate()
             .filter_map(|(i, index)| {
                 let target = &self.workspaces[index];
-                (target.id != workspace).then(|| Entry {
+                (target.id != workspace && target.ssh == source_ssh).then(|| Entry {
                     label: format!("{}. {}", i + 1, target.name),
                     enabled: true,
                     action: MenuAction::Destination(target.id),
@@ -210,7 +215,7 @@ impl App {
             });
         }
         entries.push(Entry {
-            label: if folder.is_some() {
+            label: if folder.is_some() || self.remote_directory(surface).is_some() {
                 "Copy path"
             } else {
                 "Copy URL"
@@ -236,7 +241,7 @@ impl App {
         let surface = self.workspaces[index].active();
         let mut rows = vec![
             ("New workspace", true, MenuAction::NewWorkspace),
-            ("New SSH Workspace", false, MenuAction::Unsupported),
+            ("New SSH Workspace", true, MenuAction::NewSshWorkspace),
         ];
         if !creation {
             rows.extend([
@@ -247,7 +252,11 @@ impl App {
                 ("Close tab", true, MenuAction::CloseWorkspace),
                 ("Close all tabs", true, MenuAction::CloseAllWorkspaces),
                 ("", false, MenuAction::Separator),
-                ("Show in folder", true, MenuAction::Folder),
+                (
+                    "Show in folder",
+                    self.workspaces[index].ssh.is_none(),
+                    MenuAction::Folder,
+                ),
                 (
                     "Copy path",
                     !self.tab_copy_text(surface)?.0.is_empty(),
@@ -302,8 +311,8 @@ impl App {
             },
             Entry {
                 label: "New SSH Workspace".into(),
-                enabled: false,
-                action: MenuAction::Unsupported,
+                enabled: true,
+                action: MenuAction::NewSshWorkspace,
             },
         ];
         self.show_context_menu(Kind::Creation, None, entries, Vec::new(), point)
@@ -338,7 +347,8 @@ impl App {
             .transpose()?
             .unwrap_or_default();
         if kind == Kind::Workspace {
-            folder = source.map(|(_, _, cwd)| cwd);
+            folder = source
+                .and_then(|(index, _, cwd)| self.workspaces[index].ssh.is_none().then_some(cwd));
         }
         self.cancel_drag();
         let menu = panel::Panel::new(owner, entries, point, self.background_test)?;
@@ -467,7 +477,9 @@ impl App {
                 );
                 let surface = surface.context("No tab folder")?;
                 let folder = if kind == Kind::Workspace {
-                    self.locate(surface).map(|(_, _, cwd)| cwd)
+                    self.locate(surface).and_then(|(index, _, cwd)| {
+                        self.workspaces[index].ssh.is_none().then_some(cwd)
+                    })
                 } else {
                     self.tab_copy_text(surface)?.1
                 };
@@ -500,6 +512,7 @@ impl App {
                     .context("Destination workspace has no pane")?;
                 self.move_tab(surface.context("No tab to move")?, pane, usize::MAX)?;
             }
+            MenuAction::NewSshWorkspace => self.show_ssh_dialog()?,
             MenuAction::NewWorkspace => {
                 self.new_workspace(surface, None, None)?;
             }
@@ -529,7 +542,7 @@ impl App {
                     self.focus_active()?;
                 }
             }
-            MenuAction::Move | MenuAction::Separator | MenuAction::Unsupported => unreachable!(),
+            MenuAction::Move | MenuAction::Separator => unreachable!(),
         }
         Ok(())
     }

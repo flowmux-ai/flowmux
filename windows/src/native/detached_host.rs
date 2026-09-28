@@ -350,6 +350,7 @@ impl App {
         self.editor_cancel_opens(None, "main window closed before editor Open completed");
         self.options.take();
         self.workspace_close.take();
+        self.ssh_dialog.take();
         self.metadata.take();
         self.tab_menu.take();
         let detached: Vec<_> = self

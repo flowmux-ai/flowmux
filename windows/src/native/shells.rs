@@ -64,6 +64,10 @@ impl App {
             self.ensure_attached(source)?;
         }
         let (workspace, pane, fallback) = self.locate(source).context("source tab missing")?;
+        if self.workspaces[workspace].ssh.is_some() && !matches!(kind, NewTerminal::Workspace) {
+            anyhow::ensure!(requested.is_none(), "SSH tabs use their workspace connection; create a local workspace for a Windows shell");
+            return self.new_ssh_terminal(source, cwd, kind);
+        }
         let source_cwd = if self.browsers.contains_key(&source) {
             self.workspaces[workspace]
                 .root
@@ -143,6 +147,10 @@ impl App {
         );
         let surface = self.surfaces.get(&id).context("terminal missing")?;
         anyhow::ensure!(
+            self.remote_directory(id).is_none() || shell.is_none(),
+            "An SSH terminal cannot be replaced with a local shell"
+        );
+        anyhow::ensure!(
             surface.startup_error.is_some() && surface.session.is_none(),
             "only a failed shell startup can be retried"
         );
@@ -159,6 +167,59 @@ impl App {
             anyhow::bail!("Shell retry failed: {error}");
         }
         Ok(())
+    }
+    fn new_ssh_terminal(
+        &mut self,
+        source: SurfaceId,
+        cwd: Option<PathBuf>,
+        kind: NewTerminal,
+    ) -> anyhow::Result<SurfaceId> {
+        let (index, pane, _) = self.locate(source).context("SSH source missing")?;
+        let mut workspace = self.workspaces[index].clone();
+        workspace.focused = pane;
+        workspace.root.set_active_surface(pane, source);
+        match kind {
+            NewTerminal::Tab => {
+                workspace.new_tab();
+            }
+            NewTerminal::Split(direction) => {
+                workspace.split(direction);
+            }
+            NewTerminal::Workspace => unreachable!(),
+        }
+        let id = workspace.active();
+        let mut tab = workspace
+            .root
+            .find_surface(workspace.focused, id)
+            .context("SSH terminal missing")?;
+        let SurfaceKind::SshTerminal {
+            cwd: remote,
+            tmux_session,
+        } = &mut tab.kind
+        else {
+            unreachable!()
+        };
+        if let Some(cwd) = cwd {
+            *remote = Some(
+                cwd.to_str()
+                    .context("Remote directory must be UTF-8")?
+                    .to_owned(),
+            );
+        }
+        let shell = crate::ssh::terminal_shell(
+            workspace.ssh.as_ref().unwrap(),
+            remote.as_deref(),
+            tmux_session.as_deref(),
+        )?;
+        super::super::shell::resolve(&shell)?;
+        crate::ssh::set_remote_cwd(&mut workspace.root, workspace.focused, id, remote.clone());
+        self.workspaces[index] = workspace;
+        self.active_workspace = index;
+        self.detached_focus = None;
+        self.zoomed = None;
+        self.shells.insert(id, shell);
+        self.rebuild()?;
+        Ok(id)
     }
     pub(super) fn shell_menu(&mut self, point: (i32, i32)) -> anyhow::Result<()> {
         let labels = [

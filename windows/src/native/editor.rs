@@ -1584,6 +1584,10 @@ impl App {
         let (index, pane, _) = self
             .locate(source)
             .context("editor source pane disappeared")?;
+        anyhow::ensure!(
+            self.workspaces[index].ssh.is_none(),
+            "Remote file editing is not available in SSH workspaces"
+        );
         let workspace = self.workspaces[index].id;
         let root = args.root.unwrap_or_else(|| {
             self.editors
@@ -1771,6 +1775,10 @@ impl App {
         let (index, pane, _) = self
             .locate(source)
             .context("editor source pane disappeared")?;
+        anyhow::ensure!(
+            self.workspaces[index].ssh.is_none(),
+            "Remote file editing is not available in SSH workspaces"
+        );
         Ok(PickerTarget {
             source,
             pane,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Windows-only state schema. Shell argv is explicit; history is display data only.
 use crate::model::Workspace;
-use anyhow::ensure;
+use anyhow::{ensure, Context};
 use flowmux_core::{Pane, PaneContent, SurfaceId, SurfaceKind, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -162,7 +162,10 @@ impl WindowState {
                 ws.name.len() <= 4096 && ws.cwd.as_os_str().len() <= 32767,
                 "workspace metadata exceeds limit"
             );
-            validate_pane(&ws.root, 0, &mut ids, &mut surfaces)?;
+            if let Some(ssh) = &ws.ssh {
+                ssh.validate().map_err(anyhow::Error::msg)?;
+            }
+            validate_pane(&ws.root, ws.ssh.as_ref(), 0, &mut ids, &mut surfaces)?;
             ensure!(
                 ws.root.find_leaf_content(ws.focused).is_some(),
                 "focused pane missing"
@@ -202,7 +205,12 @@ impl WindowState {
             .iter()
             .flat_map(|ws| ws.leaves())
             .flat_map(|(_, _, tabs)| tabs)
-            .filter(|tab| matches!(tab.kind, SurfaceKind::Terminal { .. }))
+            .filter(|tab| {
+                matches!(
+                    tab.kind,
+                    SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. }
+                )
+            })
             .map(|tab| tab.id)
             .collect();
         ensure!(
@@ -222,6 +230,7 @@ impl WindowState {
 }
 fn validate_pane(
     pane: &Pane,
+    ssh: Option<&flowmux_core::SshWorkspaceConfig>,
     depth: usize,
     ids: &mut HashSet<Uuid>,
     surfaces: &mut HashSet<SurfaceId>,
@@ -240,8 +249,8 @@ fn validate_pane(
                 ratio.is_finite() && *ratio > 0.0 && *ratio < 1.0,
                 "invalid split ratio"
             );
-            validate_pane(first, depth + 1, ids, surfaces)?;
-            validate_pane(second, depth + 1, ids, surfaces)?;
+            validate_pane(first, ssh, depth + 1, ids, surfaces)?;
+            validate_pane(second, ssh, depth + 1, ids, surfaces)?;
         }
         Pane::Leaf {
             id,
@@ -266,10 +275,22 @@ fn validate_pane(
                     "unsupported tab metadata"
                 );
                 match &tab.kind {
-                    SurfaceKind::Terminal { shell: None, cwd } => ensure!(
-                        cwd.as_ref().is_none_or(|p| p.as_os_str().len() <= 32767),
-                        "cwd exceeds limit"
-                    ),
+                    SurfaceKind::Terminal { shell: None, cwd } => {
+                        ensure!(ssh.is_none(), "local terminal in SSH workspace");
+                        ensure!(
+                            cwd.as_ref().is_none_or(|p| p.as_os_str().len() <= 32767),
+                            "cwd exceeds limit"
+                        );
+                    }
+                    SurfaceKind::SshTerminal { cwd, tmux_session } => {
+                        let config = ssh.context("SSH terminal has no workspace configuration")?;
+                        flowmux_core::ssh::validate_remote_cwd(cwd.as_deref())
+                            .map_err(anyhow::Error::msg)?;
+                        let expected = config
+                            .tmux
+                            .then(|| format!("flowmux-{}", tab.id.0.simple()));
+                        ensure!(*tmux_session == expected, "inconsistent SSH tmux session");
+                    }
                     SurfaceKind::Editor {
                         workspace_root,
                         session,
@@ -317,6 +338,84 @@ pub(crate) fn sample() -> WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ssh_state_roundtrip_keeps_remote_history_and_rejects_mismatched_contexts() {
+        let mut state = sample();
+        let screen = state.screens.values().next().unwrap().clone();
+        let config = flowmux_core::SshWorkspaceConfig {
+            target: flowmux_core::SshTarget::parse("user@example.test").unwrap(),
+            cwd: Some("/작업/한 e\u{301}".into()),
+            tmux: true,
+            forwards: Vec::new(),
+        };
+        let ws = Workspace::new_ssh("C:/local 한글".into(), config.clone(), None).unwrap();
+        let surface = ws.active();
+        state.active_workspace = Some(ws.id);
+        state.workspaces = vec![ws];
+        state.screens = HashMap::from([(surface, screen)]);
+        state.shells = HashMap::from([(
+            surface,
+            crate::shell::Shell {
+                program: "ssh.exe".into(),
+                args: vec!["-t".into(), "user@example.test".into()],
+            },
+        )]);
+        let restored = WindowState::decode(&state.encode().unwrap()).unwrap();
+        assert_eq!(restored.workspaces[0].ssh, Some(config));
+        assert_eq!(
+            restored.workspaces[0].cwd,
+            std::path::PathBuf::from("C:/local 한글")
+        );
+        assert_eq!(
+            restored.screens[&surface].data,
+            state.screens[&surface].data
+        );
+        assert_eq!(restored.shells, state.shells);
+        for change in 0..5 {
+            let mut invalid = state.clone();
+            let ws = &mut invalid.workspaces[0];
+            if change == 0 {
+                ws.ssh = None;
+            } else if change == 1 {
+                ws.ssh.as_mut().unwrap().cwd = Some("relative/path".into());
+            } else {
+                let Pane::Leaf {
+                    content: PaneContent::Tabs { surfaces, .. },
+                    ..
+                } = &mut ws.root
+                else {
+                    panic!("expected SSH leaf")
+                };
+                match change {
+                    2 => {
+                        surfaces[0].kind = SurfaceKind::SshTerminal {
+                            cwd: Some("/bad\npath".into()),
+                            tmux_session: Some(format!("flowmux-{}", surface.0.simple())),
+                        }
+                    }
+                    3 => {
+                        surfaces[0].kind = SurfaceKind::SshTerminal {
+                            cwd: None,
+                            tmux_session: Some("flowmux-wrong-session".into()),
+                        }
+                    }
+                    _ => {
+                        surfaces[0].kind = SurfaceKind::Terminal {
+                            shell: None,
+                            cwd: None,
+                        }
+                    }
+                }
+            }
+            assert!(invalid.encode().is_err(), "invalid SSH case {change}");
+        }
+        let legacy = sample().encode().unwrap();
+        assert!(!String::from_utf8_lossy(&legacy).contains("\"ssh\""));
+        assert!(WindowState::decode(&legacy).unwrap().workspaces[0]
+            .ssh
+            .is_none());
+    }
+
     #[test]
     fn empty_main_window_roundtrips_and_existing_active_uuid_still_loads() {
         let original = sample();

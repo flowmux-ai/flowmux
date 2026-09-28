@@ -116,7 +116,19 @@ impl App {
         } else {
             String::new()
         };
-        Some(format!("{prefix}{}\n{}", workspace.name, cwd.display()))
+        let directory = if let Some(config) = &workspace.ssh {
+            format!(
+                "{}:{}",
+                config.target.destination(),
+                self.remote_directory(workspace.active())
+                    .flatten()
+                    .as_deref()
+                    .unwrap_or("~")
+            )
+        } else {
+            cwd.display().to_string()
+        };
+        Some(format!("{prefix}{}\n{}", workspace.name, directory))
     }
     pub(super) fn chrome_role(&self, action: &Action) -> chrome::Role {
         match *action {
@@ -752,6 +764,13 @@ impl App {
             .context("tab no longer exists")
     }
     pub(super) fn metadata_owner_closing(&mut self, owner: HWND) {
+        if self
+            .ssh_dialog
+            .as_ref()
+            .is_some_and(|panel| panel.owner == owner)
+        {
+            self.ssh_dialog.take();
+        }
         if self
             .metadata
             .as_ref()

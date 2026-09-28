@@ -66,6 +66,19 @@ pub fn resolve(shell: &Shell) -> anyhow::Result<Resolved> {
     let path = match profile.as_str() {
         "powershell" => executable(system()?.join("WindowsPowerShell/v1.0/powershell.exe"))?,
         "cmd" => executable(system()?.join("cmd.exe"))?,
+        "ssh" => {
+            let built_in = system()?.join("OpenSSH/ssh.exe");
+            if built_in.is_file() {
+                executable(built_in)?
+            } else {
+                path_search(
+                    "ssh.exe",
+                    std::env::var_os("PATH"),
+                    std::env::var_os("PATHEXT"),
+                )
+                .context("OpenSSH Client is not installed or discoverable")?
+            }
+        }
         "pwsh" => {
             let found = path_search(
                 "pwsh.exe",

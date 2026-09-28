@@ -36,6 +36,7 @@ pub mod screen;
 pub mod selection;
 pub mod settings;
 pub mod shell;
+pub mod ssh;
 pub mod state;
 pub mod theme;
 pub mod window_launch;

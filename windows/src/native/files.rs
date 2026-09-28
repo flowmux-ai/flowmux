@@ -859,6 +859,12 @@ impl App {
             "Files is unavailable while the window closes"
         );
         if let domain::Op::Show(args) = op {
+            let source = self.target(Some(pane.0), None)?;
+            let (index, _, _) = self.locate(source).context("Files source disappeared")?;
+            anyhow::ensure!(
+                self.workspaces[index].ssh.is_none(),
+                "Remote files are not available in SSH workspaces"
+            );
             let reuse = self.files.states.get(&pane).is_some_and(|state| {
                 args.root
                     .as_ref()

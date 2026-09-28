@@ -15,6 +15,8 @@ pub struct Workspace {
     pub name_locked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<flowmux_core::SshWorkspaceConfig>,
     pub cwd: PathBuf,
     pub root: Pane,
     pub focused: PaneId,
@@ -37,6 +39,7 @@ impl Workspace {
             name_locked: false,
             cwd,
             color: None,
+            ssh: None,
             root: Pane::Leaf {
                 id: pane,
                 content: PaneContent::Tabs {
@@ -52,6 +55,37 @@ impl Workspace {
         self.root
             .active_surface_id(self.focused)
             .expect("focused pane must be a leaf")
+    }
+
+    pub fn new_ssh(
+        local_cwd: PathBuf,
+        config: flowmux_core::SshWorkspaceConfig,
+        name: Option<String>,
+    ) -> anyhow::Result<Self> {
+        config.validate().map_err(anyhow::Error::msg)?;
+        let name = name
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| config.target.destination());
+        validate_name(&name)?;
+        let surface = config.terminal(None);
+        let pane = PaneId::new();
+        Ok(Self {
+            id: WorkspaceId::new(),
+            name,
+            name_locked: true,
+            color: None,
+            ssh: Some(config),
+            cwd: local_cwd,
+            root: Pane::Leaf {
+                id: pane,
+                content: PaneContent::Tabs {
+                    active: surface.id,
+                    surfaces: vec![surface],
+                },
+            },
+            focused: pane,
+        })
     }
 
     pub fn rename(&mut self, raw: String) -> anyhow::Result<()> {
@@ -70,6 +104,12 @@ impl Workspace {
     pub fn refresh_name(&mut self) -> bool {
         if self.name_locked {
             return false;
+        }
+        if let Some(config) = &self.ssh {
+            let name = config.target.destination();
+            let changed = self.name != name;
+            self.name = name;
+            return changed;
         }
         let Some(active) = self.root.active_surface_id(self.focused) else {
             return false;
@@ -96,12 +136,26 @@ impl Workspace {
         true
     }
 
-    pub fn new_tab(&mut self) -> SurfaceId {
+    fn new_terminal(&self) -> PaneSurface {
+        if let Some(config) = &self.ssh {
+            let cwd = self
+                .root
+                .find_surface(self.focused, self.active())
+                .and_then(|surface| match surface.kind {
+                    flowmux_core::SurfaceKind::SshTerminal { cwd, .. } => cwd,
+                    _ => None,
+                });
+            return config.terminal(cwd);
+        }
         let cwd = self
             .root
             .terminal_surface_cwd(self.focused)
             .unwrap_or_else(|| self.cwd.clone());
-        let surface = PaneSurface::terminal("PowerShell", Some(cwd));
+        PaneSurface::terminal("PowerShell", Some(cwd))
+    }
+
+    pub fn new_tab(&mut self) -> SurfaceId {
+        let surface = self.new_terminal();
         let id = surface.id;
         self.root
             .add_surface_to_leaf(self.focused, surface)
@@ -111,11 +165,7 @@ impl Workspace {
     }
 
     pub fn split(&mut self, direction: SplitDirection) -> PaneId {
-        let cwd = self
-            .root
-            .terminal_surface_cwd(self.focused)
-            .unwrap_or_else(|| self.cwd.clone());
-        let surface = PaneSurface::terminal("PowerShell", Some(cwd));
+        let surface = self.new_terminal();
         let pane = self
             .root
             .split_leaf(
@@ -291,6 +341,10 @@ pub fn move_surface(
             )
         })
         .context("destination pane not found")?;
+    anyhow::ensure!(
+        workspaces[source_ws].ssh == workspaces[target_ws].ssh,
+        "cannot move a tab between different SSH or local workspace contexts"
+    );
     let (tab, empty) = workspaces[source_ws]
         .root
         .take_surface_from_leaf(source_pane, surface)
@@ -350,6 +404,10 @@ pub fn split_move_surface(
             )
         })
         .context("destination pane not found")?;
+    anyhow::ensure!(
+        workspaces[source_ws].ssh == workspaces[target_ws].ssh,
+        "cannot move a tab between different SSH or local workspace contexts"
+    );
     if source_pane == target && source_count == 1 {
         return Ok(source_ws);
     }
@@ -379,17 +437,25 @@ pub fn detach_surface(
     workspaces: &mut Vec<Workspace>,
     surface: SurfaceId,
 ) -> anyhow::Result<usize> {
-    let (title, cwd) = workspaces
+    let (title, name_locked, cwd, ssh) = workspaces
         .iter()
         .find_map(|workspace| {
             workspace.leaves().into_iter().find_map(|(_, _, tabs)| {
                 tabs.into_iter().find(|tab| tab.id == surface).map(|tab| {
+                    if workspace.ssh.is_some() {
+                        return (
+                            workspace.name.clone(),
+                            workspace.name_locked,
+                            workspace.cwd.clone(),
+                            workspace.ssh.clone(),
+                        );
+                    }
                     let cwd = match tab.kind {
                         flowmux_core::SurfaceKind::Terminal { cwd, .. } => cwd,
                         _ => None,
                     }
                     .unwrap_or_else(|| workspace.cwd.clone());
-                    (tab.title, cwd)
+                    (tab.title, false, cwd, None)
                 })
             })
         })
@@ -399,8 +465,9 @@ pub fn detach_surface(
     candidate.push(Workspace {
         id: WorkspaceId::new(),
         name: title,
-        name_locked: false,
+        name_locked,
         color: None,
+        ssh,
         cwd,
         root: Pane::Leaf {
             id: pane,
@@ -561,6 +628,70 @@ pub fn neighbor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_tabs_splits_detach_keep_remote_context_and_moves_are_atomic() {
+        let config = flowmux_core::SshWorkspaceConfig {
+            target: flowmux_core::SshTarget::parse("user@example.test").unwrap(),
+            cwd: Some("/원격/한 e\u{301}".into()),
+            tmux: true,
+            forwards: Vec::new(),
+        };
+        let local = PathBuf::from("C:/local 작업");
+        let mut ws = Workspace::new_ssh(local.clone(), config.clone(), None).unwrap();
+        assert_eq!(ws.name, "user@example.test");
+        assert!(ws.name_locked);
+        let first = ws.active();
+        let focused = ws.focused;
+        let remote = "/다른/한 e\u{301}";
+        let Pane::Leaf {
+            content: PaneContent::Tabs { surfaces, .. },
+            ..
+        } = &mut ws.root
+        else {
+            panic!("expected SSH leaf")
+        };
+        let flowmux_core::SurfaceKind::SshTerminal { cwd, .. } = &mut surfaces[0].kind else {
+            panic!("expected SSH terminal")
+        };
+        *cwd = Some(remote.into());
+        ws.root
+            .set_surface_title_auto(focused, first, "remote shell title".into());
+        ws.rename("  ".into()).unwrap();
+        assert_eq!(ws.name, "user@example.test");
+        let tab = ws.new_tab();
+        ws.split(SplitDirection::Vertical);
+        for (_, _, tabs) in ws.leaves() {
+            for surface in tabs {
+                let flowmux_core::SurfaceKind::SshTerminal { cwd, tmux_session } = surface.kind
+                else {
+                    panic!("SSH operation created local terminal")
+                };
+                assert_eq!(cwd.as_deref(), Some(remote));
+                assert_eq!(
+                    tmux_session,
+                    Some(format!("flowmux-{}", surface.id.0.simple()))
+                );
+            }
+        }
+        ws.rename("  서버 한  ".into()).unwrap();
+        let mut workspaces = vec![ws, Workspace::new(local.clone())];
+        let target = workspaces[1].focused;
+        let before = serde_json::to_value(&workspaces).unwrap();
+        assert!(move_surface(&mut workspaces, tab, target, 0).is_err());
+        assert!(
+            split_move_surface(&mut workspaces, tab, target, SplitDirection::Horizontal).is_err()
+        );
+        assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+        let detached = detach_surface(&mut workspaces, tab).unwrap();
+        assert_eq!(workspaces[detached].ssh, Some(config));
+        assert_eq!(workspaces[detached].cwd, local);
+        assert_eq!(workspaces[detached].active(), tab);
+        assert_eq!(workspaces[detached].name, "서버 한");
+        let target = workspaces[0].focused;
+        move_surface(&mut workspaces, tab, target, 0).unwrap();
+        assert_eq!(workspaces.len(), 2);
+    }
 
     #[test]
     fn workspace_names_follow_focused_titles_unless_locked_and_preserve_legacy_names() {

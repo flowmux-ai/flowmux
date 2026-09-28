@@ -77,6 +77,10 @@ mod paste;
 mod search;
 #[path = "shells.rs"]
 mod shells;
+#[path = "ssh.rs"]
+mod ssh;
+#[path = "ssh_panel.rs"]
+mod ssh_panel;
 #[path = "surface_host.rs"]
 pub(super) mod surface_host;
 #[path = "tab_menu.rs"]
@@ -91,6 +95,7 @@ thread_local! {
 }
 enum Event {
     EmptyWindowShortcut(crate::keybindings::ActionId),
+    SshDialog(Uuid, ssh_panel::UiAction),
     TabMenu(Uuid, tab_menu::UiAction),
     WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
@@ -426,6 +431,7 @@ enum Action {
     CommandPalette,
     Overview,
     NewWorkspace,
+    NewSshWorkspace,
     Workspace(WorkspaceId),
     WorkspaceMenu,
     NewTab,
@@ -523,6 +529,7 @@ struct App {
     metadata: Option<workspaces::Panel>,
     tab_menu: Option<tab_menu::Menu>,
     workspace_close: Option<workspaces::Close>,
+    ssh_dialog: Option<ssh_panel::Panel>,
     initial_cwd: PathBuf,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
@@ -700,8 +707,25 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             for ws in &workspaces {
                 for (_, _, tabs) in ws.leaves() {
                     for tab in tabs {
-                        if matches!(tab.kind, SurfaceKind::Terminal { .. }) {
-                            shells.entry(tab.id).or_default();
+                        match &tab.kind {
+                            SurfaceKind::Terminal { .. } => {
+                                shells.entry(tab.id).or_default();
+                            }
+                            SurfaceKind::SshTerminal { cwd, tmux_session } => {
+                                let config = ws
+                                    .ssh
+                                    .as_ref()
+                                    .context("SSH workspace configuration missing")?;
+                                shells.insert(
+                                    tab.id,
+                                    crate::ssh::terminal_shell(
+                                        config,
+                                        cwd.as_deref(),
+                                        tmux_session.as_deref(),
+                                    )?,
+                                );
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -758,6 +782,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             metadata: None,
             tab_menu: None,
             workspace_close: None,
+            ssh_dialog: None,
             initial_cwd: cwd.clone(),
             options: None,
             command_palette: command_palette::Controller::default(),
@@ -819,6 +844,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.overview));
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
+        app.ssh_dialog.take();
         app.workspace_close.take();
         app.metadata.take();
         app.tab_menu.take();
@@ -876,6 +902,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                     .workspace_close
                     .as_ref()
                     .is_some_and(|close| close.panel.handle_message(&message))
+                && !app
+                    .ssh_dialog
+                    .as_ref()
+                    .is_some_and(|panel| panel.handle_message(&message))
                 && !app.editor_close_handle_message(&message)
                 && !app.command_palette.handle_message(&message)
                 && !app.overview_handle_message(&message)
@@ -931,6 +961,7 @@ impl App {
         matches!(
             action,
             Action::NewWorkspace
+                | Action::NewSshWorkspace
                 | Action::WorkspaceMenu
                 | Action::Settings
                 | Action::CommandPalette
@@ -962,7 +993,9 @@ impl App {
         }
         for (id, kind) in missing {
             match kind {
-                SurfaceKind::Terminal { .. } => self.add_view(id)?,
+                SurfaceKind::Terminal { .. } | SurfaceKind::SshTerminal { .. } => {
+                    self.add_view(id)?
+                }
                 SurfaceKind::Editor {
                     workspace_root,
                     session,
@@ -970,7 +1003,6 @@ impl App {
                 SurfaceKind::Browser { initial_url } => {
                     self.add_browser_view(id, initial_url.unwrap_or_else(|| "about:blank".into()))?
                 }
-                _ => anyhow::bail!("unsupported Windows surface"),
             }
             if let Some(window) = self.detached.get(&id) {
                 self.surface_holder(id)?.reparent(window.window)?;
@@ -1572,7 +1604,17 @@ impl App {
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
-        if self.background_test || self.overview.is_open() || self.command_palette.is_open() {
+        if self.background_test
+            || self.overview.is_open()
+            || self.command_palette.is_open()
+            || self.ssh_dialog.is_some()
+            || unsafe {
+                IsWindowEnabled(
+                    self.current_surface()
+                        .map_or(self.window, |id| self.surface_window(id)),
+                )
+            } == 0
+        {
             return Ok(());
         }
         let Some(active) = self.current_surface() else {
@@ -1635,6 +1677,7 @@ impl App {
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::EmptyWindowShortcut(action) => self.empty_window_shortcut_action(action)?,
+            Event::SshDialog(id, action) => self.ssh_dialog_action(id, action)?,
             Event::Editor(event) => self.editor_event(event)?,
             Event::Files(event) => self.files_event(event)?,
             Event::Browser(event) => self.browser_event(event)?,
@@ -2026,7 +2069,9 @@ impl App {
             }
             ClientMessage::Cwd { path } => {
                 if surface.ready && !surface.restoring {
-                    if let Ok(path) = crate::cwd::local_path(&path) {
+                    if self.remote_directory(id).is_some() {
+                        self.update_remote_directory(id, path);
+                    } else if let Ok(path) = crate::cwd::local_path(&path) {
                         self.update_cwd(id, path);
                     }
                 }
@@ -2176,6 +2221,15 @@ impl App {
                                                     cwd.clone(),
                                                 );
                                             }
+                                            if let SurfaceKind::SshTerminal { cwd, .. } = &tab.kind
+                                            {
+                                                crate::ssh::set_remote_cwd(
+                                                    &mut workspace.root,
+                                                    pane,
+                                                    id,
+                                                    cwd.clone(),
+                                                );
+                                            }
                                             workspace.root.set_surface_title_auto(
                                                 pane,
                                                 id,
@@ -2225,6 +2279,9 @@ impl App {
     }
     fn start_session(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         let (workspace, pane, cwd) = self.locate(id).context("terminal has no workspace")?;
+        if let Some(shell) = self.ssh_shell(id)? {
+            self.shells.insert(id, shell);
+        }
         let sender = self.sender.clone();
         let surface = &self.surfaces[&id];
         let session = Session::spawn(
@@ -2448,6 +2505,9 @@ impl App {
         }
     }
     fn update_cwd(&mut self, id: SurfaceId, cwd: PathBuf) {
+        if self.remote_directory(id).is_some() {
+            return;
+        }
         if let Some((workspace, pane, _)) = self.locate(id) {
             let first_report = self.surfaces.get(&id).is_some_and(|s| !s.cwd_reported);
             let root = &mut self.workspaces[workspace].root;
@@ -2793,6 +2853,7 @@ impl App {
             Action::NewWorkspace => {
                 return self.new_workspace(None, None, None).map(|_| ());
             }
+            Action::NewSshWorkspace => return self.show_ssh_dialog(),
             Action::Workspace(id) => {
                 let index = self.workspace_index(id)?;
                 if self.is_detached_workspace(id) {
@@ -3007,10 +3068,11 @@ impl App {
                 let surface = self.target(None, caller)?;
                 let (workspace, pane, cwd) = self.locate(surface).unwrap();
                 return Ok(Some(json!({"pid":std::process::id(),"pipe":self._ipc.name,
-                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":cwd,"shell":self.shells.get(&surface),"platform":"windows"})));
+                "workspace":self.workspaces[workspace].id,"pane":pane,"surface":surface,"cwd":self.remote_directory(surface).map_or_else(||json!(cwd), |remote|json!(remote)),"shell":self.shells.get(&surface),"platform":"windows"})));
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
+                "ssh_workspace":true,"ssh_backend":"OpenSSH","ssh_multiplexing":false,"ssh_port_forwarding":false,
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode","detached_surfaces":["terminal","browser","editor"],"detached_window_restore":true,
                 "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
@@ -3042,6 +3104,7 @@ impl App {
                     .tab_menu
                     .as_ref()
                     .map(tab_menu::Menu::capture_window)
+                    .or_else(|| self.ssh_dialog.as_ref().map(|panel| panel.window))
                     .or_else(|| {
                         self.options
                             .as_ref()
@@ -3067,7 +3130,7 @@ impl App {
                     "shell":self.shells[id],"startup_error":surface.startup_error,
                     "bounds":surface.holder.view_bounds(&surface.view),"holder":surface.holder.diagnostics(),
                     "view_handle":surface.view.hwnd().0 as usize,
-                    "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
+                    "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
@@ -3084,6 +3147,7 @@ impl App {
                         "metadata":self.metadata.as_ref().map(workspaces::Panel::diagnostics),
                         "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
                         "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
+                        "ssh_dialog":self.ssh_dialog.as_ref().map(ssh_panel::Panel::diagnostics),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,

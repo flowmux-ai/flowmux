@@ -77,6 +77,11 @@ impl App {
             }
         }
         for (id, label, action) in [
+            (
+                "new-ssh-workspace",
+                "New SSH Workspace",
+                Action::NewSshWorkspace,
+            ),
             ("settings", "Options", Action::Settings),
             ("open-file", "Open file…", Action::OpenEditor),
             ("notifications", "Notifications", Action::Notifications),
