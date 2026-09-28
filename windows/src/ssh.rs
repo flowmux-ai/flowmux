@@ -9,6 +9,55 @@ use flowmux_core::{
     SshForwardSpec, SshTarget, SshWorkspaceConfig,
 };
 
+/// Display only: remote paths must never become local process/file paths.
+/// A browser tab has no cwd, so retain a known SSH directory before falling
+/// back to the workspace's configured starting directory.
+pub fn display_cwd(workspace: &crate::model::Workspace) -> Option<&str> {
+    use flowmux_core::{Pane, PaneContent, PaneId, PaneSurface, SurfaceKind};
+    fn remote(surface: &PaneSurface) -> Option<&str> {
+        match &surface.kind {
+            SurfaceKind::SshTerminal { cwd, .. } => cwd.as_deref(),
+            _ => None,
+        }
+    }
+    fn known(root: &Pane, pane: Option<PaneId>) -> Option<&str> {
+        match root {
+            Pane::Leaf {
+                id,
+                content: PaneContent::Tabs { active, surfaces },
+            } if pane.is_none_or(|pane| pane == *id) => {
+                let index = surfaces
+                    .iter()
+                    .position(|surface| surface.id == *active)
+                    .unwrap_or(0);
+                surfaces[..index]
+                    .iter()
+                    .rev()
+                    .chain(surfaces[index..].iter())
+                    .find_map(remote)
+            }
+            Pane::Split { first, second, .. } => known(first, pane).or_else(|| known(second, pane)),
+            _ => None,
+        }
+    }
+    let config = workspace.ssh.as_ref()?;
+    let active = workspace
+        .root
+        .active_surface_id(workspace.focused)
+        .and_then(|active| workspace.root.find_surface_ref(workspace.focused, active));
+    if let Some(PaneSurface {
+        kind: SurfaceKind::SshTerminal { cwd, .. },
+        ..
+    }) = active
+    {
+        // An active home-directory terminal must not borrow a sibling's cwd.
+        return cwd.as_deref().or(config.cwd.as_deref());
+    }
+    known(&workspace.root, Some(workspace.focused))
+        .or_else(|| known(&workspace.root, None))
+        .or(config.cwd.as_deref())
+}
+
 pub fn set_remote_cwd(
     root: &mut flowmux_core::Pane,
     pane: flowmux_core::PaneId,
@@ -100,9 +149,13 @@ pub fn forwarding_shell(
     local_port: u16,
 ) -> anyhow::Result<Shell> {
     spec.validate().map_err(anyhow::Error::msg)?;
-    ensure!(local_port != 0, "Resolved local forward port must not be zero");
     ensure!(
-        spec.local_port.is_none_or(|requested| requested == local_port),
+        local_port != 0,
+        "Resolved local forward port must not be zero"
+    );
+    ensure!(
+        spec.local_port
+            .is_none_or(|requested| requested == local_port),
         "Resolved local forward port differs from the requested port"
     );
     let mut args = vec!["-N".into(), "-T".into()];
@@ -162,6 +215,60 @@ mod tests {
             tmux: false,
             forwards: Vec::new(),
         }
+    }
+
+    #[test]
+    fn display_cwd_retains_remote_context_on_browser_tabs_without_local_fallback() {
+        use flowmux_core::{Pane, PaneContent, PaneSurface, SplitDirection};
+        let mut config = config();
+        config.cwd = Some("/설정/한 & 😀".into());
+        let mut workspace =
+            crate::model::Workspace::new_ssh(PathBuf::from(r"C:\local-only"), config, None)
+                .unwrap();
+        let terminal = workspace.active();
+        let pane = workspace.focused;
+        let known = "/현재/한 & 😀";
+        assert!(set_remote_cwd(
+            &mut workspace.root,
+            pane,
+            terminal,
+            Some(known.into())
+        ));
+        assert_eq!(display_cwd(&workspace), Some(known));
+        let browser = PaneSurface::browser("Preview", "https://example.test".into());
+        let browser_id = browser.id;
+        workspace.root.add_surface_to_leaf(pane, browser.clone());
+        workspace.root.set_active_surface(pane, browser_id);
+        assert_eq!(display_cwd(&workspace), Some(known));
+        let browser = PaneSurface::browser("Other preview", "https://example.test".into());
+        let browser_id = browser.id;
+        let browser_pane = workspace
+            .root
+            .split_leaf(
+                pane,
+                SplitDirection::Vertical,
+                0.5,
+                PaneContent::Tabs {
+                    active: browser_id,
+                    surfaces: vec![browser.clone()],
+                },
+            )
+            .unwrap();
+        workspace.focused = browser_pane;
+        assert_eq!(display_cwd(&workspace), Some(known));
+        workspace.root = Pane::Leaf {
+            id: browser_pane,
+            content: PaneContent::Tabs {
+                active: browser_id,
+                surfaces: vec![browser],
+            },
+        };
+        assert_eq!(display_cwd(&workspace), Some("/설정/한 & 😀"));
+        workspace.ssh.as_mut().unwrap().cwd = None;
+        assert_eq!(display_cwd(&workspace), None);
+        assert_eq!(workspace.cwd, PathBuf::from(r"C:\local-only"));
+        workspace.ssh = None;
+        assert_eq!(display_cwd(&workspace), None);
     }
 
     #[test]
@@ -258,7 +365,10 @@ mod tests {
             assert!(shell.args.windows(2).any(|args| args == pair));
         }
         assert_eq!(shell.args.last().unwrap(), "::1");
-        assert!(!shell.args.iter().any(|arg| arg == "-tt" || arg.contains("ControlMaster")));
+        assert!(!shell
+            .args
+            .iter()
+            .any(|arg| arg == "-tt" || arg.contains("ControlMaster")));
         spec.https = false; // HTTPS affects previews, not SSH transport arguments.
         assert_eq!(forwarding_shell(&target, &spec, 49152).unwrap(), shell);
         assert!(forwarding_shell(&target, &spec, 0).is_err());

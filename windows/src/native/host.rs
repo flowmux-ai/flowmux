@@ -79,6 +79,8 @@ mod search;
 mod shells;
 #[path = "ssh.rs"]
 mod ssh;
+#[path = "ssh_auth.rs"]
+mod ssh_auth;
 #[path = "ssh_forward.rs"]
 mod ssh_forward;
 #[path = "ssh_listener.rs"]
@@ -106,6 +108,7 @@ enum Event {
     SshDialog(Uuid, ssh_panel::UiAction),
     SshPorts(Uuid, ssh_ports_panel::UiAction),
     SshForwardUi(SurfaceId, ssh_forward::UiAction),
+    SshAuthenticationUi(SurfaceId, Uuid, ssh_auth::UiAction),
     TabMenu(Uuid, tab_menu::UiAction),
     WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
@@ -533,6 +536,8 @@ struct App {
     workspaces: Vec<Workspace>,
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
+    // The retained terminal's WebView/holder must drop before this parent HWND.
+    ssh_auth_window: Option<(SurfaceId, ssh_auth::Window)>,
     detached: HashMap<SurfaceId, detached::Window>,
     detached_focus: Option<SurfaceId>,
     main_closed: bool,
@@ -771,6 +776,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             ssh_attempted,
             ssh_ports: None,
             ssh_forwards: HashMap::new(),
+            ssh_auth_window: None,
             shells,
             settings_worker,
             settings,
@@ -887,6 +893,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.ssh_forwards.clear();
         app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
+        app.ssh_auth_window.take();
         app.detached.clear();
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
@@ -1353,6 +1360,7 @@ impl App {
         for surface in self.detached.keys().copied().collect::<Vec<_>>() {
             self.detached_layout(surface)?;
         }
+        self.ssh_auth_layout()?;
         let terminals: Vec<_> = self
             .surfaces
             .iter()
@@ -1414,7 +1422,12 @@ impl App {
             })
             .collect();
         for (id, surface) in &mut self.surfaces {
-            if self.detached.contains_key(id) {
+            if self.detached.contains_key(id)
+                || self
+                    .ssh_auth_window
+                    .as_ref()
+                    .is_some_and(|(hosted, _)| hosted == id)
+            {
                 continue;
             }
             let show = visible.contains_key(id) && client.right > 0 && client.bottom > 0;
@@ -1704,6 +1717,14 @@ impl App {
             }
             return Ok(());
         };
+        if self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(id, _)| *id == active)
+        {
+            // Main-window relayout must not move focus into a modeless popup.
+            return Ok(());
+        }
         self.ack_focused_notifications(active);
         if let Some(editor) = self.editors.get(&active) {
             return editor.view.focus();
@@ -1754,6 +1775,30 @@ impl App {
             Event::EmptyWindowShortcut(action) => self.empty_window_shortcut_action(action)?,
             Event::SshDialog(id, action) => self.ssh_dialog_action(id, action)?,
             Event::SshPorts(id, action) => self.ssh_ports_action(id, action)?,
+            Event::SshAuthenticationUi(surface, window, action) => {
+                if let Some(forward) = self
+                    .ssh_forwards
+                    .values_mut()
+                    .find(|f| f.surface == surface)
+                {
+                    forward.authentication_ui(window, action)?;
+                } else if self
+                    .ssh_auth_window
+                    .as_ref()
+                    .is_some_and(|(id, popup)| *id == surface && popup.id == window)
+                {
+                    match action {
+                        ssh_auth::UiAction::Close => {
+                            if self.ssh_auth_window.as_ref().is_some_and(
+                                |(_, popup)| unsafe { IsWindowEnabled(popup.window) } != 0,
+                            ) {
+                                self.close_ssh_auth()?;
+                            }
+                        }
+                        ssh_auth::UiAction::Layout => self.ssh_auth_layout()?,
+                    }
+                }
+            }
             Event::SshForwardUi(id, action) => {
                 if let Some(forward) = self.ssh_forwards.values_mut().find(|f| f.surface == id) {
                     if matches!(action, ssh_forward::UiAction::Reconnect) {
@@ -2136,11 +2181,22 @@ impl App {
                         && surface.session.is_some()
                         && surface.exit_code.is_none()
                     {
+                        let newly_connected = !surface.ssh_connected;
                         surface.ssh_connected = true;
                         surface.send(&HostMessage::SshStatus {
                             state: "connected".into(),
                             error: None,
                         })?;
+                        if newly_connected
+                            && self
+                                .ssh_auth_window
+                                .as_ref()
+                                .is_some_and(|(hosted, popup)| {
+                                    *hosted == id && unsafe { IsWindowEnabled(popup.window) } != 0
+                                })
+                        {
+                            self.close_ssh_auth()?;
+                        }
                         self.refresh_ssh_toolbar();
                     }
                 }
@@ -2939,7 +2995,8 @@ impl App {
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
         self.tab_menu_surface_closing(surface);
-        if let Some(owner) = self.detached.get(&surface).map(|window| window.window) {
+        let owner = self.surface_window(surface);
+        if owner != self.window {
             self.metadata_owner_closing(owner);
             self.download_owner_closing(owner);
         }
@@ -2949,6 +3006,13 @@ impl App {
         self.shells.remove(&surface);
         self.ssh_attempted.remove(&surface);
         self.surfaces.remove(&surface);
+        if self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(id, _)| *id == surface)
+        {
+            self.ssh_auth_window.take();
+        }
         self.detached.remove(&surface);
         if self
             .pending_save
@@ -3313,6 +3377,7 @@ impl App {
                     .as_ref()
                     .map(tab_menu::Menu::capture_window)
                     .or_else(|| self.ssh_dialog.as_ref().map(|panel| panel.window))
+                    .or_else(|| self.ssh_auth_window.as_ref().map(|(_, popup)| popup.window))
                     .or_else(|| self.ssh_ports.as_ref().map(|panel| panel.window))
                     .or_else(|| {
                         self.options
@@ -3329,7 +3394,7 @@ impl App {
             }
             Command::Tree => {
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
-                    "pid":surface.process_pid,"running":surface.session.is_some() && surface.exit_code.is_none(),
+                    "pid":surface.process_pid,"session":surface.session_generation,"running":surface.session.is_some() && surface.exit_code.is_none(),
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "observed_output_bytes":surface.observed_output_bytes,"last_output_ms":surface.last_output_ms,
@@ -3358,6 +3423,7 @@ impl App {
                         "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
                         "ssh_dialog":self.ssh_dialog.as_ref().map(ssh_panel::Panel::diagnostics),
                         "ssh_ports":self.ssh_ports.as_ref().map(ssh_ports_panel::Panel::status),
+                        "ssh_authentication":self.ssh_auth_status(),
                         "ssh_forwards":self.ssh_forwards.values().map(ssh_forward::Forward::status).collect::<Vec<_>>(),
                         "ssh_toolbar":self.ssh_toolbar_status(),
                         "overview":self.overview_status(),

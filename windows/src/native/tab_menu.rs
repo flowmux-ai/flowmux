@@ -77,7 +77,11 @@ impl Drop for Menu {
 impl App {
     pub(super) fn refresh_terminal_menu(&mut self, source: SurfaceId) -> anyhow::Result<()> {
         let (workspace, pane, _) = self.locate(source).context("Terminal no longer exists")?;
-        let split = !self.is_detached_workspace(self.workspaces[workspace].id);
+        let split = !self.is_detached_workspace(self.workspaces[workspace].id)
+            && !self
+                .ssh_auth_window
+                .as_ref()
+                .is_some_and(|(id, _)| *id == source);
         let close = split && self.workspaces[workspace].leaves().len() > 1;
         let terminal = self
             .surfaces
@@ -124,6 +128,14 @@ impl App {
             return Ok(());
         }
         use crate::protocol::TerminalMenuAction::*;
+        if !matches!(action, CopyPath)
+            && self
+                .ssh_auth_window
+                .as_ref()
+                .is_some_and(|(id, _)| *id == source)
+        {
+            return Ok(());
+        }
         match action {
             SplitRight | SplitDown => {
                 self.files_operation_guard()?;

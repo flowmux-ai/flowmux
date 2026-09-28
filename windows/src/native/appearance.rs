@@ -67,6 +67,9 @@ impl App {
                     for forward in self.ssh_forwards.values_mut() {
                         forward.apply_settings(&self.settings)?;
                     }
+                    if let Some((_, window)) = &self.ssh_auth_window {
+                        window.theme(self.settings.terminal.theme);
+                    }
                     if let Some(panel) = &self.ssh_ports {
                         chrome::window_theme(panel.window, self.settings.terminal.theme);
                     }

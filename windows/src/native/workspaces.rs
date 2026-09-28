@@ -120,10 +120,7 @@ impl App {
             format!(
                 "{}:{}",
                 config.target.destination(),
-                self.remote_directory(workspace.active())
-                    .flatten()
-                    .as_deref()
-                    .unwrap_or("~")
+                crate::ssh::display_cwd(workspace).unwrap_or("~")
             )
         } else {
             cwd.display().to_string()
@@ -900,11 +897,11 @@ impl App {
         };
         let status = self.ssh_status(workspace);
         let state = status["state"].as_str().unwrap_or("disconnected");
-        let cwd = self.remote_directory(ws.active()).flatten();
+        let cwd = crate::ssh::display_cwd(ws);
         let mut caption = format!(
             "SSH {} · {state} · {}",
             config.target.destination(),
-            cwd.as_deref().unwrap_or("~")
+            cwd.unwrap_or("~")
         );
         if let Some(error) = status["error"].as_str() {
             caption.push_str(&format!(" · {error}"));

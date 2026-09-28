@@ -82,6 +82,13 @@ impl App {
     }
 
     pub(super) fn surface_window(&self, surface: SurfaceId) -> HWND {
+        if let Some((_, window)) = self
+            .ssh_auth_window
+            .as_ref()
+            .filter(|(id, _)| *id == surface)
+        {
+            return window.window;
+        }
         self.detached
             .get(&surface)
             .map_or(self.window, |window| window.window)

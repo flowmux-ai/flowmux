@@ -229,7 +229,11 @@ impl App {
         let Some(surface) = self.surfaces.get(&source) else {
             return Ok(());
         };
-        if self.current_surface() != Some(source)
+        let authentication = self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(id, _)| *id == source);
+        if (self.current_surface() != Some(source) && !authentication)
             || !surface.visible
             || !surface.ready
             || surface.restoring
@@ -275,9 +279,22 @@ impl App {
             "window is busy"
         );
         use ActionId::*;
-        if self.detached.contains_key(&source) {
+        let authentication = self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(id, _)| *id == source);
+        if authentication && unsafe { IsWindowEnabled(self.surface_window(source)) } == 0 {
+            return Ok(());
+        }
+        if self.detached.contains_key(&source) || authentication {
             match action {
-                CloseSurface => return self.close_detached(source),
+                CloseSurface => {
+                    return if authentication {
+                        self.close_ssh_auth()
+                    } else {
+                        self.close_detached(source)
+                    }
+                }
                 TerminalSearch => {
                     self.surfaces
                         .get(&source)

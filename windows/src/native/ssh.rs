@@ -24,7 +24,11 @@ impl App {
                 && self.close_request.is_none()
                 && !self.close_accepted
                 && !self.closing
-                && self.editor_barrier.is_none(),
+                && self.editor_barrier.is_none()
+                && self
+                    .ssh_auth_window
+                    .as_ref()
+                    .is_none_or(|(_, window)| unsafe { IsWindowEnabled(window.window) } != 0),
             "SSH connection cannot change while the window is saving or closing"
         );
         Ok(())
@@ -218,6 +222,15 @@ impl App {
         self.ssh_lifecycle_guard()?;
         let ids = self.ssh_surface_ids(workspace)?;
         self.ssh_disconnected.insert(workspace);
+        let auth_failure = if self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(id, _)| ids.contains(id))
+        {
+            self.close_ssh_auth().err()
+        } else {
+            None
+        };
         let forward_failure = self.ssh_forwards_disconnect(workspace).err();
         // Retire every process before any WebView notification can fail. Sequence
         // counters stay intact so already submitted parser ACKs remain valid.
@@ -231,7 +244,7 @@ impl App {
                 surface.output_ended = true;
             }
         }
-        let mut failure = forward_failure;
+        let mut failure = auth_failure.or(forward_failure);
         for id in ids {
             self.cancel_surface_search(id);
             self.cancel_terminal_requests(id);
@@ -307,9 +320,101 @@ impl App {
             .or_else(|| current.filter(|id| ids.contains(id)))
             .or_else(|| ids.first().copied())
             .context("SSH workspace has no authentication terminal")?;
-        self.select(id)?;
-        self.layout()?;
-        self.focus_active()
+        self.show_ssh_auth(id)
+    }
+
+    fn show_ssh_auth(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        if !self
+            .ssh_auth_window
+            .as_ref()
+            .is_some_and(|(current, _)| *current == id)
+        {
+            self.close_ssh_auth()?;
+            let (index, _, _) = self.locate(id).context("SSH terminal no longer exists")?;
+            let target = &self.workspaces[index]
+                .ssh
+                .as_ref()
+                .context("Workspace is not SSH")?
+                .target;
+            let window = ssh_auth::Window::new(
+                self.window,
+                &format!("SSH Authentication — {}", target.destination()),
+                id,
+                self.background_test,
+            )?;
+            window.theme(self.settings.terminal.theme);
+            self.surface_holder(id)?.reparent(window.window)?;
+            self.ssh_auth_window = Some((id, window));
+        }
+        self.refresh_terminal_menu(id)?;
+        self.ssh_auth_layout()?;
+        self.ssh_auth_window.as_mut().unwrap().1.show();
+        if !self.background_test {
+            let terminal = &self.surfaces[&id];
+            terminal.view.focus()?;
+            if terminal.ready {
+                terminal.send(&HostMessage::Focus)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn ssh_auth_layout(&mut self) -> anyhow::Result<()> {
+        let Some((id, window)) = &self.ssh_auth_window else {
+            return Ok(());
+        };
+        let terminal = self
+            .surfaces
+            .get_mut(id)
+            .context("SSH authentication terminal disappeared")?;
+        let area = window.area()?;
+        terminal.holder.layout(Some(area), self.background_test)?;
+        terminal.view.set_bounds(bounds(area))?;
+        unsafe {
+            terminal
+                .view
+                .controller()
+                .NotifyParentWindowPositionChanged()?;
+        }
+        if !terminal.visible {
+            terminal.view.set_visible(true)?;
+            terminal.visible = true;
+            if terminal.ready || terminal.restoring {
+                terminal.send(&HostMessage::Visibility { visible: true })?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn close_ssh_auth(&mut self) -> anyhow::Result<()> {
+        let Some((id, window)) = &self.ssh_auth_window else {
+            return Ok(());
+        };
+        let (id, owner) = (*id, window.window);
+        // Keep the owner alive if reparenting fails; never destroy a live WebView's parent.
+        if let Some(terminal) = self.surfaces.get(&id) {
+            terminal.holder.reparent(self.window)?;
+        }
+        self.tab_menu_surface_closing(id);
+        self.metadata_owner_closing(owner);
+        self.ssh_auth_window.take();
+        self.layout()
+    }
+
+    pub(super) fn ssh_auth_status(&self) -> Value {
+        let Some((id, window)) = &self.ssh_auth_window else {
+            return Value::Null;
+        };
+        let mut status = window.status();
+        status["surface"] = json!(id);
+        status["workspace"] = json!(self
+            .locate(*id)
+            .map(|(index, _, _)| self.workspaces[index].id));
+        status["session"] = json!(self
+            .surfaces
+            .get(id)
+            .map(|terminal| terminal.session_generation));
+        status
     }
 
     pub(super) fn show_ssh_dialog(&mut self) -> anyhow::Result<()> {

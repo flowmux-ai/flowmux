@@ -10,52 +10,6 @@ pub(super) enum UiAction {
     Reconnect,
 }
 
-thread_local! {
-    static ROUTES: RefCell<HashMap<isize, SurfaceId>> = RefCell::new(HashMap::new());
-}
-
-unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-    let action = match message {
-        WM_CLOSE => Some(UiAction::Close),
-        WM_SIZE | WM_MOVE => Some(UiAction::Layout),
-        WM_DPICHANGED if l != 0 => {
-            let rect = &*(l as *const RECT);
-            SetWindowPos(
-                window,
-                std::ptr::null_mut(),
-                rect.left,
-                rect.top,
-                rect.right - rect.left,
-                rect.bottom - rect.top,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-            Some(UiAction::Layout)
-        }
-        WM_NCDESTROY => {
-            ROUTES.with(|routes| routes.borrow_mut().remove(&(window as isize)));
-            None
-        }
-        _ => None,
-    };
-    if let Some(action) = action {
-        let id = ROUTES.with(|routes| routes.borrow().get(&(window as isize)).copied());
-        if let Some(id) = id {
-            post(Event::SshForwardUi(id, action));
-        }
-        return 0;
-    }
-    chrome::message(window, message, w, l).unwrap_or_else(|| DefWindowProcW(window, message, w, l))
-}
-
-struct Window(HWND);
-impl Drop for Window {
-    fn drop(&mut self) {
-        unsafe {
-            DestroyWindow(self.0);
-        }
-    }
-}
-
 pub(super) struct Forward {
     pub(super) surface: SurfaceId,
     pub(super) workspace: WorkspaceId,
@@ -64,7 +18,7 @@ pub(super) struct Forward {
     pub(super) error: Option<String>,
     // The WebView and its holder must drop before the owned top-level HWND.
     terminal: Surface,
-    window: Window,
+    window: ssh_auth::Window,
     owner: HWND,
     shell: crate::shell::Shell,
     cwd: PathBuf,
@@ -101,63 +55,9 @@ impl Forward {
         );
         let surface = SurfaceId::new();
         let owner = app.window;
-        let window = unsafe {
-            anyhow::ensure!(
-                IsWindow(owner) != 0,
-                "SSH authentication owner is unavailable"
-            );
-            let class = wide("flowmux.windows.ssh.forward");
-            let instance = GetModuleHandleW(std::ptr::null());
-            let definition = WNDCLASSW {
-                lpfnWndProc: Some(procedure),
-                hInstance: instance,
-                hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                lpszClassName: class.as_ptr(),
-                ..Default::default()
-            };
-            anyhow::ensure!(
-                RegisterClassW(&definition) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS,
-                "Cannot register SSH authentication window"
-            );
-            let dpi = GetDpiForWindow(owner).max(96);
-            let style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
-            let mut frame = RECT {
-                left: 0,
-                top: 0,
-                right: (740 * dpi / 96) as i32,
-                bottom: (360 * dpi / 96) as i32,
-            };
-            checked(AdjustWindowRectExForDpi(
-                &mut frame,
-                style,
-                0,
-                WS_EX_TOOLWINDOW,
-                dpi,
-            ))?;
-            let mut parent = RECT::default();
-            checked(GetWindowRect(owner, &mut parent))?;
-            let width = frame.right - frame.left;
-            let height = frame.bottom - frame.top;
-            let handle = CreateWindowExW(
-                WS_EX_TOOLWINDOW,
-                class.as_ptr(),
-                wide(&title).as_ptr(),
-                style,
-                parent.left + (parent.right - parent.left - width) / 2,
-                parent.top + (parent.bottom - parent.top - height) / 2,
-                width,
-                height,
-                owner,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null(),
-            );
-            checked((!handle.is_null()) as i32)?;
-            Window(handle)
-        };
-        ROUTES.with(|routes| routes.borrow_mut().insert(window.0 as isize, surface));
-        chrome::window_theme(window.0, app.settings.terminal.theme);
-        let terminal = app.terminal_view(surface, window.0, Vec::new())?;
+        let window = ssh_auth::Window::new(owner, &title, surface, app.background_test)?;
+        window.theme(app.settings.terminal.theme);
+        let terminal = app.terminal_view(surface, window.window, Vec::new())?;
         let forward = Self {
             surface,
             workspace,
@@ -187,16 +87,7 @@ impl Forward {
     }
 
     fn layout(&self) -> anyhow::Result<()> {
-        let mut client = RECT::default();
-        unsafe {
-            checked(GetClientRect(self.window.0, &mut client))?;
-        }
-        let area = model::Rect {
-            x: 0,
-            y: 0,
-            width: client.right.max(1),
-            height: client.bottom.max(1),
-        };
+        let area = self.window.area()?;
         self.terminal
             .holder
             .layout(Some(area), self.background || !self.open)?;
@@ -213,10 +104,8 @@ impl Forward {
     pub(super) fn show(&mut self) -> anyhow::Result<()> {
         self.open = true;
         self.layout()?;
+        self.window.show();
         if !self.background {
-            unsafe {
-                ShowWindow(self.window.0, SW_SHOWNORMAL);
-            }
             self.terminal.view.set_visible(true)?;
             self.terminal.view.focus()?;
         }
@@ -229,16 +118,26 @@ impl Forward {
         Ok(())
     }
 
+    pub(super) fn authentication_ui(
+        &mut self,
+        window_id: Uuid,
+        action: ssh_auth::UiAction,
+    ) -> anyhow::Result<()> {
+        if window_id != self.window.id {
+            return Ok(());
+        }
+        self.ui(match action {
+            ssh_auth::UiAction::Close => UiAction::Close,
+            ssh_auth::UiAction::Layout => UiAction::Layout,
+        })
+    }
+
     pub(super) fn ui(&mut self, action: UiAction) -> anyhow::Result<()> {
         match action {
             UiAction::Close => {
                 self.open = false;
                 self.terminal.visible = false;
-                if !self.background {
-                    unsafe {
-                        ShowWindow(self.window.0, SW_HIDE);
-                    }
-                }
+                self.window.hide();
                 self.terminal.view.set_visible(false)?;
                 if self.terminal.ready {
                     self.terminal
@@ -324,7 +223,7 @@ impl Forward {
         &self,
         settings: &crate::settings::Document,
     ) -> anyhow::Result<()> {
-        chrome::window_theme(self.window.0, settings.terminal.theme);
+        self.window.theme(settings.terminal.theme);
         self.terminal.send(&HostMessage::Settings {
             document: Box::new(settings.clone()),
             bindings: Vec::new(),
@@ -502,8 +401,8 @@ impl Forward {
 
     pub(super) fn status(&self) -> Value {
         json!({"workspace":self.workspace,"id":self.spec.id,"surface":self.surface,"spec":self.spec,"port":self.port,
-            "state":self.state,"error":self.error,"window":self.window.0 as usize,"owner":self.owner as usize,
-            "open":self.open,"native_visible":unsafe { IsWindowVisible(self.window.0) } != 0,
+            "state":self.state,"error":self.error,"window":self.window.window as usize,"owner":self.owner as usize,
+            "open":self.open,"native_visible":unsafe { IsWindowVisible(self.window.window) } != 0,
             "view_handle":self.terminal.view.hwnd().0 as usize,"holder":self.terminal.holder.diagnostics(),
             "ready":self.terminal.ready,"running":self.terminal.session.is_some(),"pid":self.terminal.process_pid,
             "session":self.terminal.session_generation,"exit_code":self.terminal.exit_code,"output_ended":self.terminal.output_ended,
