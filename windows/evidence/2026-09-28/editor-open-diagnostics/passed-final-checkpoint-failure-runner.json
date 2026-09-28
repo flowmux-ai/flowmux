@@ -1,0 +1,13 @@
+{
+    "name":  "editor-open-final-checkpoint-failure",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-checkpoint-failure-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T04:05:15.5664957Z",
+    "pid":  28608,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  7.525,
+    "finished":  "2026-09-28T04:05:23.0950613Z"
+}

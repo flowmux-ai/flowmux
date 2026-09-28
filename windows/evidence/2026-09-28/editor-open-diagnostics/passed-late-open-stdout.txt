@@ -1,0 +1,141 @@
+[check] passed expired_ui_queued_open_creates_no_editor_drains_admission_preserves_terminal_and_allows_following_open
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428
+{
+    "started":  "2026-09-28T13:04:03.2360142+09:00",
+    "mode":  "background",
+    "case":  "late-open",
+    "checks":  [
+                   {
+                       "name":  "expired_ui_queued_open_creates_no_editor_drains_admission_preserves_terminal_and_allows_following_open",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  6340,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:04:03.3605363Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428\\files 한글 한 😀",
+                                                      "pane":  "48ec19ee-84cc-41f0-abf2-866055832ebe",
+                                                      "pid":  6340,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-6340-749dd654-4a04-4ee3-814a-3d8ee28be205",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "230591e9-5952-4315-ab4e-ef4e200f0f52",
+                                                      "workspace":  "98450787-9f7c-43bc-961b-22cdbaf525f0"
+                                                  },
+                             "discoveryElapsedMs":  66,
+                             "identityBudgetMs":  7933,
+                             "identityElapsedMs":  745,
+                             "treeRequests":  2,
+                             "elapsedMs":  940,
+                             "finished":  "2026-09-28T04:04:04.3018156Z"
+                         },
+                         {
+                             "case":  "late-open",
+                             "kind":  "late-open-deadline",
+                             "pid":  6340,
+                             "pane":  "48ec19ee-84cc-41f0-abf2-866055832ebe",
+                             "windowHandle":  14945468,
+                             "clientBudgetMs":  20000,
+                             "wholeProcessSuspended":  false,
+                             "uiThreadSuspended":  true,
+                             "uiThreadResumed":  true,
+                             "threadId":  31840,
+                             "verifiedThreadPid":  6340,
+                             "previousSuspendCount":  0,
+                             "response":  {
+                                              "error":  "window did not answer within the IPC command deadline; command outcome may be unknown"
+                                          },
+                             "responseElapsedMs":  15068,
+                             "previousResumeCount":  1,
+                             "suspendElapsedMs":  15074,
+                             "pendingAfter":  0,
+                             "admittedAfter":  0,
+                             "editorsAfter":  0,
+                             "treeUnchanged":  true,
+                             "followingOpenSucceeded":  true,
+                             "followingSurface":  "6a24af31-83b6-485a-a222-13c21aadd4b7"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428\\state\\editor-profile",
+                             "surface":  "6a24af31-83b6-485a-a222-13c21aadd4b7",
+                             "pid":  6340,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  6340,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  6340
+              ],
+    "shells":  [
+                   32000
+               ],
+    "clientPids":  [
+                       39240,
+                       31488,
+                       39380,
+                       34084,
+                       28968,
+                       34288,
+                       32276,
+                       35172,
+                       38140,
+                       34988,
+                       34020,
+                       31596,
+                       30304,
+                       38176,
+                       2852,
+                       27244,
+                       28828,
+                       15368,
+                       10304,
+                       15492,
+                       7044,
+                       5956,
+                       33324,
+                       32792,
+                       30796,
+                       35252
+                   ],
+    "finished":  "2026-09-28T13:04:21.8577407+09:00"
+}

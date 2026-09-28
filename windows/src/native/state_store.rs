@@ -55,7 +55,20 @@ impl Store {
             "cannot overwrite another window's state"
         );
         let bytes = state.encode()?;
-        let temporary = self.path.with_extension(format!("{}.tmp", Uuid::new_v4()));
+        // Rust filesystem calls support long paths, but raw MoveFileExW needs
+        // the extended-length path returned by Windows canonicalize. Resolve
+        // the existing parent once so a new destination and its temporary file
+        // use the same directory without changing the externally reported path.
+        let parent = self
+            .path
+            .parent()
+            .context("window state has no directory")?;
+        let destination = std::fs::canonicalize(parent)?.join(
+            self.path
+                .file_name()
+                .context("window state has no filename")?,
+        );
+        let temporary = destination.with_extension(format!("{}.tmp", Uuid::new_v4()));
         let result = (|| -> anyhow::Result<()> {
             let mut file = OpenOptions::new()
                 .write(true)
@@ -67,7 +80,7 @@ impl Store {
             unsafe {
                 checked(MoveFileExW(
                     wide(&temporary).as_ptr(),
-                    wide(&self.path).as_ptr(),
+                    wide(&destination).as_ptr(),
                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
                 ))?;
             }
@@ -153,6 +166,30 @@ fn open_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_long_state_path_creates_replaces_and_restores() {
+        use std::os::windows::ffi::OsStrExt;
+
+        let root = std::env::temp_dir().join(format!("flowmux-long-state-{}", Uuid::new_v4()));
+        let mut directory = root.clone();
+        while directory.as_os_str().encode_wide().count() < 280 {
+            directory.push("checkpoint-한글-path");
+        }
+        let mut state = crate::state::sample();
+        let store = Store::claim(&directory, state.window).unwrap();
+        assert!(store.path.as_os_str().encode_wide().count() > 260);
+        store.write(&state).unwrap();
+        state.workspaces[0].name = "긴 경로 변경 😀".into();
+        store.write(&state).unwrap();
+        assert_eq!(store.read().unwrap().workspaces[0].name, "긴 경로 변경 😀");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
+        drop(store);
+        let (lease, restored) = open_directory(&directory, false, Some(state.window)).unwrap();
+        assert_eq!(restored.unwrap().workspaces[0].name, "긴 경로 변경 😀");
+        drop(lease);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn native_lock_atomic_replace_failure_and_corrupt_state_preservation() {
         let directory = std::env::temp_dir().join(format!("flowmux-state-test-{}", Uuid::new_v4()));

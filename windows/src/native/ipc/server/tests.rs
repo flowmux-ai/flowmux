@@ -2,6 +2,132 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn reply_inbox() -> (Reply, ReplyInbox, Arc<AtomicUsize>) {
+    let pending = Arc::new(AtomicUsize::new(0));
+    let (send, receive) = mpsc::sync_channel(1);
+    let reply = Reply::new(send, &pending).unwrap();
+    let inbox = ReplyInbox::new(receive, &reply);
+    (reply, inbox, pending)
+}
+
+#[test]
+fn reply_sent_after_poll_timeout_but_before_retirement_is_consumed_once() {
+    let (reply, inbox, pending) = reply_inbox();
+    assert_eq!(
+        inbox.receiver.recv_timeout(Duration::ZERO),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+    let clone = reply.clone();
+    assert_eq!(clone.received_at(), reply.received_at());
+    let (release, gate) = mpsc::sync_channel(1);
+    let (sent, observed) = mpsc::sync_channel(1);
+    let sender = std::thread::spawn(move || {
+        gate.recv_timeout(Duration::from_secs(2)).unwrap();
+        sent.send(clone.try_send(json!({"ok":true}))).unwrap();
+    });
+    // The previous receive timed out, then the UI wins the shared delivery gate
+    // before the server retires the request. No wall-clock race is required.
+    release.send(()).unwrap();
+    assert!(observed
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .is_ok());
+    assert_eq!(inbox.close_and_drain().unwrap(), json!({"ok":true}));
+    assert!(matches!(
+        reply.try_send(json!({"duplicate":true})),
+        Err(mpsc::TrySendError::Disconnected(_))
+    ));
+    assert_eq!(inbox.receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+    sender.join().unwrap();
+    drop(inbox);
+    assert_eq!(pending.load(Ordering::Acquire), 1);
+    drop(reply);
+    assert_eq!(pending.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn deadline_retirement_before_send_disconnects_all_clones_without_refunding_the_lease() {
+    let (reply, inbox, pending) = reply_inbox();
+    let clone = reply.clone();
+    let retained = reply.clone();
+    let (release, gate) = mpsc::sync_channel(1);
+    let (sent, observed) = mpsc::sync_channel(1);
+    let sender = std::thread::spawn(move || {
+        gate.recv_timeout(Duration::from_secs(2)).unwrap();
+        sent.send(clone.try_send(json!({"ok":true}))).unwrap();
+    });
+    assert_eq!(inbox.close_and_drain(), Err(mpsc::TryRecvError::Empty));
+    release.send(()).unwrap();
+    assert!(matches!(
+        observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+        Err(mpsc::TrySendError::Disconnected(value)) if value == json!({"ok":true})
+    ));
+    // The Receiver is deliberately still alive: the closed delivery gate, not
+    // dropping the channel, makes a late accepted-close sender take fallback.
+    assert_eq!(inbox.receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+    assert!(matches!(
+        retained.try_send(json!({"another":true})),
+        Err(mpsc::TrySendError::Disconnected(_))
+    ));
+    sender.join().unwrap();
+    drop(reply);
+    drop(inbox);
+    assert_eq!(pending.load(Ordering::Acquire), 1);
+    drop(retained);
+    assert_eq!(pending.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn receiver_gate_does_not_retain_a_sender_or_command_lease() {
+    let (reply, inbox, pending) = reply_inbox();
+    drop(reply);
+    assert_eq!(pending.load(Ordering::Acquire), 0);
+    assert_eq!(
+        inbox.receiver.recv_timeout(Duration::ZERO),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    );
+    assert_eq!(
+        inbox.close_and_drain(),
+        Err(mpsc::TryRecvError::Disconnected)
+    );
+}
+
+#[test]
+fn dropping_inbox_closes_delivery_but_keeps_live_ui_reply_leases() {
+    let (reply, inbox, pending) = reply_inbox();
+    let retained = reply.clone();
+    drop(inbox);
+    assert_eq!(pending.load(Ordering::Acquire), 1);
+    assert!(matches!(
+        reply.try_send(json!({"ok":true})),
+        Err(mpsc::TrySendError::Disconnected(_))
+    ));
+    drop(reply);
+    assert_eq!(pending.load(Ordering::Acquire), 1);
+    drop(retained);
+    assert_eq!(pending.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn poisoned_delivery_gate_still_retires_without_losing_a_queued_reply() {
+    let (reply, inbox, pending) = reply_inbox();
+    let gate = reply.accepting.clone();
+    assert!(std::panic::catch_unwind(move || {
+        let _guard = gate.lock().unwrap();
+        panic!("deliberate delivery-gate poison");
+    })
+    .is_err());
+    reply.try_send(json!({"ok":true})).unwrap();
+    assert_eq!(inbox.close_and_drain().unwrap(), json!({"ok":true}));
+    assert!(matches!(
+        reply.try_send(json!({"late":true})),
+        Err(mpsc::TrySendError::Disconnected(_))
+    ));
+    drop(inbox);
+    drop(reply);
+    assert_eq!(pending.load(Ordering::Acquire), 0);
+}
+
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {

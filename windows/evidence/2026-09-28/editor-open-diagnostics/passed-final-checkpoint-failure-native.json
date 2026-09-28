@@ -1,0 +1,235 @@
+{
+    "started":  "2026-09-28T13:05:16.1969877+09:00",
+    "mode":  "background",
+    "case":  "checkpoint-failure",
+    "checks":  [
+                   {
+                       "name":  "failed_checkpoint_replace_preserves_prior_state_unseals_monaco_and_allows_later_clean_quit",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  8836,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:05:16.3004214Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\files 한글 한 😀",
+                                                      "pane":  "0d995835-111a-489a-b1b6-0ea6ea20290a",
+                                                      "pid":  8836,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-8836-40fd82a3-61b7-4de5-82c5-004e3920eb7e",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "b731afe0-b794-4f61-9fb0-d8efc0bebc89",
+                                                      "workspace":  "44212f83-a252-4146-9774-cb82a2d6e2b0"
+                                                  },
+                             "discoveryElapsedMs":  63,
+                             "identityBudgetMs":  7936,
+                             "identityElapsedMs":  733,
+                             "treeRequests":  2,
+                             "elapsedMs":  919,
+                             "finished":  "2026-09-28T04:05:17.2215508Z"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  8836,
+                             "exitCode":  0
+                         },
+                         {
+                             "kind":  "host-startup",
+                             "pid":  19264,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:05:17.4241457Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\files 한글 한 😀",
+                                                      "pane":  "05b19267-9410-4c21-b103-a708b0c68ccb",
+                                                      "pid":  19264,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-19264-9758167a-5f26-4a6f-8d32-debefd05d202",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "2acd2a43-e542-41a5-8834-11e98ff245ed",
+                                                      "workspace":  "73ece473-3cb8-484b-bff6-66527de4538e"
+                                                  },
+                             "discoveryElapsedMs":  76,
+                             "identityBudgetMs":  7924,
+                             "identityElapsedMs":  733,
+                             "treeRequests":  3,
+                             "elapsedMs":  919,
+                             "finished":  "2026-09-28T04:05:18.3422839Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state\\editor-profile",
+                             "surface":  "c352d43d-6333-4ee7-817e-7da37a7af665",
+                             "pid":  19264,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "inFlightOverlapEstablished":  false,
+                             "sealedAfterFailure":  false,
+                             "case":  "checkpoint-failure",
+                             "quitFailure":  {
+                                                 "error":  "could not atomically save Windows window state: 액세스가 거부되었습니다. (os error 5)"
+                                             },
+                             "previousCheckpointHash":  "A1271696C1350771E3AD12D210B5FC5F8F9EE487F934B96A9227A1190D308C73"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  19264,
+                             "exitCode":  0
+                         },
+                         {
+                             "kind":  "host-startup",
+                             "pid":  32276,
+                             "restoring":  true,
+                             "restoreWindow":  "fc63132b-48b3-443d-a95c-752e9cd9ab4e",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:05:20.5423567Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\files 한글 한 😀",
+                                                      "pane":  "05b19267-9410-4c21-b103-a708b0c68ccb",
+                                                      "pid":  32276,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-32276-050f06ba-a14a-48c0-ba1c-6403bce11096",
+                                                      "platform":  "windows",
+                                                      "shell":  null,
+                                                      "surface":  "c352d43d-6333-4ee7-817e-7da37a7af665",
+                                                      "workspace":  "73ece473-3cb8-484b-bff6-66527de4538e"
+                                                  },
+                             "discoveryElapsedMs":  87,
+                             "identityBudgetMs":  7913,
+                             "identityElapsedMs":  1373,
+                             "treeRequests":  1,
+                             "elapsedMs":  1448,
+                             "finished":  "2026-09-28T04:05:21.9905792Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state\\editor-profile",
+                             "surface":  "c352d43d-6333-4ee7-817e-7da37a7af665",
+                             "pid":  32276,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-162dde47-aaec-4426-895f-7e287d4351e4\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  32276,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  8836,
+                  19264,
+                  32276
+              ],
+    "shells":  [
+                   34084,
+                   9748,
+                   34652
+               ],
+    "clientPids":  [
+                       13080,
+                       36460,
+                       19940,
+                       37916,
+                       10480,
+                       32568,
+                       16500,
+                       39200,
+                       23908,
+                       38516,
+                       3684,
+                       27724,
+                       36568,
+                       25300,
+                       28800,
+                       26260,
+                       38164,
+                       11052,
+                       31640,
+                       31444,
+                       39112,
+                       23120,
+                       30880,
+                       23412,
+                       29820,
+                       16052,
+                       32448,
+                       27688,
+                       2804,
+                       18664,
+                       34896,
+                       39732,
+                       32292,
+                       33880,
+                       26504,
+                       3016,
+                       10180,
+                       31516,
+                       32592,
+                       5216,
+                       32964,
+                       37772,
+                       27436,
+                       37672,
+                       33888,
+                       39376,
+                       18844,
+                       37396
+                   ],
+    "finished":  "2026-09-28T13:05:23.0379672+09:00"
+}

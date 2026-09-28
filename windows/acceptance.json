@@ -570,9 +570,13 @@
         "evidence/2026-09-28/editor.md",
         "evidence/2026-09-28/editor-diagnostics/passed-open-native.json",
         "evidence/2026-09-28/editor-diagnostics/passed-save-as-native.json",
-        "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json"
+        "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json",
+        "evidence/2026-09-28/editor-open.md",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-async-open-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-picker-blocked-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-late-open-native.json"
       ],
-      "notes": "CLI Open, duplicate identity, Save, explicit-overwrite Save As and the shared UI/CLI serial Save All helper have hidden native evidence, including ten dirty Unicode documents with exact saved bytes. Opening is CLI-only; native Open UI and fully asynchronous Open-path validation remain pending. The shared helper test does not establish physical Save All button/shortcut behavior."
+      "notes": "CLI Open, duplicate identity, Save, explicit-overwrite Save As and shared UI/CLI serial Save All have hidden native evidence, including ten dirty Unicode documents. Open preparation now runs off the UI thread with pinned source/root and bounded admission. Initial overlapping real-client Open and background picker refusal passed; final-source expired queued Open creates no editor and permits a following Open. Sidebar Open File/editor pick are implemented, but physical dialog selection/cancellation/focus/IME and physical Save All controls remain unverified. WebView2 COM creation remains UI-bound. Source boundaries and failed attempts are preserved in editor-open.md."
     },
     {
       "id": "F03",
@@ -608,9 +612,17 @@
         "evidence/2026-09-28/editor-diagnostics/passed-missing-root-native.json",
         "evidence/2026-09-28/editor-diagnostics/passed-checkpoint-failure-native.json",
         "evidence/2026-09-28/editor-diagnostics/passed-recovery-native.json",
-        "evidence/2026-09-28/editor-diagnostics/passed-late-quit-native.json"
+        "evidence/2026-09-28/editor-diagnostics/passed-late-quit-native.json",
+        "evidence/2026-09-28/editor-open.md",
+        "evidence/2026-09-28/editor-open-diagnostics/failed-snapshot-restore-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-final-restore-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-close-preparing-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-late-quit-empty-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-final-late-quit-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-final-close-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-final-checkpoint-failure-native.json"
       ],
-      "notes": "Hidden native cases reject dirty document/tab/workspace/quit closure, allow explicit save/discard, retain multiple documents across restart, preserve failed initialization metadata, and recover acknowledged dirty content after a completed checkpoint and owned-host termination. Accepted clean discard-state quit also exits after an actual IPC deadline and balanced resume of the owned hidden UI thread. Unsynchronized edit-debounce/close races, in-flight checkpoint overlap, renderer crashes, power loss and physical confirmation/IME behavior remain pending."
+      "notes": "Earlier hidden cases cover dirty-close guards, multiple-document restore and acknowledged-edit recovery. Seven final-source editor cases now include deep-path Restore, expired queued Open, accepted close during paused preparation, direct/editor late quit, dirty close and failed-checkpoint unsealing. Controlled lifetime checks suspend only exact owned hidden threads and record balanced resume/clean exit. Two earlier Restore failures are preserved. Unsynchronized edit-debounce/close races, all in-flight checkpoint timings, renderer crashes, power loss and physical confirmation/IME remain unverified."
     },
     {
       "id": "F06",
@@ -687,9 +699,12 @@
         "evidence/2026-09-28/editor-diagnostics/passed-save-as-native.json",
         "evidence/2026-09-28/editor-diagnostics/passed-save-all-many-native.json",
         "evidence/2026-09-28/editor-diagnostics/passed-recovery-native.json",
-        "evidence/2026-09-28/editor-diagnostics/passed-checkpoint-failure-native.json"
+        "evidence/2026-09-28/editor-diagnostics/passed-checkpoint-failure-native.json",
+        "evidence/2026-09-28/editor-open.md",
+        "evidence/2026-09-28/editor-open-diagnostics/failed-snapshot-restore-native.json",
+        "evidence/2026-09-28/editor-open-diagnostics/passed-final-restore-native.json"
       ],
-      "notes": "Hidden native evidence covers Unicode paths, root-boundary rejection, explicit overwrite, denied replacement preserving old file/checkpoint bytes, and isolated recovery storage. Windows recovery uses a dedicated protected-DACL temporary-file writer. Full ACL/ownership preservation, concurrent writers, UNC/network/reparse paths, power-loss durability and exhaustive long-path behavior remain pending; implementation is not complete filesystem acceptance."
+      "notes": "Hidden native evidence covers Unicode paths, root-boundary rejection, explicit overwrite, denied replacement preserving old bytes and isolated recovery storage. Recovery uses a protected-DACL temporary writer. A 266-UTF-16-unit checkpoint temporary-path failure led to extended-length parent paths; final deep-path Restore and the Windows long-checkpoint unit test pass, with the failure retained. Full ACL/ownership preservation, concurrent writers, UNC/network/reparse paths, power-loss durability and exhaustive long-path behavior remain pending."
     },
     {
       "id": "A01",
@@ -1002,9 +1017,10 @@
       "gate": "파일·editor·viewer",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/editor.md"
+        "evidence/2026-09-28/editor.md",
+        "evidence/2026-09-28/editor-open.md"
       ],
-      "notes": "Stage evidence contains 15 unique passing hidden native editor checks and 27 related native state/pane/workspace/browser regression checks; exact source boundaries and repeated cases are recorded in editor.md. F01-F05/F17 are partial. CLI-only Open, physical UI/IME/clipboard/fonts/DPI/accessibility, fully asynchronous Open validation, automatic watching, search, viewers, complete ACL semantics and renderer-crash recovery remain pending. Windows debug/release builds passed; native unit-test and package evidence is tracked separately in editor.md. No complete Windows acceptance gate passes in this stage."
+      "notes": "The initial editor stage has 15 unique native cases and 27 related checks in editor.md. The later Open/picker stage has seven final-source editor cases plus 36 related native checks, with three initial passes and two Restore failures kept separate in editor-open.md. Final Windows debug/release, Clippy, format and 172 actual Windows unit tests pass; entrypoint/package/cleanup results are recorded separately. F01-F05/F17 remain partial. Physical picker/UI/IME/clipboard/fonts/DPI/accessibility, UI-bound WebView construction, automatic watching, search/viewers, full ACL/path semantics and renderer-crash recovery remain open. No feature or complete Windows acceptance gate passes."
     },
     {
       "id": "G09",

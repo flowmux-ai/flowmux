@@ -262,6 +262,7 @@ impl Surface {
 }
 #[derive(Clone)]
 enum Action {
+    OpenEditor,
     NewBrowser,
     Notifications,
     Settings,
@@ -323,6 +324,10 @@ struct App {
     editors: HashMap<SurfaceId, editor::Editor>,
     editor_assets: Option<crate::editor_assets::EditorAssets>,
     editor_context: Option<WebContext>,
+    editor_data_root: Option<PathBuf>,
+    editor_preparer: Option<crate::editor_open::OpenPreparer>,
+    editor_picker_pending: bool,
+    editor_open_pending: HashMap<u64, editor::PendingOpen>,
     editor_request: u64,
     editor_barrier: Option<editor::Barrier>,
     editor_bypass: bool,
@@ -349,6 +354,7 @@ struct App {
     browser_find: browser::find::Controller,
     notifications: notifications::Controller,
     closing: bool,
+    close_accepted: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
     restore_screens: HashMap<SurfaceId, SavedScreen>,
@@ -362,6 +368,13 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
     let initial_shell = launch.shell.requested()?;
     let background_test =
         cfg!(debug_assertions) && std::env::var("FLOWMUX_TEST_BACKGROUND").as_deref() == Ok("1");
+    // Resolve storage once at startup, before the UI loop. Hidden hosts never
+    // fall back to a real user editor profile when no isolated root was supplied.
+    let editor_data_root = if background_test {
+        std::env::var_os("FLOWMUX_TEST_STATE_DIR").map(PathBuf::from)
+    } else {
+        Some(data_dir()?)
+    };
     let (store, restored) = if launch.temporary {
         (None, None)
     } else {
@@ -518,6 +531,10 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             editors: HashMap::new(),
             editor_assets: None,
             editor_context: None,
+            editor_data_root,
+            editor_preparer: None,
+            editor_picker_pending: false,
+            editor_open_pending: HashMap::new(),
             editor_request: 0,
             editor_barrier: None,
             editor_bypass: false,
@@ -544,6 +561,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             notifications: notifications::Controller::default(),
             downloads: downloads::Controller::default(),
             closing: false,
+            close_accepted: false,
             // Automated IPC verification can run without exposing a window or
             // taking desktop focus. Production builds ignore this test switch.
             background_test,
@@ -560,6 +578,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         }
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.editor_cancel_opens(None, "window closed before editor Open completed");
+        app.editor_preparer.take();
         app._ipc.shutdown(); // Stop accepting commands before terminal teardown.
 
         // Cancel and release native download operations before their WebView
@@ -674,6 +694,7 @@ impl App {
             self.button(name, action)?;
         }
         self.button("+ Browser", Action::NewBrowser)?;
+        self.button("Open file…", Action::OpenEditor)?;
         self.button("Workspace…", Action::WorkspaceMenu)?;
         self.button(&self.notification_button_text(), Action::Notifications)?;
         self.button(
@@ -939,6 +960,7 @@ impl App {
         for (index, control) in self.controls.iter().enumerate() {
             let (x, y, width, height) = match control.action {
                 Action::NewBrowser => (px(5), bar + px(128), (sidebar - px(10)).max(1), px(32)),
+                Action::OpenEditor => (px(5), bar + px(168), (sidebar - px(10)).max(1), px(32)),
                 Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
                 Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
                 Action::Notifications => (px(5), bar + px(88), (sidebar - px(10)).max(1), px(32)),
@@ -947,7 +969,7 @@ impl App {
                     let swatch = matches!(control.action, Action::WorkspaceColor(_));
                     (
                         if swatch { px(5) } else { px(23) },
-                        bar + px(168) + i as i32 * px(36),
+                        bar + px(208) + i as i32 * px(36),
                         if swatch {
                             px(16)
                         } else {
@@ -1141,6 +1163,7 @@ impl App {
                 if self.store.is_some()
                     && self.pending_save.is_none()
                     && self.close_request.is_none()
+                    && !self.close_accepted
                     && self.last_save_attempt.elapsed() > Duration::from_secs(30)
                 {
                     self.last_save_attempt = Instant::now();
@@ -1631,6 +1654,15 @@ impl App {
         pending.writing = true;
         Ok(())
     }
+    fn accept_close(&mut self) {
+        // Keep the IPC reply alive until its transport drains, while preventing
+        // late preparations from publishing a new tab into an accepted close.
+        self.close_accepted = true;
+        self.editor_cancel_opens(
+            None,
+            "window close was accepted before editor Open completed",
+        );
+    }
     fn request_close(&mut self, request: CloseRequest) -> anyhow::Result<()> {
         let copy = match &request {
             CloseRequest::Native => CloseRequest::Native,
@@ -1641,6 +1673,7 @@ impl App {
         }
         anyhow::ensure!(self.close_request.is_none(), "window is already closing");
         if self.store.is_none() {
+            self.accept_close();
             match request {
                 CloseRequest::Native => self.closing = true,
                 CloseRequest::Ipc(reply) => {
@@ -1681,15 +1714,18 @@ impl App {
         }
         if pending.closing {
             match result {
-                Ok(()) => match &self.close_request {
-                    Some(CloseRequest::Native) => self.closing = true,
-                    Some(CloseRequest::Ipc(reply)) => {
-                        // A slow save can outlive the IPC caller's deadline. Its
-                        // successful close request must not leave the UI frozen.
-                        self.closing |= reply.try_send(response).is_err();
+                Ok(()) => {
+                    self.accept_close();
+                    match &self.close_request {
+                        Some(CloseRequest::Native) => self.closing = true,
+                        Some(CloseRequest::Ipc(reply)) => {
+                            // A slow save can outlive the IPC caller's deadline. Its
+                            // successful close request must not leave the UI frozen.
+                            self.closing |= reply.try_send(response).is_err();
+                        }
+                        None => {}
                     }
-                    None => {}
-                },
+                }
                 Err(error) => self.close_failed(&error),
             }
         } else if self.close_request.is_some() {
@@ -1990,10 +2026,11 @@ impl App {
             "editor synchronization is in progress"
         );
         anyhow::ensure!(
-            self.close_request.is_none(),
+            !self.close_accepted && self.close_request.is_none(),
             "window is saving before close"
         );
         match action {
+            Action::OpenEditor => return self.editor_pick_action(),
             Action::NewBrowser => {
                 return self
                     .open_browser(self.active(), "about:blank".into(), false)
@@ -2080,7 +2117,7 @@ impl App {
         }
         let command = request.command;
         anyhow::ensure!(
-            self.close_request.is_none()
+            (!self.close_accepted && self.close_request.is_none())
                 || matches!(
                     command,
                     Command::Tree
@@ -2154,7 +2191,8 @@ impl App {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode",
-                "editor_status":"partial","editor_commands":["open","status","command","check-disk","flush"],
+                "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
+                "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "commands":["editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
@@ -2176,6 +2214,10 @@ impl App {
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
+                        "editor_open_pending":self.editor_open_pending.len(),
+                        "editor_open_admitted":self.editor_preparer.as_ref().map_or(0, |worker| worker.pending()),
+                        "editor_picker_pending":self.editor_picker_pending,
+                        "close_accepted":self.close_accepted,
                         "popup":self.browser_popup_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,
                         "background_testing":self.background_test,"window_handle":self.window as usize,
@@ -2533,7 +2575,9 @@ impl App {
                     return Ok(None);
                 }
                 // Explicit state recovery escape hatch; dirty editor buffers remain protected.
-                return Ok(Some(json!({"ok":true})));
+                self.accept_close();
+                self.closing |= reply.try_send(json!({"ok":true})).is_err();
+                return Ok(None);
             }
             Command::Quit {
                 discard_state: false,

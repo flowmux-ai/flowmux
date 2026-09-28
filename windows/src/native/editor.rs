@@ -3,17 +3,67 @@
 use super::*;
 use crate::{
     editor as domain,
+    editor_open::{OpenPaths, OpenPreparer, Prepared, Ticket},
     editor_worker::{Response, Work, Worker},
 };
 use flowmux_core::{EditorSessionState, PaneSurface};
 use flowmux_editor::{EditorMessage, HostMessage as EditorMessageOut};
 use std::collections::HashSet;
+#[path = "editor_picker.rs"]
+mod editor_picker;
 #[path = "editor_view.rs"]
 mod editor_view;
 
 pub(super) enum Signal {
+    Prepared(Prepared),
+    Pick(PickerTarget),
     Bridge(SurfaceId, Uuid, String, String),
     Worker(SurfaceId, Uuid, Response),
+}
+pub(super) struct PickerTarget {
+    source: SurfaceId,
+    workspace: WorkspaceId,
+    pane: PaneId,
+    root: PathBuf,
+}
+#[derive(Clone)]
+pub(super) enum Completion {
+    Ipc(ipc::Reply),
+    User(HWND),
+}
+impl Completion {
+    fn try_send(&self, value: Value) -> Result<(), mpsc::TrySendError<Value>> {
+        match self {
+            Self::Ipc(reply) => reply.try_send(value),
+            Self::User(window) => {
+                if let Some(error) = value.get("error").and_then(Value::as_str) {
+                    report(error);
+                    unsafe {
+                        MessageBoxW(
+                            *window,
+                            wide(error).as_ptr(),
+                            wide("Open file").as_ptr(),
+                            MB_OK | MB_ICONWARNING,
+                        );
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+    fn cancel(&self, reason: &str) {
+        // A user intentionally closing its source does not need another dialog.
+        if let Self::Ipc(reply) = self {
+            let _ = reply.try_send(json!({"error":reason}));
+        }
+    }
+}
+pub(super) struct PendingOpen {
+    ticket: Ticket,
+    source: SurfaceId,
+    workspace: WorkspaceId,
+    pane: PaneId,
+    reply: Completion,
 }
 pub(super) struct Editor {
     pub(super) view: editor_view::View,
@@ -38,7 +88,7 @@ pub(super) struct Editor {
 }
 struct Pending {
     id: u64,
-    reply: ipc::Reply,
+    reply: Completion,
     started: Instant,
     kind: PendingKind,
     result: Value,
@@ -151,14 +201,10 @@ impl App {
         root: PathBuf,
         state: EditorSessionState,
     ) -> anyhow::Result<()> {
-        let data_root = if self.background_test {
-            PathBuf::from(
-                std::env::var_os("FLOWMUX_TEST_STATE_DIR")
-                    .context("background editor requires an isolated state directory")?,
-            )
-        } else {
-            data_dir()?
-        };
+        let data_root = self
+            .editor_data_root
+            .clone()
+            .context("background editor requires an isolated state directory")?;
         if self.editor_assets.is_none() {
             self.editor_assets = Some(crate::editor_assets::EditorAssets::start()?);
         }
@@ -225,6 +271,22 @@ impl App {
     }
     pub(super) fn editor_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Pick(target) => {
+                self.editor_run_picker(target);
+            }
+            Signal::Prepared(prepared) => {
+                let Some(pending) = self.editor_open_pending.remove(&prepared.id) else {
+                    return Ok(()); // Cancelled/expired; dropping the result releases its slot.
+                };
+                let completion = pending.reply.clone();
+                let result = prepared
+                    .result
+                    .map_err(anyhow::Error::from)
+                    .and_then(|paths| self.editor_finish_open(pending, paths));
+                if let Err(error) = result {
+                    let _ = completion.try_send(json!({"error":error.to_string()}));
+                }
+            }
             Signal::Bridge(surface, instance, origin, body) => {
                 let Some(editor) = self
                     .editors
@@ -494,7 +556,19 @@ impl App {
                         }
                         return Ok(());
                     }
-                    let pending = editor.pending.take().unwrap();
+                    let mut pending = editor.pending.take().unwrap();
+                    // A worker/renderer completion can be queued ahead of Tick.
+                    // Enforce the original reply deadline here as well; otherwise
+                    // a delayed UI loop could acknowledge expired work as timely.
+                    if !pending.timed_out
+                        && pending.started.elapsed() >= crate::editor_open::OPEN_BUDGET
+                    {
+                        pending.error = Some(
+                            "editor command finished after its reply deadline; review the document state before retrying"
+                                .into(),
+                        );
+                        editor.error = pending.error.clone();
+                    }
                     editor.release(pending.id);
                     editor.refresh_ready();
                     if pending.timed_out {
@@ -674,6 +748,7 @@ impl App {
                 }
                 Operation::Window(request) => self.request_close(request)?,
                 Operation::QuitDiscard(reply) => {
+                    self.accept_close();
                     // The request may have expired while queued before its
                     // editor barrier started. Keep an accepted close from
                     // leaving the clean editor sealed without a live receiver.
@@ -707,6 +782,18 @@ impl App {
         }
     }
     pub(super) fn editor_tick(&mut self) {
+        let now = Instant::now();
+        let expired: Vec<_> = self
+            .editor_open_pending
+            .iter()
+            .filter(|(_, pending)| pending.ticket.is_expired(now))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in expired {
+            let pending = self.editor_open_pending.remove(&id).unwrap();
+            pending.ticket.cancel();
+            let _ = pending.reply.try_send(json!({"error":"editor open preparation timed out; no editor was opened, and any late preparation result will be ignored"}));
+        }
         if let Some((surface, id)) = self
             .editor_barrier
             .as_ref()
@@ -725,7 +812,9 @@ impl App {
             .filter_map(|(id, e)| {
                 e.pending
                     .as_ref()
-                    .filter(|p| !p.timed_out && p.started.elapsed() > Duration::from_secs(12))
+                    .filter(|p| {
+                        !p.timed_out && p.started.elapsed() >= crate::editor_open::OPEN_BUDGET
+                    })
                     .map(|p| (*id, p.id))
             })
             .collect();
@@ -743,6 +832,10 @@ impl App {
         }
     }
     pub(super) fn editor_remove(&mut self, id: SurfaceId) {
+        self.editor_cancel_opens(
+            Some(id),
+            "editor Open source closed before preparation completed",
+        );
         if let Some(mut editor) = self.editors.remove(&id) {
             if let Some(pending) = editor.pending.take() {
                 let _ = pending
@@ -750,6 +843,269 @@ impl App {
                     .try_send(json!({"error":"editor tab closed during command"}));
             }
         }
+    }
+    pub(super) fn editor_cancel_opens(&mut self, source: Option<SurfaceId>, reason: &str) {
+        let ids: Vec<_> = self
+            .editor_open_pending
+            .iter()
+            .filter(|(_, pending)| source.is_none_or(|source| pending.source == source))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            let pending = self.editor_open_pending.remove(&id).unwrap();
+            pending.ticket.cancel();
+            pending.reply.cancel(reason);
+        }
+    }
+    fn editor_submit_open(
+        &mut self,
+        args: domain::OpenArgs,
+        caller: Option<SurfaceId>,
+        reply: Completion,
+    ) -> anyhow::Result<()> {
+        let submitted = match &reply {
+            Completion::Ipc(reply) => reply.received_at(),
+            Completion::User(_) => Instant::now(),
+        };
+        anyhow::ensure!(
+            submitted.elapsed() < crate::editor_open::OPEN_BUDGET,
+            "editor Open expired in the UI queue; no editor was opened"
+        );
+        anyhow::ensure!(
+            self.editor_barrier.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing,
+            "editor Open cannot begin during synchronization or window close"
+        );
+        let source = self.target(args.pane, caller)?;
+        let (index, pane, _) = self
+            .locate(source)
+            .context("editor source pane disappeared")?;
+        let workspace = self.workspaces[index].id;
+        let root = args
+            .root
+            .unwrap_or_else(|| self.workspaces[index].cwd.clone());
+        anyhow::ensure!(
+            !self.editor_open_pending.values().any(|p| p.pane == pane),
+            "this pane already has an editor Open preparation pending"
+        );
+        // Paths are captured now; filesystem inspection never runs in this UI handler.
+        domain::validate_path(&root)?;
+        domain::validate_path(&args.path)?;
+        if self.editor_preparer.is_none() {
+            let sender = self.sender.clone();
+            self.editor_preparer = Some(OpenPreparer::start(move |prepared| {
+                sender.send(Event::Editor(Signal::Prepared(prepared)))
+            })?);
+        }
+        let id = self.editor_next();
+        let ticket = self
+            .editor_preparer
+            .as_ref()
+            .unwrap()
+            .submit(id, root, args.path, submitted)?;
+        self.editor_open_pending.insert(
+            id,
+            PendingOpen {
+                ticket,
+                source,
+                workspace,
+                pane,
+                reply,
+            },
+        );
+        Ok(())
+    }
+    fn editor_open_target(&self, pending: &PendingOpen) -> anyhow::Result<usize> {
+        anyhow::ensure!(
+            !pending.ticket.is_cancelled() && !pending.ticket.is_expired(Instant::now()),
+            "editor Open exceeded its original deadline or was cancelled"
+        );
+        anyhow::ensure!(
+            self.editor_barrier.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing,
+            "editor Open was cancelled because synchronization or window close began"
+        );
+        let (index, pane, _) = self
+            .locate(pending.source)
+            .context("editor Open source closed")?;
+        anyhow::ensure!(
+            self.workspaces[index].id == pending.workspace && pane == pending.pane,
+            "editor Open source moved during preparation; request was cancelled"
+        );
+        Ok(index)
+    }
+    fn editor_finish_open(&mut self, pending: PendingOpen, paths: OpenPaths) -> anyhow::Result<()> {
+        let index = self.editor_open_target(&pending)?;
+        let OpenPaths { root, path } = paths;
+        let pane = pending.pane;
+        let reuse = self.workspaces[index].leaves().into_iter()
+            .find(|(p, _, _)| *p == pane)
+            .and_then(|(_, _, tabs)| tabs.into_iter().find(|tab|
+                matches!(&tab.kind, SurfaceKind::Editor { workspace_root, .. } if *workspace_root == root)))
+            .map(|tab| tab.id);
+        let (id, placement, request, open_path) = if let Some(id) = reuse {
+            anyhow::ensure!(
+                self.editors
+                    .get(&id)
+                    .is_some_and(|e| e.ready && e.pending.is_none()),
+                "editor is loading or busy"
+            );
+            let request = self.editor_next();
+            self.editors[&id].barrier(request, true)?;
+            (id, "reuse_tab", request, Some(path))
+        } else {
+            let mut tab = PaneSurface::editor("Editor", root.clone());
+            let id = tab.id;
+            let state = EditorSessionState {
+                open_files: vec![flowmux_core::EditorFileState {
+                    path: path.clone(),
+                    cursor_line: 0,
+                    cursor_column: 0,
+                    scroll_top: 0.0,
+                }],
+                active_file: Some(path),
+                ..EditorSessionState::default()
+            };
+            tab.kind = SurfaceKind::Editor {
+                workspace_root: root.clone(),
+                session: state.clone(),
+            };
+            self.add_editor_view(id, root, state)?;
+            // WebView construction can be slow. Do not publish a late view, even
+            // though the native COM call itself cannot be interrupted safely.
+            let insertion = self.editor_open_target(&pending).and_then(|index| {
+                self.workspaces[index]
+                    .root
+                    .add_surface_to_leaf(pane, tab)
+                    .context("editor Open target pane disappeared")
+            });
+            if let Err(error) = insertion {
+                self.editor_remove(id);
+                return Err(error);
+            }
+            let request = *self.editors[&id]
+                .inflight
+                .iter()
+                .next()
+                .context("editor initialization missing")?;
+            (id, "new_tab", request, None)
+        };
+        self.editors.get_mut(&id).unwrap().pending = Some(Pending {
+            id: request,
+            reply: pending.reply,
+            started: pending.ticket.submitted,
+            kind: PendingKind::Open,
+            result: json!({"editor_opened":{"pane":pane,"surface":id,"placement_strategy":placement}}),
+            error: None,
+            open_loaded: false,
+            initial_open: reuse.is_none(),
+            timed_out: false,
+            open_path,
+        });
+        let layout = self.select(id).and_then(|()| {
+            self.zoomed = None;
+            self.rebuild()
+        });
+        if let Err(error) = layout {
+            // The Open is already in flight. Its normal ordered completion owns
+            // the single response, including a failure after model publication.
+            self.editors
+                .get_mut(&id)
+                .unwrap()
+                .pending
+                .as_mut()
+                .unwrap()
+                .error = Some(error.to_string());
+        }
+        Ok(())
+    }
+    fn editor_capture_picker(
+        &self,
+        pane: Option<Uuid>,
+        caller: Option<SurfaceId>,
+    ) -> anyhow::Result<PickerTarget> {
+        anyhow::ensure!(
+            !self.background_test,
+            "Open File is unavailable in background mode"
+        );
+        anyhow::ensure!(
+            !self.editor_picker_pending,
+            "an editor picker is already pending"
+        );
+        anyhow::ensure!(
+            self.editor_barrier.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing,
+            "editor picker cannot open during synchronization or window close"
+        );
+        let source = self.target(pane, caller)?;
+        let (index, pane, _) = self
+            .locate(source)
+            .context("editor source pane disappeared")?;
+        Ok(PickerTarget {
+            source,
+            pane,
+            workspace: self.workspaces[index].id,
+            root: self.workspaces[index].cwd.clone(),
+        })
+    }
+    fn editor_show_picker(
+        &mut self,
+        target: PickerTarget,
+        completion: Completion,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.background_test,
+            "Open File is unavailable in background mode"
+        );
+        anyhow::ensure!(
+            self.editor_barrier.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing,
+            "editor picker was cancelled because synchronization or window close began"
+        );
+        let (index, pane, _) = self
+            .locate(target.source)
+            .context("editor picker source closed")?;
+        anyhow::ensure!(
+            pane == target.pane && self.workspaces[index].id == target.workspace,
+            "editor picker source moved before the dialog opened"
+        );
+        let Some(path) = editor_picker::pick(self.window, &target.root, self.background_test)?
+        else {
+            return Ok(());
+        };
+        // The dialog and its native modal loop finish before application events
+        // are drained. Pin the original source and root into the async request.
+        self.editor_submit_open(
+            domain::OpenArgs {
+                path,
+                pane: None,
+                root: Some(target.root),
+            },
+            Some(target.source),
+            completion,
+        )
+    }
+    fn editor_run_picker(&mut self, target: PickerTarget) {
+        let completion = Completion::User(self.window);
+        let result = self.editor_show_picker(target, completion.clone());
+        self.editor_picker_pending = false;
+        if let Err(error) = result {
+            let _ = completion.try_send(json!({"error":error.to_string()}));
+        }
+    }
+    pub(super) fn editor_pick_action(&mut self) -> anyhow::Result<()> {
+        let target = self.editor_capture_picker(None, None)?;
+        self.editor_picker_pending = true;
+        self.editor_run_picker(target);
+        Ok(())
     }
     pub(super) fn editor_command(
         &mut self,
@@ -759,74 +1115,23 @@ impl App {
     ) -> anyhow::Result<Option<Value>> {
         match op {
             domain::Op::Open(args) => {
-                anyhow::ensure!(
-                    self.editor_barrier.is_none(),
-                    "editor synchronization in progress"
-                );
-                let source = self.target(args.pane, caller)?;
-                let (index, pane, _) = self
-                    .locate(source)
-                    .context("editor source pane disappeared")?;
-                let root = domain::canonical_root(
-                    args.root.as_deref().unwrap_or(&self.workspaces[index].cwd),
-                )?;
-                let path = domain::resolve_existing(&root, &args.path)?;
-                let reuse=self.workspaces[index].leaves().into_iter().find(|(p,_,_)|*p==pane).and_then(|(_,_,tabs)|tabs.into_iter().find(|t|matches!(&t.kind,SurfaceKind::Editor{workspace_root,..} if *workspace_root==root))).map(|t|t.id);
-                let (id, placement, request, open_path) = if let Some(id) = reuse {
-                    anyhow::ensure!(
-                        self.editors
-                            .get(&id)
-                            .is_some_and(|e| e.ready && e.pending.is_none()),
-                        "editor is loading or busy"
-                    );
-                    let request = self.editor_next();
-                    (id, "reuse_tab", request, Some(path))
-                } else {
-                    let tab = PaneSurface::editor("Editor", root.clone());
-                    let id = tab.id;
-                    let mut state = EditorSessionState::default();
-                    state.open_files.push(flowmux_core::EditorFileState {
-                        path: path.clone(),
-                        cursor_line: 0,
-                        cursor_column: 0,
-                        scroll_top: 0.0,
-                    });
-                    state.active_file = Some(path);
-                    let mut tab = tab;
-                    tab.kind = SurfaceKind::Editor {
-                        workspace_root: root.clone(),
-                        session: state.clone(),
-                    };
-                    self.add_editor_view(id, root, state)?;
-                    self.workspaces[index]
-                        .root
-                        .add_surface_to_leaf(pane, tab)
-                        .context("editor source pane disappeared")?;
-                    let request = *self.editors[&id]
-                        .inflight
-                        .iter()
-                        .next()
-                        .context("editor initialization missing")?;
-                    (id, "new_tab", request, None)
-                };
-                self.editors.get_mut(&id).unwrap().pending = Some(Pending {
-                    id: request,
-                    reply,
-                    started: Instant::now(),
-                    kind: PendingKind::Open,
-                    result: json!({"editor_opened":{"pane":pane,"surface":id,"placement_strategy":placement}}),
-                    error: None,
-                    open_loaded: false,
-                    initial_open: reuse.is_none(),
-                    timed_out: false,
-                    open_path,
-                });
-                if reuse.is_some() {
-                    self.editors[&id].barrier(request, true)?;
-                }
-                self.select(id)?;
-                self.zoomed = None;
-                self.rebuild()?;
+                self.editor_submit_open(args, caller, Completion::Ipc(reply))?;
+                Ok(None)
+            }
+            domain::Op::Pick(args) => {
+                let target = self.editor_capture_picker(args.pane, caller)?;
+                // Human dialog interaction has no IPC-sized duration budget.
+                // Acknowledge only the request before entering its modal loop,
+                // and never show a dialog for a request whose receiver expired.
+                reply
+                    .try_send(
+                        json!({"picker_requested":true,"pane":target.pane,"source":target.source}),
+                    )
+                    .map_err(|_| {
+                        anyhow::anyhow!("editor picker requester expired; dialog was not opened")
+                    })?;
+                self.editor_picker_pending = true;
+                self.sender.send(Event::Editor(Signal::Pick(target)));
                 Ok(None)
             }
             domain::Op::Status(args) => Ok(Some(
@@ -883,7 +1188,7 @@ impl App {
                 editor.view.view.evaluate_script(&script)?;
                 editor.pending = Some(Pending {
                     id,
-                    reply,
+                    reply: Completion::Ipc(reply),
                     started: Instant::now(),
                     kind,
                     result: Value::Null,

@@ -1,0 +1,13 @@
+{
+    "name":  "editor-picker-blocked-native",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-snapshot-picker-blocked-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T03:48:08.4699339Z",
+    "pid":  14552,
+    "exitCode":  0,
+    "activeBeforeCleanup":  4,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  4.464,
+    "finished":  "2026-09-28T03:48:12.9368965Z"
+}

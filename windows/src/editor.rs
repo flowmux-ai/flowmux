@@ -19,10 +19,18 @@ pub const MAX_PATH_UNITS: usize = 32767;
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Op {
     Open(OpenArgs),
+    Pick(PickArgs),
     Status(SurfaceArgs),
     Command(CommandArgs),
     CheckDisk(SurfaceArgs),
     Flush(SurfaceArgs),
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PickArgs {
+    #[arg(long, value_parser = crate::command::parse_id)]
+    pub pane: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]

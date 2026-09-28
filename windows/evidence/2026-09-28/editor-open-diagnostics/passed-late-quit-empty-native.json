@@ -1,0 +1,161 @@
+{
+    "started":  "2026-09-28T13:04:29.3630034+09:00",
+    "mode":  "background",
+    "case":  "late-quit-empty",
+    "checks":  [
+                   {
+                       "name":  "late_direct_terminal_only_quit_exits_after_real_ipc_deadline_and_verified_owned_ui_thread_resume",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  38052,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:04:29.4928803Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-ad520b59-093e-435d-941d-f08201cd2894\\files 한글 한 😀",
+                                                      "pane":  "8f60271c-7bff-4193-a56b-207119014769",
+                                                      "pid":  38052,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-38052-5a0153b3-f8bb-4f21-9ae1-30331fec9868",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "c961965d-2959-4b29-a2f3-bdca2f4003ea",
+                                                      "workspace":  "97aef523-4899-4f59-94fa-1f1aa78b332a"
+                                                  },
+                             "discoveryElapsedMs":  68,
+                             "identityBudgetMs":  7932,
+                             "identityElapsedMs":  758,
+                             "treeRequests":  2,
+                             "elapsedMs":  937,
+                             "finished":  "2026-09-28T04:04:30.4321405Z"
+                         },
+                         {
+                             "case":  "late-quit-empty",
+                             "kind":  "late-quit-deadline",
+                             "pid":  38052,
+                             "surface":  null,
+                             "editorCount":  0,
+                             "windowHandle":  1838956,
+                             "clientBudgetMs":  20000,
+                             "wholeProcessSuspended":  false,
+                             "uiThreadSuspended":  true,
+                             "uiThreadResumed":  true,
+                             "threadId":  20960,
+                             "verifiedThreadPid":  38052,
+                             "previousSuspendCount":  0,
+                             "response":  {
+                                              "error":  "window did not answer within the IPC command deadline; command outcome may be unknown"
+                                          },
+                             "responseElapsedMs":  15069,
+                             "previousResumeCount":  1,
+                             "suspendElapsedMs":  15074,
+                             "cleanHostExit":  true
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  38052,
+                             "exitCode":  0
+                         },
+                         {
+                             "kind":  "host-startup",
+                             "pid":  30548,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T04:04:45.7927809Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-ad520b59-093e-435d-941d-f08201cd2894\\files 한글 한 😀",
+                                                      "pane":  "5645aec9-d8a8-49d3-8491-35bcfee289fd",
+                                                      "pid":  30548,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-30548-02e09d01-0405-4cbe-b1c0-10bae96701b6",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "ab36714f-f5c5-4312-8eee-80808de38294",
+                                                      "workspace":  "c2b9ede0-da80-491e-b07c-06de1d84a46e"
+                                                  },
+                             "discoveryElapsedMs":  78,
+                             "identityBudgetMs":  7922,
+                             "identityElapsedMs":  736,
+                             "treeRequests":  2,
+                             "elapsedMs":  898,
+                             "finished":  "2026-09-28T04:04:46.6920574Z"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  30548,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  38052,
+                  30548
+              ],
+    "shells":  [
+                   23956,
+                   39784
+               ],
+    "clientPids":  [
+                       37144,
+                       9840,
+                       23192,
+                       38176,
+                       3708,
+                       29528,
+                       6588,
+                       33812,
+                       15768,
+                       25844,
+                       27280,
+                       36776,
+                       29196,
+                       39524,
+                       35132,
+                       17660
+                   ],
+    "finished":  "2026-09-28T13:04:46.9179140+09:00"
+}

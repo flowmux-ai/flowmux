@@ -1,0 +1,1980 @@
+{
+  "format_version": 1,
+  "collection": "Windows editor asynchronous Open and picker diagnostics",
+  "parent_commit": "83155e6",
+  "copied_at_utc": "2026-09-28T03:45:35.080435+00:00",
+  "encoding": "UTF-8 without BOM; CRLF/CR converted to LF; textual trailing whitespace and extra EOF blank lines removed; JSON values preserved",
+  "scope": "Completed Windows-only editor Open stage: seven final-source native editor cases plus three historical initial passes;36 related checks across six suites;172 actual Windows unit tests;final debug/release/Clippy/format;three release entrypoint probes;NSIS package;read-only cleanup460 IDs (457 absent,3 timestamp-proven reused). Preserves two failed Restore attempts, all historical source boundaries, exact verifier snapshots and raw/normalized hashes. Physical picker/IME/desktop acceptance remains unverified.",
+  "limitations": [
+    "Historical pre-fix passes are not final-stage verification.",
+    "Linux unit tests do not execute Windows COM, WebView2, dialogs or native path behavior.",
+    "POSIX runner pid fields must not be interpreted as Windows PIDs.",
+    "Existing editor-diagnostics and prior evidence are untouched.",
+    "Evidence collection itself only copied completed artifacts; no native process was started, controlled or inspected by the collector.",
+    "Async-open uses real overlapping clients without forcing preparation completion order or cancellation timing. Physical picker/focus/IME/clipboard/desktop interaction remains unverified.",
+    "Picker refusal establishes its guard error and before/after HWND snapshots, not physical picker behavior or continuous absence of transient windows.",
+    "Two earlier Restore failures are preserved. Final deep Restore passes after extended paths and corrected nested startup budget. Lifetime cases verify their exact paused-thread/held-peer boundaries, not arbitrary I/O interruption or all timing races.",
+    "Final cleanup covers460 explicitly recorded Windows process IDs and excludes its own cleanup runners.457 absent and3 timestamp-proven reused; one bounded CIM fallback was exercised. No process control or individual renderer-descendant inventory; package build is not installation."
+  ],
+  "native_passed_cases": 10,
+  "runs": [
+    {
+      "group": "linux-open-preparer-tests",
+      "role": "passed_linux_domain_tests",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 41.812,
+      "source_runner": "windows/dist/checks/editor-open-pure-c39839f5-c57c-43ae-8e93-722b545c913b/result.json",
+      "artifacts": [
+        "linux-open-preparer-tests-runner.json",
+        "linux-open-preparer-tests-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Nine pure Open-preparer tests passed on Linux. No native Windows or dialog execution. No claim for later native integration changes.",
+      "tests_passed": 9,
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "before-receipt-close-fixes-clippy",
+      "role": "historical_windows_cross_clippy",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 18.298,
+      "source_runner": "windows/dist/checks/editor-open-windows-clippy-1687bc40-aa8d-4742-8c21-182a7582157d/result.json",
+      "artifacts": [
+        "before-receipt-close-fixes-clippy-runner.json",
+        "before-receipt-close-fixes-clippy-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Passed before the Reply server-receipt deadline, accepted-close and direct-quit fixes. Historical compile/lint evidence only; not final-stage verification.",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "before-direct-quit-fix-debug-build",
+      "role": "historical_windows_cross_debug_build",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 72.492,
+      "source_runner": "windows/dist/checks/editor-open-debug-0c8e0e96-4936-44a3-80cc-cd38c58a44f4/result.json",
+      "artifacts": [
+        "before-direct-quit-fix-debug-build-runner.json",
+        "before-direct-quit-fix-debug-build-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Passed before the direct-quit fix. Historical build evidence only; not final-stage verification.",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "final-debug-build",
+      "role": "historical_windows_cross_build_before_checkpoint_long_path_fix",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 69.24,
+      "source_runner": "windows/dist/checks/editor-open-quit-fix-debug-063d0596-2d23-4dcd-9e34-f7227e8accf6/result.json",
+      "artifacts": [
+        "final-debug-build-runner.json",
+        "final-debug-build-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Debug cross-build passed after the server-receipt deadline, accepted-close and direct-quit fixes. Subsequently superseded as final-stage verification by the pending Windows checkpoint long-path correction; kept at its original copied filename.",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "initial-verifier-static",
+      "role": "passed_frozen_verifier_static_check",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 0.92,
+      "source_runner": "windows/dist/checks/editor-open-snapshot-static-df734d88-c680-4c2e-9cd9-7e4bf2058540/result.json",
+      "artifacts": [
+        "initial-verifier-static-runner.json",
+        "initial-verifier-static-stdout.txt",
+        "initial-verifier-static-stderr.txt"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Static check of the frozen seventeen-case verifier snapshot; no native host or picker interaction is established by this run.",
+      "runner_started": "2026-09-28T03:47:12.5487110Z",
+      "runner_finished": "2026-09-28T03:47:13.4726142Z",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "passed-async-open",
+      "role": "passed_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 5.343,
+      "source_runner": "windows/dist/checks/editor-open-async-native-52267e44-31b5-4644-a436-6b899a3f4867/result.json",
+      "artifacts": [
+        "passed-async-open-runner.json",
+        "passed-async-open-stdout.txt",
+        "passed-async-open-stderr.txt",
+        "passed-async-open-native.json"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Two real CLI Open processes overlapped. Actual Monaco content, distinct captured roots/panes and original terminals were checked. Preparation completion order was not forced; this is not cancellation-race or physical UI acceptance.",
+      "runner_started": "2026-09-28T03:47:33.3676215Z",
+      "runner_finished": "2026-09-28T03:47:38.7144504Z",
+      "case": "async-open",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T12:47:34.0121410+09:00",
+      "native_finished": "2026-09-28T12:47:38.6629514+09:00",
+      "verifier_snapshot": "initial-verifier-snapshot-manifest.json",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "release-build",
+      "role": "historical_windows_cross_build_before_checkpoint_long_path_fix",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 93.386,
+      "source_runner": "windows/dist/checks/editor-open-release-f83f220e-3214-41d2-98f9-3b52a4ed06b5/result.json",
+      "artifacts": [
+        "release-build-runner.json",
+        "release-build-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Release cross-build after the receipt/close fixes. No later runtime changes were reported at collection time; the separately recorded Restore failure remains under investigation. Subsequently superseded as final-stage verification by the pending Windows checkpoint long-path correction; kept at its original copied filename.",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "passed-picker-blocked",
+      "role": "passed_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 4.464,
+      "source_runner": "windows/dist/checks/editor-picker-blocked-native-ba1ed8d4-4aa8-4363-9795-36a957c98f3f/result.json",
+      "artifacts": [
+        "passed-picker-blocked-runner.json",
+        "passed-picker-blocked-stdout.txt",
+        "passed-picker-blocked-stderr.txt",
+        "passed-picker-blocked-native.json"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Explicit background refusal, unchanged tree/editor identity, live terminal and zero visible owned top-level windows in before/after snapshots. No native dialog interaction or continuous transient-window observation.",
+      "runner_started": "2026-09-28T03:48:08.4699339Z",
+      "runner_finished": "2026-09-28T03:48:12.9368965Z",
+      "case": "picker-blocked",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T12:48:09.1563606+09:00",
+      "native_finished": "2026-09-28T12:48:12.8733461+09:00",
+      "verifier_snapshot": "initial-verifier-snapshot-manifest.json",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "regression-open",
+      "role": "passed_native_background_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 6.458,
+      "source_runner": "windows/dist/checks/editor-open-regression-open-0113e2c9-d8f4-4eb7-8f4a-7d9aa6026912/result.json",
+      "artifacts": [
+        "regression-open-runner.json",
+        "regression-open-stdout.txt",
+        "regression-open-stderr.txt",
+        "regression-open-native.json"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Existing Open regression passed using the frozen initial verifier: actual Monaco Unicode text, duplicate document identity, language and invalid-text isolation.",
+      "runner_started": "2026-09-28T03:49:03.1448574Z",
+      "runner_finished": "2026-09-28T03:49:09.6140481Z",
+      "case": "open",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T12:49:03.9441678+09:00",
+      "native_finished": "2026-09-28T12:49:09.4942113+09:00",
+      "verifier_snapshot": "initial-verifier-snapshot-manifest.json",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "failed-snapshot-restore",
+      "role": "failed_native_diagnostic",
+      "runner_status": "failed",
+      "runner_elapsed_seconds": 6.522,
+      "source_runner": "windows/dist/checks/editor-open-regression-restore-dfe4a6cd-523e-44e1-bd8d-42a9905b9226/result.json",
+      "artifacts": [
+        "failed-snapshot-restore-runner.json",
+        "failed-snapshot-restore-stdout.txt",
+        "failed-snapshot-restore-stderr.txt",
+        "failed-snapshot-restore-native.json"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Preserved failed Restore regression. save-state reported inability to atomically save Windows window state with os error 3. Parent source/path investigation identified a 266-UTF-16-unit temporary checkpoint filename versus a 230-unit destination, and raw path arguments to MoveFileExW after Rust created the temporary file. Windows-only extended-path correction is pending; no corrected runtime result is claimed.",
+      "runner_started": "2026-09-28T03:49:11.0665121Z",
+      "runner_finished": "2026-09-28T03:49:17.5944596Z",
+      "case": "restore",
+      "native_status": "failed",
+      "checks": 0,
+      "native_started": "2026-09-28T12:49:12.2652411+09:00",
+      "native_finished": "2026-09-28T12:49:17.4545502+09:00",
+      "verifier_snapshot": "initial-verifier-snapshot-manifest.json",
+      "checkpoint_long_path_fix_boundary": "before Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "post-checkpoint-fix-debug-build",
+      "role": "historical_windows_cross_build_before_reply_race_fix",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 71.689,
+      "source_runner": "windows/dist/checks/editor-open-long-state-debug-f98efd75-615b-4352-85cb-0c76d4f996a5/result.json",
+      "artifacts": [
+        "post-checkpoint-fix-debug-build-runner.json",
+        "post-checkpoint-fix-debug-build-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "note": "Debug cross-build after checkpoint extended-path correction, before atomic IPC reply/deadline and completion-time elapsed checks.",
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "failed-restored-startup",
+      "role": "failed_native_diagnostic",
+      "runner_status": "failed",
+      "runner_elapsed_seconds": 11.472,
+      "source_runner": "windows/dist/checks/editor-open-long-state-restore-36e10377-b7b3-401f-92fc-335e9ab1b301/result.json",
+      "artifacts": [
+        "failed-restored-startup-runner.json",
+        "failed-restored-startup-stdout.txt",
+        "failed-restored-startup-stderr.txt",
+        "failed-restored-startup-native.json"
+      ],
+      "stderr": "separate stderr copied",
+      "note": "Restore passed the previous checkpoint save step but failed its initial restored-host identify at the verifier nested 5000ms wait. Later cleanup reached editor status but close-tab reported loading; the exact owned restored host was forcibly terminated (exit -1). No passing Restore check. Startup budget correction and IPC/completion fixes remain unverified.",
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "runner_started": "2026-09-28T03:56:56.4086397Z",
+      "runner_finished": "2026-09-28T03:57:07.8856320Z",
+      "case": "restore",
+      "native_status": "failed",
+      "checks": 0,
+      "native_started": "2026-09-28T12:56:57.2040435+09:00",
+      "native_finished": "2026-09-28T12:57:07.7600974+09:00",
+      "verifier_snapshot": "initial-verifier-snapshot-manifest.json",
+      "ipc_reply_race_fix_boundary": "before atomic IPC deadline/reply and completion-time elapsed corrections"
+    },
+    {
+      "group": "startup-budget-verifier-static",
+      "role": "passed_verifier_static_check",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 0.852,
+      "runner_started": "2026-09-28T04:00:34.8655857Z",
+      "runner_finished": "2026-09-28T04:00:35.7225388Z",
+      "source_runner": "windows/dist/checks/editor-startup-budget-verifier-static-2f226ccb-9840-4aa7-8615-71a53f3d1bfb/result.json",
+      "artifacts": [
+        "startup-budget-verifier-static-runner.json",
+        "startup-budget-verifier-static-stdout.txt",
+        "startup-budget-verifier-static-stderr.txt"
+      ],
+      "note": "PowerShell parse and CliProbe/EditorFixture/EditorOpenLifetime compilation after startup-budget correction; hostExecution=false and fixtureExecution=false."
+    },
+    {
+      "group": "lifetime-helper-verifier-static",
+      "role": "passed_verifier_static_check",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 0.646,
+      "runner_started": "2026-09-28T03:55:06.4015664Z",
+      "runner_finished": "2026-09-28T03:55:07.0507127Z",
+      "source_runner": "windows/dist/checks/editor-open-lifetime-verifier-static-fixed-a101f82d-1fce-48ff-a978-0d09707054ce/result.json",
+      "artifacts": [
+        "lifetime-helper-verifier-static-runner.json",
+        "lifetime-helper-verifier-static-stdout.txt",
+        "lifetime-helper-verifier-static-stderr.txt"
+      ],
+      "note": "PowerShell parse and CliProbe/EditorFixture/EditorOpenLifetime compilation; hostExecution=false and fixtureExecution=false. Predates startup-budget correction."
+    },
+    {
+      "group": "final-clippy",
+      "role": "passed_final_windows_cross_clippy",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 41.06,
+      "source_runner": "windows/dist/checks/editor-open-final-clippy-15c7ed02-4352-4fa7-a66a-8eab3611ce2b/result.json",
+      "artifacts": [
+        "final-clippy-runner.json",
+        "final-clippy-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Completed final-source static/build check; not native runtime or physical picker acceptance."
+    },
+    {
+      "group": "final-format",
+      "role": "passed_final_format",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 8.266,
+      "source_runner": "windows/dist/checks/editor-open-format-252f1806-efa4-4873-99aa-caee54804dc4/result.json",
+      "artifacts": [
+        "final-format-runner.json",
+        "final-format-stdout.txt"
+      ],
+      "stderr": "not separately recorded by source runner",
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Completed final-source static/build check; not native runtime or physical picker acceptance."
+    },
+    {
+      "group": "final-source-debug-build",
+      "role": "passed_final_windows_cross_debug_build",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 73.506,
+      "source_runner": "windows/dist/checks/editor-open-final-debug-f94dce78-9663-47a0-a4ad-f50e566ab4c4/result.json",
+      "artifacts": [
+        "final-source-debug-build-runner.json",
+        "final-source-debug-build-stdout.txt"
+      ],
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Final-source debug cross-build after checkpoint extended-path, atomic IPC reply/deadline and completion-time checks."
+    },
+    {
+      "group": "passed-final-restore",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 12.449,
+      "source_runner": "windows/dist/checks/editor-open-final-long-restore-ab8f6980-fdda-41d5-8494-177671614330/result.json",
+      "artifacts": [
+        "passed-final-restore-runner.json",
+        "passed-final-restore-stdout.txt",
+        "passed-final-restore-stderr.txt",
+        "passed-final-restore-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Deep snapshot Restore passed with unchanged 8000ms startup budget. Restored identity took6096ms within remaining7925ms; total6167ms. All host exits clean. Preserved earlier failures remain failures.",
+      "runner_started": "2026-09-28T04:03:37.4659528Z",
+      "runner_finished": "2026-09-28T04:03:49.9188473Z",
+      "case": "restore",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:03:38.3337772+09:00",
+      "native_finished": "2026-09-28T13:03:49.8504781+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "passed-late-open",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 19.416,
+      "source_runner": "windows/dist/checks/editor-open-final-late-open-c4caa101-caad-4d40-b3ad-65d555477017/result.json",
+      "artifacts": [
+        "passed-late-open-runner.json",
+        "passed-late-open-stdout.txt",
+        "passed-late-open-stderr.txt",
+        "passed-late-open-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Owned hidden UI thread suspend0/resume1; real IPC deadline15068ms; expired Open leaves zero pending/admitted/editors, preserves model/terminal and allows following Open. No whole-process suspension.",
+      "runner_started": "2026-09-28T04:04:02.4850626Z",
+      "runner_finished": "2026-09-28T04:04:21.9029494Z",
+      "case": "late-open",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:04:03.2360142+09:00",
+      "native_finished": "2026-09-28T13:04:21.8577407+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "passed-close-preparing",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 5.208,
+      "source_runner": "windows/dist/checks/editor-open-final-close-preparing-194dea51-8c74-4548-ac76-3725c9c9ef63/result.json",
+      "artifacts": [
+        "passed-close-preparing-runner.json",
+        "passed-close-preparing-stdout.txt",
+        "passed-close-preparing-stderr.txt",
+        "passed-close-preparing-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Exact owned flowmux-editor-open worker suspend0/resume1. Pending/admitted1/1 becomes0/1 at accepted quit then0/0 after resume; no editor. Real quit peer held17ms through late-result drain, completed before clean host exit.",
+      "runner_started": "2026-09-28T04:04:22.6407907Z",
+      "runner_finished": "2026-09-28T04:04:27.8528352Z",
+      "case": "close-preparing",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:04:23.2948577+09:00",
+      "native_finished": "2026-09-28T13:04:27.7976539+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "passed-late-quit-empty",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 18.367,
+      "source_runner": "windows/dist/checks/editor-open-final-late-quit-empty-43bf5b1c-5d53-4d21-af25-d78775358c64/result.json",
+      "artifacts": [
+        "passed-late-quit-empty-runner.json",
+        "passed-late-quit-empty-stdout.txt",
+        "passed-late-quit-empty-stderr.txt",
+        "passed-late-quit-empty-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after Windows checkpoint extended-path correction",
+      "ipc_reply_race_fix_boundary": "after atomic IPC deadline/reply and completion-time elapsed corrections",
+      "note": "Terminal-only direct discard-state quit after real IPC deadline15069ms; exact owned hidden UI thread suspend0/resume1; clean host exit without force.",
+      "runner_started": "2026-09-28T04:04:28.5997890Z",
+      "runner_finished": "2026-09-28T04:04:46.9709723Z",
+      "case": "late-quit-empty",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:04:29.3630034+09:00",
+      "native_finished": "2026-09-28T13:04:46.9179140+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "final-native-unit-build",
+      "role": "passed_final_cross_build",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 87.243,
+      "source_runner": "windows/dist/checks/editor-open-final-unit-build-55f67c49-7b20-4ca5-87f8-d92beb4f385a/result.json",
+      "artifacts": [
+        "final-native-unit-build-runner.json",
+        "final-native-unit-build-stdout.txt"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "note": "Build only; native test executable has not yet been run."
+    },
+    {
+      "group": "final-source-release-build",
+      "role": "passed_final_cross_build",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 98.613,
+      "source_runner": "windows/dist/checks/editor-open-final-release-cb5d7dc7-fbd5-4851-a21f-cd5d9316e51b/result.json",
+      "artifacts": [
+        "final-source-release-build-runner.json",
+        "final-source-release-build-stdout.txt"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "note": "Final-source release build after all runtime corrections; installer and runtime entrypoint probes pending."
+    },
+    {
+      "group": "passed-final-late-quit",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 19.982,
+      "source_runner": "windows/dist/checks/editor-open-final-late-quit-1d387ccf-8b7e-4dfa-9af1-ba6b6e462510/result.json",
+      "artifacts": [
+        "passed-final-late-quit-runner.json",
+        "passed-final-late-quit-stdout.txt",
+        "passed-final-late-quit-stderr.txt",
+        "passed-final-late-quit-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:04:47.7316505Z",
+      "runner_finished": "2026-09-28T04:05:07.7164807Z",
+      "case": "late-quit",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:04:48.3461793+09:00",
+      "native_finished": "2026-09-28T13:05:07.6657341+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json",
+      "note": "One clean editor; real server deadline15065ms, exact owned hidden UI suspend0/resume1, clean unforced exit."
+    },
+    {
+      "group": "passed-final-close",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 6.341,
+      "source_runner": "windows/dist/checks/editor-open-final-close-0f403126-4b57-41b3-8469-93200bece285/result.json",
+      "artifacts": [
+        "passed-final-close-runner.json",
+        "passed-final-close-stdout.txt",
+        "passed-final-close-stderr.txt",
+        "passed-final-close-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:05:08.4743633Z",
+      "runner_finished": "2026-09-28T04:05:14.8185016Z",
+      "case": "close",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:05:09.1456855+09:00",
+      "native_finished": "2026-09-28T13:05:14.7562197+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "passed-final-checkpoint-failure",
+      "role": "passed_final_native_background_case",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 7.525,
+      "source_runner": "windows/dist/checks/editor-open-final-checkpoint-failure-37aeabfc-8704-4f81-81c4-fb578836fddb/result.json",
+      "artifacts": [
+        "passed-final-checkpoint-failure-runner.json",
+        "passed-final-checkpoint-failure-stdout.txt",
+        "passed-final-checkpoint-failure-stderr.txt",
+        "passed-final-checkpoint-failure-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:05:15.5664957Z",
+      "runner_finished": "2026-09-28T04:05:23.0950613Z",
+      "case": "checkpoint-failure",
+      "native_status": "passed_background_editor_subset",
+      "checks": 1,
+      "native_started": "2026-09-28T13:05:16.1969877+09:00",
+      "native_finished": "2026-09-28T13:05:23.0379672+09:00",
+      "verifier_snapshot": "final-v1-verifier-snapshot-manifest.json"
+    },
+    {
+      "group": "regression-state",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 40.041,
+      "source_runner": "windows/dist/checks/editor-open-final-state-205b7bae-f4ba-4b6c-80dd-a279520e6f9c/result.json",
+      "artifacts": [
+        "regression-state-runner.json",
+        "regression-state-stdout.txt",
+        "regression-state-stderr.txt",
+        "regression-state-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:05:23.7999768Z",
+      "runner_finished": "2026-09-28T04:06:03.8462388Z",
+      "suite": "state",
+      "native_status": null,
+      "checks": 8,
+      "native_started": "2026-09-28T13:05:24.5211331+09:00",
+      "native_finished": "2026-09-28T13:06:03.7874682+09:00",
+      "note": "Native JSON has no top-level status; successful bounded runner and eight recorded checks establish the reported subset result without adding a status field."
+    },
+    {
+      "group": "regression-panes",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 13.802,
+      "source_runner": "windows/dist/checks/editor-open-final-panes-fb66209a-556a-4fc4-a3df-ac8d74fc8ce4/result.json",
+      "artifacts": [
+        "regression-panes-runner.json",
+        "regression-panes-stdout.txt",
+        "regression-panes-stderr.txt",
+        "regression-panes-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:06:04.6882465Z",
+      "runner_finished": "2026-09-28T04:06:18.4934871Z",
+      "suite": "panes",
+      "native_status": "passed_background_pane_subset",
+      "checks": 7,
+      "native_started": "2026-09-28T13:06:05.5502823+09:00",
+      "native_finished": "2026-09-28T13:06:18.4337804+09:00"
+    },
+    {
+      "group": "regression-workspaces",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 11.193,
+      "source_runner": "windows/dist/checks/editor-open-final-workspaces-bae19563-0b05-46c6-8dcb-9ed51dcd326c/result.json",
+      "artifacts": [
+        "regression-workspaces-runner.json",
+        "regression-workspaces-stdout.txt",
+        "regression-workspaces-stderr.txt",
+        "regression-workspaces-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:06:19.2502303Z",
+      "runner_finished": "2026-09-28T04:06:30.4470313Z",
+      "suite": "workspaces",
+      "native_status": "passed_background_workspace_subset",
+      "checks": 6,
+      "native_started": "2026-09-28T13:06:19.8746708+09:00",
+      "native_finished": "2026-09-28T13:06:30.3802031+09:00"
+    },
+    {
+      "group": "regression-ipc",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 7.309,
+      "source_runner": "windows/dist/checks/editor-open-final-ipc-124a9198-d560-4dc4-8c71-424b7bcc32ca/result.json",
+      "artifacts": [
+        "regression-ipc-runner.json",
+        "regression-ipc-stdout.txt",
+        "regression-ipc-stderr.txt",
+        "regression-ipc-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:06:31.2538405Z",
+      "runner_finished": "2026-09-28T04:06:38.5672048Z",
+      "suite": "ipc",
+      "native_status": "passed_ipc_subset",
+      "checks": 6,
+      "native_started": "2026-09-28T13:06:32.0444960+09:00",
+      "native_finished": "2026-09-28T13:06:38.4901231+09:00"
+    },
+    {
+      "group": "regression-ipc-limits",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 36.728,
+      "source_runner": "windows/dist/checks/editor-open-final-ipc-limits-83fb6866-1d66-488e-af8d-65ec972f96a9/result.json",
+      "artifacts": [
+        "regression-ipc-limits-runner.json",
+        "regression-ipc-limits-stdout.txt",
+        "regression-ipc-limits-stderr.txt",
+        "regression-ipc-limits-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "runner_started": "2026-09-28T04:06:39.3961762Z",
+      "runner_finished": "2026-09-28T04:07:16.1271914Z",
+      "suite": "ipc-limits",
+      "native_status": "passed_ipc_limits_subset",
+      "checks": 3,
+      "native_started": "2026-09-28T13:06:40.2256291+09:00",
+      "native_finished": "2026-09-28T13:07:16.0767272+09:00"
+    },
+    {
+      "group": "regression-browser-wait",
+      "role": "passed_final_related_native_regression",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 41.443,
+      "runner_started": "2026-09-28T04:07:16.9323196Z",
+      "runner_finished": "2026-09-28T04:07:58.3799636Z",
+      "source_runner": "windows/dist/checks/editor-open-final-browser-wait-extended-b3ae6e80-ad69-486f-9f16-8c0c3aa519f2/result.json",
+      "artifacts": [
+        "regression-browser-wait-runner.json",
+        "regression-browser-wait-stdout.txt",
+        "regression-browser-wait-stderr.txt",
+        "regression-browser-wait-native.json"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "suite": "browser-wait",
+      "native_status": "passed_background_browser_wait_subset",
+      "checks": 6,
+      "native_started": "2026-09-28T13:07:17.9930844+09:00",
+      "native_finished": "2026-09-28T13:07:58.3066265+09:00",
+      "note": "Six extended browser-wait checks, including a27035ms wait exceeding default IPC/client deadlines without retransmission."
+    },
+    {
+      "group": "final-native-tests",
+      "role": "passed_final_windows_native_unit_tests",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 12.774,
+      "runner_started": "2026-09-28T04:08:58.5763280Z",
+      "runner_finished": "2026-09-28T04:09:11.3543283Z",
+      "source_runner": "windows/dist/checks/editor-open-final-native-tests-53d0299f-85ea-41a5-b2af-3739bdc089c1/result.json",
+      "artifacts": [
+        "final-native-tests-runner.json",
+        "final-native-tests-stdout.txt",
+        "final-native-tests-stderr.txt"
+      ],
+      "checkpoint_long_path_fix_boundary": "after correction",
+      "ipc_reply_race_fix_boundary": "after correction",
+      "tests_passed": 172,
+      "tests_failed": 0,
+      "tests_ignored": 0,
+      "native_test_elapsed_seconds": 12.69,
+      "note": "Actual Windows test executable; includes nine Open-preparer, five reply-handoff and one long-checkpoint-path additions."
+    },
+    {
+      "group": "final-release-doctor",
+      "role": "passed_final_release_entrypoints",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 0.923,
+      "runner_started": "2026-09-28T04:09:25.2170727Z",
+      "runner_finished": "2026-09-28T04:09:26.1435641Z",
+      "source_runner": "windows/dist/checks/editor-open-final-release-doctor-d268726f-794f-4c37-9fb0-6097531da88b/result.json",
+      "artifacts": [
+        "final-release-doctor-runner.json",
+        "final-release-doctor-stdout.txt",
+        "final-release-doctor-stderr.txt",
+        "final-release-entrypoints.json"
+      ],
+      "entrypoints_passed": 3,
+      "note": "Release flowmux.exe, flowmuxctl.exe and flowmux.com doctor probes exit0. Not GUI launch, installer execution or physical picker acceptance."
+    },
+    {
+      "group": "final-package",
+      "role": "passed_final_nsis_build",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 11.362,
+      "source_runner": "windows/dist/checks/editor-open-final-package-6dab5254-5f22-4cee-8a1d-a36c92893a28/result.json",
+      "artifacts": [
+        "final-package-runner.json",
+        "final-package-stdout.txt",
+        "artifacts-final.json"
+      ],
+      "installer_bytes": 5108021,
+      "installer_sha256": "1856bff8b7d33fe335249b59c1b60f7aaae58c07b4e806a4cfd3c557549d5056",
+      "note": "Package build only; no installer or foreground execution. All eight recorded binary hashes independently matched current files at collection."
+    },
+    {
+      "group": "final-cleanup",
+      "role": "passed_read_only_process_inventory",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 8.005,
+      "runner_started": "2026-09-28T04:14:04.5951083Z",
+      "runner_finished": "2026-09-28T04:14:12.6033452Z",
+      "source_runner": "windows/dist/checks/editor-open-final-cleanup-469ed315-0cff-4520-bfa6-f007850e5ee8/result.json",
+      "artifacts": [
+        "final-cleanup-runner.json",
+        "final-cleanup-stdout.txt",
+        "final-cleanup-stderr.txt",
+        "final-cleanup.json"
+      ],
+      "checked_pid_count": 460,
+      "absent": 457,
+      "verified_reused": 3,
+      "creation_date_fallback_observed": 1,
+      "checked_utc": "2026-09-28T04:14:12.5011125Z",
+      "note": "Read-only identity inventory. No process control. Reuse proved only by creation timestamp later than latest recorded stage finish; no unverified or possibly alive entries. Own cleanup runners are excluded as inputs, though an old owned PID can be reused by this check."
+    },
+    {
+      "group": "cleanup-static",
+      "role": "passed_cleanup_parser",
+      "runner_status": "passed",
+      "runner_elapsed_seconds": 0.533,
+      "runner_started": "2026-09-28T04:13:56.9813177Z",
+      "runner_finished": "2026-09-28T04:13:57.5171413Z",
+      "source_runner": "windows/dist/checks/editor-open-cleanup-static-157d670a-021d-4d7c-9313-43d4997fe745/result.json",
+      "artifacts": [
+        "cleanup-static-runner.json",
+        "cleanup-static-stdout.txt",
+        "cleanup-static-stderr.txt"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "linux-open-preparer-tests-runner.json",
+      "source": "windows/dist/checks/editor-open-pure-c39839f5-c57c-43ae-8e93-722b545c913b/result.json",
+      "source_bytes": 294,
+      "source_sha256": "cd5fda7597b6f73ea004d909c8c9cc43a95a7d03ab34ec774ba4ad355110c5a0",
+      "bytes": 294,
+      "sha256": "cd5fda7597b6f73ea004d909c8c9cc43a95a7d03ab34ec774ba4ad355110c5a0",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "linux-open-preparer-tests-stdout.txt",
+      "source": "windows/dist/checks/editor-open-pure-c39839f5-c57c-43ae-8e93-722b545c913b/stdout.txt",
+      "source_bytes": 1314,
+      "source_sha256": "0a1543cea00f38f16d3424b557685d09929508da7df6e6de56c4d9cf12fc807f",
+      "bytes": 1313,
+      "sha256": "39f56ba0a4ca1fafb3ef64ad7f02e5c9509e553965c08d583e6444c9c0e28342",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "before-receipt-close-fixes-clippy-runner.json",
+      "source": "windows/dist/checks/editor-open-windows-clippy-1687bc40-aa8d-4742-8c21-182a7582157d/result.json",
+      "source_bytes": 396,
+      "source_sha256": "2bb540f17feceddc90097084e486e31c8ecdcf3d3211ca635354e9d9d390aff1",
+      "bytes": 396,
+      "sha256": "2bb540f17feceddc90097084e486e31c8ecdcf3d3211ca635354e9d9d390aff1",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "before-receipt-close-fixes-clippy-stdout.txt",
+      "source": "windows/dist/checks/editor-open-windows-clippy-1687bc40-aa8d-4742-8c21-182a7582157d/stdout.txt",
+      "source_bytes": 206,
+      "source_sha256": "a483a3f2ecebabbe9e109e8191d53280f24e29acf55896d6c37e68607bb56f32",
+      "bytes": 206,
+      "sha256": "a483a3f2ecebabbe9e109e8191d53280f24e29acf55896d6c37e68607bb56f32",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "before-direct-quit-fix-debug-build-runner.json",
+      "source": "windows/dist/checks/editor-open-debug-0c8e0e96-4936-44a3-80cc-cd38c58a44f4/result.json",
+      "source_bytes": 312,
+      "source_sha256": "37ca2361d86886ea4c7580ad957e439f321a5828aa121aae08f5c97a107895cc",
+      "bytes": 312,
+      "sha256": "37ca2361d86886ea4c7580ad957e439f321a5828aa121aae08f5c97a107895cc",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "before-direct-quit-fix-debug-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-debug-0c8e0e96-4936-44a3-80cc-cd38c58a44f4/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "a22b3a44d11339a1a1b4e53f7151e3b10233f5efbb606d1097272acba97acf2b",
+      "bytes": 216,
+      "sha256": "a22b3a44d11339a1a1b4e53f7151e3b10233f5efbb606d1097272acba97acf2b",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-debug-build-runner.json",
+      "source": "windows/dist/checks/editor-open-quit-fix-debug-063d0596-2d23-4dcd-9e34-f7227e8accf6/result.json",
+      "source_bytes": 320,
+      "source_sha256": "bc1766ce552469e7e0b088f4f9a2793be3861a4fabf58d36fc6a968648b9ee07",
+      "bytes": 320,
+      "sha256": "bc1766ce552469e7e0b088f4f9a2793be3861a4fabf58d36fc6a968648b9ee07",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-debug-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-quit-fix-debug-063d0596-2d23-4dcd-9e34-f7227e8accf6/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "93767eb35ae3a2a13e5f6601d6e6e8902f3d047793e6d4c1ebf11f6eacb6b2dc",
+      "bytes": 216,
+      "sha256": "93767eb35ae3a2a13e5f6601d6e6e8902f3d047793e6d4c1ebf11f6eacb6b2dc",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "initial-verifier-static-runner.json",
+      "source": "windows/dist/checks/editor-open-snapshot-static-df734d88-c680-4c2e-9cd9-7e4bf2058540/result.json",
+      "source_bytes": 508,
+      "source_sha256": "5f76383fbb55aa3c11749126751320d75ff20f7be1809bbf6513a7868d7d0592",
+      "bytes": 492,
+      "sha256": "06e6a2bd2dadbfb10a8327e4271a77f6100130f4075b91886b8feb83b3a54609",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "initial-verifier-static-stdout.txt",
+      "source": "windows/dist/checks/editor-open-snapshot-static-df734d88-c680-4c2e-9cd9-7e4bf2058540/stdout.txt",
+      "source_bytes": 283,
+      "source_sha256": "1545f1cd9454b01d7854c1fa1d52bef0e651115030c11f597c8b17fe8ff0e110",
+      "bytes": 272,
+      "sha256": "0961fd0eb1267395c3841f0dc6be0f635579dac356410ecde7c5efd4ed008894",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "initial-verifier-static-stderr.txt",
+      "source": "windows/dist/checks/editor-open-snapshot-static-df734d88-c680-4c2e-9cd9-7e4bf2058540/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-async-open-runner.json",
+      "source": "windows/dist/checks/editor-open-async-native-52267e44-31b5-4644-a436-6b899a3f4867/result.json",
+      "source_bytes": 512,
+      "source_sha256": "6cecd99a7166b35ce048219d2b208913a9948def8fcd93745d1302eae45de65f",
+      "bytes": 496,
+      "sha256": "331cc01cd2c42c976bdf0124dcd34d482e12322c0ca553b1f341f45a8ae96d56",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-async-open-stdout.txt",
+      "source": "windows/dist/checks/editor-open-async-native-52267e44-31b5-4644-a436-6b899a3f4867/stdout.txt",
+      "source_bytes": 9385,
+      "source_sha256": "b813c40228c489ef58c22cf3089328edab66c6691b6b914f29510ef7af8e63b9",
+      "bytes": 9247,
+      "sha256": "8f858c3870019b224ef70b1c07a66f69c6b7498b34e9e7aee2b4ae0d7a1f8cb5",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-async-open-stderr.txt",
+      "source": "windows/dist/checks/editor-open-async-native-52267e44-31b5-4644-a436-6b899a3f4867/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-async-open-native.json",
+      "source": "windows/dist/editor-open-initial/dist/evidence/editor-cd5ea46c-d1f3-427f-8855-2e6c97b6c2db/native-editor-background.json",
+      "source_bytes": 9068,
+      "source_sha256": "8d341426eacc06057d6fd6aecbf2f2289c027d8d895edbb48b07003f3e25f26a",
+      "bytes": 8928,
+      "sha256": "315d7b85b7fdaae74745679fded78330ad97e26cdbe4dc6649fb5899fc8421bf",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "initial-verifier-snapshot-manifest.json",
+      "source": "windows/dist/editor-open-initial/manifest.json",
+      "source_bytes": 419,
+      "source_sha256": "e6a1bd61ceafbfce3455d8e1c481566fc7a086dd266420a91b40dba8cda6289d",
+      "bytes": 419,
+      "sha256": "e6a1bd61ceafbfce3455d8e1c481566fc7a086dd266420a91b40dba8cda6289d",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "initial-verifier-verify-editor.ps1",
+      "source": "windows/dist/editor-open-initial/scripts/verify-editor.ps1",
+      "source_bytes": 61477,
+      "source_sha256": "8d0e364b2b7ba1facd6a01186b1630aae461d324c4ef7ade1418c5176ce6ed4f",
+      "bytes": 61474,
+      "sha256": "0f9b182b5b5a823869f4704be62e1e4da0607deb926e5607db06580825333773",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "initial-verifier-CliProbe.cs",
+      "source": "windows/dist/editor-open-initial/scripts/CliProbe.cs",
+      "source_bytes": 2829,
+      "source_sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "bytes": 2829,
+      "sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "initial-verifier-EditorFixture.cs",
+      "source": "windows/dist/editor-open-initial/scripts/EditorFixture.cs",
+      "source_bytes": 9794,
+      "source_sha256": "f5b75fe2c9239bd33abbc7ffc85329474ad19aeec9a39b171e48bc859e4de126",
+      "bytes": 9791,
+      "sha256": "97733595939e52f70b36a783ffa754a0465c575d2cea243323fbbba0249f8872",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "release-build-runner.json",
+      "source": "windows/dist/checks/editor-open-release-f83f220e-3214-41d2-98f9-3b52a4ed06b5/result.json",
+      "source_bytes": 331,
+      "source_sha256": "cb6abd1310b574cc83d0b7fc1f9c6120861feafad7d2051523015963cb95e730",
+      "bytes": 331,
+      "sha256": "cb6abd1310b574cc83d0b7fc1f9c6120861feafad7d2051523015963cb95e730",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "release-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-release-f83f220e-3214-41d2-98f9-3b52a4ed06b5/stdout.txt",
+      "source_bytes": 206,
+      "source_sha256": "5328161688ae2413e3ea9f7e231be3af1b9f49c9f3cfe6a6f451ea0c3156cb83",
+      "bytes": 206,
+      "sha256": "5328161688ae2413e3ea9f7e231be3af1b9f49c9f3cfe6a6f451ea0c3156cb83",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-picker-blocked-runner.json",
+      "source": "windows/dist/checks/editor-picker-blocked-native-ba1ed8d4-4aa8-4363-9795-36a957c98f3f/result.json",
+      "source_bytes": 520,
+      "source_sha256": "52930c9085255daec5e6ba2fa185fd25e6aa359ab0c142c8e0036ad87491d2e9",
+      "bytes": 504,
+      "sha256": "f41bf68c7152a00c69467419e69c76cd3c58e69e90580642c08a991642942cb0",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-picker-blocked-stdout.txt",
+      "source": "windows/dist/checks/editor-picker-blocked-native-ba1ed8d4-4aa8-4363-9795-36a957c98f3f/stdout.txt",
+      "source_bytes": 6075,
+      "source_sha256": "497503c59836bc593ee90aeb994dbc8463a0bd2ca45721f5786d04d15765b25b",
+      "bytes": 5967,
+      "sha256": "5419c8bd0136deab474486b89d6d19c5ef142c50e8ac113ce6185fe4c4a7e568",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-picker-blocked-stderr.txt",
+      "source": "windows/dist/checks/editor-picker-blocked-native-ba1ed8d4-4aa8-4363-9795-36a957c98f3f/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-picker-blocked-native.json",
+      "source": "windows/dist/editor-open-initial/dist/evidence/editor-79fc6ceb-efc6-4f82-8b4d-d6a60b362f50/native-editor-background.json",
+      "source_bytes": 5759,
+      "source_sha256": "c7009cca8315a1c200b53557d21d12c105c3895b123979cdadb62b5025960f66",
+      "bytes": 5649,
+      "sha256": "842d98aa6f024ccb844f5845d237c196f2e4ff8d27b07cc9cd82556913e725e8",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-runner.json",
+      "source": "windows/dist/checks/editor-open-regression-open-0113e2c9-d8f4-4eb7-8f4a-7d9aa6026912/result.json",
+      "source_bytes": 507,
+      "source_sha256": "c71c6aea32da8c063955bd7d7ef894d1ba8da922d0909404eed54c04da4c50ee",
+      "bytes": 491,
+      "sha256": "eb7bc78dc9dbd9946d5e00ccaee2700dc559a75fdc75519545c4abf396ad677d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-stdout.txt",
+      "source": "windows/dist/checks/editor-open-regression-open-0113e2c9-d8f4-4eb7-8f4a-7d9aa6026912/stdout.txt",
+      "source_bytes": 5239,
+      "source_sha256": "2d7a181fd58b7569b723db09bf561d02921ca4cf7b17477ea64152385ef0c875",
+      "bytes": 5142,
+      "sha256": "e63e2ea0c884eb433ef4bed45eac00b0a6df1b00b5ab57d845087c76c0341f7e",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-open-stderr.txt",
+      "source": "windows/dist/checks/editor-open-regression-open-0113e2c9-d8f4-4eb7-8f4a-7d9aa6026912/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-open-native.json",
+      "source": "windows/dist/editor-open-initial/dist/evidence/editor-63cd588b-62d9-4da4-800b-479abf01425c/native-editor-background.json",
+      "source_bytes": 4951,
+      "source_sha256": "8a5aeb1515e8b414aab86b4884cd4e56ea9a386eaa7c298f24d1e86cc0fcb43a",
+      "bytes": 4852,
+      "sha256": "bf63e395b02fc5c0becb72a44fc4ab0bf33f88d3120fd3dec72f37d6a5a61063",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-snapshot-restore-runner.json",
+      "source": "windows/dist/checks/editor-open-regression-restore-dfe4a6cd-523e-44e1-bd8d-42a9905b9226/result.json",
+      "source_bytes": 515,
+      "source_sha256": "b263b51ededff6aec0e3ea7fbafc27ad82f4e2fa540639c9c5f1a4b345dcfdc3",
+      "bytes": 499,
+      "sha256": "536d2639aebc4d6d47beb14dc63054fc007c5e7b95c7849035e114f776bf6a2d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-snapshot-restore-stdout.txt",
+      "source": "windows/dist/checks/editor-open-regression-restore-dfe4a6cd-523e-44e1-bd8d-42a9905b9226/stdout.txt",
+      "source_bytes": 194,
+      "source_sha256": "5b10cc413cf9607db2655187380d96c4783cffd620827827c52b5f2620f51630",
+      "bytes": 193,
+      "sha256": "37808b1eadde72a859b473c89098c3163d6fb6a0bf243dabc15a647d24317d94",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-snapshot-restore-stderr.txt",
+      "source": "windows/dist/checks/editor-open-regression-restore-dfe4a6cd-523e-44e1-bd8d-42a9905b9226/stderr.txt",
+      "source_bytes": 1320,
+      "source_sha256": "8a4c637c80384a605bb41b0626c7f927dba847b425bc0f81a70d8f436fad2476",
+      "bytes": 1291,
+      "sha256": "3d2d906e7d949323c405f6865daeab3a12899b1cf5ee4934a482547bca69f74c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-snapshot-restore-native.json",
+      "source": "windows/dist/editor-open-initial/dist/evidence/editor-4cb63b52-4b8e-43f5-8e35-066b0c2af0a4/native-editor-background.json",
+      "source_bytes": 6547,
+      "source_sha256": "976ea5084c047768e9de0c9bc2cfa93f116a4490268768e7cfd5f5c0eec9aa41",
+      "bytes": 6434,
+      "sha256": "c5d7d274030ebafd0f9413c6f069a4b72b2258a136a2468183ffced00cd2bcb4",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "post-checkpoint-fix-debug-build-runner.json",
+      "source": "windows/dist/checks/editor-open-long-state-debug-f98efd75-615b-4352-85cb-0c76d4f996a5/result.json",
+      "source_bytes": 2395,
+      "source_sha256": "df93bc02ccff19b29c85f2929e2f32f6737cbe68ff08ab88b69fde837fffcbe3",
+      "bytes": 2395,
+      "sha256": "df93bc02ccff19b29c85f2929e2f32f6737cbe68ff08ab88b69fde837fffcbe3",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "post-checkpoint-fix-debug-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-long-state-debug-f98efd75-615b-4352-85cb-0c76d4f996a5/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "7fe2d25c16b87271ab7928bc7ed7653f498bc12519996a42a3f4cd84ea5f8cc6",
+      "bytes": 216,
+      "sha256": "7fe2d25c16b87271ab7928bc7ed7653f498bc12519996a42a3f4cd84ea5f8cc6",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "failed-restored-startup-runner.json",
+      "source": "windows/dist/checks/editor-open-long-state-restore-36e10377-b7b3-401f-92fc-335e9ab1b301/result.json",
+      "source_bytes": 516,
+      "source_sha256": "02080e365703560528434a671e21e3622939a73d8956aa89b76208dc18a4799c",
+      "bytes": 500,
+      "sha256": "67895b351a3ebaeb0254067a43f3ddea3fc5f9b762eb52e061bafba26f919b96",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-restored-startup-stdout.txt",
+      "source": "windows/dist/checks/editor-open-long-state-restore-36e10377-b7b3-401f-92fc-335e9ab1b301/stdout.txt",
+      "source_bytes": 194,
+      "source_sha256": "b2523fd2e5fccd8603d6a9daaad9d5f4f7c81c6b296801a189d3548f06499a40",
+      "bytes": 193,
+      "sha256": "482e4c79b140db88c48a99b1ef86e2bde7e4fc82f90ea61038560cfbd4e517e0",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-restored-startup-stderr.txt",
+      "source": "windows/dist/checks/editor-open-long-state-restore-36e10377-b7b3-401f-92fc-335e9ab1b301/stderr.txt",
+      "source_bytes": 1105,
+      "source_sha256": "d662575b7a7c04b7441f71b670491ff82789199716076ecd7718b48ef61376b7",
+      "bytes": 1088,
+      "sha256": "c9f3b5f350b680c698947b0a429252ab6e2c02ae05b9509d75f0ab784f3bf2eb",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "failed-restored-startup-native.json",
+      "source": "windows/dist/editor-open-initial/dist/evidence/editor-0455a1f9-b2f0-439f-a1f2-f798e017c052/native-editor-background.json",
+      "source_bytes": 9279,
+      "source_sha256": "508ff19d0ac11dc7f0dce4fa1d0a8bed14e0a1358ed0137ec3f83dbad43d2828",
+      "bytes": 9133,
+      "sha256": "cc3292cc3bba54fd2345c9d7e26b400d2cc5fb2e929a7ae3b38383796e016bb3",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "startup-budget-verifier-static-runner.json",
+      "source": "windows/dist/checks/editor-startup-budget-verifier-static-2f226ccb-9840-4aa7-8615-71a53f3d1bfb/result.json",
+      "source_bytes": 520,
+      "source_sha256": "3b76a5d6ab7ccfe51cdbf21eefe7221a67ea93e157a803447457019e07c4a16e",
+      "bytes": 504,
+      "sha256": "83990251f09cdad904c129b0082a15e0616269292771f891153f2e1f4a795638",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "startup-budget-verifier-static-stdout.txt",
+      "source": "windows/dist/checks/editor-startup-budget-verifier-static-2f226ccb-9840-4aa7-8615-71a53f3d1bfb/stdout.txt",
+      "source_bytes": 330,
+      "source_sha256": "6b452844e1859955debda8fe67ac9c6236e238d9662685c61206b8291715c8b4",
+      "bytes": 318,
+      "sha256": "a1cffc82fe5efb85b36f4b1c547e09abe372371253e462e0d99946b09947b9ce",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "startup-budget-verifier-static-stderr.txt",
+      "source": "windows/dist/checks/editor-startup-budget-verifier-static-2f226ccb-9840-4aa7-8615-71a53f3d1bfb/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "lifetime-helper-verifier-static-runner.json",
+      "source": "windows/dist/checks/editor-open-lifetime-verifier-static-fixed-a101f82d-1fce-48ff-a978-0d09707054ce/result.json",
+      "source_bytes": 525,
+      "source_sha256": "595ce44e536b6c3435b50a835093b0815208b2da60a65f939a6a5af192f7d902",
+      "bytes": 509,
+      "sha256": "cbda39a377d0a0f7628413f00c585e08421a72d46dfd2eca7fc7f70b6b9e2883",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "lifetime-helper-verifier-static-stdout.txt",
+      "source": "windows/dist/checks/editor-open-lifetime-verifier-static-fixed-a101f82d-1fce-48ff-a978-0d09707054ce/stdout.txt",
+      "source_bytes": 330,
+      "source_sha256": "6b452844e1859955debda8fe67ac9c6236e238d9662685c61206b8291715c8b4",
+      "bytes": 318,
+      "sha256": "a1cffc82fe5efb85b36f4b1c547e09abe372371253e462e0d99946b09947b9ce",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "lifetime-helper-verifier-static-stderr.txt",
+      "source": "windows/dist/checks/editor-open-lifetime-verifier-static-fixed-a101f82d-1fce-48ff-a978-0d09707054ce/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-v1-verifier-snapshot-manifest.json",
+      "source": "windows/dist/editor-open-final-v1/manifest.json",
+      "source_bytes": 1127,
+      "source_sha256": "7b4b42865c26cbb34e33120756cea059949871a6dbc306a1e8968a6370cbd4d6",
+      "bytes": 1127,
+      "sha256": "7b4b42865c26cbb34e33120756cea059949871a6dbc306a1e8968a6370cbd4d6",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-v1-verifier-verify-editor.ps1",
+      "source": "windows/dist/editor-open-final-v1/scripts/verify-editor.ps1",
+      "source_bytes": 74483,
+      "source_sha256": "08f86604c329e72c7f32a6f48cc0eb33cde678302e0f50aecfea08ed8da6552c",
+      "bytes": 74480,
+      "sha256": "1e746321813b84a8a6e26b19d3f1b24c1bae9ad07301800c0ce71ab9a46e8cb8",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-v1-verifier-CliProbe.cs",
+      "source": "windows/dist/editor-open-final-v1/scripts/CliProbe.cs",
+      "source_bytes": 2829,
+      "source_sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "bytes": 2829,
+      "sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-v1-verifier-EditorFixture.cs",
+      "source": "windows/dist/editor-open-final-v1/scripts/EditorFixture.cs",
+      "source_bytes": 9794,
+      "source_sha256": "f5b75fe2c9239bd33abbc7ffc85329474ad19aeec9a39b171e48bc859e4de126",
+      "bytes": 9791,
+      "sha256": "97733595939e52f70b36a783ffa754a0465c575d2cea243323fbbba0249f8872",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-v1-verifier-EditorOpenLifetime.cs",
+      "source": "windows/dist/editor-open-final-v1/scripts/EditorOpenLifetime.cs",
+      "source_bytes": 11738,
+      "source_sha256": "87c735d1a0c28e9b6e56a62338e87dd93d52afd550227b8ddd74c3e044403973",
+      "bytes": 11735,
+      "sha256": "149581ef69637cbbc2b9682456dac53dc10fc2ae2d5b4101841f3b2f0dfbbfa3",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-clippy-runner.json",
+      "source": "windows/dist/checks/editor-open-final-clippy-15c7ed02-4352-4fa7-a66a-8eab3611ce2b/result.json",
+      "source_bytes": 2468,
+      "source_sha256": "a5a674b48ee2c3068235d5a1f65b7715c99367d884a46357e55c305625eb5a40",
+      "bytes": 2468,
+      "sha256": "a5a674b48ee2c3068235d5a1f65b7715c99367d884a46357e55c305625eb5a40",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-clippy-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-clippy-15c7ed02-4352-4fa7-a66a-8eab3611ce2b/stdout.txt",
+      "source_bytes": 4017,
+      "source_sha256": "ae2f7fb9e727ffbf7d62ccc4c17c65c2f5117b4072c63217a203a7a757c81568",
+      "bytes": 4017,
+      "sha256": "ae2f7fb9e727ffbf7d62ccc4c17c65c2f5117b4072c63217a203a7a757c81568",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-format-runner.json",
+      "source": "windows/dist/checks/editor-open-format-252f1806-efa4-4873-99aa-caee54804dc4/result.json",
+      "source_bytes": 263,
+      "source_sha256": "8c3fec7d9ba31ed35ea3dacc103bc08a41260eb3d86b982429d9b5f74c985a9c",
+      "bytes": 263,
+      "sha256": "8c3fec7d9ba31ed35ea3dacc103bc08a41260eb3d86b982429d9b5f74c985a9c",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-format-stdout.txt",
+      "source": "windows/dist/checks/editor-open-format-252f1806-efa4-4873-99aa-caee54804dc4/stdout.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-source-debug-build-runner.json",
+      "source": "windows/dist/checks/editor-open-final-debug-f94dce78-9663-47a0-a4ad-f50e566ab4c4/result.json",
+      "source_bytes": 2390,
+      "source_sha256": "465044fde581b2a6e74b30a6a915a239e49e90047587b9fd7239884eb0147163",
+      "bytes": 2390,
+      "sha256": "465044fde581b2a6e74b30a6a915a239e49e90047587b9fd7239884eb0147163",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-source-debug-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-debug-f94dce78-9663-47a0-a4ad-f50e566ab4c4/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "583bcb102e9bef101188a32b9d1e494ebc6e5a8adee0e3a5882a52c16b2fc2ef",
+      "bytes": 216,
+      "sha256": "583bcb102e9bef101188a32b9d1e494ebc6e5a8adee0e3a5882a52c16b2fc2ef",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-restore-runner.json",
+      "source": "windows/dist/checks/editor-open-final-long-restore-ab8f6980-fdda-41d5-8494-177671614330/result.json",
+      "source_bytes": 522,
+      "source_sha256": "fd6d9b10eb1ae30e254c603af8ed4525aceb0c5a7574dc79a380e0848ad14faa",
+      "bytes": 506,
+      "sha256": "eed1142408c2fa4139e7f965e2f7a524dfb6a696f35e8ede7561cbdcad5bd129",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-restore-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-long-restore-ab8f6980-fdda-41d5-8494-177671614330/stdout.txt",
+      "source_bytes": 18552,
+      "source_sha256": "e9a5dd56a44c60d85c7ef3463bb3a8c1e5d34c9f88a0228ea8e5476d298140cb",
+      "bytes": 18277,
+      "sha256": "8474e086d6d6ddf5a3d13ed2d7e11d87fc94549e1e272eda1f23cbf48c17119d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-restore-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-long-restore-ab8f6980-fdda-41d5-8494-177671614330/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-restore-native.json",
+      "source": "windows/dist/editor-open-final-v1/dist/evidence/editor-c6810a94-c43e-4007-8f71-0a4ee008498b/native-editor-background.json",
+      "source_bytes": 18260,
+      "source_sha256": "7700298b498c108f7638a9c5f77c84cb394ae034387ec398da0b110ef9bb2589",
+      "bytes": 17983,
+      "sha256": "4cace1954b53b20c633dcb4af3f7291a6333cb391f4e7951ae634f06e40c38a9",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-open-runner.json",
+      "source": "windows/dist/checks/editor-open-final-late-open-c4caa101-caad-4d40-b3ad-65d555477017/result.json",
+      "source_bytes": 506,
+      "source_sha256": "322f5e35576c5302cb009a8725f910de27e41b8ac56135a06203a06ef155ff2b",
+      "bytes": 490,
+      "sha256": "5fd7c11ad9ee81d655da4fca9ec2e19c07147ff4a74234a2ee64d94eb01b3e9e",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-open-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-late-open-c4caa101-caad-4d40-b3ad-65d555477017/stdout.txt",
+      "source_bytes": 8441,
+      "source_sha256": "e48e443c516e8ad05421ea3cb9b42e2c6d5bd85618290cc8a525c25b2218a9b8",
+      "bytes": 8301,
+      "sha256": "69f8556987bf4eadcca02001696de545d242b15226f77811ae0df362a21201c9",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-open-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-late-open-c4caa101-caad-4d40-b3ad-65d555477017/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-late-open-native.json",
+      "source": "windows/dist/evidence/editor-dd6dc143-4f1f-4a40-9bae-c1e0ecc89428/native-editor-background.json",
+      "source_bytes": 8157,
+      "source_sha256": "26ccc6890786c1259eab836e48a14da5e0ecffdaa0ee0c95d644042a229f8f4d",
+      "bytes": 8015,
+      "sha256": "6bc14444464212c3d820fbbae4107bdaf8a18fc0c9c3217b352a09d665a0d855",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-close-preparing-runner.json",
+      "source": "windows/dist/checks/editor-open-final-close-preparing-194dea51-8c74-4548-ac76-3725c9c9ef63/result.json",
+      "source_bytes": 517,
+      "source_sha256": "8e4ba21ece33f2924088f350661a6badcb69df0baacc04239098c07b2d420575",
+      "bytes": 501,
+      "sha256": "749a272dc7251c6bb251facbcb8fb36deb984fe67175ebd148adcde213c7f3fb",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-close-preparing-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-close-preparing-194dea51-8c74-4548-ac76-3725c9c9ef63/stdout.txt",
+      "source_bytes": 11636,
+      "source_sha256": "cfcf54fd78e1674896ba4020d89477fc63c75778d2e9d0ac76bfb65b161c3c6b",
+      "bytes": 11443,
+      "sha256": "a79b595d06d7622304fffc9a5fd3cc76cbca83facd6a801cf0a5f0e5e24a602a",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-close-preparing-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-close-preparing-194dea51-8c74-4548-ac76-3725c9c9ef63/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-close-preparing-native.json",
+      "source": "windows/dist/evidence/editor-4237a38e-b5ba-4f21-a84f-694e9ec192a8/native-editor-background.json",
+      "source_bytes": 11349,
+      "source_sha256": "7725467af2a6d74426e7ea3170b536811e6dd73b5171e92e9b78fcc3a83e8439",
+      "bytes": 11154,
+      "sha256": "a00c61c25467a90513aa0cf1855c913ee439baeaba1cd6b342dfef1341815a2c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-quit-empty-runner.json",
+      "source": "windows/dist/checks/editor-open-final-late-quit-empty-43bf5b1c-5d53-4d21-af25-d78775358c64/result.json",
+      "source_bytes": 518,
+      "source_sha256": "10c5048250f1a869d87777218a5e78bf140bcdfd73f8ee3d3a79a05fc7728e0f",
+      "bytes": 502,
+      "sha256": "03e1ac6fe206ab054b6d558658f40ffed1b9038ce9778a9541f03046d4c47c06",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-quit-empty-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-late-quit-empty-43bf5b1c-5d53-4d21-af25-d78775358c64/stdout.txt",
+      "source_bytes": 9631,
+      "source_sha256": "0da7e51532fb6016682e023e476386e4433418516a70e74257d460d7736873af",
+      "bytes": 9469,
+      "sha256": "5cd4ba8a7afc98e420f371eb82dfee115ba9b5202ae4d60b7a6f1f70fdee4f2d",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-late-quit-empty-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-late-quit-empty-43bf5b1c-5d53-4d21-af25-d78775358c64/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-late-quit-empty-native.json",
+      "source": "windows/dist/evidence/editor-ad520b59-093e-435d-941d-f08201cd2894/native-editor-background.json",
+      "source_bytes": 9353,
+      "source_sha256": "9ede5d43779473f5b229b55589e7fa7c7af9c02d7a80e92d9f5a6be525b91a09",
+      "bytes": 9189,
+      "sha256": "e7811a80e38b48b4102cd1eedc275f69bfa9f0358731b72db833216e514131a1",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-unit-build-runner.json",
+      "source": "windows/dist/checks/editor-open-final-unit-build-55f67c49-7b20-4ca5-87f8-d92beb4f385a/result.json",
+      "source_bytes": 2460,
+      "source_sha256": "a8f0c07487d686d1b92feae1ae6cd829e3b6c13efdef9e2f3bd168f7a10e19b1",
+      "bytes": 2460,
+      "sha256": "a8f0c07487d686d1b92feae1ae6cd829e3b6c13efdef9e2f3bd168f7a10e19b1",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-native-unit-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-unit-build-55f67c49-7b20-4ca5-87f8-d92beb4f385a/stdout.txt",
+      "source_bytes": 330,
+      "source_sha256": "7b11e652f7c91ae0379c62e22c30cff07e20084d38895130337a6bd4216c7201",
+      "bytes": 330,
+      "sha256": "7b11e652f7c91ae0379c62e22c30cff07e20084d38895130337a6bd4216c7201",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-source-release-build-runner.json",
+      "source": "windows/dist/checks/editor-open-final-release-cb5d7dc7-fbd5-4851-a21f-cd5d9316e51b/result.json",
+      "source_bytes": 2429,
+      "source_sha256": "2c6fc1208e010a4f64c5612817dc6b8dd0ca83893e3c23550e0d448d0fc2c185",
+      "bytes": 2429,
+      "sha256": "2c6fc1208e010a4f64c5612817dc6b8dd0ca83893e3c23550e0d448d0fc2c185",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-source-release-build-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-release-cb5d7dc7-fbd5-4851-a21f-cd5d9316e51b/stdout.txt",
+      "source_bytes": 206,
+      "source_sha256": "149b11d6e454184d083d8c39ac7a8f03607eb5019d63050613659c82ff142c9e",
+      "bytes": 206,
+      "sha256": "149b11d6e454184d083d8c39ac7a8f03607eb5019d63050613659c82ff142c9e",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-late-quit-runner.json",
+      "source": "windows/dist/checks/editor-open-final-late-quit-1d387ccf-8b7e-4dfa-9af1-ba6b6e462510/result.json",
+      "source_bytes": 506,
+      "source_sha256": "054477478fcca113eae3f4e3978c26dea178d8d775a3b8ec31b5868cfed93aa6",
+      "bytes": 490,
+      "sha256": "47054b9691f3ec579d5c7ed022ba092f79a710c3dc0a1788a60c4a8687ea1b04",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-late-quit-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-late-quit-1d387ccf-8b7e-4dfa-9af1-ba6b6e462510/stdout.txt",
+      "source_bytes": 10778,
+      "source_sha256": "30851d14a4f63e192a6b800773dde12aa9579bfac89a2a968a804273c3609acb",
+      "bytes": 10602,
+      "sha256": "8068f8eddf0d51663eaf4fb1f2bcb6489de25436cd1dec59358fdecf3a676701",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-late-quit-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-late-quit-1d387ccf-8b7e-4dfa-9af1-ba6b6e462510/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-late-quit-native.json",
+      "source": "windows/dist/evidence/editor-115424db-1458-42a6-b875-0dc54d7aca9a/native-editor-background.json",
+      "source_bytes": 10508,
+      "source_sha256": "3ce1d2f806edabae07097e99a917ca817a26b24d3f9399d5a3b2946909f925dc",
+      "bytes": 10330,
+      "sha256": "adf5a362713086d8138fcb72cee54c12909b6d6512a930331e9979f12464fa5b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-close-runner.json",
+      "source": "windows/dist/checks/editor-open-final-close-0f403126-4b57-41b3-8469-93200bece285/result.json",
+      "source_bytes": 497,
+      "source_sha256": "f5a7faa8e022064b598761118f691deac324c8ed6e5beef52bcff4a9914d9a70",
+      "bytes": 481,
+      "sha256": "e42ccc16dec05fd563d3d6dc1c10abf174fdd1985c9b72be2bb983ff9c8f400b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-close-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-close-0f403126-4b57-41b3-8469-93200bece285/stdout.txt",
+      "source_bytes": 8347,
+      "source_sha256": "f4caf9836f79aa45245c31fc23c3f0ccd094b65247f07a24954d55d42cb5d0ee",
+      "bytes": 8209,
+      "sha256": "f56078697202c79e02e8a8953c8d2d8ce4339381bda781ffc63b7b7e599f5719",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-close-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-close-0f403126-4b57-41b3-8469-93200bece285/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-close-native.json",
+      "source": "windows/dist/evidence/editor-883f5cc8-1bfe-4be4-945e-e368dd339b0e/native-editor-background.json",
+      "source_bytes": 8077,
+      "source_sha256": "69bfbb846f4330f9c27c4d68a7c26541ed5123ad0c16d1d1ff26bdfd2c642b84",
+      "bytes": 7937,
+      "sha256": "7e4eda4b92a03c996fd8d0897141149a656a44e91ae180630671f528d64eedb2",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-checkpoint-failure-runner.json",
+      "source": "windows/dist/checks/editor-open-final-checkpoint-failure-37aeabfc-8704-4f81-81c4-fb578836fddb/result.json",
+      "source_bytes": 523,
+      "source_sha256": "804fd39abc3fb486d5d006e96308c47dbcdf8621de7e2eb4e62f861fdb5f78fa",
+      "bytes": 507,
+      "sha256": "869add9a7bc4e9dde58a7fbea982b636c4d27be5ef7bb1628dd914188c255412",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-checkpoint-failure-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-checkpoint-failure-37aeabfc-8704-4f81-81c4-fb578836fddb/stdout.txt",
+      "source_bytes": 14355,
+      "source_sha256": "fa83becbd376a058aab0a895ea77e401b9839e328b234792ec9169626c4a229d",
+      "bytes": 14119,
+      "sha256": "a7b4b6d81f092f788ec59ee7a94fcd5c21e75714dbbbad0fe0fbd1326138fa18",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "passed-final-checkpoint-failure-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-checkpoint-failure-37aeabfc-8704-4f81-81c4-fb578836fddb/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "passed-final-checkpoint-failure-native.json",
+      "source": "windows/dist/evidence/editor-162dde47-aaec-4426-895f-7e287d4351e4/native-editor-background.json",
+      "source_bytes": 14083,
+      "source_sha256": "8bc61e198edd05ff0a0fbf8338f8a52ee83e4bdf7c03f5c6555abf2c40d688a5",
+      "bytes": 13845,
+      "sha256": "dd8f74c7fbcb12aaeaddc282c1727ed70d043bdf162316cb09773c46692acee1",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-state-runner.json",
+      "source": "windows/dist/checks/editor-open-final-state-205b7bae-f4ba-4b6c-80dd-a279520e6f9c/result.json",
+      "source_bytes": 495,
+      "source_sha256": "8c08fbcf6cc03d77c5b54543fb833f2d611e80935801f6fac559dbb9088759eb",
+      "bytes": 479,
+      "sha256": "5934924b57cb94095f23ff2af4b81754091159fea8a59ed6ee9ed53a15adfdc2",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-state-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-state-205b7bae-f4ba-4b6c-80dd-a279520e6f9c/stdout.txt",
+      "source_bytes": 1964,
+      "source_sha256": "06d0a53defe22f293dda12759cc9a30457de528d4501e2f7e258174761b8ff13",
+      "bytes": 1930,
+      "sha256": "e19f6249af1d84524c89007556a2d8f9766707a0dd168d838668548e6fe91477",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-state-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-state-205b7bae-f4ba-4b6c-80dd-a279520e6f9c/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-state-native.json",
+      "source": "windows/dist/evidence/state-53cf584b-6c78-43ab-b212-fc5911f2d623/native-state-background.json",
+      "source_bytes": 1962,
+      "source_sha256": "cfac5a6621dd34666fd1211bfeb8b2a6599c6159412db09a377e6961b88a9a67",
+      "bytes": 1930,
+      "sha256": "e19f6249af1d84524c89007556a2d8f9766707a0dd168d838668548e6fe91477",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-panes-runner.json",
+      "source": "windows/dist/checks/editor-open-final-panes-fb66209a-556a-4fc4-a3df-ac8d74fc8ce4/result.json",
+      "source_bytes": 494,
+      "source_sha256": "d933901dba305fc28aca66307b86edbd9328d5a3e0d5a313833eec8e41177fcb",
+      "bytes": 478,
+      "sha256": "8987fe14d3145d8f02da7dd88ebeb553433a305dffc6d506b72f8380a1256235",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-panes-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-panes-fb66209a-556a-4fc4-a3df-ac8d74fc8ce4/stdout.txt",
+      "source_bytes": 7394,
+      "source_sha256": "9b546dfcf0cb88071f6c96c22b7ce259359503b4b8a4005acd26466deb7a265b",
+      "bytes": 7275,
+      "sha256": "ecb2d7126e2b08f8d396c73415a616f2b3831dd04e1fe153bee0d6a6d8d8ec2c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-panes-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-panes-fb66209a-556a-4fc4-a3df-ac8d74fc8ce4/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-panes-native.json",
+      "source": "windows/dist/evidence/panes-fd7bcdc7-c724-47ac-8e8e-2a3e16e84dfd/native-panes-background.json",
+      "source_bytes": 7397,
+      "source_sha256": "e4c9e354dbb6ca4ace0b13615ec00f4dc3683911ef5c3cec79791c9123b73db0",
+      "bytes": 7275,
+      "sha256": "ecb2d7126e2b08f8d396c73415a616f2b3831dd04e1fe153bee0d6a6d8d8ec2c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-workspaces-runner.json",
+      "source": "windows/dist/checks/editor-open-final-workspaces-bae19563-0b05-46c6-8dcb-9ed51dcd326c/result.json",
+      "source_bytes": 505,
+      "source_sha256": "e6d1d771b15d83cb11948766fc921345d498603212b8cc630247fa653c659957",
+      "bytes": 489,
+      "sha256": "9206469552b87fbbf6327bff34df0d74648ed50d301144daa1d2eb17d546074a",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-workspaces-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-workspaces-bae19563-0b05-46c6-8dcb-9ed51dcd326c/stdout.txt",
+      "source_bytes": 3242,
+      "source_sha256": "6102873dac382e97cb9e9e211911b5ce9438e0cb21b791bac91cef19d669d193",
+      "bytes": 3179,
+      "sha256": "74f9a0ea7ecd06561d86197757a678461a7089887719329887c80c5e34f8e874",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-workspaces-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-workspaces-bae19563-0b05-46c6-8dcb-9ed51dcd326c/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-workspaces-native.json",
+      "source": "windows/dist/evidence/workspaces-3873ce17-661e-4715-ace3-54681f78d8b2/native-workspaces-background.json",
+      "source_bytes": 3245,
+      "source_sha256": "41749592c83dba907b3fc5c0660c90941e840cf31fd2322d1d23984df3f8ed57",
+      "bytes": 3179,
+      "sha256": "74f9a0ea7ecd06561d86197757a678461a7089887719329887c80c5e34f8e874",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-runner.json",
+      "source": "windows/dist/checks/editor-open-final-ipc-124a9198-d560-4dc4-8c71-424b7bcc32ca/result.json",
+      "source_bytes": 490,
+      "source_sha256": "384188eeeb97c286a1dfeaca0371810c62c2484249870783e56211d848af26f9",
+      "bytes": 474,
+      "sha256": "db47682d3024cbc358b62242263c812f1368104cf172867dcd21bbf2a87c860e",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-ipc-124a9198-d560-4dc4-8c71-424b7bcc32ca/stdout.txt",
+      "source_bytes": 4971,
+      "source_sha256": "cf6d3e72adc4a563af149588ae49ca34fa6968ddb9209f46d8e5e25499a47a19",
+      "bytes": 4883,
+      "sha256": "aa8bffa84a12d4176f40bd698248af731fc65286637812651ef8a6f3a76012dd",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-ipc-124a9198-d560-4dc4-8c71-424b7bcc32ca/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-ipc-native.json",
+      "source": "windows/dist/evidence/ipc-9f338e4f-461d-4606-89d5-81348725b4a4/ipc.json",
+      "source_bytes": 4974,
+      "source_sha256": "8c36577d5e882975c82639441d401b7e0317b50b12b2433504639ccfaeb30407",
+      "bytes": 4883,
+      "sha256": "aa8bffa84a12d4176f40bd698248af731fc65286637812651ef8a6f3a76012dd",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-limits-runner.json",
+      "source": "windows/dist/checks/editor-open-final-ipc-limits-83fb6866-1d66-488e-af8d-65ec972f96a9/result.json",
+      "source_bytes": 505,
+      "source_sha256": "1e1a842674610f9a74b66cb79915e54d9380ed8a4f67c28b49e4d07bf276f163",
+      "bytes": 489,
+      "sha256": "bb33162f64adb3b3a9454a4c62d4308090b166044e98c8e7ba80fa0b24f64e0c",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-limits-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-ipc-limits-83fb6866-1d66-488e-af8d-65ec972f96a9/stdout.txt",
+      "source_bytes": 1464,
+      "source_sha256": "06b53f9aaa30791c618e6eb27bedce76cb472ce5d8ec6830cd6aa19fe05f90a8",
+      "bytes": 1433,
+      "sha256": "6ce5535cbea4e4eb0136864f8a181819e84e979a1976c7e3e185e536a7de0868",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-ipc-limits-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-ipc-limits-83fb6866-1d66-488e-af8d-65ec972f96a9/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-ipc-limits-native.json",
+      "source": "windows/dist/evidence/ipc-limits-9f357ad4-2951-498d-9cc9-a7b724628c34/ipc-limits.json",
+      "source_bytes": 1467,
+      "source_sha256": "e579aa632426c0fe5a3ee2f754a1205a8775ee85ac0bbd5a3442364339af5ad0",
+      "bytes": 1433,
+      "sha256": "6ce5535cbea4e4eb0136864f8a181819e84e979a1976c7e3e185e536a7de0868",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-browser-wait-runner.json",
+      "source": "windows/dist/checks/editor-open-final-browser-wait-extended-b3ae6e80-ad69-486f-9f16-8c0c3aa519f2/result.json",
+      "source_bytes": 518,
+      "source_sha256": "36e3dc21a5fcacb565106f01b1fe707a5964ccd9edcd0c48990a09ef2f06872d",
+      "bytes": 502,
+      "sha256": "ff8fd8067e6dbec3b3cced099ab95c3c389d2c13570641988f8801fa2cf073a6",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-browser-wait-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-browser-wait-extended-b3ae6e80-ad69-486f-9f16-8c0c3aa519f2/stdout.txt",
+      "source_bytes": 2925,
+      "source_sha256": "a6daac0dc790b6dc151fda1d3d9d7f147675b64b3ffacdb9eadac55cafced182",
+      "bytes": 2864,
+      "sha256": "f8827b840d5c31ef93fdb4e9ca10c3ddf8f451030a83ef0cabd081c67edad1ac",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "regression-browser-wait-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-browser-wait-extended-b3ae6e80-ad69-486f-9f16-8c0c3aa519f2/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "regression-browser-wait-native.json",
+      "source": "windows/dist/evidence/browser-wait-12f3bc03-ba20-47da-865b-dea430e67e9a/native-browser-wait-background.json",
+      "source_bytes": 2247,
+      "source_sha256": "6d32aea44246df4d00f40c06e56dfefeb342a9909fd513553d0bab071fcf95b3",
+      "bytes": 2184,
+      "sha256": "2fa31a6d4572473520c17137737de18d297e185616268a0a2d496d302e89969b",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-tests-runner.json",
+      "source": "windows/dist/checks/editor-open-final-native-tests-53d0299f-85ea-41a5-b2af-3739bdc089c1/result.json",
+      "source_bytes": 559,
+      "source_sha256": "577a634900589941a6b85184ec10adef9f3603fba52054fe27f0b09656b0b5c9",
+      "bytes": 543,
+      "sha256": "6f2f38cda0aa075729cb09c1629c9cff1391bf5c35fde846d4a89eaad9f22b84",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-tests-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-native-tests-53d0299f-85ea-41a5-b2af-3739bdc089c1/stdout.txt",
+      "source_bytes": 16408,
+      "source_sha256": "15f0da0e818e2258df4296f4ce166f6a3af7d4ac6def1c26794014c6ac6019d6",
+      "bytes": 16407,
+      "sha256": "495e82b9d4698cd85864b3ee3276caa4633191c5de887d417f66eeaf224396ca",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-native-tests-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-native-tests-53d0299f-85ea-41a5-b2af-3739bdc089c1/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-release-doctor-runner.json",
+      "source": "windows/dist/checks/editor-open-final-release-doctor-d268726f-794f-4c37-9fb0-6097531da88b/result.json",
+      "source_bytes": 513,
+      "source_sha256": "8d5b3d6c7ba99674779f7ae1b1a6be91a4f654ce2106ff7980b910fbab32c001",
+      "bytes": 497,
+      "sha256": "02c890fda3a2a672827f1353199d874fd1287374e687e99bbf3a857f5eed5859",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-release-doctor-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-release-doctor-d268726f-794f-4c37-9fb0-6097531da88b/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-release-doctor-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-release-doctor-d268726f-794f-4c37-9fb0-6097531da88b/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-release-entrypoints.json",
+      "source": "windows/evidence/2026-09-28/native-editor-open-release-entrypoints.json",
+      "source_bytes": 954,
+      "source_sha256": "6bfefafa1130cf340ddf450233124cdae39cf56964b6c15274f78779ab116e78",
+      "bytes": 954,
+      "sha256": "6bfefafa1130cf340ddf450233124cdae39cf56964b6c15274f78779ab116e78",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-package-runner.json",
+      "source": "windows/dist/checks/editor-open-final-package-6dab5254-5f22-4cee-8a1d-a36c92893a28/result.json",
+      "source_bytes": 339,
+      "source_sha256": "ae835fc6b038aa45ef73ecc78834fde2ce1a537db51f977d3c9241ab33cfc5f3",
+      "bytes": 339,
+      "sha256": "ae835fc6b038aa45ef73ecc78834fde2ce1a537db51f977d3c9241ab33cfc5f3",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-package-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-package-6dab5254-5f22-4cee-8a1d-a36c92893a28/stdout.txt",
+      "source_bytes": 1157,
+      "source_sha256": "c3af4dd571ed3a2e52237690eab6f80173a1e1796ea2bb922116317a01b15f35",
+      "bytes": 1157,
+      "sha256": "c3af4dd571ed3a2e52237690eab6f80173a1e1796ea2bb922116317a01b15f35",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "artifacts-final.json",
+      "source": "windows/evidence/2026-09-28/artifacts-editor-open.json",
+      "source_bytes": 1511,
+      "source_sha256": "b3c5c2317bc4ef4cead11ad229054889bba0f86c163de2d9ba94cb85ca3c0ab5",
+      "bytes": 1511,
+      "sha256": "b3c5c2317bc4ef4cead11ad229054889bba0f86c163de2d9ba94cb85ca3c0ab5",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-cleanup-runner.json",
+      "source": "windows/dist/checks/editor-open-final-cleanup-469ed315-0cff-4520-bfa6-f007850e5ee8/result.json",
+      "source_bytes": 499,
+      "source_sha256": "af9d237a401864658e14e3907d771c4c4785832d7967e543d8aded34a20f971e",
+      "bytes": 483,
+      "sha256": "c9c1c253576f948b56f855677145665cafa33cd5cbdb72ff3e2d8f785b5794f0",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-cleanup-stdout.txt",
+      "source": "windows/dist/checks/editor-open-final-cleanup-469ed315-0cff-4520-bfa6-f007850e5ee8/stdout.txt",
+      "source_bytes": 610094,
+      "source_sha256": "62a2fd7bbe12113ee0e63aa324f0649f9073c7a4057f5b8307ac2ed32a722af3",
+      "bytes": 610092,
+      "sha256": "00830144ec83bf38d2f45fce080cce1b0dc2a93f316ef7bc5241481b722bf512",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "final-cleanup-stderr.txt",
+      "source": "windows/dist/checks/editor-open-final-cleanup-469ed315-0cff-4520-bfa6-f007850e5ee8/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "final-cleanup.json",
+      "source": "windows/evidence/2026-09-28/native-editor-open-cleanup.json",
+      "source_bytes": 322383,
+      "source_sha256": "c35541d0ab5678e1b52cfad0395689e01d52d82481f12ea1c60a61915d136912",
+      "bytes": 322383,
+      "sha256": "c35541d0ab5678e1b52cfad0395689e01d52d82481f12ea1c60a61915d136912",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "cleanup-static-runner.json",
+      "source": "windows/dist/checks/editor-open-cleanup-static-157d670a-021d-4d7c-9313-43d4997fe745/result.json",
+      "source_bytes": 507,
+      "source_sha256": "d04367aa343d9ef750926cf8b6a07c08b8e44925fe9894b3acba2246eadd2285",
+      "bytes": 491,
+      "sha256": "53444b059a8d26da8a459679565f8842ef3d34d7f0c106a4283a31def23abdf4",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "cleanup-static-stdout.txt",
+      "source": "windows/dist/checks/editor-open-cleanup-static-157d670a-021d-4d7c-9313-43d4997fe745/stdout.txt",
+      "source_bytes": 60,
+      "source_sha256": "275ede96b42368d9ba92476895934445c9902e6c59455e475049192f4908972b",
+      "bytes": 59,
+      "sha256": "cca0156e2db530803e14fba5f1127c386756167da8ab6bde21a2c6aa29a3dafb",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "cleanup-static-stderr.txt",
+      "source": "windows/dist/checks/editor-open-cleanup-static-157d670a-021d-4d7c-9313-43d4997fe745/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "cleanup-generator.py",
+      "source": "windows/dist/generate-editor-open-cleanup.py",
+      "source_bytes": 14197,
+      "source_sha256": "d8164f8b84fde58d2a6600f4047e1160484d3828b4363e8ca8be7b70bcd350e8",
+      "bytes": 14197,
+      "sha256": "d8164f8b84fde58d2a6600f4047e1160484d3828b4363e8ca8be7b70bcd350e8",
+      "normalization_changed_bytes": false
+    },
+    {
+      "path": "cleanup-check.ps1",
+      "source": "windows/dist/editor-open-cleanup.ps1",
+      "source_bytes": 223973,
+      "source_sha256": "7ca29e6258003e475b4f6f70d4151599e5cb63aae1495b72079fc053ee486093",
+      "bytes": 223970,
+      "sha256": "897b507c3787d350600eb1cd2dc6beae0b9d75d088e476787e4475b4c6664f12",
+      "normalization_changed_bytes": true
+    },
+    {
+      "path": "cleanup-inputs.json",
+      "source": "windows/dist/editor-open-cleanup-metadata.json",
+      "source_bytes": 219903,
+      "source_sha256": "1724b67a6027f3db679291f37f7a44efb37752eea7abe4838f72a46accb19638",
+      "bytes": 219903,
+      "sha256": "1724b67a6027f3db679291f37f7a44efb37752eea7abe4838f72a46accb19638",
+      "normalization_changed_bytes": false
+    }
+  ],
+  "verifier_snapshots": [
+    {
+      "name": "initial-seventeen-case-verifier",
+      "source_manifest": "windows/dist/editor-open-initial/manifest.json",
+      "artifacts": [
+        "initial-verifier-snapshot-manifest.json",
+        "initial-verifier-verify-editor.ps1",
+        "initial-verifier-CliProbe.cs",
+        "initial-verifier-EditorFixture.cs"
+      ],
+      "source_hashes_verified": true,
+      "note": "Frozen verifier files used for initial static/native checks. Copies are text-normalized; artifact source_sha256 retains each exact raw snapshot hash. Current tracked verifier may gain later cases; do not attribute them to this snapshot."
+    },
+    {
+      "name": "final-v1-post-startup-budget-verifier",
+      "source_manifest": "windows/dist/editor-open-final-v1/manifest.json",
+      "artifacts": [
+        "final-v1-verifier-snapshot-manifest.json",
+        "final-v1-verifier-verify-editor.ps1",
+        "final-v1-verifier-CliProbe.cs",
+        "final-v1-verifier-EditorFixture.cs",
+        "final-v1-verifier-EditorOpenLifetime.cs"
+      ],
+      "source_hashes_verified": true,
+      "current_tracked_sources_byte_identical_at_collection": true,
+      "note": "Immutable final-v1 snapshot includes lifetime helper and startup-budget correction. Final deep Restore used its snapshot path; final lifetime runs used byte-identical frozen tracked scripts."
+    }
+  ],
+  "native_passed_checks": 10,
+  "updated_at_utc": "2026-09-28T04:15:11.530781+00:00",
+  "native_failed_runs": 2,
+  "native_passed_runs": 10,
+  "related_passed_suites": 6,
+  "related_passed_checks": 36,
+  "final_source_native_editor_cases": 7,
+  "initial_source_native_editor_cases": 3,
+  "cleanup_provenance": {
+    "artifacts": [
+      "cleanup-generator.py",
+      "cleanup-check.ps1",
+      "cleanup-inputs.json"
+    ],
+    "note": "Generated script was parsed and run only by parent. Its normalized copy has raw source hash retained. Inventory includes explicit hosts/shells/clientPids/waitClientPids, IPC-limits scalar-or-array shellPids and Windows runners/entrypoints; excludes POSIX and own cleanup runners. Renderer descendants are not individually inventoried."
+  }
+}

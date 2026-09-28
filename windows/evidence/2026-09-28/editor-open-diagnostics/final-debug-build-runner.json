@@ -1,0 +1,18 @@
+{
+  "name": "editor-open-quit-fix-debug",
+  "command": [
+    "cargo",
+    "xwin",
+    "build",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--locked"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 321495,
+  "exitCode": 0,
+  "elapsedSeconds": 69.24
+}

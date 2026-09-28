@@ -1,0 +1,13 @@
+{
+    "name":  "editor-open-long-state-restore",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-snapshot-restore-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "failed",
+    "started":  "2026-09-28T03:56:56.4086397Z",
+    "pid":  38800,
+    "exitCode":  1,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  11.472,
+    "finished":  "2026-09-28T03:57:07.8856320Z"
+}

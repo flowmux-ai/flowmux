@@ -1,0 +1,98 @@
+[check] passed actual_monaco_unicode_open_duplicate_identity_language_and_invalid_text_isolation
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\editor-open-initial\dist\evidence\editor-63cd588b-62d9-4da4-800b-479abf01425c
+{
+    "started":  "2026-09-28T12:49:03.9441678+09:00",
+    "mode":  "background",
+    "case":  "open",
+    "checks":  [
+                   {
+                       "name":  "actual_monaco_unicode_open_duplicate_identity_language_and_invalid_text_isolation",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-open-initial\\dist\\evidence\\editor-63cd588b-62d9-4da4-800b-479abf01425c\\state\\editor-profile",
+                             "surface":  "28bd90ba-a29c-4611-89d3-55df55ffbb6e",
+                             "pid":  16852,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-open-initial\\dist\\evidence\\editor-63cd588b-62d9-4da4-800b-479abf01425c\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-open-initial\\dist\\evidence\\editor-63cd588b-62d9-4da4-800b-479abf01425c\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  16852,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  16852
+              ],
+    "shells":  [
+                   38528
+               ],
+    "clientPids":  [
+                       19904,
+                       35452,
+                       30116,
+                       35336,
+                       31172,
+                       36128,
+                       26204,
+                       34048,
+                       39004,
+                       31740,
+                       33100,
+                       28176,
+                       21008,
+                       37284,
+                       35200,
+                       18664,
+                       2156,
+                       25708,
+                       26252,
+                       26432,
+                       6296,
+                       33336,
+                       35224,
+                       38584,
+                       35976,
+                       33400,
+                       34196,
+                       38252,
+                       38616,
+                       37048,
+                       37876,
+                       31136,
+                       39188,
+                       38080,
+                       18400,
+                       36020,
+                       27344,
+                       10080,
+                       29012,
+                       35984
+                   ],
+    "finished":  "2026-09-28T12:49:09.4942113+09:00"
+}

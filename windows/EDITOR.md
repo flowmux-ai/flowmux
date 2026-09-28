@@ -9,7 +9,11 @@ asset server and frontend adapter. This is a partial editor implementation towar
 F01–F05/F17, not a claim of full Linux/macOS parity. Hidden native tests establish
 [measured partial acceptance](evidence/2026-09-28/editor.md) for actual Monaco
 models, file bytes and the recorded lifecycle cases. Physical UI/IME acceptance
-and the remaining limits in that evidence record are still pending.
+and the remaining limits in that evidence record are still pending. The later
+[Open and picker record](evidence/2026-09-28/editor-open.md) separates current
+implementation from completed checks and outstanding verification. It records
+seven final-source editor cases, 36 related native checks and 172 Windows unit
+tests, with three earlier passes and two failed Restore attempts kept separate.
 
 An editor tab can contain several documents. `editor open` uses an existing
 editor tab with the same canonical root in the target pane, or adds a new editor
@@ -17,6 +21,30 @@ tab to that pane. Opening an already open file selects its existing document.
 An omitted `--pane` follows the normal caller/active-tab target; an omitted
 `--root` uses the workspace working directory. The CLI resolves relative file and root paths from its own working directory;
 the resulting file must be contained in the editor root and already exist.
+Root/file canonicalization and validation run on a bounded background worker.
+The host captures the original source surface, pane, workspace and root, then
+rechecks source membership before publishing a prepared Open. A source that has
+closed or moved to another pane/workspace cannot redirect that result into the
+newly focused pane.
+
+The sidebar's **Open file…** button opens an owned Windows file dialog. The
+console command `editor pick [--pane <pane-uuid>]` requests the same dialog;
+an omitted pane follows the caller/active-tab target. Both capture the workspace
+working directory as the editor root and default starting folder. Windows may
+restore a remembered dialog folder instead of that default. The selected file
+must be inside the captured root; the picker does not adopt an outside file's
+directory as a new root or change the process working directory.
+
+`editor pick` returns `picker_requested: true`, `pane` and `source` before opening
+the modal dialog. This is an accepted-request receipt, with no editor surface;
+it is not an `editor_opened` result. Human time spent selecting a file is outside
+the IPC reply wait. Cancellation leaves the tab layout unchanged. Selection
+starts asynchronous Open, with later failures shown in an owned desktop error
+dialog. Use `tree` or `editor status` to inspect the resulting editor. If the
+requester expires before the host can acknowledge the picker request, no dialog
+opens. Only one picker is admitted per host. Background mode rejects it before
+any native dialog; physical picker selection, cancellation, focus and IME
+behavior remain unverified.
 
 These PowerShell examples use the console CLI and an explicit window pipe.
 `--pipe` can be omitted when `FLOWMUX_PIPE_NAME` supplies the intended window.
@@ -46,6 +74,7 @@ response wraps its result in `result`; Open returns `editor_opened` with `pane`,
 
 | Command/action | Behavior |
 | --- | --- |
+| `editor pick [--pane <pane>]` | Requests the native Open File dialog and returns a receipt before human interaction. Background mode rejects it. |
 | `editor status <surface>` | Reports readiness, logical visibility, document metadata, active document, dirty paths, saved session state, pending work and diagnostic fields. Does not return full document text. |
 | `editor command <surface> read` | Reads the actual Monaco model and its document/version/encoding/EOL state. Text is limited to 128 KiB; check `content_truncated` and `total_bytes`. |
 | `replace-text --text <text>`, `undo`, `redo` | Change the Monaco model and synchronize through the versioned document protocol. |
@@ -77,6 +106,23 @@ Save As bridge additionally bounds its path string to 16 KiB. Windows command-li
 limits can be lower than the editor's data limits. Canonicalization checks
 containment, but this is not a claim of race-proof handling of concurrently
 changed reparse points.
+
+One Open preparation may be pending per pane. Its worker admits eight jobs per
+host, including executing/queued work, cancelled jobs that have not drained and
+posted results awaiting the UI. Cancelling an operating-system filesystem call
+does not refund its slot before it finishes. This is separate from each editor
+tab's document-I/O queue. CLI Open has a twelve-second budget from server receipt,
+including UI queue time, preparation and editor initialization; preparation does
+not restart that budget. Picker-initiated Open starts its budget after selection.
+Expired/cancelled preparation results cannot publish an editor tab. A timeout
+after initialization has begun may still have an uncertain outcome; inspect
+the tree/status before retrying.
+
+WebView2 COM construction and native dialog calls remain on the UI thread. The
+modal picker processes native messages while application events await its return;
+other IPC requests can expire during that wait. Queued CLI Opens retain their
+original receipt time. The budget cannot interrupt a blocked Windows API call,
+and this implementation does not establish bounded WebView construction time.
 
 Each editor session admits at most 128 documents. Document loading and
 synchronized text have 16 MiB limits. The shared domain accepts UTF-8 with or
@@ -125,6 +171,20 @@ guard. Checkpointing is allowed with dirty documents after synchronization; it
 does not mark them saved. Failed close/checkpoint operations release ordinary
 close seals so editing can resume.
 
+Once a window close is accepted, new mutations are refused and pending Open
+preparations are cancelled while the IPC reply drains. The accepted-close guard
+also applies when no editor barrier or persistent state store is needed, so a
+late preparation cannot add a tab during that interval. A direct clean
+`quit --discard-state` still exits when its reply receiver has expired.
+
+Window checkpoints resolve their existing parent to Windows' extended-length
+path before creating and atomically replacing the temporary state file. This
+handles a long temporary filename even when the shorter destination is below
+the traditional path limit. It preserves the externally reported checkpoint
+path and same-directory replacement. The initial failure and correction's
+verification status are recorded separately in the Open and picker evidence;
+this is not exhaustive long-path, ACL or power-loss acceptance.
+
 An accepted clean `quit --discard-state` still closes the host if its IPC reply
 receiver has already expired. A client timeout does not cancel that queued quit;
 do not retry it automatically. The measured late-quit case and its exact hidden
@@ -167,10 +227,10 @@ below that recovery root. `editor status` exposes all three paths so verificatio
 can check the actual storage location. Restoring a test window uses the same
 isolated root to make its recovery records available.
 
-Remaining scope includes the native Open File entry point/dialog, Windows native
-editor clipboard/menu integration, Quick Open and workspace search, automatic
-filesystem watchers/polling, physical IME validation and renderer-crash recovery.
-Files are currently opened through the CLI. Quick Open/search requests receive
+Remaining scope includes physical acceptance of the native Open File dialog,
+Windows native editor clipboard/menu integration, Quick Open and workspace
+search, automatic filesystem watchers/polling, physical IME validation and
+renderer-crash recovery. Quick Open/search requests receive
 completion/error responses instead of hanging. Disk changes require explicit
 `check-disk` or are detected by the save conflict check. Native clipboard requests
 report that integration is unavailable; background verification never accesses
@@ -178,6 +238,7 @@ the OS clipboard. Concurrent-writer races, exhaustive ACL behavior, power-loss
 durability and complete desktop usability remain separate acceptance work.
 
 Implementation sources: [command validation](src/editor.rs),
+[Open preparation](src/editor_open.rs), [native picker](src/native/editor_picker.rs),
 [ordered worker](src/editor_worker.rs),
 [Windows recovery writer](src/editor_recovery.rs), [native lifecycle](src/native/editor.rs),
 [editor WebView](src/native/editor_view.rs), [asset server](src/editor_assets.rs),

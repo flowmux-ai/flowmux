@@ -1,0 +1,14 @@
+[
+  {
+    "source": "windows/scripts/verify-editor.ps1",
+    "sha256": "8d0e364b2b7ba1facd6a01186b1630aae461d324c4ef7ade1418c5176ce6ed4f"
+  },
+  {
+    "source": "windows/scripts/CliProbe.cs",
+    "sha256": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f"
+  },
+  {
+    "source": "windows/scripts/EditorFixture.cs",
+    "sha256": "f5b75fe2c9239bd33abbc7ffc85329474ad19aeec9a39b171e48bc859e4de126"
+  }
+]

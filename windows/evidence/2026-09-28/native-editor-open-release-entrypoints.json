@@ -1,0 +1,41 @@
+[
+  {
+    "name": "flowmux.exe",
+    "pid": 17764,
+    "startedUtc": "2026-09-28T04:09:25.8752193Z",
+    "finishedUtc": "2026-09-28T04:09:25.9916427Z",
+    "exitCode": 0,
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  },
+  {
+    "name": "flowmuxctl.exe",
+    "pid": 11336,
+    "startedUtc": "2026-09-28T04:09:25.9956564Z",
+    "finishedUtc": "2026-09-28T04:09:26.0517628Z",
+    "exitCode": 0,
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  },
+  {
+    "name": "flowmux.com",
+    "pid": 12456,
+    "startedUtc": "2026-09-28T04:09:26.0537076Z",
+    "finishedUtc": "2026-09-28T04:09:26.1013422Z",
+    "exitCode": 0,
+    "result": {
+      "background_testing": false,
+      "platform": "windows",
+      "status": "ok",
+      "webview2": "112.0.1722.48"
+    }
+  }
+]

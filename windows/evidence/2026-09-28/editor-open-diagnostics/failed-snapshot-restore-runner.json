@@ -1,0 +1,13 @@
+{
+    "name":  "editor-open-regression-restore",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-snapshot-restore-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "failed",
+    "started":  "2026-09-28T03:49:11.0665121Z",
+    "pid":  35188,
+    "exitCode":  1,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  6.522,
+    "finished":  "2026-09-28T03:49:17.5944596Z"
+}

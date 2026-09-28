@@ -1,0 +1,13 @@
+{
+    "name":  "editor-open-async-native",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-snapshot-async-open-check.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T03:47:33.3676215Z",
+    "pid":  34064,
+    "exitCode":  0,
+    "activeBeforeCleanup":  5,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  5.343,
+    "finished":  "2026-09-28T03:47:38.7144504Z"
+}

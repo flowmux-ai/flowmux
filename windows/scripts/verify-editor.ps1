@@ -2,13 +2,13 @@
 # Bounded hidden native Monaco verification. Run through run-check.ps1 (120s).
 param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','startup','open','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','recovery')][string]$Case='all'
+    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'EditorOpenLifetime.cs')
 $directory=Join-Path $PSScriptRoot ('..\dist\evidence\editor-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object EditorFixture($directory)
@@ -19,6 +19,8 @@ $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';case=$Ca
     'The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.',
     'Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.',
     'Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.',
+    'Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.',
+    'Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.',
     'Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established.'
 )}
 
@@ -51,12 +53,12 @@ function Begin-Command([string[]]$Arguments) {
     if(-not $script:pipeName) {throw 'Explicit owned pipe required'}
     return Begin-Probe $cli (@('--pipe',$script:pipeName,'--json')+$Arguments)
 }
-function Request([string[]]$Arguments,[int]$Exit=0) {return End-Command (Begin-Command $Arguments) @($Exit)}
+function Request([string[]]$Arguments,[int]$Exit=0,[ValidateRange(1,20000)][int]$TimeoutMilliseconds=5000) {return End-Command (Begin-Command $Arguments) @($Exit) $TimeoutMilliseconds}
 function Check-Hidden([long]$Handle) {
     if($Handle -and ([CliProbe]::IsWindowVisible([IntPtr]$Handle) -or [CliProbe]::GetForegroundWindow() -eq [IntPtr]$Handle)) {throw 'Owned window became visible or foreground'}
 }
-function Tree {
-    $tree=Request @('tree')
+function Tree([ValidateRange(1,20000)][int]$TimeoutMilliseconds=5000) {
+    $tree=Request @('tree') 0 $TimeoutMilliseconds
     if(-not $tree.background_testing) {throw 'Host is not in hidden debug mode'}
     Check-Hidden ([long]$tree.window_handle)
     foreach($view in @($tree.browsers)+@($tree.editors)) {
@@ -64,34 +66,67 @@ function Tree {
     }
     return $tree
 }
+function Raw-Tree {
+    $peer=New-Object EditorOwnedPipe($process,$pipeName,100)
+    try {
+        $tree=$peer.Request('{"method":"tree"}',300)|ConvertFrom-Json
+        if($tree.error -or -not $tree.background_testing) {throw 'Raw tree did not return the owned hidden host model'}
+        Check-Hidden ([long]$tree.window_handle)
+        return $tree
+    } finally {$peer.Dispose()}
+}
+function Remaining-StartupBudget([Diagnostics.Stopwatch]$Clock) {
+    $remaining=8000-$Clock.ElapsedMilliseconds
+    if($remaining -le 0) {throw 'Owned host exceeded its total eight-second startup budget'}
+    return [int]$remaining
+}
 function Start-Owned([bool]$Persistent=$false,[string]$Restore='') {
     $arguments=@('--temporary','--shell=cmd','--cwd',$fixture.Root)
     if($Persistent) {$arguments=@('--new-window','--shell=cmd','--cwd',$fixture.Root)}
     if($Restore) {$arguments=@('--restore-window',$Restore)}
-    $utc=[DateTime]::UtcNow
-    $script:process=[CliProbe]::Start($gui,$arguments,$directory,$directory)
-    $script:hostExitRecorded=$false;$script:hostForced=$false
-    $script:hosts+=$process.Id;$script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync();$script:pipeName=$null
-    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json";$deadline=(Get-Date).AddSeconds(8)
-    do {
-        if($process.HasExited -or (Get-Date) -gt $deadline) {throw ('Owned startup failed: '+[CliProbe]::Output($stderr))}
-        if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $utc) {
-            $record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json
-            if($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
-            $script:pipeName=$record.pipe;break
-        }
-        Start-Sleep -Milliseconds 20
-    } while($true)
-    if((Request @('identify')).pid -ne $process.Id) {throw 'Wrong pipe owner'}
-    do {
-        $tree=Tree
-        if(@($tree.surfaces|Where-Object {-not $_.ready}).Count -eq 0) {
-            $script:shells+=@($tree.surfaces|Where-Object {$_.pid -and $script:shells -notcontains $_.pid}|ForEach-Object {$_.pid})
-            return $tree
-        }
-        if((Get-Date) -gt $deadline) {throw 'Owned terminal readiness timed out'}
-        Start-Sleep -Milliseconds 20
-    } while($true)
+    $utc=[DateTime]::UtcNow;$startupWatch=[Diagnostics.Stopwatch]::StartNew()
+    $startup=[ordered]@{kind='host-startup';pid=$null;restoring=[bool]$Restore;restoreWindow=$Restore;budgetMs=8000;started=$utc.ToString('o');status='starting';stage='launch';identityResponse=$null}
+    $script:evidence.observations+=$startup
+    try {
+        $script:process=[CliProbe]::Start($gui,$arguments,$directory,$directory)
+        $script:hostExitRecorded=$false;$script:hostForced=$false
+        $script:hosts+=$process.Id;$script:stdout=$process.StandardOutput.ReadToEndAsync();$script:stderr=$process.StandardError.ReadToEndAsync();$script:pipeName=$null
+        $startup.pid=$process.Id;$startup.stage='discovery'
+        $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($process.Id).json"
+        do {
+            Remaining-StartupBudget $startupWatch|Out-Null
+            if($process.HasExited) {throw ('Owned startup failed: '+[CliProbe]::Output($stderr))}
+            if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $utc) {
+                $record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json
+                if($record.pid -ne $process.Id) {throw 'Wrong discovery owner'}
+                $script:pipeName=$record.pipe;break
+            }
+            Start-Sleep -Milliseconds ([Math]::Min(20,(Remaining-StartupBudget $startupWatch)))
+        } while($true)
+        $startup.discoveryElapsedMs=$startupWatch.ElapsedMilliseconds;$startup.stage='identify'
+        $startup.identityBudgetMs=Remaining-StartupBudget $startupWatch
+        $identity=Request @('identify') 0 $startup.identityBudgetMs
+        $startup.identityResponse=$identity;$startup.identityElapsedMs=$startupWatch.ElapsedMilliseconds
+        Remaining-StartupBudget $startupWatch|Out-Null
+        if($identity.pid -ne $process.Id) {throw 'Wrong pipe owner'}
+        $startup.stage='terminal-readiness';$startup.treeRequests=0
+        do {
+            $startup.treeRequests++
+            $tree=Tree (Remaining-StartupBudget $startupWatch)
+            Remaining-StartupBudget $startupWatch|Out-Null
+            if(@($tree.surfaces|Where-Object {-not $_.ready}).Count -eq 0) {
+                $script:shells+=@($tree.surfaces|Where-Object {$_.pid -and $script:shells -notcontains $_.pid}|ForEach-Object {$_.pid})
+                $startup.stage='complete';$startup.status='ready'
+                return $tree
+            }
+            Start-Sleep -Milliseconds ([Math]::Min(20,(Remaining-StartupBudget $startupWatch)))
+        } while($true)
+    } catch {
+        $startup.status='failed';$startup.error=$_.Exception.Message
+        throw
+    } finally {
+        $startup.elapsedMs=$startupWatch.ElapsedMilliseconds;$startup.finished=[DateTime]::UtcNow.ToString('o')
+    }
 }
 function Record-HostExit {
     if(-not $script:process -or $script:hostExitRecorded) {return}
@@ -159,12 +194,16 @@ function Owned-Recovery {
         [pscustomobject]@{file=$file.FullName;identity=$identity;content=$record.content;version=$record.documentVersion}
     }
 }
+function Complete-Open($Job) {
+    $opened=(End-Command $Job).editor_opened
+    if(-not $opened.surface -or -not $opened.pane) {throw 'Editor open omitted pane/surface identity'}
+    if($script:ownedEditors -notcontains $opened.surface) {$script:ownedEditors+=$opened.surface}
+    return $opened
+}
 function Open-Editor([string]$Path,[string]$Pane='',[string]$Root='') {
     if(-not $Pane) {$Pane=$script:source.pane}
     if(-not $Root) {$Root=$fixture.Root}
-    $opened=(Request @('editor','open',$Path,'--pane',$Pane,'--root',$Root)).editor_opened
-    if(-not $opened.surface -or -not $opened.pane) {throw 'Editor open omitted pane/surface identity'}
-    if($script:ownedEditors -notcontains $opened.surface) {$script:ownedEditors+=$opened.surface}
+    $opened=Complete-Open (Begin-Command @('editor','open',$Path,'--pane',$Pane,'--root',$Root))
     Ready $opened.surface|Out-Null;Tree|Out-Null
     return $opened
 }
@@ -197,6 +236,10 @@ function Saved-Surface($Pane,[string]$Surface) {
     if($Pane.kind -eq 'split') {Saved-Surface $Pane.first $Surface;Saved-Surface $Pane.second $Surface}
     else {$Pane.content.surfaces|Where-Object {$_.id -eq $Surface}}
 }
+function Pane-Leaf($Node,[string]$Pane) {
+    if($Node.kind -eq 'split') {Pane-Leaf $Node.first $Pane;Pane-Leaf $Node.second $Pane}
+    elseif($Node.id -eq $Pane) {$Node}
+}
 function Checkpoint-Editor([string]$Path,[string]$Surface) {
     $checkpoint=[IO.File]::ReadAllText($Path,[Text.Encoding]::UTF8)|ConvertFrom-Json
     $matches=@($checkpoint.workspaces|ForEach-Object {Saved-Surface $_.root $Surface})
@@ -221,7 +264,7 @@ try {
     if(-not $doctor.background_testing -or $doctor.status -ne 'ok') {throw 'Working hidden debug build required; no host launched'}
     $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
     if($Case -eq 'startup') {Passed 'hidden_debug_doctor_and_owned_host_readiness'}
-    foreach($group in @('open','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','recovery')) {
+    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery')) {
         if($Case -ne 'all' -and $Case -ne $group) {continue}
         Clean-Editors;$fixture.ReleaseLocks();Request @('focus-tab',$terminal.id)|Out-Null
         switch($group) {
@@ -242,6 +285,158 @@ try {
                 Request @('read-screen','--surface',$opened.surface) 1|Out-Null
                 Request @('browser','eval',$opened.pane,'document.title') 1|Out-Null
                 Passed 'actual_monaco_unicode_open_duplicate_identity_language_and_invalid_text_isolation'
+            }
+            'async-open' {
+                $firstSource=Request @('identify')
+                Request @('split','vertical')|Out-Null;$secondSource=Request @('identify')
+                if($firstSource.pane -eq $secondSource.pane -or $firstSource.workspace -ne $secondSource.workspace) {throw 'Concurrent Open requires two distinct captured panes in one workspace'}
+                $deadline=(Get-Date).AddSeconds(5)
+                do {
+                    $tree=Tree;$secondTerminal=@($tree.surfaces|Where-Object {$_.id -eq $secondSource.surface})
+                    if($secondTerminal.Count -eq 1 -and $secondTerminal[0].ready -and $secondTerminal[0].running) {break}
+                    if((Get-Date) -gt $deadline) {throw 'Second owned terminal did not become ready'}
+                    Start-Sleep -Milliseconds 20
+                } while($true)
+                $secondTerminal=$secondTerminal[0]
+                if($shells -notcontains $secondTerminal.pid) {$shells+=$secondTerminal.pid}
+                $firstPath=$fixture.Write('async first 한글 한\first é 😀.txt',[EditorFixture]::Original,$false,$false)
+                $secondPath=$fixture.Write('async second é 😀\second 한글 한.txt',[EditorFixture]::Edited,$true,$true)
+                $requests=@(
+                    @{source=$firstSource;path=$firstPath;root=[IO.Path]::GetDirectoryName($firstPath);text=[EditorFixture]::Original;encoding='UTF-8';eol='LF'},
+                    @{source=$secondSource;path=$secondPath;root=[IO.Path]::GetDirectoryName($secondPath);text=[EditorFixture]::Edited;encoding='UTF-8 BOM';eol='CRLF'}
+                )
+                # Start both real clients before waiting for either; no worker delay or test hook.
+                $firstJob=Begin-Command @('editor','open',$requests[0].path,'--pane',$requests[0].source.pane,'--root',$requests[0].root)
+                $secondJob=Begin-Command @('editor','open',$requests[1].path,'--pane',$requests[1].source.pane,'--root',$requests[1].root)
+                $overlapped=-not $firstJob.process.HasExited -and -not $secondJob.process.HasExited
+                $evidence.observations+=@{case=$group;kind='concurrent-open-submission';firstClientPid=$firstJob.pid;secondClientPid=$secondJob.pid;overlappingClients=$overlapped;forcedCompletionOrder=$false}
+                if(-not $overlapped) {throw 'Open clients did not overlap; concurrent Open coverage was not established'}
+                $requests[0].opened=Complete-Open $firstJob;$requests[1].opened=Complete-Open $secondJob
+                if($requests[0].opened.surface -eq $requests[1].opened.surface) {throw 'Distinct roots and panes reused one editor surface'}
+                foreach($request in $requests) {
+                    $opened=$request.opened;$status=Ready $opened.surface;$read=Assert-Text $opened.surface $request.text $false
+                    $docs=@($status.documents)
+                    if($opened.pane -ne $request.source.pane -or -not (Same-Text $status.workspace_root $request.root) -or -not (Same-Text $status.session.active_file $request.path) -or $docs.Count -ne 1 -or $docs[0].id -ne $read.document_id -or -not (Same-Text $read.path ([IO.Path]::GetFileName($request.path))) -or $read.encoding -ne $request.encoding -or $read.eol -ne $request.eol) {throw 'Concurrent Open returned an incorrect pane, root, path or actual Monaco document'}
+                    $tree=Tree;$workspace=@($tree.workspaces|Where-Object {$_.id -eq $request.source.workspace})
+                    if($workspace.Count -ne 1) {throw 'Concurrent Open lost its captured workspace'}
+                    $leaf=@(Pane-Leaf $workspace[0].root $request.source.pane)
+                    if($leaf.Count -ne 1 -or @($leaf[0].content.surfaces|Where-Object {$_.id -eq $opened.surface}).Count -ne 1 -or @($leaf[0].content.surfaces|Where-Object {$_.id -eq $request.source.surface}).Count -ne 1) {throw 'Concurrent Open changed its captured source pane or terminal membership'}
+                    $evidence.observations+=@{case=$group;kind='concurrent-open-result';sourcePane=$request.source.pane;sourceSurface=$request.source.surface;surface=$opened.surface;root=$status.workspace_root;activeFile=$status.session.active_file;document=$read.document_id;content=$read.content;encoding=$read.encoding;eol=$read.eol}
+                }
+                Assert-Terminal;$tree=Tree;$current=@($tree.surfaces|Where-Object {$_.id -eq $secondTerminal.id})
+                if($current.Count -ne 1 -or $current[0].pid -ne $secondTerminal.pid -or -not $current[0].running) {throw 'Concurrent Open changed the second original terminal process'}
+                Assert-Bytes $firstPath ([EditorFixture]::Original);Assert-Bytes $secondPath ([EditorFixture]::Edited) $true $true
+                Clean-Editors;Request @('close-tab',$secondSource.surface)|Out-Null
+                Passed 'overlapping_real_cli_opens_keep_two_captured_panes_distinct_unicode_roots_actual_monaco_and_original_terminals'
+            }
+            'picker-blocked' {
+                $path=$fixture.Write('picker retained 한글 한 😀.txt',[EditorFixture]::Original,$false,$false)
+                $opened=Open-Editor $path;Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null
+                Request @('focus-tab',$terminal.id)|Out-Null
+                $before=Tree;$beforeIdentity=Request @('identify')
+                $beforeWindows=@([EditorWindowProbe]::VisibleTopLevelWindows($process))
+                if($beforeWindows.Count) {throw 'Owned hidden host already has a visible top-level window'}
+                $response=Request @('editor','pick','--pane',$source.pane) 1
+                $afterWindows=@([EditorWindowProbe]::VisibleTopLevelWindows($process))
+                $after=Tree;$afterIdentity=Request @('identify')
+                if(-not (Same-Text $response.error 'Open File is unavailable in background mode')) {throw 'Picker did not return its explicit background-mode rejection'}
+                if($afterWindows.Count -ne 0 -or -not (Same-Text ($before.workspaces|ConvertTo-Json -Depth 60 -Compress) ($after.workspaces|ConvertTo-Json -Depth 60 -Compress)) -or -not (Same-Text ($before.layout|ConvertTo-Json -Depth 20 -Compress) ($after.layout|ConvertTo-Json -Depth 20 -Compress)) -or $before.active_workspace -ne $after.active_workspace -or @($before.editors).Count -ne @($after.editors).Count -or -not (Same-Text (@($before.editors.id|Sort-Object)|ConvertTo-Json -Compress) (@($after.editors.id|Sort-Object)|ConvertTo-Json -Compress)) -or $beforeIdentity.pane -ne $afterIdentity.pane -or $beforeIdentity.surface -ne $afterIdentity.surface) {throw 'Blocked picker changed the tree, editor identities, logical focus or visible owned windows'}
+                if($process.HasExited -or $afterIdentity.pid -ne $process.Id) {throw 'Blocked picker lost its owned host'}
+                Assert-Terminal;Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null;Assert-Bytes $path ([EditorFixture]::Original)
+                $evidence.observations+=@{case=$group;kind='blocked-picker';response=$response;pid=$process.Id;pane=$source.pane;editorsBefore=@($before.editors).Count;editorsAfter=@($after.editors).Count;visibleOwnedTopLevelBefore=$beforeWindows;visibleOwnedTopLevelAfter=$afterWindows;treeUnchanged=$true;terminalAlive=$true;dialogInteraction=$false;continuousWindowObservation=$false}
+                Passed 'background_open_file_picker_rejects_with_unchanged_tree_editor_identity_and_no_visible_owned_top_level_window'
+            }
+            'late-open' {
+                $path=$fixture.Write('late open root 한글 한\expired é 😀.txt',[EditorFixture]::Original,$false,$false)
+                $root=[IO.Path]::GetDirectoryName($path);$before=Tree;$identity=Request @('identify')
+                if($identity.pid -ne $process.Id -or @($before.editors).Count -or $before.editor_open_pending -ne 0 -or $before.editor_open_admitted -ne 0) {throw 'Late Open requires the exact owned host with no editor or admitted preparation'}
+                $pause=$null;$deadlineWatch=[Diagnostics.Stopwatch]::StartNew()
+                $observation=[ordered]@{case=$group;kind='late-open-deadline';pid=$process.Id;pane=$identity.pane;windowHandle=$before.window_handle;clientBudgetMs=20000;wholeProcessSuspended=$false;uiThreadSuspended=$false;uiThreadResumed=$false}
+                $evidence.observations+=$observation
+                try {
+                    $pause=New-Object EditorUiThreadPause($process,([long]$before.window_handle))
+                    $observation.threadId=$pause.ThreadId;$observation.verifiedThreadPid=$pause.ProcessId;$observation.previousSuspendCount=$pause.PreviousSuspendCount;$observation.uiThreadSuspended=$true
+                    # This deliberate pause reaches the real server's 15s deadline,
+                    # proving that time already spent in its UI queue is not renewed.
+                    $response=End-Command (Begin-Command @('editor','open',$path,'--pane',$identity.pane,'--root',$root)) @(1) 20000
+                    $observation.response=$response;$observation.responseElapsedMs=$deadlineWatch.ElapsedMilliseconds
+                    if(-not $response.error -or -not $response.error.Contains('window did not answer within the IPC command deadline')) {throw 'Late Open did not observe the actual server command deadline'}
+                    if($process.HasExited) {throw 'Owned host exited before the expired Open was processed'}
+                } finally {
+                    if($pause) {
+                        try {$pause.Dispose()} finally {$observation.uiThreadResumed=$pause.Resumed;$observation.previousResumeCount=$pause.PreviousResumeCount;$observation.suspendElapsedMs=$deadlineWatch.ElapsedMilliseconds}
+                    }
+                }
+                if(-not $observation.uiThreadResumed -or $observation.previousResumeCount -ne 1) {throw 'Late Open UI suspension was not balanced exactly once'}
+                $after=Tree;$afterIdentity=Request @('identify')
+                if(@($after.editors).Count -ne 0 -or $after.editor_open_pending -ne 0 -or $after.editor_open_admitted -ne 0 -or $after.close_accepted -or -not (Same-Text ($before.workspaces|ConvertTo-Json -Depth 60 -Compress) ($after.workspaces|ConvertTo-Json -Depth 60 -Compress)) -or $identity.pane -ne $afterIdentity.pane -or $identity.surface -ne $afterIdentity.surface) {throw 'Expired UI-queued Open created state, retained admission or changed its source identity'}
+                Assert-Terminal;Assert-Bytes $path ([EditorFixture]::Original)
+                $observation.pendingAfter=$after.editor_open_pending;$observation.admittedAfter=$after.editor_open_admitted;$observation.editorsAfter=@($after.editors).Count;$observation.treeUnchanged=$true
+                $opened=Open-Editor $path $identity.pane $root;Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null
+                $observation.followingOpenSucceeded=$true;$observation.followingSurface=$opened.surface
+                Clean-Editors
+                Passed 'expired_ui_queued_open_creates_no_editor_drains_admission_preserves_terminal_and_allows_following_open'
+            }
+            'close-preparing' {
+                # Start the real preparation worker, then leave a terminal-only model.
+                $warmPath=$fixture.Write('preparer warm 한글.txt',[EditorFixture]::Original,$false,$false)
+                $warm=Open-Editor $warmPath;Assert-Text $warm.surface ([EditorFixture]::Original) $false|Out-Null;Clean-Editors
+                $path=$fixture.Write('close preparing root 한 😀\cancelled é 한글.txt',[EditorFixture]::Edited,$true,$true)
+                $root=[IO.Path]::GetDirectoryName($path);$before=Tree;$identity=Request @('identify')
+                if($identity.pid -ne $process.Id -or @($before.editors).Count -or $before.editor_open_pending -ne 0 -or $before.editor_open_admitted -ne 0) {throw 'Close-preparing requires an idle owned preparation worker and terminal-only model'}
+                $pause=$null;$quitPeer=$null;$openJob=$null;$closedPid=$process.Id
+                $observation=[ordered]@{case=$group;kind='close-preparing';pid=$closedPid;pane=$identity.pane;windowHandle=$before.window_handle;wholeProcessSuspended=$false;workerSuspended=$false;workerResumed=$false;rawQuitHeld=$false;completedBeforeHostExit=$false}
+                $evidence.observations+=$observation
+                try {
+                    $pause=New-Object EditorOpenWorkerPause($process,([long]$before.window_handle))
+                    $observation.threadId=$pause.ThreadId;$observation.verifiedThreadPid=$pause.ProcessId;$observation.threadDescription=$pause.Description;$observation.previousSuspendCount=$pause.PreviousSuspendCount;$observation.workerSuspended=$true
+                    $openJob=Begin-Command @('editor','open',$path,'--pane',$identity.pane,'--root',$root)
+                    $pendingWatch=[Diagnostics.Stopwatch]::StartNew()
+                    do {
+                        $pending=Raw-Tree
+                        if($pending.editor_open_pending -eq 1 -and $pending.editor_open_admitted -eq 1) {break}
+                        if($openJob.process.HasExited -or $pendingWatch.ElapsedMilliseconds -ge 3000) {throw 'Paused worker did not retain exactly one pending/admitted Open'}
+                    } while($true)
+                    if(@($pending.editors).Count -or $pending.close_accepted) {throw 'Preparation created a tab or accepted close before quit'}
+                    $observation.pendingBeforeQuit=$pending.editor_open_pending;$observation.admittedBeforeQuit=$pending.editor_open_admitted
+                    $quitPeer=New-Object EditorOwnedPipe($process,$pipeName,300)
+                    $quitResponse=$quitPeer.Request('{"method":"quit","discard_state":true}',1000)|ConvertFrom-Json
+                    $heldWatch=[Diagnostics.Stopwatch]::StartNew();$observation.rawQuitHeld=$true;$observation.quitResponse=$quitResponse
+                    if($quitResponse.ok -ne $true) {throw 'Raw held quit was not accepted'}
+                    $accepted=Raw-Tree
+                    if(-not $accepted.close_accepted -or $accepted.editor_open_pending -ne 0 -or $accepted.editor_open_admitted -ne 1 -or @($accepted.editors).Count) {throw 'Accepted close did not cancel the pending Open while its paused worker still owned admission'}
+                    $observation.closeAccepted=$accepted.close_accepted;$observation.pendingAtAcceptance=$accepted.editor_open_pending;$observation.admittedAtAcceptance=$accepted.editor_open_admitted
+                    # The server waits at most two seconds for the quit peer to close.
+                    # Resume immediately and use only bounded raw IPC in that interval.
+                    $pause.Dispose();$observation.workerResumed=$pause.Resumed;$observation.previousResumeCount=$pause.PreviousResumeCount
+                    if(-not $pause.Resumed -or $pause.PreviousResumeCount -ne 1) {throw 'Owned preparation worker suspension was not balanced exactly once'}
+                    do {
+                        if($process.HasExited) {throw 'Host exited before cancelled preparation admission was observed draining'}
+                        $drained=Raw-Tree
+                        if(-not $drained.close_accepted -or @($drained.editors).Count -or -not (Same-Text ($before.workspaces|ConvertTo-Json -Depth 60 -Compress) ($drained.workspaces|ConvertTo-Json -Depth 60 -Compress))) {throw 'Late preparation published a tab or changed the accepted-close model'}
+                        if($drained.editor_open_pending -eq 0 -and $drained.editor_open_admitted -eq 0) {break}
+                        if($heldWatch.ElapsedMilliseconds -ge 1200) {throw 'Cancelled preparation did not drain before the held quit transport deadline'}
+                    } while($true)
+                    $current=@($drained.surfaces|Where-Object {$_.id -eq $terminal.id})
+                    if($process.HasExited -or $current.Count -ne 1 -or $current[0].pid -ne $terminal.pid -or -not $current[0].running) {throw 'Original host/terminal exited before the late preparation result was checked'}
+                    $observation.pendingAfterResume=$drained.editor_open_pending;$observation.admittedAfterResume=$drained.editor_open_admitted;$observation.editorsAfterResume=@($drained.editors).Count;$observation.heldMilliseconds=$heldWatch.ElapsedMilliseconds;$observation.completedBeforeHostExit=$true
+                } finally {
+                    try {
+                        if($pause) {
+                            try {$pause.Dispose()} finally {$observation.workerResumed=$pause.Resumed;$observation.previousResumeCount=$pause.PreviousResumeCount}
+                        }
+                    } finally {
+                        if($quitPeer) {$quitPeer.Dispose();$observation.rawQuitReleased=$true}
+                    }
+                }
+                $response=End-Command $openJob @(1)
+                if(-not (Same-Text $response.error 'window close was accepted before editor Open completed')) {throw 'Preparing Open did not receive its explicit accepted-close cancellation'}
+                $observation.openResponse=$response
+                if(-not $process.WaitForExit(5000)) {throw 'Accepted close did not exit after the held quit peer was released'}
+                Assert-Bytes $path ([EditorFixture]::Edited) $true $true
+                Finish-Host;$observation.cleanHostExit=$true
+                Passed 'accepted_quit_cancels_paused_owned_preparation_drains_late_result_without_tab_then_exits_when_peer_closes'
+                $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
             }
             'edit' {
                 $path=$fixture.Write('edit 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
@@ -531,13 +726,17 @@ try {
                 Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null
                 Passed 'failed_checkpoint_replace_preserves_prior_state_unseals_monaco_and_allows_later_clean_quit'
             }
-            'late-quit' {
-                $path=$fixture.Write('late quit clean 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
-                Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null
+            {$_ -eq 'late-quit' -or $_ -eq 'late-quit-empty'} {
+                $path=$null;$opened=$null
+                if($group -eq 'late-quit') {
+                    $path=$fixture.Write('late quit clean 한글.txt',[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                    Assert-Text $opened.surface ([EditorFixture]::Original) $false|Out-Null
+                }
                 $tree=Tree;$identity=Request @('identify')
                 if($identity.pid -ne $process.Id) {throw 'Refusing UI suspension without exact owned-host identity'}
+                if($group -eq 'late-quit-empty' -and @($tree.editors).Count) {throw 'Direct late quit requires a terminal-only model'}
                 $closedPid=$process.Id;$pause=$null;$deadlineWatch=[Diagnostics.Stopwatch]::StartNew()
-                $observation=[ordered]@{case=$group;kind='late-quit-deadline';pid=$closedPid;surface=$opened.surface;windowHandle=$tree.window_handle;clientBudgetMs=20000;wholeProcessSuspended=$false;uiThreadSuspended=$false;uiThreadResumed=$false}
+                $observation=[ordered]@{case=$group;kind='late-quit-deadline';pid=$closedPid;surface=$opened.surface;editorCount=@($tree.editors).Count;windowHandle=$tree.window_handle;clientBudgetMs=20000;wholeProcessSuspended=$false;uiThreadSuspended=$false;uiThreadResumed=$false}
                 $evidence.observations+=$observation
                 try {
                     $pause=New-Object EditorUiThreadPause($process,([long]$tree.window_handle))
@@ -557,10 +756,11 @@ try {
                 }
                 if(-not $observation.uiThreadResumed -or $observation.previousResumeCount -ne 1) {throw 'Owned UI thread suspension was not balanced exactly once'}
                 if(-not $process.WaitForExit(5000)) {throw 'Accepted clean editor quit left the host alive after its IPC reply receiver expired'}
-                Assert-Bytes $path ([EditorFixture]::Original)
-                Finish-Host;Forget-Editor $opened.surface
+                if($path) {Assert-Bytes $path ([EditorFixture]::Original)}
+                Finish-Host;if($opened) {Forget-Editor $opened.surface}
                 $observation.cleanHostExit=$true
-                Passed 'late_clean_editor_quit_exits_after_real_ipc_deadline_and_verified_owned_ui_thread_resume'
+                if($group -eq 'late-quit') {Passed 'late_clean_editor_quit_exits_after_real_ipc_deadline_and_verified_owned_ui_thread_resume'}
+                else {Passed 'late_direct_terminal_only_quit_exits_after_real_ipc_deadline_and_verified_owned_ui_thread_resume'}
                 # Keep following independently runnable groups on a fresh owned host.
                 $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
             }

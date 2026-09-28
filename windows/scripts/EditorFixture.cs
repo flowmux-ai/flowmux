@@ -77,6 +77,34 @@ public sealed class EditorFixture : IDisposable {
     public void Dispose() { ReleaseLocks(); }
 }
 
+// Read-only snapshot of visible top-level windows belonging to this owned host.
+// Other applications' window titles, process details and contents are not read.
+public static class EditorWindowProbe {
+    private delegate bool EnumWindowsCallback(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll", SetLastError=true)] static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint GetProcessId(IntPtr process);
+
+    public static long[] VisibleTopLevelWindows(Process owned) {
+        if (owned == null || owned.HasExited) throw new InvalidOperationException("Owned host is not running");
+        uint processId = GetProcessId(owned.Handle);
+        if (processId == 0 || processId != (uint)owned.Id) throw new InvalidOperationException("Owned process handle identity differs");
+        var windows = new List<long>();
+        EnumWindowsCallback callback = delegate(IntPtr window, IntPtr parameter) {
+            uint owner;
+            if (GetWindowThreadProcessId(window, out owner) != 0 && owner == processId && IsWindowVisible(window))
+                windows.Add(window.ToInt64());
+            return true;
+        };
+        if (!EnumWindows(callback, IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        GC.KeepAlive(callback);
+        if (owned.HasExited || GetProcessId(owned.Handle) != processId) throw new InvalidOperationException("Owned host exited during window snapshot");
+        windows.Sort();
+        return windows.ToArray();
+    }
+}
+
 // Only the verified UI thread of an already owned hidden host may be paused.
 // IPC worker threads keep running; this never suspends a process or sends input.
 public sealed class EditorUiThreadPause : IDisposable {

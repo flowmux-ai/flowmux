@@ -5,7 +5,10 @@ use super::{
 };
 use std::{
     path::Path,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
     thread::JoinHandle,
     time::Instant,
 };
@@ -24,6 +27,8 @@ impl Drop for CommandLease {
 #[derive(Clone)]
 pub struct Reply {
     sender: mpsc::SyncSender<Value>,
+    accepting: Arc<Mutex<bool>>,
+    received: Instant,
     _lease: Arc<CommandLease>,
 }
 impl Reply {
@@ -35,11 +40,62 @@ impl Reply {
             .ok()?;
         Some(Self {
             sender,
+            accepting: Arc::new(Mutex::new(true)),
+            received: Instant::now(),
             _lease: Arc::new(CommandLease(pending.clone())),
         })
     }
     pub fn try_send(&self, value: Value) -> Result<(), mpsc::TrySendError<Value>> {
+        let accepting = self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !*accepting {
+            return Err(mpsc::TrySendError::Disconnected(value));
+        }
+        // Hold the gate until the nonblocking send has committed. Deadline
+        // retirement must either consume this reply or make this send fail.
         self.sender.try_send(value)
+    }
+    /// Receipt precedes dispatch to the UI. Clones retain the same deadline
+    /// origin, including time spent behind a native modal dialog or slow view.
+    pub fn received_at(&self) -> Instant {
+        self.received
+    }
+}
+
+struct ReplyInbox {
+    receiver: mpsc::Receiver<Value>,
+    // No Sender or command lease is retained here: dropping the UI's last
+    // Reply must still wake recv_timeout with Disconnected immediately.
+    accepting: Arc<Mutex<bool>>,
+}
+impl ReplyInbox {
+    fn new(receiver: mpsc::Receiver<Value>, reply: &Reply) -> Self {
+        Self {
+            receiver,
+            accepting: reply.accepting.clone(),
+        }
+    }
+
+    fn close_and_drain(&self) -> Result<Value, mpsc::TryRecvError> {
+        let mut accepting = self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *accepting = false;
+        // A send that won the gate before the deadline remains a real response,
+        // including accepted quit. A later sender observes Disconnected even
+        // while this Receiver still exists and can take its close fallback.
+        self.receiver.try_recv()
+    }
+}
+impl Drop for ReplyInbox {
+    fn drop(&mut self) {
+        *self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
     }
 }
 #[derive(Clone, Copy)]
@@ -182,13 +238,19 @@ fn serve(
         let (send, receive) = mpsc::sync_channel(1);
         let reply = Reply::new(send, pending)
             .context("window request queue is full; request was not dispatched")?;
+        let receive = ReplyInbox::new(receive, &reply);
         emit(command, reply);
         let deadline = Instant::now() + budget;
         loop {
             anyhow::ensure!(!stop.is_set(), "IPC server is stopping");
             let left = deadline.saturating_duration_since(Instant::now());
-            anyhow::ensure!(!left.is_zero(), "window did not answer within the IPC command deadline; command outcome may be unknown");
-            match receive.recv_timeout(left.min(Duration::from_millis(50))) {
+            if left.is_zero() {
+                if let Ok(value) = receive.close_and_drain() {
+                    return Ok(value);
+                }
+                anyhow::bail!("window did not answer within the IPC command deadline; command outcome may be unknown");
+            }
+            match receive.receiver.recv_timeout(left.min(Duration::from_millis(50))) {
                 Ok(value) => return Ok(value),
                 Err(mpsc::RecvTimeoutError::Timeout) => {},
                 Err(mpsc::RecvTimeoutError::Disconnected) => anyhow::bail!("window closed before answering"),

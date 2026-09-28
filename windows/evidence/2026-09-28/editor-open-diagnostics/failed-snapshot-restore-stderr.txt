@@ -1,0 +1,15 @@
+Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windo
+ws\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowmux-33616-5039a379-22f3-472e-b8cf-6e2
+7e7b04b9a","--json","save-state"]; Owned CLI exit 1: {"error":"could not atomically save Windows window state: 지정된 경로를
+찾을 수 없습니다. (os error 3)"}
+
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\editor-open
+-initial\scripts\verify-editor.ps1:46 문자:9
++         throw ('Owned command failed: '+$Job.file+' '+($Job.arguments ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Owned command f...os error 3)"}
+ :String) [], RuntimeException
+    + FullyQualifiedErrorId : Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-gith
+   ub-com-jsuya\work\flowmux\windows\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowm
+  ux-33616-5039a379-22f3-472e-b8cf-6e27e7b04b9a","--json","save-state"]; Owned CLI exit 1: {"error":"could not atomi
+ cally save Windows window state: 지정된 경로를 찾을 수 없습니다. (os error 3)"}

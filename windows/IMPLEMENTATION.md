@@ -509,7 +509,7 @@ native testing exposed directory attributes copied onto a file by the shared
 recovery fallback. Hidden hosts keep both editor profiles and recovery data
 inside their explicit isolated state directory.
 
-Fifteen unique hidden native editor checks passed, covering actual Monaco content,
+The initial editor stage passed fifteen unique hidden native checks, covering actual Monaco content,
 Unicode/BOM/EOL bytes, ten-document Save All, dirty closure, conflict actions,
 moves, restore failures, checkpoint failure and recovery after acknowledged
 edits plus a completed checkpoint. A clean discard-state quit now completes even
@@ -521,7 +521,32 @@ and browser regression checks also passed. These are bounded case results,
 not physical UI or complete editor acceptance. Final Windows debug and release
 builds passed; source boundaries, repeated cases, native unit/package results
 and preserved failures are tracked in the [editor record](evidence/2026-09-28/editor.md).
-F01–F05, F17 and G08 remain partial. Opening is CLI-only; native Open UI, fully
-asynchronous Open-path validation, automatic file watching, search/viewers,
-physical IME/GUI/clipboard/fonts/DPI/accessibility, full ACL preservation,
-unsynchronized edit/close races and renderer-crash recovery remain pending.
+Open path preparation now runs on a bounded worker, retaining its original
+source/pane/workspace/root and checking them again before publication. Admission
+allows one preparation per pane and eight jobs per host, including cancelled
+filesystem work and posted results. CLI Open keeps a twelve-second budget from
+server receipt through preparation and initialization. WebView2 COM construction
+still runs on the UI thread. The sidebar Open File button and `editor pick`
+use an owned native dialog; the CLI returns an accepted-request receipt before
+human interaction, not an editor surface. Background mode refuses the picker.
+
+Accepted window closes cancel pending Opens and block mutations while replies
+drain, including direct discard-state quits without an editor barrier. Window
+checkpoint replacement now uses the canonical parent's extended-length Windows
+path after a nested verifier directory exposed a 266-unit temporary filename
+and a raw `MoveFileExW` path failure. The failed Restore run is preserved.
+
+The [Open and picker record](evidence/2026-09-28/editor-open.md) separates three
+initial hidden passes from seven final-source editor cases and 36 related native
+regression checks. Final cases include deep-path Restore, expired queued Open,
+accepted close during paused preparation, direct/editor late quit, dirty close
+and failed-checkpoint unsealing. Controlled cases pause only exact owned hidden
+threads and record balanced resumption; they do not cover every timing race or
+exercise the physical picker. Final Windows debug/release builds, Clippy, format
+and all 172 actual Windows unit tests pass. Two earlier Restore failures remain
+preserved; package, entrypoint and cleanup results are recorded separately.
+F01–F05, F17 and G08 remain partial, with 57 partial/57 pending features and ten
+partial/three pending gates. Physical IME/GUI/clipboard/fonts/DPI/accessibility,
+automatic file watching, search/viewers, full ACL preservation, exhaustive
+long-path behavior, unsynchronized edit/close races and renderer-crash recovery
+remain pending.

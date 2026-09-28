@@ -13,6 +13,7 @@ mod download_name;
 pub mod downloads;
 pub mod editor;
 pub mod editor_assets;
+pub mod editor_open;
 pub mod editor_recovery;
 pub mod editor_worker;
 pub mod keys;
