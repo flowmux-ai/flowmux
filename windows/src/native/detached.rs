@@ -30,6 +30,9 @@ pub(super) struct Window {
     tab: HWND,
     close: HWND,
     tools: [HWND; 6],
+    // (maximize on first show, hidden-test restore). Hidden windows never apply
+    // maximization, but subsequent checkpoints must retain the saved intent.
+    restored_show: std::cell::Cell<Option<(bool, bool)>>,
 }
 
 impl Window {
@@ -74,6 +77,7 @@ impl Window {
                 tab: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
                 tools: [std::ptr::null_mut(); 6],
+                restored_show: std::cell::Cell::new(None),
             };
             ROUTES.with(|routes| routes.borrow_mut().insert(window as isize, surface));
             result.tab = result.button(
@@ -237,16 +241,98 @@ impl Window {
         );
     }
 
+    pub(super) fn placement(&self) -> anyhow::Result<crate::state::SavedPlacement> {
+        let mut native = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        unsafe {
+            checked(GetWindowPlacement(self.window, &mut native))?;
+        }
+        let rect = native.rcNormalPosition;
+        let width = u32::try_from(i64::from(rect.right) - i64::from(rect.left))?;
+        let height = u32::try_from(i64::from(rect.bottom) - i64::from(rect.top))?;
+        anyhow::ensure!(width > 0 && height > 0, "invalid detached window placement");
+        let maximized = match self.restored_show.get() {
+            Some((maximized, background))
+                if background || unsafe { IsWindowVisible(self.window) == 0 } =>
+            {
+                maximized
+            }
+            _ => {
+                native.showCmd == SW_SHOWMAXIMIZED as u32
+                    || (unsafe { IsIconic(self.window) != 0 }
+                        && native.flags & WPF_RESTORETOMAXIMIZED != 0)
+            }
+        };
+        Ok(crate::state::SavedPlacement {
+            left: rect.left,
+            top: rect.top,
+            width,
+            height,
+            maximized,
+        })
+    }
+
+    pub(super) fn restore_placement(
+        &self,
+        saved: &crate::state::SavedPlacement,
+        background: bool,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            saved.width > 0 && saved.height > 0,
+            "invalid saved window size"
+        );
+        let dpi = unsafe { GetDpiForWindow(self.window) }.max(96) as i32;
+        let width = i32::try_from(saved.width)?.max(420 * dpi / 96);
+        let height = i32::try_from(saved.height)?.max(240 * dpi / 96);
+        let right = saved
+            .left
+            .checked_add(width)
+            .context("saved window right edge overflow")?;
+        let bottom = saved
+            .top
+            .checked_add(height)
+            .context("saved window bottom edge overflow")?;
+        let native = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            showCmd: SW_HIDE as u32,
+            ptMinPosition: POINT { x: -1, y: -1 },
+            ptMaxPosition: POINT { x: -1, y: -1 },
+            rcNormalPosition: RECT {
+                left: saved.left,
+                top: saved.top,
+                right,
+                bottom,
+            },
+            ..Default::default()
+        };
+        // Normal placement uses workspace coordinates. SetWindowPlacement also
+        // corrects a saved position made offscreen by changed monitor geometry.
+        // SW_HIDE applies geometry without displaying or activating the frame.
+        unsafe {
+            checked(SetWindowPlacement(self.window, &native))?;
+        }
+        self.restored_show.set(Some((saved.maximized, background)));
+        Ok(())
+    }
+
     pub(super) fn show(&self, background: bool) {
         unsafe {
-            ShowWindow(
-                self.window,
-                if background {
-                    SW_HIDE
+            let command = if background {
+                SW_HIDE
+            } else {
+                let maximized = self
+                    .restored_show
+                    .take()
+                    .map_or_else(|| IsZoomed(self.window) != 0, |(maximized, _)| maximized);
+                if maximized {
+                    SW_SHOWMAXIMIZED
                 } else {
                     SW_SHOWNOACTIVATE
-                },
-            );
+                }
+            };
+            ShowWindow(self.window, command);
         }
     }
 
@@ -254,6 +340,7 @@ impl Window {
         json!({"window_handle":self.window as usize,"workspace":self.workspace,"surface":self.surface,
             "owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,
             "native_visible":unsafe{IsWindowVisible(self.window)}!=0,"area":self.area().ok(),
+            "placement":self.placement().ok(),
             "tab":self.tab as usize,"close":self.close as usize,
             "tools":self.tools.map(|window| window as usize)})
     }

@@ -21,6 +21,39 @@ fn is_default_sidebar_width(width: &u32) -> bool {
     *width == DEFAULT_SIDEBAR_WIDTH
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Normal workspace coordinates from Win32 WINDOWPLACEMENT, not screen bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedPlacement {
+    pub left: i32,
+    pub top: i32,
+    pub width: u32,
+    pub height: u32,
+    pub maximized: bool,
+}
+impl SavedPlacement {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            (1..=32768).contains(&self.width) && (1..=32768).contains(&self.height),
+            "invalid saved window dimensions"
+        );
+        ensure!(
+            self.left.unsigned_abs() <= 1_000_000 && self.top.unsigned_abs() <= 1_000_000,
+            "invalid saved window position"
+        );
+        ensure!(
+            self.left.checked_add(self.width as i32).is_some()
+                && self.top.checked_add(self.height as i32).is_some(),
+            "saved window bounds overflow"
+        );
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedScreen {
@@ -60,6 +93,12 @@ pub struct WindowState {
         skip_serializing_if = "is_default_sidebar_width"
     )]
     pub sidebar_width_dip: u32,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub detached_windows: HashMap<SurfaceId, SavedPlacement>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub main_closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached_focus: Option<SurfaceId>,
 }
 impl WindowState {
     pub fn decode(bytes: &[u8]) -> anyhow::Result<Self> {
@@ -111,6 +150,34 @@ impl WindowState {
             );
         }
         ensure!(surfaces.len() <= 128, "too many saved surfaces");
+        let single_surfaces: HashSet<_> = self
+            .workspaces
+            .iter()
+            .filter_map(|ws| match &ws.root {
+                Pane::Leaf {
+                    content: PaneContent::Tabs { surfaces, .. },
+                    ..
+                } if surfaces.len() == 1 => Some(surfaces[0].id),
+                _ => None,
+            })
+            .collect();
+        for (surface, placement) in &self.detached_windows {
+            ensure!(surfaces.contains(surface), "orphaned separate window");
+            ensure!(
+                single_surfaces.contains(surface),
+                "separate window requires a single-pane, single-surface workspace"
+            );
+            placement.validate()?;
+        }
+        ensure!(
+            !self.main_closed || self.detached_windows.len() == self.workspaces.len(),
+            "closed main window contains attached workspaces"
+        );
+        ensure!(
+            self.detached_focus
+                .is_none_or(|surface| self.detached_windows.contains_key(&surface)),
+            "focused separate window missing"
+        );
         let terminals: HashSet<_> = self
             .workspaces
             .iter()
@@ -223,11 +290,96 @@ pub(crate) fn sample() -> WindowState {
         workspaces: vec![ws],
         shells: HashMap::new(),
         sidebar_width_dip: DEFAULT_SIDEBAR_WIDTH,
+        detached_windows: HashMap::new(),
+        main_closed: false,
+        detached_focus: None,
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn separate_windows_preserve_old_state_and_validate_placement_and_ownership() {
+        let old = sample();
+        let json = serde_json::to_value(&old).unwrap();
+        for key in ["detached_windows", "main_closed", "detached_focus"] {
+            assert!(json.get(key).is_none());
+        }
+        let restored = WindowState::decode(&old.encode().unwrap()).unwrap();
+        assert!(restored.detached_windows.is_empty());
+        assert!(!restored.main_closed);
+        assert!(restored.detached_focus.is_none());
+
+        let surface = old.workspaces[0].active();
+        let placement = SavedPlacement {
+            left: -1920,
+            top: -120,
+            width: 1280,
+            height: 800,
+            maximized: true,
+        };
+        let mut state = old.clone();
+        state.detached_windows.insert(surface, placement);
+        state.main_closed = true;
+        state.detached_focus = Some(surface);
+        let restored = WindowState::decode(&state.encode().unwrap()).unwrap();
+        assert_eq!(restored.detached_windows[&surface], placement);
+        assert!(restored.main_closed);
+        assert_eq!(restored.detached_focus, Some(surface));
+        for position in [-1_000_000, 1_000_000] {
+            SavedPlacement { left: position, top: position, width: 1, height: 32768, ..placement }
+                .validate().unwrap();
+        }
+        for invalid in [
+            SavedPlacement { width: 0, ..placement },
+            SavedPlacement { height: 0, ..placement },
+            SavedPlacement { width: 32769, ..placement },
+            SavedPlacement { height: 32769, ..placement },
+            SavedPlacement { left: -1_000_001, ..placement },
+            SavedPlacement { top: 1_000_001, ..placement },
+            SavedPlacement { left: i32::MIN, ..placement },
+            SavedPlacement { top: i32::MAX, ..placement },
+            SavedPlacement { width: u32::MAX, ..placement },
+        ] {
+            let mut invalid_state = state.clone();
+            invalid_state.detached_windows.insert(surface, invalid);
+            assert!(invalid_state.encode().is_err());
+            assert!(WindowState::decode(&serde_json::to_vec(&invalid_state).unwrap()).is_err());
+        }
+        let mut extra = serde_json::to_value(placement).unwrap();
+        extra["screen_coordinates"] = true.into();
+        assert!(serde_json::from_value::<SavedPlacement>(extra).is_err());
+
+        let mut orphan = state.clone();
+        orphan.detached_windows.insert(SurfaceId::new(), placement);
+        assert!(orphan.encode().is_err());
+        for split in [false, true] {
+            let mut invalid = state.clone();
+            let added = if split {
+                invalid.workspaces[0].split(flowmux_core::SplitDirection::Vertical);
+                invalid.workspaces[0].active()
+            } else {
+                invalid.workspaces[0].new_tab()
+            };
+            invalid.screens.insert(added, old.screens[&surface].clone());
+            assert!(invalid.encode().is_err());
+        }
+        let mut attached = old.clone();
+        attached.main_closed = true;
+        assert!(attached.encode().is_err());
+        attached.main_closed = false;
+        attached.detached_focus = Some(surface);
+        assert!(attached.encode().is_err());
+        let mut mixed = state.clone();
+        let workspace = Workspace::new("attached 한글".into());
+        mixed.screens.insert(workspace.active(), old.screens[&surface].clone());
+        mixed.workspaces.push(workspace);
+        assert!(mixed.encode().is_err());
+        mixed.main_closed = false;
+        assert!(mixed.encode().is_ok());
+        mixed.detached_focus = Some(SurfaceId::new());
+        assert!(mixed.encode().is_err());
+    }
     #[test]
     fn sidebar_width_preserves_old_state_and_rejects_invalid_saved_preferences() {
         let mut state = sample();

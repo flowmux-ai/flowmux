@@ -553,6 +553,12 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         cwd.display()
     );
     let restoring_window = restored.is_some();
+    let restore_detached = restored
+        .as_ref()
+        .map(|state| state.detached_windows.clone())
+        .unwrap_or_default();
+    let restore_main_closed = restored.as_ref().is_some_and(|state| state.main_closed);
+    let restore_detached_focus = restored.as_ref().and_then(|state| state.detached_focus);
     let sidebar_width_dip = restored
         .as_ref()
         .map_or(crate::state::DEFAULT_SIDEBAR_WIDTH, |state| {
@@ -751,10 +757,22 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         };
         chrome::configure_settings(&app.settings.terminal, GetDpiForWindow(window).max(96));
         chrome::window_theme(window, app.settings.terminal.theme);
-        app.rebuild()?;
-        if !app.background_test {
+        app.restore_detached(
+            restore_detached,
+            restore_main_closed,
+            restore_detached_focus,
+        )?;
+        app.rebuild_without_focus()?;
+        if !app.background_test && !app.main_closed {
             ShowWindow(window, SW_SHOW);
         }
+        for window in app.detached.values() {
+            window.show(app.background_test);
+        }
+        if let Some(surface) = app.detached_focus {
+            app.select(surface)?;
+        }
+        app.focus_active()?;
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
         app.files_shutdown();
@@ -847,9 +865,6 @@ impl App {
     }
     fn rebuild_without_focus(&mut self) -> anyhow::Result<()> {
         self.cancel_drag();
-        if self.main_closed {
-            return self.layout();
-        }
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
         let mut missing = Vec::new();
         for workspace in &self.workspaces {
@@ -876,6 +891,13 @@ impl App {
                 }
                 _ => anyhow::bail!("unsupported Windows surface"),
             }
+            if let Some(window) = self.detached.get(&id) {
+                self.surface_holder(id)?.reparent(window.window)?;
+                self.refresh_tab_title(id);
+            }
+        }
+        if self.main_closed {
+            return self.layout();
         }
         let mut desired = Vec::new();
         for (name, action) in [
@@ -1136,10 +1158,6 @@ impl App {
         let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
         panes::cache_sidebar(sidebar, client.bottom, px(4), !self.background_test);
         let bar = px(28);
-        chrome::configure_settings(
-            &self.settings.terminal,
-            unsafe { GetDpiForWindow(self.window) }.max(96),
-        );
         self.files_reconcile();
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
         if let Some(pane) = self.zoomed {
@@ -2101,6 +2119,11 @@ impl App {
             self.surfaces.values().all(|s| s.ready && !s.restoring),
             "wait for all terminals to finish loading before saving"
         );
+        let detached_windows = self
+            .detached
+            .iter()
+            .map(|(id, window)| Ok((*id, window.placement()?)))
+            .collect::<anyhow::Result<_>>()?;
         let request = Uuid::new_v4();
         let mut waiting = HashMap::new();
         for (id, surface) in &self.surfaces {
@@ -2121,6 +2144,9 @@ impl App {
                 screens: HashMap::new(),
                 shells: self.shells.clone(),
                 sidebar_width_dip: self.sidebar_width_dip,
+                detached_windows,
+                main_closed: self.main_closed,
+                detached_focus: self.detached_focus,
             },
             waiting,
             started: Instant::now(),
@@ -2806,7 +2832,7 @@ impl App {
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
                 "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
-                "named_key_protocol":"send_key_mode","detached_surfaces":["terminal","browser","editor"],"detached_window_restore":false,
+                "named_key_protocol":"send_key_mode","detached_surfaces":["terminal","browser","editor"],"detached_window_restore":true,
                 "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],

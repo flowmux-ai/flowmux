@@ -10,6 +10,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 public static class ChromeFixture {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X,Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct WindowPlacement {
+        public uint Length,Flags,Show;public Point Minimum,Maximum;public Rect Normal;
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo {
+        public uint Size;public Rect Monitor,Work;public uint Flags;
+    }
+    public sealed class NormalPlacement { public int Left,Top,Width,Height;public bool Maximized; }
     [StructLayout(LayoutKind.Sequential)] private struct ThreadInfo {
         public uint Size,Flags;public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret;public Rect CaretRect;
     }
@@ -28,6 +36,9 @@ public static class ChromeFixture {
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out Rect rect);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out Rect rect);
+    [DllImport("user32.dll",SetLastError=true)] private static extern bool GetWindowPlacement(IntPtr hwnd,ref WindowPlacement placement);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd,uint flags);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern bool GetMonitorInfo(IntPtr monitor,ref MonitorInfo info);
     [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Rect rect,uint count);
     [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd,int index);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd,StringBuilder text,int count);
@@ -78,6 +89,34 @@ public static class ChromeFixture {
         // NOMOVE | NOZORDER | NOACTIVATE, deliberately without SHOWWINDOW.
         if(!SetWindowPos(hwnd,IntPtr.Zero,0,0,width+outer.Right-outer.Left-client.Right,
             height+outer.Bottom-outer.Top-client.Bottom,0x16))throw new Win32Exception();
+        Owned(hwnd,owner);
+    }
+    public static NormalPlacement Placement(long root,int owner) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);
+        var p=new WindowPlacement();p.Length=(uint)Marshal.SizeOf(p);
+        if(!GetWindowPlacement(hwnd,ref p))throw new Win32Exception();
+        return new NormalPlacement {Left=p.Normal.Left,Top=p.Normal.Top,
+            Width=p.Normal.Right-p.Normal.Left,Height=p.Normal.Bottom-p.Normal.Top,Maximized=p.Show==3};
+    }
+    public static bool InWorkArea(long root,int owner) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);Rect rect;
+        var monitor=new MonitorInfo();monitor.Size=(uint)Marshal.SizeOf(monitor);
+        if(!GetWindowRect(hwnd,out rect) || !GetMonitorInfo(MonitorFromWindow(hwnd,2),ref monitor))throw new Win32Exception();
+        return rect.Left>=monitor.Work.Left && rect.Top>=monitor.Work.Top &&
+            rect.Right<=monitor.Work.Right && rect.Bottom<=monitor.Work.Bottom;
+    }
+    public static void Position(long root,int owner,int offset,int width,int height) {
+        var hwnd=new IntPtr(root);Owned(hwnd,owner);
+        if(offset<0 || offset>300 || width<420 || width>1200 || height<300 || height>900)
+            throw new ArgumentOutOfRangeException("Owned hidden placement");
+        var monitor=new MonitorInfo();monitor.Size=(uint)Marshal.SizeOf(monitor);
+        if(!GetMonitorInfo(MonitorFromWindow(hwnd,2),ref monitor))throw new Win32Exception();
+        int availableWidth=monitor.Work.Right-monitor.Work.Left,availableHeight=monitor.Work.Bottom-monitor.Work.Top;
+        width=Math.Min(width,availableWidth);height=Math.Min(height,availableHeight);
+        int left=monitor.Work.Left+Math.Min(offset,Math.Max(0,availableWidth-width));
+        int top=monitor.Work.Top+Math.Min(offset,Math.Max(0,availableHeight-height));
+        // NOZORDER | NOACTIVATE, without SHOWWINDOW: hidden ownership is checked twice.
+        if(!SetWindowPos(hwnd,IntPtr.Zero,left,top,width,height,0x14))throw new Win32Exception();
         Owned(hwnd,owner);
     }
     public static long CaptureHandle(long root,int owner) {

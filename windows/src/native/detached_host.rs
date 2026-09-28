@@ -3,6 +3,33 @@
 use super::*;
 
 impl App {
+    pub(super) fn restore_detached(
+        &mut self,
+        placements: HashMap<SurfaceId, crate::state::SavedPlacement>,
+        main_closed: bool,
+        focus: Option<SurfaceId>,
+    ) -> anyhow::Result<()> {
+        for (surface, placement) in placements {
+            let (index, pane, _) = self
+                .locate(surface)
+                .context("saved window has no surface")?;
+            let workspace = &self.workspaces[index];
+            let title = workspace
+                .root
+                .surface_title(pane, surface)
+                .unwrap_or("flowmux");
+            let window = detached::Window::new(surface, workspace.id, title)?;
+            chrome::window_theme(window.window, self.settings.terminal.theme);
+            window.restore_placement(&placement, self.background_test)?;
+            self.detached.insert(surface, window);
+        }
+        self.main_closed = main_closed;
+        self.detached_focus =
+            focus.or_else(|| main_closed.then(|| self.workspaces[self.active_workspace].active()));
+        self.normalize_main_workspace();
+        Ok(())
+    }
+
     pub(super) fn is_detached_workspace(&self, workspace: WorkspaceId) -> bool {
         self.detached
             .values()

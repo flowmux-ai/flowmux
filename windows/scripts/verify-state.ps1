@@ -1,6 +1,7 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden debug hosts and a unique state directory only. No desktop input.
-param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
+    [ValidateSet('all','detached')][string]$Case='all')
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
@@ -8,6 +9,11 @@ $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor = (& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no window was launched.' }
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
+if ($Case -eq 'detached') {
+    Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'BrowserFixture.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
+}
 $directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('state-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
@@ -31,18 +37,31 @@ function Start-Owned([string[]]$LaunchArgs = @()) {
     }
 }
 function Invoke-Flowmux([string[]]$Arguments) {
+    if ($Case -eq 'detached') {
+        $probe=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
+        try {
+            $out=$probe.StandardOutput.ReadToEndAsync();$err=$probe.StandardError.ReadToEndAsync()
+            if (-not $probe.WaitForExit(5000)) {throw 'Owned state CLI exceeded five seconds'}
+            if (-not $out.Wait(500) -or -not $err.Wait(500)) {throw 'Owned state CLI output did not close'}
+            if ($probe.ExitCode -ne 0) {throw ('State CLI failed: '+($Arguments -join ' ')+' '+[CliProbe]::Output($err))}
+            return ([CliProbe]::Output($out)|ConvertFrom-Json)
+        } finally {if (-not $probe.HasExited) {$probe.Kill();[CliProbe]::WaitAfterKill($probe)};$probe.Dispose()}
+    }
     $output = & $cli --pipe $script:pipeName --json @Arguments
     if ($LASTEXITCODE -ne 0) { throw "flowmuxctl failed: $Arguments" }
     return (($output -join "`n") | ConvertFrom-Json)
 }
 function Connect-Owned($Process) {
     $discovery = Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($Process.Id).json"
-    $deadline = (Get-Date).AddSeconds(30)
+    $deadline = (Get-Date).AddSeconds($(if ($Case -eq 'detached') {5} else {30}))
     while (-not (Test-Path $discovery)) {
         if ($Process.HasExited -or (Get-Date) -gt $deadline) { throw 'Test host did not start' }
         Start-Sleep -Milliseconds 100
     }
-    $script:pipeName = (Get-Content -Raw $discovery | ConvertFrom-Json).pipe
+    $record=Get-Content -Raw $discovery|ConvertFrom-Json
+    if ($Case -eq 'detached' -and $record.pid -ne $Process.Id) {throw 'Detached discovery process owner differs'}
+    $script:pipeName = $record.pipe
+    if ($Case -eq 'detached' -and (Invoke-Flowmux @('identify')).pid -ne $Process.Id) {throw 'Detached pipe process owner differs'}
     do {
         $tree = Invoke-Flowmux @('tree')
         if (@($tree.surfaces | Where-Object { -not $_.ready }).Count -eq 0) {
@@ -58,7 +77,7 @@ function Connect-Owned($Process) {
 }
 function Stop-Owned($Process) {
     Invoke-Flowmux @('quit') | Out-Null
-    if (-not $Process.WaitForExit(10000) -or $Process.ExitCode -ne 0) { throw 'Host did not close cleanly' }
+    if (-not $Process.WaitForExit($(if ($Case -eq 'detached') {5000} else {10000})) -or $Process.ExitCode -ne 0) { throw 'Host did not close cleanly' }
 }
 function Write-Marker([string]$Surface, [string]$Marker) {
     Invoke-Flowmux @('focus-tab', $Surface) | Out-Null
@@ -66,7 +85,7 @@ function Write-Marker([string]$Surface, [string]$Marker) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("Write-Host '$Marker' -ForegroundColor Green"))
     Invoke-Flowmux @('send-keys', $pane, "Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encoded')))") | Out-Null
     Invoke-Flowmux @('send-key', 'Enter', '--pane', $pane) | Out-Null
-    $deadline = (Get-Date).AddSeconds(12)
+    $deadline = (Get-Date).AddSeconds($(if ($Case -eq 'detached') {5} else {12}))
     do {
         $screen = Invoke-Flowmux @('read-screen', '--surface', $Surface)
         if ($screen.text.Replace("`n", '').Contains($Marker)) { return }
@@ -76,7 +95,139 @@ function Write-Marker([string]$Surface, [string]$Marker) {
 }
 function Load-State([string]$Path) { return ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json) }
 function Save-Json([string]$Path, $Value) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 60), (New-Object Text.UTF8Encoding($false))) }
+function State-Leaves($Node) {if ($Node.content) {$Node} else {State-Leaves $Node.first;State-Leaves $Node.second}}
+function State-Topology($Tree) {
+    return (@($Tree.workspaces|ForEach-Object {$workspace=$_.id;State-Leaves $_.root|ForEach-Object {$pane=$_.id;$_.content.surfaces|ForEach-Object {$workspace+':'+$pane+':'+$_.id}}}|Sort-Object)-join ';')
+}
+function Detached-Tree {
+    $tree=Invoke-Flowmux @('tree');$evidence.lastTree=$tree
+    foreach ($handle in @($tree.window_handle)+@($tree.detached_windows.window_handle)) {
+        if ($handle) {[ChromeFixture]::Placement([long]$handle,$script:detachedProcess.Id)|Out-Null}
+    }
+    if (-not $tree.background_testing) {throw 'Detached state host is not isolated and hidden'}
+    return $tree
+}
+function Detached-Ready {
+    $deadline=(Get-Date).AddSeconds(5)
+    do {
+        $tree=Detached-Tree
+        if (@($tree.surfaces|Where-Object {-not $_.ready}).Count -eq 0 -and @($tree.editors|Where-Object {-not $_.ready}).Count -eq 0 -and @($tree.browsers|Where-Object {$_.loading}).Count -eq 0) {return $tree}
+        if ((Get-Date) -gt $deadline) {throw 'Mixed detached state did not become ready within five seconds'}
+        Start-Sleep -Milliseconds 25
+    } while ($true)
+}
+function Detached-Start([string[]]$LaunchArgs) {
+    $script:detachedProcess=[CliProbe]::Start((Join-Path $BuildDirectory 'flowmux.exe'),$LaunchArgs,$directory,$directory)
+    $hosts.Add($script:detachedProcess)
+    $script:detachedOutput[$script:detachedProcess.Id]=@{out=$script:detachedProcess.StandardOutput.ReadToEndAsync();err=$script:detachedProcess.StandardError.ReadToEndAsync()}
+    Connect-Owned $script:detachedProcess|Out-Null
+    return Detached-Ready
+}
+function Detached-EditorText([string]$Surface) {
+    $response=Invoke-Flowmux @('editor','command',$Surface,'read')
+    $read=if ($response.psobject.Properties.Name -contains 'result') {$response.result} else {$response}
+    if ($read.document_focused -ne $false -or $read.dirty -or $read.content_truncated -or -not [string]::Equals($read.content,[EditorFixture]::Original,[StringComparison]::Ordinal)) {throw 'Detached editor did not restore its exact clean Korean document'}
+}
+function Detached-BrowserText([string]$Surface) {
+    Invoke-Flowmux @('focus-tab',$Surface)|Out-Null;$pane=(Invoke-Flowmux @('identify')).pane
+    $value=(Invoke-Flowmux @('browser','eval',$pane,'({text:document.querySelector("#label").textContent,saved:localStorage.getItem("detached-state"),focused:document.hasFocus()})')).result
+    if (-not [string]::Equals($value.text,'첫째 한글 한 é 😀',[StringComparison]::Ordinal) -or -not [string]::Equals($value.saved,'복원 한 é 😀',[StringComparison]::Ordinal) -or $value.focused -ne $false) {throw 'Detached browser URL/profile Korean DOM or hidden focus differs'}
+}
+function Detached-Placements($Tree,$Expected) {
+    $keys=@($Expected.psobject.Properties.Name)
+    if (@($Tree.detached_windows).Count -ne $keys.Count) {throw 'Saved detached frame count changed'}
+    foreach ($surface in $keys) {
+        $frames=@($Tree.detached_windows|Where-Object {$_.surface -eq $surface})
+        if ($frames.Count -ne 1) {throw 'Saved detached surface identity is missing or duplicated'}
+        $frame=$frames[0];$native=[ChromeFixture]::Placement([long]$frame.window_handle,$script:detachedProcess.Id)
+        foreach ($key in @('left','top','width','height')) {
+            if ($null -eq $frame.placement.$key -or $frame.placement.$key -ne $Expected.$surface.$key -or $native.$key -ne $Expected.$surface.$key) {throw ('Restored actual detached placement differs: '+$surface+' '+$key)}
+        }
+        if ($frame.placement.maximized -ne $Expected.$surface.maximized -or $native.Maximized) {throw 'Hidden restore lost maximized intent or actually maximized a native window'}
+        $tabs=@($Tree.workspaces|Where-Object {$_.id -eq $frame.workspace}|ForEach-Object {State-Leaves $_.root}|ForEach-Object {$_.content.surfaces})
+        if ($tabs.Count -ne 1 -or $tabs[0].id -ne $surface) {throw 'Restored detached workspace is not its original single surface'}
+        $views=@(@($Tree.surfaces)+@($Tree.browsers)+@($Tree.editors)|Where-Object {$_.id -eq $surface})
+        if ($views.Count -ne 1 -or $views[0].holder.parent -ne $frame.window_handle -or $views[0].holder.root -ne $frame.window_handle -or $frame.native_visible -ne $false -or $views[0].holder.native_visible -ne $false) {throw 'Restored detached holder is not under its hidden saved frame'}
+    }
+}
+function Detached-State {
+    $tree=Detached-Start @('--new-window','--cwd',$directory);$anchor=Invoke-Flowmux @('identify')
+    Invoke-Flowmux @('new-tab')|Out-Null;$terminal=Invoke-Flowmux @('identify');Detached-Ready|Out-Null
+    $marker='DETACHED-HISTORY-한글-한-é-😀';Write-Marker $terminal.surface $marker
+    $browser=(Invoke-Flowmux @('browser','open',($script:stateBrowser.Origin+'/one'),'--pane',$anchor.pane)).browser_pane_opened
+    Detached-Ready|Out-Null
+    Invoke-Flowmux @('browser','eval',$browser.pane,'localStorage.setItem("detached-state","복원 한 é 😀");true')|Out-Null
+    $file=$script:stateEditor.Write('복원 문서 한 é 😀.txt',[EditorFixture]::Original,$true,$false)
+    $editor=(Invoke-Flowmux @('editor','open',$file,'--pane',$anchor.pane,'--root',$script:stateEditor.Root)).editor_opened
+    Detached-Ready|Out-Null;Detached-EditorText $editor.surface
+    $ids=@($terminal.surface,$browser.surface,$editor.surface)
+    for ($index=0;$index -lt $ids.Count;$index++) {
+        Invoke-Flowmux @('detach-tab',$ids[$index])|Out-Null
+        $frame=@((Detached-Tree).detached_windows|Where-Object {$_.surface -eq $ids[$index]})[0]
+        [ChromeFixture]::Position([long]$frame.window_handle,$script:detachedProcess.Id,(60+30*$index),(700+40*$index),(460+30*$index))
+    }
+    Invoke-Flowmux @('focus-tab',$browser.surface)|Out-Null
+    $before=Detached-Tree;$topology=State-Topology $before;$oldPid=@($before.surfaces|Where-Object {$_.id -eq $terminal.surface})[0].pid
+    $saved=Invoke-Flowmux @('save-state');$snapshot=Load-State $saved.path
+    if (@($snapshot.detached_windows.psobject.Properties).Count -ne 3 -or $snapshot.main_closed -or $snapshot.detached_focus -ne $browser.surface) {throw 'Mixed state omitted detached placement/focus or closed its main window'}
+    Detached-Placements $before $snapshot.detached_windows
+    if (-not $snapshot.screens.($terminal.surface).data.Contains($marker)) {throw 'Detached Korean history was not saved'}
+    Stop-Owned $script:detachedProcess
+    # State-input recovery probe only: no fixture displays or maximizes a window.
+    $snapshot=Load-State $saved.path
+    $snapshot.detached_windows.($browser.surface).left=999999;$snapshot.detached_windows.($browser.surface).top=999999
+    $snapshot.detached_windows.($terminal.surface).maximized=$true
+    Save-Json $saved.path $snapshot
+    $restored=Detached-Start @('--restore-window',$saved.window)
+    if ((State-Topology $restored) -cne $topology -or $restored.main_closed) {throw 'Mixed detached restart changed workspace/pane/surface identities'}
+    $corrected=@($restored.detached_windows|Where-Object {$_.surface -eq $browser.surface})[0]
+    if (-not $corrected -or -not [ChromeFixture]::InWorkArea([long]$corrected.window_handle,$script:detachedProcess.Id) -or $corrected.placement.left -eq 999999 -or $corrected.placement.top -eq 999999) {throw 'Offscreen browser placement was not clamped into the native work area'}
+    $snapshot.detached_windows.($browser.surface)=$corrected.placement
+    Detached-Placements $restored $snapshot.detached_windows
+    $newPid=@($restored.surfaces|Where-Object {$_.id -eq $terminal.surface})[0].pid
+    if (-not $newPid -or $newPid -eq $oldPid -or (Invoke-Flowmux @('identify')).surface -ne $browser.surface) {throw 'Detached restart did not restore focused browser and a fresh terminal process'}
+    $screen=Invoke-Flowmux @('read-screen','--surface',$terminal.surface,'--recent')
+    if (-not $screen.text.Replace("`r",'').Replace("`n",'').Contains($marker)) {throw 'Detached restart lost visible Korean terminal history'}
+    Detached-BrowserText $browser.surface;Detached-EditorText $editor.surface
+    $correctedSave=Invoke-Flowmux @('save-state');$correctedSnapshot=Load-State $correctedSave.path
+    Detached-Placements $restored $correctedSnapshot.detached_windows
+    if (-not $correctedSnapshot.detached_windows.($terminal.surface).maximized) {throw 'Hidden save lost the restored maximized intent'}
+    $evidence.checks+='Mixed detached restart preserves identities, actual placements, focus, Korean history with fresh PTY, browser profile/editor text; offscreen browser is clamped and maximized intent is saved without native maximization'
+    [FindFixture]::PostClose([long]$restored.window_handle,$script:detachedProcess.Id)
+    $deadline=(Get-Date).AddSeconds(5)
+    do {
+        $broker=Detached-Tree
+        if ($broker.main_closed -and -not $broker.state.saving -and -not $broker.editor_synchronizing) {break}
+        if ((Get-Date) -gt $deadline) {throw 'Main close did not retain detached windows as a broker within five seconds'}
+        Start-Sleep -Milliseconds 25
+    } while ($true)
+    if (@($broker.surfaces).Count -ne 1 -or @($broker.browsers).Count -ne 1 -or @($broker.editors).Count -ne 1 -or @($broker.surfaces|Where-Object {$_.id -eq $anchor.surface}).Count) {throw 'Main close did not remove only the attached anchor terminal'}
+    $brokerSaved=Invoke-Flowmux @('save-state');$brokerSnapshot=Load-State $brokerSaved.path
+    if (-not $brokerSnapshot.main_closed -or @($brokerSnapshot.detached_windows.psobject.Properties).Count -ne 3) {throw 'Broker-only state omitted its closed-main flag or detached windows'}
+    Stop-Owned $script:detachedProcess
+    $brokerRestored=Detached-Start @('--restore-window',$saved.window)
+    if (-not $brokerRestored.main_closed -or (State-Topology $brokerRestored) -cne (State-Topology $broker)) {throw 'Broker-only restart recreated a main workspace or lost surface identities'}
+    Detached-Placements $brokerRestored $brokerSnapshot.detached_windows
+    Detached-BrowserText $browser.surface;Detached-EditorText $editor.surface
+    $evidence.checks+='Closed-main broker restart restores only the three detached windows and their native placements'
+    Invoke-Flowmux @('new-workspace','--cwd',$directory)|Out-Null;$destination=Invoke-Flowmux @('identify');Detached-Ready|Out-Null
+    foreach ($surface in $ids) {Invoke-Flowmux @('move-tab',$surface,'--to-pane',$destination.pane)|Out-Null}
+    $joined=Detached-Tree
+    if ($joined.main_closed -or @($joined.detached_windows).Count -ne 0) {throw 'Reattachment did not reopen main or remove detached frames'}
+    foreach ($surface in $ids) {
+        $view=@(@($joined.surfaces)+@($joined.browsers)+@($joined.editors)|Where-Object {$_.id -eq $surface})
+        if ($view.Count -ne 1 -or $view[0].holder.root -ne $joined.window_handle) {throw 'Reattachment lost a saved surface or its main-window parent'}
+    }
+    $joinedSaved=Invoke-Flowmux @('save-state');$joinedSnapshot=Load-State $joinedSaved.path
+    if ($joinedSnapshot.main_closed -or $joinedSnapshot.detached_focus -or ($joinedSnapshot.detached_windows -and @($joinedSnapshot.detached_windows.psobject.Properties).Count -ne 0)) {throw 'Reattachment persisted stale detached map/focus/main-closed state'}
+    Stop-Owned $script:detachedProcess
+    $evidence.checks+='Reattachment preserves original surface IDs and removes detached map/focus from the saved main-window state'
+}
 try {
+    if ($Case -eq 'detached') {
+        $script:detachedOutput=@{};$script:stateBrowser=New-Object BrowserFixture;$script:stateEditor=New-Object EditorFixture($directory)
+        Detached-State
+    } else {
     $first = Start-Owned @('--cwd', ('"' + $directory + '"'))
     Connect-Owned $first | Out-Null
     Invoke-Flowmux @('new-tab') | Out-Null
@@ -184,12 +335,17 @@ try {
     Stop-Owned $temporary
     if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $hash) { throw 'Temporary host modified persistent state' }
     $evidence.checks += 'Default launch restored latest closed window; explicit discard and temporary mode preserved its checkpoint'
+    }
     $evidence.finished = (Get-Date).ToString('o')
 } catch {
     $evidence.status='failed';$evidence.error=$_.Exception.Message
+    if ($Case -eq 'detached' -and $script:detachedOutput) {
+        $evidence.hostOutput=@($hosts|ForEach-Object {$output=$script:detachedOutput[$_.Id];@{pid=$_.Id;stdout=[CliProbe]::Output($output.out);stderr=[CliProbe]::Output($output.err)}})
+    }
     Save-Json (Join-Path $directory 'native-state-background.json') $evidence
     throw
 } finally {
-    foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); $owned.WaitForExit() } }
+    foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); if ($Case -eq 'detached') {[CliProbe]::WaitAfterKill($owned)} else {$owned.WaitForExit()} } }
+    if ($Case -eq 'detached') {if ($script:stateBrowser) {$script:stateBrowser.Dispose()};if ($script:stateEditor) {$script:stateEditor.Dispose()}}
 }
-[ordered]@{status='passed';checks=$evidence.checks.Count}|ConvertTo-Json -Compress
+[ordered]@{status='passed';case=$Case;checks=$evidence.checks.Count}|ConvertTo-Json -Compress
