@@ -16,6 +16,21 @@ use windows_sys::Win32::UI::{
 };
 
 const SUBCLASS: usize = 0x464d_4348;
+thread_local! {
+    static TAB_DROP: RefCell<Option<(isize, bool)>> = const { RefCell::new(None) };
+}
+
+pub(super) fn set_tab_drop(target: Option<(HWND, bool)>) {
+    let next = target.map(|(window, before)| (window as isize, before));
+    let previous = TAB_DROP.with(|slot| slot.replace(next));
+    if previous != next {
+        for (window, _) in previous.into_iter().chain(next) {
+            unsafe {
+                InvalidateRect(window as HWND, std::ptr::null(), 0);
+            }
+        }
+    }
+}
 // CommCtrl.h TTTOOLINFOW_V2_SIZE ends at lParam. The full structure includes
 // the v6-only lpReserved tail; this host does not require a v6 activation context.
 // Use the supported prefix consistently for add, update and read messages.
@@ -444,6 +459,12 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
 }
 
 pub(super) fn unregister(window: HWND) {
+    if TAB_DROP.with(|slot| {
+        slot.borrow()
+            .is_some_and(|(target, _)| target == window as isize)
+    }) {
+        set_tab_drop(None);
+    }
     remove_tooltip(window);
     STATE.with(|slot| {
         slot.borrow_mut().controls.remove(&(window as isize));
@@ -491,6 +512,9 @@ unsafe extern "system" fn control_proc(
     _id: usize,
     _data: usize,
 ) -> LRESULT {
+    if tab_pointer(window, message, lparam) {
+        return 0;
+    }
     if message == WM_SETTEXT {
         let result = DefSubclassProc(window, message, wparam, lparam);
         update_tooltip(window); // Caption changes, including unread counts, win immediately.
@@ -1255,6 +1279,25 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 bottom: item.rcItem.bottom - inset,
             };
             DrawFocusRect(item.hDC, &focus);
+        }
+        if let Some((_, before)) = TAB_DROP
+            .with(|slot| *slot.borrow())
+            .filter(|(window, _)| *window == item.hwndItem as isize)
+        {
+            let edge = if before {
+                item.rcItem.left
+            } else {
+                item.rcItem.right - pixel(3)
+            };
+            fill(
+                item.hDC,
+                &RECT {
+                    left: edge,
+                    right: edge + pixel(3),
+                    ..item.rcItem
+                },
+                palette.accent,
+            );
         }
         RestoreDC(item.hDC, saved);
     }

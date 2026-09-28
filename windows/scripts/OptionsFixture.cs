@@ -70,6 +70,22 @@ public static class OptionsFixture {
         long flags=1L;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;
         if(!PostMessage(hwnd,up?0x101U:0x100U,new IntPtr(key),new IntPtr(flags)))throw new InvalidOperationException("Could not post owned key event");
     }
+    public static void TabPointerDown(long parent,long child,int owner,int x,int y) {
+        var hwnd=Child(parent,child,owner);Rect bounds;
+        if(!IsWindowEnabled(hwnd)||!GetClientRect(hwnd,out bounds)||x<0||y<0||x>=bounds.Right||y>=bounds.Bottom)throw new InvalidOperationException("Owned tab press lies outside its client");
+        Message(hwnd,0x201,new IntPtr(1),PointerPoint(x,y));
+    }
+    private static IntPtr PointerPoint(int x,int y) {
+        if(x<short.MinValue||x>short.MaxValue||y<short.MinValue||y>short.MaxValue)throw new ArgumentOutOfRangeException("Owned pointer coordinate");
+        return new IntPtr(unchecked((int)(((uint)y&0xffffU)<<16|((uint)x&0xffffU))));
+    }
+    // Host client coordinates only. Negative release points test an outside
+    // drop; capture APIs and desktop pointer state are never invoked here.
+    public static void HostPointer(long window,int owner,uint message,int x,int y) {
+        var hwnd=Owned(window,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned drag host is disabled");
+        if(message!=0x200&&message!=0x202&&message!=0x1f&&message!=0x215)throw new ArgumentException("Unsupported owned pointer message");
+        Message(hwnd,message,message==0x200?new IntPtr(1):IntPtr.Zero,(message==0x1f||message==0x215)?IntPtr.Zero:PointerPoint(x,y));
+    }
     public static void PostEscape(long control,int owner) {
         var hwnd=Owned(control,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned Escape target is disabled");
         if(!PostMessage(hwnd,0x100,new IntPtr(27),new IntPtr(1L|(1L<<16))))throw new InvalidOperationException("Could not post owned Escape keydown");

@@ -150,6 +150,7 @@ impl Browser {
             builder = builder.with_environment(environment);
         }
         let view = builder.build_as_child(&Parent(app.window))?;
+        install_drag_escape(&view, app.window)?;
         unsafe {
             let core = view.controller().CoreWebView2()?;
             app.downloads

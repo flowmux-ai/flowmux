@@ -36,7 +36,9 @@ use windows_sys::Win32::{
     System::{Com::*, LibraryLoader::*},
     UI::{
         HiDpi::*,
-        Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture, SetFocus},
+        Input::KeyboardAndMouse::{
+            GetCapture, IsWindowEnabled, ReleaseCapture, SetCapture, SetFocus,
+        },
         WindowsAndMessaging::*,
     },
 };
@@ -128,6 +130,79 @@ fn post(event: Event) {
     });
 }
 
+// Intercept tab buttons before BUTTON's default handler takes capture/focus.
+// Stable IDs are queued now; a later rebuild must not retarget this gesture.
+unsafe fn tab_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
+    if !matches!(
+        message,
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEMOVE | WM_LBUTTONUP
+    ) {
+        return false;
+    }
+    let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(window as isize)).cloned());
+    let Some(Action::Tab(pane, surface)) = action else {
+        return false;
+    };
+    let parent = GetParent(window);
+    let mut point = POINT {
+        x: lparam as u16 as i16 as i32,
+        y: (lparam >> 16) as u16 as i16 as i32,
+    };
+    MapWindowPoints(window, parent, &mut point, 1);
+    if IsWindowEnabled(parent) != 0 {
+        post(Event::Pointer(match message {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => panes::Pointer::TabDown {
+                pane,
+                surface,
+                x: point.x,
+                y: point.y,
+            },
+            WM_LBUTTONUP => panes::Pointer::Up(point.x, point.y),
+            _ => panes::Pointer::Move(point.x, point.y),
+        }));
+    }
+    message != WM_MOUSEMOVE
+}
+
+// WebView2 delivers accelerator events on the controller's UI thread even
+// when the renderer owns keyboard focus. Cancel capture without blurring IME.
+pub(super) fn install_drag_escape(view: &WebView, window: HWND) -> anyhow::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+    };
+    let owner = window as isize;
+    let mut token = 0;
+    unsafe {
+        view.controller().add_AcceleratorKeyPressed(
+            &webview2_com::AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                if GetCapture() != owner as HWND {
+                    return Ok(());
+                }
+                let mut key = 0;
+                let mut kind = Default::default();
+                args.VirtualKey(&mut key)?;
+                args.KeyEventKind(&mut kind)?;
+                if key == 0x1b
+                    && matches!(
+                        kind,
+                        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                            | COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                    )
+                {
+                    args.SetHandled(true)?;
+                    post(Event::Pointer(panes::Pointer::Cancel));
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
+}
+
 unsafe extern "system" fn window_proc(
     window: HWND,
     message: u32,
@@ -202,6 +277,8 @@ unsafe extern "system" fn window_proc(
         WM_ACTIVATE => {
             if (wparam as u16) != WA_INACTIVE as u16 {
                 post(Event::Activated);
+            } else {
+                post(Event::Pointer(panes::Pointer::Cancel));
             }
             DefWindowProcW(window, message, wparam, lparam)
         }
@@ -679,6 +756,13 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             return Ok(());
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
+        if message.message == WM_KEYDOWN
+            && message.wParam == 0x1b
+            && matches!(app.drag, Some(panes::Drag::Tab { .. }))
+        {
+            app.cancel_drag();
+            continue;
+        }
         unsafe {
             if !app.command_palette.handle_message(&message)
                 && !app.overview_handle_message(&message)
@@ -957,6 +1041,7 @@ impl App {
             .with_url("flowmux-terminal://localhost/")
             .build_as_child(&Parent(self.window))
             .context("Cannot create the terminal WebView2 view")?;
+        install_drag_escape(&view, self.window)?;
         self.surfaces.insert(
             surface,
             Surface {
@@ -1340,6 +1425,7 @@ impl App {
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) if !self.overview.is_open() => {
+                self.cancel_drag();
                 self.context_menu(action, x, y)?
             }
             Event::ContextMenu(..) => {}

@@ -78,6 +78,7 @@ impl View {
             .with_url(&url)
             .build_as_child(&Parent(window))
             .context("cannot create editor WebView2 view")?;
+        crate::native::host::install_drag_escape(&view, window)?;
         unsafe {
             let settings = view.controller().CoreWebView2()?.Settings()?;
             settings.SetAreHostObjectsAllowed(false)?;

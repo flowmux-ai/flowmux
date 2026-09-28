@@ -66,6 +66,12 @@ unsafe fn divider_cursor(direction: SplitDirection) {
 
 pub(super) enum Pointer {
     Down(i32, i32),
+    TabDown {
+        pane: PaneId,
+        surface: SurfaceId,
+        x: i32,
+        y: i32,
+    },
     Move(i32, i32),
     Up(i32, i32),
     Cancel,
@@ -82,6 +88,20 @@ pub(super) enum Drag {
         start_x: i32,
         moved: bool,
     },
+    Tab {
+        workspace: WorkspaceId,
+        pane: PaneId,
+        surface: SurfaceId,
+        start_x: i32,
+        start_y: i32,
+        moved: bool,
+    },
+}
+
+struct TabDrop {
+    pane: PaneId,
+    index: usize,
+    marker: Option<(HWND, bool)>,
 }
 
 impl App {
@@ -123,6 +143,7 @@ impl App {
 
     pub(super) fn cancel_drag(&mut self) {
         self.drag = None;
+        chrome::set_tab_drop(None);
         unsafe {
             if !self.background_test && GetCapture() == self.window {
                 ReleaseCapture();
@@ -132,11 +153,53 @@ impl App {
 
     pub(super) fn pointer(&mut self, pointer: Pointer) -> anyhow::Result<()> {
         // Hidden verification never captures or changes the desktop pointer.
-        if self.close_request.is_some() {
+        if self.close_request.is_some()
+            || self.close_accepted
+            || self.closing
+            || self.editor_barrier.is_some()
+            || self.overview.is_open()
+            || self.command_palette.is_open()
+            || unsafe {
+                windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(self.window)
+            } == 0
+        {
             self.cancel_drag();
             return Ok(());
         }
         match pointer {
+            Pointer::TabDown {
+                pane,
+                surface,
+                x,
+                y,
+            } => {
+                self.cancel_drag();
+                let valid_source = self.locate(surface).is_some_and(|(workspace, source, _)| {
+                    workspace == self.active_workspace && source == pane
+                });
+                let visible_source = self.controls.iter().any(|control| {
+                    matches!(control.action, Action::Tab(p, s) if p == pane && s == surface)
+                        && self
+                            .tab_control_rect(control.hwnd)
+                            .is_some_and(|r| r.contains(x, y))
+                });
+                if !valid_source || !visible_source {
+                    return Ok(());
+                }
+                self.drag = Some(Drag::Tab {
+                    workspace: self.workspace().id,
+                    pane,
+                    surface,
+                    start_x: x,
+                    start_y: y,
+                    moved: false,
+                });
+                if !self.background_test {
+                    unsafe {
+                        SetCapture(self.window);
+                    }
+                }
+            }
             Pointer::Down(x, y) => {
                 let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
                 let mut client = RECT::default();
@@ -178,6 +241,72 @@ impl App {
                 }
             }
             Pointer::Move(x, y) | Pointer::Up(x, y) => {
+                if let Some(Drag::Tab {
+                    workspace,
+                    pane,
+                    surface,
+                    start_x,
+                    start_y,
+                    moved,
+                }) = self.drag
+                {
+                    let current = self.locate(surface).is_some_and(|(index, source, _)| {
+                        index == self.active_workspace
+                            && self.workspaces[index].id == workspace
+                            && source == pane
+                    });
+                    if !current {
+                        self.cancel_drag();
+                        return Ok(());
+                    }
+                    let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+                    let moved = moved
+                        || (i64::from(x) - i64::from(start_x)).abs()
+                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) }.max(1))
+                        || (i64::from(y) - i64::from(start_y)).abs()
+                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) }.max(1));
+                    self.drag = Some(Drag::Tab {
+                        workspace,
+                        pane,
+                        surface,
+                        start_x,
+                        start_y,
+                        moved,
+                    });
+                    let target = moved.then(|| self.tab_drop_target(x, y)).flatten();
+                    chrome::set_tab_drop(target.as_ref().and_then(|target| target.marker));
+                    if matches!(pointer, Pointer::Up(..)) {
+                        self.cancel_drag();
+                        if moved {
+                            if let Some(target) = target {
+                                let source_index = self
+                                    .workspace()
+                                    .leaves()
+                                    .into_iter()
+                                    .find(|(id, _, _)| *id == pane)
+                                    .and_then(|(_, _, tabs)| {
+                                        tabs.iter().position(|tab| tab.id == surface)
+                                    });
+                                let index = target.index.saturating_sub(usize::from(
+                                    target.pane == pane
+                                        && source_index.is_some_and(|source| source < target.index),
+                                ));
+                                if target.pane != pane || source_index != Some(index) {
+                                    self.move_tab(surface, target.pane, index)?;
+                                }
+                            }
+                        } else if self.controls.iter().any(|control| {
+                            matches!(control.action, Action::Tab(p, s) if p == pane && s == surface)
+                                && self
+                                    .tab_control_rect(control.hwnd)
+                                    .is_some_and(|r| r.contains(x, y))
+                        }) {
+                            self.select(surface)?;
+                            self.rebuild()?;
+                        }
+                    }
+                    return Ok(());
+                }
                 if let Some(drag) = self.drag {
                     let direction = match drag {
                         Drag::Pane { divider, offset } => {
@@ -212,6 +341,7 @@ impl App {
                             }
                             SplitDirection::Vertical
                         }
+                        Drag::Tab { .. } => unreachable!("tab drag handled above"),
                     };
                     if !self.background_test {
                         unsafe {
@@ -226,6 +356,122 @@ impl App {
             Pointer::Cancel => self.cancel_drag(),
         }
         Ok(())
+    }
+
+    // Check the child's own WS_VISIBLE bit: hidden test hosts deliberately keep
+    // their top-level window hidden while laying out the same visible controls.
+    fn tab_control_rect(&self, window: HWND) -> Option<model::Rect> {
+        unsafe {
+            if GetParent(window) != self.window
+                || GetWindowLongPtrW(window, GWL_STYLE) as u32 & WS_VISIBLE == 0
+            {
+                return None;
+            }
+            let mut rect = RECT::default();
+            let mut client = RECT::default();
+            if GetWindowRect(window, &mut rect) == 0 || GetClientRect(self.window, &mut client) == 0
+            {
+                return None;
+            }
+            let mut top_left = POINT {
+                x: rect.left,
+                y: rect.top,
+            };
+            let mut bottom_right = POINT {
+                x: rect.right,
+                y: rect.bottom,
+            };
+            if ScreenToClient(self.window, &mut top_left) == 0
+                || ScreenToClient(self.window, &mut bottom_right) == 0
+            {
+                return None;
+            }
+            (top_left.x >= 0
+                && top_left.y >= 0
+                && bottom_right.x <= client.right
+                && bottom_right.y <= client.bottom
+                && bottom_right.x > top_left.x
+                && bottom_right.y > top_left.y)
+                .then_some(model::Rect {
+                    x: top_left.x,
+                    y: top_left.y,
+                    width: bottom_right.x - top_left.x,
+                    height: bottom_right.y - top_left.y,
+                })
+        }
+    }
+
+    fn tab_drop_target(&self, x: i32, y: i32) -> Option<TabDrop> {
+        let mut client = RECT::default();
+        if unsafe { GetClientRect(self.window, &mut client) } == 0
+            || x < 0
+            || y < 0
+            || x >= client.right
+            || y >= client.bottom
+        {
+            return None;
+        }
+        for control in &self.controls {
+            let Some(mut rect) = self.tab_control_rect(control.hwnd) else {
+                continue;
+            };
+            match control.action {
+                Action::Tab(pane, surface) => {
+                    let close = self.controls.iter().find(|candidate| matches!(candidate.action, Action::TabClose(p, s) if p == pane && s == surface))
+                        .and_then(|candidate| self.tab_control_rect(candidate.hwnd).map(|rect| (candidate.hwnd, rect)));
+                    if let Some((_, close)) = close {
+                        rect.width = (close.x + close.width - rect.x).max(rect.width);
+                    }
+                    if !rect.contains(x, y) {
+                        continue;
+                    }
+                    let before = x < rect.x + rect.width / 2;
+                    let index = self
+                        .workspace()
+                        .leaves()
+                        .into_iter()
+                        .find(|(id, _, _)| *id == pane)
+                        .and_then(|(_, _, tabs)| tabs.iter().position(|tab| tab.id == surface))?;
+                    return Some(TabDrop {
+                        pane,
+                        index: index + usize::from(!before),
+                        marker: Some((
+                            if before {
+                                control.hwnd
+                            } else {
+                                close.map_or(control.hwnd, |(hwnd, _)| hwnd)
+                            },
+                            before,
+                        )),
+                    });
+                }
+                Action::Workspace(id) if rect.contains(x, y) => {
+                    let workspace = self
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.id == id)?;
+                    return Some(TabDrop {
+                        pane: workspace.focused,
+                        index: workspace.root.surface_count(workspace.focused)?,
+                        marker: Some((control.hwnd, false)),
+                    });
+                }
+                _ => {}
+            }
+        }
+        let bar =
+            (28.0 * unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0).round() as i32;
+        self.pane_layout.panes.iter().find_map(|(pane, rect)| {
+            (rect.contains(x, y) && y >= rect.y + bar).then(|| TabDrop {
+                pane: *pane,
+                index: self.workspace().root.surface_count(*pane).unwrap_or(0),
+                marker: self.controls.iter()
+                    .filter(|control| matches!(control.action, Action::Tab(id, _) | Action::TabClose(id, _) if id == *pane))
+                    .filter_map(|control| self.tab_control_rect(control.hwnd).map(|rect| (control.hwnd, rect)))
+                    .max_by_key(|(_, rect)| rect.x + rect.width)
+                    .map(|(window, _)| (window, false)),
+            })
+        })
     }
 
     pub(super) fn resize_pane(
