@@ -149,6 +149,8 @@ try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'A working hidden debug build is required; no host launched'
     $launch=@('--shell=cmd','--cwd',$cwd);if($Case -ne 'resize'){$launch+=,'--temporary'}
     $tree=Start-Owned $launch
+    # Pin this fixture name before separate IPC/native reads; startup titles arrive asynchronously.
+    Request @('workspace','rename',$tree.active_workspace,'workspace 한글')|Out-Null;$tree=Tree
     $initial=Capture 'initial' $tree
     if($Case -eq 'details') {
         $notification=(Request @('notify','--global','--title','한글 알림','chrome fixture')).id

@@ -897,25 +897,16 @@ impl App {
         caption
     }
     pub(super) fn refresh_ssh_toolbar(&self) {
-        let Some(workspace) = self.current_workspace().filter(|w| w.ssh.is_some()) else {
-            return;
-        };
-        let status = self.ssh_status(workspace.id);
-        let state = status["state"].as_str().unwrap_or("disconnected");
-        let live = status["tabs"].as_object().is_some_and(|tabs| {
-            tabs.values()
-                .any(|tab| matches!(tab["state"].as_str(), Some("connecting" | "connected")))
-        });
         for control in &self.controls {
             let enabled = match control.action {
                 Action::SshStatus(id) => {
                     set_caption(control.hwnd, &self.ssh_toolbar_caption(id));
                     continue;
                 }
-                Action::SshConnect(_) => !matches!(state, "connected" | "connecting"),
-                Action::SshDisconnect(_) => live,
-                Action::SshAuthentication(_) => !self.surfaces.is_empty(),
-                Action::SshPorts(_) => false,
+                Action::SshConnect(_)
+                | Action::SshDisconnect(_)
+                | Action::SshAuthentication(_)
+                | Action::SshPorts(_) => self.ssh_action_enabled(&control.action),
                 _ => continue,
             };
             unsafe {

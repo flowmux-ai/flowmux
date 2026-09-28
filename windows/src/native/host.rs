@@ -1890,6 +1890,11 @@ impl App {
                 }
             }
             Event::Button(action) => {
+                // Recheck queued SSH actions before changing focus: a rebuild or
+                // session exit can disable their captured workspace in the meantime.
+                if !self.ssh_action_enabled(&action) {
+                    return Ok(());
+                }
                 self.detached_focus = None;
                 if !self.command_palette.is_open() {
                     self.action(action)?;

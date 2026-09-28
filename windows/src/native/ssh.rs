@@ -30,6 +30,42 @@ impl App {
         Ok(())
     }
 
+    pub(super) fn ssh_action_enabled(&self, action: &Action) -> bool {
+        let workspace = match *action {
+            Action::SshConnect(id) | Action::SshDisconnect(id) | Action::SshAuthentication(id) => {
+                id
+            }
+            Action::SshStatus(_) | Action::SshPorts(_) => return false,
+            _ => return true,
+        };
+        if self.current_workspace().is_none_or(|ws| ws.id != workspace) {
+            return false;
+        }
+        let Ok(ids) = self.ssh_surface_ids(workspace) else {
+            return false;
+        };
+        if !ids.iter().any(|id| self.surfaces.contains_key(id)) {
+            return false;
+        }
+        let status = self.ssh_status(workspace);
+        match action {
+            Action::SshConnect(_) => {
+                !matches!(status["state"].as_str(), Some("connected" | "connecting"))
+                    && !ids.iter().any(|id| {
+                        self.surfaces.get(id).is_some_and(|surface| {
+                            surface.session.is_some() && surface.exit_code.is_some()
+                        })
+                    })
+            }
+            Action::SshDisconnect(_) => status["tabs"].as_object().is_some_and(|tabs| {
+                tabs.values()
+                    .any(|tab| matches!(tab["state"].as_str(), Some("connecting" | "connected")))
+            }),
+            Action::SshAuthentication(_) => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn ssh_status(&self, workspace: WorkspaceId) -> Value {
         let ids = match self.ssh_surface_ids(workspace) {
             Ok(ids) => ids,
@@ -179,7 +215,11 @@ impl App {
 
     pub(super) fn ssh_authentication(&mut self, workspace: WorkspaceId) -> anyhow::Result<()> {
         self.ssh_lifecycle_guard()?;
-        let ids = self.ssh_surface_ids(workspace)?;
+        let ids: Vec<_> = self
+            .ssh_surface_ids(workspace)?
+            .into_iter()
+            .filter(|id| self.surfaces.contains_key(id))
+            .collect();
         let current = self.current_surface();
         let id = ids
             .iter()
@@ -189,6 +229,14 @@ impl App {
                     surface.session.is_some()
                         && surface.exit_code.is_none()
                         && !surface.ssh_connected
+                })
+            })
+            .or_else(|| {
+                ids.iter().copied().find(|id| {
+                    self.surfaces.get(id).is_some_and(|surface| {
+                        surface.startup_error.is_some()
+                            || surface.exit_code.is_some_and(|code| code != 0)
+                    })
                 })
             })
             .or_else(|| current.filter(|id| ids.contains(id)))

@@ -226,14 +226,14 @@ unsafe extern "system" fn drop_preview_proc(
         _ => DefWindowProcW(window, message, w, l),
     }
 }
-// CommCtrl.h TTTOOLINFOW_V2_SIZE ends at lParam. The full structure includes
-// the v6-only lpReserved tail; this host does not require a v6 activation context.
-// Use the supported prefix consistently for add, update and read messages.
+// CommCtrl.h TTTOOLINFOW_V2_SIZE ends at lParam. Use the supported prefix
+// consistently for add, update and read; the v6-only reserved tail is unused.
 const TOOL_INFO_V2_SIZE: u32 = std::mem::offset_of!(TTTOOLINFOW, lpReserved) as u32;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Role {
     Button,
+    Suggested,
     Destructive,
     Swatch(COLORREF),
     Workspace {
@@ -529,6 +529,30 @@ thread_local! { static STATE: RefCell<State> = RefCell::new(State::new()); }
 
 pub(super) fn palette() -> Palette {
     STATE.with(|slot| slot.borrow().palette)
+}
+
+pub(super) fn suggested_colors() -> (COLORREF, COLORREF) {
+    let palette = palette();
+    let foreground = if palette.high_contrast {
+        unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) }
+    } else {
+        // Choose readable text even when a custom terminal theme supplies accent.
+        let channel = |shift| {
+            let value = ((palette.accent >> shift) & 255u32) as f64 / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let luminance = 0.2126 * channel(0) + 0.7152 * channel(8) + 0.0722 * channel(16);
+        if luminance > 0.179 {
+            rgb(0, 0, 0)
+        } else {
+            rgb(255, 255, 255)
+        }
+    };
+    (palette.accent, foreground)
 }
 
 pub(super) fn configure_settings(settings: &crate::settings::TerminalSettings, dpi: u32) {
@@ -1143,8 +1167,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let pressed = item.itemState & ODS_SELECTED != 0;
     let hot = hot || item.itemState & ODS_HOTLIGHT != 0;
     let disabled = item.itemState & ODS_DISABLED != 0;
+    let suggested = matches!(role, Role::Suggested) && !disabled;
     let highlighted = selected || pressed || hot;
-    let color = if selected && matches!(role, Role::Tab { focused: false, .. }) {
+    let color = if suggested {
+        palette.accent
+    } else if selected && matches!(role, Role::Tab { focused: false, .. }) {
         palette.hover
     } else if pressed || selected {
         palette.selected
@@ -1157,6 +1184,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     };
     let text = if disabled {
         palette.muted
+    } else if suggested {
+        suggested_colors().1
     } else if palette.high_contrast && highlighted {
         unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) }
     } else if !palette.high_contrast && matches!(role, Role::Destructive) {
@@ -1185,7 +1214,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             RestoreDC(item.hDC, saved);
             return true;
         }
-        if matches!(role, Role::Workspace { .. }) && !palette.high_contrast {
+        if matches!(role, Role::Workspace { .. } | Role::Suggested) && !palette.high_contrast {
             fill(item.hDC, &item.rcItem, palette.background);
             SelectObject(item.hDC, GetStockObject(NULL_PEN));
             SelectObject(item.hDC, GetStockObject(DC_BRUSH));

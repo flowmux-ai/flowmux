@@ -4,7 +4,7 @@ use super::*;
 use flowmux_core::{SshTarget, SshWorkspaceConfig};
 use windows_sys::Win32::System::SystemServices::SS_NOPREFIX;
 use windows_sys::Win32::UI::{
-    Controls::{BST_CHECKED, EM_LIMITTEXT},
+    Controls::{BST_CHECKED, EM_GETCUEBANNER, EM_LIMITTEXT, EM_SETCUEBANNER},
     Input::KeyboardAndMouse::{EnableWindow, GetFocus},
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
@@ -20,6 +20,23 @@ const LABELS: [&str; 6] = [
     "SSH config file",
 ];
 const KEYS: [&str; 6] = ["host", "cwd", "name", "port", "identity", "config"];
+const CUES: [&str; 6] = [
+    "Host alias or user@hostname",
+    "/srv/project (optional)",
+    "Optional",
+    "From SSH config (default 22)",
+    "Optional local key path",
+    "Optional; defaults to ~/.ssh/config",
+];
+
+fn error_color() -> COLORREF {
+    let palette = chrome::palette();
+    if palette.high_contrast {
+        palette.foreground
+    } else {
+        palette.destructive
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum UiAction {
@@ -114,9 +131,29 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
         WM_GETMINMAXINFO if l != 0 => {
             let info = &mut *(l as *mut MINMAXINFO);
             let dpi = GetDpiForWindow(window).max(96) as i32;
-            info.ptMinTrackSize.x = 460 * dpi / 96;
-            info.ptMinTrackSize.y = 600 * dpi / 96;
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 460 * dpi / 96,
+                bottom: 540 * dpi / 96,
+            };
+            AdjustWindowRectExForDpi(
+                &mut rect,
+                GetWindowLongW(window, GWL_STYLE) as u32,
+                0,
+                GetWindowLongW(window, GWL_EXSTYLE) as u32,
+                dpi as u32,
+            );
+            info.ptMinTrackSize.x = rect.right - rect.left;
+            info.ptMinTrackSize.y = rect.bottom - rect.top;
             return 0;
+        }
+        WM_CTLCOLORSTATIC
+            if l != 0 && GetParent(l as HWND) == window && GetDlgCtrlID(l as HWND) == 31 =>
+        {
+            let brush = chrome::message(window, message, w, l).unwrap_or(0);
+            SetTextColor(w as HDC, error_color());
+            return brush;
         }
         WM_COMMAND if (w >> 16) as u32 == BN_CLICKED && l != 0 => {
             let child = l as HWND;
@@ -175,12 +212,23 @@ impl Panel {
             let dpi = GetDpiForWindow(owner).max(96) as i32;
             let mut bounds = RECT::default();
             checked(GetWindowRect(owner, &mut bounds))?;
-            let (width, height) = (460 * dpi / 96, 620 * dpi / 96);
+            let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN;
+            let ex_style = WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME;
+            let mut frame = RECT {
+                left: 0,
+                top: 0,
+                right: 460 * dpi / 96,
+                bottom: 540 * dpi / 96,
+            };
+            checked(AdjustWindowRectExForDpi(
+                &mut frame, style, 0, ex_style, dpi as u32,
+            ))?;
+            let (width, height) = (frame.right - frame.left, frame.bottom - frame.top);
             let window = CreateWindowExW(
-                WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME,
+                ex_style,
                 class.as_ptr(),
                 wide("New SSH Workspace").as_ptr(),
-                WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
+                style,
                 bounds.left + (bounds.right - bounds.left - width) / 2,
                 bounds.top + (bounds.bottom - bounds.top - height) / 2,
                 width,
@@ -230,6 +278,13 @@ impl Panel {
                     if index == 3 { 5 } else { 4096 },
                     0,
                 );
+                checked(SendMessageW(
+                    panel.inputs[index],
+                    EM_SETCUEBANNER,
+                    1,
+                    wide(CUES[index]).as_ptr() as LPARAM,
+                ) as i32)
+                .context("cannot set SSH field hint")?;
                 checked(SetWindowSubclass(
                     panel.inputs[index],
                     Some(edit_proc),
@@ -283,7 +338,7 @@ impl Panel {
         };
         anyhow::ensure!(!child.is_null(), "cannot create SSH form control");
         if class == "BUTTON" && id == CONNECT {
-            chrome::register_button(child, chrome::Role::Button);
+            chrome::register_button(child, chrome::Role::Suggested);
         } else {
             chrome::register_control(
                 child,
@@ -377,14 +432,14 @@ impl Panel {
                 px(16),
                 px(442),
                 width,
-                (client.bottom - px(498)).max(1),
+                (client.bottom - px(504)).max(1),
             );
             place(
                 self.connect,
-                (client.right - px(120)).max(0),
-                (client.bottom - px(44)).max(0),
-                px(104),
-                px(28),
+                px(16),
+                (client.bottom - px(52)).max(0),
+                width,
+                px(36),
             );
         }
     }
@@ -422,12 +477,34 @@ impl Panel {
     }
     pub(super) fn diagnostics(&self) -> Value {
         let state = route(self.window);
-        let fields: Vec<_> = self.inputs.iter().enumerate().map(|(index, input)| json!({"key":KEYS[index],"label":LABELS[index],"input":*input as usize,"caption":self.labels[index] as usize,"value":text(*input).unwrap_or_default()})).collect();
+        let fields: Vec<_> = self.inputs.iter().enumerate().map(|(index, input)| json!({"key":KEYS[index],"label":LABELS[index],"input":*input as usize,"caption":self.labels[index] as usize,"value":text(*input).unwrap_or_default(),"cue":cue(*input)})).collect();
+        let (connect_background, connect_foreground) = chrome::suggested_colors();
         json!({"id":self.id,"window":self.window as usize,"owner":unsafe {GetWindow(self.window,GW_OWNER)} as usize,"open":self.is_open(),
             "fields":fields,"tmux":self.tmux as usize,"tmux_checked":unsafe {SendMessageW(self.tmux,BM_GETCHECK,0,0)==BST_CHECKED as isize},
             "hint":self.hint as usize,"connect":self.connect as usize,"error_handle":self.error_label as usize,"error":text(self.error_label).unwrap_or_default(),
+            "colors":{"connect_background":connect_background,"connect_foreground":connect_foreground,"error":error_color(),"background":chrome::palette().background},"high_contrast":chrome::palette().high_contrast,
             "composing":state.is_some_and(|r|r.composing),"settling":state.is_some_and(|r|r.settling),"pending":state.is_some_and(|r|r.submitted),"native_visible":unsafe {IsWindowVisible(self.window)!=0}})
     }
+}
+fn cue(window: HWND) -> Option<String> {
+    let mut value = [0u16; 256];
+    // EM_GETCUEBANNER contains a pointer and must run in the owning process.
+    let ok = unsafe {
+        SendMessageW(
+            window,
+            EM_GETCUEBANNER,
+            value.as_mut_ptr() as WPARAM,
+            value.len() as LPARAM,
+        )
+    };
+    (ok != 0).then(|| {
+        String::from_utf16_lossy(
+            &value[..value
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(value.len())],
+        )
+    })
 }
 fn text(window: HWND) -> anyhow::Result<String> {
     unsafe {
