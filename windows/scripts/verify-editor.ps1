@@ -216,7 +216,8 @@ function Wait-CloseDialog([long]$Owner,[string[]]$Names=@()) {
     } while($true)
 }
 function Choose-Close($Dialog,[ValidateSet('save','discard','cancel')][string]$Choice) {
-    [OptionsFixture]::Click([long]$Dialog.window,[long]$Dialog.$Choice,$process.Id)
+    # This action destroys its dialog; validate the owned controls before dispatch.
+    [OptionsFixture]::ClickMenu([long]$Dialog.window,[long]$Dialog.$Choice,$process.Id)
 }
 function Wait-EditorUnsealed([string]$Surface) {
     $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -276,6 +277,32 @@ function Open-CloseAll([string]$Workspace) {
     return $dialog
 }
 function Confirm-CloseAll($Dialog){[OptionsFixture]::ClickMenu([long]$Dialog.window,[long]$Dialog.confirm,$process.Id)}
+function Empty-Key([long]$Handle,[int]$Key,[bool]$Shift=$false,[bool]$Repeat=$false) {
+    # A successful child keydown rebuilds controls; release on its stable owned main.
+    $release=[OptionsFixture]::Parent($Handle,$process.Id);if(-not $release){$release=$Handle}
+    [OptionsFixture]::PostKey($Handle,$process.Id,17,$false,$false)
+    if($Shift){[OptionsFixture]::PostKey($Handle,$process.Id,16,$false,$false)}
+    [OptionsFixture]::PostKey($Handle,$process.Id,$Key,$false,$Repeat)
+    [OptionsFixture]::PostKey($release,$process.Id,$Key,$true,$false)
+    if($Shift){[OptionsFixture]::PostKey($release,$process.Id,16,$true,$false)}
+    [OptionsFixture]::PostKey($release,$process.Id,17,$true,$false)
+}
+function Assert-EmptyMain {
+    $tree=Tree
+    if($process.HasExited -or -not $tree.main_empty -or $tree.main_closed -or @($tree.workspaces).Count -or @($tree.surfaces).Count -or @($tree.editors).Count -or @($tree.browsers).Count -or $null -ne $tree.active_workspace){throw 'Guarded native shortcut created a ghost workspace or closed empty main'}
+    [OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)|Out-Null;return $tree
+}
+function Created-ByEmptyKey {
+    $tree=Wait-CloseAll {param($t) -not $t.main_empty -and @($t.workspaces).Count -eq 1 -and @($t.surfaces).Count -eq 1 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running -or -not $_.pid}).Count -eq 0}
+    $script:source=Request @('identify');$script:terminal=$tree.surfaces[0];$script:shells+=,$terminal.pid
+    if($source.surface -cne $terminal.id){throw 'Native empty-window shortcut selected the wrong new terminal'}
+    return $tree
+}
+function Close-KeyWorkspace {
+    $closing=$terminal.pid;$dialog=Open-CloseAll $source.workspace;Confirm-CloseAll $dialog
+    $tree=Wait-CloseAll {param($t) $t.main_empty -and @($t.workspaces).Count -eq 0 -and -not $t.workspace_close_dialog -and -not $t.editor_synchronizing -and -not (Get-Process -Id $closing -ErrorAction SilentlyContinue)}
+    return Assert-EmptyMain
+}
 function New-MainWorkspace {
     $tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_add' -and $_.layout_visible})
     if($button.Count -ne 1){throw 'Empty main omitted its native New workspace entry'}
@@ -1038,6 +1065,47 @@ try {
                 Finish-Host $true;$tree=Start-Owned $true $saved.window $true
                 if(@($tree.surfaces).Count -or @($tree.editors).Count -or @($tree.browsers).Count -or @($tree.detached_windows).Count -or @($tree.layout.panes).Count -or $tree.state.window -ne $saved.window){throw 'Empty restore created a session or lost its saved window identity'}
                 Passed 'Close_all_Save_persists_exact_BOM_CRLF_bytes_and_restores_a_live_truly_empty_main'
+
+                # Exercise the native empty-window key route: no WebView or terminal exists.
+                if(-not ('ChromeFixture' -as [type])){Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')}
+                $empty=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'empty_state' -and $_.layout_visible})
+                if($empty.Count -ne 1){throw 'Restored empty main omitted its native status page'}
+                $native=@([ChromeFixture]::Read([long]$tree.window_handle,$process.Id)|Where-Object {$_.Handle -eq $empty[0].handle});$size=[ChromeFixture]::Size([long]$tree.window_handle,$process.Id);$r=$empty[0].rect;$pad=[int][Math]::Floor((4*[Math]::Max(96,$tree.chrome.dpi)+48)/96)
+                if($native.Count -ne 1 -or $native[0].Class -cne 'Static' -or -not $native[0].Shown -or $native[0].Text -cne "flowmux`nNo workspaces yet" -or $r.x -ne $tree.chrome.sidebar_actual_width+$pad -or $r.y -ne $pad -or $r.width -ne $size[0]-$tree.chrome.sidebar_actual_width-2*$pad -or $r.height -ne $size[1]-2*$pad -or $native[0].X -ne $r.x -or $native[0].Y -ne $r.y -or $native[0].Width -ne $r.width -or $native[0].Height -ne $r.height){throw 'Empty status page lost Linux title/description or actual content bounds'}
+                $bitmap=Join-Path $directory 'empty-main.bmp';$capture=Request @('chrome-capture',$bitmap)
+                if($capture.root_handle -ne $tree.window_handle -or @($capture.controls|Where-Object {$_.handle -eq $empty[0].handle -and $_.kind -ceq 'empty_state'}).Count -ne 1){throw 'Production capture omitted the owned empty status painter'}
+                $dpi=[Math]::Max(96,$tree.chrome.dpi);$px={param($n) [int][Math]::Floor(($n*$dpi+48)/96)};$top=[int][Math]::Max(0,[Math]::Floor(($r.height-(& $px 228))/2));$center=[int][Math]::Floor($r.width/2)
+                $regions=@(@{name='terminal icon';x=$center-(& $px 64);y=$top+(& $px 14);width=(& $px 128);height=(& $px 101)},@{name='flowmux title';x=0;y=$top+(& $px 164);width=$r.width;height=(& $px 32)},@{name='empty description';x=0;y=$top+(& $px 208);width=$r.width;height=(& $px 20)})
+                foreach($region in $regions){if($region.y+$region.height -gt $r.height -or [ChromeFixture]::ColorCount($bitmap,($r.x+$region.x),($r.y+$region.y),$region.width,$region.height,$capture.background) -ge $region.width*$region.height-5){throw ('Production empty status painter omitted '+$region.name)}}
+                Remove-Item -LiteralPath $bitmap -Force
+                $main=[long]$tree.window_handle;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_add' -and $_.layout_visible})[0]
+                if([OptionsFixture]::Parent([long]$button.handle,$process.Id) -ne $main){throw 'New workspace key target belongs to another main window'}
+                [OptionsFixture]::PostKey($main,$process.Id,229,$false,$false);Empty-Key $main 78;$tree=Assert-EmptyMain
+                [OptionsFixture]::PostKey($main,$process.Id,229,$true,$false);[OptionsFixture]::PostKey($main,$process.Id,78,$true,$false)
+                [OptionsFixture]::CompositionGuard($main,[long]$button.handle,$process.Id,$true);Empty-Key ([long]$button.handle) 78;$tree=Assert-EmptyMain
+                [OptionsFixture]::CompositionGuard($main,[long]$button.handle,$process.Id,$false);[OptionsFixture]::PostKey([long]$button.handle,$process.Id,229,$true,$false)
+                Empty-Key $main 78 $false $true;$tree=Assert-EmptyMain
+                # Controlled right-Alt bits only; this is not an OS AltGraph input session.
+                [OptionsFixture]::PostKey($main,$process.Id,165,$false,$false);Empty-Key $main 78;$tree=Assert-EmptyMain
+                [OptionsFixture]::PostKey($main,$process.Id,165,$true,$false)
+                Empty-Key $main 78;$tree=Created-ByEmptyKey
+                Passed 'Empty_status_native_paint_and_owned_Ctrl_N_respect_PROCESS_composition_repeat_and_controlled_RightAlt_guards'
+
+                $tree=Close-KeyWorkspace
+                Request @('settings','keybindings','set','new-workspace','Ctrl+Shift+Y')|Out-Null
+                $catalog=Request @('settings','keybindings','show');$binding=@($catalog.bindings|Where-Object {$_.action -ceq 'new-workspace'})
+                if($binding.Count -ne 1 -or $binding[0].chord.code -cne 'KeyY' -or -not $binding[0].chord.ctrl -or -not $binding[0].chord.shift -or $binding[0].chord.alt){throw 'Empty native rebind differs from the current resolved settings'}
+                $main=[long]$tree.window_handle;Empty-Key $main 78;$tree=Assert-EmptyMain
+                $button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_add' -and $_.layout_visible})[0];Empty-Key ([long]$button.handle) 89 $true;$tree=Created-ByEmptyKey
+                $tree=Close-KeyWorkspace
+                Request @('settings','keybindings','set','new-workspace')|Out-Null
+                if(@((Request @('settings','keybindings','show')).bindings|Where-Object {$_.action -ceq 'new-workspace'}).Count){throw 'Explicit empty-window unbind retained a resolved shortcut'}
+                $main=[long]$tree.window_handle;Empty-Key $main 78;Empty-Key $main 89 $true;$tree=Assert-EmptyMain
+                Request @('settings','keybindings','clear','new-workspace')|Out-Null
+                $binding=@((Request @('settings','keybindings','show')).bindings|Where-Object {$_.action -ceq 'new-workspace'})
+                if($binding.Count -ne 1 -or $binding[0].chord.code -cne 'KeyN' -or -not $binding[0].chord.ctrl -or $binding[0].chord.alt -or $binding[0].chord.shift){throw 'Use default did not restore empty-window Ctrl+N'}
+                Empty-Key ([long]$tree.window_handle) 78;$tree=Created-ByEmptyKey;$tree=Close-KeyWorkspace
+                Passed 'Empty_native_parent_child_shortcuts_use_live_rebind_unbind_and_default_settings'
 
                 $tree=New-MainWorkspace;$mainSource=$source;$mainTerminal=$terminal
                 Request @('new-tab','--cwd',$fixture.Root,'--shell=cmd')|Out-Null;$separate=Request @('identify')

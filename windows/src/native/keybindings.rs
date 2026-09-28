@@ -3,7 +3,145 @@
 use super::*;
 use crate::keybindings::{ActionId, Chord};
 
+#[derive(Default)]
+pub(super) struct WindowKeys {
+    modifiers: u16,
+    composing: bool,
+    settling: bool,
+}
+
+thread_local! {
+    static NATIVE_KEY_GUARDS: RefCell<Vec<(HWND, u32)>> = const { RefCell::new(Vec::new()) };
+}
+
+// IME and focus messages can be sent synchronously, outside GetMessageW.
+// Record only guards here; never mutate App reentrantly or reorder IPC work.
+pub(super) fn native_key_guard(window: HWND, message: u32) {
+    if matches!(
+        message,
+        WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION | WM_KILLFOCUS | WM_ACTIVATE
+    ) {
+        NATIVE_KEY_GUARDS.with(|guards| guards.borrow_mut().push((window, message)));
+    }
+}
+
 impl App {
+    pub(super) fn apply_native_key_guards(&mut self) {
+        let guards = NATIVE_KEY_GUARDS.with(|guards| std::mem::take(&mut *guards.borrow_mut()));
+        for (window, message) in guards {
+            self.empty_window_key_guard(window, message);
+        }
+    }
+
+    fn empty_window_key_target(&self, window: HWND) -> bool {
+        !self.main_closed
+            && self.current_workspace().is_none()
+            && (window == self.window || self.controls.iter().any(|control| control.hwnd == window))
+    }
+
+    pub(super) fn empty_window_key_guard(&mut self, window: HWND, message: u32) {
+        if !self.empty_window_key_target(window) {
+            return;
+        }
+        match message {
+            WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION => {
+                self.empty_window_keys.composing = message == WM_IME_STARTCOMPOSITION;
+                self.empty_window_keys.settling = true;
+                self.empty_window_keys.modifiers = 0;
+            }
+            _ => self.empty_window_keys = WindowKeys::default(),
+        }
+    }
+
+    pub(super) fn empty_window_shortcut(&mut self, message: &MSG) -> bool {
+        if !matches!(
+            message.message,
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
+        ) {
+            return false;
+        }
+        if !self.empty_window_key_target(message.hwnd)
+            || unsafe { IsWindowEnabled(self.window) } == 0
+            || unsafe { IsWindowEnabled(message.hwnd) } == 0
+            || self.close_request.is_some()
+            || self.close_accepted
+            || self.closing
+            || self.editor_barrier.is_some()
+            || self.command_palette.is_open()
+        {
+            self.empty_window_keys = WindowKeys::default();
+            return false;
+        }
+        let down = matches!(message.message, WM_KEYDOWN | WM_SYSKEYDOWN);
+        let modifier = crate::keybindings::native_modifier(message.wParam, message.lParam);
+        let keys = &mut self.empty_window_keys;
+        if let Some(bit) = modifier {
+            if down {
+                keys.modifiers |= bit;
+            } else {
+                keys.modifiers &= !bit;
+            }
+        } else if !down {
+            keys.settling = false;
+        }
+        if down && message.wParam == 229 {
+            keys.settling = true;
+        }
+        if !down || keys.composing || keys.settling || keys.modifiers & (8 | 64 | 128) != 0 {
+            return false;
+        }
+        let Some(chord) = crate::keybindings::captured_key(
+            message.wParam as u32,
+            keys.modifiers & 3 != 0,
+            keys.modifiers & 12 != 0,
+            keys.modifiers & 48 != 0,
+        )
+        .ok()
+        .flatten()
+        .and_then(|value| crate::keybindings::parse(&value).ok()) else {
+            return false;
+        };
+        let action = crate::keybindings::resolved(&self.settings.keybindings)
+            .ok()
+            .and_then(|bindings| bindings.into_iter().find(|binding| binding.chord == chord))
+            .and_then(|binding| ActionId::from_wire(&binding.action))
+            .filter(|action| {
+                matches!(
+                    action,
+                    ActionId::NewWorkspace | ActionId::CommandPalette | ActionId::QuitApp
+                )
+            });
+        let Some(action) = action else {
+            return false;
+        };
+        if message.lParam as usize & (1 << 30) == 0 {
+            post(Event::EmptyWindowShortcut(action));
+        }
+        true
+    }
+
+    pub(super) fn empty_window_shortcut_action(&mut self, action: ActionId) -> anyhow::Result<()> {
+        if !self.empty_window_key_target(self.window)
+            || unsafe { IsWindowEnabled(self.window) } == 0
+            || self.close_request.is_some()
+            || self.close_accepted
+            || self.closing
+            || self.editor_barrier.is_some()
+            || self.command_palette.is_open()
+        {
+            return Ok(());
+        }
+        // A detached window can remain alive beside the empty main window.
+        // Main-window shortcuts use the main context, even after detached focus.
+        self.detached_focus = None;
+        match action {
+            ActionId::NewWorkspace => self.action(Action::NewWorkspace),
+            ActionId::CommandPalette => self.action(Action::CommandPalette),
+            ActionId::QuitApp => self.request_close(CloseRequest::Native),
+            _ => Ok(()),
+        }
+    }
+
     #[cfg(debug_assertions)]
     pub(super) fn test_terminal_menu(
         &mut self,

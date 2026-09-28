@@ -14,7 +14,7 @@ function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $M
 function Budget([int]$Max=5000){if($cleanup){return $Max};$left=55000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Pane tools exceeded55s inner budget';return [int][Math]::Min($Max,$left)}
 function Probe([string[]]$Arguments,[int]$Exit=0,[int]$Max=5000){
  $p=[CliProbe]::Start($cli,$Arguments,$directory,$directory);$script:clients+=,$p.Id;$o=$p.StandardOutput.ReadToEndAsync();$e=$p.StandardError.ReadToEndAsync()
- try {Require ($p.WaitForExit((Budget $Max))) 'Owned CLI exceeded bounded deadline; no retry';Require ($o.Wait(500)-and $e.Wait(500)) 'CLI pipes did not close';$text=[CliProbe]::Output($o);Require ($p.ExitCode -eq $Exit) ('CLI exit differs: '+[CliProbe]::Output($e)+' '+$text);if($Exit -ne 0){return ([CliProbe]::Output($e)|ConvertFrom-Json)};return ($text|ConvertFrom-Json)}
+ try {Require ($p.WaitForExit((Budget $Max))) ('Owned CLI exceeded bounded deadline; no retry: '+($Arguments -join ' '));Require ($o.Wait(500)-and $e.Wait(500)) 'CLI pipes did not close';$text=[CliProbe]::Output($o);Require ($p.ExitCode -eq $Exit) ('CLI exit differs: '+[CliProbe]::Output($e)+' '+$text);if($Exit -ne 0){return ([CliProbe]::Output($e)|ConvertFrom-Json)};return ($text|ConvertFrom-Json)}
  finally {if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
 }
 function Request([string[]]$Arguments,[int]$Exit=0,[int]$Max=5000){Require ([bool]$pipeName) 'Explicit owned pipe required';return Probe (@('--pipe',$pipeName,'--json')+$Arguments) $Exit $Max}

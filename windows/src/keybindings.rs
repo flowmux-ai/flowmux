@@ -148,6 +148,43 @@ pub fn parse(accel: &str) -> anyhow::Result<Chord> {
     Ok(chord)
 }
 
+/// Modifier bits shared by native shortcut capture and window dispatch.
+pub fn native_modifier(key: usize, l: isize) -> Option<u16> {
+    let extended = (l as usize & (1 << 24)) != 0;
+    Some(match key {
+        0x11 => {
+            if extended {
+                2
+            } else {
+                1
+            }
+        }
+        0xa2 => 1,
+        0xa3 => 2,
+        0x12 => {
+            if extended {
+                8
+            } else {
+                4
+            }
+        }
+        0xa4 => 4,
+        0xa5 => 8,
+        0x10 => {
+            if (l as usize >> 16) & 255 == 0x36 {
+                32
+            } else {
+                16
+            }
+        }
+        0xa0 => 16,
+        0xa1 => 32,
+        0x5b => 64,
+        0x5c => 128,
+        _ => return None,
+    })
+}
+
 /// Format an owned native key capture without querying global keyboard state.
 /// The caller owns IME/AltGraph/Windows-key guards and passes tracked modifiers.
 pub fn captured_key(

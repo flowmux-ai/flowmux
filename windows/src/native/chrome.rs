@@ -285,6 +285,7 @@ pub(super) enum SurfaceIcon {
 pub(super) enum ControlRole {
     Static,
     Caption,
+    EmptyState,
     Edit,
     Listbox,
 }
@@ -414,23 +415,25 @@ pub(super) fn window_theme(window: HWND, theme: Theme) {
 struct Resources {
     body: HFONT,
     caption: HFONT,
+    title: HFONT,
     background: HBRUSH,
     surface: HBRUSH,
     owns_body: bool,
     owns_caption: bool,
+    owns_title: bool,
     owns_background: bool,
     owns_surface: bool,
 }
 impl Resources {
     fn new(palette: Palette, dpi: u32) -> Self {
-        fn font(points: i32, dpi: u32) -> (HFONT, bool) {
+        fn font(points: i32, dpi: u32, weight: i32) -> (HFONT, bool) {
             let font = unsafe {
                 CreateFontW(
                     -((points * dpi as i32 + 36) / 72),
                     0,
                     0,
                     0,
-                    FW_NORMAL as i32,
+                    weight,
                     0,
                     0,
                     0,
@@ -456,17 +459,20 @@ impl Resources {
                 (brush, true)
             }
         }
-        let (body, owns_body) = font(11, dpi);
-        let (caption, owns_caption) = font(9, dpi);
+        let (body, owns_body) = font(11, dpi, FW_NORMAL as i32);
+        let (caption, owns_caption) = font(9, dpi, FW_NORMAL as i32);
+        let (title, owns_title) = font(20, dpi, FW_EXTRABOLD as i32);
         let (background, owns_background) = brush(palette.background);
         let (surface, owns_surface) = brush(palette.surface);
         Self {
             body,
             caption,
+            title,
             background,
             surface,
             owns_body,
             owns_caption,
+            owns_title,
             owns_background,
             owns_surface,
         }
@@ -478,6 +484,7 @@ impl Drop for Resources {
             for (object, owned) in [
                 (self.body, self.owns_body),
                 (self.caption, self.owns_caption),
+                (self.title, self.owns_title),
                 (self.background, self.owns_background),
                 (self.surface, self.owns_surface),
             ] {
@@ -713,6 +720,30 @@ unsafe extern "system" fn control_proc(
     _id: usize,
     _data: usize,
 ) -> LRESULT {
+    super::keybindings::native_key_guard(window, message);
+    let empty = STATE.with(|slot| {
+        slot.borrow()
+            .controls
+            .get(&(window as isize))
+            .is_some_and(|entry| matches!(entry.control, ControlRole::EmptyState))
+    });
+    if empty {
+        match message {
+            WM_PAINT => {
+                let mut paint = PAINTSTRUCT::default();
+                let dc = BeginPaint(window, &mut paint);
+                draw_empty_state(window, dc);
+                EndPaint(window, &paint);
+                return 0;
+            }
+            WM_PRINTCLIENT => {
+                draw_empty_state(window, wparam as HDC);
+                return 1;
+            }
+            WM_ERASEBKGND => return 1,
+            _ => {}
+        }
+    }
     if row_pointer(window, message, lparam) {
         return 0;
     }
@@ -988,6 +1019,99 @@ pub(super) fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]>
     }
     drawing.truncate(written as usize);
     Cow::Owned(drawing)
+}
+
+// One painter serves both the real STATIC and owned, in-process capture. The
+// native caption remains the accessible text; only the drawing copy is shaped.
+fn draw_empty_state(window: HWND, dc: HDC) {
+    let (palette, title, body, dpi) = STATE.with(|slot| {
+        let state = slot.borrow();
+        (
+            state.palette,
+            state.resources.title,
+            state.resources.body,
+            state.dpi,
+        )
+    });
+    if dc.is_null() {
+        return;
+    }
+    let pixel = |dip: i32| ((dip * dpi as i32 + 48) / 96).max(1);
+    unsafe {
+        let saved = SaveDC(dc);
+        if saved == 0 {
+            return;
+        }
+        let mut client = RECT::default();
+        GetClientRect(window, &mut client);
+        fill(dc, &client, palette.background);
+        let top = ((client.bottom - pixel(228)) / 2).max(0);
+        let cx = client.right / 2;
+        let cy = top + pixel(64);
+        let muted = if palette.high_contrast {
+            palette.foreground
+        } else {
+            palette.muted
+        };
+        SelectObject(dc, GetStockObject(DC_PEN));
+        SelectObject(dc, GetStockObject(NULL_BRUSH));
+        SetDCPenColor(dc, muted);
+        RoundRect(
+            dc,
+            cx - pixel(64),
+            cy - pixel(50),
+            cx + pixel(64),
+            cy + pixel(50),
+            pixel(16),
+            pixel(16),
+        );
+        draw_terminal_glyph(dc, cx, cy, pixel(34), pixel(8));
+
+        let mut caption = vec![0u16; 2048];
+        let length =
+            GetWindowTextW(window, caption.as_mut_ptr(), caption.len() as i32).max(0) as usize;
+        caption.truncate(length);
+        let drawing = caption_for_paint(&caption);
+        let mut lines = drawing.splitn(2, |unit| *unit == b'\n' as u16);
+        let heading = lines.next().unwrap_or_default();
+        let description = lines.next().unwrap_or_default();
+        SetBkMode(dc, TRANSPARENT as i32);
+        SetTextColor(dc, palette.foreground);
+        SelectObject(dc, title);
+        let mut text_rect = RECT {
+            left: pixel(16).min(client.right / 2),
+            right: (client.right - pixel(16)).max(client.right / 2),
+            top: top + pixel(164),
+            bottom: top + pixel(196),
+        };
+        DrawTextW(
+            dc,
+            heading.as_ptr(),
+            heading.len() as i32,
+            &mut text_rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
+        SetTextColor(dc, palette.foreground);
+        SelectObject(dc, body);
+        text_rect.top = top + pixel(208);
+        text_rect.bottom = client.bottom.max(text_rect.top);
+        DrawTextW(
+            dc,
+            description.as_ptr(),
+            description.len() as i32,
+            &mut text_rect,
+            DT_CENTER | DT_WORDBREAK | DT_NOPREFIX,
+        );
+        RestoreDC(dc, saved);
+    }
+}
+
+unsafe fn draw_terminal_glyph(dc: HDC, cx: i32, cy: i32, radius: i32, unit: i32) {
+    MoveToEx(dc, cx - radius, cy - radius + unit, std::ptr::null_mut());
+    LineTo(dc, cx - unit, cy);
+    LineTo(dc, cx - radius, cy + radius - unit);
+    MoveToEx(dc, cx + unit, cy + radius - unit, std::ptr::null_mut());
+    LineTo(dc, cx + radius + 1, cy + radius - unit);
 }
 
 fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
@@ -1373,16 +1497,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 SetDCPenColor(item.hDC, text);
                 match kind {
                     SurfaceIcon::Terminal => {
-                        MoveToEx(item.hDC, cx - r, cy - r + pixel(1), std::ptr::null_mut());
-                        LineTo(item.hDC, cx - pixel(1), cy);
-                        LineTo(item.hDC, cx - r, cy + r - pixel(1));
-                        MoveToEx(
-                            item.hDC,
-                            cx + pixel(1),
-                            cy + r - pixel(1),
-                            std::ptr::null_mut(),
-                        );
-                        LineTo(item.hDC, cx + r + 1, cy + r - pixel(1));
+                        draw_terminal_glyph(item.hDC, cx, cy, r, pixel(1));
                     }
                     SurfaceIcon::Browser => {
                         Ellipse(item.hDC, cx - r, cy - r, cx + r + 1, cy + r + 1);
@@ -1897,6 +2012,7 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
             match entry.control {
                 ControlRole::Edit => "edit",
                 ControlRole::Listbox => "listbox",
+                ControlRole::EmptyState => "empty_state",
                 _ => "static",
             }
         };

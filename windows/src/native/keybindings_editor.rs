@@ -58,7 +58,9 @@ unsafe extern "system" fn input_proc(
             }
         });
     }
-    if (message == WM_KEYDOWN && w == 229) || (message == WM_KEYUP && modifier(w, l).is_none()) {
+    if (message == WM_KEYDOWN && w == 229)
+        || (message == WM_KEYUP && crate::keybindings::native_modifier(w, l).is_none())
+    {
         ROUTES.with(|routes| {
             if let Some(r) = routes.borrow_mut().get_mut(&(parent as isize)) {
                 r.settling = message == WM_KEYDOWN;
@@ -76,52 +78,18 @@ unsafe extern "system" fn input_proc(
     }
     result
 }
-fn modifier(key: usize, l: LPARAM) -> Option<u16> {
-    let extended = (l as usize & (1 << 24)) != 0;
-    Some(match key {
-        0x11 => {
-            if extended {
-                2
-            } else {
-                1
-            }
-        }
-        0xa2 => 1,
-        0xa3 => 2,
-        0x12 => {
-            if extended {
-                8
-            } else {
-                4
-            }
-        }
-        0xa4 => 4,
-        0xa5 => 8,
-        0x10 => {
-            if (l as usize >> 16) & 255 == 0x36 {
-                32
-            } else {
-                16
-            }
-        }
-        0xa0 => 16,
-        0xa1 => 32,
-        0x5b => 64,
-        0x5c => 128,
-        _ => return None,
-    })
-}
+
 unsafe fn capture_key(window: HWND, message: u32, w: WPARAM, l: LPARAM) {
     let Some(mut r) = route(window) else { return };
     let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
-    if let Some(bit) = modifier(w, l) {
+    if let Some(bit) = crate::keybindings::native_modifier(w, l) {
         if down {
             r.keys |= bit;
         } else {
             r.keys &= !bit;
         }
     }
-    if !down && modifier(w, l).is_none() {
+    if !down && crate::keybindings::native_modifier(w, l).is_none() {
         r.settling = false;
     }
     if down && w == 229 {

@@ -90,6 +90,7 @@ thread_local! {
     static CONTROL_ACTIONS: RefCell<HashMap<isize, Action>> = RefCell::new(HashMap::new());
 }
 enum Event {
+    EmptyWindowShortcut(crate::keybindings::ActionId),
     TabMenu(Uuid, tab_menu::UiAction),
     WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
@@ -232,6 +233,7 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    keybindings::native_key_guard(window, message);
     if message != WM_CTLCOLORSTATIC {
         if let Some(result) = chrome::message(window, message, wparam, lparam) {
             return result;
@@ -529,6 +531,7 @@ struct App {
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
     pending_keys: HashMap<Uuid, keys::PendingKey>,
+    empty_window_keys: keybindings::WindowKeys,
     #[cfg(debug_assertions)]
     pending_terminal_ui_tests: HashMap<Uuid, PendingRead>,
     pending_selections: HashMap<Uuid, PendingRead>,
@@ -763,6 +766,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
             pending_keys: HashMap::new(),
+            empty_window_keys: keybindings::WindowKeys::default(),
             #[cfg(debug_assertions)]
             pending_terminal_ui_tests: HashMap::new(),
             pending_selections: HashMap::new(),
@@ -838,6 +842,9 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             return Ok(());
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
+        // GetMessage dispatches sent IME/focus messages too. Apply only their
+        // guards before keys; ordinary events stay after DispatchMessage.
+        app.apply_native_key_guards();
         if message.message == WM_KEYDOWN && message.wParam == 0x1b {
             let owner = unsafe { GetAncestor(message.hwnd, GA_ROOT) };
             if app
@@ -860,10 +867,11 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             continue;
         }
         unsafe {
-            if !app
-                .tab_menu
-                .as_ref()
-                .is_some_and(|menu| menu.handle_message(&message))
+            if !app.empty_window_shortcut(&message)
+                && !app
+                    .tab_menu
+                    .as_ref()
+                    .is_some_and(|menu| menu.handle_message(&message))
                 && !app
                     .workspace_close
                     .as_ref()
@@ -936,6 +944,7 @@ impl App {
         self.focus_active()
     }
     fn rebuild_without_focus(&mut self) -> anyhow::Result<()> {
+        self.empty_window_keys = keybindings::WindowKeys::default();
         self.cancel_drag();
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().clear());
         let mut missing = Vec::new();
@@ -999,7 +1008,7 @@ impl App {
             ));
         }
         if self.current_workspace().is_none() {
-            desired.push(("No workspaces yet".into(), Action::EmptyState));
+            desired.push(("flowmux\nNo workspaces yet".into(), Action::EmptyState));
         }
         for (pane, active, tabs) in self
             .current_workspace()
@@ -1101,7 +1110,7 @@ impl App {
         }
         let role = self.chrome_role(&action);
         if empty {
-            chrome::register_control(hwnd, chrome::ControlRole::Static);
+            chrome::register_control(hwnd, chrome::ControlRole::EmptyState);
         } else {
             chrome::register_button(hwnd, role);
         }
@@ -1395,12 +1404,7 @@ impl App {
                 );
             }
             let rect = match control.action {
-                Action::EmptyState => Some((
-                    content.x,
-                    content.y + (content.height - px(32)).max(0) / 2,
-                    content.width,
-                    px(32),
-                )),
+                Action::EmptyState => Some((content.x, content.y, content.width, content.height)),
                 Action::NewWorkspace => {
                     (sidebar >= px(36)).then_some((px(4), px(5), px(28), px(28)))
                 }
@@ -1630,6 +1634,7 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
+            Event::EmptyWindowShortcut(action) => self.empty_window_shortcut_action(action)?,
             Event::Editor(event) => self.editor_event(event)?,
             Event::Files(event) => self.files_event(event)?,
             Event::Browser(event) => self.browser_event(event)?,
