@@ -384,6 +384,7 @@ impl HasWindowHandle for Parent {
 struct Surface {
     startup_error: Option<String>,
     applied_settings: Option<Value>,
+    menu_capabilities: Option<(PaneId, bool, bool)>,
     view: WebView,
     // WebView2 must close before its stable native parent is destroyed.
     holder: surface_host::Host,
@@ -529,7 +530,7 @@ struct App {
     pending_pastes: HashMap<Uuid, PendingRead>,
     pending_keys: HashMap<Uuid, keys::PendingKey>,
     #[cfg(debug_assertions)]
-    pending_shortcuts: HashMap<Uuid, PendingRead>,
+    pending_terminal_ui_tests: HashMap<Uuid, PendingRead>,
     pending_selections: HashMap<Uuid, PendingRead>,
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
@@ -763,7 +764,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_pastes: HashMap::new(),
             pending_keys: HashMap::new(),
             #[cfg(debug_assertions)]
-            pending_shortcuts: HashMap::new(),
+            pending_terminal_ui_tests: HashMap::new(),
             pending_selections: HashMap::new(),
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
@@ -1211,6 +1212,7 @@ impl App {
             Surface {
                 startup_error: None,
                 applied_settings: None,
+                menu_capabilities: None,
                 view,
                 holder,
                 identity,
@@ -1240,6 +1242,14 @@ impl App {
         );
         for surface in self.detached.keys().copied().collect::<Vec<_>>() {
             self.detached_layout(surface)?;
+        }
+        let terminals: Vec<_> = self
+            .surfaces
+            .iter()
+            .filter_map(|(id, terminal)| terminal.ready.then_some(*id))
+            .collect();
+        for surface in terminals {
+            self.refresh_terminal_menu(surface)?;
         }
         if self.main_closed {
             return Ok(());
@@ -1687,11 +1697,11 @@ impl App {
             Event::ContextMenu(..) => {}
             Event::Tick => {
                 #[cfg(debug_assertions)]
-                self.pending_shortcuts.retain(|_, request| {
+                self.pending_terminal_ui_tests.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(2) {
-                        let _ = request.reply.try_send(
-                            json!({"error":"renderer shortcut test exceeded two seconds"}),
-                        );
+                        let _ = request
+                            .reply
+                            .try_send(json!({"error":"renderer UI test exceeded two seconds"}));
                         false
                     } else {
                         true
@@ -1871,6 +1881,7 @@ impl App {
                 } else {
                     self.start_session(id)?;
                 }
+                self.refresh_terminal_menu(id)?;
             }
             ClientMessage::Restored => {
                 anyhow::ensure!(
@@ -1966,14 +1977,30 @@ impl App {
                 chord,
                 revision,
             } => self.shortcut(id, &action, &chord, revision)?,
+            ClientMessage::TerminalMenuAction { pane, action } => {
+                self.terminal_menu_action(id, PaneId(pane), action)?;
+            }
+            #[cfg(debug_assertions)]
+            ClientMessage::TerminalMenuTested { request, state } => {
+                if let Some(pending) = self.pending_terminal_ui_tests.get(&request) {
+                    anyhow::ensure!(
+                        self.background_test && pending.surface == id,
+                        "invalid terminal menu test acknowledgement"
+                    );
+                    let pending = self.pending_terminal_ui_tests.remove(&request).unwrap();
+                    let _ = pending
+                        .reply
+                        .try_send(json!({"surface":id,"request":request,"state":state}));
+                }
+            }
             #[cfg(debug_assertions)]
             ClientMessage::ShortcutTested { request, forwarded } => {
-                if let Some(pending) = self.pending_shortcuts.get(&request) {
+                if let Some(pending) = self.pending_terminal_ui_tests.get(&request) {
                     anyhow::ensure!(
                         self.background_test && pending.surface == id,
                         "invalid shortcut test acknowledgement"
                     );
-                    let pending = self.pending_shortcuts.remove(&request).unwrap();
+                    let pending = self.pending_terminal_ui_tests.remove(&request).unwrap();
                     let _ = pending
                         .reply
                         .try_send(json!({"surface":id,"request":request,"forwarded":forwarded}));
@@ -2993,6 +3020,11 @@ impl App {
             #[cfg(debug_assertions)]
             Command::TestShortcut { surface, event } => {
                 self.test_shortcut(SurfaceId(surface), &event, reply)?;
+                return Ok(None);
+            }
+            #[cfg(debug_assertions)]
+            Command::TestTerminalMenu { surface, event } => {
+                self.test_terminal_menu(SurfaceId(surface), &event, reply)?;
                 return Ok(None);
             }
             #[cfg(debug_assertions)]

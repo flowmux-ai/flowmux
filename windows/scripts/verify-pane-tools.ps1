@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Own hidden host only. Run under run-check.ps1 -TimeoutSeconds 60.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('pane-tools','terminal-menu')][string]$Case='pane-tools')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -9,7 +9,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 
 $directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('pane-tools-한글-한-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object EditorFixture($directory);$path=$fixture.Write('pane close 한글.txt',[EditorFixture]::Original,$false,$false)
 $clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$pipeName=$null;$clients=@();$shells=@();$cleanup=$false;$out=$null;$err=$null;$editor=$null
-$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-pane-tools';checks=@();observations=@();desktopInput=$false;physicalIme=$false;deferred=@('Owned WM_COMMAND validates direct production buttons. Desktop pointer/menu navigation and composed GPU pixels are not covered.','Tab menus use owned hidden HWND messages; clipboard and folder launch are never invoked. Pane/workspace menus use the same modeless native controller.','The dirty document is acknowledged before close; this does not force an unsynchronized edit debounce race.')}
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-pane-tools';case=$Case;checks=@();observations=@();desktopInput=$false;physicalIme=$false;deferred=@('Owned WM_COMMAND validates direct production buttons. Desktop pointer/menu navigation and composed GPU pixels are not covered.','Tab menus use owned hidden HWND messages; clipboard and folder launch are never invoked. Pane/workspace menus use the same modeless native controller.','The dirty document is acknowledged before close; this does not force an unsynchronized edit debounce race.')}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Budget([int]$Max=5000){if($cleanup){return $Max};$left=55000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Pane tools exceeded55s inner budget';return [int][Math]::Min($Max,$left)}
 function Probe([string[]]$Arguments,[int]$Exit=0,[int]$Max=5000){
@@ -62,6 +62,16 @@ function Menu-Metadata($Tree,[string]$Label){
  return $panel
 }
 function Finish-Metadata($Panel,[string]$Action){[OptionsFixture]::Click([long]$Panel.window,[long]$Panel.$Action,$hostProcess.Id);$t=Await {param($value) -not $value.metadata.open};Require ([OptionsFixture]::Describe([long]$t.window_handle,$hostProcess.Id).Enabled) 'Metadata left its main owner disabled';return $t}
+function Body-Menu([string]$Surface,$Event,[int]$Max=5000){
+ $reply=Request @('test-terminal-menu',$Surface,($Event|ConvertTo-Json -Compress)) 0 $Max
+ Require ($reply.surface -ceq $Surface -and $reply.request -and $reply.state) 'Terminal menu hook returned the wrong owned source or no state'
+ $evidence.lastTerminalMenu=$reply;return $reply.state
+}
+function Body-Open([string]$Surface,[scriptblock]$Condition){
+ $watch=[Diagnostics.Stopwatch]::StartNew()
+ do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Terminal menu configuration exceeded five seconds';$state=Body-Menu $Surface @{action='open';x=99999;y=99999} ([int]$left);if(& $Condition $state){return $state};Start-Sleep -Milliseconds 20}while($true)
+}
+function Pane-Area($Tree,[string]$Id){$bounds=$null;$count=0;foreach($entry in $Tree.layout.panes){if($entry[0] -ceq $Id){$bounds=$entry[1];$count++}};Require ($count -eq 1) 'Terminal menu lost its pane geometry';return $bounds}
 function Editor-Command([string]$Action,[string[]]$Options=@()){$r=Request (@('editor','command',$editor.surface,$Action)+$Options);if($r.psobject.Properties.Name -contains 'result'){return $r.result};return $r}
 try {
  $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Debug background build required'
@@ -69,6 +79,57 @@ try {
  $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($hostProcess.Id).json"
  do {Budget|Out-Null;Require (-not $hostProcess.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Startup exceeded eight seconds';if((Test-Path $discovery)-and(Get-Item $discovery).LastWriteTimeUtc -ge $utc){$record=Get-Content -Raw $discovery|ConvertFrom-Json;Require ($record.pid -eq $hostProcess.Id) 'Wrong discovery PID';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
  $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left);$a=Request @('identify');$original=@($tree.surfaces)
+ if($Case -eq 'terminal-menu'){
+  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850)
+  $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $a.surface -and $_.cwd_reported}).Count -eq 1}
+  Require (@($tree.surfaces|Where-Object {$_.id -ceq $a.surface})[0].cwd -ceq $fixture.Root) 'Terminal body menu fixture lost its live Unicode/NFD CWD'
+  $original=@($tree.surfaces)
+  Request @('send-keys',$a.pane,'echo FLOWMUX_BODY_MENU_SURVIVOR')|Out-Null;Request @('send-key','Enter','--pane',$a.pane)|Out-Null
+  $watch=[Diagnostics.Stopwatch]::StartNew()
+  do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Terminal marker exceeded five seconds';$screen=Request @('read-screen','--surface',$a.surface) 0 ([int]$left);if($screen.text.Contains('FLOWMUX_BODY_MENU_SURVIVOR')){break};Start-Sleep -Milliseconds 20}while($true)
+  $expected='copy,paste,separator,split_right,split_down,separator,copy_path,separator,close_pane'
+  $html=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\assets\index.html');$markup=[regex]::Match($html,'(?s)<div id="terminal-menu".*?(?=<form id="search")').Value
+  $sourceRows=@([regex]::Matches($markup,'data-action="([^"]+)"|role="separator"')|ForEach-Object {if($_.Groups[1].Success){$_.Groups[1].Value}else{'separator'}})
+  Require (($sourceRows -join ',') -ceq $expected) 'Production terminal HTML action/separator order differs from Linux'
+  $menu=Body-Open $a.surface {param($s) -not $s.hidden -and @($s.rows|Where-Object {$_.action -ceq 'split_right' -and $_.enabled}).Count -eq 1}
+  Require ((@($menu.rows.action)-join ',') -ceq $expected -and @($menu.rows|Where-Object {$_.action -ceq 'separator' -and $_.label -ceq '' -and -not $_.enabled}).Count -eq 3) 'Live terminal menu rows/separators differ from production HTML'
+  Require ($menu.rows[0].label -match '^Copy(?:\s|$)' -and $menu.rows[1].label -match '^Paste(?:\s|$)' -and $menu.rows[3].label -ceq 'Split Right' -and $menu.rows[4].label -ceq 'Split Down' -and $menu.rows[6].label -ceq 'Copy path' -and $menu.rows[8].label -ceq 'Close Pane') 'Terminal menu labels differ from Linux'
+  Require (-not $menu.rows[0].enabled -and $menu.rows[1].enabled -and $menu.rows[6].enabled -and -not $menu.rows[8].enabled) 'Initial selection, input, CWD or final-pane menu state differs'
+  Require ($menu.rect.width -gt 0 -and $menu.rect.height -gt 0 -and $menu.rect.left -ge 0 -and $menu.rect.top -ge 0 -and $menu.rect.left+$menu.rect.width -le $menu.viewport.width+1 -and $menu.rect.top+$menu.rect.height -le $menu.viewport.height+1) 'Terminal menu escaped its actual renderer viewport'
+  $menu=Body-Menu $a.surface @{action='key';key='Escape';isComposing=$true};Require (-not $menu.hidden) 'Synthetic composing Escape dismissed the terminal menu'
+  $menu=Body-Menu $a.surface @{action='key';key='Escape';keyCode=229};Require (-not $menu.hidden) 'PROCESS/229 Escape dismissed the terminal menu'
+  $menu=Body-Menu $a.surface @{action='key';key='ArrowDown'};Require (-not $menu.hidden) 'Arrow navigation dismissed terminal menu'
+  $menu=Body-Menu $a.surface @{action='key';key='Escape'};Require ($menu.hidden) 'Escape did not dismiss the terminal menu';Stable (Tree) $original
+  $evidence.checks+=@{name='terminal_body_Linux_HTML_live_rows_separators_viewport_clamp_and_synthetic_composition_Escape_guards';passed=$true}
+
+  Body-Open $a.surface {param($s) -not $s.hidden -and $s.rows[3].enabled}|Out-Null
+  Body-Menu $a.surface @{action='click';item='split_right'}|Out-Null;$tree=Ready 2;$b=Request @('identify');Require ($b.pane -cne $a.pane) 'Body Split Right did not create a different pane'
+  $left=Pane-Area $tree $a.pane;$right=Pane-Area $tree $b.pane;Require ($right.x -ge $left.x+$left.width -and $right.y -eq $left.y -and $right.height -eq $left.height) 'Body Split Right used the wrong direction';Stable $tree $original
+  Request @('focus-tab',$a.surface)|Out-Null
+  Body-Open $b.surface {param($s) -not $s.hidden -and $s.rows[4].enabled}|Out-Null
+  Require ((Request @('identify')).surface -ceq $a.surface) 'Source-routing case requires the visible B menu while A remains current'
+  Body-Menu $b.surface @{action='click';item='split_down'}|Out-Null;$tree=Ready 3;$c=Request @('identify')
+  $top=Pane-Area $tree $b.pane;$bottom=Pane-Area $tree $c.pane;Require ($c.pane -cne $b.pane -and $bottom.y -ge $top.y+$top.height -and $bottom.x -eq $top.x -and $bottom.width -eq $top.width) 'Body Split Down used the wrong target or direction';Stable $tree $original
+  $unchanged=Pane-Area $tree $a.pane;foreach($key in @('x','y','width','height')){Require ($unchanged.$key -eq $left.$key) 'Non-current B menu split changed A pane geometry'}
+  $retained=@($tree.surfaces|Where-Object {$_.id -in @($a.surface,$c.surface)})
+  $evidence.checks+=@{name='terminal_body_Split_Right_and_Down_create_actual_nested_panes_without_restarting_original_PTY';passed=$true}
+
+  Request @('focus-tab',$b.surface)|Out-Null;Request @('new-tab','--cwd',$fixture.Root,'--shell=cmd')|Out-Null;$tree=Ready 4;$d=Request @('identify');Require ($d.pane -ceq $b.pane) 'Whole-pane close requires two tabs in its source pane'
+  $closedPids=@($tree.surfaces|Where-Object {$_.id -in @($b.surface,$d.surface)}|ForEach-Object {$_.pid});Require ($closedPids.Count -eq 2) 'Whole-pane close target omitted a terminal process'
+  Body-Open $d.surface {param($s) -not $s.hidden -and $s.rows[8].enabled}|Out-Null
+  # Debug click ACK captures pre-click state; the actual production action follows.
+  Body-Menu $d.surface @{action='click';item='close_pane'}|Out-Null
+  $tree=Await {param($t) @($t.layout.panes).Count -eq 2 -and @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.id -in @($b.surface,$d.surface)}).Count -eq 0 -and @(Get-Process -Id $closedPids -ErrorAction SilentlyContinue).Count -eq 0};Stable $tree $retained
+  foreach($prior in $retained){$now=@($tree.surfaces|Where-Object {$_.id -ceq $prior.id})[0];Require ($now.view_handle -eq $prior.view_handle -and $now.holder.window -eq $prior.holder.window) 'Body Close Pane recreated a surviving WebView or holder'}
+  $screen=Request @('read-screen','--surface',$a.surface);Require ($screen.text.Contains('FLOWMUX_BODY_MENU_SURVIVOR')) 'Body Close Pane erased original terminal output'
+  $evidence.checks+=@{name='terminal_body_Close_Pane_terminates_every_source_tab_preserves_surviving_PID_WebView_holder_and_output';passed=$true}
+
+  Request @('focus-tab',$c.surface)|Out-Null;Body-Open $c.surface {param($s) -not $s.hidden -and $s.rows[8].enabled}|Out-Null;Body-Menu $c.surface @{action='click';item='close_pane'}|Out-Null
+  $tree=Await {param($t) @($t.layout.panes).Count -eq 1 -and @($t.surfaces).Count -eq 1};Stable $tree $original
+  Request @('focus-tab',$a.surface)|Out-Null;$menu=Body-Open $a.surface {param($s) -not $s.hidden -and -not $s.rows[8].enabled};Require ($menu.rows[3].enabled -and $menu.rows[4].enabled) 'Final pane lost its available split actions'
+  $menu=Body-Menu $a.surface @{action='key';key='Escape'};Require ($menu.hidden) 'Final-pane menu did not dismiss';Stable (Tree) $original
+  $evidence.checks+=@{name='terminal_body_menu_updates_final_pane_Close_disabled_and_keeps_splits_available';passed=$true}
+ }else{
  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850);$tree=Tree;Check-Geometry $tree
  $order=@($tree.chrome.controls|Where-Object {$_.pane -eq $a.pane -and $_.kind -like 'pane_*' -and $_.layout_visible}|Sort-Object {$_.rect.x}|ForEach-Object {$_.kind})
  Require (($order -join ',') -eq 'pane_zoom,pane_split_right,pane_split_down,pane_add,pane_browser,pane_menu') 'Direct tool order differs from Linux'
@@ -213,6 +274,7 @@ try {
  $tree=Workspace-Menu $first.workspace;$panel=Menu-Metadata $tree 'Change color…';[OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.input,$hostProcess.Id,'#a15c33');$tree=Finish-Metadata $panel 'cancel'
  Require (@($tree.workspaces|Where-Object {$_.id -ceq $first.workspace})[0].color -ceq '#2684c7') 'Workspace color Cancel overwrote the saved color';Stable $tree $allTerminals
  $evidence.checks+=@{name='header_creation_preserves_PIDs_and_inactive_workspace_context_captures_UUID_across_reorder_focus_Unicode_rename_color_and_Cancel';passed=$true}
+ }
  Request @('quit','--discard-state')|Out-Null;Require ($hostProcess.WaitForExit((Budget 5000))) 'Owned host quit timed out';Require ($hostProcess.ExitCode -eq 0) 'Owned host exit failed';$evidence.status='passed_background_pane_tools_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

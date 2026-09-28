@@ -54,7 +54,7 @@ const clipboard = new Clipboard(selection, paste, navigator.clipboard,
   message => { document.getElementById('input-status').textContent = message; },
   () => !backgroundTesting && surfaceVisible && document.hasFocus() && !document.hidden,
   () => !composing && !restoring && !paste.settling && !terminal.options.disableStdin);
-const menu = new TerminalMenu(terminal, selection, clipboard, document, () => composing || restoring || paste.settling);
+const menu = new TerminalMenu(terminal, selection, clipboard, document, () => composing || restoring || paste.settling, send);
 const terminalElement = document.getElementById('terminal');
 terminalElement.addEventListener('contextmenu', event => menu.open(event), true);
 terminalElement.addEventListener('pointerdown', event => { if (event.button === 0) { clipboard.cancel(); selection.primaryDown(); } }, true);
@@ -85,7 +85,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('resize', () => menu.close(false));
 terminal.textarea.addEventListener('blur', () => { paneShortcuts.reset(); clipboard.cancel(); });
-terminal.textarea.addEventListener('compositionstart', () => { composing = true; clipboard.cancel(); selection.forget(); });
+terminal.textarea.addEventListener('compositionstart', () => { composing = true; clipboard.cancel(); menu.close(false); selection.forget(); });
 terminal.textarea.addEventListener('compositionend', () => {
   paste.settleComposition(); composing = false; queueMicrotask(() => settings.flush());
 });
@@ -133,6 +133,31 @@ window.flowmuxHost = message => {
       surfaceVisible = message.visible;
       minimap.visibility(surfaceVisible && (!document.hidden || backgroundTesting));
       if (!surfaceVisible) { clipboard.cancel(); menu.close(false); selection.primaryUp(); }
+    } else if (message.type === 'terminal_menu_state') menu.configure(message);
+    else if (message.type === 'test_terminal_menu' && backgroundTesting) {
+      // Invoke the real menu handlers only in an owned hidden test renderer.
+      // Clipboard commands are deliberately excluded from this test driver.
+      const event = message.event;
+      let click = null;
+      if (event.action === 'open') menu.open(new MouseEvent('contextmenu', {
+        clientX: event.x ?? 0, clientY: event.y ?? 0, shiftKey: !!event.shiftKey,
+        cancelable: true,
+      }));
+      else if (event.action === 'click' && !['copy', 'paste', 'copy_path'].includes(event.item)) {
+        click = menu.buttons.find(button => button.dataset.action === event.item && !button.disabled);
+      } else if (event.action === 'key') {
+        const target = menu.menu.contains(document.activeElement) ? document.activeElement : menu.menu;
+        // Do not let a synthetic Enter/Space operate a clipboard button either.
+        if (!(['Enter', ' '].includes(event.key) && ['copy', 'paste', 'copy_path'].includes(target.dataset.action))) {
+          target.dispatchEvent(new KeyboardEvent('keydown', { key: event.key,
+            shiftKey: !!event.shiftKey, isComposing: !!event.isComposing,
+            keyCode: event.keyCode ?? 0, bubbles: true, cancelable: true }));
+        }
+      }
+      send({ type: 'terminal_menu_tested', request: message.request, state: menu.diagnostics() });
+      // Closing the source pane can destroy this renderer before an ACK arrives.
+      // The click reply describes the menu before dispatch; native state verifies its result.
+      click?.click();
     } else if (message.type === 'test_shortcut' && backgroundTesting) {
       // Exercise the same custom hook on an owned hidden renderer. This neither
       // dispatches a DOM/OS key nor asks xterm to produce text or IME composition.

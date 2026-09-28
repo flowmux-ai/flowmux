@@ -4,6 +4,83 @@ use super::*;
 use crate::keybindings::{ActionId, Chord};
 
 impl App {
+    #[cfg(debug_assertions)]
+    pub(super) fn test_terminal_menu(
+        &mut self,
+        source: SurfaceId,
+        event: &str,
+        reply: ipc::Reply,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.background_test,
+            "terminal menu tests require an owned hidden debug host"
+        );
+        anyhow::ensure!(
+            event.len() <= 2048,
+            "terminal menu test event exceeds limit"
+        );
+        let event: Value = serde_json::from_str(event)?;
+        let fields = event
+            .as_object()
+            .context("terminal menu event must be an object")?;
+        anyhow::ensure!(
+            matches!(event["action"].as_str(), Some("open" | "click" | "key")),
+            "invalid terminal menu test action"
+        );
+        for (key, value) in fields {
+            let valid = match key.as_str() {
+                "action" => true,
+                "item" => matches!(
+                    value.as_str(),
+                    Some("split_right" | "split_down" | "close_pane")
+                ),
+                "key" => matches!(
+                    value.as_str(),
+                    Some("ArrowUp" | "ArrowDown" | "Home" | "End" | "Escape" | "Tab")
+                ),
+                "shiftKey" | "isComposing" => value.is_boolean(),
+                "keyCode" => value.as_u64().is_some_and(|code| code <= 255),
+                "x" | "y" => value
+                    .as_u64()
+                    .is_some_and(|coordinate| coordinate <= 1000000),
+                _ => false,
+            };
+            anyhow::ensure!(valid, "invalid terminal menu event field: {key}");
+        }
+        anyhow::ensure!(
+            event["action"] != "click" || event.get("item").is_some(),
+            "menu click requires an item"
+        );
+        anyhow::ensure!(
+            event["action"] != "key" || event.get("key").is_some(),
+            "menu key requires a key"
+        );
+        anyhow::ensure!(
+            self.pending_terminal_ui_tests.len() < 2,
+            "terminal UI test already pending"
+        );
+        let terminal = self
+            .surfaces
+            .get(&source)
+            .context("terminal menu test requires a terminal surface")?;
+        anyhow::ensure!(
+            terminal.ready && !terminal.restoring,
+            "terminal menu test terminal is not ready"
+        );
+        let request = Uuid::new_v4();
+        terminal.send(&HostMessage::TestTerminalMenu { request, event })?;
+        self.pending_terminal_ui_tests.insert(
+            request,
+            PendingRead {
+                surface: source,
+                after: 0,
+                reply,
+                started: Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
     pub(super) fn shortcut(
         &mut self,
         source: SurfaceId,
@@ -188,7 +265,7 @@ impl App {
             anyhow::ensure!(valid, "invalid shortcut test event field: {key}");
         }
         anyhow::ensure!(
-            self.pending_shortcuts.len() < 2,
+            self.pending_terminal_ui_tests.len() < 2,
             "shortcut test already pending"
         );
         let surface = self
@@ -201,7 +278,7 @@ impl App {
         );
         let request = Uuid::new_v4();
         surface.send(&HostMessage::TestShortcut { request, event })?;
-        self.pending_shortcuts.insert(
+        self.pending_terminal_ui_tests.insert(
             request,
             PendingRead {
                 surface: source,

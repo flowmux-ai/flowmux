@@ -13,6 +13,15 @@ pub const OUTPUT_CHUNK_BYTES: usize = 16 * 1024;
 pub const TERMINAL_ORIGIN: &str = "http://flowmux-terminal.localhost";
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalMenuAction {
+    SplitRight,
+    SplitDown,
+    CopyPath,
+    ClosePane,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Envelope {
     pub version: u8,
@@ -70,6 +79,15 @@ pub enum ClientMessage {
         sequence: u64,
     },
     Focus,
+    TerminalMenuAction {
+        pane: Uuid,
+        action: TerminalMenuAction,
+    },
+    #[cfg(debug_assertions)]
+    TerminalMenuTested {
+        request: Uuid,
+        state: serde_json::Value,
+    },
     Shortcut {
         action: String,
         chord: crate::keybindings::Chord,
@@ -136,6 +154,16 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    TerminalMenuState {
+        pane: Uuid,
+        split: bool,
+        close: bool,
+    },
+    #[cfg(debug_assertions)]
+    TestTerminalMenu {
+        request: Uuid,
+        event: serde_json::Value,
+    },
     KeyMode {
         request: Uuid,
         after: u64,

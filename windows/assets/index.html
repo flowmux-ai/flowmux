@@ -8,10 +8,15 @@
 <div id="terminal" aria-label="Terminal"></div>
 <div id="minimap" role="scrollbar" aria-label="Terminal scrollback minimap" aria-controls="terminal" aria-orientation="vertical" tabindex="0" title="Wheel previews history; click or drag scrolls the terminal" hidden><canvas aria-hidden="true"></canvas><div class="viewport" aria-hidden="true"></div></div>
 <div id="terminal-menu" role="menu" aria-label="Terminal actions" hidden>
-<button type="button" role="menuitem" data-action="copy">Copy <span>Ctrl+Shift+C</span></button>
-<button type="button" role="menuitem" data-action="paste">Paste <span>Ctrl+Shift+V</span></button>
-<button type="button" role="menuitem" data-action="all">Select all</button>
-<button type="button" role="menuitem" data-action="clear">Clear selection</button>
+<button type="button" role="menuitem" data-action="copy">Copy</button>
+<button type="button" role="menuitem" data-action="paste">Paste</button>
+<div role="separator"></div>
+<button type="button" role="menuitem" data-action="split_right" disabled>Split Right</button>
+<button type="button" role="menuitem" data-action="split_down" disabled>Split Down</button>
+<div role="separator"></div>
+<button type="button" role="menuitem" data-action="copy_path">Copy path</button>
+<div role="separator"></div>
+<button type="button" role="menuitem" data-action="close_pane" disabled>Close Pane</button>
 </div>
 <form id="search" hidden aria-label="Find in terminal">
 <div class="search-row"><label>Find <input id="query" autocomplete="off" spellcheck="false" maxlength="1024" aria-label="Search terminal" aria-describedby="search-status"></label>

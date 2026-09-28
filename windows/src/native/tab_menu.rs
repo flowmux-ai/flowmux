@@ -75,6 +75,83 @@ impl Drop for Menu {
     }
 }
 impl App {
+    pub(super) fn refresh_terminal_menu(&mut self, source: SurfaceId) -> anyhow::Result<()> {
+        let (workspace, pane, _) = self.locate(source).context("Terminal no longer exists")?;
+        let split = !self.is_detached_workspace(self.workspaces[workspace].id);
+        let close = split && self.workspaces[workspace].leaves().len() > 1;
+        let terminal = self
+            .surfaces
+            .get_mut(&source)
+            .context("Terminal no longer exists")?;
+        let capabilities = (pane, split, close);
+        if terminal.menu_capabilities != Some(capabilities) {
+            terminal.send(&HostMessage::TerminalMenuState {
+                pane: pane.0,
+                split,
+                close,
+            })?;
+            terminal.menu_capabilities = Some(capabilities);
+        }
+        Ok(())
+    }
+
+    pub(super) fn terminal_menu_action(
+        &mut self,
+        source: SurfaceId,
+        captured_pane: PaneId,
+        action: crate::protocol::TerminalMenuAction,
+    ) -> anyhow::Result<()> {
+        let Some(terminal) = self.surfaces.get(&source) else {
+            return Ok(());
+        };
+        let (workspace, pane, cwd) = self.locate(source).context("Terminal no longer exists")?;
+        let owner = self.surface_window(source);
+        // A right-click may come from another visible pane. Bind the action to
+        // that surface and reject hidden tabs and menus left over after a move.
+        if pane != captured_pane
+            || !terminal.visible
+            || !terminal.ready
+            || terminal.restoring
+            || self.workspaces[workspace].root.active_surface_id(pane) != Some(source)
+            || self.close_request.is_some()
+            || self.close_accepted
+            || self.closing
+            || self.editor_barrier.is_some()
+            || self.overview.is_open()
+            || self.command_palette.is_open()
+            || unsafe { IsWindowEnabled(owner) } == 0
+        {
+            return Ok(());
+        }
+        use crate::protocol::TerminalMenuAction::*;
+        match action {
+            SplitRight | SplitDown => {
+                self.files_operation_guard()?;
+                self.new_terminal(
+                    source,
+                    None,
+                    None,
+                    shells::NewTerminal::Split(if matches!(action, SplitRight) {
+                        SplitDirection::Vertical
+                    } else {
+                        SplitDirection::Horizontal
+                    }),
+                )?;
+            }
+            ClosePane => {
+                self.close_pane(pane, None)?;
+            }
+            CopyPath => {
+                anyhow::ensure!(
+                    !self.background_test,
+                    "Clipboard access is disabled in background hosts"
+                );
+                copy_text(owner, &cwd.to_string_lossy())?;
+            }
+        }
+        Ok(())
+    }
+
     fn tab_copy_text(&self, surface: SurfaceId) -> anyhow::Result<(String, Option<PathBuf>)> {
         let (workspace, pane, cwd) = self.locate(surface).context("Tab no longer exists")?;
         let tab = self.workspaces[workspace]
@@ -458,7 +535,7 @@ impl App {
     }
 }
 
-fn copy_text(owner: HWND, text: &str) -> anyhow::Result<()> {
+pub(super) fn copy_text(owner: HWND, text: &str) -> anyhow::Result<()> {
     use windows_sys::Win32::System::{DataExchange::*, Memory::*, Ole::CF_UNICODETEXT};
     anyhow::ensure!(!text.contains('\0'), "Clipboard text contains NUL");
     let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();

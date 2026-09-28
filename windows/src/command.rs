@@ -210,6 +210,13 @@ pub enum Command {
         surface: Uuid,
         event: String,
     },
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    TestTerminalMenu {
+        #[arg(value_parser = parse_id)]
+        surface: Uuid,
+        event: String,
+    },
     /// Print the session-local PowerShell prompt integration for manual reinstallation.
     ShellIntegration,
     Identify,
