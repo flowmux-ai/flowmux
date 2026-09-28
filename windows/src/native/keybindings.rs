@@ -112,6 +112,7 @@ impl App {
                         | ActionId::NewWindow
                         | ActionId::CommandPalette
                         | ActionId::ToggleUsagePopover
+                        | ActionId::ToggleSessionPanel
                         | ActionId::QuitApp
                 )
             });
@@ -143,6 +144,7 @@ impl App {
             ActionId::NewWindow => self.action(Action::NewWindow),
             ActionId::CommandPalette => self.action(Action::CommandPalette),
             ActionId::ToggleUsagePopover => self.action(Action::Usage),
+            ActionId::ToggleSessionPanel => self.action(Action::Sessions),
             ActionId::QuitApp => self.request_close(CloseRequest::Native),
             _ => Ok(()),
         }
@@ -392,6 +394,7 @@ impl App {
             Some(NewWindow) => return self.new_window(Some(source)),
             Some(OpenTig) => return self.open_tig(source),
             Some(ToggleUsagePopover) => Action::Usage,
+            Some(ToggleSessionPanel) => Action::Sessions,
             Some(TerminalSearch) => Action::Find,
             Some(SearchAllTerminals) => Action::SearchAll,
             Some(TogglePaneZoom) => Action::TogglePaneZoom,

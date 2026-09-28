@@ -52,6 +52,7 @@ impl App {
                     }
                     self.editor_apply_theme()?;
                     self.worktrees.refresh_theme()?;
+                    self.sessions.refresh_theme()?;
                     self.usage_render();
                     if enable_usage {
                         self.usage_refresh(false)?;

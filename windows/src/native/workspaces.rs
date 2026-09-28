@@ -174,6 +174,7 @@ impl App {
             | Action::ShowFiles
             | Action::Worktrees
             | Action::Usage
+            | Action::Sessions
             | Action::SearchAll
             | Action::OpenEditor
             | Action::Notifications => chrome::Role::Icon {
@@ -184,6 +185,7 @@ impl App {
                     Action::ShowFiles => chrome::ChromeIcon::Files,
                     Action::Worktrees => chrome::ChromeIcon::Worktrees,
                     Action::Usage => chrome::ChromeIcon::Usage,
+                    Action::Sessions => chrome::ChromeIcon::Sessions,
                     Action::SearchAll => chrome::ChromeIcon::Search,
                     Action::OpenEditor => chrome::ChromeIcon::OpenFile,
                     _ => chrome::ChromeIcon::Notifications,
@@ -358,6 +360,7 @@ impl App {
                 Action::ShowFiles=>("files",None,None,None,false),
                 Action::Worktrees=>("worktrees",None,None,None,false),
                 Action::Usage=>("usage",None,None,None,false),
+                Action::Sessions=>("sessions",None,None,None,false),
                 Action::SearchAll=>("search_all",None,None,None,false),
                 Action::OpenEditor=>("open_file",None,None,None,false),
                 Action::Notifications=>("notifications",None,None,None,false),

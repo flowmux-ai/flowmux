@@ -105,6 +105,7 @@ pub fn supported() -> &'static [ActionId] {
         ToggleWorktreePanel,
         OpenTig,
         ToggleUsagePopover,
+        ToggleSessionPanel,
     ]
 }
 
@@ -477,7 +478,7 @@ mod tests {
     fn defaults_aliases_conflicts_reserved_and_unbind_are_validated() {
         let defaults = KeybindingOverrides::default();
         let bindings = resolved(&defaults).unwrap();
-        assert_eq!(bindings.len(), 33);
+        assert_eq!(bindings.len(), 34);
         assert!(bindings.iter().any(|binding| binding.action == "new-window"
             && binding.chord == parse("Ctrl+Shift+N").unwrap()));
         let palette = bindings
@@ -492,7 +493,7 @@ mod tests {
         assert!(change(
             &defaults,
             &Op::Set(SetArgs {
-                action: ActionId::ToggleSessionPanel.as_str().into(),
+                action: ActionId::CopyPanePath.as_str().into(),
                 accels: vec!["Ctrl+Alt+Y".into()],
                 expected: Some(defaults.clone()),
             })
@@ -530,7 +531,7 @@ mod tests {
         assert!(change(&defaults, &set(vec!["Ctrl+N"])).is_err());
         assert!(change(&defaults, &set(vec!["Ctrl+Alt+K", "<Ctrl><Alt>k"])).is_err());
         let unbound = change(&defaults, &set(vec![])).unwrap();
-        assert_eq!(resolved(&unbound).unwrap().len(), 32);
+        assert_eq!(resolved(&unbound).unwrap().len(), 33);
         assert!(change(&unbound, &set(vec!["Ctrl+Alt+K"])).is_err());
         assert_eq!(
             change(

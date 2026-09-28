@@ -75,6 +75,10 @@ mod panes;
 mod paste;
 #[path = "search.rs"]
 mod search;
+#[path = "session_panel.rs"]
+mod session_panel;
+#[path = "sessions.rs"]
+mod sessions;
 #[path = "shells.rs"]
 mod shells;
 #[path = "ssh.rs"]
@@ -143,6 +147,7 @@ enum Event {
     Metadata(Uuid, workspaces::EditAction),
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
+    Sessions(sessions::Signal),
     UsageUi(usage_panel::UiAction),
     UsageResult([crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
@@ -457,6 +462,7 @@ enum Action {
     NewBrowser,
     Notifications,
     Usage,
+    Sessions,
     Settings,
     CommandPalette,
     Overview,
@@ -519,6 +525,7 @@ struct PendingSave {
 }
 struct App {
     shells: HashMap<SurfaceId, crate::shell::Shell>,
+    startup_shells: HashMap<SurfaceId, crate::shell::Shell>,
     settings_worker: settings_store::Worker,
     settings: crate::settings::Document,
     settings_error: Option<String>,
@@ -590,6 +597,7 @@ struct App {
     browser_find: browser::find::Controller,
     notifications: notifications::Controller,
     usage: usage::Controller,
+    sessions: sessions::Controller,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -799,6 +807,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             last_new_window_pid: None,
             ssh_auth_window: None,
             shells,
+            startup_shells: HashMap::new(),
             settings_worker,
             settings,
             settings_error,
@@ -862,6 +871,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             browser_find: browser::find::Controller::default(),
             notifications: notifications::Controller::default(),
             usage: usage::Controller::default(),
+            sessions: sessions::Controller::default(),
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -896,6 +906,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.focus_active()?;
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.sessions.shutdown();
         app.usage.shutdown();
         app.worktrees.shutdown();
         app.files_shutdown();
@@ -988,6 +999,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
                 && !app.usage.handle_message(&message)
+                && !app.sessions.handle_message(&message)
                 && !app.downloads.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
                 && !app
@@ -1043,6 +1055,7 @@ impl App {
                 | Action::CommandPalette
                 | Action::Notifications
                 | Action::Usage
+                | Action::Sessions
                 | Action::SidebarScroll(_)
                 | Action::EmptyState
         )
@@ -1106,6 +1119,7 @@ impl App {
             ("Open file", Action::OpenEditor),
             ("Notices", Action::Notifications),
             ("AI usage (Ctrl+Alt+U)", Action::Usage),
+            ("Agent sessions (Ctrl+Alt+J)", Action::Sessions),
             ("Previous", Action::SidebarScroll(-1)),
             ("Next", Action::SidebarScroll(1)),
         ] {
@@ -1417,6 +1431,7 @@ impl App {
         let bar = px(28);
         self.files_reconcile();
         self.worktrees_reconcile()?;
+        self.sessions_reconcile()?;
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
         if let Some(pane) = self.zoomed {
             geometry.panes = vec![(pane, content)];
@@ -1432,14 +1447,21 @@ impl App {
             geometry.dividers.clear();
         }
         let view_areas = geometry.panes.clone();
+        let sessions_width = self.sessions_width((client.right - content.x - px(4)).max(1), scale);
+        self.sessions_layout((sessions_width > 0).then_some(model::Rect {
+            x: client.right - px(4) - sessions_width,
+            y: content.y,
+            width: sessions_width,
+            height: content.height,
+        }));
         let dock_width = self.files_dock_width(
             self.active_workspace,
-            (client.right - content.x - px(4)).max(1),
+            (client.right - content.x - px(4) - sessions_width).max(1),
             scale,
         );
         self.files_layout(
             (dock_width > 0).then_some(model::Rect {
-                x: client.right - px(4) - dock_width,
+                x: client.right - px(4) - sessions_width - dock_width,
                 y: content.y,
                 width: dock_width,
                 height: content.height,
@@ -1447,13 +1469,13 @@ impl App {
             scale,
         )?;
         let worktrees_width = self.worktrees_width(
-            (client.right - content.x - px(4) - dock_width).max(1),
+            (client.right - content.x - px(4) - sessions_width - dock_width).max(1),
             scale,
         );
         self.usage_layout(client, sidebar + px(4));
         self.worktrees_layout(
             (worktrees_width > 0).then_some(model::Rect {
-                x: client.right - px(4) - dock_width - worktrees_width,
+                x: client.right - px(4) - sessions_width - dock_width - worktrees_width,
                 y: content.y,
                 width: worktrees_width,
                 height: content.height,
@@ -1576,8 +1598,14 @@ impl App {
                 Action::NewWorkspace => {
                     (sidebar >= px(36)).then_some((px(4), px(5), px(28), px(28)))
                 }
-                Action::WorkspaceMenu => {
-                    (sidebar >= px(100)).then_some((px(36), px(5), sidebar - px(72), px(28)))
+                Action::WorkspaceMenu => (sidebar >= px(100)).then_some((
+                    px(36),
+                    px(5),
+                    sidebar - px(if sidebar >= px(132) { 104 } else { 72 }),
+                    px(28),
+                )),
+                Action::Sessions => {
+                    (sidebar >= px(132)).then_some((sidebar - px(64), px(5), px(28), px(28)))
                 }
                 Action::Notifications => {
                     (sidebar >= px(64)).then_some((sidebar - px(32), px(5), px(28), px(28)))
@@ -1872,6 +1900,7 @@ impl App {
             Event::Browser(event) => self.browser_event(event)?,
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
+            Event::Sessions(signal) => self.sessions_event(signal)?,
             Event::UsageUi(action) => self.usage_ui(action)?,
             Event::UsageResult(results) => self.usage_result(results)?,
             Event::Activated => {
@@ -1937,6 +1966,7 @@ impl App {
             Event::ContextMenu(..) => {}
             Event::Tick => {
                 self.usage_tick()?;
+                self.sessions_reconcile()?;
                 self.worktrees_reconcile()?;
                 self.ssh_ports_tick()?;
                 #[cfg(debug_assertions)]
@@ -2561,7 +2591,10 @@ impl App {
             self.shells.insert(id, shell);
         }
         let generation = Uuid::new_v4();
-        let mut shell = self.shells[&id].clone();
+        let mut shell = self
+            .startup_shells
+            .remove(&id)
+            .unwrap_or_else(|| self.shells[&id].clone());
         if remote {
             let command = shell.args.last_mut().context("SSH bootstrap is missing")?;
             *command = format!("printf '\\033]777;flowmux-ssh-ready;{generation}\\007'; {command}");
@@ -3072,6 +3105,7 @@ impl App {
         self.browser_cancel(surface, "browser closed during script request");
         self.browsers.remove(&surface);
         self.shells.remove(&surface);
+        self.startup_shells.remove(&surface);
         self.ssh_attempted.remove(&surface);
         self.surfaces.remove(&surface);
         if self
@@ -3211,6 +3245,7 @@ impl App {
             Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Usage => return self.toggle_usage(),
+            Action::Sessions => return self.toggle_sessions(),
             Action::Settings => return self.settings_menu(),
             Action::CommandPalette => {
                 return self.command_palette_ui(command_palette::UiAction::Show)
@@ -3488,6 +3523,7 @@ impl App {
                     })
                     .or_else(|| self.overview_capture_window())
                     .or_else(|| self.usage.capture_window())
+                    .or_else(|| self.sessions.capture_window())
                 {
                     chrome::capture_subtree(window, &path)
                 } else {
@@ -3514,7 +3550,7 @@ impl App {
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
-                        "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),"usage":self.usage.status(),
+                        "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),"usage":self.usage.status(),"agent_sessions":self.sessions.status(),
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),

@@ -258,6 +258,7 @@ pub(super) enum ChromeIcon {
     Files,
     Worktrees,
     Usage,
+    Sessions,
     Search,
     CommandPalette,
     OpenFile,
@@ -1411,6 +1412,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     ] {
                         line(a, b, c, d);
                     }
+                }
+                ChromeIcon::Sessions => {
+                    Ellipse(item.hDC, x(-7), y(-7), x(7) + 1, y(7) + 1);
+                    line(0, -4, 0, 0);
+                    line(0, 0, 4, 2);
                 }
                 ChromeIcon::Usage => {
                     line(-6, 6, -6, 0);

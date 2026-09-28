@@ -175,6 +175,7 @@ impl App {
                                 | ActionId::NewWindow
                                 | ActionId::QuitApp
                                 | ActionId::ToggleUsagePopover
+                                | ActionId::ToggleSessionPanel
                         ),
                         "No active workspace"
                     );
@@ -312,6 +313,9 @@ impl App {
                         self.action(Action::NewWorkspace)?
                     }
                     Target::Keybinding(ActionId::NewWindow) => self.action(Action::NewWindow)?,
+                    Target::Keybinding(ActionId::ToggleSessionPanel) => {
+                        self.action(Action::Sessions)?
+                    }
                     Target::Keybinding(ActionId::ToggleUsagePopover) => {
                         self.action(Action::Usage)?
                     }

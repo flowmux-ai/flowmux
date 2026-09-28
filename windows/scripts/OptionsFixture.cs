@@ -83,6 +83,7 @@ public static class OptionsFixture {
     // Exercises only the app's message guard, not OS IME/TSF composition behavior.
     public static void CompositionGuard(long parent,long child,int owner,bool active) {var hwnd=Child(parent,child,owner);Message(hwnd,active?0x10DU:0x10EU,IntPtr.Zero,IntPtr.Zero);Owned(parent,owner);}
     public static void Scroll(long window,int owner,bool end) {Message(Owned(window,owner),0x115,new IntPtr(end?7:6),IntPtr.Zero);}
+    public static int EditFirstVisibleLine(long window,int owner) {return Message(Owned(window,owner),0xCE,IntPtr.Zero,IntPtr.Zero).ToInt32();}
     public static void ScrollPage(long window,int owner,bool down) {Message(Owned(window,owner),0x115,new IntPtr(down?3:2),IntPtr.Zero);}
     public static void ScrollLine(long window,int owner,bool down) {Message(Owned(window,owner),0x115,new IntPtr(down?1:0),IntPtr.Zero);}
     // Direct owned-window messages exercise capture dispatch without physical

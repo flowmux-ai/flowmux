@@ -136,12 +136,13 @@ impl App {
         let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
         let ssh_bar = self.ssh_toolbar_height(workspace, client.right);
         let available = (client.right - sidebar - px(8)).max(1);
-        let files_width = self.files_dock_width(workspace, available, scale);
-        let worktrees_width = self.worktrees_width(available - files_width, scale);
+        let sessions_width = self.sessions_width(available, scale);
+        let files_width = self.files_dock_width(workspace, available - sessions_width, scale);
+        let worktrees_width = self.worktrees_width(available - sessions_width - files_width, scale);
         let content = model::Rect {
             x: sidebar + px(4),
             y: px(4) + ssh_bar,
-            width: (available - files_width - worktrees_width).max(1),
+            width: (available - sessions_width - files_width - worktrees_width).max(1),
             height: (client.bottom - px(8) - ssh_bar - self.usage_height(client.bottom)).max(1),
         };
         let mut geometry = model::Layout::default();

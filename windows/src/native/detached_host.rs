@@ -360,6 +360,7 @@ impl App {
         self.cancel_drag();
         self.files_shutdown();
         self.usage.shutdown();
+        self.sessions.shutdown();
         self.editor_cancel_opens(None, "main window closed before editor Open completed");
         self.options.take();
         self.workspace_close.take();

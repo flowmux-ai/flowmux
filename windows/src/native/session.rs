@@ -161,6 +161,9 @@ fn pipe() -> anyhow::Result<(OwnedHandle, OwnedHandle)> {
 }
 
 impl Session {
+    pub(super) fn process_job(&self) -> Arc<OwnedHandle> {
+        self.job.clone()
+    }
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(

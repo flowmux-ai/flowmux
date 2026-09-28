@@ -34,6 +34,7 @@ pub mod paste;
 pub mod protocol;
 pub mod screen;
 pub mod selection;
+pub mod session_history;
 pub mod settings;
 pub mod shell;
 pub mod ssh;
