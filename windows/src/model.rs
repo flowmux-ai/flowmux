@@ -272,6 +272,57 @@ pub fn move_surface(
     Ok(target_ws)
 }
 
+/// Split beside an existing pane and relocate the same surface into its new
+/// sibling. Commit a complete candidate layout so errors cannot leave an empty
+/// destination behind. Splitting a pane's sole tab onto itself is a no-op.
+pub fn split_move_surface(
+    workspaces: &mut Vec<Workspace>,
+    surface: SurfaceId,
+    target: PaneId,
+    direction: SplitDirection,
+) -> anyhow::Result<usize> {
+    let (source_ws, source_pane, source_count) = workspaces
+        .iter()
+        .enumerate()
+        .find_map(|(index, workspace)| {
+            workspace.leaves().into_iter().find_map(|(pane, _, tabs)| {
+                tabs.iter()
+                    .any(|tab| tab.id == surface)
+                    .then_some((index, pane, tabs.len()))
+            })
+        })
+        .context("source surface not found")?;
+    let target_ws = workspaces
+        .iter()
+        .position(|workspace| {
+            matches!(
+                workspace.root.find_leaf_content(target),
+                Some(PaneContent::Tabs { .. })
+            )
+        })
+        .context("destination pane not found")?;
+    if source_pane == target && source_count == 1 {
+        return Ok(source_ws);
+    }
+
+    let mut candidate = workspaces.clone();
+    let sibling = candidate[target_ws]
+        .root
+        .split_leaf(
+            target,
+            direction,
+            0.5,
+            PaneContent::Tabs {
+                active: surface,
+                surfaces: Vec::new(),
+            },
+        )
+        .context("destination pane disappeared")?;
+    let active = move_surface(&mut candidate, surface, sibling, 0)?;
+    *workspaces = candidate;
+    Ok(active)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Rect {
     pub x: i32,
@@ -587,6 +638,117 @@ mod tests {
         let surface = workspaces[0].active();
         assert!(move_surface(&mut workspaces, surface, PaneId::new(), 0).is_err());
         assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+    }
+
+    #[test]
+    fn split_move_retains_original_pane_and_surface_in_both_directions() {
+        for direction in [SplitDirection::Vertical, SplitDirection::Horizontal] {
+            let mut workspaces = vec![Workspace::new("한글-project".into())];
+            let target = workspaces[0].focused;
+            let original = workspaces[0].active();
+            let moved = workspaces[0].new_tab();
+            let before = workspaces[0].leaves()[0].2[1].clone();
+            assert_eq!(
+                split_move_surface(&mut workspaces, moved, target, direction).unwrap(),
+                0
+            );
+            let workspace = &workspaces[0];
+            let flowmux_core::Pane::Split {
+                first,
+                second,
+                direction: actual,
+                ratio,
+                ..
+            } = &workspace.root
+            else {
+                panic!("expected split");
+            };
+            assert_eq!(*actual, direction);
+            assert_eq!(*ratio, 0.5);
+            assert_eq!(first.first_leaf_id(), Some(target));
+            assert_eq!(first.active_surface_id(target), Some(original));
+            let sibling = second.first_leaf_id().unwrap();
+            assert_ne!(sibling, target);
+            assert_eq!(workspace.focused, sibling);
+            assert_eq!(workspace.active(), moved);
+            let tabs = workspace
+                .leaves()
+                .into_iter()
+                .find(|(pane, _, _)| *pane == sibling)
+                .unwrap()
+                .2;
+            assert_eq!(tabs.len(), 1);
+            assert_eq!(
+                serde_json::to_value(&tabs[0]).unwrap(),
+                serde_json::to_value(&before).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn split_move_is_atomic_and_collapses_last_source_pane_or_workspace() {
+        let mut workspaces = vec![Workspace::new("source".into())];
+        let source = workspaces[0].active();
+        let source_pane = workspaces[0].focused;
+        let before = serde_json::to_value(&workspaces).unwrap();
+        assert!(split_move_surface(
+            &mut workspaces,
+            source,
+            PaneId::new(),
+            SplitDirection::Vertical
+        )
+        .is_err());
+        assert!(split_move_surface(
+            &mut workspaces,
+            SurfaceId::new(),
+            source_pane,
+            SplitDirection::Vertical
+        )
+        .is_err());
+        assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+        assert_eq!(
+            split_move_surface(
+                &mut workspaces,
+                source,
+                source_pane,
+                SplitDirection::Vertical
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
+
+        workspaces.push(Workspace::new("target".into()));
+        let target_workspace = workspaces[1].id;
+        let target = workspaces[1].focused;
+        let target_surface = workspaces[1].active();
+        assert_eq!(
+            split_move_surface(&mut workspaces, source, target, SplitDirection::Horizontal)
+                .unwrap(),
+            0
+        );
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(workspaces[0].id, target_workspace);
+        assert_eq!(
+            workspaces[0].root.active_surface_id(target),
+            Some(target_surface)
+        );
+        let moved_pane = workspaces[0].focused;
+        assert_eq!(
+            workspaces[0].root.terminal_surface_cwd(moved_pane),
+            Some("source".into())
+        );
+        assert_eq!(
+            split_move_surface(&mut workspaces, source, target, SplitDirection::Vertical).unwrap(),
+            0
+        );
+        assert_eq!(workspaces[0].leaves().len(), 2);
+        assert!(workspaces[0].root.find_leaf_content(moved_pane).is_none());
+        assert_eq!(
+            workspaces[0].root.active_surface_id(target),
+            Some(target_surface)
+        );
+        assert_eq!(workspaces[0].active(), source);
     }
 
     #[test]

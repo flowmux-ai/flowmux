@@ -102,6 +102,7 @@ struct TabDrop {
     pane: PaneId,
     index: usize,
     marker: Option<(HWND, bool)>,
+    split: Option<(SplitDirection, model::Rect)>,
 }
 
 impl App {
@@ -144,6 +145,9 @@ impl App {
     pub(super) fn cancel_drag(&mut self) {
         self.drag = None;
         chrome::set_tab_drop(None);
+        if let Some(preview) = &mut self.drop_preview {
+            preview.hide();
+        }
         unsafe {
             if !self.background_test && GetCapture() == self.window {
                 ReleaseCapture();
@@ -275,10 +279,34 @@ impl App {
                     });
                     let target = moved.then(|| self.tab_drop_target(x, y)).flatten();
                     chrome::set_tab_drop(target.as_ref().and_then(|target| target.marker));
+                    if let Some((direction, rect)) = target.as_ref().and_then(|target| target.split)
+                    {
+                        if self.drop_preview.is_none() {
+                            self.drop_preview = Some(chrome::DropPreview::new(self.window)?);
+                        }
+                        self.drop_preview.as_mut().unwrap().show(
+                            target.as_ref().unwrap().pane,
+                            direction,
+                            rect,
+                            self.background_test,
+                        )?;
+                    } else if let Some(preview) = &mut self.drop_preview {
+                        preview.hide();
+                    }
                     if matches!(pointer, Pointer::Up(..)) {
                         self.cancel_drag();
                         if moved {
                             if let Some(target) = target {
+                                if let Some((direction, _)) = target.split {
+                                    self.active_workspace = model::split_move_surface(
+                                        &mut self.workspaces,
+                                        surface,
+                                        target.pane,
+                                        direction,
+                                    )?;
+                                    self.zoomed = None;
+                                    return self.rebuild();
+                                }
                                 let source_index = self
                                     .workspace()
                                     .leaves()
@@ -435,6 +463,7 @@ impl App {
                     return Some(TabDrop {
                         pane,
                         index: index + usize::from(!before),
+                        split: None,
                         marker: Some((
                             if before {
                                 control.hwnd
@@ -454,6 +483,7 @@ impl App {
                         pane: workspace.focused,
                         index: workspace.root.surface_count(workspace.focused)?,
                         marker: Some((control.hwnd, false)),
+                        split: None,
                     });
                 }
                 _ => {}
@@ -462,14 +492,33 @@ impl App {
         let bar =
             (28.0 * unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0).round() as i32;
         self.pane_layout.panes.iter().find_map(|(pane, rect)| {
-            (rect.contains(x, y) && y >= rect.y + bar).then(|| TabDrop {
+            let body = model::Rect { y: rect.y + bar, height: rect.height - bar, ..*rect };
+            if !body.contains(x, y) { return None; }
+            // Match Linux: lower half splits down, upper-right splits right,
+            // upper-left appends a tab. The preview covers the new sibling.
+            let split = if y >= body.y + body.height / 2 {
+                Some((SplitDirection::Horizontal, model::Rect {
+                    y: body.y + body.height / 2, height: body.height - body.height / 2, ..body
+                }))
+            } else if x >= body.x + body.width / 2 {
+                Some((SplitDirection::Vertical, model::Rect {
+                    x: body.x + body.width / 2, width: body.width - body.width / 2, ..body
+                }))
+            } else { None };
+            if split.is_some() && (body.width < 2 || body.height < 2 ||
+                matches!(self.drag, Some(Drag::Tab { pane: source, .. }) if source == *pane)
+                    && self.workspace().root.surface_count(*pane) == Some(1)) {
+                return None;
+            }
+            Some(TabDrop {
                 pane: *pane,
                 index: self.workspace().root.surface_count(*pane).unwrap_or(0),
-                marker: self.controls.iter()
+                split,
+                marker: if split.is_some() { None } else { self.controls.iter()
                     .filter(|control| matches!(control.action, Action::Tab(id, _) | Action::TabClose(id, _) if id == *pane))
                     .filter_map(|control| self.tab_control_rect(control.hwnd).map(|rect| (control.hwnd, rect)))
                     .max_by_key(|(_, rect)| rect.x + rect.width)
-                    .map(|(window, _)| (window, false)),
+                    .map(|(window, _)| (window, false)) },
             })
         })
     }

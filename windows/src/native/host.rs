@@ -263,6 +263,10 @@ unsafe extern "system" fn window_proc(
             post(Event::Pointer(panes::Pointer::Cancel));
             DefWindowProcW(window, message, wparam, lparam)
         }
+        WM_MOVE => {
+            post(Event::Pointer(panes::Pointer::Cancel));
+            DefWindowProcW(window, message, wparam, lparam)
+        }
         WM_SETCURSOR if lparam as u16 == HTCLIENT as u16 => {
             if panes::set_cursor(window) {
                 1
@@ -468,6 +472,7 @@ struct App {
     pane_layout: model::Layout,
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
+    drop_preview: Option<chrome::DropPreview>,
     metadata: Option<workspaces::Panel>,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
@@ -689,6 +694,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pane_layout: model::Layout::default(),
             zoomed: None,
             drag: None,
+            drop_preview: None,
             metadata: None,
             options: None,
             command_palette: command_palette::Controller::default(),

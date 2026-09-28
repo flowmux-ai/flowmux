@@ -31,6 +31,138 @@ pub(super) fn set_tab_drop(target: Option<(HWND, bool)>) {
         }
     }
 }
+
+// A non-activating owned popup paints above WebView2 without changing its focus
+// or requiring a Windows-8-aware manifest for layered child windows.
+pub(super) struct DropPreview {
+    window: HWND,
+    owner: HWND,
+    rect: model::Rect,
+    pane: PaneId,
+    direction: SplitDirection,
+    active: bool,
+}
+impl DropPreview {
+    pub(super) fn new(owner: HWND) -> anyhow::Result<Self> {
+        unsafe {
+            let instance = GetModuleHandleW(std::ptr::null());
+            let class = wide("flowmux-tab-drop-preview");
+            let spec = WNDCLASSW {
+                lpfnWndProc: Some(drop_preview_proc),
+                hInstance: instance,
+                lpszClassName: class.as_ptr(),
+                ..std::mem::zeroed()
+            };
+            anyhow::ensure!(
+                RegisterClassW(&spec) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS,
+                "cannot register tab drop preview"
+            );
+            let window = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                class.as_ptr(),
+                wide("").as_ptr(),
+                WS_POPUP | WS_DISABLED,
+                0,
+                0,
+                1,
+                1,
+                owner,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null(),
+            );
+            anyhow::ensure!(!window.is_null(), "cannot create tab drop preview");
+            let preview = Self {
+                window,
+                owner,
+                rect: model::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                pane: PaneId::new(),
+                direction: SplitDirection::Vertical,
+                active: false,
+            };
+            checked(SetLayeredWindowAttributes(window, 0, 26, LWA_ALPHA))?;
+            Ok(preview)
+        }
+    }
+    pub(super) fn show(
+        &mut self,
+        pane: PaneId,
+        direction: SplitDirection,
+        rect: model::Rect,
+        background: bool,
+    ) -> anyhow::Result<()> {
+        if self.active && self.rect == rect && self.pane == pane && self.direction == direction {
+            return Ok(());
+        }
+        unsafe {
+            let mut point = POINT {
+                x: rect.x,
+                y: rect.y,
+            };
+            checked(ClientToScreen(self.owner, &mut point))?;
+            checked(SetWindowPos(
+                self.window,
+                HWND_TOP,
+                point.x,
+                point.y,
+                rect.width,
+                rect.height,
+                SWP_NOACTIVATE | if background { 0 } else { SWP_SHOWWINDOW },
+            ))?;
+            InvalidateRect(self.window, std::ptr::null(), 0);
+        }
+        self.rect = rect;
+        self.pane = pane;
+        self.direction = direction;
+        self.active = true;
+        Ok(())
+    }
+    pub(super) fn hide(&mut self) {
+        self.active = false;
+        unsafe {
+            ShowWindow(self.window, SW_HIDE);
+        }
+    }
+    pub(super) fn diagnostics(&self) -> Value {
+        json!({"window":self.window as usize,"rect":self.rect,"pane":self.pane,
+            "zone":if self.direction==SplitDirection::Vertical {"right"}else{"down"},
+            "active":self.active,"native_visible":unsafe{IsWindowVisible(self.window)!=0}})
+    }
+}
+impl Drop for DropPreview {
+    fn drop(&mut self) {
+        unsafe {
+            DestroyWindow(self.window);
+        }
+    }
+}
+unsafe extern "system" fn drop_preview_proc(
+    window: HWND,
+    message: u32,
+    w: WPARAM,
+    l: LPARAM,
+) -> LRESULT {
+    match message {
+        WM_NCHITTEST => HTTRANSPARENT as LRESULT,
+        WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
+        WM_ERASEBKGND => 1,
+        WM_PAINT => {
+            let mut paint = PAINTSTRUCT::default();
+            let dc = BeginPaint(window, &mut paint);
+            let mut rect = RECT::default();
+            GetClientRect(window, &mut rect);
+            FillRect(dc, &rect, GetStockObject(WHITE_BRUSH));
+            EndPaint(window, &paint);
+            0
+        }
+        _ => DefWindowProcW(window, message, w, l),
+    }
+}
 // CommCtrl.h TTTOOLINFOW_V2_SIZE ends at lParam. The full structure includes
 // the v6-only lpReserved tail; this host does not require a v6 activation context.
 // Use the supported prefix consistently for add, update and read messages.

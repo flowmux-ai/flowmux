@@ -23,11 +23,24 @@ function Order($Tree,[string]$Id){return (@((Pane $Tree $Id).content.surfaces.id
 function Mapping($Tree){return (@($Tree.workspaces|ForEach-Object {$w=$_.id;Leaves $_.root|ForEach-Object {$w+':'+$_.id+':'+(@($_.content.surfaces.id)-join ',')}})-join ';')}
 function Identities($Tree){return (@($Tree.surfaces|Sort-Object id|ForEach-Object {$_.id.ToString()+':'+$_.pid.ToString()}) -join ',')}
 function Tab($Tree,[string]$Id){$c=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'tab' -and $_.surface -ceq $Id -and $_.layout_visible});Require ($c.Count -eq 1) ('Visible owned tab missing: '+$Id);[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$c[0].handle,$owned.Id)|Out-Null;return $c[0]}
-function Body($Tree,[string]$Id){foreach($entry in $Tree.layout.panes){if($entry[0] -ceq $Id){$r=$entry[1];return @{x=[int]($r.x+$r.width/2);y=[int]($r.y+$r.height/2)}}};throw ('Pane layout missing '+$Id)}
+function Pane-Rect($Tree,[string]$Id){foreach($entry in $Tree.layout.panes){if($entry[0] -ceq $Id){return $entry[1]}};throw ('Pane layout missing '+$Id)}
+function Body-Rect($Tree,[string]$Id){$r=Pane-Rect $Tree $Id;$bar=[int][Math]::Round(28*$Tree.chrome.dpi/96.0,[MidpointRounding]::AwayFromZero);return @{x=$r.x;y=$r.y+$bar;width=$r.width;height=$r.height-$bar}}
+function Body($Tree,[string]$Id,[string]$Zone='append'){$r=Body-Rect $Tree $Id;$fx=if($Zone -ceq 'right'){0.75}else{0.25};$fy=if($Zone -ceq 'down'){0.75}else{0.25};return @{x=[int]($r.x+$r.width*$fx);y=[int]($r.y+$r.height*$fy)}}
+function Location($Tree,[string]$Surface){$found=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|Where-Object {@($_.content.surfaces.id) -ccontains $Surface});Require ($found.Count -eq 1) ('Surface location is ambiguous '+$Surface);return $found[0].id}
+function Topology($Tree){return ($Tree.workspaces|ForEach-Object {@{id=$_.id;root=$_.root}}|ConvertTo-Json -Depth 30 -Compress)}
+function No-Preview($Tree){Require (-not $Tree.chrome.tab_drop_preview -or -not $Tree.chrome.tab_drop_preview.active) 'Split drop preview was not cleared'}
+function Preview($Tree,[string]$Pane,[string]$Zone,$Body){
+    $p=$Tree.chrome.tab_drop_preview;Require ($p -and $p.active -and $p.zone -ceq $Zone -and $p.pane -ceq $Pane -and -not $p.native_visible) 'Wrong or visible split preview'
+    $popup=[OptionsFixture]::Describe([long]$p.window,$owned.Id);Require ($popup.Owner -eq $Tree.window_handle -and -not $popup.Enabled -and [OptionsFixture]::Parent([long]$p.window,$owned.Id) -eq $Tree.window_handle) 'Split preview has another owner or accepts input'
+    $native=[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$p.window,$owned.Id)
+    $expected=if($Zone -ceq 'right'){@{x=$Body.x+[Math]::Floor($Body.width/2);y=$Body.y;width=$Body.width-[Math]::Floor($Body.width/2);height=$Body.height}}else{@{x=$Body.x;y=$Body.y+[Math]::Floor($Body.height/2);width=$Body.width;height=$Body.height-[Math]::Floor($Body.height/2)}}
+    foreach($key in @('x','y','width','height')){Require ([Math]::Abs($p.rect.$key-$expected.$key) -le 1 -and [Math]::Abs($native.$key-$p.rect.$key) -le 1) ('Split preview half-body bounds differ: '+$key)}
+}
+function Split-Drag($Tree,[string]$Source,[string]$Target,[string]$Zone){$body=Body-Rect $Tree $Target;$point=Body $Tree $Target $Zone;$tree=Begin $Tree $Source;Motion $tree $point;$tree=Await {param($t) $t.chrome.tab_drop_preview -and $t.chrome.tab_drop_preview.active};Preview $tree $Target $Zone $body;$tree=Release $tree $point;No-Preview $tree;return $tree}
 function Tab-Point($Tree,[string]$Id,[bool]$After){$c=Tab $Tree $Id;$right=$c.rect.x+$c.rect.width;$close=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'tab_close' -and $_.surface -ceq $Id -and $_.layout_visible});if($close.Count -eq 1){[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$close[0].handle,$owned.Id)|Out-Null;$right=[Math]::Max($right,$close[0].rect.x+$close[0].rect.width)};return @{x=[int]$(if($After){$right-3}else{$c.rect.x+3});y=[int]($c.rect.y+$c.rect.height/2)}}
 function Begin($Tree,[string]$Id){$c=Tab $Tree $Id;$x=[int]($c.rect.width/2);$y=[int]($c.rect.height/2);$script:press=@{x=[int]($c.rect.x+$x);y=[int]($c.rect.y+$y)};[OptionsFixture]::TabPointerDown([long]$Tree.window_handle,[long]$c.handle,$owned.Id,$x,$y);return Await {param($t) $t.chrome.tab_dragging}}
 function Motion($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x200,[int]$Point.x,[int]$Point.y)}
-function Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,[int]$Point.x,[int]$Point.y);return Await {param($t) -not $t.chrome.tab_dragging}}
+function Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,[int]$Point.x,[int]$Point.y);return Await {param($t) -not $t.chrome.tab_dragging -and (-not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active)}}
 function Drag($Tree,[string]$Source,$Point){$tree=Begin $Tree $Source;Motion $tree $Point;return Release $tree $Point}
 function Stable($Tree){Require ((Identities $Tree) -ceq $identities) 'Tab drag replaced a terminal process';foreach($item in $names.GetEnumerator()){$tabs=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces}|Where-Object {$_.id -ceq $item.Key});Require ($tabs.Count -eq 1 -and $tabs[0].title -ceq $item.Value) 'Drag changed a Unicode title or lost a tab'}}
 function Passed([string]$Name){$script:checks+=$Name}
@@ -79,6 +92,25 @@ try {
     $point=Tab-Point $tree $f.surface $false;$tree=Begin $tree $c.surface;Motion $tree $point
     Request @('move-tab',$c.surface,'--to-pane',$a.pane)|Out-Null;$tree=Await {param($t) -not $t.chrome.tab_dragging};$afterMutation=Mapping $tree;$tree=Release $tree $point
     Require ((Mapping $tree) -ceq $afterMutation -and (Order $tree $a.pane) -ceq (@($a.surface,$b.surface,$d.surface,$c.surface)-join ',')) 'Stale pointer release overrode a structural mutation';Stable $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'stale-rebuild-cancel-and-Unicode-PID-output-preservation'
+
+    # Split the original pane using its existing live tabs; no extra PTYs.
+    $tree=Split-Drag $tree $c.surface $a.pane 'right';$right=Location $tree $c.surface;$ws=@($tree.workspaces|Where-Object {$_.id -ceq $a.workspace})[0]
+    Require ($right -cne $a.pane -and @($tree.layout.panes).Count -eq 2 -and $ws.root.direction -ceq 'vertical' -and $ws.root.first.id -ceq $a.pane -and $ws.root.second.id -ceq $right -and (Order $tree $right) -ceq $c.surface -and (Order $tree $a.pane) -ceq (@($a.surface,$b.surface,$d.surface)-join ',')) 'Same-pane right split has wrong identities or structure'
+    Request @('focus-tab',$b.surface)|Out-Null;$tree=Tree;$tree=Split-Drag $tree $b.surface $a.pane 'down';$down=Location $tree $b.surface;$ws=@($tree.workspaces|Where-Object {$_.id -ceq $a.workspace})[0]
+    Require (@($tree.layout.panes).Count -eq 3 -and $ws.root.direction -ceq 'vertical' -and $ws.root.first.direction -ceq 'horizontal' -and $ws.root.first.first.id -ceq $a.pane -and $ws.root.first.second.id -ceq $down -and $ws.root.second.id -ceq $right -and (Order $tree $a.pane) -ceq (@($a.surface,$d.surface)-join ',')) 'Nested down split has wrong ordering or nesting';Stable $tree;Passed 'same-pane-right-and-nested-down-splits-with-owned-half-body-preview'
+
+    $tree=Split-Drag $tree $c.surface $a.pane 'right';$relocated=Location $tree $c.surface;$ws=@($tree.workspaces|Where-Object {$_.id -ceq $a.workspace})[0]
+    Require (@($tree.layout.panes).Count -eq 3 -and @($tree.workspaces|ForEach-Object {Leaves $_.root}|Where-Object {$_.id -ceq $right}).Count -eq 0 -and $relocated -cne $right -and $ws.root.direction -ceq 'horizontal' -and $ws.root.first.direction -ceq 'vertical' -and $ws.root.first.first.id -ceq $a.pane -and $ws.root.first.second.id -ceq $relocated -and $ws.root.second.id -ceq $down) 'Sole source tab split did not collapse its original pane'
+    Request @('focus-tab',$b.surface)|Out-Null;$tree=Tree;$before=Topology $tree
+    foreach($zone in @('right','down')){$point=Body $tree $down $zone;$tree=Begin $tree $b.surface;Motion $tree $point;$tree=Tree;No-Preview $tree;$tree=Release $tree $point;Require ((Topology $tree) -ceq $before) 'Single-tab self split mutated the model'}
+    Stable $tree;Passed 'other-pane-sole-source-collapse-and-single-tab-self-split-noop'
+
+    Request @('focus-tab',$d.surface)|Out-Null;$tree=Tree
+    foreach($cancel in @('escape','cancelmode','outside')){
+        $before=Topology $tree;$body=Body-Rect $tree $a.pane;$point=Body $tree $a.pane 'right';$tree=Begin $tree $d.surface;Motion $tree $point;$tree=Await {param($t) $t.chrome.tab_drop_preview -and $t.chrome.tab_drop_preview.active};Preview $tree $a.pane 'right' $body
+        if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}elseif($cancel -ceq 'cancelmode'){[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x1f,0,0)}else{$point=@{x=-20;y=-20};Motion $tree $point}
+        $tree=Await {param($t) -not $t.chrome.tab_drop_preview -or -not $t.chrome.tab_drop_preview.active};$tree=Release $tree $point;No-Preview $tree;Require ((Topology $tree) -ceq $before) ('Split preview cancellation changed model: '+$cancel)
+    };Stable $tree;Screen-Contains $a.surface $marker;Screen-Contains $c.surface $marker;Passed 'split-preview-Escape-cancel-outside-cleanup-and-Unicode-output-preservation'
 }catch{$failure=$_.Exception.Message}
 finally{
     $cleaning=$true
