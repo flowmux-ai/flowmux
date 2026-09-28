@@ -1,0 +1,13 @@
+{
+  "name": "popups-regression-downloads-shutdown",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\popups-downloads-shutdown.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T01:58:56.2397487Z",
+  "pid": 37776,
+  "exitCode": 0,
+  "activeBeforeCleanup": 2,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 3.452,
+  "finished": "2026-09-28T01:58:59.6949214Z"
+}

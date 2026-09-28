@@ -1,0 +1,13 @@
+{
+  "name": "popups-regression-browser-actions",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-browser-actions.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T01:57:14.0289418Z",
+  "pid": 39688,
+  "exitCode": 0,
+  "activeBeforeCleanup": 4,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 12.242,
+  "finished": "2026-09-28T01:57:26.2740047Z"
+}

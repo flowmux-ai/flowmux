@@ -1,0 +1,13 @@
+{
+    "name":  "popups-source-pin-gated",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\popups-source-pin.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T01:52:16.8780206Z",
+    "pid":  9388,
+    "exitCode":  0,
+    "activeBeforeCleanup":  3,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  3.892,
+    "finished":  "2026-09-28T01:52:20.7743227Z"
+}

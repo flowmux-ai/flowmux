@@ -385,7 +385,7 @@ without waiting for nonexistent terminal history callbacks. Terminal-only action
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
 B01/B02/B03/B04/B05/B06/B07/B08/B09/B10/B11 and G09 are partial.
-Popups, full browser find acceptance, DevTools, private/profile controls, bookmarks, cookie import,
+Remaining popup validation, full browser find acceptance, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
 failure recovery, isolation, move identity, mixed checkpoints and browser-only
@@ -460,3 +460,32 @@ matching can differ from the original query, and shadow/text-control range
 cleanup is deliberately conservative. Physical IME/UI, Find API parity and
 remaining B11 browser controls remain pending. See
 [page-find evidence](evidence/2026-09-28/browser-find.md).
+
+Windows browser new-window requests now have native popup-to-tab routing. A
+UI-thread-owned deferral attaches a fresh, never-navigated child through
+`SetNewWindow`, using the opener's actual WebView2 environment and browser profile.
+No URL/HTML initialization or separate navigation substitutes for the native
+WindowProxy/opener connection. The original SurfaceId determines the destination
+pane, where the child becomes active; terminal bridges remain unavailable.
+Delivered script requests are accepted without a user-gesture restriction under
+the URL, active-source and capacity policy. The host bounds live popup tabs to 16
+and pending requests to eight, including native construction in progress. Epoch,
+visibility-revision, closure and 12-second validity checks reject stale requests;
+the deadline does not interrupt blocked COM creation.
+
+Actual native close events remove the exact browser tab without cascading through
+its children. A workspace's final closed browser is replaced by a new SurfaceId
+and `about:blank` view in the same pane. Opener clearing/closed state and refusal
+to close an ordinary browser remain engine behavior. Native creation/close
+failure recovery, exhaustive deferral races, cross-origin/named-target policy and
+physical UI/IME/DPI/accessibility acceptance remain open. The final hidden debug
+fixture passed 14 groups in 45.107 seconds using owned loopback pages without
+desktop input, foreground activation or clipboard access. Native opener access,
+Unicode URL/blank content, routing, close behavior and bounded capacity have
+[measured results](evidence/2026-09-28/native-browser-popups-background.json);
+the ordinary-browser close case records whether the engine permits closure.
+Release builds, 141 actual Windows unit tests, 49 related native regression
+groups and installer packaging passed; results and remaining limits are in the
+[popup record](evidence/2026-09-28/browser-popups.md).
+B11/G09 remain partial and the browser CLI operation count remains 34. No shared
+Linux/macOS source or acceptance status is changed by this Windows implementation.

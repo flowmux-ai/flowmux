@@ -1,0 +1,129 @@
+{
+    "started":  "2026-09-28T10:47:01.1476772+09:00",
+    "mode":  "background",
+    "case":  "source-close",
+    "checks":  [
+
+               ],
+    "observations":  [
+
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Native deferral pending during move, hide/re-show, navigation or source close is not deterministically forced by the HTTP fixture.",
+                     "The eight-request in-flight limit and twelve-second expiry are not saturated or expired deterministically; sampled bounds and eventual drain are checked.",
+                     "No physical target-link gesture, visible focus, real IME, cross-origin opener policy, external site, renderer crash or shutdown-during-deferral coverage."
+                 ],
+    "sourceClose":  {
+                        "expectedChild":  "b1c4cc47-adb6-49b9-8cf2-a808f3eee384",
+                        "observation":  {
+                                            "documentFocused":  false,
+                                            "hasOpener":  false,
+                                            "host":  "undefined",
+                                            "href":  "http://127.0.0.1:58069/child",
+                                            "identity":  "undefined",
+                                            "ipc":  "undefined",
+                                            "message":  "새 탭 한글 한 é 😀 + \u0026",
+                                            "openerClosed":  null,
+                                            "openerError":  null,
+                                            "openerToken":  null,
+                                            "role":  "child",
+                                            "settings":  "undefined",
+                                            "sourceToken":  "owned_1790560024949_0.33108131585358946"
+                                        },
+                        "expectedChildToken":  "owned_1790560024949_0.33108131585358946",
+                        "actualStatus":  {
+                                             "action_pending":  false,
+                                             "address_handle":  1445034,
+                                             "can_go_back":  false,
+                                             "can_go_forward":  false,
+                                             "captures_pending":  0,
+                                             "chrome_handle":  5245654,
+                                             "find":  {
+                                                          "busy":  false,
+                                                          "found":  null,
+                                                          "panel_handle":  null,
+                                                          "panel_query_handle":  null,
+                                                          "panel_status":  null,
+                                                          "query":  ""
+                                                      },
+                                             "generation":  4,
+                                             "id":  "b1c4cc47-adb6-49b9-8cf2-a808f3eee384",
+                                             "kind":  "browser",
+                                             "loading":  false,
+                                             "native_closed":  false,
+                                             "navigation_error":  null,
+                                             "popup_opener":  "afbf688c-0e4a-4889-9999-6ead724ca932",
+                                             "popup_user_initiated":  true,
+                                             "title":  "Popup child",
+                                             "url":  "http://127.0.0.1:58069/child",
+                                             "view_handle":  33360374,
+                                             "visible":  true,
+                                             "zoom":  1.0
+                                         },
+                        "closedSource":  "afbf688c-0e4a-4889-9999-6ead724ca932"
+                    },
+    "status":  "failed",
+    "error":  "Closing opener cascaded to child or left its native opener open",
+    "requests":  [
+                     "/source",
+                     "/favicon.ico",
+                     "/child",
+                     "/favicon.ico"
+                 ],
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  39596
+              ],
+    "shells":  [
+                   31556
+               ],
+    "clientPids":  [
+                       25828,
+                       27108,
+                       13340,
+                       13476,
+                       21612,
+                       31868,
+                       29436,
+                       21760,
+                       18844,
+                       38916,
+                       27500,
+                       33348,
+                       32484,
+                       32452,
+                       22832,
+                       34288,
+                       22212,
+                       36136,
+                       36312,
+                       39328,
+                       30600,
+                       5012,
+                       33536,
+                       35696,
+                       15388,
+                       30672,
+                       32132,
+                       39676,
+                       29580,
+                       37416,
+                       37716,
+                       10716,
+                       32620,
+                       13848,
+                       31532,
+                       33104,
+                       13872,
+                       19264,
+                       39240,
+                       33728
+                   ],
+    "finished":  "2026-09-28T10:47:05.5311996+09:00"
+}

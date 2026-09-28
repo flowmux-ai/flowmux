@@ -747,12 +747,12 @@ side effects; do not automatically retry them. Navigation IDs protect callbacks
 from earlier documents. Snapshot/ref queries and DOM actions are described below; active-element
 `type`/`press` and asynchronous eval remain pending. PNG capture is described below.
 
-New-window requests are currently denied; downloads use the manager described
-below. DevTools and browser
+New-window requests use the partially supported popup-to-tab implementation
+described below. Downloads use the manager below. DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
 normal runs and are denied in hidden debug tests. Page find is partially supported
-as described below. Custom permission UI, fullscreen/media/login acceptance and
-popup-to-tab routing remain pending. HTTP error pages are pages, while network navigation failures
+as described below. Custom permission UI and fullscreen/media/login acceptance
+remain pending. HTTP error pages are pages, while network navigation failures
 report a WebView2 error code in the native status line. Terminal OSC 8 links now
 open an in-app browser; physical link-click behavior is not yet live-tested.
 
@@ -1074,5 +1074,54 @@ cancellation. The separate startup check passed in 3.067 seconds. Query transpor
 remained exact while the engine matched decomposed `한` to `한` and combining
 `é` to the plain `e` in `needle`; the full `한글 한 é 😀` match retained all
 codepoints. These observations do not establish physical IME behavior or ordinal
-matching by the engine. Remaining build/regression/artifact results are pending
+matching by the engine. Build, regression and artifact results are recorded
 in the linked evidence.
+
+### Browser popup tabs (partial)
+
+Windows handles delivered `window.open` and target-link new-window requests by
+adding an active browser tab to the original source's pane. It does not create a
+separate desktop window. The source must remain the active, logically visible
+browser in the active workspace. HTTP/HTTPS and `about:blank` follow the existing
+URL policy; local files, data/script URLs and the terminal origin are rejected.
+Programmatic requests are admitted under the same bounds without requiring
+`IsUserInitiated` to be true; WebView2 can still block a request before delivery.
+
+The child uses the opener's actual WebView2 environment and browser profile.
+It has no preliminary navigation or HTML load: `SetNewWindow` attaches the fresh
+child before the native deferral completes. The browser runtime retains control
+of WindowProxy/opener behavior, same-origin access and `noopener`; there is no
+URL-only fallback. Popup pages retain the browser's separation from terminal
+scripts, web messaging and host objects.
+
+Each host allows 16 live popup tabs and eight pending requests, including native
+construction in progress. Requests retain their source SurfaceId, navigation
+generation and visibility revision. Navigation, source closure, hiding/re-showing
+or expiry invalidates pending attachment. The 12-second validity budget is checked
+before attachment; it cannot interrupt a blocked native creation call. `tree.popup`
+reports pending/opened/rejected/live counts, limits and the last error. Browser
+status reports `popup_opener`, `popup_user_initiated` and `native_closed`. These
+events add no CLI operations; the Windows browser operation count remains 34.
+
+When the engine delivers `window.close`, flowmux removes that exact browser tab.
+Closing an opener does not cascade through its child tabs; the engine may clear
+the child's opener or report it closed. If the closed browser was a workspace's
+final tab, a fresh `about:blank` browser with a new SurfaceId preserves its pane
+and workspace. The engine may refuse script closure of a manually opened tab.
+Popup ancestry is runtime metadata and is not reconstructed after restart.
+
+The [hidden popup verifier](scripts/verify-browser-popups.ps1) uses owned,
+isolated debug hosts and loopback fixtures. Hidden hosts keep child windows hidden
+and suppress default script dialogs; no desktop input, foreground activation,
+clipboard or real IME operation is part of this verifier. The final hidden native
+suite passed 14 groups in 45.107 seconds, covering native opener access, Unicode
+URL/blank-document content, routing, source/child closure and capacity. The
+ordinary-browser close case records the engine's outcome; it does not assume
+that every script close is allowed. See the
+[native popup result](evidence/2026-09-28/native-browser-popups-background.json).
+Release builds, 141 actual Windows unit tests, 49 related native regression
+groups and installer packaging passed. Results and remaining limits are in the
+[popup implementation and verification record](evidence/2026-09-28/browser-popups.md).
+Named-target reuse, cross-origin/opener policies, requested window geometry,
+exhaustive pending/close/failure races and physical UI/IME/DPI/accessibility
+acceptance remain open. B11 and G09 remain partial.

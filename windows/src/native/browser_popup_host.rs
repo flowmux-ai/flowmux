@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Commit deferred native new-window requests as ordinary browser tabs.
+use super::*;
+use crate::browser_popup as domain;
+use flowmux_core::PaneSurface;
+
+impl App {
+    pub(crate) fn browser_popup_status(&self) -> Value {
+        let mut status = self.browser_popups.status();
+        status["active"] = json!(self
+            .browsers
+            .values()
+            .filter(|b| b.popup_opener.is_some())
+            .count());
+        status["limit"] = json!(domain::MAX_POPUP_TABS);
+        status["pending_limit"] = json!(popup::MAX_PENDING);
+        status
+    }
+    pub(super) fn browser_popup_dispatch(&mut self) {
+        for request in self.browser_popups.drain() {
+            let source = request.surface;
+            if let Err(error) = self.browser_popup_open(request) {
+                let error = format!("{error:#}");
+                self.browser_popups.rejected(&error);
+                if let Some(browser) = self.browsers.get_mut(&source) {
+                    browser.error = Some(error);
+                }
+            }
+        }
+    }
+    fn browser_popup_open(&mut self, mut request: popup::Request) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.close_request.is_none() && !self.closing,
+            "window is closing"
+        );
+        anyhow::ensure!(
+            request.valid(),
+            "popup opener changed, closed or request expired"
+        );
+        domain::admit(
+            self.browsers
+                .values()
+                .filter(|b| b.popup_opener.is_some())
+                .count(),
+        )?;
+        let (index, _, _) = self
+            .locate(request.surface)
+            .context("popup opener no longer exists")?;
+        anyhow::ensure!(
+            index == self.active_workspace,
+            "popup opener workspace is hidden"
+        );
+        let previous = self.workspaces[index].clone();
+        let mut candidate = previous.clone();
+        let opened = domain::open(&mut candidate, request.surface, request.uri.clone())?;
+        let child = Browser::new_in_environment(self, opened.surface, Some(request.environment()));
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                self.browser_cancel(opened.surface, "popup construction failed");
+                return Err(error.context("cannot create popup browser tab"));
+            }
+        };
+        // Construction pumps native callbacks. Do not attach after a navigation,
+        // close or visibility transition which happened during that pump.
+        if !request.valid() {
+            self.browser_cancel(opened.surface, "popup opener changed during construction");
+            drop(child);
+            anyhow::bail!("popup opener changed during browser construction");
+        }
+        child.popup_opener = Some(request.surface);
+        child.popup_user_initiated = Some(request.user_initiated);
+        child.url = opened.url;
+        let core = match unsafe { child.view.controller().CoreWebView2() } {
+            Ok(core) => core,
+            Err(error) => {
+                self.browser_cancel(opened.surface, "popup controller became unavailable");
+                return Err(error.into());
+            }
+        };
+        // Install the model before completing the deferral: completion may cause
+        // navigation or window.close callbacks. There is no separate Navigate.
+        self.workspaces[index] = candidate;
+        self.browsers.insert(opened.surface, child);
+        if let Err(error) = request.attach(&core) {
+            drop(request);
+            drop(core);
+            self.workspaces[index] = previous;
+            self.browser_cancel(opened.surface, "native popup attachment failed");
+            self.browsers.remove(&opened.surface);
+            return Err(error.context("cannot attach native popup"));
+        }
+        drop(core);
+        drop(request);
+        self.browser_popups.opened();
+        self.zoomed = None;
+        // Once attached, a WindowProxy may already refer to the child. Retain it
+        // if a layout update fails instead of undoing a completed native action.
+        if let Err(error) = self.rebuild() {
+            report(&format!("popup tab layout: {error:#}"));
+            if let Some(browser) = self.browsers.get_mut(&opened.surface) {
+                browser.error = Some(format!("Popup opened; layout update failed: {error}"));
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn browser_popup_close(
+        &mut self,
+        id: SurfaceId,
+        instance: Uuid,
+    ) -> anyhow::Result<()> {
+        if self
+            .browsers
+            .get(&id)
+            .is_none_or(|b| b.instance != instance || !b.native_closed.get())
+        {
+            return Ok(());
+        }
+        let (index, pane, _) = self
+            .locate(id)
+            .context("closed browser is missing from layout")?;
+        let mut candidate = self.workspaces[index].clone();
+        let final_tab = candidate
+            .leaves()
+            .iter()
+            .map(|(_, _, tabs)| tabs.len())
+            .sum::<usize>()
+            == 1;
+        // Wry has already destroyed this view's container HWND. Even a refused
+        // final-tab close therefore needs a fresh view and a fresh surface ID.
+        // A new ID also prevents old script/download callbacks reaching it.
+        let replacement = if final_tab {
+            let tab = PaneSurface::browser("Browser", "about:blank".into());
+            let replacement = tab.id;
+            candidate
+                .root
+                .add_surface_to_leaf(pane, tab)
+                .context("final browser pane disappeared")?;
+            domain::close(&mut candidate, id)?;
+            Some(replacement)
+        } else {
+            domain::close(&mut candidate, id)?;
+            None
+        };
+        let focused = index == self.active_workspace && self.active() == id;
+        self.workspaces[index] = candidate;
+        self.remove_surface(id);
+        if self.zoomed == Some(pane)
+            && self.workspaces[index]
+                .root
+                .find_leaf_content(pane)
+                .is_none()
+        {
+            self.zoomed = None;
+        }
+        if let Some(replacement) = replacement {
+            // Drop the destroyed controller before allocating another HWND.
+            // A failed creation is reported; a later explicit structural action
+            // can retry the model's blank browser, without an automatic loop.
+            self.add_browser_view(replacement, "about:blank".into())?;
+        }
+        if focused {
+            self.rebuild()
+        } else {
+            self.rebuild_without_focus()
+        }
+    }
+}

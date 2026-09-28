@@ -526,9 +526,11 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/browser-find.md",
-        "evidence/2026-09-28/native-browser-find-background.json"
+        "evidence/2026-09-28/native-browser-find-background.json",
+        "evidence/2026-09-28/browser-popups.md",
+        "evidence/2026-09-28/native-browser-popups-background.json"
       ],
-      "notes": "Page find now uses the actual engine with next/previous, case/wrap options, a native panel and CLI; eight hidden groups cover Unicode transport, owned selection cleanup, queued dismissal, surface pinning, navigation and closure. Native matching equivalence may differ from query codepoints. Full Find API parity, counts/highlight-all/regex, shadow/text-control selection cleanup, physical IME/UI/DPI/accessibility, new-window/tab policy, DevTools and site-permission UI remain pending."
+      "notes": "Page find now uses the actual engine with next/previous, case/wrap options, a native panel and CLI; eight hidden groups cover Unicode transport, owned selection cleanup, queued dismissal, surface pinning, navigation and closure. Native matching equivalence may differ from query codepoints. Popup routing now attaches a never-navigated child in the opener's actual WebView2 environment through SetNewWindow, creating an active tab in the original source pane. Live/pending bounds are 16/8; stale, hidden, closed and invalid-URL requests are rejected. Native close removes the exact browser and replaces a workspace's final browser with a fresh-ID blank view. Fourteen hidden popup groups passed in 45.107 seconds, including opener/Unicode/routing/close/capacity behavior; the ordinary-browser close case records the engine's outcome. Release builds, 141 actual Windows unit tests, 49 related native regression groups and installer packaging passed; results and remaining limits are tracked in the popup record. Full Find API parity, counts/highlight-all/regex, shadow/text-control selection cleanup, exhaustive popup races and cross-origin/named-target policies, physical IME/UI/DPI/accessibility, DevTools and site-permission UI remain pending."
     },
     {
       "id": "B12",
@@ -975,9 +977,11 @@
         "evidence/2026-09-28/native-browser-actions-background.json",
         "evidence/2026-09-28/native-browser-capture-background.json",
         "evidence/2026-09-28/browser-downloads.md",
-        "evidence/2026-09-28/browser-find.md"
+        "evidence/2026-09-28/browser-find.md",
+        "evidence/2026-09-28/browser-popups.md",
+        "evidence/2026-09-28/native-browser-popups-background.json"
       ],
-      "notes": "Thirty-four Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending. Native download manager/list/cancellation now have partial hidden evidence. Page find and its hidden native panel now have partial engine/Unicode/lifecycle evidence."
+      "notes": "Thirty-four Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending. Native download manager/list/cancellation now have partial hidden evidence. Page find and its hidden native panel now have partial engine/Unicode/lifecycle evidence. Native popup-to-tab routing adds no CLI operations and has fourteen passing hidden groups; release builds, 141 actual Windows unit tests, 49 related native regression groups and installer packaging passed; results and limits are tracked in its evidence record."
     },
     {
       "id": "G10",

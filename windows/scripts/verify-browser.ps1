@@ -19,7 +19,7 @@ function Request([string[]]$Arguments,[int]$Exit=0) {
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(30000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
+        if (-not $p.WaitForExit(5000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
         if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
         if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
         if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
@@ -35,7 +35,7 @@ function Raw-Request($Body) {
         $reader=[IO.StreamReader]::new($stream,(New-Object Text.UTF8Encoding($false)),$false,4096,$true)
         try {
             $writer.WriteLine(($Body|ConvertTo-Json -Depth 10 -Compress));$writer.Flush()
-            $read=$reader.ReadLineAsync();if (-not $read.Wait(20000)) {throw 'Owned browser fixture request timed out; not retried'}
+            $read=$reader.ReadLineAsync();if (-not $read.Wait(5000)) {throw 'Owned browser fixture request timed out; not retried'}
             return ($read.Result|ConvertFrom-Json)
         } finally {$writer.Dispose();$reader.Dispose()}
     } finally {$stream.Dispose()}
@@ -136,11 +136,29 @@ try {
     Request @('browser','eval',$first.pane,'Promise.resolve(1)') 1|Out-Null
     Request @('browser','eval',$first.pane,'throw new Error("한글 오류")') 1|Out-Null
     Request @('browser','eval',$first.pane,'"한".repeat(100000)') 1|Out-Null
-    Eval-Page $first.pane 'window.open("/two");null'|Out-Null
+    $popupResult=Eval-Page $first.pane 'window.fixturePopup=window.open("/two");({returned:window.fixturePopup!==null})'
+    if (-not $popupResult.returned) {throw 'Native popup did not return a WindowProxy'}
+    $deadline=(Get-Date).AddSeconds(8)
+    do {
+        $popupTree=Tree;$children=@($popupTree.browsers|Where-Object {$_.popup_opener -eq $first.surface})
+        if ($children.Count -gt 1 -or @($popupTree.browsers).Count -gt 2) {throw 'One popup request created multiple browser tabs'}
+        if ($children.Count -eq 1 -and $popupTree.popup.pending -eq 0) {break}
+        if ((Get-Date) -gt $deadline) {throw 'Native popup tab did not attach'}
+        Start-Sleep -Milliseconds 50
+    } while ($true)
+    $child=$children[0];$popupStatus=Request @('browser','status',$first.pane)
+    if ($popupStatus.id -ne $child.id -or $popupStatus.popup_opener -ne $first.surface -or @($popupTree.browsers).Count -ne 2) {throw 'Popup did not become the single child tab in its source pane'}
+    Wait-Page $first.pane '/two' $twoTitle|Out-Null
+    if (-not (Eval-Page $first.pane 'window.opener!==null && window.opener.fixturePopup===window')) {throw 'Native popup lost its opener or returned WindowProxy'}
+    Request @('close-tab',$child.id)|Out-Null
+    $afterPopup=Tree;$original=Request @('browser','status',$first.pane)
+    $stableTerminal=@($afterPopup.surfaces|Where-Object {$_.id -eq $terminal.id})
+    if (@($afterPopup.browsers).Count -ne 1 -or $original.id -ne $first.surface -or $original.view_handle -ne $loaded.view_handle -or $original.url -ne ($origin+'/one') -or -not (Eval-Page $first.pane 'window.fixturePopup.closed')) {throw 'Popup close did not restore the original browser tab'}
+    if ($stableTerminal.Count -ne 1 -or $stableTerminal[0].pid -ne $terminal.pid -or -not $stableTerminal[0].running) {throw 'Popup lifecycle changed the original terminal identity or process'}
     foreach ($args in @(@('read-screen','--surface',$first.surface),@('selection','--surface',$first.surface,'read'),@('send-key','Enter','--surface',$first.surface),@('browser','url',$source.pane))) {Request $args 1|Out-Null}
     if ((Request @('identify')).shell) {throw 'Browser advertised a terminal shell'}
     Tree|Out-Null
-    $evidence.checks+=@{name='forbidden_urls_popup_denial_script_errors_and_terminal_target_rejection';passed=$true}
+    $evidence.checks+=@{name='forbidden_urls_popup_tab_lifecycle_script_errors_and_terminal_target_rejection';passed=$true;popup=@{surface=$child.id;opener=$first.surface;pane=$first.pane;returnedWindowProxy=$popupResult.returned;closed=$true}}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     $second=(Request @('browser','open',($origin+'/two'),'--pane',$source.pane)).browser_pane_opened
     if ($second.placement_strategy -ne 'reuse_right_sibling' -or $second.pane -ne $first.pane) {throw 'Right browser pane not reused'}

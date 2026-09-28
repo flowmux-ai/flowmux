@@ -1,0 +1,8 @@
+[check] passed script_url_creates_same_pane_tab_with_native_opener_unicode_and_no_terminal_bridge
+[check] passed dom_target_blank_rel_opener_link_routes_to_browser_tab
+[check] passed native_about_blank_window_proxy_supports_synchronous_unicode_document_write
+[check] passed popup_child_navigation_back_forward_preserve_opener
+[check] passed delayed_dom_request_uses_source_surface_while_another_pane_is_logically_focused
+[check] passed delivered_hidden_tab_and_workspace_popup_requests_rejected_without_activation
+[check] passed popup_after_source_move_uses_current_pane_and_same_native_opener
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\browser-popups-563cf932-7e39-4441-94b6-c8cb12fd9679

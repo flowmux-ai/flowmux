@@ -1,0 +1,136 @@
+[check] passed closing_source_preserves_child_and_clears_or_closes_native_opener
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\browser-popups-179e4d15-b7f3-445d-90e4-9a7cd6682320
+{
+    "started":  "2026-09-28T10:52:02.4046818+09:00",
+    "mode":  "background",
+    "case":  "source-close",
+    "checks":  [
+                   {
+                       "name":  "closing_source_preserves_child_and_clears_or_closes_native_opener",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "case":  "source-close",
+                             "popup":  {
+                                           "active":  1,
+                                           "last_error":  null,
+                                           "limit":  16,
+                                           "opened":  1,
+                                           "pending":  0,
+                                           "pending_limit":  8,
+                                           "rejected":  0
+                                       }
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Native deferral pending during move, hide/re-show, navigation or source close is not deterministically forced by the HTTP fixture.",
+                     "The eight-request in-flight limit and twelve-second expiry are not saturated or expired deterministically; sampled bounds and eventual drain are checked.",
+                     "No physical target-link gesture, visible focus, real IME, cross-origin opener policy, external site, renderer crash or shutdown-during-deferral coverage."
+                 ],
+    "sourceClose":  {
+                        "actualStatus":  {
+                                             "action_pending":  false,
+                                             "address_handle":  920870,
+                                             "can_go_back":  false,
+                                             "can_go_forward":  false,
+                                             "captures_pending":  0,
+                                             "chrome_handle":  4590828,
+                                             "find":  {
+                                                          "busy":  false,
+                                                          "found":  null,
+                                                          "panel_handle":  null,
+                                                          "panel_query_handle":  null,
+                                                          "panel_status":  null,
+                                                          "query":  ""
+                                                      },
+                                             "generation":  4,
+                                             "id":  "0898120c-bcae-4cb5-9b80-cf531d556c99",
+                                             "kind":  "browser",
+                                             "loading":  false,
+                                             "native_closed":  false,
+                                             "navigation_error":  null,
+                                             "popup_opener":  "0be68d23-b3f4-41dc-bc69-7c5ba4d6651f",
+                                             "popup_user_initiated":  true,
+                                             "title":  "Popup child",
+                                             "url":  "http://127.0.0.1:60341/child",
+                                             "view_handle":  33425910,
+                                             "visible":  true,
+                                             "zoom":  1.0
+                                         },
+                        "expectedChild":  "0898120c-bcae-4cb5-9b80-cf531d556c99",
+                        "closedSource":  "0be68d23-b3f4-41dc-bc69-7c5ba4d6651f",
+                        "observation":  {
+                                            "documentFocused":  false,
+                                            "hasOpener":  false,
+                                            "host":  "undefined",
+                                            "href":  "http://127.0.0.1:60341/child",
+                                            "identity":  "undefined",
+                                            "ipc":  "undefined",
+                                            "message":  "새 탭 한글 한 é 😀 + \u0026",
+                                            "openerClosed":  null,
+                                            "openerError":  null,
+                                            "openerToken":  null,
+                                            "role":  "child",
+                                            "settings":  "undefined",
+                                            "sourceToken":  "owned_1790560325317_0.1959128199747886"
+                                        },
+                        "expectedChildToken":  "owned_1790560325317_0.1959128199747886",
+                        "sourceAbsent":  true
+                    },
+    "status":  "passed_background_browser_popups_subset",
+    "requests":  [
+                     "/source",
+                     "/favicon.ico",
+                     "/child",
+                     "/favicon.ico"
+                 ],
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  32860
+              ],
+    "shells":  [
+                   38424
+               ],
+    "clientPids":  [
+                       33100,
+                       36364,
+                       31344,
+                       28844,
+                       15200,
+                       29992,
+                       4744,
+                       39744,
+                       29456,
+                       38692,
+                       38512,
+                       23416,
+                       2484,
+                       20876,
+                       36920,
+                       36972,
+                       27928,
+                       30068,
+                       39264,
+                       37904,
+                       23496,
+                       15568,
+                       26348,
+                       37968,
+                       29788,
+                       38708,
+                       16212,
+                       3708,
+                       27456,
+                       37196,
+                       39180
+                   ],
+    "finished":  "2026-09-28T10:52:06.1090143+09:00"
+}

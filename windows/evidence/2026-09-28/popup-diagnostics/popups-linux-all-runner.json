@@ -1,0 +1,15 @@
+{
+  "name": "popups-linux-all",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--locked"
+  ],
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "pid": 289954,
+  "exitCode": 0,
+  "elapsedSeconds": 10.214
+}

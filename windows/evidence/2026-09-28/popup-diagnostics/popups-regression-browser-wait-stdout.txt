@@ -1,0 +1,67 @@
+[check] passed five_conditions_plain_json_exact_unicode_and_no_input_or_dom_mutation
+[check] passed delayed_dom_and_streaming_loading_interactive_complete_states
+[check] passed timeout_false_invalid_inputs_and_single_runtime_exception_without_replay
+[check] passed navigation_redirect_hidden_surface_pin_and_close_cancellation
+[check] passed bounded_concurrent_waits_keep_other_commands_responsive_and_release_capacity
+[check] passed wait_exceeds_default_server_and_client_deadlines_without_retransmission
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\browser-wait-f0437a1d-728d-4e33-820d-4020b7bd040e
+{
+    "started":  "2026-09-28T10:57:59.0124948+09:00",
+    "mode":  "background",
+    "checks":  [
+                   {
+                       "name":  "five_conditions_plain_json_exact_unicode_and_no_input_or_dom_mutation",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "delayed_dom_and_streaming_loading_interactive_complete_states",
+                       "passed":  true
+                   },
+                   {
+                       "timeoutElapsedMs":  244,
+                       "name":  "timeout_false_invalid_inputs_and_single_runtime_exception_without_replay",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "navigation_redirect_hidden_surface_pin_and_close_cancellation",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "bounded_concurrent_waits_keep_other_commands_responsive_and_release_capacity",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "wait_exceeds_default_server_and_client_deadlines_without_retransmission",
+                       "elapsedMs":  27052,
+                       "passed":  true
+                   }
+               ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "unicodeComparison":  "ordinal",
+    "status":  "passed_background_browser_wait_subset",
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "waitClientPids":  [
+                           13584,
+                           29916,
+                           8316,
+                           37016,
+                           34320,
+                           21488,
+                           32988,
+                           30692,
+                           33436,
+                           16564,
+                           37252,
+                           38884
+                       ],
+    "hosts":  [
+                  26364
+              ],
+    "shells":  [
+                   15556
+               ],
+    "finished":  "2026-09-28T10:58:39.3800285+09:00"
+}

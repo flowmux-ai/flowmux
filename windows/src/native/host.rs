@@ -313,6 +313,9 @@ struct App {
     sender: EventSender,
     _ipc: ipc::Server,
     context: WebContext,
+    // Native deferrals/download objects must drop before browser WebViews even on early errors.
+    browser_popups: browser::popup::Controller,
+    downloads: downloads::Controller,
     browsers: HashMap<SurfaceId, browser::Browser>,
     browser_context: Option<WebContext>,
     pending_browser: HashMap<Uuid, browser::Pending>,
@@ -336,7 +339,6 @@ struct App {
     search: search::Controller,
     browser_find: browser::find::Controller,
     notifications: notifications::Controller,
-    downloads: downloads::Controller,
     closing: bool,
     background_test: bool,
     store: Option<Arc<Store>>,
@@ -502,6 +504,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             _ipc: ipc,
             context: WebContext::new(Some(data_dir()?.join("terminal-profile"))),
             browser_context: None,
+            browser_popups: browser::popup::Controller::default(),
             browsers: HashMap::new(),
             pending_browser: HashMap::new(),
             pending_captures: HashMap::new(),
@@ -546,6 +549,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
 
         // Cancel and release native download operations before their WebView
         // controllers close (older runtimes invalidate these COM objects).
+        app.browser_popups.shutdown();
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.browsers.clear();
@@ -966,7 +970,11 @@ impl App {
             return Ok(());
         }
         self.ack_focused_notifications(self.active());
-        if let Some(browser) = self.browsers.get(&self.active()) {
+        if let Some(browser) = self
+            .browsers
+            .get(&self.active())
+            .filter(|b| !b.native_closed.get())
+        {
             let mut info = GUITHREADINFO {
                 cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
                 ..GUITHREADINFO::default()
@@ -2090,6 +2098,7 @@ impl App {
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
+                        "popup":self.browser_popup_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,
                         "background_testing":self.background_test,"window_handle":self.window as usize,
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),

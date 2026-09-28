@@ -1,0 +1,16 @@
+{
+  "name": "popups-linux-routing",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--locked",
+    "browser_popup"
+  ],
+  "deadlineSeconds": 120,
+  "status": "failed",
+  "pid": 287423,
+  "exitCode": 101,
+  "elapsedSeconds": 19.905
+}

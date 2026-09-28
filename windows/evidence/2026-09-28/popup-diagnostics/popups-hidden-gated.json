@@ -1,0 +1,93 @@
+{
+    "started":  "2026-09-28T10:52:22.1748337+09:00",
+    "mode":  "background",
+    "case":  "hidden",
+    "checks":  [
+                   {
+                       "name":  "delivered_hidden_tab_and_workspace_popup_requests_rejected_without_activation",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "case":  "hidden",
+                             "popup":  {
+                                           "active":  0,
+                                           "last_error":  "popup opener is hidden",
+                                           "limit":  16,
+                                           "opened":  0,
+                                           "pending":  0,
+                                           "pending_limit":  8,
+                                           "rejected":  2
+                                       }
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Native deferral pending during move, hide/re-show, navigation or source close is not deterministically forced by the HTTP fixture.",
+                     "The eight-request in-flight limit and twelve-second expiry are not saturated or expired deterministically; sampled bounds and eventual drain are checked.",
+                     "No physical target-link gesture, visible focus, real IME, cross-origin opener policy, external site, renderer crash or shutdown-during-deferral coverage."
+                 ],
+    "status":  "passed_background_browser_popups_subset",
+    "requests":  [
+                     "/source",
+                     "/favicon.ico",
+                     "/popup-gate?request=1790560344703_0.4194045189463149",
+                     "/source?other",
+                     "/event?scheduled=completed",
+                     "/favicon.ico",
+                     "/popup-gate?request=1790560345338_0.7085633153552799",
+                     "/event?scheduled=completed"
+                 ],
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  33972
+              ],
+    "shells":  [
+                   29540,
+                   37544
+               ],
+    "clientPids":  [
+                       32428,
+                       30796,
+                       19168,
+                       30568,
+                       29640,
+                       3388,
+                       14476,
+                       32632,
+                       13636,
+                       26864,
+                       35208,
+                       36304,
+                       38404,
+                       12796,
+                       37112,
+                       38352,
+                       30112,
+                       15608,
+                       3756,
+                       22052,
+                       39812,
+                       28840,
+                       27220,
+                       12268,
+                       23236,
+                       32396,
+                       37848,
+                       38068,
+                       38868,
+                       28664,
+                       29008,
+                       32248,
+                       39316,
+                       32732,
+                       38108
+                   ],
+    "finished":  "2026-09-28T10:52:26.2760883+09:00"
+}

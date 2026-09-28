@@ -1,0 +1,13 @@
+{
+  "name": "popups-native-all",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-browser-popups.ps1",
+  "deadlineSeconds": 120,
+  "status": "failed",
+  "started": "2026-09-28T01:45:46.7363121Z",
+  "pid": 30320,
+  "exitCode": 1,
+  "activeBeforeCleanup": 0,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 19.837,
+  "finished": "2026-09-28T01:46:06.5785036Z"
+}

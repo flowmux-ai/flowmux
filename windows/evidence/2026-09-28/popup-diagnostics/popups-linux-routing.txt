@@ -1,0 +1,13 @@
+   Compiling flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error[E0308]: mismatched types
+   --> src/browser_popup.rs:233:37
+    |
+233 |             assert_eq!(initial_url, expected);
+    |                                     ^^^^^^^^ expected `Option<String>`, found `&str`
+    |
+    = note:   expected enum `std::option::Option<std::string::String>`
+            found reference `&str`
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `flowmux-windows` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

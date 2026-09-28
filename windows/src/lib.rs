@@ -5,6 +5,7 @@ pub mod browser_action;
 pub mod browser_capture;
 pub mod browser_dom;
 pub mod browser_find;
+pub mod browser_popup;
 pub mod browser_wait;
 pub mod command;
 pub mod cwd;

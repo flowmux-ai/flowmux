@@ -1,0 +1,13 @@
+{
+  "name": "popups-source-close-diagnostic",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\popups-source-close.ps1",
+  "deadlineSeconds": 120,
+  "status": "failed",
+  "started": "2026-09-28T01:47:00.3269493Z",
+  "pid": 35612,
+  "exitCode": 1,
+  "activeBeforeCleanup": 0,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 5.318,
+  "finished": "2026-09-28T01:47:05.6492037Z"
+}

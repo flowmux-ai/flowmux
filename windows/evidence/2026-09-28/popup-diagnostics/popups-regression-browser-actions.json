@@ -1,0 +1,86 @@
+{
+  "started": "2026-09-28T10:57:15.1209188+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "exact_unicode_fill_native_setter_events_empty_and_idempotent_values",
+      "passed": true
+    },
+    {
+      "name": "disabled_readonly_file_cancel_replacement_and_reentrant_disable_rejected",
+      "passed": true
+    },
+    {
+      "name": "select_value_label_precedence_unicode_multiple_noop_and_disabled_options",
+      "passed": true
+    },
+    {
+      "name": "checkbox_idempotence_and_radio_group_semantics_without_click_or_keyboard",
+      "passed": true
+    },
+    {
+      "name": "explicit_click_repeats_synthetic_double_hover_scroll_and_stale_replacement_refs",
+      "passed": true
+    },
+    {
+      "name": "background_focus_guard_cross_tab_refs_navigation_and_terminal_identity",
+      "passed": true
+    },
+    {
+      "name": "one_action_in_flight_status_snapshot_barrier_and_idempotent_explicit_repeat",
+      "passed": true
+    },
+    {
+      "name": "large_unicode_value_raw_and_encoded_bounds_recover_without_mutation",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "selectInitial": "<select id=\"pick\" aria-label=\"선택\"><option value=\"\">기본</option><option value=\"text-match\">우선</option><option value=\"우선\">값 우선</option><option value=\"한 😀\">한글 항목</option><option value=\"accent\"> é 😀 </option><optgroup disabled=\"\" label=\"불가\"><option value=\"blocked\">차단</option></optgroup></select>",
+  "selectParser": "<select><option>first</option><option>second</option><option>third</option></select>",
+  "selectApi": "<select><option value=\"first\">first</option><option value=\"second\">second</option><option value=\"third\">third</option></select>",
+  "selectHtml": "<select id=\"pick\" aria-label=\"선택\"><option value=\"\">기본</option><option value=\"text-match\">우선</option><option value=\"우선\">값 우선</option><option value=\"한 😀\">한글 항목</option><option value=\"accent\"> é 😀 </option><optgroup disabled=\"\" label=\"불가\"><option value=\"blocked\">차단</option></optgroup></select>",
+  "selectBefore": [
+    {
+      "text": "기본",
+      "value": ""
+    },
+    {
+      "text": "우선",
+      "value": "text-match"
+    },
+    {
+      "text": "값 우선",
+      "value": "우선"
+    },
+    {
+      "text": "한글 항목",
+      "value": "한 😀"
+    },
+    {
+      "text": " é 😀 ",
+      "value": "accent"
+    },
+    {
+      "text": "차단",
+      "value": "blocked"
+    }
+  ],
+  "status": "passed_background_browser_actions_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "hosts": [
+    29168
+  ],
+  "shells": [
+    12264
+  ],
+  "actionClientPids": [
+    29444,
+    18276
+  ],
+  "finished": "2026-09-28T10:57:26.2235574+09:00"
+}

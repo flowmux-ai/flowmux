@@ -1,0 +1,13 @@
+{
+  "name": "popups-native-url",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\popups-url.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T01:45:27.2505570Z",
+  "pid": 3480,
+  "exitCode": 0,
+  "activeBeforeCleanup": 4,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 4.451,
+  "finished": "2026-09-28T01:45:31.7054510Z"
+}

@@ -4,16 +4,25 @@ use super::*;
 use crate::browser::{self as domain, Op};
 use crate::browser_dom as dom;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{cell::Cell, rc::Rc};
+use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment;
+use wry::WebViewBuilderExtWindows;
 #[path = "browser_capture.rs"]
 pub(super) mod capture;
 #[path = "browser_chrome.rs"]
 mod chrome;
 #[path = "browser_find.rs"]
 pub(super) mod find;
+#[path = "browser_popup.rs"]
+pub(super) mod popup;
+#[path = "browser_popup_host.rs"]
+mod popup_host;
 #[path = "browser_wait.rs"]
 pub(super) mod wait;
 const MAX_SCRIPT: usize = 128 * 1024;
 pub(super) enum Signal {
+    Popup,
+    PopupClose(SurfaceId, Uuid),
     Navigation(SurfaceId, u64),
     Loaded(SurfaceId, u64, Option<i32>),
     Denied(SurfaceId, String),
@@ -78,6 +87,11 @@ pub(super) struct Browser {
     epoch: Arc<AtomicU64>,
     pub(super) visible: bool,
     visibility_revision: u64,
+    popup_visibility: Rc<Cell<Option<u64>>>,
+    popup_opener: Option<SurfaceId>,
+    popup_user_initiated: Option<bool>,
+    instance: Uuid,
+    pub(super) native_closed: Rc<Cell<bool>>,
     url: String,
     title: String,
     loading: bool,
@@ -94,7 +108,18 @@ pub(super) struct Browser {
 }
 impl Browser {
     pub(super) fn new(app: &mut App, id: SurfaceId) -> anyhow::Result<Self> {
+        Self::new_in_environment(app, id, None)
+    }
+    fn new_in_environment(
+        app: &mut App,
+        id: SurfaceId,
+        environment: Option<ICoreWebView2Environment>,
+    ) -> anyhow::Result<Self> {
         let chrome = chrome::Chrome::new(app.window, id)?;
+        let instance = Uuid::new_v4();
+        let popup_visibility = Rc::new(Cell::new(None));
+        let native_closed = Rc::new(Cell::new(false));
+        let nav_closed = native_closed.clone();
         let epoch = Arc::new(AtomicU64::new(0));
         let nav_epoch = epoch.clone();
         let nav_sender = app.sender.clone();
@@ -104,25 +129,27 @@ impl Browser {
         if app.browser_context.is_none() {
             app.browser_context = Some(WebContext::new(Some(profile(background)?)));
         }
-        let view = WebViewBuilder::new_with_web_context(app.browser_context.as_mut().unwrap())
-            .with_url("about:blank")
-            .with_visible(false)
-            .with_focused(false)
-            .with_clipboard(false)
-            .with_devtools(false)
-            .with_hotkeys_zoom(false)
-            .with_document_title_changed_handler(move |_| {
-                title_sender.send(Event::Browser(Signal::Metadata(id)))
-            })
-            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-            .with_permission_handler(move |_| {
-                if background {
-                    wry::PermissionResponse::Deny
-                } else {
-                    wry::PermissionResponse::Default
-                }
-            })
-            .build_as_child(&Parent(app.window))?;
+        let mut builder =
+            WebViewBuilder::new_with_web_context(app.browser_context.as_mut().unwrap())
+                .with_visible(false)
+                .with_focused(false)
+                .with_clipboard(false)
+                .with_devtools(false)
+                .with_hotkeys_zoom(false)
+                .with_document_title_changed_handler(move |_| {
+                    title_sender.send(Event::Browser(Signal::Metadata(id)))
+                })
+                .with_permission_handler(move |_| {
+                    if background {
+                        wry::PermissionResponse::Deny
+                    } else {
+                        wry::PermissionResponse::Default
+                    }
+                });
+        if let Some(environment) = environment {
+            builder = builder.with_environment(environment);
+        }
+        let view = builder.build_as_child(&Parent(app.window))?;
         unsafe {
             let core = view.controller().CoreWebView2()?;
             app.downloads
@@ -141,6 +168,10 @@ impl Browser {
                     let Some(args) = args else {
                         return Ok(());
                     };
+                    if nav_closed.get() {
+                        args.SetCancel(true)?;
+                        return Ok(());
+                    }
                     let mut uri = Default::default();
                     args.Uri(&mut uri)?;
                     let uri = webview2_com::take_pwstr(uri);
@@ -179,8 +210,39 @@ impl Browser {
                 &mut token,
             )?;
         }
+        unsafe {
+            let core = view.controller().CoreWebView2()?;
+            let close_sender = app.sender.clone();
+            let visibility = popup_visibility.clone();
+            let closed = native_closed.clone();
+            let close_epoch = epoch.clone();
+            core.add_WindowCloseRequested(
+                &webview2_com::WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                    closed.set(true);
+                    // Existing script/wait/capture generation guards must reject
+                    // results even before the queued model cleanup runs.
+                    close_epoch.fetch_add(1, Ordering::SeqCst);
+                    visibility.set(None);
+                    close_sender.send(Event::Browser(Signal::PopupClose(id, instance)));
+                    Ok(())
+                })),
+                &mut 0,
+            )?;
+            app.browser_popups.install(
+                &core,
+                id,
+                epoch.clone(),
+                popup_visibility.clone(),
+                app.sender.clone(),
+            )?;
+        }
         Ok(Self {
             view,
+            popup_visibility,
+            popup_opener: None,
+            popup_user_initiated: None,
+            instance,
+            native_closed,
             chrome,
             epoch,
             visible: false,
@@ -229,9 +291,12 @@ impl Browser {
         Ok(())
     }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
-        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"address_handle":self.chrome.address as usize})
+        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"address_handle":self.chrome.address as usize})
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
+        if self.native_closed.get() {
+            return Ok(());
+        }
         let viewport = area.map(|r| (r.x, r.y, r.width, r.height));
         if self.viewport != viewport {
             self.viewport_revision = self.viewport_revision.wrapping_add(1);
@@ -246,6 +311,8 @@ impl Browser {
                 ShowWindow(self.chrome.window, if show { SW_SHOWNA } else { SW_HIDE });
             }
             self.visible = show;
+            self.popup_visibility
+                .set(show.then_some(self.visibility_revision));
         }
         if let Some(area) = area {
             self.chrome.layout(area, scale);
@@ -331,7 +398,13 @@ impl App {
         let mut candidate = self.workspaces[index].clone();
         let opened = domain::open(&mut candidate, pane, url.clone(), down)?;
         let mut browser = Browser::new(self, opened.surface)?;
-        browser.navigate(&url)?;
+        if let Err(error) = browser.navigate(&url) {
+            self.browser_cancel(
+                opened.surface,
+                "browser navigation failed during construction",
+            );
+            return Err(error);
+        }
         self.workspaces[index] = candidate;
         self.browsers.insert(opened.surface, browser);
         self.active_workspace = index;
@@ -343,7 +416,10 @@ impl App {
     }
     pub(super) fn add_browser_view(&mut self, id: SurfaceId, url: String) -> anyhow::Result<()> {
         let mut browser = Browser::new(self, id)?;
-        browser.navigate(&url)?;
+        if let Err(error) = browser.navigate(&url) {
+            self.browser_cancel(id, "browser navigation failed during construction");
+            return Err(error);
+        }
         self.browsers.insert(id, browser);
         Ok(())
     }
@@ -351,6 +427,9 @@ impl App {
         let Some(browser) = self.browsers.get_mut(&id) else {
             return Ok(());
         };
+        if browser.native_closed.get() {
+            return Ok(());
+        }
         browser.refresh()?;
         let url = browser.url.clone();
         let title = browser.title.clone();
@@ -370,6 +449,7 @@ impl App {
         Ok(())
     }
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
+        self.browser_popups.cancel_surface(id);
         self.browser_find_reset(id, reason);
         self.browser_wait_cancel(id, reason);
         self.browser_capture_cancel(id, reason);
@@ -431,6 +511,8 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Popup => self.browser_popup_dispatch(),
+            Signal::PopupClose(id, instance) => self.browser_popup_close(id, instance)?,
             Signal::Capture(id, result) => self.browser_capture_result(id, result),
             Signal::CaptureSaved(id, result) => self.browser_capture_saved(id, result),
             Signal::WaitTick => self.browser_wait_tick(),
@@ -504,10 +586,9 @@ impl App {
                     let reply = if p.started.elapsed() > Duration::from_secs(12) {
                         json!({"error":"browser script callback timed out; script may have executed"})
                     } else if epoch != p.epoch
-                        || self
-                            .browsers
-                            .get(&p.surface)
-                            .is_none_or(|b| b.epoch.load(Ordering::SeqCst) != epoch)
+                        || self.browsers.get(&p.surface).is_none_or(|b| {
+                            b.native_closed.get() || b.epoch.load(Ordering::SeqCst) != epoch
+                        })
                     {
                         json!({"error":"browser document changed during script request"})
                     } else if find
@@ -612,6 +693,7 @@ impl App {
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<()> {
         let browser = self.browsers.get(&id).context("browser was closed")?;
+        anyhow::ensure!(!browser.native_closed.get(), "browser window has closed");
         anyhow::ensure!(
             !browser.loading,
             "wait for browser navigation to finish before evaluating a script"
@@ -708,6 +790,10 @@ impl App {
         anyhow::ensure!(
             self.browsers.contains_key(&id),
             "pane has no active browser tab"
+        );
+        anyhow::ensure!(
+            !self.browsers[&id].native_closed.get(),
+            "browser window has closed"
         );
         let action_pending = self
             .pending_browser

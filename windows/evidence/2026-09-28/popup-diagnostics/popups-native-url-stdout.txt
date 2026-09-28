@@ -1,0 +1,95 @@
+[check] passed script_url_creates_same_pane_tab_with_native_opener_unicode_and_no_terminal_bridge
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\browser-popups-b775feae-7924-4bbf-894b-b6100cc4652f
+{
+    "started":  "2026-09-28T10:45:28.0823346+09:00",
+    "mode":  "background",
+    "case":  "url",
+    "checks":  [
+                   {
+                       "name":  "script_url_creates_same_pane_tab_with_native_opener_unicode_and_no_terminal_bridge",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "case":  "url",
+                             "windowProxy":  {
+                                                 "closed":  false,
+                                                 "exists":  true
+                                             },
+                             "unicode":  "새 탭 한글 한 é 😀 + \u0026",
+                             "child":  "03deac72-3102-4ade-ab43-a4b180a62e50"
+                         },
+                         {
+                             "case":  "url",
+                             "popup":  {
+                                           "active":  1,
+                                           "last_error":  null,
+                                           "limit":  16,
+                                           "opened":  1,
+                                           "pending":  0,
+                                           "pending_limit":  8,
+                                           "rejected":  0
+                                       }
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Native deferral pending during move, hide/re-show, navigation or source close is not deterministically forced by the HTTP fixture.",
+                     "The eight-request in-flight limit and twelve-second expiry are not saturated or expired deterministically; sampled bounds and eventual drain are checked.",
+                     "No physical target-link gesture, visible focus, real IME, cross-origin opener policy, external site, renderer crash or shutdown-during-deferral coverage."
+                 ],
+    "status":  "passed_background_browser_popups_subset",
+    "requests":  [
+                     "/source",
+                     "/favicon.ico",
+                     "/child?message=%EC%83%88%20%ED%83%AD%20%ED%95%9C%EA%B8%80%20%E1%84%92%E1%85%A1%E1%86%AB%20e%CC%81%20%F0%9F%98%80%20%2B%20%26",
+                     "/favicon.ico"
+                 ],
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  33072
+              ],
+    "shells":  [
+                   36124
+               ],
+    "clientPids":  [
+                       33300,
+                       23184,
+                       4832,
+                       31204,
+                       14756,
+                       30684,
+                       32396,
+                       19828,
+                       16044,
+                       34188,
+                       32192,
+                       39360,
+                       5900,
+                       34732,
+                       37068,
+                       24064,
+                       2484,
+                       23444,
+                       30116,
+                       36032,
+                       38076,
+                       35948,
+                       31868,
+                       34632,
+                       34496,
+                       39012,
+                       35728,
+                       3016,
+                       15556,
+                       3568,
+                       38884
+                   ],
+    "finished":  "2026-09-28T10:45:31.6194316+09:00"
+}
