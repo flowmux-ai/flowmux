@@ -168,8 +168,11 @@ try {
     if (-not $process.WaitForExit(10000)) { throw 'Host did not close' }
     $evidence.finished=(Get-Date).ToString('o')
     $evidence.interactive='Real search-field IME, buttons, keyboard navigation and DPI remain pending; no desktop input was injected.'
+} catch {
+    $evidence.status='failed';$evidence.error=$_.Exception.Message
     $evidence | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-find-background.json')
-    $evidence | ConvertTo-Json -Depth 20
+    throw
 } finally {
     if ($process -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
 }
+[ordered]@{status='passed_find_subset';checks=$evidence.checks.Count}|ConvertTo-Json -Compress

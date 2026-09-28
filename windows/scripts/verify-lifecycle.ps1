@@ -118,6 +118,6 @@ try {
         if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
     }
     $evidence.finished = (Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 15 | Set-Content -Encoding UTF8 (Join-Path $directory 'lifecycle.json')
+    if ($evidence.status -eq 'failed') { $evidence | ConvertTo-Json -Depth 15 | Set-Content -Encoding UTF8 (Join-Path $directory 'lifecycle.json') }
 }
-$evidence | ConvertTo-Json -Depth 15
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

@@ -201,6 +201,9 @@ try {
     if(-not $process.WaitForExit(10000)){throw 'Host did not close'}
     $evidence.finished=(Get-Date).ToString('o')
     $evidence.interactive='Native search window stayed hidden. Mouse, keyboard, Microsoft IME, visual layout and DPI remain pending.'
+} catch {
+    $evidence.status='failed';$evidence.error=$_.Exception.Message
     $evidence | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-output-search-background.json')
-    $evidence | ConvertTo-Json -Depth 20
+    throw
 } finally { if($process -and -not $process.HasExited){$process.Kill();$process.WaitForExit()} }
+[ordered]@{status='passed';checks=$evidence.checks.Count}|ConvertTo-Json -Compress

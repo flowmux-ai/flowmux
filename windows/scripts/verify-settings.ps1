@@ -190,6 +190,6 @@ try {
 finally {
     foreach ($hostItem in $hosts) { if (-not $hostItem.process.HasExited) { $hostItem.process.Kill(); $hostItem.process.WaitForExit() } }
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 30 | Set-Content -Encoding UTF8 (Join-Path $directory 'settings.json')
+    if($evidence.status -eq 'failed'){$evidence | ConvertTo-Json -Depth 30 | Set-Content -Encoding UTF8 (Join-Path $directory 'settings.json')}
 }
-$evidence | ConvertTo-Json -Depth 30
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

@@ -259,7 +259,7 @@ finally {
     }
     if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.shells=$shells;$evidence.clientPids=$clients;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o')
-    $evidence|ConvertTo-Json -Depth 24|Set-Content -Encoding UTF8 (Join-Path $directory 'native-chrome-background.json');Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') { $evidence|ConvertTo-Json -Depth 24|Set-Content -Encoding UTF8 (Join-Path $directory 'native-chrome-background.json') };if ($evidence.status -eq 'failed') { Write-Output ('Evidence: '+$directory) }
 }
 if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
 [ordered]@{status=$evidence.status;baseline=$false;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

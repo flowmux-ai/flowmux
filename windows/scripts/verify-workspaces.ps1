@@ -228,8 +228,8 @@ finally {
     }
     if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.clientPids=$clientPids;$evidence.shells=$shellPids;$evidence.descendants=$descendantPids;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-workspaces-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if($evidence.status -eq 'failed'){$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-workspaces-background.json')}
+    if($evidence.status -eq 'failed'){Write-Output ('Evidence: '+$directory)}
 }
 if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
 [ordered]@{status=$evidence.status;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

@@ -256,7 +256,7 @@ finally {
     }
     if ($process) {if (-not $process.HasExited -and -not $process.WaitForExit(10000)) {$process.Kill();[CliProbe]::WaitAfterKill($process)};if ($stderr -and $stderr.Wait(3000)) {$evidence.hostStderr=([CliProbe]::Output($stderr))};$evidence.hostExitCode=$process.ExitCode;$process.Dispose()}
     $evidence.brokenRequests=$fixture.BrokenRequests;$evidence.concurrentFixtureOrigins=@($extraFixtures|ForEach-Object {$_.Origin});foreach($server in $extraFixtures){$server.Dispose()};$fixture.Dispose();$evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-downloads-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') { $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-downloads-background.json') }
+    if ($evidence.status -eq 'failed') { Write-Output ('Evidence: '+$directory) }
 }
-$evidence|ConvertTo-Json -Depth 12
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

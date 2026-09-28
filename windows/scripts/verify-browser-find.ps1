@@ -346,8 +346,8 @@ finally {
     if($cleanupErrors.Count) {$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.clientPids=@($clients|ForEach-Object {$_.pid})
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-find-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') { $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-browser-find-background.json') }
+    if ($evidence.status -eq 'failed') { Write-Output ('Evidence: '+$directory) }
 }
 if($cleanupErrors.Count) {throw ($cleanupErrors -join '; ')}
-$evidence|ConvertTo-Json -Depth 12
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

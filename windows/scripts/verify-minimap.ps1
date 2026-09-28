@@ -177,7 +177,7 @@ try {
         $process.Dispose()
     }
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-minimap-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if($evidence.status -eq 'failed'){$evidence|ConvertTo-Json -Depth 12|Set-Content -Encoding UTF8 (Join-Path $directory 'native-minimap-background.json')}
+    if($evidence.status -eq 'failed'){Write-Output ('Evidence: '+$directory)}
 }
-$evidence|ConvertTo-Json -Depth 12
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

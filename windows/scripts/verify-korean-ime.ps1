@@ -148,7 +148,11 @@ try {
     if ($script:pipeName) { try { Invoke-Flowmux @('quit') | Out-Null } catch {} }
     if (-not $process.HasExited) { if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force } }
     $evidence.finished = (Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-ime.json')
+    if ($evidence.status -ne 'passed_ime_subset_only') {
+        $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-ime.json')
+        Write-Output ('Failure diagnostics: '+$directory)
+    }
 }
-$evidence | ConvertTo-Json -Depth 10
+if ($evidence.status -ne 'passed_ime_subset_only') { $evidence | ConvertTo-Json -Depth 10 }
 if ($evidence.status -ne 'passed_ime_subset_only') { throw 'One or more native IME checks failed; see native-ime.json.' }
+Write-Host ('[check] Korean IME: '+$evidence.cases.Count+' cases passed (tested subset only)')

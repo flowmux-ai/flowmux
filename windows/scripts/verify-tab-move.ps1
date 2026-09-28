@@ -200,6 +200,9 @@ try {
     if ($script:pipeName) { try { Invoke-Flowmux @('quit') | Out-Null } catch {} }
     if (-not $process.HasExited -and -not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
     $evidence.finished = (Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 15 | Set-Content -Encoding UTF8 (Join-Path $directory 'tab-move.json')
+    if ($evidence.status -eq 'failed') {
+        $evidence | ConvertTo-Json -Depth 15 | Set-Content -Encoding UTF8 (Join-Path $directory 'tab-move.json')
+        Write-Output ('Failure diagnostics: '+$directory)
+    }
 }
-$evidence | ConvertTo-Json -Depth 15
+Write-Host ('[check] tab move: '+$evidence.checks.Count+' groups passed')

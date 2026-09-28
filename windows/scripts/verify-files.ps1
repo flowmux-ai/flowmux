@@ -504,10 +504,10 @@ finally {
     $fixture.Dispose()
     if($cleanupErrors.Count) {$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors}
     $evidence.hosts=$hosts;$evidence.shells=$shells;$evidence.clientPids=@($clients|ForEach-Object {$_.pid});$evidence.elapsedMs=$suiteClock.ElapsedMilliseconds;$evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 22|Set-Content -Encoding UTF8 (Join-Path $directory 'native-files-background.json')
-    Write-Output ('Evidence: '+$directory)
+    if ($evidence.status -eq 'failed') { $evidence|ConvertTo-Json -Depth 22|Set-Content -Encoding UTF8 (Join-Path $directory 'native-files-background.json') }
+    if ($evidence.status -eq 'failed') { Write-Output ('Evidence: '+$directory) }
 }
 if($cleanupErrors.Count) {throw ($cleanupErrors -join '; ')}
-# Full observations stay in the evidence file; bounded console output must not
+# Failure observations stay in the evidence file; bounded console output must not
 # consume run-check's output cap or glue its runner marker onto a truncated line.
 [ordered]@{status=$evidence.status;case=$Case;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

@@ -65,7 +65,6 @@ try {
     } while ((Get-Date) -lt $deadline)
     if (-not $screen.text.Contains("FLOWMUX_NATIVE_$korean")) { throw 'Korean UTF-8 round trip failed' }
     $evidence.checks += @{ name = 'korean_utf8_roundtrip_via_cli_not_ime'; passed = $true; sequence = $screen.sequence }
-    $screen.text | Set-Content -Encoding UTF8 (Join-Path $evidenceDirectory 'screen.txt')
     Invoke-Flowmux @('split', 'vertical') | Out-Null
     Invoke-Flowmux @('split', 'horizontal') | Out-Null
     Invoke-Flowmux @('split', 'vertical') | Out-Null
@@ -131,7 +130,7 @@ try {
             Stop-Process -Id $process.Id -Force
         }
     }
-    $evidence | ConvertTo-Json -Depth 30 | Set-Content -Encoding UTF8 (Join-Path $evidenceDirectory 'native-smoke.json')
+    if ($evidence.status -eq 'failed') { if ($screen) { $screen.text | Set-Content -Encoding UTF8 (Join-Path $evidenceDirectory 'screen.txt') }; $evidence | ConvertTo-Json -Depth 30 | Set-Content -Encoding UTF8 (Join-Path $evidenceDirectory 'native-smoke.json') }
 }
-[pscustomobject]$evidence | Select-Object pid, status, checks, cycleSamples | ConvertTo-Json -Depth 10
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress
 if ($evidence.status -ne 'passed_smoke_only') { throw 'Native smoke checks failed; see native-smoke.json.' }

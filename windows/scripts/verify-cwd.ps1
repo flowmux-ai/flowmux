@@ -197,8 +197,11 @@ try {
     Invoke-Flowmux @('quit') | Out-Null
     if (-not $restored.WaitForExit(10000)) { throw 'Restored host did not exit' }
     $evidence.finished=(Get-Date).ToString('o')
+} catch {
+    $evidence.status='failed';$evidence.error=$_.Exception.Message
     $evidence | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 (Join-Path $directory 'native-cwd-background.json')
-    $evidence | ConvertTo-Json -Depth 20
+    throw
 } finally {
     foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); $owned.WaitForExit() } }
 }
+[ordered]@{status='passed_cwd_subset';checks=$evidence.checks.Count}|ConvertTo-Json -Compress

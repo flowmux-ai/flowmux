@@ -226,6 +226,6 @@ try {
 finally {
     foreach ($owned in $hosts) {if (-not $owned.process.HasExited) {$owned.process.Kill();$owned.process.WaitForExit()};$owned.process.Dispose()}
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 (Join-Path $directory 'entrypoints.json')
+    if ($evidence.status -eq 'failed') { $evidence|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 (Join-Path $directory 'entrypoints.json') }
 }
-$evidence|ConvertTo-Json -Depth 20
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

@@ -185,8 +185,11 @@ try {
     if ((Get-FileHash $path -Algorithm SHA256).Hash -ne $hash) { throw 'Temporary host modified persistent state' }
     $evidence.checks += 'Default launch restored latest closed window; explicit discard and temporary mode preserved its checkpoint'
     $evidence.finished = (Get-Date).ToString('o')
+} catch {
+    $evidence.status='failed';$evidence.error=$_.Exception.Message
     Save-Json (Join-Path $directory 'native-state-background.json') $evidence
-    $evidence | ConvertTo-Json -Depth 20
+    throw
 } finally {
     foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); $owned.WaitForExit() } }
 }
+[ordered]@{status='passed';checks=$evidence.checks.Count}|ConvertTo-Json -Compress

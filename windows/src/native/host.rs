@@ -2790,7 +2790,7 @@ impl App {
                 "commands":["files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","detach-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
-                "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
+                "acceptance":"Release validation is incomplete; physical Korean IME behavior remains unverified"})))
             }
             #[cfg(debug_assertions)]
             Command::TestShortcut { surface, event } => {

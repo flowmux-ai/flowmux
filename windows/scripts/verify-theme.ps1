@@ -141,7 +141,7 @@ finally {
         try{$stderrComplete=$hostErr.Wait(500)}catch{$cleanupErrors+=('Host stderr read failed: '+$_.Exception.Message)};if(-not $stderrComplete){$cleanupErrors+='Host stderr did not complete within 500ms'}
         $evidence.observations+=@{name='host-exit';pid=$owned.Id;exitCode=$exitCode;stdoutComplete=$stdoutComplete;stderrComplete=$stderrComplete;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)};$owned.Dispose()
     }
-    if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors};$evidence.clientPids=$clients;$evidence.shells=$shells;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o');$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-theme-background.json');Write-Output ('Evidence: '+$directory)
+    if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors};$evidence.clientPids=$clients;$evidence.shells=$shells;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o');if($evidence.status -eq 'failed'){$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-theme-background.json')};if($evidence.status -eq 'failed'){Write-Output ('Evidence: '+$directory)}
 }
 if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
 [ordered]@{status=$evidence.status;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

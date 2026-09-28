@@ -133,7 +133,7 @@ finally {
     if($fixture){$fixture.Dispose()}
     if($owned){try{if(-not $owned.HasExited){$stop=[Diagnostics.Stopwatch]::StartNew();if($pipeName){Request @('quit','--discard-state') 2500|Out-Null};if(-not $owned.WaitForExit([int][Math]::Max(1,5000-$stop.ElapsedMilliseconds))){throw 'Owned host cleanup deadline exceeded'}}}catch{$cleanupErrors+=$_.Exception.Message;if(-not $owned.HasExited){$owned.Kill();[CliProbe]::WaitAfterKill($owned)}}
         $evidence.observations+=@{name='host-exit';pid=$owned.Id;exitCode=$owned.ExitCode;stdoutComplete=$hostOut.Wait(500);stderrComplete=$hostErr.Wait(500);stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)};$owned.Dispose()}
-    if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors};$evidence.clientPids=$clients;$evidence.shells=$shells;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o');$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-overview-background.json');Write-Output ('Evidence: '+$directory)
+    if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors};$evidence.clientPids=$clients;$evidence.shells=$shells;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o');if($evidence.status -eq 'failed'){$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-overview-background.json')};if($evidence.status -eq 'failed'){Write-Output ('Evidence: '+$directory)}
 }
 if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
 [ordered]@{status=$evidence.status;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

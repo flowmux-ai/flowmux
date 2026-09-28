@@ -54,8 +54,8 @@ try {
     if (-not $restored) { $evidence.status = 'failed'; $evidence.cleanupError = 'Uninstall did not restore PATH/registration' }
     $evidence.finished = (Get-Date).ToString('o')
     $directory = $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' })
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
-    $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'installer-smoke.json')
+    if ($evidence.status -eq 'failed' -or $evidence.uninstallExitCode -ne 0) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    if ($evidence.status -eq 'failed' -or $evidence.uninstallExitCode -ne 0) { $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'installer-smoke.json') }
 }
-$evidence | ConvertTo-Json -Depth 10
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress
 if ($evidence.status -ne 'passed_install_subset' -or $evidence.uninstallExitCode -ne 0) { throw 'Installer checks failed; see installer-smoke.json.' }

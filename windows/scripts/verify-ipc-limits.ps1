@@ -139,6 +139,6 @@ finally {
         if (-not $owned.WaitForExit(10000)) { $owned.Kill(); $owned.WaitForExit() }
     }
     $evidence.finished=(Get-Date).ToString('o')
-    $evidence | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 (Join-Path $directory 'ipc-limits.json')
+    if ($evidence.status -eq 'failed') { $evidence | ConvertTo-Json -Depth 20 | Set-Content -Encoding UTF8 (Join-Path $directory 'ipc-limits.json') }
 }
-$evidence | ConvertTo-Json -Depth 20
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

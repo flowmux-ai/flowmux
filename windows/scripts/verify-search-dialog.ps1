@@ -150,8 +150,8 @@ finally {
     $evidence.finished=(Get-Date).ToUniversalTime().ToString('o')
     $evidence.elapsedMs=$budget.ElapsedMilliseconds
     $evidencePath=Join-Path $directory 'native-search-dialog-background.json'
-    $evidence|ConvertTo-Json -Depth 18|Set-Content -Encoding UTF8 $evidencePath
-    [ordered]@{status=$evidence.status;checkCount=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs;evidence=$evidencePath}|ConvertTo-Json -Compress
+    if($evidence.status -eq 'failed'){$evidence|ConvertTo-Json -Depth 18|Set-Content -Encoding UTF8 $evidencePath;Write-Output ('Evidence: '+$evidencePath)}
+    [ordered]@{status=$evidence.status;checkCount=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress
 }
 if($evidence.status -ne 'passed_hidden_search_dialog_subset'){
     throw ('Search dialog verification failed: '+$evidence.error+' '+$evidence.cleanupError)
