@@ -269,7 +269,11 @@ impl App {
             .get(&surface)
             .context("separate window no longer exists")?;
         if self.workspaces.len() == 1 {
-            if native_closed && self.close_request.is_some() {
+            if native_closed
+                && (self.close_request.is_some() || self.files_operation_guard().is_err())
+            {
+                // The native view cannot reopen. Files completion retries this
+                // close after retaining its outcome and releasing admission.
                 return Ok(());
             }
             return self.request_close(CloseRequest::Native);

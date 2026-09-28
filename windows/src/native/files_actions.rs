@@ -227,6 +227,7 @@ impl App {
                 }
             }
         }
+        self.browser_resume_closed();
     }
     pub(super) fn files_operation_event(&mut self, event: operations::Event) -> anyhow::Result<()> {
         match event {

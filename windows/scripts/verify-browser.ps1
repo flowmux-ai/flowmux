@@ -1,6 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
+    [ValidateSet('all','files-close')][string]$Case='all')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
@@ -17,15 +18,15 @@ $directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_
 $fixture=New-Object BrowserFixture;$origin=$fixture.Origin
 $pipeName=$null;$process=$null;$hosts=@();$shells=@()
 $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';checks=@();clipboardAccess=$false;desktopInput=$false;externalSites=$false;unicodeComparison='ordinal'}
-function Request([string[]]$Arguments,[int]$Exit=0) {
+function Request([string[]]$Arguments,[int[]]$Exit=@(0),[ValidateRange(1,5000)][int]$TimeoutMilliseconds=5000) {
     if (-not $script:pipeName) {throw 'Owned pipe required'}
     $p=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
     try {
-        $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit(5000)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
-        if (-not $out.Wait(3000) -or -not $err.Wait(3000)) {throw 'Owned output did not close'}
-        if ($p.ExitCode -ne $Exit) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
-        if ($Exit -eq 0) {return ($out.Result|ConvertFrom-Json)}
+        $requestClock=[Diagnostics.Stopwatch]::StartNew();$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit($TimeoutMilliseconds)) {$p.Kill();[CliProbe]::WaitAfterKill($p);throw 'Owned CLI timed out; not retried'}
+        if (-not $out.Wait([int][Math]::Max(1,$TimeoutMilliseconds-$requestClock.ElapsedMilliseconds)) -or -not $err.Wait([int][Math]::Max(1,$TimeoutMilliseconds-$requestClock.ElapsedMilliseconds))) {throw 'Owned output did not close'}
+        if ($Exit -notcontains $p.ExitCode) {throw "CLI $Arguments exit $($p.ExitCode): $(([CliProbe]::Output($err))) $($out.Result)"}
+        if ($p.ExitCode -eq 0) {return ($out.Result|ConvertFrom-Json)}
         return (([CliProbe]::Output($err))|ConvertFrom-Json)
     } finally {$p.Dispose()}
 }
@@ -124,7 +125,105 @@ function Check-Toolbar($Status) {
     if($reload.Width -ne [Math]::Round(30*$dpi/96) -or $reload.X -ne $stop.X -or $reload.Y -ne $stop.Y -or $reload.Width -ne $stop.Width -or $reload.Height -ne $stop.Height){throw 'Reload/Stop geometry changed during metadata refresh'}
     return $chrome
 }
+function Files-CloseRemaining([Diagnostics.Stopwatch]$Clock,[int]$Limit=3000) {
+    $left=$Limit-$Clock.ElapsedMilliseconds;if($left -le 0){throw 'Files-close phase exceeded its bounded budget'};return [int][Math]::Min(5000,$left)
+}
+function Files-CloseListing([string]$Pane) {
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $listing=Request @('files','status','--pane',$Pane) 0 (Files-CloseRemaining $clock 5000)
+        if(-not $listing.loading -and -not $listing.stale -and -not $listing.last_error -and $listing.token){return $listing}
+        Start-Sleep -Milliseconds 20
+    }while($true)
+}
+function Verify-FilesClose {
+    Add-Type -Path (Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FilesFixture.cs'),(Join-Path $PSScriptRoot 'EditorOpenLifetime.cs')
+    $files=New-Object FilesFixture($directory);$pause=$null;$copy=$null;$copyOut=$null;$copyErr=$null
+    try {
+        $sourceName='닫기 중 원본 한 😀.txt';$destination='닫기 후 복사 한 😀.txt';$bytes=[EditorFixture]::Encode([EditorFixture]::Original,$true,$true)
+        $sourcePath=$files.WriteBytes($sourceName,$bytes)
+        $tree=Start-Owned @('--temporary','--shell=cmd','--cwd',$files.Root);$source=Request @('identify');$script:shells+=@($tree.surfaces.pid)
+        $opener=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+        Wait-Page $opener.pane '/one' '첫째 한글 한 é 😀'|Out-Null
+        if(-not (Eval-Page $opener.pane 'window.filesChild=window.open("/two");window.filesChild!==null')){throw 'Files-close child did not return a WindowProxy'}
+        $clock=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $tree=Request @('tree') 0 (Files-CloseRemaining $clock 5000);$children=@($tree.browsers|Where-Object {$_.popup_opener -eq $opener.surface})
+            if($children.Count -eq 1 -and $tree.popup.pending -eq 0){break}
+            Start-Sleep -Milliseconds 20
+        }while($true)
+        $child=$children[0];$childPane=Location $tree $child.id;Wait-Page $childPane '/two' '둘째 한글 한 é 😀'|Out-Null
+        Request @('detach-tab',$child.id)|Out-Null;$tree=Tree;$childPane=Location $tree $child.id;$frame=@($tree.detached_windows|Where-Object {$_.surface -eq $child.id})[0];$main=[long]$tree.window_handle
+        [FindFixture]::PostClose($main,$process.Id);$clock=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            if($process.HasExited){throw 'Main close killed the script-opened detached child'}
+            $tree=Request @('tree') 0 (Files-CloseRemaining $clock 5000)
+            if($tree.main_closed -and @($tree.browsers).Count -eq 1 -and @($tree.surfaces).Count -eq 0 -and -not $tree.state.saving){break}
+            Start-Sleep -Milliseconds 20
+        }while($true)
+        [OptionsFixture]::Describe($main,$process.Id)|Out-Null;[OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)|Out-Null
+        Request @('files','show','--pane',$childPane,'--root',$files.Root)|Out-Null;$listing=Files-CloseListing $childPane
+        $row=@($listing.rows|Where-Object {$_.path -ceq $sourceName});if($row.Count -ne 1){throw 'Files-close source row missing'}
+        $warm=Request @('files','copy','--pane',$childPane,'--token',$listing.token,'--index',$row[0].index.ToString(),'--destination','warm.txt')
+        if(-not $warm.operation.accepted -or -not $warm.operation.id){throw 'Files worker warm-up was not accepted'}
+        $clock=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $receipt=Request @('files','operation-status','--id',$warm.operation.id) 0 (Files-CloseRemaining $clock 5000)
+            if($receipt.operation.status -notin @('accepted','preparing')){break}
+            Start-Sleep -Milliseconds 20
+        }while($true)
+        if($receipt.operation.status -ne 'succeeded' -or -not $files.BytesEqual($files.File('warm.txt'),$bytes)){throw 'Files worker warm-up did not finish with exact bytes'}
+        $listing=Files-CloseListing $childPane;$row=@($listing.rows|Where-Object {$_.path -ceq $sourceName});if($row.Count -ne 1){throw 'Refreshed Files-close source row missing'}
+        $pauseClock=[Diagnostics.Stopwatch]::StartNew()
+        try {
+            $pause=[EditorOpenWorkerPause]::new($process,$main,'flowmux-files-actions')
+            Files-CloseRemaining $pauseClock|Out-Null
+            $copy=[CliProbe]::Start($cli,@('--pipe',$pipeName,'--json','files','copy','--pane',$childPane,'--token',$listing.token,'--index',$row[0].index.ToString(),'--destination',$destination),$directory,$directory)
+            $copyOut=$copy.StandardOutput.ReadToEndAsync();$copyErr=$copy.StandardError.ReadToEndAsync()
+            do {
+                $pending=Request @('files','status','--pane',$childPane) 0 (Files-CloseRemaining $pauseClock)
+                if($pending.operation.status -eq 'preparing'){break}
+                if($copy.HasExited){throw 'Paused Files copy exited before preparing was observed'}
+                Start-Sleep -Milliseconds 10
+            }while($true)
+            $operationId=$pending.operation.id
+            # Closing may invalidate its own eval callback. The real native close
+            # event is required inside the same three-second pause budget.
+            Request @('browser','eval',$childPane,'setTimeout(()=>window.close(),0);null') @(0,1) (Files-CloseRemaining $pauseClock)|Out-Null
+            do {
+                if($process.HasExited){throw 'Final browser close bypassed the pending Files operation'}
+                $closed=Request @('tree') 0 (Files-CloseRemaining $pauseClock);$retained=@($closed.browsers|Where-Object {$_.id -eq $child.id})
+                if($retained.Count -eq 1 -and $retained[0].native_closed){break}
+                Start-Sleep -Milliseconds 10
+            }while($true)
+            $retainedFrames=@($closed.detached_windows|Where-Object {$_.surface -eq $child.id})
+            if(-not $closed.main_closed -or $retainedFrames.Count -ne 1 -or $retainedFrames[0].window_handle -ne $frame.window_handle -or $process.HasExited -or $copy.HasExited){throw 'Native-closed final browser did not retain its frame and blocked copy'}
+            [OptionsFixture]::Describe($main,$process.Id)|Out-Null;[OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)|Out-Null
+            $pending=Request @('files','status','--pane',$childPane) 0 (Files-CloseRemaining $pauseClock)
+            if($pending.operation.id -ne $operationId -or $pending.operation.status -ne 'preparing'){throw 'Native browser close lost the active Files preparation'}
+            $evidence.filesClose=@{operation=$operationId;surface=$child.id;frame=$frame.window_handle;nativeClosed=$true;worker=$pause.Description;thread=$pause.ThreadId;heldMs=$pauseClock.ElapsedMilliseconds}
+            Files-CloseRemaining $pauseClock|Out-Null
+        } finally {
+            if($pause){$pause.Dispose()}
+        }
+        if(-not $pause.Resumed -or $pause.PreviousResumeCount -ne 1 -or $pauseClock.ElapsedMilliseconds -ge 3000){throw 'Files worker suspension was not balanced within three seconds'}
+        $finish=[Diagnostics.Stopwatch]::StartNew()
+        if(-not $copy.WaitForExit((Files-CloseRemaining $finish 5000)) -or -not $copyOut.Wait((Files-CloseRemaining $finish 5000)) -or -not $copyErr.Wait((Files-CloseRemaining $finish 5000)) -or $copy.ExitCode -ne 0){throw ('Resumed Files copy did not return acceptance: '+[CliProbe]::Output($copyErr))}
+        $accepted=[CliProbe]::Output($copyOut)|ConvertFrom-Json
+        if($accepted.operation.id -ne $operationId -or $accepted.operation.status -ne 'accepted' -or -not $accepted.operation.accepted){throw 'Resumed Files operation returned a different receipt'}
+        if(-not $process.WaitForExit((Files-CloseRemaining $finish 5000)) -or $process.ExitCode -ne 0){throw 'Completed Files operation did not close the final native-closed browser normally'}
+        if(-not $files.BytesEqual($sourcePath,$bytes) -or -not $files.BytesEqual($files.File($destination),$bytes)){throw 'Files-close completion changed source or destination bytes'}
+        $evidence.checks+=@{name='final_script_browser_close_waits_for_active_files_copy_then_exits_with_exact_bytes';passed=$true;heldMs=$evidence.filesClose.heldMs}
+        $evidence.hostExitCode=$process.ExitCode;if($stderr.Wait(1000)){$evidence.hostStderr=[CliProbe]::Output($stderr)}
+        $process.Dispose();$script:process=$null;$script:pipeName=$null
+    } finally {
+        if($pause){$pause.Dispose()}
+        if($copy){if(-not $copy.HasExited){$copy.Kill();[CliProbe]::WaitAfterKill($copy)};$copy.Dispose()}
+        $files.Dispose()
+    }
+}
 try {
+    if($Case -eq 'all') {
     $initial=Start-Owned @('--new-window','--shell=cmd','--cwd',$directory);$source=(Request @('identify'));$terminal=$initial.surfaces[0]
     $script:shells+=$terminal.pid
     $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
@@ -377,6 +476,8 @@ try {
     $process.Dispose();$process=$null;$pipeName=$null
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
+    }
+    Verify-FilesClose
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

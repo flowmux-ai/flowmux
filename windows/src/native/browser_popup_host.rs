@@ -190,6 +190,21 @@ impl App {
         }
         Ok(())
     }
+    pub(in crate::native::host) fn browser_resume_closed(&mut self) {
+        // WindowCloseRequested fires once. Files completion retries any close
+        // that it deferred, validating the instance and current layout again.
+        let closed: Vec<_> = self
+            .browsers
+            .iter()
+            .filter(|(_, browser)| browser.native_closed.get())
+            .map(|(id, browser)| (*id, browser.instance))
+            .collect();
+        for (id, instance) in closed {
+            if let Err(error) = self.browser_popup_close(id, instance) {
+                report(&format!("browser close after Files completion: {error:#}"));
+            }
+        }
+    }
     pub(super) fn browser_popup_close(
         &mut self,
         id: SurfaceId,

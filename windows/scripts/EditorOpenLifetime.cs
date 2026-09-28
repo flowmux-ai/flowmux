@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
 public sealed class EditorOpenWorkerPause : IDisposable {
-    private const string WorkerName = "flowmux-editor-open";
     [DllImport("user32.dll", SetLastError=true)] static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -61,7 +60,13 @@ public sealed class EditorOpenWorkerPause : IDisposable {
         return uiThread;
     }
 
-    public EditorOpenWorkerPause(Process owned, long hiddenHostHwnd) {
+    public EditorOpenWorkerPause(Process owned, long hiddenHostHwnd)
+        : this(owned, hiddenHostHwnd, "flowmux-editor-open") {}
+
+    public EditorOpenWorkerPause(Process owned, long hiddenHostHwnd, string workerName) {
+        if (!String.Equals(workerName, "flowmux-editor-open", StringComparison.Ordinal) &&
+            !String.Equals(workerName, "flowmux-files-actions", StringComparison.Ordinal))
+            throw new ArgumentException("Worker name is not allowed", "workerName");
         if (owned == null || owned.HasExited) throw new InvalidOperationException("Owned host is not running");
         ProcessId = GetProcessId(owned.Handle);
         IntPtr window = new IntPtr(hiddenHostHwnd);
@@ -79,8 +84,8 @@ public sealed class EditorOpenWorkerPause : IDisposable {
                     if (handle == IntPtr.Zero) continue;
                     if (GetProcessIdOfThread(handle) != ProcessId || GetThreadId(handle) != candidateId) continue;
                     string description = ReadDescription(handle);
-                    if (!String.Equals(description, WorkerName, StringComparison.Ordinal)) continue;
-                    if (thread != IntPtr.Zero) throw new InvalidOperationException("Owned host has more than one editor Open worker");
+                    if (!String.Equals(description, workerName, StringComparison.Ordinal)) continue;
+                    if (thread != IntPtr.Zero) throw new InvalidOperationException("Owned host has more than one matching worker");
                     thread = handle;handle = IntPtr.Zero;
                     ThreadId = candidateId;Description = description;
                 } finally {
@@ -88,15 +93,15 @@ public sealed class EditorOpenWorkerPause : IDisposable {
                     candidate.Dispose();
                 }
             }
-            if (thread == IntPtr.Zero) throw new InvalidOperationException("Owned editor Open worker was not found; warm it before pausing");
+            if (thread == IntPtr.Zero) throw new InvalidOperationException("Owned worker was not found; warm it before pausing");
             if (CheckHiddenHost(owned, window, ProcessId) != uiThread ||
                 GetProcessIdOfThread(thread) != ProcessId || GetThreadId(thread) != ThreadId || ThreadId == uiThread ||
-                !String.Equals(ReadDescription(thread), WorkerName, StringComparison.Ordinal))
+                !String.Equals(ReadDescription(thread), workerName, StringComparison.Ordinal))
                 throw new InvalidOperationException("Owned worker identity changed before suspension");
             PreviousSuspendCount = SuspendThread(thread);
             if (PreviousSuspendCount == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
             suspended = true;
-            if (PreviousSuspendCount != 0) throw new InvalidOperationException("Owned Open worker was already suspended; refusing nested suspension");
+            if (PreviousSuspendCount != 0) throw new InvalidOperationException("Owned worker was already suspended; refusing nested suspension");
         } catch {
             Dispose();
             throw;
