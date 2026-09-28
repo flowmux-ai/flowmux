@@ -1,0 +1,17 @@
+{
+  "name": "font-picker-package",
+  "command": [
+    "env",
+    "NSISDIR=/tmp/flowmux-windows-tools/nsis/usr/share/nsis",
+    "/tmp/flowmux-windows-tools/nsis/usr/bin/makensis",
+    "-V3",
+    "-DBINARY_DIR=/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/font-picker-release",
+    "-DOUTPUT_FILE=dist/flowmux-windows-0.10.1-dev-font-picker-x64-setup.exe",
+    "windows/installer.nsi"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 501675,
+  "exitCode": 0,
+  "elapsedSeconds": 11.678
+}

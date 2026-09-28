@@ -1,0 +1,21 @@
+{
+  "name": "font-picker-format",
+  "command": [
+    "rustfmt",
+    "--edition",
+    "2021",
+    "--config",
+    "skip_children=true",
+    "--check",
+    "windows/src/native/font_catalog.rs",
+    "windows/src/native/font_picker.rs",
+    "windows/src/native/options_panel.rs",
+    "windows/src/native/appearance.rs",
+    "windows/src/native/chrome.rs"
+  ],
+  "deadlineSeconds": 30,
+  "status": "passed",
+  "pid": 499161,
+  "exitCode": 0,
+  "elapsedSeconds": 0.212
+}

@@ -31,6 +31,7 @@ public static class OptionsFixture {
     // owned parent explicitly when testing the same draft-change handler.
     public static void SetTextAndNotify(long parent,long child,int owner,string value) {SetText(parent,child,owner,value);var hwnd=Child(parent,child,owner);Message(new IntPtr(parent),0x111,new IntPtr((0x300<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     public static void Select(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned combo is disabled");if(Message(hwnd,0x14E,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned combo selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    public static void ListSelect(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned list is disabled");if(Message(hwnd,0x186,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned list selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     public sealed class Bounds {public long Parent;public int X,Y,Width,Height;}
     [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Rect rect,uint count);
     public static long Parent(long handle,int owner) {return GetParent(Owned(handle,owner)).ToInt64();}

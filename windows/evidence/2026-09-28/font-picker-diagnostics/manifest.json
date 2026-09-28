@@ -1,0 +1,608 @@
+{
+  "stage": "native-font-picker",
+  "status": "frozen",
+  "artifacts": {
+    "c7ba4f32481a-result.json": {
+      "source": "windows/dist/checks/font-picker-clippy-3a9f7259-d4a8-437e-b903-835e0d0d083f/result.json",
+      "source_bytes": 2591,
+      "source_sha256": "8b4a651775b9a79585b0f59e788ccc7e86c277776ecaa5657d3da1149e01e6dc",
+      "bytes": 2591,
+      "sha256": "8b4a651775b9a79585b0f59e788ccc7e86c277776ecaa5657d3da1149e01e6dc"
+    },
+    "b25ed2d6eacf-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-clippy-3a9f7259-d4a8-437e-b903-835e0d0d083f/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "8192c206955313206cb45a7a17bdb8c5d94f99a08d1cd4d7189074da7951bfc6",
+      "bytes": 216,
+      "sha256": "8192c206955313206cb45a7a17bdb8c5d94f99a08d1cd4d7189074da7951bfc6"
+    },
+    "5469ed512f18-result.json": {
+      "source": "windows/dist/checks/font-picker-clippy-final-9b5c0166-00e1-46f6-ad17-5c0bf987a557/result.json",
+      "source_bytes": 2597,
+      "source_sha256": "4edec409963dc622dd30815ee4d8c9c57e81562366e66dafc86d986a7ae8bc47",
+      "bytes": 2597,
+      "sha256": "4edec409963dc622dd30815ee4d8c9c57e81562366e66dafc86d986a7ae8bc47"
+    },
+    "975be8d189ce-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-clippy-final-9b5c0166-00e1-46f6-ad17-5c0bf987a557/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "b4026de4357e2ded10cd906f62643c7ce64ba6149975e57823bc718d8947c3ea",
+      "bytes": 216,
+      "sha256": "b4026de4357e2ded10cd906f62643c7ce64ba6149975e57823bc718d8947c3ea"
+    },
+    "608c8790ace4-result.json": {
+      "source": "windows/dist/checks/font-picker-debug-d3ec3eaf-a7dc-467a-818a-69e809522b65/result.json",
+      "source_bytes": 2610,
+      "source_sha256": "c4a963b95e03457418c90fafd71a639c6c6a4b99e98f5c027631512d4d6738d2",
+      "bytes": 2610,
+      "sha256": "c4a963b95e03457418c90fafd71a639c6c6a4b99e98f5c027631512d4d6738d2"
+    },
+    "b3a9a9d0fbb4-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-debug-d3ec3eaf-a7dc-467a-818a-69e809522b65/stdout.txt",
+      "source_bytes": 372,
+      "source_sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b",
+      "bytes": 372,
+      "sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b"
+    },
+    "9090963aef53-result.json": {
+      "source": "windows/dist/checks/font-picker-format-a183032c-fa04-4ec0-9c98-40ad7beb7db8/result.json",
+      "source_bytes": 465,
+      "source_sha256": "17b79ce6db7bbceed94956e80afc3a0ffb65baf7a855b36d01548f184c0ef335",
+      "bytes": 465,
+      "sha256": "17b79ce6db7bbceed94956e80afc3a0ffb65baf7a855b36d01548f184c0ef335"
+    },
+    "c85e10b9000f-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-format-a183032c-fa04-4ec0-9c98-40ad7beb7db8/stdout.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "3734225e4696-result.json": {
+      "source": "windows/dist/checks/font-picker-keybindings-b516141d-526b-4f7d-a9d4-f67ce768dd05/result.json",
+      "source_bytes": 506,
+      "source_sha256": "a259f3b841b19353a823a87df5f52da068e5f1f7b5fd799e0a1af24af37bad39",
+      "bytes": 490,
+      "sha256": "98baeaf50f5f60d24fa39ee7c9be04d9d1bb48558ea76ce5b5a8b8b5b754e1b3"
+    },
+    "825947c3b5c3-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-keybindings-b516141d-526b-4f7d-a9d4-f67ce768dd05/stdout.txt",
+      "source_bytes": 230,
+      "source_sha256": "6d7063212e1bc8bda7f1d73e0db1b2d14502108c70b3a998f9d481fca8bcf35b",
+      "bytes": 228,
+      "sha256": "82eed8eead641e95fdf6b60df38fe218b0887ca4affbcf204707039bb395c757"
+    },
+    "a4c819cce585-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-keybindings-b516141d-526b-4f7d-a9d4-f67ce768dd05/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "d52358efe251-result.json": {
+      "source": "windows/dist/checks/font-picker-native-b64f9aa4-0918-46f7-899b-648d1f4dbf07/result.json",
+      "source_bytes": 488,
+      "source_sha256": "31b6b4b20ec5705959bef3b817e79e19e819b724a64bfbd9b910f2733303b3a8",
+      "bytes": 472,
+      "sha256": "8a55ad161839e6f41b8cc28b6718ccdc9adb38ed17bbd9ec705a02bfd6949d8f"
+    },
+    "e83b6d1b4694-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-native-b64f9aa4-0918-46f7-899b-648d1f4dbf07/stdout.txt",
+      "source_bytes": 223,
+      "source_sha256": "2e29f1cf5f900860c759682132926821007706f17d624a1fc83f32457f0d8f53",
+      "bytes": 221,
+      "sha256": "04b920b5474e6dde5f381c4762fa6a1fd0b6fc4f1ce7cf56ed1049f9f8cad86f"
+    },
+    "4b70697dee91-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-native-b64f9aa4-0918-46f7-899b-648d1f4dbf07/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "2d4998bb02a3-result.json": {
+      "source": "windows/dist/checks/font-picker-options-f89e90d5-9e12-4fcc-870a-d1b334e801bc/result.json",
+      "source_bytes": 498,
+      "source_sha256": "9eb82d5502a6ec122dee34bbd4711998492edfaa433ef2210d395d6bcd91f7c9",
+      "bytes": 482,
+      "sha256": "a5d57fc5d85ac9074362c3e1552aba036ec144e5eb1befd7ac09660212437661"
+    },
+    "6248fd68e5f1-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-options-f89e90d5-9e12-4fcc-870a-d1b334e801bc/stdout.txt",
+      "source_bytes": 251,
+      "source_sha256": "363d2d30861ae4ab6f6bd03ebee423f0a68d991fe0bf543b7dd28cdc2ea497e8",
+      "bytes": 249,
+      "sha256": "34bf7b1c7b8a68ea1d24ce06ba348cc0dc65f1e7e6b6d35168376475f22ab7d8"
+    },
+    "486b1a055e11-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-options-f89e90d5-9e12-4fcc-870a-d1b334e801bc/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "f89f65f887fe-result.json": {
+      "source": "windows/dist/checks/font-picker-release-ca7bde7f-f33e-4c6c-aaa2-2c396e07dc6a/result.json",
+      "source_bytes": 2650,
+      "source_sha256": "86710e0a06de9d3f571f15a2a3ff6b06e2bd089f57eaada0726448e91cf73734",
+      "bytes": 2650,
+      "sha256": "86710e0a06de9d3f571f15a2a3ff6b06e2bd089f57eaada0726448e91cf73734"
+    },
+    "e91af472638c-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-release-ca7bde7f-f33e-4c6c-aaa2-2c396e07dc6a/stdout.txt",
+      "source_bytes": 374,
+      "source_sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df",
+      "bytes": 374,
+      "sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df"
+    },
+    "0b037db4d737-result.json": {
+      "source": "windows/dist/checks/font-picker-script-check-9ab6c033-e53e-48e5-85d8-26b47853a998/result.json",
+      "source_bytes": 506,
+      "source_sha256": "1456d294ca0c34c44cfafa7004ad013ab47b18ae17d8cef524478083edcbc072",
+      "bytes": 490,
+      "sha256": "6080b7cc50d8aee6c7ba24b65080d0aa7bbf646e75af23f56e2dfeea292eadcb"
+    },
+    "e4a8e54ea5eb-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-script-check-9ab6c033-e53e-48e5-85d8-26b47853a998/stdout.txt",
+      "source_bytes": 55,
+      "source_sha256": "ce5a136e184d3182fcbb718ecc7d9ad3a7860e36015c41329d9ebbcc6b5497ec",
+      "bytes": 54,
+      "sha256": "0c54df3bd834e9ff050c50107b62bff1d0949e393f4863372fcc807cda18873d"
+    },
+    "d9fb271ce819-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-script-check-9ab6c033-e53e-48e5-85d8-26b47853a998/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "78e20964e943-result.json": {
+      "source": "windows/dist/checks/font-picker-unit-build-6022dff0-e647-40c2-a9cd-43c8d7aeeaa8/result.json",
+      "source_bytes": 2562,
+      "source_sha256": "7f3ab5774b84e59b49631061ee2b209833da01b031280e5c4230ca91f5a8fc4a",
+      "bytes": 2562,
+      "sha256": "7f3ab5774b84e59b49631061ee2b209833da01b031280e5c4230ca91f5a8fc4a"
+    },
+    "a687e29cebd4-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-unit-build-6022dff0-e647-40c2-a9cd-43c8d7aeeaa8/stdout.txt",
+      "source_bytes": 339,
+      "source_sha256": "b56f17a4936ca1884e795eb0b08df7cc6599e6f21425f38a7547926eb2aa41b4",
+      "bytes": 339,
+      "sha256": "b56f17a4936ca1884e795eb0b08df7cc6599e6f21425f38a7547926eb2aa41b4"
+    },
+    "858e38867663-result.json": {
+      "source": "windows/dist/checks/font-picker-units-94e15ad4-437f-4532-8f85-c5b346aa4fab/result.json",
+      "source_bytes": 493,
+      "source_sha256": "7e38f59d5a9181b71d18293299d1d597cd250a6cf958cdd8049ddef56b84b83e",
+      "bytes": 477,
+      "sha256": "e8efa06334878ef608b0ed2ee9e06f2095aac76895af99f643f09cda87fb639b"
+    },
+    "16038122b9fd-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-units-94e15ad4-437f-4532-8f85-c5b346aa4fab/stdout.txt",
+      "source_bytes": 214,
+      "source_sha256": "698d7e8c448c22ba9d8c4d4011168c9a9cee4da82c245d430cbacf5663391a52",
+      "bytes": 211,
+      "sha256": "f8e3ff091209604530feafd1ee7718d31f96e0d50a27269945311a347f99e544"
+    },
+    "ab3ff6902140-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-units-94e15ad4-437f-4532-8f85-c5b346aa4fab/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "558ebe9fbc80-native-font-picker-background.json": {
+      "source": "windows/dist/evidence/font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5/native-font-picker-background.json",
+      "source_bytes": 141450,
+      "source_sha256": "9e3e5442754e63771fd963185579469cda055e636fda102812f4eeb764cd6567",
+      "bytes": 139680,
+      "sha256": "e1ce4461cae00822139a69baf0f14771666e67c6c2519ff542e7579ff39f9f33"
+    },
+    "25ea5ceecace-font-picker.png": {
+      "source": "windows/dist/evidence/font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5/font-picker.png",
+      "source_bytes": 12673,
+      "source_sha256": "e6279a065945ead8bf11e165744e9680dc1cb9a381b61c5d66deb9c900191eb8",
+      "bytes": 12673,
+      "sha256": "e6279a065945ead8bf11e165744e9680dc1cb9a381b61c5d66deb9c900191eb8"
+    },
+    "fb79266efd6b-native-keybindings-dialog-background.json": {
+      "source": "windows/dist/evidence/keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b/native-keybindings-dialog-background.json",
+      "source_bytes": 5107723,
+      "source_sha256": "aec450d515471c9ab737a0fb96478aaf8957755c11a53ea14e11c9ac493cae33",
+      "bytes": 5049807,
+      "sha256": "d729c83b68ff9fcb894da2b90f1e36de361f28cc1eea7babe0892802ee072c4a"
+    },
+    "5f988ffd4d6f-keybindings-rows.png": {
+      "source": "windows/dist/evidence/keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b/keybindings-rows.png",
+      "source_bytes": 24793,
+      "source_sha256": "6986f596384d62142bcd2fcccb7db5393dec040ab7655d447281a73413887913",
+      "bytes": 24793,
+      "sha256": "6986f596384d62142bcd2fcccb7db5393dec040ab7655d447281a73413887913"
+    },
+    "40c86ade73fe-keybindings-edit.png": {
+      "source": "windows/dist/evidence/keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b/keybindings-edit.png",
+      "source_bytes": 4108,
+      "source_sha256": "e9b6e8c9576a52d43c079231c00f4768437e22e115168f82b5ef3ef683b87123",
+      "bytes": 4108,
+      "sha256": "e9b6e8c9576a52d43c079231c00f4768437e22e115168f82b5ef3ef683b87123"
+    },
+    "6dcbe50267d2-keybindings-capture.png": {
+      "source": "windows/dist/evidence/keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b/keybindings-capture.png",
+      "source_bytes": 1786,
+      "source_sha256": "aadf6e0553d0908fed8a5df55b5e77e1fb270c7128c1a8d15b6f9fe6c63ef8cb",
+      "bytes": 1786,
+      "sha256": "aadf6e0553d0908fed8a5df55b5e77e1fb270c7128c1a8d15b6f9fe6c63ef8cb"
+    },
+    "4e49c5239bc7-native-options-live-background.json": {
+      "source": "windows/dist/evidence/options-live-42f66e07-4d25-4d7f-92fe-f1628096505f/native-options-live-background.json",
+      "source_bytes": 3200691,
+      "source_sha256": "62a80a22d90a0e60da4466303802be02b3fff87c2799413d98ea5f0200ebcb58",
+      "bytes": 3163229,
+      "sha256": "043bf2c87459c9ba62466b1d5460d8afebb06ec6cf6eaa18ac8fd5ef9fe714aa"
+    },
+    "84288274c693-font-picker-unit-evidence.json": {
+      "source": "windows/dist/font-picker-unit-evidence.json",
+      "source_bytes": 956,
+      "source_sha256": "f90b478ee4451cda45ab4402bee22454f3cdbd46596621979220d3ae9f584214",
+      "bytes": 935,
+      "sha256": "7f550f80a7989f1e7da00650159fdad58cef6e4cfacec05fe04abf621f176767"
+    },
+    "0198823fec18-font-picker-source-final.json": {
+      "source": "windows/dist/font-picker-source-final.json",
+      "source_bytes": 15942,
+      "source_sha256": "e012a0335a81705de820b94df70a9475b861b92094e80843e953c4bdc2ffde34",
+      "bytes": 15942,
+      "sha256": "e012a0335a81705de820b94df70a9475b861b92094e80843e953c4bdc2ffde34"
+    },
+    "e2873d23f76d-font-picker-verifiers-final.json": {
+      "source": "windows/dist/font-picker-verifiers-final.json",
+      "source_bytes": 1018,
+      "source_sha256": "e49d340083a711d36ee8bfa631c633c8e311410163502b835cda9458802341e6",
+      "bytes": 1018,
+      "sha256": "e49d340083a711d36ee8bfa631c633c8e311410163502b835cda9458802341e6"
+    },
+    "9c98c756f315-font-picker-verifiers-capture-scope.json": {
+      "source": "windows/dist/font-picker-verifiers-capture-scope.json",
+      "source_bytes": 1188,
+      "source_sha256": "6f3f327d70caa180e4cbc8c2af307f52cb5b98e8073cc23ec42646f6ac4a520a",
+      "bytes": 1188,
+      "sha256": "6f3f327d70caa180e4cbc8c2af307f52cb5b98e8073cc23ec42646f6ac4a520a"
+    },
+    "657c0351a8aa-font-picker-debug-staging.json": {
+      "source": "windows/dist/font-picker-debug-staging.json",
+      "source_bytes": 2272,
+      "source_sha256": "74b4985569eb0d9b101f7b9672170f3d6610d23007ec30a190187420625ee2cb",
+      "bytes": 2272,
+      "sha256": "74b4985569eb0d9b101f7b9672170f3d6610d23007ec30a190187420625ee2cb"
+    },
+    "f110d8dc74da-font-picker-tests-staging.json": {
+      "source": "windows/dist/font-picker-tests-staging.json",
+      "source_bytes": 1204,
+      "source_sha256": "d979a68c6fcfabc17686c12aecb41827a4a6cbcf327c8b286a2edf7207365e2b",
+      "bytes": 1204,
+      "sha256": "d979a68c6fcfabc17686c12aecb41827a4a6cbcf327c8b286a2edf7207365e2b"
+    },
+    "c465694047dc-result.json": {
+      "source": "windows/dist/checks/font-picker-package-9f1bfdf2-86ed-4724-b93c-848d05df7821/result.json",
+      "source_bytes": 561,
+      "source_sha256": "b91378f4c30feece37f9e535af6f058b2b29e52152d1cd92120c0f3cee82f802",
+      "bytes": 561,
+      "sha256": "b91378f4c30feece37f9e535af6f058b2b29e52152d1cd92120c0f3cee82f802"
+    },
+    "e6e822991880-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-package-9f1bfdf2-86ed-4724-b93c-848d05df7821/stdout.txt",
+      "source_bytes": 1323,
+      "source_sha256": "2373a95266458c68218dad813bcf6fe3c7eb0ffa95316af93e616083f2a6cbe9",
+      "bytes": 1323,
+      "sha256": "2373a95266458c68218dad813bcf6fe3c7eb0ffa95316af93e616083f2a6cbe9"
+    },
+    "87a18b2f83a2-result.json": {
+      "source": "windows/dist/checks/font-picker-release-doctor-17ceb112-319d-43fd-9fc3-e93673e5351e/result.json",
+      "source_bytes": 507,
+      "source_sha256": "399d1e6ab3bd063cb49c8dad3dd7733a2d1fccba3fb82f19214d8c4566435ce9",
+      "bytes": 491,
+      "sha256": "a781774738ec2f62a04ec006d77e91035b0d04ff268dcd2e83dde6d6c189a971"
+    },
+    "c2ed0379d938-stdout.txt": {
+      "source": "windows/dist/checks/font-picker-release-doctor-17ceb112-319d-43fd-9fc3-e93673e5351e/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f"
+    },
+    "1fdc4e9c0929-stderr.txt": {
+      "source": "windows/dist/checks/font-picker-release-doctor-17ceb112-319d-43fd-9fc3-e93673e5351e/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "92fac8211d3b-font-picker-release-staging.json": {
+      "source": "windows/dist/font-picker-release-staging.json",
+      "source_bytes": 2298,
+      "source_sha256": "b055dd280d66ec2957b4adf45c6f7b0bdbac101d8b61770516a9a2dc658a834f",
+      "bytes": 2298,
+      "sha256": "b055dd280d66ec2957b4adf45c6f7b0bdbac101d8b61770516a9a2dc658a834f"
+    },
+    "73419fd34fc8-native-font-picker-release-entrypoints.json": {
+      "source": "windows/evidence/2026-09-28/native-font-picker-release-entrypoints.json",
+      "source_bytes": 1361,
+      "source_sha256": "ccffd75784a382f141371cc10d194f2518673da1b0a808434590227b81e94dc2",
+      "bytes": 1317,
+      "sha256": "a504e35d19694e81ab45c988c5ecd3df7902b1316f0ed220d6f5a1cbcba8b1e7"
+    },
+    "e2c516729d75-font-picker-package-inputs.json": {
+      "source": "windows/dist/font-picker-package-inputs.json",
+      "source_bytes": 456,
+      "source_sha256": "6a6d807943798f78518081261620f889da47c36e5fb437402540822dd527cbeb",
+      "bytes": 456,
+      "sha256": "6a6d807943798f78518081261620f889da47c36e5fb437402540822dd527cbeb"
+    },
+    "b7f67285a56a-font-picker-documents.json": {
+      "source": "windows/dist/font-picker-documents.json",
+      "source_bytes": 217,
+      "source_sha256": "42b744fc9b0b49f1c350be7b754c03af23d058c890fd9b6a66700ced33c50ff0",
+      "bytes": 217,
+      "sha256": "42b744fc9b0b49f1c350be7b754c03af23d058c890fd9b6a66700ced33c50ff0"
+    },
+    "b27031d52fa4-font-picker-visual-review.json": {
+      "source": "windows/dist/font-picker-visual-review.json",
+      "source_bytes": 1595,
+      "source_sha256": "76f3c97c315791594353fe1e1336cf0eb3969b123af846aa041549296ed9362a",
+      "bytes": 1595,
+      "sha256": "76f3c97c315791594353fe1e1336cf0eb3969b123af846aa041549296ed9362a"
+    },
+    "be87e0e6f5bf-font-picker-package-command.json": {
+      "source": "windows/dist/font-picker-package-command.json",
+      "source_bytes": 383,
+      "source_sha256": "66e3510ce638e7b4cac2a25469c9d40a4ef6bf88f5614a139e3886ea28ffcabb",
+      "bytes": 383,
+      "sha256": "66e3510ce638e7b4cac2a25469c9d40a4ef6bf88f5614a139e3886ea28ffcabb"
+    },
+    "5f1524d9f706-release-font-picker-doctor.ps1": {
+      "source": "windows/dist/release-font-picker-doctor.ps1",
+      "source_bytes": 1991,
+      "source_sha256": "ec6ef7d88493436eac90577584114417f5689d207ce1f6f0cecdbef31a131a2a",
+      "bytes": 1988,
+      "sha256": "9d6a80fa0cf159c4e628792c6686d127432a21798afc02dfad8c7e74474602e7"
+    }
+  },
+  "checks": {
+    "windows/dist/checks/font-picker-clippy-3a9f7259-d4a8-437e-b903-835e0d0d083f/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 28.271,
+      "files": {
+        "result": "c7ba4f32481a-result.json",
+        "stdout.txt": "b25ed2d6eacf-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-clippy-final-9b5c0166-00e1-46f6-ad17-5c0bf987a557/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 22.208,
+      "files": {
+        "result": "5469ed512f18-result.json",
+        "stdout.txt": "975be8d189ce-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-debug-d3ec3eaf-a7dc-467a-818a-69e809522b65/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 88.907,
+      "files": {
+        "result": "608c8790ace4-result.json",
+        "stdout.txt": "b3a9a9d0fbb4-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-format-a183032c-fa04-4ec0-9c98-40ad7beb7db8/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.212,
+      "files": {
+        "result": "9090963aef53-result.json",
+        "stdout.txt": "c85e10b9000f-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-keybindings-b516141d-526b-4f7d-a9d4-f67ce768dd05/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 10.449,
+      "files": {
+        "result": "3734225e4696-result.json",
+        "stdout.txt": "825947c3b5c3-stdout.txt",
+        "stderr.txt": "a4c819cce585-stderr.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-native-b64f9aa4-0918-46f7-899b-648d1f4dbf07/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 9.891,
+      "files": {
+        "result": "d52358efe251-result.json",
+        "stdout.txt": "e83b6d1b4694-stdout.txt",
+        "stderr.txt": "4b70697dee91-stderr.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-options-f89e90d5-9e12-4fcc-870a-d1b334e801bc/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 10.132,
+      "files": {
+        "result": "2d4998bb02a3-result.json",
+        "stdout.txt": "6248fd68e5f1-stdout.txt",
+        "stderr.txt": "486b1a055e11-stderr.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-release-ca7bde7f-f33e-4c6c-aaa2-2c396e07dc6a/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 117.233,
+      "files": {
+        "result": "f89f65f887fe-result.json",
+        "stdout.txt": "e91af472638c-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-script-check-9ab6c033-e53e-48e5-85d8-26b47853a998/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.002,
+      "files": {
+        "result": "0b037db4d737-result.json",
+        "stdout.txt": "e4a8e54ea5eb-stdout.txt",
+        "stderr.txt": "d9fb271ce819-stderr.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-unit-build-6022dff0-e647-40c2-a9cd-43c8d7aeeaa8/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 83.832,
+      "files": {
+        "result": "78e20964e943-result.json",
+        "stdout.txt": "a687e29cebd4-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-units-94e15ad4-437f-4532-8f85-c5b346aa4fab/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.045,
+      "files": {
+        "result": "858e38867663-result.json",
+        "stdout.txt": "16038122b9fd-stdout.txt",
+        "stderr.txt": "ab3ff6902140-stderr.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-package-9f1bfdf2-86ed-4724-b93c-848d05df7821/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 11.678,
+      "files": {
+        "result": "c465694047dc-result.json",
+        "stdout.txt": "e6e822991880-stdout.txt"
+      }
+    },
+    "windows/dist/checks/font-picker-release-doctor-17ceb112-319d-43fd-9fc3-e93673e5351e/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.886,
+      "files": {
+        "result": "87a18b2f83a2-result.json",
+        "stdout.txt": "c2ed0379d938-stdout.txt",
+        "stderr.txt": "1fdc4e9c0929-stderr.txt"
+      }
+    }
+  },
+  "native": {
+    "windows/dist/evidence/font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5/native-font-picker-background.json": {
+      "original_status": "passed",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "558ebe9fbc80-native-font-picker-background.json",
+        "png0": "25ea5ceecace-font-picker.png"
+      }
+    },
+    "windows/dist/evidence/keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b/native-keybindings-dialog-background.json": {
+      "original_status": "passed",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "fb79266efd6b-native-keybindings-dialog-background.json",
+        "png0": "5f988ffd4d6f-keybindings-rows.png",
+        "png1": "40c86ade73fe-keybindings-edit.png",
+        "png2": "6dcbe50267d2-keybindings-capture.png"
+      }
+    },
+    "windows/dist/evidence/options-live-42f66e07-4d25-4d7f-92fe-f1628096505f/native-options-live-background.json": {
+      "original_status": "passed_hidden_options_live_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "4e49c5239bc7-native-options-live-background.json"
+      }
+    },
+    "windows/dist/font-picker-unit-evidence.json": {
+      "original_status": "passed",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "84288274c693-font-picker-unit-evidence.json"
+      }
+    }
+  },
+  "hashes": {
+    "windows/dist/font-picker-debug/flowmux.exe#4a4fbb1338d2d844429f43d85f4d59b8e307bbbe93a094c47622e05ac69eec36": {
+      "path": "windows/dist/font-picker-debug/flowmux.exe",
+      "bytes": 33507328,
+      "sha256": "4a4fbb1338d2d844429f43d85f4d59b8e307bbbe93a094c47622e05ac69eec36"
+    },
+    "windows/dist/font-picker-debug/flowmuxctl.exe#c08e712d963af0ff4b06e7d146e811a71b4395ae7b5a7b05cbe4fe2a07a22e00": {
+      "path": "windows/dist/font-picker-debug/flowmuxctl.exe",
+      "bytes": 3398144,
+      "sha256": "c08e712d963af0ff4b06e7d146e811a71b4395ae7b5a7b05cbe4fe2a07a22e00"
+    },
+    "windows/dist/font-picker-debug/flowmux-command.exe#a8fa5de28404aabfc062a7265520c170691ef51f0be3d17eb6b8f4d21cc79fa2": {
+      "path": "windows/dist/font-picker-debug/flowmux-command.exe",
+      "bytes": 3509760,
+      "sha256": "a8fa5de28404aabfc062a7265520c170691ef51f0be3d17eb6b8f4d21cc79fa2"
+    },
+    "windows/dist/font-picker-debug/flowmux.com#a8fa5de28404aabfc062a7265520c170691ef51f0be3d17eb6b8f4d21cc79fa2": {
+      "path": "windows/dist/font-picker-debug/flowmux.com",
+      "bytes": 3509760,
+      "sha256": "a8fa5de28404aabfc062a7265520c170691ef51f0be3d17eb6b8f4d21cc79fa2"
+    },
+    "windows/dist/font-picker-debug/conpty.dll#39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8": {
+      "path": "windows/dist/font-picker-debug/conpty.dll",
+      "bytes": 109920,
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8"
+    },
+    "windows/dist/font-picker-debug/x64/OpenConsole.exe#b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160": {
+      "path": "windows/dist/font-picker-debug/x64/OpenConsole.exe",
+      "bytes": 1066296,
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160"
+    },
+    "windows/dist/font-picker-release/flowmux.exe#b81873d3d42636dd212cf182dd1077df83f8d3b7692233df3e7643e8b11ad2a5": {
+      "path": "windows/dist/font-picker-release/flowmux.exe",
+      "bytes": 22832128,
+      "sha256": "b81873d3d42636dd212cf182dd1077df83f8d3b7692233df3e7643e8b11ad2a5"
+    },
+    "windows/dist/font-picker-release/flowmuxctl.exe#f49129869c3170658b930a8ac90c241873989afb9480fe2aa3840ab49e7d34ac": {
+      "path": "windows/dist/font-picker-release/flowmuxctl.exe",
+      "bytes": 1944064,
+      "sha256": "f49129869c3170658b930a8ac90c241873989afb9480fe2aa3840ab49e7d34ac"
+    },
+    "windows/dist/font-picker-release/flowmux-command.exe#704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6": {
+      "path": "windows/dist/font-picker-release/flowmux-command.exe",
+      "bytes": 2002944,
+      "sha256": "704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6"
+    },
+    "windows/dist/font-picker-release/flowmux.com#704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6": {
+      "path": "windows/dist/font-picker-release/flowmux.com",
+      "bytes": 2002944,
+      "sha256": "704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6"
+    },
+    "windows/dist/font-picker-release/conpty.dll#39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8": {
+      "path": "windows/dist/font-picker-release/conpty.dll",
+      "bytes": 109920,
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8"
+    },
+    "windows/dist/font-picker-release/x64/OpenConsole.exe#b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160": {
+      "path": "windows/dist/font-picker-release/x64/OpenConsole.exe",
+      "bytes": 1066296,
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160"
+    },
+    "windows/dist/font-picker-tests/flowmux_windows-940f179605ae9006.exe#20a022379200928e637412f2fd265beeb21399bdd7b840216a4c11bde993208b": {
+      "path": "windows/dist/font-picker-tests/flowmux_windows-940f179605ae9006.exe",
+      "bytes": 32238592,
+      "sha256": "20a022379200928e637412f2fd265beeb21399bdd7b840216a4c11bde993208b"
+    },
+    "windows/dist/flowmux-windows-0.10.1-dev-font-picker-x64-setup.exe#2d2f5960392e5fed08d529d0a14171dc0c61bc1beb3a33a80b93817b620ac832": {
+      "path": "windows/dist/flowmux-windows-0.10.1-dev-font-picker-x64-setup.exe",
+      "bytes": 6020784,
+      "sha256": "2d2f5960392e5fed08d529d0a14171dc0c61bc1beb3a33a80b93817b620ac832"
+    }
+  },
+  "updated_utc": "2026-09-28T11:14:08.051271+00:00",
+  "frozen_utc": "2026-09-28T11:15:00.204301+00:00",
+  "validation": {
+    "all_preserved_artifact_hashes_verified": true,
+    "all_14_binary_hashes_verified": true,
+    "final_runtime_verifier_package_document_hashes_verified": true,
+    "windows_jobs": 6,
+    "owned_processes_after_cleanup": 0,
+    "pngs_reviewed": 4,
+    "edit_raster_verified": false,
+    "acceptance": "partial only; native paint requests do not establish visible EDIT, physical Korean IME or full Linux parity"
+  }
+}

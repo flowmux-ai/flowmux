@@ -886,3 +886,56 @@ Physical Korean IME/TSF, keyboard/focus and OS accelerator delivery, per-monitor
 DPI/accessibility, full General/Theme/Update settings and complete Linux parity
 remain unverified or incomplete. Acceptance stays **62 partial / 52 pending**,
 U09 partial; no feature is marked complete.
+
+
+## 2026-09-28 — Searchable installed terminal fonts
+
+The original font-family/fallback EDIT remains available. Choose opens an owned
+460×420-DIP modal with Search, native list, Use font and Cancel. Its choices
+combine installed curated monospace families, the exact current custom string
+and Windows default. Query changes never save; explicit selection returns to
+the existing row writer/CAS path. A new primary preserves the original fallback
+tail, while unsupported CSS expressions are left for direct editing. Composition,
+newer raw input and stale external values retain their existing protections.
+Cancel and an unchanged Current choice reconcile an untouched row with an
+external winner without submitting another write.
+
+This differs from Linux's inline searchable DropDown. Windows default restores
+the existing Windows CSS stack; it does not implement Linux's absent-override
+theme inheritance. Installed GDI families do not establish WebView2 glyph
+coverage or Korean font fallback correctness. Full Linux Options parity is not
+claimed.
+
+One worker enumerates once per Options lifetime, caching its result. Callback
+checks cap discovery at 300 ms, 4096 visits or 256 candidates; a separate two-
+second UI deadline rejects late results. There is no join, retry or thread growth.
+The underlying native call cannot be forcibly stopped. Current/default choices
+remain usable after discovery failure or timeout.
+
+Final hidden picker coverage passed **nine groups in 8.829 s**. Existing Options
+regression passed **nine groups in 9.238 s**, and Keybindings regression passed
+**eight groups in 9.384 s**. Records under `windows/dist/evidence` are
+`font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5`,
+`options-live-42f66e07-4d25-4d7f-92fe-f1628096505f` and
+`keybindings-dialog-35a8cc36-1773-46f0-9c5a-c6b49a60868b`.
+Final source Clippy passed in **22.208 s**. Debug Cargo failed canonical GUI
+publication with OS error 5 after **88.907 s**; verified fresh deps outputs were
+staged separately for runtime checks. The failed Cargo invocation is preserved.
+The new font-contract unit passed (one test; Windows runner **1.045 s**).
+Static-CRT release linked fresh outputs but failed canonical publication with
+OS error 5 in **117.233 s**. Three staged release entrypoints passed doctor in
+**0.886 s**, and NSIS packaging passed in **11.678 s**.
+Source snapshots cover 146 Windows files plus one read-only shared file.
+
+Same-process WM_PRINTCLIENT capture showed actual LISTBOX text and selection
+colors. **Search and shortcut EDIT pixels remained blank despite the call**;
+EDIT raster is not verified. Actual WM_GETTEXT input, search results and geometry
+passed separately. These native client images exclude title bars, GPU/WebViews
+and the desktop, and do not expand older BUTTON/STATIC-only evidence. Physical
+IME/focus/DPI/accessibility and full visual parity remain unverified.
+
+Acceptance remains **62 partial / 52 pending**, U09 partial. Execution and artifact
+results are tracked in [the evidence](evidence/2026-09-28/font-picker.md).
+The installer candidate is `flowmux-windows-0.10.1-dev-font-picker-x64-setup.exe`
+(**6,020,784 bytes**); its hash and provenance are in the evidence. It was not
+installed over the running user application.

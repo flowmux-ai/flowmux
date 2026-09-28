@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Exact subsets in owned hidden processes; run under run-check.ps1 (50s).
-param([Parameter(Mandatory=$true)][string]$Executable,[Parameter(Mandatory=$true)][string]$OutputPath)
+param([Parameter(Mandatory=$true)][string]$Executable,[Parameter(Mandatory=$true)][string]$OutputPath,
+ [hashtable[]]$Cases=@(
+  @{filter='keybindings::';expected=22},
+  @{filter='native::settings_store::tests';expected=1},
+  @{filter='command::tests';expected=8},
+  @{filter='protocol::tests';expected=2}
+ ))
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $exe=(Resolve-Path -LiteralPath $Executable).Path
 $checks=@()
-$cases=@(
- @{filter='keybindings::';expected=22},
- @{filter='native::settings_store::tests';expected=1},
- @{filter='command::tests';expected=8},
- @{filter='protocol::tests';expected=2}
-)
 foreach($case in $cases) {
  $p=[CliProbe]::Start($exe,@($case.filter,'--test-threads=1'),$PSScriptRoot,$PSScriptRoot)
  try {

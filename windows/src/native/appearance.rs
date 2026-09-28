@@ -155,6 +155,10 @@ impl App {
                 panel.bindings_signal(signal);
                 return self.options_save_next();
             }
+            UiAction::FontPicker(signal) => {
+                panel.font_picker_signal(signal, &self.settings, self.settings_error.as_deref());
+                return self.options_save_next();
+            }
             UiAction::Changed(index) => {
                 panel.changed(index);
                 return self.options_save_next();

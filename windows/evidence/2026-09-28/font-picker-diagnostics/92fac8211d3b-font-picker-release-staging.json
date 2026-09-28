@@ -1,0 +1,49 @@
+{
+  "cargo_result": "windows/dist/checks/font-picker-release-ca7bde7f-f33e-4c6c-aaa2-2c396e07dc6a/result.json",
+  "cargo_status": "failed",
+  "reason": "Fresh linked deps separately staged; canonical GUI publication may fail because the user app holds it open. Running GUI unchanged. Cargo can update other canonical entrypoints.",
+  "files": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux.exe",
+      "path": "windows/dist/font-picker-release/flowmux.exe",
+      "sha256": "b81873d3d42636dd212cf182dd1077df83f8d3b7692233df3e7643e8b11ad2a5",
+      "bytes": 22832128,
+      "mtime_utc": "2026-09-28T11:12:07.034327+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmuxctl.exe",
+      "path": "windows/dist/font-picker-release/flowmuxctl.exe",
+      "sha256": "f49129869c3170658b930a8ac90c241873989afb9480fe2aa3840ab49e7d34ac",
+      "bytes": 1944064,
+      "mtime_utc": "2026-09-28T11:11:40.379267+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_command.exe",
+      "path": "windows/dist/font-picker-release/flowmux-command.exe",
+      "sha256": "704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6",
+      "bytes": 2002944,
+      "mtime_utc": "2026-09-28T11:11:40.385211+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_command.exe",
+      "path": "windows/dist/font-picker-release/flowmux.com",
+      "sha256": "704a6373d3b975743776e28b0d0308ed4e106d36d1eac4178153dfe9b87680b6",
+      "bytes": 2002944,
+      "mtime_utc": "2026-09-28T11:11:40.385211+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/conpty.dll",
+      "path": "windows/dist/font-picker-release/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920,
+      "mtime_utc": "2026-09-27T12:20:12.289442+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/x64/OpenConsole.exe",
+      "path": "windows/dist/font-picker-release/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296,
+      "mtime_utc": "2026-09-27T12:20:12.306707+00:00"
+    }
+  ]
+}

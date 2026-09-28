@@ -18,6 +18,8 @@ const SAVE_TIMER: usize = 7;
 const INPUT_BASE: usize = 200;
 #[path = "keybindings_panel.rs"]
 mod bindings;
+#[path = "font_picker.rs"]
+mod fonts;
 
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
@@ -32,6 +34,7 @@ pub(crate) enum UiAction {
     Close,
     Layout,
     Bindings(bindings::Signal),
+    FontPicker(fonts::Signal),
 }
 fn emit(action: UiAction) {
     post(Event::OptionsUi(action));
@@ -82,6 +85,10 @@ unsafe extern "system" fn procedure(
             emit(UiAction::Save);
             0
         }
+        WM_TIMER if wparam == fonts::TIMER => {
+            emit(UiAction::FontPicker(fonts::Signal::Poll));
+            0
+        }
         WM_MOUSEWHEEL => {
             emit(UiAction::Scroll(-((wparam >> 16) as i16 as i32) / 120 * 96));
             0
@@ -121,6 +128,7 @@ unsafe extern "system" fn procedure(
                     1 => emit(UiAction::Tab(0)),
                     2 => emit(UiAction::Tab(1)),
                     6 => emit(UiAction::Tab(2)),
+                    7 => emit(UiAction::FontPicker(fonts::Signal::Open)),
                     3 => emit(UiAction::Reset),
                     4 => emit(UiAction::Close),
                     5 => emit(UiAction::Reload),
@@ -179,6 +187,9 @@ pub(crate) struct Panel {
     window: HWND,
     tabs: [HWND; 3],
     bindings: Option<bindings::Bindings>,
+    font_picker: Option<fonts::Picker>,
+    background: bool,
+    theme: crate::settings::Theme,
     heading: HWND,
     viewport: HWND,
     groups: Vec<(usize, HWND)>,
@@ -196,6 +207,7 @@ pub(crate) struct Panel {
 }
 impl Drop for Panel {
     fn drop(&mut self) {
+        self.font_picker.take();
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.dismiss();
         }
@@ -242,6 +254,9 @@ impl Panel {
                 window,
                 tabs: [std::ptr::null_mut(); 3],
                 bindings: None,
+                font_picker: None,
+                background: true,
+                theme: crate::settings::Theme::Dark,
                 heading: std::ptr::null_mut(),
                 viewport: std::ptr::null_mut(),
                 groups: vec![],
@@ -358,6 +373,8 @@ impl Panel {
                 vec![("Dark", "dark"), ("Light", "light")],
             )?;
             p.bindings = Some(bindings::Bindings::new(&p)?);
+            let font_entry = p.child_in(p.viewport, "BUTTON", "Choose…", 7, WS_TABSTOP)?;
+            p.font_picker = Some(fonts::Picker::new(p.window, font_entry));
             p.layout();
             Ok(p)
         }
@@ -499,6 +516,8 @@ impl Panel {
         error: Option<&str>,
         background: bool,
     ) {
+        self.background = background;
+        self.theme = document.terminal.theme;
         chrome::window_theme(self.window, document.terminal.theme);
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.environment(background, document.terminal.theme);
@@ -520,6 +539,14 @@ impl Panel {
                 self.reload(document, error);
             }
             self.open = true;
+        }
+        if self
+            .font_picker
+            .as_ref()
+            .is_some_and(fonts::Picker::is_open)
+        {
+            self.font_picker.as_ref().unwrap().focus();
+            return;
         }
         if self
             .bindings
@@ -575,6 +602,10 @@ impl Panel {
     }
     pub(super) fn select(&mut self, page: usize) {
         if page < 3
+            && !self
+                .font_picker
+                .as_ref()
+                .is_some_and(fonts::Picker::is_open)
             && !self
                 .bindings
                 .as_ref()
@@ -660,6 +691,82 @@ impl Panel {
         }
         self.enable();
         self.schedule();
+    }
+    pub(super) fn font_picker_signal(
+        &mut self,
+        signal: fonts::Signal,
+        document: &crate::settings::Document,
+        error: Option<&str>,
+    ) {
+        if matches!(signal, fonts::Signal::Open) {
+            if !self.open
+                || self.page != 0
+                || self.pending.is_some()
+                || self.rows[0].due.is_some()
+                || COMPOSING.with(Cell::get) != 0
+                || self
+                    .bindings
+                    .as_ref()
+                    .is_some_and(bindings::Bindings::modal)
+            {
+                return;
+            }
+            let raw = Self::value(&self.rows[0]);
+            if let Some(picker) = self.font_picker.as_mut() {
+                if let Err(error) = picker.open(&raw, self.background, self.theme) {
+                    self.status(&format!("{error:#}"));
+                }
+            }
+            return;
+        }
+        let Some(picker) = self.font_picker.as_mut() else {
+            return;
+        };
+        let was_open = picker.is_open();
+        let snapshot = picker.source_raw().map(str::to_owned);
+        let Some(result) = picker.signal(signal) else {
+            if was_open && !picker.is_open() {
+                // Cancelling an untouched draft reveals any external winner
+                // that was deliberately held back while the modal was open.
+                self.update(document, error, false);
+            }
+            return;
+        };
+        let value = match result {
+            Ok(value) => value,
+            Err(error) => {
+                picker.error(error);
+                return;
+            }
+        };
+        let current = Self::value(&self.rows[0]);
+        if COMPOSING.with(Cell::get) != 0 || snapshot.as_deref() != Some(current.as_str()) {
+            picker.error(
+                "The original font field changed or is composing. Cancel and reopen the picker."
+                    .into(),
+            );
+            return;
+        }
+        // The font row baseline is held while this modal is open. The existing
+        // writer therefore rejects a stale choice after an external change.
+        picker.close();
+        if value == current {
+            self.update(document, error, false);
+            return;
+        }
+        Self::set(&self.rows[0], &value);
+        if value == self.rows[0].baseline && value != document.terminal.font_family {
+            // An explicit choice returning a dirty field to its old baseline
+            // still conflicts with an external winner; next_due's normal no-op
+            // optimization must not silently discard this case.
+            self.rows[0].due = None;
+            self.failed(
+                0,
+                "this setting changed elsewhere; reopen the editor before applying",
+            );
+            return;
+        }
+        self.changed(0);
     }
     pub(super) fn operation(
         &self,
@@ -748,6 +855,10 @@ impl Panel {
         error: Option<&str>,
         completed: bool,
     ) {
+        self.theme = document.terminal.theme;
+        if let Some(picker) = self.font_picker.as_ref() {
+            picker.theme(document.terminal.theme);
+        }
         chrome::window_theme(self.window, document.terminal.theme);
         unsafe {
             InvalidateRect(self.window, std::ptr::null(), 1);
@@ -763,7 +874,14 @@ impl Panel {
             );
         }
         let mut shell_baseline_updated = false;
+        let font_picker_open = self
+            .font_picker
+            .as_ref()
+            .is_some_and(fonts::Picker::is_open);
         for (index, row) in self.rows.iter_mut().enumerate() {
+            if index == 0 && font_picker_open {
+                continue;
+            }
             let value = row
                 .key
                 .map(|key| document.terminal.value(key))
@@ -784,7 +902,11 @@ impl Panel {
                 row.baseline = value;
                 shell_baseline_updated |= index == 8;
                 row.error = None;
-            } else if !composing && current == row.baseline && row.due.is_none() {
+            } else if !composing
+                && current == row.baseline
+                && row.due.is_none()
+                && row.error.is_none()
+            {
                 Self::set(row, &value);
                 row.baseline = value;
                 shell_baseline_updated |= index == 8;
@@ -823,10 +945,17 @@ impl Panel {
             }
             EnableWindow(self.reset, i32::from(self.pending.is_none()));
             EnableWindow(self.reload, i32::from(self.pending.is_none()));
+            if let Some(picker) = self.font_picker.as_ref() {
+                EnableWindow(picker.entry, i32::from(self.pending.is_none()));
+            }
         }
     }
     pub(super) fn reset_ready(&self) -> bool {
         self.open
+            && !self
+                .font_picker
+                .as_ref()
+                .is_some_and(fonts::Picker::is_open)
             && self.pending.is_none()
             && COMPOSING.with(Cell::get) == 0
             && !self
@@ -835,6 +964,9 @@ impl Panel {
                 .is_some_and(bindings::Bindings::modal)
     }
     pub(super) fn hide(&mut self) {
+        if let Some(picker) = self.font_picker.as_mut() {
+            picker.close();
+        }
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.dismiss();
         }
@@ -978,7 +1110,7 @@ impl Panel {
                         row.input,
                         px(246),
                         px(top) - offset,
-                        view.right - px(254),
+                        view.right - px(if index == 0 { 342 } else { 254 }),
                         if row.choices.is_empty() {
                             px(30)
                         } else {
@@ -986,6 +1118,19 @@ impl Panel {
                         },
                     );
                 }
+            }
+            if let Some(picker) = self.font_picker.as_ref() {
+                ShowWindow(
+                    picker.entry,
+                    if self.page == 0 { SW_SHOWNA } else { SW_HIDE },
+                );
+                place(
+                    picker.entry,
+                    view.right - px(88),
+                    px(44) - offset,
+                    px(80),
+                    px(30),
+                );
             }
             place(
                 self.status,
@@ -1025,16 +1170,28 @@ impl Panel {
     #[cfg(debug_assertions)]
     pub(in super::super) fn capture_window(&self) -> Option<HWND> {
         self.open.then(|| {
-            self.bindings
+            self.font_picker
                 .as_ref()
-                .and_then(bindings::Bindings::capture_window)
+                .and_then(fonts::Picker::capture_window)
+                .or_else(|| {
+                    self.bindings
+                        .as_ref()
+                        .and_then(bindings::Bindings::capture_window)
+                })
                 .unwrap_or(self.window)
         })
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
+        if self
+            .font_picker
+            .as_ref()
+            .is_some_and(|picker| picker.handle_message(message))
+        {
+            return true;
+        }
         if self
             .bindings
             .as_ref()

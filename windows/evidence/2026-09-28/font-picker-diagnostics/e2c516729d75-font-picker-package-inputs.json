@@ -1,0 +1,8 @@
+{
+  "files": {
+    "windows/installer.nsi": "b19819e88eb831a9a3cc0e3208cb5e404852dee9082d72de973f9235a5bd827c",
+    "windows/acceptance.json": "23814bbc1ece5866a37c00c9562fc58311cb8d780f4c2ed4ee706a4146f59bf2",
+    "windows/dist/font-picker-package-command.json": "66e3510ce638e7b4cac2a25469c9d40a4ef6bf88f5614a139e3886ea28ffcabb",
+    "windows/dist/release-font-picker-doctor.ps1": "ec6ef7d88493436eac90577584114417f5689d207ce1f6f0cecdbef31a131a2a"
+  }
+}

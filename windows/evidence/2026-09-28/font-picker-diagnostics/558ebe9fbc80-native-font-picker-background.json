@@ -1,0 +1,1767 @@
+{
+    "started":  "2026-09-28T11:08:25.6073618Z",
+    "mode":  "hidden-native-font-picker",
+    "hosts":  [
+                  37548
+              ],
+    "checks":  [
+                   {
+                       "name":  "installed_catalog_current_custom_fallbacks_owned_modal_and_Enter_Cancel",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "native_search_substring_and_empty_results_do_not_save",
+                       "passed":  true
+                   },
+                   {
+                       "scope":  "Owned HWND application guard messages only, not physical Korean IME",
+                       "name":  "raw_Unicode_NFD_search_survives_controlled_composition_and_external_other_setting",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "native_LISTBOX_selection_Enter_Use_font_persists_renderer_ACK_and_stable_terminal_PID",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "Cancel_and_identical_Current_refresh_untouched_font_row_after_external_write_without_saving",
+                       "passed":  true
+                   },
+                   {
+                       "scope":  "Owned native messages to disabled parent controls; no physical input",
+                       "name":  "controlled_original_row_composition_and_stale_raw_draft_block_picker_replacement",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "stale_picker_source_CAS_preserves_external_winner_and_local_candidate",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit_default_restores_default_font_chain_only",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit_old_baseline_conflict_draft_error_survives_unrelated_settings_update_until_Reload",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "name":  "startup",
+                             "pipe":  "\\\\.\\pipe\\flowmux-37548-93202dbd-2ff8-4da4-9a4f-d64b7945a32c",
+                             "elapsedMs":  548
+                         },
+                         {
+                             "client":  [
+                                            444,
+                                            381
+                                        ],
+                             "name":  "modal-owner-and-native-client-bounds",
+                             "controls":  [
+                                              {
+                                                  "handle":  725370,
+                                                  "name":  "search",
+                                                  "bounds":  {
+                                                                 "Parent":  4460626,
+                                                                 "X":  12,
+                                                                 "Y":  52,
+                                                                 "Width":  420,
+                                                                 "Height":  28
+                                                             }
+                                              },
+                                              {
+                                                  "handle":  2101456,
+                                                  "name":  "list",
+                                                  "bounds":  {
+                                                                 "Parent":  4460626,
+                                                                 "X":  12,
+                                                                 "Y":  88,
+                                                                 "Width":  420,
+                                                                 "Height":  195
+                                                             }
+                                              },
+                                              {
+                                                  "handle":  9047410,
+                                                  "name":  "choose",
+                                                  "bounds":  {
+                                                                 "Parent":  4460626,
+                                                                 "X":  254,
+                                                                 "Y":  343,
+                                                                 "Width":  90,
+                                                                 "Height":  28
+                                                             }
+                                              },
+                                              {
+                                                  "handle":  9309548,
+                                                  "name":  "cancel",
+                                                  "bounds":  {
+                                                                 "Parent":  4460626,
+                                                                 "X":  352,
+                                                                 "Y":  343,
+                                                                 "Width":  80,
+                                                                 "Height":  28
+                                                             }
+                                              }
+                                          ],
+                             "window":  {
+                                            "Handle":  4460626,
+                                            "Owner":  3215530,
+                                            "Style":  114032640,
+                                            "Title":  "Choose terminal font",
+                                            "Width":  460,
+                                            "Height":  420,
+                                            "Dpi":  96,
+                                            "Enabled":  true,
+                                            "OwnerEnabled":  false
+                                        }
+                         },
+                         {
+                             "current":  {
+                                             "family":  null,
+                                             "kind":  "current",
+                                             "label":  "Current custom: \"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                             "value":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                         },
+                             "name":  "catalog-choice-examples",
+                             "installed":  {
+                                               "family":  "Cascadia Code",
+                                               "kind":  "installed",
+                                               "label":  "Cascadia Code",
+                                               "value":  "\"Cascadia Code\", \"Malgun Gothic\", monospace"
+                                           },
+                             "catalog":  {
+                                             "elapsed_ms":  2,
+                                             "families":  [
+                                                              "Cascadia Code",
+                                                              "Cascadia Code ExtraLight",
+                                                              "Cascadia Code Light",
+                                                              "Cascadia Code SemiBold",
+                                                              "Cascadia Code SemiLight",
+                                                              "Cascadia Mono",
+                                                              "Cascadia Mono ExtraLight",
+                                                              "Cascadia Mono Light",
+                                                              "Cascadia Mono SemiBold",
+                                                              "Cascadia Mono SemiLight",
+                                                              "Consolas",
+                                                              "Lucida Console",
+                                                              "Courier New"
+                                                          ],
+                                             "truncated":  false,
+                                             "visited":  1399
+                                         },
+                             "default":  {
+                                             "family":  null,
+                                             "kind":  "default",
+                                             "label":  "Windows default",
+                                             "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                         },
+                             "catalog_scope":  "Actual GDI installed font enumeration, not a font rendering or glyph coverage assertion"
+                         },
+                         {
+                             "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                             "name":  "current-fallback-and-installed-catalog",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                              "revision":  "ffc28f62-6fce-44fe-9695-694303dfd4bb",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                         "value":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "ffc28f62-6fce-44fe-9695-694303dfd4bb",
+                             "picker":  {
+                                            "open":  true,
+                                            "window":  4460626,
+                                            "owner":  3215530,
+                                            "search":  725370,
+                                            "list":  2101456,
+                                            "choose":  9047410,
+                                            "cancel":  9309548,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  15,
+                                            "filtered":  [
+                                                             0,
+                                                             1,
+                                                             2,
+                                                             3,
+                                                             4,
+                                                             5,
+                                                             6,
+                                                             7,
+                                                             8,
+                                                             9,
+                                                             10,
+                                                             11,
+                                                             12,
+                                                             13,
+                                                             14
+                                                         ],
+                                            "selected":  0,
+                                            "query":  "",
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                        }
+                         },
+                         {
+                             "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                             "name":  "substring-and-no-results-do-not-save",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                              "revision":  "ffc28f62-6fce-44fe-9695-694303dfd4bb",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                         "value":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "ffc28f62-6fce-44fe-9695-694303dfd4bb",
+                             "picker":  {
+                                            "open":  true,
+                                            "window":  4526162,
+                                            "owner":  3215530,
+                                            "search":  9112946,
+                                            "list":  659870,
+                                            "choose":  790906,
+                                            "cancel":  4657110,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  15,
+                                            "filtered":  [
+
+                                                         ],
+                                            "selected":  null,
+                                            "query":  "FLOWMUX_NO_SUCH_FONT_7e71f5",
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                        }
+                         },
+                         {
+                             "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                             "name":  "raw-Unicode-NFD-query-during-composition-and-watcher",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                              "revision":  "4e05dd1c-ef78-4959-bbec-4df74e085470",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace",
+                                         "value":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "4e05dd1c-ef78-4959-bbec-4df74e085470",
+                             "picker":  {
+                                            "open":  true,
+                                            "window":  4591698,
+                                            "owner":  3215530,
+                                            "search":  856442,
+                                            "list":  2232528,
+                                            "choose":  9178482,
+                                            "cancel":  9440620,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  15,
+                                            "filtered":  [
+                                                             0,
+                                                             1,
+                                                             2,
+                                                             3,
+                                                             4,
+                                                             5,
+                                                             6,
+                                                             7,
+                                                             8,
+                                                             9,
+                                                             10,
+                                                             11,
+                                                             12,
+                                                             13,
+                                                             14
+                                                         ],
+                                            "selected":  0,
+                                            "query":  "한글 한 é 😀 \u0026",
+                                            "composing":  true,
+                                            "error":  null,
+                                            "source_raw":  "\"Current 한 é 😀 \u0026\", \"Malgun Gothic\", monospace"
+                                        }
+                         },
+                         {
+                             "font":  "\"Cascadia Code\", \"Malgun Gothic\", monospace",
+                             "name":  "installed-selection-renderer-ack",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Cascadia Code\", \"Malgun Gothic\", monospace",
+                                              "revision":  "adac4e5f-dfe9-441d-89db-0a05067bcedd",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Cascadia Code\", \"Malgun Gothic\", monospace",
+                                         "value":  "\"Cascadia Code\", \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "adac4e5f-dfe9-441d-89db-0a05067bcedd",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "\"Cancel winner 한\", monospace",
+                             "name":  "Cancel-refreshes-untouched-external-winner",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Cancel winner 한\", monospace",
+                                              "revision":  "a2059e43-326c-4c06-b2fe-2ba74627fb81",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Cancel winner 한\", monospace",
+                                         "value":  "\"Cancel winner 한\", monospace"
+                                     },
+                             "revision":  "a2059e43-326c-4c06-b2fe-2ba74627fb81",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "\"Current no-op winner 한\", monospace",
+                             "name":  "Current-identical-source-no-op-refreshes-winner",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current no-op winner 한\", monospace",
+                                              "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current no-op winner 한\", monospace",
+                                         "value":  "\"Current no-op winner 한\", monospace"
+                                     },
+                             "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "\"Current no-op winner 한\", monospace",
+                             "name":  "original-row-composition-guard",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current no-op winner 한\", monospace",
+                                              "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current no-op winner 한\", monospace",
+                                         "value":  "\"Current no-op winner 한\", monospace"
+                                     },
+                             "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                             "picker":  {
+                                            "open":  true,
+                                            "window":  4853842,
+                                            "owner":  3215530,
+                                            "search":  1118586,
+                                            "list":  2494672,
+                                            "choose":  9440626,
+                                            "cancel":  9702764,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  15,
+                                            "filtered":  [
+                                                             0,
+                                                             1,
+                                                             2,
+                                                             3,
+                                                             4,
+                                                             5,
+                                                             6,
+                                                             7,
+                                                             8,
+                                                             9,
+                                                             10,
+                                                             11,
+                                                             12,
+                                                             13,
+                                                             14
+                                                         ],
+                                            "selected":  1,
+                                            "query":  "",
+                                            "composing":  false,
+                                            "error":  "The original font field changed or is composing. Cancel and reopen the picker.",
+                                            "source_raw":  "\"Current no-op winner 한\", monospace"
+                                        }
+                         },
+                         {
+                             "font":  "\"Current no-op winner 한\", monospace",
+                             "name":  "stale-original-row-draft-preserved",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Current no-op winner 한\", monospace",
+                                              "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "\"Current no-op winner 한\", monospace",
+                                         "value":  ""
+                                     },
+                             "revision":  "45d1d154-6b7a-4948-ab04-733121e8fd0a",
+                             "picker":  {
+                                            "open":  true,
+                                            "window":  4853842,
+                                            "owner":  3215530,
+                                            "search":  1118586,
+                                            "list":  2494672,
+                                            "choose":  9440626,
+                                            "cancel":  9702764,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  15,
+                                            "filtered":  [
+                                                             0,
+                                                             1,
+                                                             2,
+                                                             3,
+                                                             4,
+                                                             5,
+                                                             6,
+                                                             7,
+                                                             8,
+                                                             9,
+                                                             10,
+                                                             11,
+                                                             12,
+                                                             13,
+                                                             14
+                                                         ],
+                                            "selected":  1,
+                                            "query":  "",
+                                            "composing":  false,
+                                            "error":  "The original font field changed or is composing. Cancel and reopen the picker.",
+                                            "source_raw":  "\"Current no-op winner 한\", monospace"
+                                        }
+                         },
+                         {
+                             "font":  "\"External winner 한\", monospace",
+                             "name":  "picker-source-CAS-conflict",
+                             "acks":  [
+                                          {
+                                              "font":  "\"External winner 한\", monospace",
+                                              "revision":  "a8dccc10-461c-4dca-a2ca-b1122bdbcf7d",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  "this setting changed elsewhere; reopen the editor before applying",
+                                         "baseline":  "\"Current no-op winner 한\", monospace",
+                                         "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "a8dccc10-461c-4dca-a2ca-b1122bdbcf7d",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                             "name":  "default-font-chain-and-clean-owner",
+                             "acks":  [
+                                          {
+                                              "font":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                              "revision":  "abe83368-a309-4c74-b60f-beb38055f0ce",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  null,
+                                         "baseline":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                         "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "abe83368-a309-4c74-b60f-beb38055f0ce",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "\"Baseline conflict winner 한\", monospace",
+                             "name":  "explicit-old-baseline-conflict",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Baseline conflict winner 한\", monospace",
+                                              "revision":  "7cc72169-4a32-4390-a48b-2ad98c2409b6",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  "this setting changed elsewhere; reopen the editor before applying",
+                                         "baseline":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                         "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "7cc72169-4a32-4390-a48b-2ad98c2409b6",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "font":  "\"Baseline conflict winner 한\", monospace",
+                             "name":  "baseline-equal-error-survives-unrelated-write",
+                             "acks":  [
+                                          {
+                                              "font":  "\"Baseline conflict winner 한\", monospace",
+                                              "revision":  "7316fc01-9286-440b-add8-8cba8898b1f7",
+                                              "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                          }
+                                      ],
+                             "row":  {
+                                         "input":  1904544,
+                                         "parent":  3018908,
+                                         "error":  "this setting changed elsewhere; reopen the editor before applying",
+                                         "baseline":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                         "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                     },
+                             "revision":  "7316fc01-9286-440b-add8-8cba8898b1f7",
+                             "picker":  {
+                                            "open":  false,
+                                            "window":  null,
+                                            "owner":  3215530,
+                                            "search":  null,
+                                            "list":  null,
+                                            "choose":  null,
+                                            "cancel":  null,
+                                            "catalog_state":  "ready",
+                                            "choice_count":  1,
+                                            "filtered":  [
+                                                             null
+                                                         ],
+                                            "selected":  null,
+                                            "query":  null,
+                                            "composing":  false,
+                                            "error":  null,
+                                            "source_raw":  null
+                                        }
+                         },
+                         {
+                             "stdoutComplete":  true,
+                             "name":  "host-exit",
+                             "exitCode":  0,
+                             "stderrComplete":  true,
+                             "pid":  37548,
+                             "stderr":  "",
+                             "stdout":  ""
+                         }
+                     ],
+    "artifacts":  [
+                      {
+                          "width":  444,
+                          "height":  381,
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5\\font-picker.png",
+                          "stateUnchanged":  true,
+                          "capture":  {
+                                          "background":  "#24272e",
+                                          "controls":  [
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  28,
+                                                                            "width":  80,
+                                                                            "x":  352,
+                                                                            "y":  343
+                                                                        },
+                                                               "handle":  4657110,
+                                                               "height":  28,
+                                                               "kind":  "button",
+                                                               "width":  80,
+                                                               "x":  352,
+                                                               "y":  343
+                                                           },
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  28,
+                                                                            "width":  90,
+                                                                            "x":  254,
+                                                                            "y":  343
+                                                                        },
+                                                               "handle":  790906,
+                                                               "height":  28,
+                                                               "kind":  "button",
+                                                               "width":  90,
+                                                               "x":  254,
+                                                               "y":  343
+                                                           },
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  44,
+                                                                            "width":  420,
+                                                                            "x":  12,
+                                                                            "y":  291
+                                                                        },
+                                                               "handle":  2166992,
+                                                               "height":  44,
+                                                               "kind":  "static",
+                                                               "width":  420,
+                                                               "x":  12,
+                                                               "y":  291
+                                                           },
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  195,
+                                                                            "width":  420,
+                                                                            "x":  12,
+                                                                            "y":  88
+                                                                        },
+                                                               "handle":  659870,
+                                                               "height":  195,
+                                                               "kind":  "listbox",
+                                                               "width":  420,
+                                                               "x":  12,
+                                                               "y":  88
+                                                           },
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  28,
+                                                                            "width":  420,
+                                                                            "x":  12,
+                                                                            "y":  52
+                                                                        },
+                                                               "handle":  9112946,
+                                                               "height":  28,
+                                                               "kind":  "edit",
+                                                               "width":  420,
+                                                               "x":  12,
+                                                               "y":  52
+                                                           },
+                                                           {
+                                                               "clip":  {
+                                                                            "height":  38,
+                                                                            "width":  420,
+                                                                            "x":  12,
+                                                                            "y":  10
+                                                                        },
+                                                               "handle":  9375084,
+                                                               "height":  38,
+                                                               "kind":  "static",
+                                                               "width":  420,
+                                                               "x":  12,
+                                                               "y":  10
+                                                           }
+                                                       ],
+                                          "format":  "bmp-rgb32",
+                                          "height":  381,
+                                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5\\font-picker.bmp",
+                                          "root_handle":  4526162,
+                                          "scope":  "production native subtree WM_DRAWITEM; may include cached owned WebView2 CapturePreview thumbnails; not a composed GPU or desktop capture",
+                                          "subtree":  true,
+                                          "width":  444
+                                      },
+                          "scope":  "Actual owned native client control paint including WM_PRINTCLIENT for EDIT and LISTBOX. Root visually reviews content; this assertion covers geometry and unchanged state, not glyph correctness. No titlebar, GPU composition or desktop capture.",
+                          "name":  "font-picker",
+                          "bytes":  12673,
+                          "sha256":  "e6279a065945ead8bf11e165744e9680dc1cb9a381b61c5d66deb9c900191eb8"
+                      }
+                  ],
+    "desktopInput":  false,
+    "clipboardAccess":  false,
+    "imeGuardMessageSimulation":  true,
+    "physicalIme":  false,
+    "deferred":  "Owned WM_IME_START/END messages exercise application guards only, not OS Korean IME or TSF. Hidden HWND dispatch does not establish physical focus, keyboard routing, per-monitor DPI, accessibility or composed font glyph rendering. Font family strings, native control ownership and renderer settings ACK are asserted.",
+    "finalSettings":  {
+                          "config_error":  null,
+                          "document":  {
+                                           "default_shell":  {
+                                                                 "args":  [
+
+                                                                          ],
+                                                                 "program":  "powershell"
+                                                             },
+                                           "revision":  "23ef6a5c-cd90-4154-95b5-81f5e87cc0f8",
+                                           "terminal":  {
+                                                            "cursor_blink":  true,
+                                                            "cursor_style":  "block",
+                                                            "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                            "font_size":  17,
+                                                            "minimap_enabled":  true,
+                                                            "minimap_opacity":  50,
+                                                            "minimap_width":  40,
+                                                            "scrollback":  10000,
+                                                            "theme":  "dark"
+                                                        },
+                                           "version":  1
+                                       },
+                          "options":  {
+                                          "auto_apply":  true,
+                                          "close":  2953272,
+                                          "composing":  false,
+                                          "controls":  [
+                                                           {
+                                                               "baseline":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                               "draft_error":  null,
+                                                               "input":  1904544,
+                                                               "key":  "font_family",
+                                                               "label":  "Font family / fallbacks",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace"
+                                                           },
+                                                           {
+                                                               "baseline":  "17",
+                                                               "draft_error":  null,
+                                                               "input":  3149952,
+                                                               "key":  "font_size",
+                                                               "label":  "Font size (6–72 px)",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "17"
+                                                           },
+                                                           {
+                                                               "baseline":  "10000",
+                                                               "draft_error":  null,
+                                                               "input":  659910,
+                                                               "key":  "scrollback",
+                                                               "label":  "Scrollback (0–100000 lines)",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "10000"
+                                                           },
+                                                           {
+                                                               "baseline":  "true",
+                                                               "draft_error":  null,
+                                                               "input":  30805564,
+                                                               "key":  "cursor_blink",
+                                                               "label":  "Cursor blink",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "true"
+                                                           },
+                                                           {
+                                                               "baseline":  "block",
+                                                               "draft_error":  null,
+                                                               "input":  725432,
+                                                               "key":  "cursor_style",
+                                                               "label":  "Cursor shape",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "block"
+                                                           },
+                                                           {
+                                                               "baseline":  "true",
+                                                               "draft_error":  null,
+                                                               "input":  2429242,
+                                                               "key":  "minimap_enabled",
+                                                               "label":  "Minimap",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "true"
+                                                           },
+                                                           {
+                                                               "baseline":  "40",
+                                                               "draft_error":  null,
+                                                               "input":  1839360,
+                                                               "key":  "minimap_width",
+                                                               "label":  "Minimap width (12–96 px)",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "40"
+                                                           },
+                                                           {
+                                                               "baseline":  "50",
+                                                               "draft_error":  null,
+                                                               "input":  2363630,
+                                                               "key":  "minimap_opacity",
+                                                               "label":  "Minimap opacity (0–100%)",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "50"
+                                                           },
+                                                           {
+                                                               "baseline":  "powershell",
+                                                               "draft_error":  null,
+                                                               "input":  3608430,
+                                                               "key":  "default_shell",
+                                                               "label":  "Default shell (future terminals)",
+                                                               "page":  "general",
+                                                               "parent":  3018908,
+                                                               "value":  "powershell"
+                                                           },
+                                                           {
+                                                               "baseline":  "dark",
+                                                               "draft_error":  null,
+                                                               "input":  2167064,
+                                                               "key":  "theme",
+                                                               "label":  "Color theme",
+                                                               "page":  "theme",
+                                                               "parent":  3018908,
+                                                               "value":  "dark"
+                                                           }
+                                                       ],
+                                          "error_or_status":  "Changes save automatically and apply to all flowmux windows.",
+                                          "font_picker":  {
+                                                              "cancel":  null,
+                                                              "catalog":  {
+                                                                              "elapsed_ms":  2,
+                                                                              "families":  [
+                                                                                               "Cascadia Code",
+                                                                                               "Cascadia Code ExtraLight",
+                                                                                               "Cascadia Code Light",
+                                                                                               "Cascadia Code SemiBold",
+                                                                                               "Cascadia Code SemiLight",
+                                                                                               "Cascadia Mono",
+                                                                                               "Cascadia Mono ExtraLight",
+                                                                                               "Cascadia Mono Light",
+                                                                                               "Cascadia Mono SemiBold",
+                                                                                               "Cascadia Mono SemiLight",
+                                                                                               "Consolas",
+                                                                                               "Lucida Console",
+                                                                                               "Courier New"
+                                                                                           ],
+                                                                              "truncated":  false,
+                                                                              "visited":  1399
+                                                                          },
+                                                              "catalog_state":  "ready",
+                                                              "choices":  null,
+                                                              "choose":  null,
+                                                              "composing":  false,
+                                                              "entrybutton":  7081646,
+                                                              "error":  null,
+                                                              "filtered":  null,
+                                                              "list":  null,
+                                                              "open":  false,
+                                                              "owner":  3215530,
+                                                              "query":  null,
+                                                              "search":  null,
+                                                              "selected":  null,
+                                                              "source_raw":  null,
+                                                              "window":  null
+                                                          },
+                                          "keybindings":  {
+                                                              "actions":  [
+                                                                              {
+                                                                                  "accel_handle":  2035756,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ePage_Up"
+                                                                                             ],
+                                                                                  "action":  "split-right",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ePage_Up",
+                                                                                  "edit":  6098668,
+                                                                                  "label":  "Split pane right",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  3084642,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ePage_Down"
+                                                                                             ],
+                                                                                  "action":  "split-down",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ePage_Down",
+                                                                                  "edit":  10030398,
+                                                                                  "label":  "Split pane down",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  8458248,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003eLeft"
+                                                                                             ],
+                                                                                  "action":  "focus-left",
+                                                                                  "chip_text":  "\u003cAlt\u003eLeft",
+                                                                                  "edit":  5115994,
+                                                                                  "label":  "Focus pane left",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2429130,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003eRight"
+                                                                                             ],
+                                                                                  "action":  "focus-right",
+                                                                                  "chip_text":  "\u003cAlt\u003eRight",
+                                                                                  "edit":  16321832,
+                                                                                  "label":  "Focus pane right",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  32182574,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003eUp"
+                                                                                             ],
+                                                                                  "action":  "focus-up",
+                                                                                  "chip_text":  "\u003cAlt\u003eUp",
+                                                                                  "edit":  2429060,
+                                                                                  "label":  "Focus pane up",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  7016156,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003eDown"
+                                                                                             ],
+                                                                                  "action":  "focus-down",
+                                                                                  "chip_text":  "\u003cAlt\u003eDown",
+                                                                                  "edit":  4263626,
+                                                                                  "label":  "Focus pane down",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  10685658,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003ew"
+                                                                                             ],
+                                                                                  "action":  "close-surface",
+                                                                                  "chip_text":  "\u003cAlt\u003ew",
+                                                                                  "edit":  6622378,
+                                                                                  "label":  "Close tab",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2428996,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ew"
+                                                                                             ],
+                                                                                  "action":  "quit-app",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ew",
+                                                                                  "edit":  5508294,
+                                                                                  "label":  "Quit flowmux",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1249520,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003eRight"
+                                                                                             ],
+                                                                                  "action":  "next-surface",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003eRight",
+                                                                                  "edit":  856312,
+                                                                                  "label":  "Next tab in pane",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1052938,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003eLeft"
+                                                                                             ],
+                                                                                  "action":  "prev-surface",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003eLeft",
+                                                                                  "edit":  4329514,
+                                                                                  "label":  "Previous tab in pane",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  13437754,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003eTab"
+                                                                                             ],
+                                                                                  "action":  "next-workspace",
+                                                                                  "chip_text":  "\u003cCtrl\u003eTab",
+                                                                                  "edit":  987350,
+                                                                                  "label":  "Next workspace",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1249616,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003eTab"
+                                                                                             ],
+                                                                                  "action":  "prev-workspace",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003eTab",
+                                                                                  "edit":  5771234,
+                                                                                  "label":  "Previous workspace",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  8195484,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e1"
+                                                                                             ],
+                                                                                  "action":  "workspace-1",
+                                                                                  "chip_text":  "\u003cAlt\u003e1",
+                                                                                  "edit":  13438252,
+                                                                                  "label":  "Go to workspace 1",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  987470,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e2"
+                                                                                             ],
+                                                                                  "action":  "workspace-2",
+                                                                                  "chip_text":  "\u003cAlt\u003e2",
+                                                                                  "edit":  10620150,
+                                                                                  "label":  "Go to workspace 2",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1708352,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e3"
+                                                                                             ],
+                                                                                  "action":  "workspace-3",
+                                                                                  "chip_text":  "\u003cAlt\u003e3",
+                                                                                  "edit":  7540666,
+                                                                                  "label":  "Go to workspace 3",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1642650,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e4"
+                                                                                             ],
+                                                                                  "action":  "workspace-4",
+                                                                                  "chip_text":  "\u003cAlt\u003e4",
+                                                                                  "edit":  1184034,
+                                                                                  "label":  "Go to workspace 4",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  12455758,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e5"
+                                                                                             ],
+                                                                                  "action":  "workspace-5",
+                                                                                  "chip_text":  "\u003cAlt\u003e5",
+                                                                                  "edit":  5311978,
+                                                                                  "label":  "Go to workspace 5",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  3543162,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e6"
+                                                                                             ],
+                                                                                  "action":  "workspace-6",
+                                                                                  "chip_text":  "\u003cAlt\u003e6",
+                                                                                  "edit":  3804628,
+                                                                                  "label":  "Go to workspace 6",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  4984216,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e7"
+                                                                                             ],
+                                                                                  "action":  "workspace-7",
+                                                                                  "chip_text":  "\u003cAlt\u003e7",
+                                                                                  "edit":  9375840,
+                                                                                  "label":  "Go to workspace 7",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2560312,
+                                                                                  "accels":  [
+                                                                                                 "\u003cAlt\u003e8"
+                                                                                             ],
+                                                                                  "action":  "workspace-8",
+                                                                                  "chip_text":  "\u003cAlt\u003e8",
+                                                                                  "edit":  14553174,
+                                                                                  "label":  "Go to workspace 8",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  26084786,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003et"
+                                                                                             ],
+                                                                                  "action":  "new-surface",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003et",
+                                                                                  "edit":  1315090,
+                                                                                  "label":  "New terminal tab",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1118356,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003eb"
+                                                                                             ],
+                                                                                  "action":  "new-browser-surface",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003eb",
+                                                                                  "edit":  2625322,
+                                                                                  "label":  "New browser tab",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1315068,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003en"
+                                                                                             ],
+                                                                                  "action":  "new-workspace",
+                                                                                  "chip_text":  "\u003cCtrl\u003en",
+                                                                                  "edit":  1839410,
+                                                                                  "label":  "New workspace",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  594342,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003en"
+                                                                                             ],
+                                                                                  "action":  "new-window",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003en",
+                                                                                  "edit":  11799736,
+                                                                                  "label":  "New window",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  921858,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ep"
+                                                                                             ],
+                                                                                  "action":  "command-palette",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ep",
+                                                                                  "edit":  3149248,
+                                                                                  "label":  "Command palette",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2101032,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ef"
+                                                                                             ],
+                                                                                  "action":  "terminal-search",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ef",
+                                                                                  "edit":  6819776,
+                                                                                  "label":  "Find in terminal or page",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1053116,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003e\u003cShift\u003ef"
+                                                                                             ],
+                                                                                  "action":  "search-all-terminals",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003e\u003cShift\u003ef",
+                                                                                  "edit":  2560150,
+                                                                                  "label":  "Search all terminals",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  725448,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003em"
+                                                                                             ],
+                                                                                  "action":  "toggle-pane-zoom",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003em",
+                                                                                  "edit":  14486772,
+                                                                                  "label":  "Toggle pane zoom",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1577290,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003ek"
+                                                                                             ],
+                                                                                  "action":  "toggle-workspace-overview",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003ek",
+                                                                                  "edit":  6229886,
+                                                                                  "label":  "Toggle workspace overview",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2167028,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cShift\u003ek"
+                                                                                             ],
+                                                                                  "action":  "copy-pane-path",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cShift\u003ek",
+                                                                                  "edit":  3346584,
+                                                                                  "label":  "Copy focused pane path",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  7933090,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003ew"
+                                                                                             ],
+                                                                                  "action":  "toggle-worktree-panel",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003ew",
+                                                                                  "edit":  2429232,
+                                                                                  "label":  "Toggle worktree panel",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  1184180,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003ef"
+                                                                                             ],
+                                                                                  "action":  "toggle-file-browser",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003ef",
+                                                                                  "edit":  594280,
+                                                                                  "label":  "Toggle file browser",
+                                                                                  "supported":  true
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  5181368,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003eu"
+                                                                                             ],
+                                                                                  "action":  "toggle-usage-popover",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003eu",
+                                                                                  "edit":  1577106,
+                                                                                  "label":  "Toggle AI usage",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  2822462,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003ej"
+                                                                                             ],
+                                                                                  "action":  "toggle-session-panel",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003ej",
+                                                                                  "edit":  1183962,
+                                                                                  "label":  "Toggle agent sessions",
+                                                                                  "supported":  false
+                                                                              },
+                                                                              {
+                                                                                  "accel_handle":  7802952,
+                                                                                  "accels":  [
+                                                                                                 "\u003cCtrl\u003e\u003cAlt\u003eg"
+                                                                                             ],
+                                                                                  "action":  "open-tig",
+                                                                                  "chip_text":  "\u003cCtrl\u003e\u003cAlt\u003eg",
+                                                                                  "edit":  1446072,
+                                                                                  "label":  "Open tig",
+                                                                                  "supported":  false
+                                                                              }
+                                                                          ],
+                                                              "auto_apply":  false,
+                                                              "editor":  null,
+                                                              "error":  null,
+                                                              "fixed_clipboard":  [
+                                                                                      "copy",
+                                                                                      "paste"
+                                                                                  ],
+                                                              "parent":  3018908,
+                                                              "pending":  false,
+                                                              "queued":  false,
+                                                              "reset":  7736602,
+                                                              "reset_parent":  3215530,
+                                                              "scope":  "terminal_input"
+                                                          },
+                                          "modal":  false,
+                                          "native_visible":  false,
+                                          "open":  true,
+                                          "owner":  19991774,
+                                          "page":  "general",
+                                          "pending":  false,
+                                          "queued":  0,
+                                          "reload":  5443426,
+                                          "reset":  6884786,
+                                          "scroll_offset":  0,
+                                          "tabs":  [
+                                                       {
+                                                           "handle":  19991936,
+                                                           "name":  "General"
+                                                       },
+                                                       {
+                                                           "handle":  1577124,
+                                                           "name":  "Theme"
+                                                       },
+                                                       {
+                                                           "handle":  8392744,
+                                                           "name":  "Keybindings"
+                                                       }
+                                                   ],
+                                          "viewport":  3018908,
+                                          "window":  3215530
+                                      },
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5\\config\\config.json",
+                          "pending_writes":  0,
+                          "persistent":  true,
+                          "surfaces":  [
+                                           {
+                                               "applied":  {
+                                                               "background":  "#282c34",
+                                                               "bindings":  [
+                                                                                {
+                                                                                    "action":  "split-right",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "PageUp",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "split-down",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "PageDown",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "focus-left",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "ArrowLeft",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "focus-right",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "ArrowRight",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "focus-up",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "ArrowUp",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "focus-down",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "ArrowDown",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "close-surface",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "KeyW",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "quit-app",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "KeyW",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "next-surface",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "ArrowRight",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "prev-surface",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "ArrowLeft",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "next-workspace",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "Tab",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "prev-workspace",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "Tab",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-1",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit1",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-2",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit2",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-3",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit3",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-4",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit4",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-5",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit5",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-6",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit6",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-7",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit7",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "workspace-8",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "Digit8",
+                                                                                                  "ctrl":  false,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "new-surface",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "KeyT",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "new-browser-surface",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "KeyB",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "new-workspace",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "KeyN",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "terminal-search",
+                                                                                    "chord":  {
+                                                                                                  "alt":  false,
+                                                                                                  "code":  "KeyF",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "search-all-terminals",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "KeyF",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  true
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "toggle-pane-zoom",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "KeyM",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "toggle-workspace-overview",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "KeyK",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                },
+                                                                                {
+                                                                                    "action":  "toggle-file-browser",
+                                                                                    "chord":  {
+                                                                                                  "alt":  true,
+                                                                                                  "code":  "KeyF",
+                                                                                                  "ctrl":  true,
+                                                                                                  "shift":  false
+                                                                                              }
+                                                                                }
+                                                                            ],
+                                                               "foreground":  "#ffffff",
+                                                               "revision":  "23ef6a5c-cd90-4154-95b5-81f5e87cc0f8",
+                                                               "terminal":  {
+                                                                                "cursor_blink":  true,
+                                                                                "cursor_style":  "block",
+                                                                                "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                                                "font_size":  17,
+                                                                                "minimap_enabled":  true,
+                                                                                "minimap_opacity":  50,
+                                                                                "minimap_width":  40,
+                                                                                "scrollback":  10000,
+                                                                                "theme":  "dark"
+                                                                            }
+                                                           },
+                                               "surface":  "e149353f-27ef-47f2-8a82-a368f75d441d"
+                                           }
+                                       ]
+                      },
+    "status":  "passed",
+    "clientPids":  [
+                       20552,
+                       30664,
+                       30068,
+                       32392,
+                       34596,
+                       15656,
+                       23732,
+                       9844,
+                       31336,
+                       12968,
+                       39992,
+                       8148,
+                       31596,
+                       7884,
+                       38052,
+                       11232,
+                       35524,
+                       20416,
+                       32864,
+                       39216,
+                       18268,
+                       30460,
+                       40500,
+                       32476,
+                       40768,
+                       30176,
+                       2648,
+                       11072,
+                       40868,
+                       27436,
+                       32000,
+                       3728,
+                       39188,
+                       840,
+                       30380,
+                       17720,
+                       3708,
+                       28688,
+                       40552,
+                       15648,
+                       40252,
+                       40544,
+                       31384,
+                       16920,
+                       33776,
+                       21468,
+                       12804,
+                       27824,
+                       2064,
+                       30072,
+                       35604,
+                       34924,
+                       29880,
+                       33800,
+                       40936,
+                       33024,
+                       35460,
+                       32696,
+                       4108,
+                       30756,
+                       26864,
+                       34380,
+                       34020,
+                       38320,
+                       39940,
+                       31728,
+                       18808,
+                       28852,
+                       28876,
+                       2368,
+                       37124,
+                       36120,
+                       39096,
+                       7640,
+                       37100,
+                       3412,
+                       30568,
+                       40764,
+                       35084,
+                       40716,
+                       23004,
+                       40244,
+                       31160,
+                       4020,
+                       30504,
+                       2312,
+                       38888,
+                       32432,
+                       15704
+                   ],
+    "shells":  [
+                   26248
+               ],
+    "elapsedMs":  8829,
+    "finished":  "2026-09-28T11:08:34.4373359Z"
+}

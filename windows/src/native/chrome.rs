@@ -1437,11 +1437,6 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
         {
             continue;
         }
-        if entry.button.is_none()
-            && !matches!(entry.control, ControlRole::Static | ControlRole::Caption)
-        {
-            continue;
-        }
         let mut child_owner = 0;
         anyhow::ensure!(
             unsafe { GetWindowThreadProcessId(child, &mut child_owner) } == thread
@@ -1562,8 +1557,17 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
                 );
             }
         }
+        let kind = if entry.button.is_some() {
+            "button"
+        } else {
+            match entry.control {
+                ControlRole::Edit => "edit",
+                ControlRole::Listbox => "listbox",
+                _ => "static",
+            }
+        };
         rendered.push(
-            json!({"handle":child as isize,"kind":if entry.button.is_some(){"button"}else{"static"},
+            json!({"handle":child as isize,"kind":kind,
             "x":rect.left,"y":rect.top,"width":child_width,"height":child_height,
             "clip":{"x":clip.left,"y":clip.top,"width":clip.right-clip.left,"height":clip.bottom-clip.top}}),
         );
