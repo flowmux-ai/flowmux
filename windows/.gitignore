@@ -3,3 +3,6 @@
 /dist/
 /terminal/node_modules/
 /terminal/.test-build/
+
+# Verification output is local and temporary.
+/evidence/

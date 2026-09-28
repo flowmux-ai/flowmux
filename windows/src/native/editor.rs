@@ -207,6 +207,21 @@ impl Editor {
             })
             .unwrap_or_default()
     }
+    fn apply_theme(&self, colors: &crate::theme::ResolvedTheme) -> anyhow::Result<()> {
+        // The owned editor view permits only its authenticated initial document.
+        // Color-only updates never replace documents or the view's font settings.
+        let value = json!({
+            "dark":colors.dark,"background":colors.background,
+            "foreground":colors.foreground,"cursor":colors.cursor,
+            "selectionBackground":colors.selection_background.clone().unwrap_or_else(|| format!("{}47",colors.foreground)),
+            "selectionForeground":colors.selection_foreground.as_ref().unwrap_or(&colors.foreground),
+        });
+        self.view.view.evaluate_script(&format!(
+            "window.flowmuxWindowsEditor.setTheme({})",
+            serde_json::to_string(&value)?
+        ))?;
+        Ok(())
+    }
     fn barrier(&self, id: u64, seal: bool) -> anyhow::Result<()> {
         self.view
             .view
@@ -243,6 +258,17 @@ impl Editor {
     }
 }
 impl App {
+    pub(super) fn editor_apply_theme(&mut self) -> anyhow::Result<()> {
+        let colors = crate::theme::resolve(&self.settings.terminal);
+        for editor in self.editors.values().filter(|editor| editor.frontend_ready) {
+            if let Err(error) = editor.apply_theme(&colors) {
+                report(&format!("editor theme delivery: {error:#}"));
+            }
+        }
+        // A delivery failure is reported without turning a successful settings
+        // disk write into a failure or rolling back its already committed state.
+        Ok(())
+    }
     fn editor_next(&mut self) -> u64 {
         self.editor_request += 1;
         self.editor_request
@@ -431,6 +457,12 @@ impl App {
                     "invalid editor instance credentials"
                 );
                 match value["kind"].as_str() {
+                    Some("theme_error") => {
+                        report(&format!(
+                            "editor theme application: {}",
+                            value["error"].as_str().unwrap_or("unknown error")
+                        ));
+                    }
                     Some("search_open") => {
                         let token = value["token"]
                             .as_str()
@@ -606,6 +638,7 @@ impl App {
                                 );
                             }
                             EditorMessage::EditorReady => {
+                                let colors = crate::theme::resolve(&self.settings.terminal);
                                 if self.editors[&surface].frontend_ready {
                                     self.editors.get_mut(&surface).unwrap().frontend_ready = false;
                                     self.editor_sync_failure(surface, "editor document unexpectedly reloaded; retained backend documents must be recovered before closing");
@@ -617,6 +650,9 @@ impl App {
                                     "editor synchronization failed; reopening is required"
                                 );
                                 editor.frontend_ready = true;
+                                if let Err(error) = editor.apply_theme(&colors) {
+                                    report(&format!("initial editor theme delivery: {error:#}"));
+                                }
                                 for message in std::mem::take(&mut editor.deferred) {
                                     editor.send(&message)?
                                 }

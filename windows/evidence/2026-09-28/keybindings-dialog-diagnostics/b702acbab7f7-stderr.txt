@@ -1,7 +1,0 @@
-Cancel persisted a draft or left Options disabled
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-k
-eybindings-dialog.ps1:11 문자:73
-+ ... ool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
-+                                                          ~~~~~~~~~~~~~~
-    + CategoryInfo          : OperationStopped: (Cancel persiste...ptions disabled:String) [], RuntimeException
-    + FullyQualifiedErrorId : Cancel persisted a draft or left Options disabled

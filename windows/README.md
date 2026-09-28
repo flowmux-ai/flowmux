@@ -7,9 +7,8 @@ and tabs, embeds an xterm.js terminal in WebView2, and runs native Windows shell
 through ConPTY. WSL is not used by the installed application.
 
 This implementation is in progress. It is **not feature-equivalent to the
-Linux/macOS application**. See [IMPLEMENTATION.md](IMPLEMENTATION.md) and
-[acceptance.json](acceptance.json) for the complete scope and outstanding gates.
-Do not mark a release complete based on the initial terminal smoke test.
+Linux/macOS application**. The supported commands and current limitations are
+described below.
 
 Build on Windows with Rust MSVC, the Windows SDK, and WebView2 Runtime 109+:
 
@@ -55,8 +54,7 @@ They are published by atomic replacement after the pipe is bound. The CLI checks
 the process ID reported by Windows before sending commands. An unavailable
 explicit or inherited pipe returns its connection error; it never redirects the
 command to another window. Connecting and disconnecting before sending a request
-does not stop the listener. See [IPC verification](evidence/2026-09-28/ipc.md)
-for coverage and remaining limits.
+does not stop the listener.
 Each window admits up to 16 pipe clients and 16 outstanding GUI requests. IPC
 uses fixed deadlines: 3 seconds to acquire a connection, 5 seconds to send/receive
 a request or write a reply, 15 seconds for the GUI command, and 25 seconds for
@@ -65,7 +63,7 @@ reply budgets to the requested timeout plus 5/10 seconds when greater than those
 defaults. A completed reply waits up to 2 seconds for client
 closure. A timeout after dispatch does not prove a command was cancelled; check
 the window state before repeating a mutation. Commands are never automatically
-retransmitted. See [deadline and shutdown evidence](evidence/2026-09-28/ipc-limits.md).
+retransmitted.
 Use `flowmuxctl.exe --help` to see the commands currently implemented.
 
 `paste` supplies explicit text to a terminal; it never reads the system clipboard.
@@ -99,7 +97,6 @@ and xterm's deferred finalization is rejected without committing, cancelling or
 replaying the composition.
 Desktop clipboard/menu/shortcut behavior and real IME interaction remain pending;
 the hidden verifier uses explicit test text and never accesses the OS clipboard.
-See [paste evidence](evidence/2026-09-28/paste.md).
 
 Terminal **Ctrl+Shift+C** (also **Ctrl+Insert**) copies the selected text;
 **Ctrl+Shift+V** and **Shift+Insert** paste through the bounded paste path.
@@ -143,16 +140,14 @@ received output to be parsed and do not activate the target tab. Results include
 the exact text, `live`/`retained`/`none` source, buffer and selection coordinates.
 Retained coordinates describe the original selection and may no longer point
 to the same text. `result.error` reports an invalid range or oversized selection;
-transport/target errors use the normal CLI error response. See
-[selection evidence](evidence/2026-09-28/selection.md).
+transport/target errors use the normal CLI error response.
 
 The header bell opens an owned 320-DIP notification popup anchored to the button,
 with newest-first title/body/time rows, bounded scrolling, Open/Delete and All Clear.
 The first visible snapshot retains unread styling before the store is acknowledged.
 Entries reopen their original terminal after a move, including retained output
 after process exit; a closed source reports an error without selecting a replacement.
-The per-window store is memory-only and retains at most 50 entries. Verification
-of this new popup is tracked in [UI structure evidence](evidence/2026-09-28/ui-structure.md).
+The per-window store is memory-only and retains at most 50 entries.
 
 ```powershell
 flowmux notify --surface surface:<id> --title "작업 완료" --level attention "확인이 필요합니다"
@@ -191,7 +186,7 @@ byte counts and the last observed timestamp; these do not determine agent state.
 Windows desktop toast delivery, toast activation and OS taskbar badges are not
 implemented yet. CLI responses report `desktop_delivery: "not_implemented"`.
 Actual foreground/IME/menu behavior remains separate from the hidden native
-verification. See [notification evidence](evidence/2026-09-28/notifications.md).
+verification.
 
 The installer includes three entry points. **flowmux.exe** is the GUI target
 for desktop shortcuts. **flowmux.com** is a console executable: with a command
@@ -225,8 +220,7 @@ remain clap's textual usage diagnostics. `read-screen` without `--json` emits
 plain text. Pipes and redirected files use UTF-8. The GUI's CLI mode preserves
 redirected streams when attaching to its parent's console. Closed output pipes
 return an error instead of panicking; a command may already have taken effect.
-CLI errors do not open message boxes. See
-[entry-point verification](evidence/2026-09-28/entrypoints.md).
+CLI errors do not open message boxes.
 
 When launched from a native flowmux terminal, both launchers ask that terminal's
 GUI host to create the new window. The new GUI therefore survives closing the
@@ -239,8 +233,7 @@ routing variables are removed, and new PTYs receive their own identifiers.
 An obsolete inherited pipe or surface returns an error without another target
 or a local launch fallback. A timeout may still mean the host created a window;
 never repeat a launch automatically. The child still inherits any jobs containing
-its GUI broker; broader external-job policies have not been validated. See
-[independent-window verification](evidence/2026-09-28/window-lifetime.md).
+its GUI broker; broader external-job policies have not been validated.
 
 Windows PowerShell remains the initial default. Use **Settings…** to choose
 Windows PowerShell, Command Prompt, or installed PowerShell 7 for future tabs
@@ -299,8 +292,7 @@ Omitting `--cwd` inherits the source terminal's recorded directory. Raw IPC
 relative cwd values use the source terminal; ambiguous drive-relative values
 must be sent as absolute paths.
 PowerShell 7, other interactive shells, script-language quoting, real menus/IME,
-DPI and accessibility acceptance remain pending. See
-[shell verification](evidence/2026-09-28/shells.md).
+DPI and accessibility acceptance remain pending.
 
 The side panel's **Workspaces** menu (also available by right-clicking a workspace)
 renames, colors, moves up/down and closes workspaces. Right-click a tab to rename
@@ -385,11 +377,7 @@ Use installed monospaced fonts; Unicode font names are preserved, but font
 availability and glyph coverage are not validated. Dark/light settings now also
 select native shell colors; custom themes, font
 discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
-accessibility acceptance remain pending. See
-[settings verification](evidence/2026-09-28/settings.md). Five current hidden Options
-checks pass in 5.285 seconds: owned nonmodal layout, Unicode edit/Apply and terminal
-acknowledgement, theme selection, invalid draft retention, and Reset/Close with
-stable terminal identity. See [UI structure evidence](evidence/2026-09-28/ui-structure.md).
+accessibility acceptance remain pending.
 
 The sidebar divider now adjusts a preferred width of 160–640 DIP, defaulting to
 260 DIP. Narrow windows temporarily reduce the displayed width to reserve 320 DIP
@@ -411,16 +399,8 @@ The terminal colors continue to match the Linux defaults.
 Native caption painting now applies Win32 NFC normalization to a temporary drawing
 copy so decomposed Hangul can display as composed syllables. Raw model/HWND
 captions, input, paths and persisted codepoints are unchanged by this drawing step.
-Memory-only native experiments found no improvement from Uniscribe or swapping
-the tested fonts; normalizing the drawing copy produced equivalent NFC/NFD pixels.
-Hidden native checks confirm matching NFC/NFD drawing pixels while preserving raw
-text, plus actual tooltips, width dragging/clamping/restart and workspace behavior.
-Debug build and Clippy pass; release packaging is deferred to the structural UI
-batch. Physical IME acceptance remains separate. See the
-[sidebar evidence](evidence/2026-09-28/chrome-sidebar.md).
+Physical IME acceptance remains separate.
 
-The [preceding metadata/theme evidence](evidence/2026-09-28/chrome-details.md) and
-[first visual stage](evidence/2026-09-28/chrome.md) retain their original results.
 Agents, broader status metadata, the full icon set, physical IME/DPI, high contrast
 and accessibility remain open. Native offscreen renders exclude composed
 WebView/GPU contents and do not establish full visual parity.
@@ -460,7 +440,6 @@ actual canvas pixels; it refreshes a dirty visible preview before returning.
 zero-based physical buffer row. Rows are not stable references after reflow or
 history eviction. Hidden/disabled/alternate/composing views reject navigation;
 reads remain available and report visibility. Terminal selection is preserved.
-See [minimap verification](evidence/2026-09-28/minimap.md).
 
 Move an existing terminal between panes or workspaces in the same window:
 
@@ -536,7 +515,7 @@ The CLI sends the `send_key_mode` wire method. New hosts also accept legacy
 `send_key` requests. Older hosts reject the new method, preventing an unrecognized
 `surface` field from silently routing input to their active tab. Raw IPC callers
 using the new surface contract should use `send_key_mode`; capabilities exposes
-it as `named_key_protocol`. See [named-key evidence](evidence/2026-09-28/keys.md).
+it as `named_key_protocol`.
 
 `read-screen --surface` reads an inactive tab without activating it.
 `capture-pane` is an alias with the same arguments; it does not implement tmux's
@@ -762,9 +741,7 @@ tabs can share a pane and move without recreating their views. The native
 address EDIT uses an explicit **Go** button; Enter is left to native text/IME
 handling. Navigation now occupies one 40-DIP row with address, Back/Forward,
 Reload/Stop, Go and **Browser tools**. Narrow panes move navigation into the tools
-menu; zoom, Downloads and Find in page are available there. Existing WebView2
-services remain unchanged; current layout/interaction acceptance is tracked in
-[UI structure evidence](evidence/2026-09-28/ui-structure.md).
+menu; zoom, Downloads and Find in page are available there.
 
 ```powershell
 flowmuxctl.exe browser open https://example.com --pane pane:<source-id>
@@ -815,8 +792,7 @@ loopback-only HTTP fixture. It checks Unicode DOM/native address text, history,
 network failure recovery, IPC isolation, moves, unchanged source shell identity
 and browser-only persistence. These checks do not verify glyph rendering, real
 IME composition, physical navigation controls, DPI or accessibility. No OS input,
-clipboard, external site, installer or foreground window is involved. See
-[browser evidence](evidence/2026-09-28/browser.md).
+clipboard, external site, installer or foreground window is involved.
 
 Windows browser DOM queries now include `snapshot`, `text`, `value`, `attr`,
 `is-visible`, `is-enabled`, `is-checked` and `count`:
@@ -965,7 +941,6 @@ inspect the current page state before an intentional repeat. Page JS and event
 handlers are not sandboxed by these commands. `type`, `press`, full
 framework/custom-widget coverage and physical IME acceptance remain pending.
 
-
 ### Browser viewport PNG capture (partial)
 
 ```powershell
@@ -1015,8 +990,7 @@ The [hidden capture verifier](scripts/verify-browser-capture.ps1) decodes actual
 PNG pixels, checks scroll/zoom and Unicode filenames, and tests locked-destination
 failure and browser/terminal separation. Physical DPI/multi-monitor, minimized
 windows, remote filesystems, exhaustive lifecycle races and real IME acceptance
-remain open. See [capture evidence](evidence/2026-09-28/browser-capture.md).
-
+remain open.
 
 ### Browser downloads (partial)
 
@@ -1086,8 +1060,7 @@ and security checks remain WebView2's responsibility.
 The [bounded verification workflow](scripts/VERIFICATION.md) defines deadlines,
 quick checks and explicit extended checks.
 
-See [download evidence](evidence/2026-09-28/browser-downloads.md) and the
-[hidden fixture verifier](scripts/verify-browser-downloads.ps1). This feature does
+See the [hidden fixture verifier](scripts/verify-browser-downloads.ps1). This feature does
 not establish real Korean IME behavior.
 
 ### Browser page find (partial)
@@ -1120,16 +1093,7 @@ Close clears only a still-matching owned selection. It preserves later selection
 `cleared:false` when ownership cannot be established, including shadow/text-control
 ranges whose real boundaries Chromium does not expose. Hidden debug hosts keep
 the panel hidden; native engine focus effects and physical UI/DPI/accessibility
-acceptance remain open. See [page-find implementation and verification status](evidence/2026-09-28/browser-find.md).
-
-The final debug hidden native run passed eight page-find groups in 17.443 seconds,
-including owned-selection cleanup, deferred panel close and navigation/tab-close
-cancellation. The separate startup check passed in 3.067 seconds. Query transport
-remained exact while the engine matched decomposed `한` to `한` and combining
-`é` to the plain `e` in `needle`; the full `한글 한 é 😀` match retained all
-codepoints. These observations do not establish physical IME behavior or ordinal
-matching by the engine. Build, regression and artifact results are recorded
-in the linked evidence.
+acceptance remain open.
 
 ### Browser popup tabs (partial)
 
@@ -1167,15 +1131,7 @@ Popup ancestry is runtime metadata and is not reconstructed after restart.
 The [hidden popup verifier](scripts/verify-browser-popups.ps1) uses owned,
 isolated debug hosts and loopback fixtures. Hidden hosts keep child windows hidden
 and suppress default script dialogs; no desktop input, foreground activation,
-clipboard or real IME operation is part of this verifier. The final hidden native
-suite passed 14 groups in 45.107 seconds, covering native opener access, Unicode
-URL/blank-document content, routing, source/child closure and capacity. The
-ordinary-browser close case records the engine's outcome; it does not assume
-that every script close is allowed. See the
-[native popup result](evidence/2026-09-28/native-browser-popups-background.json).
-Release builds, 141 actual Windows unit tests, 49 related native regression
-groups and installer packaging passed. Results and remaining limits are in the
-[popup implementation and verification record](evidence/2026-09-28/browser-popups.md).
+clipboard or real IME operation is part of this verifier.
 Named-target reuse, cross-origin/opener policies, requested window geometry,
 exhaustive pending/close/failure races and physical UI/IME/DPI/accessibility
 acceptance remain open. B11 and G09 remain partial.
@@ -1184,16 +1140,8 @@ acceptance remain open. B11 and G09 remain partial.
 
 An editor surface supports Quick Open, workspace search and literal in-document
 find/replace. These Windows adapters reuse the shared editor protocol and Monaco
-models without changing shared/Linux/macOS sources. Six distinct hidden native
-cases passed across eight executions: find, replace, Quick Open, workspace search,
-retained-result Open and a delayed result-open deadline. The deadline correction
-passed result Open again (5.990s) and the real IPC deadline case (20.321s). After a
-later Windows path-separator correction, guarded result Open passed with a nested
-Unicode path (6.265s). Ten related editor checks passed on the initial source.
-F06 remains partial; these checks do not establish physical UI or complete Windows
-acceptance.
-Results, source boundaries and remaining limits are tracked in
-[editor search evidence](evidence/2026-09-28/editor-search.md).
+models without changing shared/Linux/macOS sources.
+Physical UI and full Linux/macOS parity remain unverified.
 
 ```powershell
 # $surface is an editor tab surface UUID; $pipe selects its host window.
@@ -1267,7 +1215,6 @@ clipboard, accessibility and broad filesystem-race acceptance remain pending;
 programmatic or simulated composition checks do not establish physical IME
 behavior.
 
-
 ## Files panel (partial)
 
 **Files** opens one visible dock on the right of the entire window workbench,
@@ -1282,8 +1229,7 @@ file to the existing Monaco editor. **Refresh** rereads the pinned root; **Hide*
 closes the panel while retaining bounded in-memory selection and expansion state.
 The listing includes hidden/generated names; search ignore rules do not hide them.
 Reparse entries appear as unsupported leaves. The root remains pinned when the
-terminal changes its working directory. Current dock/source-switch/form acceptance
-is tracked in [UI structure evidence](evidence/2026-09-28/ui-structure.md).
+terminal changes its working directory.
 
 ```powershell
 flowmux --json files show --pane <pane-id> --root C:\work\project
@@ -1336,7 +1282,7 @@ file operation runs per host, with four-second preparation and 30-second commit
 budgets. Cancellation/deadlines are cooperative between OS calls: the operation
 remains active until its worker returns, and close/editor operations reject while
 it is active. The latest 64 terminal receipts remain queryable without a pane.
-Completion refreshes the listing. See the [file-action evidence](evidence/2026-09-28/files-actions.md).
+Completion refreshes the listing.
 
 Clipboard cut/paste, batch/directory operations, remote/reparse/case-sensitive
 paths, overwrite, external applications, automatic tree watching and persisted

@@ -36,7 +36,7 @@ public static class IpcProbe {
     }
 }
 '@
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\ipc-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('ipc-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory=(Resolve-Path $directory).Path
 $hosts=New-Object 'System.Collections.Generic.List[object]'

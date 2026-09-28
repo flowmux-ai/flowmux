@@ -10,7 +10,7 @@ $doctor=(& $control doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
 Copy-Item (Join-Path $BuildDirectory 'flowmux-command.exe') $console
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\entrypoints-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('entrypoints-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null; $directory=(Resolve-Path $directory).Path
 $cwd=Join-Path $directory '한글 한 😀 space & #';[IO.Directory]::CreateDirectory($cwd)|Out-Null
 $hosts=New-Object 'System.Collections.Generic.List[object]'

@@ -9,7 +9,7 @@ $doctor=& $cli doctor|ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'Working debug build required; no host launched'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\browser-wait-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('browser-wait-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object BrowserFixture((Join-Path $PSScriptRoot 'browser-dom.html'));$origin=$fixture.Origin
 $pipeName=$null;$process=$null;$hosts=@();$shells=@()

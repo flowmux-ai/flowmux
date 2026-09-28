@@ -1,4 +1,0 @@
-{
-  "clarification": "The release-staging note about existing executables refers to the running GUI application. Cargo successfully published new CLI/console files at canonical build paths; the in-use GUI was not replaced. No user app instance was stopped or installed.",
-  "source": "windows/dist/ui-structure-release-staging.json"
-}

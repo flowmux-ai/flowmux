@@ -7,7 +7,7 @@ $BuildDirectory = (Resolve-Path $BuildDirectory).Path
 $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor = (& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no window was launched.' }
-$directory = Join-Path $PSScriptRoot '..\dist\evidence\output-load'
+$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) 'output-load'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 $probe = Join-Path $PSScriptRoot 'OutputProbe.ps1'

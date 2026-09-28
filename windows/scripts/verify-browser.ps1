@@ -11,7 +11,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\browser-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('browser-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object BrowserFixture;$origin=$fixture.Origin
 $pipeName=$null;$process=$null;$hosts=@();$shells=@()

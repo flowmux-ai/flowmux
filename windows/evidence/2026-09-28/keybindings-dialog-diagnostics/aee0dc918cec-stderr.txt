@@ -1,7 +1,0 @@
-"2"개의 인수가 있는 "MeasureButton"을(를) 호출하는 동안 예외가 발생했습니다. "Cannot select owned button font"
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-k
-eybindings-dialog.ps1:52 문자:258
-+ ... ne 'input'){$record.label=[OptionsFixture]::MeasureButton($handle,$ow ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : InvalidOperationException

@@ -22,13 +22,15 @@ const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
 const send = message => window.ipc.postMessage(JSON.stringify({ ...identity, message }));
 const initialSettings = window.__flowmuxSettings;
+const initialTheme = window.__flowmuxTheme;
+delete window.__flowmuxTheme;
 delete window.__flowmuxSettings;
 const initialBindings = window.__flowmuxBindings;
 delete window.__flowmuxBindings;
 const backgroundTesting = window.__flowmuxBackgroundTesting === true;
 delete window.__flowmuxBackgroundTesting;
 const terminal = new Terminal({
-  ...options(initialSettings.terminal), allowProposedApi: false,
+  ...options(initialSettings.terminal,initialTheme), allowProposedApi: false,
   linkHandler: { activate: (_event, url) => send({ type: 'link', url }) },
 });
 const fit = new FitAddon(), serialize = new SerializeAddon();
@@ -140,7 +142,7 @@ window.flowmuxHost = message => {
         ...supplied, getModifierState: name => name === 'AltGraph' && !!supplied.altGraph,
         preventDefault() {} };
       send({ type: 'shortcut_tested', request: message.request, forwarded: handleKeyEvent(event) });
-    } else if (message.type === 'settings') settings.receive(message.document, message.bindings);
+    } else if (message.type === 'settings') settings.receive(message.document, message.bindings, message.colors);
     else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
     else if (message.type === 'open_find') { if (!restoring && !composing && !paste.settling && !terminal.options.disableStdin) find.open(message.focus !== false); }
     else if (message.type === 'open_search_hit') {
@@ -166,6 +168,6 @@ window.flowmuxHost = message => {
   } catch (error) { send({ type: 'fault', message: String(error) }); }
 };
 fit.fit();
-settings.receive(initialSettings, initialBindings);
+settings.receive(initialSettings, initialBindings, initialTheme);
 send({ type: 'ready' });
 // The native host grants focus after readiness. Hidden tabs must not steal it.

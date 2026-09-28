@@ -7,8 +7,23 @@ export const themes = Object.freeze({
     black:'#202124', red:'#b42318', green:'#18733b', yellow:'#805500', blue:'#185abc', magenta:'#8f2db3', cyan:'#007580', white:'#c5c7cb',
     brightBlack:'#686b70', brightRed:'#c5221f', brightGreen:'#188038', brightYellow:'#956500', brightBlue:'#1967d2', brightMagenta:'#a142b8', brightCyan:'#00838f', brightWhite:'#f1f3f4' },
 });
-export function options(settings) {
-  return { fontFamily:settings.font_family, fontSize:settings.font_size, theme:{...themes[settings.theme]},
+const paletteKeys = ['black','red','green','yellow','blue','magenta','cyan','white',
+  'brightBlack','brightRed','brightGreen','brightYellow','brightBlue','brightMagenta','brightCyan','brightWhite'];
+function resolvedOptions(colors) {
+  if (!colors) return null;
+  if (!Array.isArray(colors.palette) || colors.palette.length !== 16 ||
+      typeof colors.dark !== 'boolean' ||
+      ![colors.background,colors.foreground,colors.cursor,...colors.palette].every(value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) ||
+      ![colors.selection_background,colors.selection_foreground].every(value => value === null || (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)))) {
+    throw Error('Invalid resolved terminal colors');
+  }
+  return {background:colors.background,foreground:colors.foreground,cursor:colors.cursor,
+    selectionBackground:colors.selection_background ?? undefined,
+    selectionForeground:colors.selection_foreground ?? undefined,
+    ...Object.fromEntries(paletteKeys.map((key,index) => [key,colors.palette[index]]))};
+}
+export function options(settings, colors) {
+  return { fontFamily:settings.font_family, fontSize:settings.font_size, theme:resolvedOptions(colors) ?? {...themes[settings.theme]},
     scrollback:settings.scrollback, cursorBlink:settings.cursor_blink, cursorStyle:settings.cursor_style };
 }
 // Apply only the newest desired settings after composition/restore has ended.
@@ -17,24 +32,32 @@ export class Settings {
   constructor(terminal, fit, send, blocked, changed, document, minimap, shortcuts) {
     Object.assign(this,{terminal,fit,send,blocked,changed,document,minimap,shortcuts}); this.pending=null;
   }
-  receive(document, bindings) { this.pending={ document, bindings }; this.flush(); }
+  receive(document, bindings, colors) { this.pending={ document, bindings, colors }; this.flush(); }
   flush() {
     if (!this.pending || this.blocked()) return;
-    const {document:desired,bindings}=this.pending;
+    const {document:desired,bindings,colors}=this.pending;
+    const settings=desired.terminal, opts=options(settings,colors);
     this.shortcuts?.configure(desired.revision,bindings);
     this.pending=null;
-    const settings=desired.terminal, opts=options(settings);
     for (const [key,value] of Object.entries(opts)) this.terminal.options[key]=value;
     const theme=this.terminal.options.theme;
     this.document.body.style.backgroundColor=theme.background;
     this.document.body.style.color=theme.foreground;
+    this.document.body.style.colorScheme=(colors?.dark ?? settings.theme === 'dark') ? 'dark' : 'light';
+    for (const [name,value] of Object.entries({background:theme.background,foreground:theme.foreground,
+      selection:theme.selectionBackground ?? theme.brightBlack,accent:theme.cursor,error:theme.red})) {
+      this.document.body.style.setProperty('--theme-'+name,value);
+    }
     this.minimap?.configure(settings);
     this.changed(); this.fit();
     const actual=this.terminal.options;
     this.send({type:'settings_applied',revision:desired.revision,bindings:this.shortcuts?.snapshot() ?? [],
-      terminal:{font_family:actual.fontFamily,font_size:actual.fontSize,theme:settings.theme,
+      terminal:{...settings,font_family:actual.fontFamily,font_size:actual.fontSize,theme:settings.theme,
         scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle,
         minimap_enabled:settings.minimap_enabled,minimap_width:settings.minimap_width,minimap_opacity:settings.minimap_opacity},
-      background:theme.background,foreground:theme.foreground});
+      background:theme.background,foreground:theme.foreground,
+      colors:{background:theme.background,foreground:theme.foreground,cursor:theme.cursor,
+        selection_background:theme.selectionBackground ?? null,selection_foreground:theme.selectionForeground ?? null,
+        palette:paletteKeys.map(key => theme[key]),dark:colors?.dark ?? settings.theme === 'dark'}});
   }
 }

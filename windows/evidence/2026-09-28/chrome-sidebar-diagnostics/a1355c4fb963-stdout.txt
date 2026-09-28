@@ -1,1 +1,0 @@
-Chrome verifier syntax and native probe compilation passed

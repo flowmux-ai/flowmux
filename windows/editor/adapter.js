@@ -29,12 +29,42 @@ let windowsUiSaveAll = null;
 let windowsDiskRefresh = null;
 const windowsComposingEditors = new Set();
 const windowsObservedEditors = new WeakSet();
+let windowsPendingTheme = null;
+let windowsThemeFlushQueued = false;
+function windowsFlushTheme() {
+  if (windowsPendingTheme === null || windowsComposingEditors.size !== 0) return;
+  const colors = windowsPendingTheme;
+  windowsPendingTheme = null;
+  try {
+    // Shared applyAppearance also refreshes font/minimap options. Keep the
+    // editor's current values, including local minimap toggles and font zoom.
+    const targets = [editor, diffEditor?.getModifiedEditor()].filter(Boolean);
+    const fonts = targets.map((target) => ({ target,
+      fontFamily: target.getOption(monaco.editor.EditorOption.fontFamily),
+      fontSize: target.getOption(monaco.editor.EditorOption.fontSize) }));
+    applyAppearance({ ...appliedAppearance, ...colors, minimapEnabled, fontSize: editorFontSize });
+    for (const { target, fontFamily, fontSize } of fonts) {
+      if (target.getOption(monaco.editor.EditorOption.fontFamily) !== fontFamily ||
+          target.getOption(monaco.editor.EditorOption.fontSize) !== fontSize) {
+        target.updateOptions({ fontFamily, fontSize });
+      }
+    }
+  } catch (error) {
+    window.__flowmuxWindowsEditorBridge({ kind: "theme_error", error: String(error.message ?? error).slice(0, 4096) });
+  }
+}
+function windowsQueueThemeFlush() {
+  if (windowsThemeFlushQueued) return;
+  windowsThemeFlushQueued = true;
+  queueMicrotask(() => { windowsThemeFlushQueued = false; windowsFlushTheme(); });
+}
 function windowsObserveComposition(target) {
   if (target === null || windowsObservedEditors.has(target)) return;
   windowsObservedEditors.add(target);
   target.onDidCompositionStart(() => windowsComposingEditors.add(target));
-  target.onDidCompositionEnd(() => windowsComposingEditors.delete(target));
-  target.onDidDispose(() => windowsComposingEditors.delete(target));
+  const finished = () => { windowsComposingEditors.delete(target); windowsQueueThemeFlush(); };
+  target.onDidCompositionEnd(finished);
+  target.onDidDispose(finished);
 }
 windowsObserveComposition(editor);
 function windowsApplySeal() {
@@ -118,6 +148,8 @@ function windowsValidString(value, limit) {
 
 function windowsRead() {
   const document = activeDocumentId === null ? undefined : documents.get(activeDocumentId);
+  const rootStyle = window.getComputedStyle(window.document.documentElement);
+  const background = window.document.querySelector(".monaco-editor-background");
   const result = {
     document_id: document?.payload.id ?? null,
     path: document?.payload.relativePath ?? null,
@@ -141,6 +173,14 @@ function windowsRead() {
     sealed: windowsSealedBarrier !== null || windowsUiSaveAll !== null,
     replacement_pending: windowsPendingReplacements > 0,
     quarantined: windowsQuarantined,
+    appearance: {
+      applied: { ...appliedAppearance }, pending: windowsPendingTheme !== null,
+      font_family: editor.getOption(monaco.editor.EditorOption.fontFamily),
+      font_size: editor.getOption(monaco.editor.EditorOption.fontSize),
+      background: background === null ? null : window.getComputedStyle(background).backgroundColor,
+      css_background: rootStyle.getPropertyValue("--ink").trim(),
+      css_foreground: rootStyle.getPropertyValue("--text").trim(),
+    },
   };
   if (document !== undefined) {
     const selection = editor.getModel() === document.model ? editor.getSelection() : null;
@@ -558,6 +598,19 @@ openSearchResult = (index) => {
 };
 
 window.flowmuxWindowsEditor = Object.freeze({
+  setTheme(colors) {
+    try {
+      const fields = ["background", "foreground", "cursor", "selectionBackground", "selectionForeground"];
+      windowsRequire(colors !== null && typeof colors === "object" && !Array.isArray(colors) &&
+        Object.keys(colors).length === fields.length + 1 && typeof colors.dark === "boolean" &&
+        fields.every((field) => typeof colors[field] === "string" && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(colors[field])),
+      "Invalid editor theme colors.");
+      windowsPendingTheme = { ...colors };
+      windowsFlushTheme();
+    } catch (error) {
+      window.__flowmuxWindowsEditorBridge({ kind: "theme_error", error: String(error.message ?? error).slice(0, 4096) });
+    }
+  },
   completeSearch: windowsCompleteSearch,
   searchOpenFinished(token, error) {
     if (windowsSearchOpenPending?.token !== token) return;

@@ -1,7 +1,0 @@
-Native tooltip text differs from its accessible button caption
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-c
-hrome.ps1:13 문자:74
-+ ... ol]$Condition,[string]$Message) {if(-not $Condition){throw $Message}}
-+                                                          ~~~~~~~~~~~~~~
-    + CategoryInfo          : OperationStopped: (Native tooltip ... button caption:String) [], RuntimeException
-    + FullyQualifiedErrorId : Native tooltip text differs from its accessible button caption

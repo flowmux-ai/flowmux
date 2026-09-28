@@ -1,6 +1,0 @@
-[files-confinement] started pid=27304, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-confinement-22f7c869-b203-487c-a5fb-17fb8818847a
-[files-confinement] running 5/120s, owned processes=18
-[check] passed files_reparse_leaves_and_invalid_roots_reject_activation_without_target_listing_or_file_mutation
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-2e88454b-905c-4baf-ba72-8d9e68e00bc3
-{"status":"passed_background_files_subset","case":"confinement","checks":1,"elapsedMs":5235}
-[files-confinement] passed in 6.11s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-confinement-22f7c869-b203-487c-a5fb-17fb8818847a\result.json

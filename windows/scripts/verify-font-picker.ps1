@@ -5,7 +5,7 @@ $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Obje
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\font-picker-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('font-picker-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
 $evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-font-picker';hosts=@();checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;imeGuardMessageSimulation=$true;physicalIme=$false;deferred='Owned WM_IME_START/END messages exercise application guards only, not OS Korean IME or TSF. Hidden HWND dispatch does not establish physical focus, keyboard routing, per-monitor DPI, accessibility or composed font glyph rendering. Font family strings, native control ownership and renderer settings ACK are asserted.'}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}

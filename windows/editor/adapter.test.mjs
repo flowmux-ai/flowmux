@@ -48,6 +48,14 @@ test("initialization authenticates the exact page and hidden focus guards preced
 
 function harness(content = "hello", empty = false) {
   const sent = [], calls = [], composition = {}, models = {}, pending = new Set();
+  const appearance = { dark: true, background: "#15171b", foreground: "#e6e9ef", cursor: "#72b7a8",
+    selectionBackground: "#365c59a0", selectionForeground: "#e6e9ef", minimapEnabled: true,
+    fontFamily: '"한글 한 é 😀", monospace', fontSize: 13 };
+  const options = { fontFamily: appearance.fontFamily, fontSize: appearance.fontSize, minimap: { enabled: true } };
+  const css = { "--ink": appearance.background, "--text": appearance.foreground };
+  const root = {}, background = {};
+  const nativeDocument = { hasFocus: () => false, documentElement: root,
+    querySelector: (selector) => selector === ".monaco-editor-background" ? background : null };
   const input = () => ({ handlers: {}, addEventListener(name, listener) { this.handlers[name] = listener; } });
   const document = {
     payload: { id: "document-1", relativePath: "한글.txt", encoding: "UTF-8", eol: "LF", dirty: false, readOnly: false, externalChange: false, version: 1 },
@@ -59,8 +67,9 @@ function harness(content = "hello", empty = false) {
     readOnly: false,
     getModel: () => document.model, getSelection: () => null,
     hasWidgetFocus: () => false, hasTextFocus: () => false,
-    onDidCompositionStart(fn) { composition.start = fn; }, onDidCompositionEnd(fn) { composition.end = fn; }, onDidDispose() {},
-    updateOptions(value) { this.readOnly = value.readOnly; calls.push(["options", value.readOnly]); },
+    onDidCompositionStart(fn) { composition.start = fn; }, onDidCompositionEnd(fn) { composition.end = fn; }, onDidDispose(fn) { composition.dispose = fn; },
+    getOption: (option) => options[option],
+    updateOptions(value) { Object.assign(options, value); if (Object.hasOwn(value, "readOnly")) this.readOnly = value.readOnly; calls.push(["options", value.readOnly]); },
     pushUndoStop() { calls.push(["undo-stop", this.readOnly]); return !this.readOnly; },
     executeEdits(source, edits) {
       calls.push(["edit", source, this.readOnly, context.window.__flowmuxWindowsEditorSealed]);
@@ -70,7 +79,10 @@ function harness(content = "hello", empty = false) {
     },
   };
   const context = vm.createContext({
-    window: { document: { hasFocus: () => false }, flowmuxEditorHost: { receive(message) {
+    window: { document: nativeDocument, getComputedStyle: (element) => ({
+      backgroundColor: element === background ? css["--ink"] : "",
+      getPropertyValue: (property) => css[property] ?? "",
+    }), flowmuxEditorHost: { receive(message) {
       const target = context.documents.get(message.documentId);
       if (target !== undefined && message.surfaceId === "s") {
         if (message.type === "document_change_applied") target.outstandingChanges.delete(message.changeSequence);
@@ -79,7 +91,15 @@ function harness(content = "hello", empty = false) {
       }
     } }, __flowmuxWindowsEditorBridge: (message) => sent.push(message) },
     editor, diffEditor: null, documents: new Map(empty ? [] : [[document.payload.id, document]]),
-    monaco: { editor: { EndOfLineSequence: { LF: 0 }, onDidCreateModel(listener) { models.created = listener; } } },
+    monaco: { editor: { EditorOption: { fontFamily: "fontFamily", fontSize: "fontSize", minimap: "minimap" }, EndOfLineSequence: { LF: 0 }, onDidCreateModel(listener) { models.created = listener; } } },
+    appliedAppearance: appearance, editorFontSize: appearance.fontSize, minimapEnabled: true,
+    applyAppearance(value) {
+      context.appliedAppearance = value;
+      context.editorFontSize = value.fontSize; context.minimapEnabled = value.minimapEnabled;
+      editor.updateOptions({ fontFamily: value.fontFamily, fontSize: value.fontSize, minimap: { enabled: value.minimapEnabled } });
+      css["--ink"] = value.background; css["--text"] = value.foreground;
+      calls.push(["appearance", value]);
+    },
     activeDocumentId: empty ? null : document.payload.id, surfaceId: "s", maxDocumentBytes: 16 * 1024 * 1024,
     diffDocumentId: null, closeDialog: { open: false }, saveAsDialog: { open: false }, searchDialog: { open: false }, recoveryDialogDocumentId: null,
     pendingFlushRequests: pending, flushChangesForHost() { calls.push(["flush", ...pending]); },
@@ -87,7 +107,7 @@ function harness(content = "hello", empty = false) {
     reportActiveViewState() { calls.push(["view-state", document.payload.version]); },
     postToHost(message) { calls.push(["posted", message.type]); },
     isHostMessage: (message) => message?.surfaceId === "s", utf8ByteLength: (value) => Buffer.byteLength(value),
-    setTimeout, clearTimeout, Promise,
+    setTimeout, clearTimeout, Promise, queueMicrotask,
     syncDocument: () => true,
     clearChangeTimer(document) { clearTimeout(document.changeTimer); document.changeTimer = null; },
     requestSaveAll() {}, renderState() { calls.push(["render"]); },
@@ -145,10 +165,11 @@ function findHarness(initial) {
     undo() { if (undo.length) { redo.push(content); content = undo.pop(); state.document.pendingChanges = true; } },
     redo() { if (redo.length) { undo.push(content); content = redo.pop(); state.document.pendingChanges = true; } },
   });
-  state.context.monaco.editor.EditorOption = { wordSeparators: 1 };
+  state.context.monaco.editor.EditorOption.wordSeparators = 1;
+  const originalGetOption = state.context.editor.getOption;
   Object.assign(state.context.editor, {
     getModel: () => model, getSelection: () => selection,
-    getOption: () => "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?",
+    getOption: (option) => option === 1 ? "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?" : originalGetOption(option),
     setSelection(range) { selection = Range.lift(range); state.calls.push(["selection", range]); },
     focus() { throw new Error("Find must not request focus"); },
     executeEdits(source, edits) {
@@ -400,6 +421,67 @@ test("new Windows document and diff models use LF internally without changing di
   }
   assert.equal(state.document.payload.eol, "CRLF");
   assert.equal(state.document.payload.dirty, false);
+});
+
+test("theme keeps only newest colors through composition and preserves Unicode, model, fonts and local minimap", async () => {
+  const text = "한글 한 é 😀\nunchanged";
+  const state = harness(text), api = state.context.window.flowmuxWindowsEditor;
+  const model = state.document.model, family = state.context.appliedAppearance.fontFamily;
+  state.context.editor.focus = () => { throw new Error("Theme must not focus the editor"); };
+  state.context.editor.setModel = () => { throw new Error("Theme must not replace the model"); };
+  state.context.minimapEnabled = false;
+  state.context.editor.updateOptions({ fontFamily: family, fontSize: 19, minimap: { enabled: false } });
+  const colors = { dark: false, background: "#fdf6e3", foreground: "#657b83", cursor: "#657b83",
+    selectionBackground: "#eee8d5", selectionForeground: "#586e75" };
+  state.composition.start();
+  api.setTheme({ ...colors, background: "#123456" });
+  api.setTheme(colors);
+  let read = (await state.command("read")).result;
+  assert.equal(read.appearance.pending, true);
+  assert.equal(read.appearance.applied.background, "#15171b");
+  assert.equal(state.calls.filter(([kind]) => kind === "appearance").length, 0);
+  state.composition.end();
+  assert.equal(state.calls.filter(([kind]) => kind === "appearance").length, 0, "composition end does not apply synchronously");
+  state.composition.start();
+  await Promise.resolve();
+  assert.equal(state.calls.filter(([kind]) => kind === "appearance").length, 0, "new composition also blocks a queued flush");
+  state.composition.end();
+  await Promise.resolve();
+  read = (await state.command("read")).result;
+  assert.equal(read.appearance.pending, false);
+  assert.equal(read.appearance.applied.background, colors.background);
+  assert.equal(read.appearance.css_background, colors.background);
+  assert.equal(read.appearance.css_foreground, colors.foreground);
+  assert.equal(read.appearance.background, colors.background);
+  assert.equal(read.appearance.font_family, family);
+  assert.equal(read.appearance.font_size, 19);
+  assert.equal(read.appearance.applied.minimapEnabled, false);
+  assert.equal(read.content, text);
+  assert.equal(read.dirty, false);
+  assert.equal(read.active_version, 1);
+  assert.equal(state.context.editor.getModel(), model);
+  assert.equal(state.calls.filter(([kind]) => kind === "appearance").length, 1);
+
+  const diffComposition = {}, modified = {
+    onDidCompositionStart(fn) { diffComposition.start = fn; },
+    onDidCompositionEnd(fn) { diffComposition.end = fn; },
+    onDidDispose(fn) { diffComposition.dispose = fn; },
+    getOption: state.context.editor.getOption,
+  };
+  state.context.diffEditor = { getModifiedEditor: () => modified };
+  state.context.window.flowmuxEditorHost.receive({ surfaceId: "s", type: "noop" });
+  diffComposition.start();
+  api.setTheme({ ...colors, cursor: "#112233" });
+  assert.equal((await state.command("read")).result.appearance.pending, true);
+  diffComposition.dispose(); state.context.diffEditor = null;
+  assert.equal(state.calls.filter(([kind]) => kind === "appearance").length, 1);
+  await Promise.resolve();
+  read = (await state.command("read")).result;
+  assert.equal(read.appearance.pending, false);
+  assert.equal(read.appearance.applied.cursor, "#112233");
+  assert.equal(read.content, text);
+  assert.equal(state.context.editor.getModel(), model);
+  assert.equal(state.calls.some(([kind]) => kind === "edit" || kind === "undo-stop"), false);
 });
 
 test("bounded read preserves Unicode scalar boundaries and empty document state", async () => {

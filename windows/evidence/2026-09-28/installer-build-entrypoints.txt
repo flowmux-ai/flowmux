@@ -1,3 +1,0 @@
-makensis -V2 windows/installer.nsi
-Exit code: 0
-No compiler output. flowmux-command.exe is packaged as flowmux.com. Installer not executed.

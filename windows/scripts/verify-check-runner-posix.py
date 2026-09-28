@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,9 +46,10 @@ def existing(pids):
     return remaining
 
 
-def run_case(signum):
+def run_case(signum, keep_artifacts):
     name = 'cancel-' + signal.Signals(signum).name.lower() + '-' + str(uuid.uuid4())
     owned = {}
+    checked_directory = None
     with tempfile.TemporaryDirectory(prefix='flowmux-cancel-') as directory:
         ready = Path(directory) / 'ready.json'
         with (Path(directory) / 'runner.log').open('w+') as output:
@@ -80,6 +82,7 @@ def run_case(signum):
                     if time.monotonic() >= deadline:
                         raise AssertionError('Owned processes survived cancellation: ' + str(remaining))
                     time.sleep(0.01)
+                checked_directory = paths[0].parent
                 return dict(signal=signal.Signals(signum).name, runnerPid=runner.pid, ownedPids=owned,
                             exitCode=code, cancellationSeconds=round(elapsed, 3),
                             activeAfterCleanup=0, runnerResult=result)
@@ -100,11 +103,41 @@ def run_case(signum):
                         runner.kill()
                         runner.wait(timeout=3)
                 existing(owned.values())
+                if checked_directory is not None and not keep_artifacts:
+                    shutil.rmtree(checked_directory)
+
+
+def retention_case(keep, code, keep_artifacts):
+    name = 'retention-' + str(uuid.uuid4())
+    command = [sys.executable, str(RUNNER), '--name', name, '--timeout-seconds', '5']
+    if keep:
+        command.append('--keep-artifacts')
+    command += ['--', sys.executable, '-c',
+                'import os,pathlib,sys; p=pathlib.Path(os.environ["FLOWMUX_TEST_ARTIFACT_ROOT"]); '
+                'p.joinpath("probe.txt").write_text(str(p)); print("owned artifact ready"); sys.exit(' + str(code) + ')']
+    environment = os.environ.copy()
+    environment['FLOWMUX_TEST_ARTIFACT_ROOT'] = 'parent-value-must-not-be-used'
+    completed = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, env=environment, timeout=8)
+    assert completed.returncode == code, completed.stdout.decode(errors='replace')
+    paths = list(CHECKS.glob(name + '-*'))
+    if keep or code:
+        assert len(paths) == 1, paths
+        result = json.loads((paths[0] / 'result.json').read_text())
+        assert result['status'] == ('passed' if code == 0 else 'failed'), result
+        artifact_root = paths[0] / 'artifacts'
+        assert (artifact_root / 'probe.txt').read_text() == str(artifact_root)
+        if not keep_artifacts:
+            shutil.rmtree(paths[0])
+    else:
+        assert paths == [], paths
+    return dict(keepArtifacts=keep, exitCode=code, retained=bool(paths))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--output', type=Path, help='explicitly save the combined result')
+    parser.add_argument('--keep-artifacts', action='store_true')
     args = parser.parse_args()
     if os.name != 'posix':
         parser.error('POSIX processes only; do not run this script on Windows')
@@ -113,11 +146,13 @@ def main():
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
             raise OSError(ctypes.get_errno(), 'Could not enable fixture descendant reaping')
-    checks = [run_case(signum) for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)]
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(dict(status='passed', linuxSubreaper=subreaper, checks=checks), indent=2) + '\n')
-    print('POSIX cancellation passed: SIGTERM=143, SIGHUP=129, SIGINT=130; no owned processes remain')
-    print('Evidence: ' + str(args.output))
+    retention = [retention_case(keep, code, args.keep_artifacts) for keep, code in ((False, 0), (True, 0), (False, 7))]
+    checks = [run_case(signum, args.keep_artifacts) for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)]
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(dict(status='passed', linuxSubreaper=subreaper, checks=checks, retention=retention), indent=2) + '\n')
+        print('Result: ' + str(args.output))
+    print('POSIX retention and cancellation passed: SIGTERM=143, SIGHUP=129, SIGINT=130; no owned processes remain')
 
 
 if __name__ == '__main__':

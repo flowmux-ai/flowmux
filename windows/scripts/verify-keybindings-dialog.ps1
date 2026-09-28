@@ -5,7 +5,8 @@ $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Obje
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\keybindings-dialog-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+. (Join-Path $PSScriptRoot 'OptionsEvidence.ps1')
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('keybindings-dialog-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
 $evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-keybindings-dialog';hosts=@();checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;imeGuardMessageSimulation=$true;physicalIme=$false;deferred='Owned WM_IME_START/END messages exercise only application guards; they do not establish OS Korean IME/TSF correctness. The renderer hook is synthetic: physical keyboard/focus/IME and WebView/OS accelerator routing, per-monitor DPI, accessibility and composed visual acceptance are not established. PNG capture requests native EDIT client paint, but hidden EDIT pixels may be absent; nonclient titlebar pixels are excluded.'}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
@@ -22,7 +23,14 @@ function Identities($Tree){return (@($Tree.surfaces|Sort-Object id|ForEach-Objec
 function Ack($Status){return @($Status.surfaces).Count -gt 0 -and @($Status.surfaces|Where-Object {-not $_.applied -or $_.applied.revision -ne $Status.document.revision}).Count -eq 0}
 function Await([scriptblock]$Condition){$wait=[Diagnostics.Stopwatch]::StartNew();$last=$null;do{$left=5000-$wait.ElapsedMilliseconds;if($left -le 0){$evidence.observations+=@{kind='condition-timeout';settings=$last};throw 'Keybindings condition exceeded five seconds'};$s=Request @('settings','show') ([int]$left);if($s.options){[OptionsFixture]::Describe([long]$s.options.window,$owned.Id)|Out-Null};$last=$s;if(& $Condition $s){return $s};Start-Sleep -Milliseconds 20}while($true)}
 function Click($Status,[long]$Control){[OptionsFixture]::Click([long]$Status.options.window,$Control,$owned.Id)}
-function Record([string]$Name,$Status){$record=@{name=$Name;settings=$Status;window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);controls=@([ChromeFixture]::Read([long]$Status.options.viewport,$owned.Id))};if($Status.options.keybindings.editor){$record.editor=[OptionsFixture]::Describe([long]$Status.options.keybindings.editor.window,$owned.Id);$record.editorControls=@([ChromeFixture]::Read([long]$Status.options.keybindings.editor.window,$owned.Id));if($Status.options.keybindings.editor.capture_dialog){$record.capture=[OptionsFixture]::Describe([long]$Status.options.keybindings.editor.capture_dialog.window,$owned.Id)}};$evidence.observations+=$record}
+function Record([string]$Name,$Status){
+    # Keep every existing owned HWND read/guard; compact only the saved evidence.
+    $window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);$controls=@([ChromeFixture]::Read([long]$Status.options.viewport,$owned.Id))
+    $record=Get-OptionsEvidenceSummary $Name $Status 'keybindings';$record.window=$window;$record.nativeCounts=@{viewportControls=$controls.Count}
+    if(-not $script:optionsEvidenceInventoryRecorded){$record.catalog=$Status.options.keybindings.actions;$record.controls=$controls;$script:optionsEvidenceInventoryRecorded=$true}
+    if($Status.options.keybindings.editor){$record.editorWindow=[OptionsFixture]::Describe([long]$Status.options.keybindings.editor.window,$owned.Id);$record.editorControls=@([ChromeFixture]::Read([long]$Status.options.keybindings.editor.window,$owned.Id));if($Status.options.keybindings.editor.capture_dialog){$record.captureWindow=[OptionsFixture]::Describe([long]$Status.options.keybindings.editor.capture_dialog.window,$owned.Id)}}
+    $evidence.observations+=$record;$evidence.finalSettings=$Status
+}
 
 function Capture([string]$Name){
     $before=Request @('settings','show');$snapshot=$before.options|ConvertTo-Json -Depth 40 -Compress;$editor=$before.options.keybindings.editor
@@ -135,7 +143,7 @@ try {
     $status=Open-Editor $status 'new-surface';Edit-Click $status 'unbind';Edit-Click $status 'ok';$status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and @($s.surfaces[0].applied.bindings|Where-Object {$_.action -eq 'new-surface'}).Count -eq 0};Require ([OptionsFixture]::Text([long](Row $status 'new-surface').accel_handle,$owned.Id) -ceq '(unbound)') 'Unbound row chip differs'
     $status=Open-Editor $status 'new-surface';Edit-Click $status 'reset';Edit-Click $status 'ok';$status=Await {param($s) -not $s.options.keybindings.editor -and (Ack $s) -and (Bound $s 'new-surface' 'KeyT' $true $false $true)}
     Require ($status.document.terminal.font_size -eq 17 -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled -and (Identities (Tree)) -ceq $identities) 'Unbind/Reset changed unrelated setting or left owner disabled';Record 'final-unbind-reset-modal-cleanup' $status;$evidence.checks+=@{name='OK_commits_unbind_reset_and_reenables_owner_without_terminal_recreation';passed=$true};$evidence.status='passed'
-} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
+} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;$evidence.failureSettings=$status;throw}
 finally {
     $cleaning=$true
     if($owned){

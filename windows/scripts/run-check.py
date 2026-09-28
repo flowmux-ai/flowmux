@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--name', default='check')
     parser.add_argument('--timeout-seconds', type=int, default=120)
+    parser.add_argument('--keep-artifacts', action='store_true', help='retain successful check logs and artifacts')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
@@ -27,6 +29,10 @@ def main():
         parser.error('use run-check.ps1 for Windows processes and their descendants')
     directory = Path(__file__).resolve().parent.parent / 'dist' / 'checks' / (args.name + '-' + str(uuid.uuid4()))
     directory.mkdir(parents=True)
+    artifact_root = directory / 'artifacts'
+    artifact_root.mkdir()
+    environment = os.environ.copy()
+    environment['FLOWMUX_TEST_ARTIFACT_ROOT'] = str(artifact_root)
     result = dict(name=args.name, command=command, deadlineSeconds=args.timeout_seconds, status='runner_error')
     started = time.monotonic()
     process = None
@@ -49,7 +55,7 @@ def main():
                 pass
     try:
         with (directory / 'stdout.txt').open('wb') as output, (directory / 'stdout.txt').open('rb') as reader:
-            process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+            process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True, env=environment)
             result['pid'] = process.pid
             print(f'[{args.name}] started pid={process.pid}, deadline={args.timeout_seconds}s; logs: {directory}', flush=True)
             heartbeat = 5
@@ -85,10 +91,22 @@ def main():
             result.update(status='cancelled', exitCode=128 + cancelled_by,
                           signal=signal.Signals(cancelled_by).name)
         result['elapsedSeconds'] = round(time.monotonic() - started, 3)
-        (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
-        print(f'[{args.name}] {result["status"]} in {result["elapsedSeconds"]}s; result: {directory / "result.json"}', flush=True)
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+        retained = args.keep_artifacts or result['status'] != 'passed'
+        try:
+            if not retained:
+                try:
+                    shutil.rmtree(directory)
+                except OSError as error:
+                    retained = True
+                    result.update(status='cleanup_failed', exitCode=125, cleanupError=str(error))
+            if retained:
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+            location = f'result: {directory / "result.json"}' if retained else 'temporary logs and artifacts removed'
+            print(f'[{args.name}] {result["status"]} in {result["elapsedSeconds"]}s; {location}', flush=True)
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
     return result['exitCode'] if 0 <= result['exitCode'] <= 255 else 1
 
 

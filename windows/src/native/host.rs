@@ -634,7 +634,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             last_save_attempt: Instant::now(),
             state_error: None,
         };
-        chrome::configure(app.settings.terminal.theme, GetDpiForWindow(window).max(96));
+        chrome::configure_settings(&app.settings.terminal, GetDpiForWindow(window).max(96));
         chrome::window_theme(window, app.settings.terminal.theme);
         app.rebuild()?;
         if !app.background_test {
@@ -874,10 +874,11 @@ impl App {
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
-            "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBindings={};window.__flowmuxBackgroundTesting={};",
+            "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBindings={};window.__flowmuxBackgroundTesting={};window.__flowmuxTheme={};",
             serde_json::to_string(&identity)?,
             serde_json::to_string(&self.settings)?,
-            serde_json::to_string(&crate::keybindings::resolved(&self.settings.keybindings)?)?, self.background_test
+            serde_json::to_string(&crate::keybindings::resolved(&self.settings.keybindings)?)?, self.background_test,
+            serde_json::to_string(&crate::theme::resolve(&self.settings.terminal))?
         );
         #[cfg(debug_assertions)]
         let init = if std::env::var_os("FLOWMUX_TEST_INPUT_TRACE").is_some() {
@@ -984,8 +985,8 @@ impl App {
         let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
         panes::cache_sidebar(sidebar, client.bottom, px(4), !self.background_test);
         let bar = px(28);
-        chrome::configure(
-            self.settings.terminal.theme,
+        chrome::configure_settings(
+            &self.settings.terminal,
             unsafe { GetDpiForWindow(self.window) }.max(96),
         );
         self.files_reconcile();
@@ -1502,7 +1503,8 @@ impl App {
                     return Ok(());
                 }
                 surface.send(&HostMessage::Settings {
-                    document: self.settings.clone(),
+                    document: Box::new(self.settings.clone()),
+                    colors: Box::new(crate::theme::resolve(&self.settings.terminal)),
                     bindings: crate::keybindings::resolved(&self.settings.keybindings)?,
                 })?;
                 if let Some(screen) = self.restore_screens.remove(&id) {
@@ -1528,13 +1530,17 @@ impl App {
                 background,
                 foreground,
                 bindings,
+                colors,
             } => {
                 if revision == self.settings.revision
-                    && terminal == self.settings.terminal
+                    && *terminal == self.settings.terminal
+                    && *colors == crate::theme::resolve(&self.settings.terminal)
+                    && background == colors.background
+                    && foreground == colors.foreground
                     && bindings == crate::keybindings::resolved(&self.settings.keybindings)?
                 {
                     self.surfaces.get_mut(&id).unwrap().applied_settings = Some(
-                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground,"bindings":bindings}),
+                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground,"colors":colors,"bindings":bindings}),
                     );
                 }
             }

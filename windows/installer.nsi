@@ -61,8 +61,6 @@ Section "flowmux" Main
   File /oname=THIRD_PARTY_EDITOR.txt "assets/editor/THIRD_PARTY_NOTICES.md"
   File "assets/editor/MONACO_THIRD_PARTY_NOTICES.txt"
   File "scripts/configure-path.ps1"
-  File "IMPLEMENTATION.md"
-  File "acceptance.json"
   nsExec::ExecToStack '"$INSTDIR\flowmuxctl.exe" doctor'
   Pop $0
   Pop $1

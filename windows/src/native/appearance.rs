@@ -7,7 +7,7 @@ pub(super) use options_panel::{Panel, UiAction};
 
 impl App {
     pub(super) fn settings_status(&self) -> Value {
-        json!({"document":self.settings,"path":self.settings_worker.path,
+        json!({"document":self.settings,"colors":crate::theme::resolve(&self.settings.terminal),"path":self.settings_worker.path,
             "persistent":self.settings_worker.path.is_some(),"config_error":self.settings_error,
             "pending_writes":self.settings_pending.len(),
             "options":self.options.as_ref().map(Panel::diagnostics),
@@ -41,10 +41,11 @@ impl App {
                 self.settings_error = None;
                 if self.settings != document {
                     self.settings = document;
-                    chrome::window_theme(self.window, self.settings.terminal.theme);
-                    chrome::configure(self.settings.terminal.theme, unsafe {
+                    chrome::configure_settings(&self.settings.terminal, unsafe {
                         GetDpiForWindow(self.window)
                     });
+                    chrome::window_theme(self.window, self.settings.terminal.theme);
+                    self.editor_apply_theme()?;
                     unsafe {
                         InvalidateRect(self.window, std::ptr::null(), 1);
                     }
@@ -52,7 +53,8 @@ impl App {
                         surface.applied_settings = None;
                         if surface.ready || surface.restoring {
                             if let Err(error) = surface.send(&HostMessage::Settings {
-                                document: self.settings.clone(),
+                                document: Box::new(self.settings.clone()),
+                                colors: Box::new(crate::theme::resolve(&self.settings.terminal)),
                                 bindings: crate::keybindings::resolved(&self.settings.keybindings)?,
                             }) {
                                 report(&format!("settings delivery: {error:#}"));
@@ -159,6 +161,10 @@ impl App {
                 panel.font_picker_signal(signal, &self.settings, self.settings_error.as_deref());
                 return self.options_save_next();
             }
+            UiAction::Theme(signal) => {
+                panel.theme_signal(signal);
+                return self.options_save_next();
+            }
             UiAction::Changed(index) => {
                 panel.changed(index);
                 return self.options_save_next();
@@ -198,7 +204,7 @@ impl App {
         Ok(())
     }
     fn options_save_next(&mut self) -> anyhow::Result<()> {
-        // At most ten coalesced fields, never a queue of individual keystrokes.
+        // Coalesced settings fields, never a queue of individual keystrokes.
         while let Some(index) = self.options.as_mut().and_then(Panel::next_due) {
             let panel = self.options.as_ref().unwrap();
             let edit_id = panel.edit_id;

@@ -5,7 +5,8 @@ $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Obje
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\options-live-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+. (Join-Path $PSScriptRoot 'OptionsEvidence.ps1')
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('options-live-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
 $evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-options-live';hosts=@();checks=@();observations=@();desktopInput=$false;clipboardAccess=$false;imeGuardMessageSimulation=$true;physicalIme=$false;deferred='Owned WM_IME_START/END messages exercise only application guards; they do not establish OS Korean IME/TSF correctness. Physical keyboard/focus/IME, per-monitor DPI, accessibility and composed visual acceptance are not established.'}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
@@ -23,7 +24,13 @@ function Ack($Status){return @($Status.surfaces).Count -gt 0 -and @($Status.surf
 function Await([scriptblock]$Condition){$wait=[Diagnostics.Stopwatch]::StartNew();$last=$null;do{$left=5000-$wait.ElapsedMilliseconds;if($left -le 0){$evidence.observations+=@{kind='condition-timeout';settings=$last};throw 'Live Options condition exceeded five seconds'};$s=Request @('settings','show') ([int]$left);if($s.options){[OptionsFixture]::Describe([long]$s.options.window,$owned.Id)|Out-Null};$last=$s;if(& $Condition $s){return $s};Start-Sleep -Milliseconds 20}while($true)}
 function Field($Status,[string]$Key){$rows=@($Status.options.controls|Where-Object {$_.key -eq $Key});Require ($rows.Count -eq 1) ('Missing Options field '+$Key);return $rows[0]}
 function Click($Status,[long]$Control){[OptionsFixture]::Click([long]$Status.options.window,$Control,$owned.Id)}
-function Record([string]$Name,$Status){$evidence.observations+=@{name=$Name;settings=$Status;window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);controls=@([ChromeFixture]::Read([long]$Status.options.window,$owned.Id));viewportControls=@([ChromeFixture]::Read([long]$Status.options.viewport,$owned.Id))}}
+function Record([string]$Name,$Status){
+    # Keep every existing owned HWND read/guard; compact only the saved evidence.
+    $window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);$controls=@([ChromeFixture]::Read([long]$Status.options.window,$owned.Id));$viewport=@([ChromeFixture]::Read([long]$Status.options.viewport,$owned.Id))
+    $record=Get-OptionsEvidenceSummary $Name $Status 'options';$record.window=$window;$record.nativeCounts=@{controls=$controls.Count;viewportControls=$viewport.Count}
+    if(-not $script:optionsEvidenceInventoryRecorded){$record.catalog=$Status.options.keybindings.actions;$record.controls=$controls;$record.viewportControls=$viewport;$script:optionsEvidenceInventoryRecorded=$true}
+    $evidence.observations+=$record;$evidence.finalSettings=$Status
+}
 
 function Parent-Of($Status,$Row){Require ([bool]$Row.parent) 'Live Options input parent diagnostic missing';Require ([OptionsFixture]::Parent([long]$Row.input,$owned.Id) -eq [long]$Row.parent) 'Options input parent mismatch';return [long]$Row.parent}
 function Edit($Status,[string]$Key,[string]$Value){$row=Field $Status $Key;[OptionsFixture]::SetText((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Value)}
@@ -105,7 +112,7 @@ try {
     Record 'reset-close-reopen' $status;$evidence.checks+=@{name='theme_reset_and_options_reopen_preserve_defaults_terminal_pids_and_active_surface';passed=$true}
     Click $status ([long]$status.options.close);Await {param($s) -not $s.options.open}|Out-Null
     Request @('quit','--discard-state')|Out-Null;Require ($owned.WaitForExit((Budget 5000)) -and $owned.ExitCode -eq 0) 'Owned host did not quit cleanly';$evidence.status='passed_hidden_options_live_subset'
-} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
+} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;$evidence.failureSettings=$status;throw}
 finally {
     $cleaning=$true
     if($owned){try{if(-not $owned.HasExited){$stop=[Diagnostics.Stopwatch]::StartNew();if($pipeName){Request @('quit','--discard-state') 2500|Out-Null};if(-not $owned.WaitForExit([int][Math]::Max(1,5000-$stop.ElapsedMilliseconds))){throw 'Owned host cleanup deadline exceeded'}}}catch{$cleanupErrors+=$_.Exception.Message;if(-not $owned.HasExited){$owned.Kill();[CliProbe]::WaitAfterKill($owned)}}

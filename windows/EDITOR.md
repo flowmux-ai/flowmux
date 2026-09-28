@@ -6,21 +6,8 @@ The Windows host embeds Monaco in a separate WebView2 editor tab. It reuses the
 unchanged `flowmux-editor` document, protocol, session and recovery domain through
 a path dependency; Windows owns its host integration, ordered I/O worker, local
 asset server and frontend adapter. This is a partial editor implementation toward
-F01–F05/F17, not a claim of full Linux/macOS parity. Hidden native tests establish
-[measured partial acceptance](evidence/2026-09-28/editor.md) for actual Monaco
-models, file bytes and the recorded lifecycle cases. Physical UI/IME acceptance
-and the remaining limits in that evidence record are still pending. The later
-[Open and picker record](evidence/2026-09-28/editor-open.md) separates current
-implementation from completed checks and outstanding verification. It records
-seven final-source editor cases, 36 related native checks and 172 Windows unit
-tests, with three earlier passes and two failed Restore attempts kept separate.
-Those results precede the automatic-refresh implementation described below.
-The later [automatic-refresh record](evidence/2026-09-28/editor-refresh.md)
-contains eight passing hidden native cases for actual Monaco updates, conflicts,
-partial failures and ownership, plus nine related editor cases and 184 actual
-Windows unit tests. Release, package and cleanup results are tracked separately
-in that record. Physical IME and desktop acceptance remain unverified; these
-results do not establish every notification or callback race.
+F01–F05/F17, not a claim of full Linux/macOS parity.
+Physical IME and desktop interaction remain unverified.
 
 An editor tab can contain several documents. `editor open` uses an existing
 editor tab with the same canonical root in the target pane, or adds a new editor
@@ -145,15 +132,7 @@ in a noisy root can cause repeated scans. There is no automatic watcher restart,
 periodic fallback, or explicit detection of the watched root directory itself
 being renamed. Watcher startup/failure remains visible in status. Shutdown
 signals cancellation without joining on the UI thread; the worker keeps pending
-I/O resources until Windows reports completion. The eight hidden native cases
-passed clean and inactive-document updates, dirty conflicts, deletion/recreation,
-equal-length writes with restored timestamps, partial sharing-denied reads,
-moved/closed ownership and write bursts followed by the editor's own save. They
-read actual Monaco models after apply acknowledgment without using `check-disk`
-to trigger refresh. The move/close case waited for idle before its mutations
-and observed the closed editor's absence for 1,553 ms; it did not force a queued
-callback race. The 32-write burst produced 64 observed generations and two
-completed refreshes in that run, not a fixed event-to-write relationship.
+I/O resources until Windows reports completion.
 Physical interaction, modal/composition deferral on a real desktop and exhaustive
 watcher failure/cancellation timing remain unverified.
 
@@ -212,7 +191,7 @@ flushes the snapshot, then replaces the destination in the same directory.
 Replacement failure leaves the previous snapshot in place; cleanup targets only
 the temporary file created by that write. Native creation and replacement use
 the canonical parent's extended-length Windows path, including for deeply nested
-evidence directories. This changes recovery-file creation, not the shared source
+directories. This changes recovery-file creation, not the shared source
 or ordinary document-save implementation. Power-loss durability and exhaustive
 ACL behavior remain separate acceptance work.
 
@@ -240,14 +219,12 @@ Window checkpoints resolve their existing parent to Windows' extended-length
 path before creating and atomically replacing the temporary state file. This
 handles a long temporary filename even when the shorter destination is below
 the traditional path limit. It preserves the externally reported checkpoint
-path and same-directory replacement. The initial failure and correction's
-verification status are recorded separately in the Open and picker evidence;
-this is not exhaustive long-path, ACL or power-loss acceptance.
+path and same-directory replacement. Exhaustive long-path, ACL and power-loss
+acceptance remain unverified.
 
 An accepted clean `quit --discard-state` still closes the host if its IPC reply
 receiver has already expired. A client timeout does not cancel that queued quit;
-do not retry it automatically. The measured late-quit case and its exact hidden
-UI-thread suspension boundary are recorded in the linked acceptance evidence.
+do not retry it automatically.
 
 Mutating CLI commands and model-replacing disk/recovery operations suspend edits
 until their original responses have been applied. The native command deadline
@@ -279,7 +256,7 @@ Editor storage is isolated as well as its window behavior. Normal mode uses
 `%LOCALAPPDATA%\flowmux\windows` as `storage_root`. Background mode requires
 `FLOWMUX_TEST_STATE_DIR` and uses that supplied directory for editor storage;
 it does not fall back to the normal profile/recovery directory. The background
-verifier supplies its owned evidence/state directory. Both modes place the
+verifier supplies its isolated state/output directory. Both modes place the
 WebView profile under `storage_root\editor-profile` and shared recovery records
 under `storage_root\editor-recovery`, with workspace and surface/document hashes
 below that recovery root. `editor status` exposes all three paths so verification

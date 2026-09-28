@@ -1,2 +1,0 @@
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\keybindings-f90c3b29-be1f-4972-8a42-50c094cc831f
-{"status":"passed","checks":8,"elapsedMs":6907}

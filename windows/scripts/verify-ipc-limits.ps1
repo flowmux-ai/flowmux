@@ -45,7 +45,7 @@ public static class LimitsProbe {
     }
 }
 '@
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\ipc-limits-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('ipc-limits-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory=(Resolve-Path $directory).Path
 $evidence=[ordered]@{ started=(Get-Date).ToString('o'); mode='background'; legacyObservation=[bool]$ObserveLegacy; checks=@() }

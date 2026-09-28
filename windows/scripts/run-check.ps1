@@ -4,15 +4,17 @@ param(
     [Parameter(Mandatory=$true)][string]$Path,
     [string[]]$ArgumentList=@(),
     [ValidateRange(1,1800)][int]$TimeoutSeconds=120,
-    [ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Name='check'
+    [ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Name='check',
+    [switch]$KeepArtifacts
 )
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'CheckJob.cs')
 $target=(Resolve-Path -LiteralPath $Path).Path
-$directory=Join-Path $PSScriptRoot ('..\dist\checks\'+$Name+'-'+[guid]::NewGuid())
+$directory=Join-Path ([IO.Path]::GetTempPath()) ('flowmux-checks\'+$Name+'-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null
 $directory=(Resolve-Path $directory).Path
+$artifactRoot=Join-Path $directory 'artifacts';[IO.Directory]::CreateDirectory($artifactRoot)|Out-Null
 $stdout=Join-Path $directory 'stdout.txt';$stderr=Join-Path $directory 'stderr.txt'
 $executable=$target;$arguments=$ArgumentList
 if ([IO.Path]::GetExtension($target) -eq '.ps1') {
@@ -27,7 +29,11 @@ function Write-Available($Reader) {
 $clock=[Diagnostics.Stopwatch]::StartNew();$job=$null;$readers=@();$nextBeat=5
 $result=[ordered]@{name=$Name;target=$target;deadlineSeconds=$TimeoutSeconds;status='runner_error';started=[DateTime]::UtcNow.ToString('o')}
 try {
-    $job=New-Object CheckJob($executable,$arguments,(Split-Path $PSScriptRoot -Parent),$stdout,$stderr)
+    $previousArtifactRoot=[Environment]::GetEnvironmentVariable('FLOWMUX_TEST_ARTIFACT_ROOT','Process')
+    try {
+        [Environment]::SetEnvironmentVariable('FLOWMUX_TEST_ARTIFACT_ROOT',$artifactRoot,'Process')
+        $job=New-Object CheckJob($executable,$arguments,(Split-Path $PSScriptRoot -Parent),$stdout,$stderr)
+    } finally {[Environment]::SetEnvironmentVariable('FLOWMUX_TEST_ARTIFACT_ROOT',$previousArtifactRoot,'Process')}
     $result.pid=$job.Id
     foreach($file in @($stdout,$stderr)) {
         $stream=[IO.File]::Open($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
@@ -62,7 +68,15 @@ finally {
     foreach($reader in $readers){$reader.Dispose()}
     $result.elapsedSeconds=[Math]::Round($clock.Elapsed.TotalSeconds,3)
     $result.finished=[DateTime]::UtcNow.ToString('o')
-    $result|ConvertTo-Json -Depth 5|Set-Content -Encoding UTF8 (Join-Path $directory 'result.json')
-    Write-Host "[$Name] $($result.status) in $($result.elapsedSeconds)s; result: $directory\result.json"
+    $retain=$KeepArtifacts -or $result.status -ne 'passed'
+    if(-not $retain){
+        try {Remove-Item -LiteralPath $directory -Recurse -Force}
+        catch {$retain=$true;$result.status='cleanup_failed';$result.exitCode=125;$result.cleanupError=$_.Exception.Message}
+    }
+    if($retain){
+        [IO.Directory]::CreateDirectory($directory)|Out-Null
+        $result|ConvertTo-Json -Depth 5|Set-Content -Encoding UTF8 (Join-Path $directory 'result.json')
+        Write-Host "[$Name] $($result.status) in $($result.elapsedSeconds)s; result: $directory\result.json"
+    }else{Write-Host "[$Name] $($result.status) in $($result.elapsedSeconds)s; temporary logs and artifacts removed"}
 }
 exit $result.exitCode

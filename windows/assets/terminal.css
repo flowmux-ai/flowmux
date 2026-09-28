@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #282c34; color: #ffffff; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--theme-background, #282c34); color: var(--theme-foreground, #ffffff); }
 #terminal { position: absolute; inset: 5px; right: calc(5px + var(--minimap-width, 0px)); }
 #minimap { position: absolute; top: 5px; bottom: 5px; right: 5px; width: var(--minimap-width, 0px); cursor: pointer; touch-action: none; }
 #minimap[hidden] { display: none; }
@@ -8,21 +8,21 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 #minimap:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 /* Pinned xterm 6 markup. Its fit addon keeps the scrollbar allowance stable. */
 .minimap-enabled .xterm-scrollable-element > .scrollbar { visibility: hidden !important; pointer-events: none; }
-#search { position: absolute; top: 6px; right: 20px; left: 10px; margin-left: auto; max-width: 560px; padding: 8px; background: #292e3e; font: 13px "Segoe UI", sans-serif; }
+#search { position: absolute; top: 6px; right: 20px; left: 10px; margin-left: auto; max-width: 560px; padding: 8px; background: var(--theme-background, #292e3e); font: 13px "Segoe UI", sans-serif; }
 .search-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .search-row > label:first-child { flex: 1; min-width: 100px; display: flex; align-items: center; gap: 5px; }
-#query { background: #282c34; color: #ffffff; border: 1px solid #8ea4fa; padding: 4px; width: 100%; min-width: 0; }
-#search button { background: #282c34; color: #ffffff; border: 1px solid #7887b0; min-width: 28px; min-height: 26px; }
-#search :focus-visible { outline: 2px solid #b9c6ff; outline-offset: 1px; }
+#query { background: var(--theme-background, #282c34); color: var(--theme-foreground, #ffffff); border: 1px solid var(--theme-accent, #8ea4fa); padding: 4px; width: 100%; min-width: 0; }
+#search button { background: var(--theme-background, #282c34); color: var(--theme-foreground, #ffffff); border: 1px solid var(--theme-accent, #7887b0); min-width: 28px; min-height: 26px; }
+#search :focus-visible { outline: 2px solid var(--theme-accent, #b9c6ff); outline-offset: 1px; }
 #search-status { padding-top: 4px; }
 #search-status:empty { display: none; }
-#search-status[data-error] { color: #ffb4b4; }
+#search-status[data-error] { color: var(--theme-error, #ffb4b4); }
 #status:empty { display: none; }
-#status { position: absolute; bottom: 8px; right: 20px; padding: 6px; background: #292e3e; font: 12px "Segoe UI", sans-serif; }
+#status { position: absolute; bottom: 8px; right: 20px; padding: 6px; background: var(--theme-background, #292e3e); font: 12px "Segoe UI", sans-serif; }
 #input-status:empty { display: none; }
-#input-status { position: absolute; bottom: 42px; right: 20px; left: 10px; max-width: 520px; margin-left: auto; padding: 6px; background: #292e3e; color: #ffb4b4; font: 12px "Segoe UI", sans-serif; pointer-events: none; }
-#terminal-menu { position: fixed; z-index: 10; padding: 4px; min-width: min(220px, 100vw); max-width: 100vw; max-height: 100vh; overflow: auto; box-sizing: border-box; background: #292e3e; color: #ffffff; border: 1px solid #7887b0; box-shadow: 0 3px 12px #0008; }
+#input-status { position: absolute; bottom: 42px; right: 20px; left: 10px; max-width: 520px; margin-left: auto; padding: 6px; background: var(--theme-background, #292e3e); color: var(--theme-error, #ffb4b4); font: 12px "Segoe UI", sans-serif; pointer-events: none; }
+#terminal-menu { position: fixed; z-index: 10; padding: 4px; min-width: min(220px, 100vw); max-width: 100vw; max-height: 100vh; overflow: auto; box-sizing: border-box; background: var(--theme-background, #292e3e); color: var(--theme-foreground, #ffffff); border: 1px solid var(--theme-accent, #7887b0); box-shadow: 0 3px 12px #0008; }
 #terminal-menu button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 7px; border: none; background: transparent; color: inherit; text-align: left; font: 13px "Segoe UI", sans-serif; }
-#terminal-menu button:focus-visible, #terminal-menu button:hover:not(:disabled) { background: #414b67; outline: 1px solid #b9c6ff; }
+#terminal-menu button:focus-visible, #terminal-menu button:hover:not(:disabled) { background: var(--theme-selection, #414b67); outline: 1px solid var(--theme-accent, #b9c6ff); }
 #terminal-menu button:disabled { opacity: .5; }
-#terminal-menu span { color: #bfc8e0; font-size: 11px; }
+#terminal-menu span { color: inherit; opacity: .75; font-size: 11px; }

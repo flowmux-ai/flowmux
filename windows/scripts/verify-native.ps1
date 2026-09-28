@@ -12,7 +12,7 @@ if ($LASTEXITCODE -ne 0 -or (-not $Interactive -and -not $doctor.background_test
 }
 if ($Cycles -gt 0) { Add-Type -Path (Join-Path $PSScriptRoot 'HandleProbe.cs') }
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
-$evidenceDirectory = Join-Path $PSScriptRoot '..\dist\evidence'
+$evidenceDirectory = $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' })
 New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
 $previousBackground = $env:FLOWMUX_TEST_BACKGROUND
 try {

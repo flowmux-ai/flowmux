@@ -1,7 +1,0 @@
-Keybindings condition exceeded five seconds
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-k
-eybindings.ps1:23 문자:218
-+ ... ings=$last};throw 'Keybindings condition exceeded five seconds'};$s=R ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : OperationStopped: (Keybindings con...ed five seconds:String) [], RuntimeException
-    + FullyQualifiedErrorId : Keybindings condition exceeded five seconds

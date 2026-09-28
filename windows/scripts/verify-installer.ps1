@@ -53,7 +53,7 @@ try {
     $evidence.checks += @{ name = 'uninstall_restores_exact_user_path_and_value_type'; passed = $restored }
     if (-not $restored) { $evidence.status = 'failed'; $evidence.cleanupError = 'Uninstall did not restore PATH/registration' }
     $evidence.finished = (Get-Date).ToString('o')
-    $directory = Join-Path $PSScriptRoot '..\dist\evidence'
+    $directory = $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' })
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
     $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'installer-smoke.json')
 }

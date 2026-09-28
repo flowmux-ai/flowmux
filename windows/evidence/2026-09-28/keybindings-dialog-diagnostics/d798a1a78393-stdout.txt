@@ -1,6 +1,0 @@
-[release-doctor] checking flowmux.exe
-[release-doctor] passed flowmux.exe
-[release-doctor] checking flowmuxctl.exe
-[release-doctor] passed flowmuxctl.exe
-[release-doctor] checking flowmux.com
-[release-doctor] passed flowmux.com

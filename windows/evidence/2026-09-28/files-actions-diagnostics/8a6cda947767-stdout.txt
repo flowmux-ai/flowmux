@@ -1,3 +1,0 @@
-[check] passed long_nested_unicode_copy_preserves_exact_utf8_bom_crlf_and_binary_nul_bytes_without_editor
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e
-{"status":"passed_background_files_actions_subset","case":"copy-bytes","checks":1,"elapsedMs":2841}

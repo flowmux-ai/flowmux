@@ -1,6 +1,0 @@
-[files-actions-roundtrip] started pid=26364, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-roundtrip-189a3dfe-3b7d-4fe7-8165-b6bbb0bcd54a
-[files-actions-roundtrip] running 5/120s, owned processes=12
-[check] passed long_nested_unicode_copy_rename_move_preserve_bom_crlf_bytes_and_reach_actual_listbox_and_monaco
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-2509efff-342e-4aef-b0c2-2b2346bc733a
-{"status":"passed_background_files_actions_subset","case":"roundtrip","checks":1,"elapsedMs":8141}
-[files-actions-roundtrip] passed in 9.124s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-roundtrip-189a3dfe-3b7d-4fe7-8165-b6bbb0bcd54a\result.json

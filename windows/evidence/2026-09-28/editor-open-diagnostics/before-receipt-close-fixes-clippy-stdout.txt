@@ -1,2 +1,0 @@
-    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
-    Finished `release` profile [optimized] target(s) in 17.86s

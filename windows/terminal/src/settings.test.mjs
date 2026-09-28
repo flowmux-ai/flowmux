@@ -11,7 +11,7 @@ const key = code => ({ type: 'keydown', key: code, code, ctrlKey: true, shiftKey
 function fixture() {
   const state = { blocked: false, fits: 0, changes: 0, replies: [], maps: [] };
   const terminal = { options: { fontSize: 14 }, focus() { throw Error('focus stolen'); }, write() { throw Error('input/output changed'); } };
-  const document = { body: { style: {} } }, shortcuts = new PaneShortcuts();
+  const document = { body: { style: {setProperty(name,value) {this[name]=value;}} } }, shortcuts = new PaneShortcuts();
   const controller = new Settings(terminal, () => { assert.equal(state.maps.at(-1).minimap_width, 40); state.fits++; },
     message => state.replies.push(message), () => state.blocked, () => state.changes++, document,
     { configure: settings => state.maps.push(settings) }, shortcuts);
@@ -62,4 +62,28 @@ test('invalid resolved tables cannot partially apply settings or acknowledge an 
   controller.receive(documentFor('unbound', 18), []);
   assert.equal(terminal.options.fontSize, 18); assert.deepEqual(state.replies.at(-1).bindings, []);
   assert.equal(shortcuts.event(key('KeyF'), false), undefined);
+});
+
+test('resolved palette and overrides apply together after composition and ACK actual terminal colors', () => {
+  const {state,terminal,document,controller}=fixture();
+  const colors={background:'#112233',foreground:'#ddeeff',cursor:'#123456',
+    selection_background:'#445566',selection_foreground:'#abcdef',
+    palette:Array.from({length:16},(_,i)=>'#'+i.toString(16).padStart(6,'0')),dark:true};
+  state.blocked=true;
+  controller.receive(documentFor('old',16),[],colors);
+  const newest={...colors,background:'#223344',selection_foreground:null};
+  controller.receive(documentFor('new',18),[],newest);
+  assert.equal(state.replies.length,0);
+  state.blocked=false;controller.flush();
+  assert.deepEqual(state.replies[0].colors,newest);
+  assert.equal(terminal.options.theme.brightWhite,'#00000f');
+  assert.equal(terminal.options.theme.selectionForeground,undefined);
+  assert.equal(document.body.style.backgroundColor,'#223344');
+  assert.equal(document.body.style['--theme-accent'],'#123456');
+  assert.equal(document.body.style.colorScheme,'dark');
+  const before=structuredClone(terminal.options);
+  assert.throws(()=>controller.receive(documentFor('invalid',22),[],{...colors,palette:[]}),/Invalid/);
+  assert.throws(()=>controller.receive(documentFor('null',22),[],{...colors,background:null}),/Invalid/);
+  assert.deepEqual(terminal.options,before);
+  assert.equal(state.replies.length,1);
 });

@@ -7,7 +7,7 @@ $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\search-dialog-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('search-dialog-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $evidence=[ordered]@{started=(Get-Date).ToUniversalTime().ToString('o');mode='hidden-native-search-dialog';checks=@();observations=@();desktopInput=$false;clipboardAccess=$false;physicalIme=$false}
 $process=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$cleaningUp=$false

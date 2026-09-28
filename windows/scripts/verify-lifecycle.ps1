@@ -3,7 +3,7 @@ param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
-$directory = Join-Path $PSScriptRoot '..\dist\evidence\lifecycle'
+$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) 'lifecycle'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 $probe = Join-Path $directory 'process-tree-probe.exe'

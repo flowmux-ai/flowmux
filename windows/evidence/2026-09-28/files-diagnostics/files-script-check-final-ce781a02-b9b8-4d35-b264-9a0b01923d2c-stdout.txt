@@ -1,1 +1,0 @@
-Files PowerShell syntax and C# fixture compilation passed; no host launched.

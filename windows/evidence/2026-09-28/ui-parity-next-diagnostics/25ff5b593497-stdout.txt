@@ -1,1 +1,0 @@
-{"status":"failed","checkCount":0,"elapsedMs":3837,"evidence":"C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\search-dialog-f69b8efd-f7c4-4813-95ac-570efe691a15\\native-search-dialog-background.json"}

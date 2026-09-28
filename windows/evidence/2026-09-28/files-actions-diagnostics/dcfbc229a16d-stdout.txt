@@ -1,3 +1,0 @@
-[check] passed copy_rename_and_move_reject_clean_or_dirty_open_editor_source_preserving_disk_and_actual_monaco
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-589a637a-e85d-4c99-8d0b-b23ea3395a0b
-{"status":"passed_background_files_actions_subset","case":"editor-guard","checks":1,"elapsedMs":5299}

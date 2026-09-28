@@ -15,7 +15,7 @@ public static class SettingsFile {
     public static extern bool MoveFileEx(string from,string to,uint flags);
 }
 '@
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\settings-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('settings-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory=(Resolve-Path $directory).Path
 $configDirectory=Join-Path $directory 'config'; $configPath=Join-Path $configDirectory 'config.json'

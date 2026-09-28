@@ -1,9 +1,0 @@
-
-running 5 tests
-test native::session::tests::failed_spawn_releases_pseudoconsole_resources ... ok
-test native::session::tests::invalid_executable_returns_without_dialog_and_restores_thread_error_mode ... ok
-test native::session::tests::natural_exit_keeps_final_output_and_reaches_eof ... ok
-test native::session::tests::prompt_reports_changed_unicode_directory_through_conpty ... ok
-test native::session::tests::repeated_native_pty_close_releases_process_handles ... ok
-
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 9.25s

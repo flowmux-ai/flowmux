@@ -7,7 +7,7 @@ if (-not $Interactive) {
 }
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
-$directory = Join-Path $PSScriptRoot '..\dist\evidence\ime'
+$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) 'ime'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')

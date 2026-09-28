@@ -20,6 +20,8 @@ const INPUT_BASE: usize = 200;
 mod bindings;
 #[path = "font_picker.rs"]
 mod fonts;
+#[path = "theme_panel.rs"]
+mod themes;
 
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
@@ -35,6 +37,7 @@ pub(crate) enum UiAction {
     Layout,
     Bindings(bindings::Signal),
     FontPicker(fonts::Signal),
+    Theme(themes::Signal),
 }
 fn emit(action: UiAction) {
     post(Event::OptionsUi(action));
@@ -115,9 +118,11 @@ unsafe extern "system" fn procedure(
         WM_COMMAND => {
             let id = wparam & 0xffff;
             let code = (wparam >> 16) as u32;
-            if let Some(signal) = bindings::command(id, code) {
+            if let Some(signal) = themes::command(id, code) {
+                emit(UiAction::Theme(signal));
+            } else if let Some(signal) = bindings::command(id, code) {
                 emit(UiAction::Bindings(signal));
-            } else if (INPUT_BASE..INPUT_BASE + 10).contains(&id) {
+            } else if (INPUT_BASE..INPUT_BASE + themes::ROW_COUNT).contains(&id) {
                 if !SYNCING.with(Cell::get) && matches!(code, EN_CHANGE | CBN_SELCHANGE) {
                     emit(UiAction::Changed(id - INPUT_BASE));
                 } else if matches!(code, EN_SETFOCUS | CBN_SETFOCUS) {
@@ -188,6 +193,7 @@ pub(crate) struct Panel {
     tabs: [HWND; 3],
     bindings: Option<bindings::Bindings>,
     font_picker: Option<fonts::Picker>,
+    theme_panel: Option<themes::ThemePanel>,
     background: bool,
     theme: crate::settings::Theme,
     heading: HWND,
@@ -255,6 +261,7 @@ impl Panel {
                 tabs: [std::ptr::null_mut(); 3],
                 bindings: None,
                 font_picker: None,
+                theme_panel: None,
                 background: true,
                 theme: crate::settings::Theme::Dark,
                 heading: std::ptr::null_mut(),
@@ -369,9 +376,21 @@ impl Panel {
             p.row(
                 Some(SettingKey::Theme),
                 1,
-                "Color theme",
+                "Legacy dark/light",
                 vec![("Dark", "dark"), ("Light", "light")],
             )?;
+            p.row(Some(SettingKey::ThemePreset), 1, "Theme preset", vec![])?;
+            for (key, label) in [
+                (SettingKey::ThemeBackground, "Terminal background"),
+                (SettingKey::ThemeForeground, "Terminal text"),
+                (SettingKey::ThemeCursor, "Cursor"),
+                (SettingKey::ThemeSelectionBackground, "Selection background"),
+                (SettingKey::ThemeSelectionForeground, "Selection text"),
+            ] {
+                p.row(Some(key), 1, label, vec![])?;
+            }
+            p.row(Some(SettingKey::ThemeOverrides), 1, "Custom colors", vec![])?;
+            p.theme_panel = Some(themes::ThemePanel::new(&p)?);
             p.bindings = Some(bindings::Bindings::new(&p)?);
             let font_entry = p.child_in(p.viewport, "BUTTON", "Choose…", 7, WS_TABSTOP)?;
             p.font_picker = Some(fonts::Picker::new(p.window, font_entry));
@@ -517,10 +536,14 @@ impl Panel {
         background: bool,
     ) {
         self.background = background;
-        self.theme = document.terminal.theme;
-        chrome::window_theme(self.window, document.terminal.theme);
+        self.theme = if crate::theme::resolve(&document.terminal).dark {
+            crate::settings::Theme::Dark
+        } else {
+            crate::settings::Theme::Light
+        };
+        chrome::window_theme(self.window, self.theme);
         if let Some(bindings) = self.bindings.as_mut() {
-            bindings.environment(background, document.terminal.theme);
+            bindings.environment(background, self.theme);
         }
         if !self.open {
             // A close may have flushed committed drafts to the worker. Keep its
@@ -565,6 +588,10 @@ impl Panel {
     }
     pub(super) fn reload(&mut self, document: &crate::settings::Document, error: Option<&str>) {
         self.shell = document.default_shell.clone();
+        if let Some(theme) = self.theme_panel.as_mut() {
+            theme.reset_snapshot = None;
+            theme.sync(&document.terminal);
+        }
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.reload(document);
         }
@@ -768,6 +795,88 @@ impl Panel {
         }
         self.changed(0);
     }
+    pub(super) fn theme_signal(&mut self, signal: themes::Signal) {
+        if let themes::Signal::Reveal(index) = signal {
+            if let Some(theme) = self.theme_panel.as_ref() {
+                self.scroll_by(theme.reveal_delta(self.viewport, index));
+            }
+            return;
+        }
+        if self.page != 1 || !self.reset_ready() {
+            return;
+        }
+        match signal {
+            themes::Signal::Preset(index) => {
+                let value = self
+                    .theme_panel
+                    .as_ref()
+                    .and_then(|theme| theme.preset(index))
+                    .map(str::to_owned);
+                if let Some(value) = value {
+                    Self::set(&self.rows[themes::PRESET], &value);
+                    self.changed(themes::PRESET);
+                    self.rows[themes::PRESET].due = Some(Instant::now());
+                }
+            }
+            themes::Signal::Legacy => {
+                Self::set(&self.rows[themes::PRESET], "");
+                self.changed(themes::PRESET);
+                self.rows[themes::PRESET].due = Some(Instant::now());
+            }
+            themes::Signal::Reset => {
+                let snapshot = std::array::from_fn(|index| {
+                    Self::value(&self.rows[themes::FIRST_COLOR + index])
+                });
+                for row in &mut self.rows[themes::FIRST_COLOR..themes::OVERRIDES] {
+                    row.due = None;
+                }
+                if self.rows[themes::OVERRIDES].baseline == "{}" {
+                    for row in &mut self.rows[themes::FIRST_COLOR..themes::OVERRIDES] {
+                        Self::set(row, "");
+                        row.baseline.clear();
+                        row.error = None;
+                    }
+                    self.default_status();
+                    return;
+                }
+                if let Some(theme) = self.theme_panel.as_mut() {
+                    theme.reset_snapshot = Some(snapshot);
+                }
+                Self::set(&self.rows[themes::OVERRIDES], "{}");
+                self.changed(themes::OVERRIDES);
+                self.rows[themes::OVERRIDES].due = Some(Instant::now());
+            }
+            themes::Signal::Pick(index) if index < 5 => {
+                let row_index = themes::FIRST_COLOR + index;
+                let raw = Self::value(&self.rows[row_index]);
+                let baseline = self.rows[row_index].baseline.clone();
+                let result =
+                    self.theme_panel
+                        .as_mut()
+                        .unwrap()
+                        .choose(self.window, index, self.background);
+                match result {
+                    Ok(Some(value)) => {
+                        if COMPOSING.with(Cell::get) != 0
+                            || raw != Self::value(&self.rows[row_index])
+                            || baseline != self.rows[row_index].baseline
+                        {
+                            self.status(
+                                "The color field changed while the chooser was open; choose again.",
+                            );
+                            return;
+                        }
+                        Self::set(&self.rows[row_index], &value);
+                        self.changed(row_index);
+                        self.rows[row_index].due = Some(Instant::now());
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.status(&format!("{error:#}")),
+                }
+            }
+            _ => {}
+        }
+    }
     pub(super) fn operation(
         &self,
         index: usize,
@@ -838,6 +947,11 @@ impl Panel {
         self.enable();
     }
     pub(super) fn failed(&mut self, index: usize, error: &str) {
+        if index == themes::OVERRIDES {
+            if let Some(theme) = self.theme_panel.as_mut() {
+                theme.reset_snapshot = None;
+            }
+        }
         if index == bindings::SAVE_INDEX {
             if let Some(bindings) = self.bindings.as_mut() {
                 bindings.failed(error);
@@ -855,15 +969,33 @@ impl Panel {
         error: Option<&str>,
         completed: bool,
     ) {
-        self.theme = document.terminal.theme;
+        self.theme = if crate::theme::resolve(&document.terminal).dark {
+            crate::settings::Theme::Dark
+        } else {
+            crate::settings::Theme::Light
+        };
         if let Some(picker) = self.font_picker.as_ref() {
-            picker.theme(document.terminal.theme);
+            picker.theme(self.theme);
         }
-        chrome::window_theme(self.window, document.terminal.theme);
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.environment(self.background, self.theme);
+        }
+        chrome::window_theme(self.window, self.theme);
         unsafe {
             InvalidateRect(self.window, std::ptr::null(), 1);
         }
         let applied = if completed { self.pending.take() } else { None };
+        let reset_colors = applied
+            .as_ref()
+            .is_some_and(|(index, _)| *index == themes::OVERRIDES);
+        let reset_snapshot = self.theme_panel.as_mut().and_then(|theme| {
+            theme.sync(&document.terminal);
+            if reset_colors {
+                theme.reset_snapshot.take()
+            } else {
+                None
+            }
+        });
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.update(
                 document,
@@ -888,6 +1020,21 @@ impl Panel {
                 .unwrap_or_else(|| document.default_shell.program.clone());
             let current = Self::value(row);
             let composing = COMPOSING.with(Cell::get) == row.input as isize;
+            if reset_colors && (themes::FIRST_COLOR..themes::OVERRIDES).contains(&index) {
+                if error.is_none() {
+                    if !composing
+                        && reset_snapshot.as_ref().is_some_and(|snapshot| {
+                            snapshot[index - themes::FIRST_COLOR] == current
+                        })
+                    {
+                        Self::set(row, &value);
+                        row.due = None;
+                    }
+                    row.baseline = value;
+                    row.error = None;
+                }
+                continue;
+            }
             let own = applied
                 .as_ref()
                 .filter(|(i, _)| *i == index || *i == usize::MAX);
@@ -942,6 +1089,9 @@ impl Panel {
             }
             if let Some(bindings) = self.bindings.as_ref() {
                 bindings.enable(self.pending.is_none());
+            }
+            if let Some(theme) = self.theme_panel.as_ref() {
+                theme.enable(self.pending.is_none());
             }
             EnableWindow(self.reset, i32::from(self.pending.is_none()));
             EnableWindow(self.reload, i32::from(self.pending.is_none()));
@@ -1054,7 +1204,7 @@ impl Panel {
                 viewport_height,
             );
             let content_height = match self.page {
-                1 => px(94),
+                1 => px(904),
                 2 => self.bindings.as_ref().map_or(px(562), |bindings| {
                     bindings.content_height(GetDpiForWindow(self.window))
                 }),
@@ -1094,7 +1244,9 @@ impl Panel {
                 place(*group, px(8), px(top) - offset, view.right - px(16), px(26));
             }
             for (index, row) in self.rows.iter().enumerate() {
-                let show = row.page == self.page;
+                let show = row.page == self.page
+                    && !matches!(index, themes::PRESET | themes::OVERRIDES)
+                    && !(themes::FIRST_COLOR..themes::OVERRIDES).contains(&index);
                 for hwnd in [row.label, row.input] {
                     ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
                 }
@@ -1110,7 +1262,14 @@ impl Panel {
                         row.input,
                         px(246),
                         px(top) - offset,
-                        view.right - px(if index == 0 { 342 } else { 254 }),
+                        view.right
+                            - px(if index == 0 {
+                                342
+                            } else if index == 9 {
+                                438
+                            } else {
+                                254
+                            }),
                         if row.choices.is_empty() {
                             px(30)
                         } else {
@@ -1130,6 +1289,15 @@ impl Panel {
                     px(44) - offset,
                     px(80),
                     px(30),
+                );
+            }
+            if let Some(theme) = self.theme_panel.as_ref() {
+                theme.layout(
+                    self,
+                    self.page == 1,
+                    view.right,
+                    GetDpiForWindow(self.window),
+                    offset,
                 );
             }
             place(
@@ -1182,7 +1350,7 @@ impl Panel {
         })
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         if self

@@ -11,6 +11,13 @@ pub enum SettingKey {
     FontFamily,
     FontSize,
     Theme,
+    ThemePreset,
+    ThemeBackground,
+    ThemeForeground,
+    ThemeCursor,
+    ThemeSelectionBackground,
+    ThemeSelectionForeground,
+    ThemeOverrides,
     Scrollback,
     CursorBlink,
     CursorStyle,
@@ -31,12 +38,76 @@ pub enum CursorStyle {
     Underline,
     Bar,
 }
+/// Windows settings retain Eq and reject unknown fields while using the shared
+/// Ghostty override representation only at the color-resolution boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemeOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_background: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_foreground: Option<String>,
+}
+impl ThemeOverrides {
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        // A settings payload is a named-field object, never a positional array.
+        anyhow::ensure!(
+            value.trim_start().starts_with('{'),
+            "theme overrides must be a JSON object"
+        );
+        serde_json::from_str(value).context("theme overrides must be a JSON object")
+    }
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+    fn normalize(&mut self) -> anyhow::Result<()> {
+        for value in [
+            &mut self.background,
+            &mut self.foreground,
+            &mut self.cursor,
+            &mut self.selection_background,
+            &mut self.selection_foreground,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            anyhow::ensure!(
+                crate::theme::valid_color(value),
+                "theme color must be #RRGGBB"
+            );
+            value.make_ascii_lowercase();
+        }
+        Ok(())
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.clone().normalize()
+    }
+    pub(crate) fn shared(&self) -> flowmux_config::options::ThemeOverrides {
+        flowmux_config::options::ThemeOverrides {
+            background: self.background.clone(),
+            foreground: self.foreground.clone(),
+            cursor: self.cursor.clone(),
+            selection_background: self.selection_background.clone(),
+            selection_foreground: self.selection_foreground.clone(),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u16,
     pub theme: Theme,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme_preset: Option<String>,
+    #[serde(skip_serializing_if = "ThemeOverrides::is_empty")]
+    pub theme_overrides: ThemeOverrides,
     pub scrollback: u32,
     pub cursor_blink: bool,
     pub cursor_style: CursorStyle,
@@ -50,6 +121,8 @@ impl Default for TerminalSettings {
             font_family: "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace".into(),
             font_size: 14,
             theme: Theme::Dark,
+            theme_preset: None,
+            theme_overrides: ThemeOverrides::default(),
             scrollback: 10000,
             cursor_blink: true,
             cursor_style: CursorStyle::Block,
@@ -61,6 +134,13 @@ impl Default for TerminalSettings {
 }
 impl TerminalSettings {
     pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.theme_preset
+                .as_deref()
+                .is_none_or(|id| flowmux_config::presets::find(id).is_some()),
+            "unknown theme preset"
+        );
+        self.theme_overrides.validate()?;
         anyhow::ensure!(
             !self.font_family.trim().is_empty()
                 && self.font_family.encode_utf16().count() <= 256
@@ -94,6 +174,26 @@ impl TerminalSettings {
             SettingKey::MinimapEnabled => self.minimap_enabled.to_string(),
             SettingKey::MinimapWidth => self.minimap_width.to_string(),
             SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
+            SettingKey::ThemePreset => self.theme_preset.clone().unwrap_or_default(),
+            SettingKey::ThemeBackground => {
+                self.theme_overrides.background.clone().unwrap_or_default()
+            }
+            SettingKey::ThemeForeground => {
+                self.theme_overrides.foreground.clone().unwrap_or_default()
+            }
+            SettingKey::ThemeCursor => self.theme_overrides.cursor.clone().unwrap_or_default(),
+            SettingKey::ThemeSelectionBackground => self
+                .theme_overrides
+                .selection_background
+                .clone()
+                .unwrap_or_default(),
+            SettingKey::ThemeSelectionForeground => self
+                .theme_overrides
+                .selection_foreground
+                .clone()
+                .unwrap_or_default(),
+            SettingKey::ThemeOverrides => serde_json::to_string(&self.theme_overrides)
+                .expect("theme override strings serialize"),
             SettingKey::Theme => match self.theme {
                 Theme::Dark => "dark",
                 Theme::Light => "light",
@@ -113,12 +213,42 @@ impl TerminalSettings {
         value: &str,
         expected: Option<&str>,
     ) -> anyhow::Result<Self> {
+        // Whole-override CAS compares values rather than JSON whitespace/key order.
+        let matches = match (key, expected) {
+            (SettingKey::ThemeOverrides, Some(value)) => {
+                ThemeOverrides::parse(value)? == self.theme_overrides
+            }
+            (_, Some(value)) => value == self.value(key),
+            (_, None) => true,
+        };
         anyhow::ensure!(
-            expected.is_none_or(|value| value == self.value(key)),
+            matches,
             "this setting changed elsewhere; reopen the editor before applying"
         );
         let mut next = self.clone();
         match key {
+            SettingKey::ThemePreset => {
+                next.theme_preset = (!value.is_empty()).then(|| value.to_string())
+            }
+            SettingKey::ThemeBackground => {
+                next.theme_overrides.background = crate::theme::color_override(value)?
+            }
+            SettingKey::ThemeForeground => {
+                next.theme_overrides.foreground = crate::theme::color_override(value)?
+            }
+            SettingKey::ThemeCursor => {
+                next.theme_overrides.cursor = crate::theme::color_override(value)?
+            }
+            SettingKey::ThemeSelectionBackground => {
+                next.theme_overrides.selection_background = crate::theme::color_override(value)?
+            }
+            SettingKey::ThemeSelectionForeground => {
+                next.theme_overrides.selection_foreground = crate::theme::color_override(value)?
+            }
+            SettingKey::ThemeOverrides => {
+                next.theme_overrides = ThemeOverrides::parse(value)?;
+                next.theme_overrides.normalize()?;
+            }
             SettingKey::FontFamily => next.font_family = value.into(),
             SettingKey::FontSize => {
                 next.font_size = value

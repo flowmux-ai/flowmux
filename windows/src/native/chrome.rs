@@ -24,6 +24,7 @@ const TOOL_INFO_V2_SIZE: u32 = std::mem::offset_of!(TTTOOLINFOW, lpReserved) as 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Role {
     Button,
+    Swatch(COLORREF),
     Workspace {
         selected: bool,
         color: Option<COLORREF>,
@@ -173,7 +174,13 @@ unsafe extern "system" {
 }
 
 pub(super) fn window_theme(window: HWND, theme: Theme) {
-    let dark: i32 = i32::from(theme == Theme::Dark && !high_contrast());
+    let dark = STATE.with(|slot| {
+        slot.borrow()
+            .resolved
+            .as_ref()
+            .map_or(theme == Theme::Dark, |colors| colors.dark)
+    });
+    let dark: i32 = i32::from(dark && !high_contrast());
     // DWMWA_USE_IMMERSIVE_DARK_MODE = 20 takes a 32-bit BOOL. Documented support
     // starts with Windows 11 build 22000; an unsupported attribute leaves the
     // normal system title bar intact. Never replace the native non-client frame.
@@ -274,6 +281,7 @@ struct Entry {
 }
 struct State {
     theme: Theme,
+    resolved: Option<crate::theme::ResolvedTheme>,
     dpi: u32,
     palette: Palette,
     resources: Resources,
@@ -285,6 +293,7 @@ impl State {
         let palette = Palette::new(Theme::Dark, high_contrast());
         Self {
             theme: Theme::Dark,
+            resolved: None,
             dpi: 96,
             palette,
             resources: Resources::new(palette, 96),
@@ -299,10 +308,51 @@ pub(super) fn palette() -> Palette {
     STATE.with(|slot| slot.borrow().palette)
 }
 
+pub(super) fn configure_settings(settings: &crate::settings::TerminalSettings, dpi: u32) {
+    let colors = crate::theme::resolve(settings);
+    let mode = if colors.dark {
+        Theme::Dark
+    } else {
+        Theme::Light
+    };
+    // Keep the established legacy Windows chrome until a preset or custom color is selected.
+    let custom = settings.theme_preset.is_some() || settings.theme_overrides != Default::default();
+    STATE.with(|slot| slot.borrow_mut().resolved = custom.then_some(colors));
+    configure(mode, dpi);
+}
+fn color_ref(hex: &str) -> COLORREF {
+    let value = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or_default();
+    rgb(value >> 16, (value >> 8) & 255, value & 255)
+}
+fn blend(a: COLORREF, b: COLORREF, percent: u32) -> COLORREF {
+    let channel = |shift: u32| {
+        (((a >> shift) & 255u32) * percent + ((b >> shift) & 255u32) * (100 - percent)) / 100
+    };
+    rgb(channel(0), channel(8), channel(16))
+}
+
 pub(super) fn configure(theme: Theme, dpi: u32) {
     let dpi = dpi.clamp(48, 768);
     let contrast = high_contrast();
-    let palette = Palette::new(theme, contrast);
+    let mut palette = Palette::new(theme, contrast);
+    if !contrast {
+        if let Some(colors) = STATE.with(|slot| slot.borrow().resolved.clone()) {
+            let bg = color_ref(&colors.background);
+            let fg = color_ref(&colors.foreground);
+            palette.background = bg;
+            palette.surface = blend(fg, bg, 4);
+            palette.foreground = fg;
+            palette.muted = blend(fg, bg, 65);
+            palette.border = blend(fg, bg, 22);
+            palette.hover = blend(fg, bg, 10);
+            palette.selected = colors
+                .selection_background
+                .as_deref()
+                .map(color_ref)
+                .unwrap_or_else(|| blend(fg, bg, 18));
+            palette.accent = color_ref(&colors.palette[4]);
+        }
+    }
     let swap = STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         if state.theme == theme && state.dpi == dpi && state.palette == palette {
@@ -346,6 +396,19 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
 
 pub(super) fn register_button(window: HWND, role: Role) {
     register(window, Some(role), ControlRole::Static);
+}
+pub(super) fn register_swatch(window: HWND, color: COLORREF) {
+    register_button(window, Role::Swatch(color));
+}
+pub(super) fn set_swatch(window: HWND, color: COLORREF) {
+    STATE.with(|slot| {
+        if let Some(entry) = slot.borrow_mut().controls.get_mut(&(window as isize)) {
+            entry.button = Some(Role::Swatch(color));
+        }
+    });
+    unsafe {
+        InvalidateRect(window, std::ptr::null(), 1);
+    }
 }
 pub(super) fn register_control(window: HWND, role: ControlRole) {
     register(window, None, role);
@@ -761,6 +824,14 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         let saved = SaveDC(item.hDC);
         if saved == 0 {
             return false;
+        }
+        if let Role::Swatch(swatch) = role {
+            fill(item.hDC, &item.rcItem, swatch);
+            if item.itemState & ODS_FOCUS != 0 {
+                DrawFocusRect(item.hDC, &item.rcItem);
+            }
+            RestoreDC(item.hDC, saved);
+            return true;
         }
         if matches!(role, Role::Workspace { .. }) && !palette.high_contrast {
             fill(item.hDC, &item.rcItem, palette.background);

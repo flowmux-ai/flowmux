@@ -1,7 +1,0 @@
-"3"개의 인수가 있는 "Run"을(를) 호출하는 동안 예외가 발생했습니다. "Requested font is not installed: Malgun Gothic; selected 맑은 고딕"
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\UniscribeNf
-dProbe-matrix.ps1:7 문자:88
-+ ... lse,$true)){$results+= [UniscribeNfdProbe]::Run($directory,$font,$nor ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : InvalidOperationException

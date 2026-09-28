@@ -1,3 +1,0 @@
-   Compiling flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
-    Finished `release` profile [optimized] target(s) in 1m 26s
-  Executable unittests src/lib.rs (windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_windows-b2f2949a703e9e66.exe)

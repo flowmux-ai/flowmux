@@ -8,7 +8,7 @@ $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flo
 $doctor=& $cli doctor|ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
-$directory=Join-Path $PSScriptRoot ('..\dist\evidence\screen-'+[guid]::NewGuid())
+$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('screen-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $probe=Join-Path $directory 'screen-probe.exe';$control=Join-Path $directory 'control.txt'
 Add-Type -Path (Join-Path $PSScriptRoot 'ScreenProbe.cs') -OutputAssembly $probe -OutputType ConsoleApplication

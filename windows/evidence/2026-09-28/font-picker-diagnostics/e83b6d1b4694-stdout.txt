@@ -1,2 +1,0 @@
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\font-picker-6636fcc1-82ab-4992-8ef5-3b303e22eea5
-{"status":"passed","checks":9,"elapsedMs":8829}

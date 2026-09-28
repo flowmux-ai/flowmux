@@ -1,7 +1,0 @@
-Closing opener cascaded to child or left its native opener open
-위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-b
-rowser-popups.ps1:258 문자:151
-+ ... -ne $true) {throw 'Closing opener cascaded to child or left its nativ ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : OperationStopped: (Closing opener ...ive opener open:String) [], RuntimeException
-    + FullyQualifiedErrorId : Closing opener cascaded to child or left its native opener open

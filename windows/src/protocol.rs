@@ -39,10 +39,11 @@ pub enum ClientMessage {
     Ready,
     SettingsApplied {
         revision: Uuid,
-        terminal: crate::settings::TerminalSettings,
+        terminal: Box<crate::settings::TerminalSettings>,
         bindings: Vec<crate::keybindings::Binding>,
         background: String,
         foreground: String,
+        colors: Box<crate::theme::ResolvedTheme>,
     },
     Restored,
     Input {
@@ -156,8 +157,9 @@ pub enum HostMessage {
         error: Option<String>,
     },
     Settings {
-        document: crate::settings::Document,
+        document: Box<crate::settings::Document>,
         bindings: Vec<crate::keybindings::Binding>,
+        colors: Box<crate::theme::ResolvedTheme>,
     },
     Output {
         sequence: u64,

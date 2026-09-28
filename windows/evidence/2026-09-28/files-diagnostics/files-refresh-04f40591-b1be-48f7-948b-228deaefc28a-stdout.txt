@@ -1,3 +1,0 @@
-[check] passed files_refresh_retains_selection_by_unicode_path_and_rejects_stale_or_out_of_range_open
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1
-{"status":"passed_background_files_subset","case":"refresh","checks":1,"elapsedMs":5399}

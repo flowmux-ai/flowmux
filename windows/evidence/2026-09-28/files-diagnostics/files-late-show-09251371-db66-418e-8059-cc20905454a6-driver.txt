@@ -1,8 +1,0 @@
-[files-late-show] started pid=37744, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-late-show-09251371-db66-418e-8059-cc20905454a6
-[files-late-show] running 5/120s, owned processes=13
-[files-late-show] running 10/120s, owned processes=13
-[files-late-show] running 15/120s, owned processes=13
-[check] passed expired_ui_queued_files_show_preserves_root_token_selection_and_controls_then_fresh_show_succeeds
-Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-4a6050b6-c1f2-4f52-9104-780f36dacf21
-{"status":"passed_background_files_subset","case":"late-show","checks":1,"elapsedMs":17440}
-[files-late-show] passed in 18.151s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-late-show-09251371-db66-418e-8059-cc20905454a6\result.json

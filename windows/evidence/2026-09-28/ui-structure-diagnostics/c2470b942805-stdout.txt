@@ -1,2 +1,0 @@
-Error: reading stub "/usr/share/nsis/Stubs/zlib-x86-unicode"
-Error initializing CEXEBuild: error setting default stub

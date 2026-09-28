@@ -1,3 +1,0 @@
-setting_theme frame=30 count=361
-claude_notification frame=30 count=300
-usage_fileview_worktreeview frame=30 count=349

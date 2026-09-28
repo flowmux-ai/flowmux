@@ -1,8 +1,0 @@
-    Checking windows-sys v0.61.2
-    Checking anstyle-wincon v3.0.11
-    Checking anstyle-query v1.1.5
-    Checking anstream v1.0.0
-    Checking clap_builder v4.6.7
-    Checking clap v4.6.7
-    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
-    Finished `release` profile [optimized] target(s) in 12.31s
