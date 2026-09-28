@@ -144,10 +144,12 @@ function Detached-Placements($Tree,$Expected) {
             if ($null -eq $frame.placement.$key -or $frame.placement.$key -ne $Expected.$surface.$key -or $native.$key -ne $Expected.$surface.$key) {throw ('Restored actual detached placement differs: '+$surface+' '+$key)}
         }
         if ($frame.placement.maximized -ne $Expected.$surface.maximized -or $native.Maximized) {throw 'Hidden restore lost maximized intent or actually maximized a native window'}
+        if ($frame.sidebar.width_dip -ne $Expected.$surface.sidebar_width_dip -or $frame.placement.sidebar_width_dip -ne $Expected.$surface.sidebar_width_dip -or $frame.area.x -ne ($frame.sidebar.gutter.x+$frame.sidebar.gutter.width)) {throw 'Restored independent sidebar width or live content offset differs'}
         $tabs=@($Tree.workspaces|Where-Object {$_.id -eq $frame.workspace}|ForEach-Object {State-Leaves $_.root}|ForEach-Object {$_.content.surfaces})
         if ($tabs.Count -ne 1 -or $tabs[0].id -ne $surface) {throw 'Restored detached workspace is not its original single surface'}
         $views=@(@($Tree.surfaces)+@($Tree.browsers)+@($Tree.editors)|Where-Object {$_.id -eq $surface})
         if ($views.Count -ne 1 -or $views[0].holder.parent -ne $frame.window_handle -or $views[0].holder.root -ne $frame.window_handle -or $frame.native_visible -ne $false -or $views[0].holder.native_visible -ne $false) {throw 'Restored detached holder is not under its hidden saved frame'}
+        foreach ($key in @('x','y','width','height')) {if ($views[0].holder.bounds.$key -ne $frame.area.$key) {throw ('Native retained surface overlaps its restored sidebar: '+$key)}}
     }
 }
 function Detached-State {
@@ -164,6 +166,18 @@ function Detached-State {
     for ($index=0;$index -lt $ids.Count;$index++) {
         Invoke-Flowmux @('detach-tab',$ids[$index])|Out-Null
         $frame=@((Detached-Tree).detached_windows|Where-Object {$_.surface -eq $ids[$index]})[0]
+        $dip=200+60*$index;$dpi=[ChromeFixture]::GetDpiForWindow([IntPtr][long]$frame.window_handle)
+        $x=[int]$frame.sidebar.gutter.x+1;$target=[int][Math]::Round($dip*[Math]::Max(96,$dpi)/96)+1
+        [ChromeFixture]::Pointer([long]$frame.window_handle,$script:detachedProcess.Id,'down',$x,120)
+        [ChromeFixture]::Pointer([long]$frame.window_handle,$script:detachedProcess.Id,'move',$target,120)
+        [ChromeFixture]::Pointer([long]$frame.window_handle,$script:detachedProcess.Id,'up',$target,120)
+        $deadline=(Get-Date).AddSeconds(5)
+        do {
+            $frame=@((Detached-Tree).detached_windows|Where-Object {$_.surface -eq $ids[$index]})[0]
+            if ($frame.sidebar.width_dip -eq $dip -and -not $frame.sidebar.dragging) {break}
+            if ((Get-Date) -gt $deadline) {throw 'Detached sidebar drag did not settle within five seconds'}
+            Start-Sleep -Milliseconds 20
+        } while ($true)
         [ChromeFixture]::Position([long]$frame.window_handle,$script:detachedProcess.Id,(60+30*$index),(700+40*$index),(460+30*$index))
     }
     Invoke-Flowmux @('focus-tab',$browser.surface)|Out-Null

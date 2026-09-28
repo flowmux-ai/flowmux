@@ -1086,6 +1086,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 && matches!(
                     label_text.as_str(),
                     "Close tab"
+                        | "Close workspace"
                         | "Pane actions"
                         | "+"
                         | "New tab"
@@ -1270,7 +1271,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             SelectObject(item.hDC, GetStockObject(DC_PEN));
             SetDCPenColor(item.hDC, text);
             match label_text.as_str() {
-                "Close tab" => {
+                "Close tab" | "Close workspace" => {
                     MoveToEx(item.hDC, cx - radius, cy - radius, std::ptr::null_mut());
                     LineTo(item.hDC, cx + radius + 1, cy + radius + 1);
                     MoveToEx(item.hDC, cx - radius, cy + radius, std::ptr::null_mut());

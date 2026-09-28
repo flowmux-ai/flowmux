@@ -18,7 +18,13 @@ impl App {
                 .root
                 .surface_title(pane, surface)
                 .unwrap_or("flowmux");
-            let window = detached::Window::new(surface, workspace.id, title)?;
+            let window = detached::Window::new(
+                surface,
+                workspace.id,
+                title,
+                self.sidebar_width_dip,
+                self.background_test,
+            )?;
             chrome::window_theme(window.window, self.settings.terminal.theme);
             window.restore_placement(&placement, self.background_test)?;
             self.detached.insert(surface, window);
@@ -137,7 +143,13 @@ impl App {
             .root
             .surface_title(workspace.focused, surface)
             .unwrap_or("Terminal");
-        let window = detached::Window::new(surface, workspace.id, title)?;
+        let window = detached::Window::new(
+            surface,
+            workspace.id,
+            title,
+            self.sidebar_width_dip,
+            self.background_test,
+        )?;
         chrome::window_theme(window.window, self.settings.terminal.theme);
         window.caption(title, self.surface_icon(surface));
         // Native construction can pump messages; domain state is still untouched.
@@ -170,6 +182,12 @@ impl App {
         };
         if unsafe { IsIconic(window.window) } != 0 {
             return Ok(());
+        }
+        if let Some(workspace) = self.workspaces.iter().find(|w| w.id == window.workspace) {
+            window.workspace_caption(
+                &workspace.name,
+                self.chrome_role(&Action::Workspace(workspace.id)),
+            );
         }
         window.layout()?;
         let area = window.area()?;
@@ -208,6 +226,19 @@ impl App {
             return Ok(());
         }
         match signal {
+            detached::Signal::Pointer(message, x, y) => {
+                let window = self.detached.get_mut(&surface).unwrap();
+                if self.editor_barrier.is_some()
+                    || self.close_request.is_some()
+                    || self.close_accepted
+                    || self.closing
+                    || unsafe { IsWindowEnabled(window.window) } == 0
+                {
+                    window.cancel_drag();
+                    return Ok(());
+                }
+                window.pointer(message, x, y)
+            }
             detached::Signal::Layout => self.detached_layout(surface),
             detached::Signal::Moved => {
                 if let Some(view) = self.surface_view(surface) {

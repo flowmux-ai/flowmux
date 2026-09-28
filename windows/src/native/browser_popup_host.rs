@@ -105,7 +105,17 @@ impl App {
         // environment and has not been independently navigated.
         let window = if let Some(destination) = destination {
             let workspace = &candidate[destination];
-            let window = match detached::Window::new(opened.surface, workspace.id, "Browser") {
+            let sidebar_width = self
+                .detached
+                .get(&request.surface)
+                .map_or(self.sidebar_width_dip, detached::Window::sidebar_width_dip);
+            let window = match detached::Window::new(
+                opened.surface,
+                workspace.id,
+                "Browser",
+                sidebar_width,
+                self.background_test,
+            ) {
                 Ok(window) => window,
                 Err(error) => {
                     self.browser_cancel(opened.surface, "popup window construction failed");

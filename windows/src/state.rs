@@ -34,9 +34,16 @@ pub struct SavedPlacement {
     pub width: u32,
     pub height: u32,
     pub maximized: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidebar_width_dip: Option<u32>,
 }
 impl SavedPlacement {
     pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.sidebar_width_dip
+                .is_none_or(|width| (MIN_SIDEBAR_WIDTH..=MAX_SIDEBAR_WIDTH).contains(&width)),
+            "invalid saved sidebar width"
+        );
         ensure!(
             (1..=32768).contains(&self.width) && (1..=32768).contains(&self.height),
             "invalid saved window dimensions"
@@ -317,6 +324,7 @@ mod tests {
             width: 1280,
             height: 800,
             maximized: true,
+            sidebar_width_dip: Some(320),
         };
         let mut state = old.clone();
         state.detached_windows.insert(surface, placement);
@@ -326,11 +334,19 @@ mod tests {
         assert_eq!(restored.detached_windows[&surface], placement);
         assert!(restored.main_closed);
         assert_eq!(restored.detached_focus, Some(surface));
+        let mut legacy = serde_json::to_value(placement).unwrap();
+        legacy.as_object_mut().unwrap().remove("sidebar_width_dip");
+        assert_eq!(
+            serde_json::from_value::<SavedPlacement>(legacy).unwrap().sidebar_width_dip,
+            None
+        );
         for position in [-1_000_000, 1_000_000] {
             SavedPlacement { left: position, top: position, width: 1, height: 32768, ..placement }
                 .validate().unwrap();
         }
         for invalid in [
+            SavedPlacement { sidebar_width_dip: Some(MIN_SIDEBAR_WIDTH - 1), ..placement },
+            SavedPlacement { sidebar_width_dip: Some(MAX_SIDEBAR_WIDTH + 1), ..placement },
             SavedPlacement { width: 0, ..placement },
             SavedPlacement { height: 0, ..placement },
             SavedPlacement { width: 32769, ..placement },

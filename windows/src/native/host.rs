@@ -210,7 +210,8 @@ pub(super) fn install_drag_escape(view: &WebView, window: HWND) -> anyhow::Resul
                     )
                 {
                     args.SetHandled(true)?;
-                    post(Event::Pointer(panes::Pointer::Cancel));
+                    // The retained holder may now belong to a detached frame.
+                    PostMessageW(owner, WM_CANCELMODE, 0, 0);
                 }
                 Ok(())
             })),
@@ -807,6 +808,17 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             return Ok(());
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
+        if message.message == WM_KEYDOWN && message.wParam == 0x1b {
+            let owner = unsafe { GetAncestor(message.hwnd, GA_ROOT) };
+            if app
+                .detached
+                .values()
+                .find(|window| window.window == owner)
+                .is_some_and(detached::Window::cancel_drag)
+            {
+                continue;
+            }
+        }
         if message.message == WM_KEYDOWN
             && message.wParam == 0x1b
             && matches!(

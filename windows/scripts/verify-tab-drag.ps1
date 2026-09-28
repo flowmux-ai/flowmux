@@ -4,6 +4,7 @@ param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\de
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs') -ReferencedAssemblies System.Drawing
 $base=if($env:FLOWMUX_TEST_ARTIFACT_ROOT){$env:FLOWMUX_TEST_ARTIFACT_ROOT}else{[IO.Path]::GetTempPath()};$directory=Join-Path $base ('tab-drag-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$checks=@();$failure=$null;$last=$null;$commandFailure=$null;$cleanupErrors=@();$cleaning=$false;$terminalProcesses=@()
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
@@ -59,8 +60,24 @@ function Detached($Tree,$Before){
     Require ($now.holder.parent -eq $window.window_handle -and $now.holder.root -eq $window.window_handle -and [OptionsFixture]::Parent([long]$now.holder.window,$owned.Id) -eq $window.window_handle -and [OptionsFixture]::Parent([long]$now.view_handle,$owned.Id) -eq $now.holder.window) 'Live terminal parent chain did not move to the detached root'
     $bounds=[OptionsFixture]::RelativeBounds([long]$window.window_handle,[long]$now.holder.window,$owned.Id);foreach($key in @('x','y','width','height')){Require ($bounds.$key -eq $now.holder.bounds.$key -and $now.bounds.$key -eq $now.holder.bounds.$key -and $now.holder.bounds.$key -eq $window.area.$key) ('Detached terminal bounds differ: '+$key)}
     $tabs=@($Tree.workspaces|Where-Object {$_.id -ceq $window.workspace}|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces});Require ($tabs.Count -eq 1 -and $tabs[0].id -ceq $Before.id -and $tabs[0].title -ceq $names[$Before.id]) 'Detached workspace lost its sole tab or Unicode title'
+    $sidebar=$window.sidebar;Require ($sidebar -and $sidebar.width -gt 0 -and $sidebar.width_dip -ge 160 -and $sidebar.width_dip -le 640 -and $window.placement.sidebar_width_dip -eq $sidebar.width_dip) 'Detached sidebar omitted its bounded persisted preference'
+    $right=[int]($sidebar.gutter.x+$sidebar.gutter.width)
+    Require ($sidebar.gutter.x -eq $sidebar.width -and $sidebar.gutter.width -gt 0 -and $window.area.x -eq $right) 'Detached content does not start after its sidebar gutter'
+    foreach($handle in @($sidebar.workspace_row,$sidebar.workspace_close,$sidebar.header)) {
+        Require ([long]$handle -ne 0) 'Detached sidebar omitted a native control'
+        $control=[OptionsFixture]::Describe([long]$handle,$owned.Id)
+        $rect=[OptionsFixture]::RelativeBounds([long]$window.window_handle,[long]$handle,$owned.Id)
+        Require (($control.Style -band 0x10000000) -ne 0 -and $rect.X -ge 0 -and $rect.Width -gt 0 -and $rect.X+$rect.Width -le $sidebar.width) 'Detached sidebar control is not logically shown inside its hidden parent'
+    }
+    $workspace=@($Tree.workspaces|Where-Object {$_.id -ceq $window.workspace});Require ($workspace.Count -eq 1) 'Detached sidebar workspace is ambiguous'
+    $caption=[OptionsFixture]::Text([long]$sidebar.workspace_row,$owned.Id)
+    Require ($caption -ceq $workspace[0].name.Replace('&','&&')) 'Detached native workspace row lost its Unicode name or Win32 ampersand escaping'
+    $tab=[OptionsFixture]::RelativeBounds([long]$window.window_handle,[long]$window.tab,$owned.Id)
+    Require ($tab.X -ge $right -and $now.holder.bounds.x -ge $right -and [ChromeFixture]::CaptureHandle([long]$window.window_handle,$owned.Id) -eq 0) 'Detached tab/view overlaps its sidebar or hidden window captured the pointer'
     return $window
 }
+function Detached-Width($Tree,[string]$Surface){$frames=@($Tree.detached_windows|Where-Object {$_.surface -ceq $Surface});Require ($frames.Count -eq 1) 'Missing detached width target';return $frames[0].sidebar}
+function Await-DetachedWidth([string]$Surface,[int]$Width,[bool]$Dragging){return Await {param($t) $sidebar=Detached-Width $t $Surface;$sidebar.width_dip -eq $Width -and $sidebar.dragging -eq $Dragging}}
 function Rejected-Attached([string[]]$Arguments){$result=Request $Arguments 5000 1;Require ($result.error -like '*requires a tab in the main window*') ('Wrong detached rejection: '+($result|ConvertTo-Json -Compress))}
 function Terminal-Command($Tree,[string]$Surface,[string]$Command){$pane=Location $Tree $Surface;Request @('send-keys',$pane,$Command)|Out-Null;Request @('send-key','Enter','--surface',$Surface)|Out-Null}
 function Passed([string]$Name){$script:checks+=$Name}
@@ -80,6 +97,49 @@ try {
     $singleReply=Request @('detach-tab',$originalSurface);$tree=Await {param($t) @($t.detached_windows).Count -eq 1};$singleWindow=Detached $tree $singleBefore
     Require ($singleReply.surface -ceq $originalSurface -and $singleReply.window_handle -eq $singleWindow.window_handle -and @($tree.surfaces).Count -eq 1 -and -not $tree.main_closed -and @($tree.chrome.controls|Where-Object {$_.kind -in @('workspace','tab')}).Count -eq 0) 'Last-tab detach left a main row, created a replacement session or closed the main window'
     Screen-Contains $originalSurface $marker
+    # Resize only this exact hidden independent HWND; main preferences and the
+    # retained terminal/holder must survive drag limits and temporary clamping.
+    $mainSidebar=[int]$tree.chrome.sidebar_width_dip;$mainActual=[int]$tree.chrome.sidebar_actual_width
+    $singleSize=[ChromeFixture]::Size([long]$singleWindow.window_handle,$owned.Id);$scale=[Math]::Max(96,[ChromeFixture]::GetDpiForWindow([IntPtr]([long]$singleWindow.window_handle)))/96.0
+    foreach($limit in @(@{x=0;width=160},@{x=4096;width=640})) {
+        $sidebar=Detached-Width $tree $originalSurface;$edge=[int]$sidebar.gutter.x+1
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'down',$edge,100)
+        $tree=Await-DetachedWidth $originalSurface ([int]$sidebar.width_dip) $true
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'move',$limit.x,100)
+        $tree=Await-DetachedWidth $originalSurface $limit.width $true
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'up',$limit.x,100)
+        $tree=Await-DetachedWidth $originalSurface $limit.width $false;$singleWindow=Detached $tree $singleBefore
+        Require ($tree.chrome.sidebar_width_dip -eq $mainSidebar -and $tree.chrome.sidebar_actual_width -eq $mainActual) 'Detached sidebar drag changed main sidebar width'
+    }
+    $workspaceBefore=@($tree.workspaces|Where-Object {$_.id -ceq $singleWindow.workspace})[0]
+    Request @('workspace','rename',$singleWindow.workspace,'분리 한 é & 작업공간')|Out-Null;Request @('workspace','color',$singleWindow.workspace,'#12abef')|Out-Null
+    $tree=Tree;$singleWindow=Detached $tree $singleBefore;$changed=@($tree.workspaces|Where-Object {$_.id -ceq $singleWindow.workspace})[0]
+    Require ($changed.name -ceq '분리 한 é & 작업공간' -and $changed.color -ceq '#12abef') 'Detached workspace rename/color did not update the same workspace'
+    Request @('workspace','rename',$singleWindow.workspace,$workspaceBefore.name)|Out-Null
+    if($workspaceBefore.color){Request @('workspace','color',$singleWindow.workspace,$workspaceBefore.color)|Out-Null}else{Request @('workspace','color',$singleWindow.workspace,'--clear')|Out-Null}
+    $tree=Tree;$singleWindow=Detached $tree $singleBefore
+    Passed 'detached-native-sidebar-Unicode-row-metadata-geometry-and-independent-min-max-drag'
+    $expandedWidth=[int]$singleWindow.sidebar.width;$narrowWidth=[int][Math]::Max(400,[Math]::Min($singleSize[0]-160,[Math]::Round(480*$scale)));$narrowHeight=[int][Math]::Min(1200,[Math]::Max(300,[Math]::Round(400*$scale)))
+    [ChromeFixture]::Resize([long]$singleWindow.window_handle,$owned.Id,$narrowWidth,$narrowHeight)
+    $tree=Await {param($t) $s=Detached-Width $t $originalSurface;$s.width_dip -eq 640 -and $s.width -lt $expandedWidth};$singleWindow=Detached $tree $singleBefore
+    $edge=[int]$singleWindow.sidebar.gutter.x+1
+    [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'down',$edge,100);$tree=Await-DetachedWidth $originalSurface 640 $true
+    [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'up',$edge,100);$tree=Await-DetachedWidth $originalSurface 640 $false
+    [ChromeFixture]::Resize([long]$singleWindow.window_handle,$owned.Id,$singleSize[0],$singleSize[1])
+    $tree=Await {param($t) $s=Detached-Width $t $originalSurface;$s.width_dip -eq 640 -and $s.width -eq $expandedWidth};$singleWindow=Detached $tree $singleBefore
+    Require ($tree.chrome.sidebar_width_dip -eq $mainSidebar -and $tree.chrome.sidebar_actual_width -eq $mainActual -and @($tree.surfaces).Count -eq 1) 'Detached clamp changed main width or created a replacement session'
+    Screen-Contains $originalSurface $marker;Passed 'detached-sidebar-narrow-clamp-click-preserves-preferred-width-and-live-session'
+    foreach($cancel in @('child-escape','cancel-mode')) {
+        $edge=[int]$singleWindow.sidebar.gutter.x+1
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'down',$edge,100);$tree=Await-DetachedWidth $originalSurface 640 $true
+        if($cancel -eq 'child-escape') {[OptionsFixture]::PostEscape([long]$singleWindow.sidebar.workspace_row,$owned.Id)}
+        else {[ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'cancel',$edge,100)}
+        $tree=Await-DetachedWidth $originalSurface 640 $false
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'move',0,100)
+        [ChromeFixture]::Pointer([long]$singleWindow.window_handle,$owned.Id,'up',0,100)
+        $tree=Await-DetachedWidth $originalSurface 640 $false;$singleWindow=Detached $tree $singleBefore
+    }
+    Passed 'detached-child-Escape-and-owner-cancel-ignore-late-drag-motion'
     Request @('new-workspace','--cwd',$directory,'--shell=cmd')|Out-Null;$dummy=Request @('identify')
     Require ($dummy.surface -cne $originalSurface -and $dummy.workspace -cne $singleWindow.workspace) 'New Workspace did not return from the detached terminal to a new main workspace'
     $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};Detached $tree $singleBefore|Out-Null
@@ -204,7 +264,7 @@ try {
     $window=Detached $tree $retained;Screen-Contains $c.surface $marker;Terminal-Command $tree $c.surface 'echo MAIN_CLOSED_%FM_TEAROUT%';Screen-Contains $c.surface ('MAIN_CLOSED_'+$shellState)
     Terminal-Command $tree $c.surface ('"'+$cli+'" --json identify');Screen-Contains $c.surface $c.surface
     Passed 'main-WM_CLOSE-removes-attached-sessions-preserves-detached-PTY-and-inherited-pipe'
-    [FindFixture]::PostClose([long]$window.window_handle,$owned.Id);Require ($owned.WaitForExit((Budget 5000))) 'Final detached WM_CLOSE did not stop the host within five seconds';Require ($owned.ExitCode -eq 0) 'Final detached window exit was not clean';$terminal=@($terminalProcesses|Where-Object {$_.Id -eq $retained.pid});Require ($terminal.Count -eq 1 -and $terminal[0].WaitForExit((Budget 2000))) 'Final detached close retained its shell process';Passed 'final-detached-WM_CLOSE-ends-process'
+    [OptionsFixture]::Click([long]$window.window_handle,[long]$window.sidebar.workspace_close,$owned.Id);Require ($owned.WaitForExit((Budget 5000))) 'Final detached workspace close did not stop the host within five seconds';Require ($owned.ExitCode -eq 0) 'Final detached window exit was not clean';$terminal=@($terminalProcesses|Where-Object {$_.Id -eq $retained.pid});Require ($terminal.Count -eq 1 -and $terminal[0].WaitForExit((Budget 2000))) 'Final detached close retained its shell process';Passed 'final-detached-workspace-close-button-ends-process'
 
 }catch{$failure=$_.Exception.Message}
 finally{

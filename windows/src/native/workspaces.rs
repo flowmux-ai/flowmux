@@ -122,7 +122,7 @@ impl App {
                     .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
                     .map(|rgb| ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff));
                 chrome::Role::Workspace {
-                    selected: self.workspace().id == id,
+                    selected: self.workspace().id == id || self.is_detached_workspace(id),
                     color,
                 }
             }
@@ -188,6 +188,14 @@ impl App {
         }
     }
     pub(super) fn refresh_chrome_metadata(&self) {
+        for window in self.detached.values() {
+            if let Some(workspace) = self.workspaces.iter().find(|w| w.id == window.workspace) {
+                window.workspace_caption(
+                    &workspace.name,
+                    self.chrome_role(&Action::Workspace(workspace.id)),
+                );
+            }
+        }
         for control in &self.controls {
             if let Action::Workspace(id) = control.action {
                 if let Some(label) = self.workspace_caption(id) {
