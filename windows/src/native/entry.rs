@@ -175,6 +175,23 @@ fn request_gui(arguments: &[std::ffi::OsString]) -> anyhow::Result<u32> {
     }
 }
 
+pub(super) fn new_window(directory: &std::path::Path, temporary: bool) -> anyhow::Result<u32> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStrExt;
+    let mut arguments = vec![
+        OsString::from("--new-window"),
+        OsString::from("--cwd"),
+        directory.as_os_str().to_owned(),
+    ];
+    if temporary {
+        arguments.push(OsString::from("--temporary"));
+    }
+    let mut context = capture_launch(&arguments)?;
+    // --cwd selects the initial terminal; the process directory also follows it.
+    context.directory = directory.as_os_str().encode_wide().collect();
+    launch_gui(&context)
+}
+
 pub(super) fn launch_gui(context: &LaunchContext) -> anyhow::Result<u32> {
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
@@ -185,14 +202,10 @@ pub(super) fn launch_gui(context: &LaunchContext) -> anyhow::Result<u32> {
         .iter()
         .map(|a| std::ffi::OsString::from_wide(a))
         .collect();
-    let invocation = parse_entry(
+    crate::command::validate_launch(
         std::iter::once(std::ffi::OsString::from("flowmux")).chain(arguments.iter().cloned()),
     )
     .map_err(|_| anyhow::anyhow!("Invalid window launch options"))?;
-    anyhow::ensure!(
-        matches!(invocation, Invocation::Launch { .. }),
-        "Only window launch options can be delegated"
-    );
     let directory = std::path::PathBuf::from(std::ffi::OsString::from_wide(&context.directory));
     anyhow::ensure!(
         directory.is_absolute() && directory.is_dir(),

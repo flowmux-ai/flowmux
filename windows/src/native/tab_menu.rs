@@ -12,6 +12,7 @@ enum MenuAction {
     Move,
     Destination(WorkspaceId),
     NewWorkspace,
+    NewWindow,
     NewSshWorkspace,
     RenameWorkspace,
     WorkspaceColor,
@@ -254,6 +255,7 @@ impl App {
         let mut rows = vec![
             ("New workspace", true, MenuAction::NewWorkspace),
             ("New SSH Workspace", true, MenuAction::NewSshWorkspace),
+            ("New window", true, MenuAction::NewWindow),
         ];
         if !creation {
             rows.extend([
@@ -325,6 +327,11 @@ impl App {
                 label: "New SSH Workspace".into(),
                 enabled: true,
                 action: MenuAction::NewSshWorkspace,
+            },
+            Entry {
+                label: "New window".into(),
+                enabled: true,
+                action: MenuAction::NewWindow,
             },
         ];
         self.show_context_menu(Kind::Creation, None, entries, Vec::new(), point)
@@ -525,6 +532,7 @@ impl App {
                 self.move_tab(surface.context("No tab to move")?, pane, usize::MAX)?;
             }
             MenuAction::NewSshWorkspace => self.show_ssh_dialog()?,
+            MenuAction::NewWindow => self.new_window(surface)?,
             MenuAction::NewWorkspace => {
                 self.new_workspace(surface, None, None)?;
             }

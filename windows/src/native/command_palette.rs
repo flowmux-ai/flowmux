@@ -169,7 +169,10 @@ impl App {
             match target {
                 Target::Keybinding(action) => {
                     anyhow::ensure!(
-                        matches!(action, ActionId::NewWorkspace | ActionId::QuitApp),
+                        matches!(
+                            action,
+                            ActionId::NewWorkspace | ActionId::NewWindow | ActionId::QuitApp
+                        ),
                         "No active workspace"
                     );
                     return Ok(());
@@ -305,6 +308,7 @@ impl App {
                     Target::Keybinding(ActionId::NewWorkspace) => {
                         self.action(Action::NewWorkspace)?
                     }
+                    Target::Keybinding(ActionId::NewWindow) => self.action(Action::NewWindow)?,
                     Target::Keybinding(ActionId::QuitApp) => {
                         self.request_close(CloseRequest::Native)?
                     }

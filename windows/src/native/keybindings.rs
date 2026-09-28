@@ -108,7 +108,10 @@ impl App {
             .filter(|action| {
                 matches!(
                     action,
-                    ActionId::NewWorkspace | ActionId::CommandPalette | ActionId::QuitApp
+                    ActionId::NewWorkspace
+                        | ActionId::NewWindow
+                        | ActionId::CommandPalette
+                        | ActionId::QuitApp
                 )
             });
         let Some(action) = action else {
@@ -136,6 +139,7 @@ impl App {
         self.detached_focus = None;
         match action {
             ActionId::NewWorkspace => self.action(Action::NewWorkspace),
+            ActionId::NewWindow => self.action(Action::NewWindow),
             ActionId::CommandPalette => self.action(Action::CommandPalette),
             ActionId::QuitApp => self.request_close(CloseRequest::Native),
             _ => Ok(()),
@@ -305,6 +309,7 @@ impl App {
                     return Ok(());
                 }
                 QuitApp => return self.request_close(CloseRequest::Native),
+                NewWindow if !authentication => return self.new_window(Some(source)),
                 _ => return Ok(()), // Single-surface window tools match Linux's disabled controls.
             }
         }
@@ -382,6 +387,7 @@ impl App {
             Some(NewSurface) => Action::NewTab,
             Some(NewBrowserSurface) => Action::NewBrowser,
             Some(NewWorkspace) => Action::NewWorkspace,
+            Some(NewWindow) => return self.new_window(Some(source)),
             Some(TerminalSearch) => Action::Find,
             Some(SearchAllTerminals) => Action::SearchAll,
             Some(TogglePaneZoom) => Action::TogglePaneZoom,

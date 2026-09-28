@@ -447,6 +447,7 @@ enum Action {
     CommandPalette,
     Overview,
     NewWorkspace,
+    NewWindow,
     NewSshWorkspace,
     SshStatus(WorkspaceId),
     SshConnect(WorkspaceId),
@@ -576,6 +577,8 @@ struct App {
     closing: bool,
     close_accepted: bool,
     background_test: bool,
+    #[cfg(debug_assertions)]
+    last_new_window_pid: Option<u32>,
     store: Option<Arc<Store>>,
     restore_screens: HashMap<SurfaceId, SavedScreen>,
     pending_save: Option<PendingSave>,
@@ -776,6 +779,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             ssh_attempted,
             ssh_ports: None,
             ssh_forwards: HashMap::new(),
+            #[cfg(debug_assertions)]
+            last_new_window_pid: None,
             ssh_auth_window: None,
             shells,
             settings_worker,
@@ -1008,6 +1013,7 @@ impl App {
         matches!(
             action,
             Action::NewWorkspace
+                | Action::NewWindow
                 | Action::NewSshWorkspace
                 | Action::WorkspaceMenu
                 | Action::Settings
@@ -3089,6 +3095,35 @@ impl App {
             }
         });
     }
+    fn new_window(&mut self, source: Option<SurfaceId>) -> anyhow::Result<()> {
+        let owner = source.map_or(self.window, |id| self.surface_window(id));
+        anyhow::ensure!(
+            self.pending_save.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing
+                && self.editor_barrier.is_none()
+                && !self.overview.is_open()
+                && unsafe { IsWindowEnabled(owner) } != 0,
+            "Window is busy"
+        );
+        // locate returns a local working directory even for an SSH surface.
+        let directory = match source {
+            Some(id) => {
+                self.locate(id)
+                    .context("New window source no longer exists")?
+                    .2
+            }
+            None => self.initial_cwd.clone(),
+        };
+        let _pid = super::entry::new_window(&directory, self.store.is_none())?;
+        #[cfg(debug_assertions)]
+        {
+            self.last_new_window_pid = Some(_pid);
+        }
+        Ok(())
+    }
+
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.overview.is_open() || matches!(action, Action::Overview),
@@ -3121,6 +3156,7 @@ impl App {
                 return self.new_workspace(None, None, None).map(|_| ());
             }
             Action::NewSshWorkspace => return self.show_ssh_dialog(),
+            Action::NewWindow => return self.new_window(self.current_surface()),
             Action::SshStatus(_) => return Ok(()),
             Action::SshPorts(id) => return self.show_ssh_ports(id),
             Action::SshConnect(id) => return self.ssh_connect(id),
@@ -3393,6 +3429,10 @@ impl App {
                 .map(Some);
             }
             Command::Tree => {
+                #[cfg(debug_assertions)]
+                let last_new_window_pid = self.last_new_window_pid;
+                #[cfg(not(debug_assertions))]
+                let last_new_window_pid = None::<u32>;
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
                     "pid":surface.process_pid,"session":surface.session_generation,"running":surface.session.is_some() && surface.exit_code.is_none(),
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
@@ -3407,6 +3447,7 @@ impl App {
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
+                        "last_new_window_pid":last_new_window_pid,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),

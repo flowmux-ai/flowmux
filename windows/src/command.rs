@@ -45,6 +45,21 @@ pub enum Invocation {
     Client(Cli),
 }
 
+/// Validate an already classified window launch without building every CLI
+/// subcommand on the native UI thread's deeper event-handler stack.
+pub fn validate_launch(
+    arguments: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
+) -> Result<(), clap::Error> {
+    Launch::command()
+        .arg(
+            clap::Arg::new("json")
+                .long("json")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .try_get_matches_from(arguments)
+        .map(|_| ())
+}
+
 pub fn parse_entry(
     arguments: impl IntoIterator<Item = impl Into<std::ffi::OsString> + Clone>,
 ) -> Result<Invocation, clap::Error> {
@@ -750,7 +765,13 @@ mod tests {
             vec!["flowmux", "--shell=cmd", "--temporary"],
             vec!["flowmux", "--cwd=C:\\한글 한 😀", "--json", "--shell=cmd"],
             vec!["flowmux", "--json", "--new-window"],
+            vec!["flowmux", "--shell=cmd", "--shell-arg", "--json"],
+            vec![
+                "flowmux",
+                "--restore-window=00000000-0000-0000-0000-000000000000",
+            ],
         ] {
+            assert!(validate_launch(&args).is_ok());
             assert!(matches!(
                 parse_entry(args).unwrap(),
                 Invocation::Launch { .. }
@@ -761,6 +782,7 @@ mod tests {
             vec!["flowmux", "--pipe=example", "tree", "--json"],
             vec!["flowmux", "new-tab", "--shell=cmd", "--cwd=C:\\한글"],
         ] {
+            assert!(validate_launch(&args).is_err());
             assert!(matches!(parse_entry(args).unwrap(), Invocation::Client(_)));
         }
         for args in [
@@ -769,7 +791,13 @@ mod tests {
             vec!["flowmux", "--pipe=example"],
             vec!["flowmux", "--shell-arg=orphan"],
             vec!["flowmux", "unknown-command"],
+            vec![
+                "flowmux",
+                "--restore-window=00000000-0000-0000-0000-000000000000",
+                "--new-window",
+            ],
         ] {
+            assert!(validate_launch(&args).is_err());
             assert_eq!(parse_entry(args).unwrap_err().exit_code(), 2);
         }
         for args in [
