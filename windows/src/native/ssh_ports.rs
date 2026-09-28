@@ -11,13 +11,17 @@ impl App {
             .into_iter()
             .flat_map(|c| &c.forwards)
             .map(|spec| {
-                let runtime = self.ssh_forwards.get(&spec.id);
+                let runtime = self
+                    .ssh_forwards
+                    .get(&spec.id)
+                    .filter(|f| f.workspace == workspace);
                 ssh_ports_panel::Row {
                     id: spec.id,
                     remote_port: spec.remote_port,
                     local_port: runtime.filter(|f| f.state() == "connected").map(|f| f.port),
                     state: runtime.map_or("disconnected", |f| f.state()).into(),
                     error: runtime.and_then(|f| f.error.clone()),
+                    authentication_available: runtime.is_some(),
                 }
             })
             .collect()
@@ -68,6 +72,9 @@ impl App {
             ssh_ports_panel::UiAction::Preview(forward) => {
                 self.open_ssh_preview(workspace, forward)
             }
+            ssh_ports_panel::UiAction::Authentication(forward) => {
+                self.ssh_forward_authentication(workspace, forward)
+            }
         };
         let rows = self.ssh_port_rows(workspace);
         if let Some(panel) = self.ssh_ports.as_mut() {
@@ -76,6 +83,27 @@ impl App {
         }
         self.refresh_ssh_toolbar();
         Ok(())
+    }
+
+    fn ssh_forward_authentication(
+        &mut self,
+        workspace: WorkspaceId,
+        id: Uuid,
+    ) -> anyhow::Result<()> {
+        self.ssh_lifecycle_guard()?;
+        let config = self.workspaces[self.workspace_index(workspace)?]
+            .ssh
+            .as_ref()
+            .context("Target is not an SSH workspace")?;
+        anyhow::ensure!(
+            config.forwards.iter().any(|forward| forward.id == id),
+            "Forward no longer exists"
+        );
+        self.ssh_forwards
+            .get_mut(&id)
+            .filter(|forward| forward.workspace == workspace)
+            .context("Forward authentication is unavailable; connect the workspace first")?
+            .show()
     }
 
     fn ssh_forward_start(

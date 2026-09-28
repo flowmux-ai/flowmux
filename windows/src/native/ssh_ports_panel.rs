@@ -23,12 +23,14 @@ pub(super) struct Row {
     pub(super) local_port: Option<u16>,
     pub(super) state: String,
     pub(super) error: Option<String>,
+    pub(super) authentication_available: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) enum UiAction {
     Add,
     Remove(Uuid),
     Preview(Uuid),
+    Authentication(Uuid),
     Close,
     Layout,
 }
@@ -66,7 +68,10 @@ fn emit(window: HWND, action: UiAction) {
         let route = routes.get_mut(&(window as isize))?;
         if matches!(
             action,
-            UiAction::Add | UiAction::Remove(_) | UiAction::Preview(_)
+            UiAction::Add
+                | UiAction::Remove(_)
+                | UiAction::Preview(_)
+                | UiAction::Authentication(_)
         ) {
             if route.composing || route.settling || route.pending {
                 return None;
@@ -225,6 +230,7 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
 struct Controls {
     label: HWND,
     preview: HWND,
+    authentication: HWND,
     remove: HWND,
 }
 pub(super) struct Panel {
@@ -390,19 +396,27 @@ impl Panel {
                     panel.viewport,
                     "BUTTON",
                     "Open preview",
-                    1000 + index * 2,
+                    1000 + index * 3,
+                    WS_TABSTOP | BS_OWNERDRAW as u32,
+                )?;
+                let authentication = panel.child(
+                    panel.viewport,
+                    "BUTTON",
+                    "Authentication",
+                    1001 + index * 3,
                     WS_TABSTOP | BS_OWNERDRAW as u32,
                 )?;
                 let remove = panel.child(
                     panel.viewport,
                     "BUTTON",
                     "Remove",
-                    1001 + index * 2,
+                    1002 + index * 3,
                     WS_TABSTOP | BS_OWNERDRAW as u32,
                 )?;
                 panel.controls.push(Controls {
                     label,
                     preview,
+                    authentication,
                     remove,
                 });
             }
@@ -496,6 +510,7 @@ impl Panel {
             ACTIONS.with(|actions| {
                 let mut actions = actions.borrow_mut();
                 actions.remove(&(control.preview as isize));
+                actions.remove(&(control.authentication as isize));
                 actions.remove(&(control.remove as isize));
             });
             if let Some(row) = self.rows.get(index) {
@@ -513,12 +528,20 @@ impl Panel {
                 unsafe {
                     SetWindowTextW(control.label, wide(&label).as_ptr());
                     EnableWindow(control.preview, i32::from(row.local_port.is_some()));
+                    EnableWindow(
+                        control.authentication,
+                        i32::from(row.authentication_available),
+                    );
                 }
                 ACTIONS.with(|actions| {
                     let mut actions = actions.borrow_mut();
                     actions.insert(
                         control.preview as isize,
                         (self.window, UiAction::Preview(row.id)),
+                    );
+                    actions.insert(
+                        control.authentication as isize,
+                        (self.window, UiAction::Authentication(row.id)),
                     );
                     actions.insert(
                         control.remove as isize,
@@ -595,14 +618,20 @@ impl Panel {
             place(self.empty, 0, 0, row_width, px(28));
             for (index, control) in self.controls.iter().enumerate() {
                 let visible = index < self.rows.len();
-                for child in [control.label, control.preview, control.remove] {
+                for child in [
+                    control.label,
+                    control.preview,
+                    control.authentication,
+                    control.remove,
+                ] {
                     ShowWindow(child, if visible { SW_SHOWNA } else { SW_HIDE });
                 }
                 if visible {
                     let y = px(index as i32 * 76) - scroll;
                     place(control.label, 0, y, row_width, px(40));
                     place(control.preview, 0, y + px(42), px(110), px(28));
-                    place(control.remove, px(118), y + px(42), px(80), px(28));
+                    place(control.authentication, px(118), y + px(42), px(136), px(28));
+                    place(control.remove, px(262), y + px(42), px(80), px(28));
                 }
             }
             place(self.remote, px(12), form, width, px(28));
@@ -649,7 +678,7 @@ impl Panel {
     }
     pub(super) fn status(&self) -> Value {
         let state = route(self.window);
-        let rows:Vec<_>=self.rows.iter().zip(&self.controls).map(|(row,control)|json!({"id":row.id,"remote_port":row.remote_port,"local_port":row.local_port,"state":row.state,"error":row.error,"label":control.label as usize,"preview":control.preview as usize,"remove":control.remove as usize})).collect();
+        let rows:Vec<_>=self.rows.iter().zip(&self.controls).map(|(row,control)|json!({"id":row.id,"remote_port":row.remote_port,"local_port":row.local_port,"state":row.state,"error":row.error,"label":control.label as usize,"preview":control.preview as usize,"authentication":control.authentication as usize,"authentication_available":row.authentication_available,"remove":control.remove as usize})).collect();
         json!({"id":self.id,"workspace":self.workspace,"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"viewport":self.viewport as usize,"remote":self.remote as usize,"local":self.local as usize,"https":self.https as usize,"add":self.add as usize,"error_handle":self.error as usize,"error":text(self.error).unwrap_or_default(),"remote_value":text(self.remote).unwrap_or_default(),"local_value":text(self.local).unwrap_or_default(),"https_checked":unsafe{SendMessageW(self.https,BM_GETCHECK,0,0)==BST_CHECKED as isize},"rows":rows,"scroll":state.map_or(0,|route|route.scroll),"composing":state.is_some_and(|route|route.composing),"pending":state.is_some_and(|route|route.pending),"native_visible":unsafe{IsWindowVisible(self.window)!=0}})
     }
 }
@@ -679,11 +708,14 @@ impl Drop for Panel {
             self.error,
         ]
         .into_iter()
-        .chain(
-            self.controls
-                .iter()
-                .flat_map(|controls| [controls.label, controls.preview, controls.remove]),
-        ) {
+        .chain(self.controls.iter().flat_map(|controls| {
+            [
+                controls.label,
+                controls.preview,
+                controls.authentication,
+                controls.remove,
+            ]
+        })) {
             if !child.is_null() {
                 chrome::unregister(child);
             }
