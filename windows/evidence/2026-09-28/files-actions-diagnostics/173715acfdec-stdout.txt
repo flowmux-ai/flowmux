@@ -1,0 +1,27 @@
+   Compiling flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 03s
+     Running unittests src/lib.rs (windows/target/debug/deps/flowmux_windows-df74957bba4a146d)
+
+running 20 tests
+test files_model::action_grammar_tests::action_arguments_preserve_unicode_and_require_retained_identity ... ok
+test files_model::tests::invalid_tree_structure_and_budget_are_rejected_before_apply ... ok
+test files_model::tests::maximum_size_refresh_and_native_selection_remain_path_bounded ... ok
+test files_model::tests::native_selection_is_atomic_and_preserves_exact_caret_anchor ... ok
+test files_model::tests::pages_add_exact_500_and_indices_are_retained_indices ... ok
+test files_model::tests::path_validation_and_byte_pages_preserve_exact_unicode ... ok
+test files_model::tests::refresh_does_not_treat_uninspected_collapsed_children_as_deleted ... ok
+test files_model::tests::refresh_retains_paths_not_old_indices_and_invalid_input_is_atomic ... ok
+test files_model::tests::selection_survives_collapse_without_becoming_another_row ... ok
+test files_operation_fs::tests::invalid_destination_never_reaches_native_preparation ... ok
+test files_operation_fs::tests::rename_scope_alias_and_cancellation_are_rejected ... ok
+test files_operation_fs::tests::validation_preserves_unicode_and_normalizes_separators ... ok
+test files_operations::tests::cancellation_and_service_drop_retain_running_admission ... ok
+test files_operations::tests::delivered_preparation_holds_admission_until_consumed_even_when_failed ... ok
+test files_operations::tests::expired_admission_does_not_occupy_the_worker ... ok
+test files_service::tests::cancellation_and_posted_responses_keep_their_admission_permits ... ok
+test files_service::tests::drop_does_not_join_a_blocked_worker_and_response_remains_owned ... ok
+test files_service::tests::failures_and_original_deadlines_are_explicit ... ok
+test files_service::tests::parser_preserves_exact_unicode_and_rejects_malformed_offsets ... ok
+test files_service::tests::snapshot_expands_only_requested_directories_and_keeps_hidden_names ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 167 filtered out; finished in 1.38s

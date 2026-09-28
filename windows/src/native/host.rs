@@ -1196,7 +1196,9 @@ impl App {
                 }
                 // Give due checkpoints first admission. A refresh already in
                 // progress defers the checkpoint until the next idle tick.
-                self.editor_refresh_tick();
+                if self.files_operation_guard().is_ok() {
+                    self.editor_refresh_tick();
+                }
             }
             Event::Button(action) => self.action(action)?,
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
@@ -1691,6 +1693,7 @@ impl App {
         );
     }
     fn request_close(&mut self, request: CloseRequest) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
         let copy = match &request {
             CloseRequest::Native => CloseRequest::Native,
             CloseRequest::Ipc(reply) => CloseRequest::Ipc(reply.clone()),

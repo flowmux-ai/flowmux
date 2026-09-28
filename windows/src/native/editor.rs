@@ -311,7 +311,55 @@ impl App {
         );
         Ok(())
     }
+    pub(super) fn editor_files_operation_guard(
+        &self,
+        root: &std::path::Path,
+        source: &str,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.closing
+                && !self.close_accepted
+                && self.close_request.is_none()
+                && self.editor_barrier.is_none()
+                && self.pending_save.is_none()
+                && !self.editor_picker_pending
+                && self.editor_open_pending.is_empty(),
+            "Files actions require idle editor and window operations"
+        );
+        let path = root.join(source);
+        for editor in self.editors.values() {
+            anyhow::ensure!(
+                editor.ready
+                    && editor.pending.is_none()
+                    && editor.inflight.is_empty()
+                    && editor.replacements.is_empty()
+                    && editor.refresh.pending.is_none()
+                    && !editor.search.pending(),
+                "Files actions require all editors to be idle"
+            );
+            if let Some(documents) = editor.documents.as_array() {
+                for document in documents {
+                    if let Some(relative) = document["path"].as_str() {
+                        anyhow::ensure!(!crate::editor_search::same_path(&editor.root.join(relative), &path), "Close the source editor document before copying, renaming or moving its file");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     fn editor_work(&mut self, surface: SurfaceId, id: u64, work: Work) -> anyhow::Result<()> {
+        if !matches!(
+            &work,
+            Work::Message(
+                EditorMessage::DocumentDirty { .. }
+                    | EditorMessage::DocumentChanged { .. }
+                    | EditorMessage::ViewStateChanged { .. }
+                    | EditorMessage::ActiveDocumentChanged { .. }
+                    | EditorMessage::ZoomChanged { .. }
+            )
+        ) {
+            self.files_operation_guard()?;
+        }
         let editor = self
             .editors
             .get_mut(&surface)
@@ -472,6 +520,60 @@ impl App {
                             message_surface == surface.to_string(),
                             "editor surface identity does not match native view"
                         );
+                        if let Err(error) = self.files_operation_guard() {
+                            let reason = error.to_string();
+                            let failure = match &message {
+                                EditorMessage::SaveRequested {
+                                    document_id,
+                                    document_version,
+                                    change_sequence,
+                                    ..
+                                } => Some(EditorMessageOut::SaveFailed {
+                                    document_id: document_id.clone(),
+                                    document_version: *document_version,
+                                    change_sequence: *change_sequence,
+                                    reason: reason.clone(),
+                                    conflict: false,
+                                }),
+                                EditorMessage::SaveAsRequested {
+                                    document_id,
+                                    document_version,
+                                    change_sequence,
+                                    ..
+                                } => Some(EditorMessageOut::SaveAsFailed {
+                                    document_id: document_id.clone(),
+                                    document_version: *document_version,
+                                    change_sequence: *change_sequence,
+                                    reason: reason.clone(),
+                                    target_exists: false,
+                                }),
+                                EditorMessage::ConflictActionRequested {
+                                    document_id,
+                                    document_version,
+                                    ..
+                                } => Some(EditorMessageOut::ConflictActionFailed {
+                                    document_id: document_id.clone(),
+                                    document_version: *document_version,
+                                    reason: reason.clone(),
+                                }),
+                                _ => None,
+                            };
+                            if let Some(failure) = failure {
+                                let editor = self.editors.get_mut(&surface).unwrap();
+                                editor.error = Some(reason);
+                                editor.send(&failure)?;
+                                return Ok(());
+                            }
+                            if matches!(
+                                &message,
+                                EditorMessage::RecoveryDecision { .. }
+                                    | EditorMessage::CloseRequested { .. }
+                                    | EditorMessage::DiscardCloseRequested { .. }
+                            ) {
+                                self.editors.get_mut(&surface).unwrap().error = Some(reason);
+                                return Ok(());
+                            }
+                        }
                         match message {
                             EditorMessage::QuickOpenRequested { request_id } => {
                                 self.editor_search_ui(surface, request_id, search::Query::Quick)?;
@@ -918,6 +1020,7 @@ impl App {
         operation: Operation,
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<bool> {
+        self.files_operation_guard()?;
         if self.editor_bypass {
             return Ok(false);
         }
@@ -1194,6 +1297,7 @@ impl App {
         reply: Completion,
         files_owner: Option<crate::files_model::Owner>,
     ) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
         let submitted = match &reply {
             Completion::Ipc(reply) => reply.received_at(),
             Completion::User(_) | Completion::FilesUi { .. } => Instant::now(),
@@ -1446,6 +1550,7 @@ impl App {
         }
     }
     pub(super) fn editor_pick_action(&mut self) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
         let target = self.editor_capture_picker(None, None)?;
         self.editor_picker_pending = true;
         self.editor_run_picker(target);
@@ -1457,6 +1562,9 @@ impl App {
         caller: Option<SurfaceId>,
         reply: ipc::Reply,
     ) -> anyhow::Result<Option<Value>> {
+        if !matches!(&op, domain::Op::Status(_)) {
+            self.files_operation_guard()?;
+        }
         match op {
             domain::Op::QuickOpen(args) => {
                 self.editor_search_start(

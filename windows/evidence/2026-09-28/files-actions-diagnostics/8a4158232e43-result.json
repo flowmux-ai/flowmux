@@ -1,0 +1,13 @@
+{
+    "name":  "files-actions-copy-bytes",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\copy-bytes.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T06:46:53.3181505Z",
+    "pid":  28928,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  3.737,
+    "finished":  "2026-09-28T06:46:57.0604849Z"
+}

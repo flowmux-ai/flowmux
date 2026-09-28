@@ -1,0 +1,20 @@
+{
+  "name": "files-actions-unit-debug-fix",
+  "command": [
+    "cargo",
+    "xwin",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--locked",
+    "--lib",
+    "--no-run"
+  ],
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "pid": 423951,
+  "exitCode": 0,
+  "elapsedSeconds": 94.195
+}

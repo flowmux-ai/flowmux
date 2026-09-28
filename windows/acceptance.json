@@ -641,13 +641,16 @@
       "evidence": [
         "evidence/2026-09-28/files.md"
       ],
-      "notes": "Native Windows Files child panel implements bounded local tree expansion/collapse, path-based multiple selection, another 500 rendered rows, explicit refresh and retained-row editor Open. Seven distinct hidden native cases pass: nested Unicode >300 UTF-16-unit roots with new/reused Monaco documents, 1105-row paging, selection, refresh/stale tokens, reparse confinement, source-pane ownership/show-hide, and actual queued IPC expiry preserving prior state. One worker/eight admitted requests retain permits through response consumption; four-second original deadlines, 20k entries/four-MiB path cache, 64 expansion/depth, one-MiB status pages and 32-pane/16-MiB host cache are bounded. Read-only listing only; physical keyboard/mouse/IME/focus, glyphs/DPI/accessibility, all limits and hostile filesystem races, automatic tree watching and persisted tree restoration remain unverified or unsupported. See source boundaries and preserved failed verification attempts in the evidence."
+      "notes": "Native Windows Files child panel implements bounded local tree expansion/collapse, path-based multiple selection, another 500 rendered rows, explicit refresh and retained-row editor Open. Seven distinct hidden native cases pass: nested Unicode >300 UTF-16-unit roots with new/reused Monaco documents, 1105-row paging, selection, refresh/stale tokens, reparse confinement, source-pane ownership/show-hide, and actual queued IPC expiry preserving prior state. One worker/eight admitted requests retain permits through response consumption; four-second original deadlines, 20k entries/four-MiB path cache, 64 expansion/depth, one-MiB status pages and 32-pane/16-MiB host cache are bounded. Listing acceptance is tracked here; single-file mutations are tracked under F08. Physical keyboard/mouse/IME/focus, glyphs/DPI/accessibility, all limits and hostile filesystem races, automatic tree watching and persisted tree restoration remain unverified or unsupported. See source boundaries and preserved failed verification attempts in the evidence."
     },
     {
       "id": "F08",
       "feature": "파일 복사·잘라내기·붙여넣기·이름 변경",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/files-actions.md"
+      ],
+      "notes": "Single-file local Copy/Rename/Move use retained Files tokens, one host-wide worker, accepted operation IDs and 64 terminal receipts. Existing destinations and open editor sources (clean or dirty) are rejected; Copy preserves raw bytes up to 16 MiB. Five affected hidden native cases pass: long nested Unicode roundtrip with actual LISTBOX/Monaco, BOM/CRLF and binary NUL copy, invalid destinations, editor guards and stale tokens. Preparation pins handles; NtCreateFile/NtSetInformationFile avoid path re-traversal for mutation. Cancellation/deadlines are cooperative and close/editor operations reject while active. Related regressions and final builds/package are tracked separately in the evidence. Clipboard cut/paste, batch/directory/remote/reparse/case-sensitive paths, overwrite and physical keyboard/IME/focus acceptance remain unsupported or unverified."
     },
     {
       "id": "F09",

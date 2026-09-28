@@ -3,7 +3,11 @@
 use super::*;
 use crate::{files_model as domain, files_service as worker};
 use std::collections::HashSet;
+use windows_sys::Win32::UI::Controls::EM_SETLIMITTEXT;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetKeyState, VK_CONTROL};
+
+#[path = "files_actions.rs"]
+mod actions;
 
 pub(super) const TIMER: usize = 4;
 const MAX_PANES: usize = 32;
@@ -12,6 +16,7 @@ const LIST_ID: usize = 20;
 
 pub(super) enum Signal {
     Worker(worker::Response),
+    Operation(crate::files_operations::Event),
     Ui(UiRequest),
     OpenFinished(domain::Owner, Value),
     Tick,
@@ -24,6 +29,10 @@ enum Action {
     Expand,
     Collapse,
     Hide,
+    Copy(String),
+    Rename(String),
+    Move(String),
+    CancelOperation(Uuid),
     Select {
         indices: Vec<usize>,
         caret: Option<usize>,
@@ -44,8 +53,10 @@ struct Binding {
     token: Option<Uuid>,
     indices: Vec<usize>,
     list: isize,
+    destination: isize,
 }
 thread_local! {
+    static ACTIVE_OPERATION: std::cell::Cell<Option<Uuid>> = const { std::cell::Cell::new(None) };
     static BINDINGS: RefCell<HashMap<isize, Binding>> = RefCell::new(HashMap::new());
 }
 
@@ -65,6 +76,13 @@ unsafe extern "system" fn procedure(
                 .ok()
                 .and_then(|index| binding.indices.get(index).copied());
             let code = (wparam >> 16) as u32;
+            let destination = || {
+                let edit = binding.destination as HWND;
+                let length = GetWindowTextLengthW(edit).clamp(0, 16384) as usize;
+                let mut text = vec![0u16; length + 1];
+                let read = GetWindowTextW(edit, text.as_mut_ptr(), text.len() as i32);
+                String::from_utf16(&text[..read.max(0) as usize]).ok()
+            };
             let action = match (wparam & 0xffff, code) {
                 (1, BN_CLICKED) => Some(Action::Refresh),
                 (2, BN_CLICKED) => Some(Action::More),
@@ -72,6 +90,12 @@ unsafe extern "system" fn procedure(
                 (4, BN_CLICKED) => Some(Action::Expand),
                 (5, BN_CLICKED) => Some(Action::Collapse),
                 (6, BN_CLICKED) => Some(Action::Hide),
+                (7, BN_CLICKED) => destination().map(Action::Copy),
+                (8, BN_CLICKED) => destination().map(Action::Rename),
+                (9, BN_CLICKED) => destination().map(Action::Move),
+                (10, BN_CLICKED) => ACTIVE_OPERATION
+                    .with(|id| id.get())
+                    .map(Action::CancelOperation),
                 (LIST_ID, LBN_SELCHANGE) => {
                     let count = SendMessageW(list, LB_GETSELCOUNT, 0, 0);
                     if count < 0 || count as usize > binding.indices.len() {
@@ -132,6 +156,7 @@ struct Panel {
     window: HWND,
     list: HWND,
     heading: HWND,
+    destination: HWND,
     status: HWND,
     buttons: Vec<HWND>,
     indices: Vec<usize>,
@@ -181,6 +206,7 @@ impl Panel {
                 window,
                 list: std::ptr::null_mut(),
                 heading: std::ptr::null_mut(),
+                destination: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
                 buttons: Vec::new(),
                 indices: Vec::new(),
@@ -189,6 +215,19 @@ impl Panel {
             };
             panel.heading = panel.child("STATIC", "Files", 10, 0)?;
             panel.status = panel.child("STATIC", "", 11, 0)?;
+            panel.destination = panel.child(
+                "EDIT",
+                "",
+                12,
+                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
+            )?;
+            SendMessageW(panel.destination, EM_SETLIMITTEXT, 16384, 0);
+            SendMessageW(
+                panel.destination,
+                0x1501,
+                1,
+                wide("Destination path / new name").as_ptr() as isize,
+            );
             panel.list = panel.child(
                 "LISTBOX",
                 "",
@@ -208,6 +247,10 @@ impl Panel {
                 (4, "Expand"),
                 (5, "Collapse"),
                 (6, "Hide"),
+                (7, "Copy to"),
+                (8, "Rename to"),
+                (9, "Move to"),
+                (10, "Cancel job"),
             ] {
                 panel
                     .buttons
@@ -268,7 +311,7 @@ impl Panel {
                     *button,
                     std::ptr::null_mut(),
                     margin + (index % 3) as i32 * (button_width + margin),
-                    px(29) + (index / 3) as i32 * px(28),
+                    px(29) + (index / 3) as i32 * px(28) + if index >= 6 { px(28) } else { 0 },
                     button_width,
                     px(24),
                     SWP_NOZORDER | SWP_NOACTIVATE,
@@ -276,13 +319,14 @@ impl Panel {
             }
             for (window, x, y, w, h) in [
                 (self.heading, margin, px(4), width, px(21)),
-                (self.status, margin, px(86), width, px(35)),
+                (self.destination, margin, px(86), width, px(24)),
+                (self.status, margin, px(172), width, px(35)),
                 (
                     self.list,
                     margin,
-                    px(123),
+                    px(209),
                     width,
-                    (area.height - px(128)).max(1),
+                    (area.height - px(214)).max(1),
                 ),
             ] {
                 SetWindowPos(
@@ -389,7 +433,8 @@ impl Panel {
             };
             SetWindowTextW(self.status, wide(text).as_ptr());
             for (at, button) in self.buttons.iter().enumerate() {
-                let enabled = at == 0
+                let enabled = at == 9
+                    || at == 0
                     || at == 5
                     || (state.pending.is_none() && !page.stale && (at != 1 || page.more_available));
                 EnableWindow(*button, i32::from(enabled));
@@ -403,6 +448,7 @@ impl Panel {
                     token: state.model.token(),
                     indices: self.indices.clone(),
                     list: self.list as isize,
+                    destination: self.destination as isize,
                 },
             );
         });
@@ -480,6 +526,7 @@ pub(super) struct Controller {
     states: HashMap<PaneId, PaneState>,
     service: Option<worker::Service>,
     clock: u64,
+    actions: actions::State,
 }
 impl Controller {
     fn cancel(&mut self, pane: PaneId, reason: &str) {
@@ -547,6 +594,16 @@ impl App {
         op: domain::Op,
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<Option<Value>> {
+        if matches!(
+            &op,
+            domain::Op::Copy(_)
+                | domain::Op::Move(_)
+                | domain::Op::Rename(_)
+                | domain::Op::OperationStatus(_)
+                | domain::Op::OperationCancel(_)
+        ) {
+            return self.files_operation_command(op, reply);
+        }
         if matches!(&op, domain::Op::Show(_)) {
             anyhow::ensure!(
                 reply
@@ -565,6 +622,7 @@ impl App {
             domain::Op::Select(args) => args.pane,
             domain::Op::More(args) => args.pane,
             domain::Op::Refresh(args) | domain::Op::Hide(args) => args.pane,
+            _ => unreachable!(),
         });
         if let domain::Op::Status(args) = op {
             return Ok(Some(self.files_status(pane, args.offset)?));
@@ -734,7 +792,7 @@ impl App {
                 candidate.more(args.token)?;
                 self.files_commit_model(pane, candidate)?;
             }
-            domain::Op::Show(_) | domain::Op::Status(_) => unreachable!(),
+            _ => unreachable!(),
         }
         self.files.states.get_mut(&pane).unwrap().message = None;
         self.files.states.get_mut(&pane).unwrap().render()?;
@@ -831,6 +889,7 @@ impl App {
     pub(super) fn files_event(&mut self, signal: Signal) -> anyhow::Result<()> {
         match signal {
             Signal::Tick => self.files_tick(),
+            Signal::Operation(event) => self.files_operation_event(event)?,
             Signal::Worker(mut response) => {
                 self.files_reconcile();
                 let pane = PaneId(response.owner.pane);
@@ -929,8 +988,10 @@ impl App {
     }
     fn files_ui(&mut self, request: UiRequest) {
         let pane = PaneId(request.owner.pane);
+        let cancelling = matches!(&request.action, Action::CancelOperation(_));
         if self.files.states.get(&pane).is_none_or(|state| {
-            state.owner != request.owner || !state.visible || state.model.token() != request.token
+            (!cancelling && (state.owner != request.owner || state.model.token() != request.token))
+                || !state.visible
         }) {
             return;
         }
@@ -961,6 +1022,36 @@ impl App {
                     } else {
                         domain::Op::Open(args)
                     }
+                }
+                Action::CancelOperation(id) => {
+                    domain::Op::OperationCancel(domain::OperationArgs { id })
+                }
+                Action::Copy(destination) => {
+                    let row = row()?;
+                    domain::Op::Copy(domain::ActionArgs {
+                        pane: row.pane,
+                        token: row.token,
+                        index: row.index,
+                        destination,
+                    })
+                }
+                Action::Move(destination) => {
+                    let row = row()?;
+                    domain::Op::Move(domain::ActionArgs {
+                        pane: row.pane,
+                        token: row.token,
+                        index: row.index,
+                        destination,
+                    })
+                }
+                Action::Rename(name) => {
+                    let row = row()?;
+                    domain::Op::Rename(domain::RenameArgs {
+                        pane: row.pane,
+                        token: row.token,
+                        index: row.index,
+                        name,
+                    })
                 }
                 Action::Expand => domain::Op::Expand(row()?),
                 Action::Collapse => domain::Op::Collapse(row()?),
@@ -1018,6 +1109,9 @@ impl App {
         value["current_owner"] = json!(state.owner);
         value["captured_root"] = json!(state.root);
         value["panel_handle"] = json!(state.panel.as_ref().map(|panel| panel.window as usize));
+        value["destination_handle"] =
+            json!(state.panel.as_ref().map(|panel| panel.destination as usize));
+        value["operation"] = self.files_operation_current();
         value["list_handle"] = json!(state.panel.as_ref().map(|panel| panel.list as usize));
         value["native_count"] = json!(state.panel.as_ref().map_or(0, Panel::native_count));
         value["native_selected_indices"] = json!(state
@@ -1110,6 +1204,7 @@ impl App {
             })
     }
     pub(super) fn files_tick(&mut self) {
+        self.files_operation_tick();
         self.files_reconcile();
         let expired: Vec<_> = self
             .files
@@ -1146,6 +1241,7 @@ impl App {
             .states
             .values()
             .filter_map(|state| state.pending.as_ref().map(|pending| pending.deadline))
+            .chain(self.files_operation_next_tick())
             .min();
         if let Some(next) = next {
             let millis = next
@@ -1205,6 +1301,9 @@ impl App {
             .any(|panel| unsafe {
                 panel.shown
                     && (message.hwnd == panel.window || IsChild(panel.window, message.hwnd) != 0)
+                    && !(message.hwnd == panel.destination
+                        && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+                        && matches!(message.wParam, 13 | 27))
                     && IsDialogMessageW(panel.window, message) != 0
             })
     }

@@ -1,0 +1,7 @@
+
+running 3 tests
+test files_operation_fs::tests::windows_native::native_long_unicode_copy_collision_and_move_preserve_bytes ... ok
+test files_operation_fs::tests::windows_native::native_precommit_cancellation_does_not_mutate_and_sharing_conflicts_fail ... ok
+test files_operation_fs::tests::windows_native::native_prepared_handles_prevent_ancestor_and_source_replacement ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.09s

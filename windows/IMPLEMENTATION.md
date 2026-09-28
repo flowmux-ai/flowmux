@@ -631,7 +631,7 @@ See the [command and limit reference](README.md#editor-search-partial); the
 [search evidence record](evidence/2026-09-28/editor-search.md) tracks measured
 results separately from this implementation description.
 
-F01–F07, F17 and G08 remain partial, with 59 partial/55 pending features and ten
+F01–F08, F17 and G08 remain partial, with 60 partial/54 pending features and ten
 partial/three pending gates. Broader F06 acceptance, physical
 IME/GUI/clipboard/fonts/DPI/accessibility, broader automatic-refresh acceptance
 and the stated watcher limits, viewers, full ACL preservation, exhaustive
@@ -664,3 +664,22 @@ reparse leaves, source ownership and real queued IPC expiry. Physical UI/IME and
 full F07 parity remain open. See the [Files evidence](evidence/2026-09-28/files.md)
 for source boundaries, failures, measured checks and final packaging results, and
 the [command reference](README.md#files-panel-partial) for supported operations.
+
+
+F08 adds single-file Copy/Rename/Move with retained Files tokens, one host-wide
+worker and 64 terminal receipts. Preparation pins source/parent handles; the host
+rechecks owner, deadline and editor state before returning acceptance and
+submitting mutation. Retired replies cannot submit commit. `NtCreateFile` and
+`NtSetInformationFile` keep child creation and no-replacement rename bound to
+those handles. Copy preserves raw bytes through a temporary file, up to 16 MiB.
+All open source editor documents are rejected, including clean documents.
+Cancellation remains cooperative; close/editor operations reject until the worker
+returns. Shared Linux/macOS code stays unchanged.
+
+Five affected hidden native cases pass: long nested Unicode roundtrip (9.124 s),
+text/binary copy (3.737 s), invalid destinations (4.611 s), clean/dirty editor
+guards (6.050 s), and stale tokens (3.240 s). These include actual LISTBOX and Monaco
+observations. Final regression/build/package results are tracked separately in
+[file-action evidence](evidence/2026-09-28/files-actions.md). F08 stays partial:
+clipboard cut/paste, batch/directory/remote operations, overwrite and physical
+keyboard/IME/focus acceptance remain open.

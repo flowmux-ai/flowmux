@@ -1,0 +1,19 @@
+{
+  "name": "files-actions-pure",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--locked",
+    "--lib",
+    "files_",
+    "--",
+    "--test-threads=1"
+  ],
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "pid": 383981,
+  "exitCode": 0,
+  "elapsedSeconds": 65.669
+}

@@ -202,6 +202,7 @@ impl App {
         query: Query,
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
         anyhow::ensure!(
             !request_id.is_empty()
                 && request_id.len() <= 128
@@ -651,6 +652,7 @@ impl App {
         index: usize,
         completion: Completion,
     ) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
         let started = match &completion {
             Completion::Ipc(reply) => reply.received_at(),
             _ => Instant::now(),

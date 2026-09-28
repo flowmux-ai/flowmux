@@ -1,0 +1,384 @@
+{
+    "started":  "2026-09-28T15:46:54.1442385+09:00",
+    "mode":  "background",
+    "case":  "copy-bytes",
+    "checks":  [
+                   {
+                       "name":  "long_nested_unicode_copy_preserves_exact_utf8_bom_crlf_and_binary_nul_bytes_without_editor",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  35852,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T06:46:54.3418942Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e\\files 한글 한 😀",
+                                                      "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                                      "pid":  35852,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-35852-aaf96070-f61b-4d66-bf1f-035e8ba425d3",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "2936179c-3492-43a8-a3bd-7eea404aa657",
+                                                      "workspace":  "c445ac4f-3810-4475-af6d-19a6193bac08"
+                                                  },
+                             "discoveryElapsedMs":  141,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  956,
+                             "treeRequests":  2,
+                             "elapsedMs":  1145,
+                             "finished":  "2026-09-28T06:46:55.4872934Z"
+                         },
+                         {
+                             "elapsedMs":  47,
+                             "polls":  1,
+                             "accepted":  {
+                                              "accepted":  true,
+                                              "destination":  "복사 대상 é/텍스트 😀.txt",
+                                              "id":  "07ed702a-0178-49a2-bfb2-d8fa2ff27a43",
+                                              "kind":  "copy",
+                                              "source":  "중첩 한글/텍스트 한.txt",
+                                              "status":  "accepted"
+                                          },
+                             "case":  "copy-bytes",
+                             "kind":  "file-operation",
+                             "operation":  {
+                                               "accepted":  true,
+                                               "cancel_requested":  false,
+                                               "destination":  "복사 대상 é/텍스트 😀.txt",
+                                               "error":  null,
+                                               "id":  "07ed702a-0178-49a2-bfb2-d8fa2ff27a43",
+                                               "kind":  "copy",
+                                               "outcome":  {
+                                                               "bytes":  40,
+                                                               "destination":  "복사 대상 é/텍스트 😀.txt",
+                                                               "destination_identity":  {
+                                                                                            "index":  1125899907754442,
+                                                                                            "volume":  1378498994
+                                                                                        },
+                                                               "kind":  "copy",
+                                                               "source":  "중첩 한글/텍스트 한.txt",
+                                                               "source_identity":  {
+                                                                                       "index":  1125899907754439,
+                                                                                       "volume":  1378498994
+                                                                                   },
+                                                               "warnings":  [
+
+                                                                            ]
+                                                           },
+                                               "owner":  {
+                                                             "generation":  2,
+                                                             "instance":  "43f4dbcf-bf4e-4307-bf79-0789f1fd8d80",
+                                                             "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                                             "workspace":  "c445ac4f-3810-4475-af6d-19a6193bac08"
+                                                         },
+                                               "source":  "중첩 한글/텍스트 한.txt",
+                                               "status":  "succeeded"
+                                           }
+                         },
+                         {
+                             "elapsedMs":  49,
+                             "polls":  1,
+                             "accepted":  {
+                                              "accepted":  true,
+                                              "destination":  "복사 대상 é/바이너리 한.bin",
+                                              "id":  "7a99b648-bbf5-4b30-b61d-1efc3f632044",
+                                              "kind":  "copy",
+                                              "source":  "중첩 한글/바이너리 😀.bin",
+                                              "status":  "accepted"
+                                          },
+                             "case":  "copy-bytes",
+                             "kind":  "file-operation",
+                             "operation":  {
+                                               "accepted":  true,
+                                               "cancel_requested":  false,
+                                               "destination":  "복사 대상 é/바이너리 한.bin",
+                                               "error":  null,
+                                               "id":  "7a99b648-bbf5-4b30-b61d-1efc3f632044",
+                                               "kind":  "copy",
+                                               "outcome":  {
+                                                               "bytes":  17,
+                                                               "destination":  "복사 대상 é/바이너리 한.bin",
+                                                               "destination_identity":  {
+                                                                                            "index":  1125899907754443,
+                                                                                            "volume":  1378498994
+                                                                                        },
+                                                               "kind":  "copy",
+                                                               "source":  "중첩 한글/바이너리 😀.bin",
+                                                               "source_identity":  {
+                                                                                       "index":  1125899907754440,
+                                                                                       "volume":  1378498994
+                                                                                   },
+                                                               "warnings":  [
+
+                                                                            ]
+                                                           },
+                                               "owner":  {
+                                                             "generation":  4,
+                                                             "instance":  "43f4dbcf-bf4e-4307-bf79-0789f1fd8d80",
+                                                             "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                                             "workspace":  "c445ac4f-3810-4475-af6d-19a6193bac08"
+                                                         },
+                                               "source":  "중첩 한글/바이너리 😀.bin",
+                                               "status":  "succeeded"
+                                           }
+                         },
+                         {
+                             "path":  "중첩 한글/텍스트 한.txt",
+                             "case":  "copy-bytes",
+                             "sha256":  "ac8fe736a734456659728db3da393ba6548553c78770abd6ae4ea0937de9eeba",
+                             "bytes":  40,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "path":  "복사 대상 é/텍스트 😀.txt",
+                             "case":  "copy-bytes",
+                             "sha256":  "ac8fe736a734456659728db3da393ba6548553c78770abd6ae4ea0937de9eeba",
+                             "bytes":  40,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "path":  "중첩 한글/바이너리 😀.bin",
+                             "case":  "copy-bytes",
+                             "sha256":  "15412ed874718fb5f61aa62755740124473dc907a25cc254ee305744bd1ab148",
+                             "bytes":  17,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "path":  "복사 대상 é/바이너리 한.bin",
+                             "case":  "copy-bytes",
+                             "sha256":  "15412ed874718fb5f61aa62755740124473dc907a25cc254ee305744bd1ab148",
+                             "bytes":  17,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  5109,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e\\files 한글 한 😀\\copy-bytes\\long-root\\긴경로_한_😀_00_abcdefghij\\긴경로_한_😀_01_abcdefghij\\긴경로_한_😀_02_abcdefghij\\긴경로_한_😀_03_abcdefghij",
+                                            "current_owner":  {
+                                                                  "generation":  7,
+                                                                  "instance":  "43f4dbcf-bf4e-4307-bf79-0789f1fd8d80",
+                                                                  "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                                                  "workspace":  "c445ac4f-3810-4475-af6d-19a6193bac08"
+                                                              },
+                                            "destination_handle":  853426,
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  6,
+                                            "last_error":  null,
+                                            "list_handle":  331426,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  6,
+                                            "native_selected_indices":  [
+
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "operation":  null,
+                                            "owner":  {
+                                                          "generation":  7,
+                                                          "instance":  "43f4dbcf-bf4e-4307-bf79-0789f1fd8d80",
+                                                          "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                                          "workspace":  "c445ac4f-3810-4475-af6d-19a6193bac08"
+                                                      },
+                                            "pane":  "cc630fdf-f429-481b-bec5-5e47a3b7d72d",
+                                            "panel_handle":  35785854,
+                                            "rendered_rows":  6,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e\\files 한글 한 😀\\copy-bytes\\long-root\\긴경로_한_😀_00_abcdefghij\\긴경로_한_😀_01_abcdefghij\\긴경로_한_😀_02_abcdefghij\\긴경로_한_😀_03_abcdefghij",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  true,
+                                                             "expanded":  true,
+                                                             "index":  0,
+                                                             "name":  "복사 대상 é",
+                                                             "path":  "복사 대상 é",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  1,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  1,
+                                                             "name":  "바이너리 한.bin",
+                                                             "path":  "복사 대상 é/바이너리 한.bin",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  1,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  2,
+                                                             "name":  "텍스트 😀.txt",
+                                                             "path":  "복사 대상 é/텍스트 😀.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  true,
+                                                             "expanded":  true,
+                                                             "index":  3,
+                                                             "name":  "중첩 한글",
+                                                             "path":  "중첩 한글",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  1,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  4,
+                                                             "name":  "바이너리 😀.bin",
+                                                             "path":  "중첩 한글/바이너리 😀.bin",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  1,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  5,
+                                                             "name":  "텍스트 한.txt",
+                                                             "path":  "중첩 한글/텍스트 한.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         }
+                                                     ],
+                                            "selected_count":  0,
+                                            "selected_paths":  [
+
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  7,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  6,
+                                            "source":  "2936179c-3492-43a8-a3bd-7eea404aa657",
+                                            "stale":  false,
+                                            "token":  "4a299c41-a47f-4923-a6b6-1616b96afe12",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "copy-bytes",
+                             "native":  {
+                                            "Host":  1050048,
+                                            "Panel":  35785854,
+                                            "List":  331426,
+                                            "ProcessId":  35852,
+                                            "Count":  6,
+                                            "Caret":  0,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "[-] 복사 대상 é",
+                                                         "      바이너리 한.bin",
+                                                         "      텍스트 😀.txt",
+                                                         "[-] 중첩 한글",
+                                                         "      바이너리 😀.bin",
+                                                         "      텍스트 한.txt"
+                                                     ],
+                                            "Selected":  [
+
+                                                         ],
+                                            "ElapsedMs":  3
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  35852,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "No physical keyboard/mouse/IME, glyph rendering, clipboard, native dialogs, DPI or accessibility checks.",
+                     "Commands exercise retained native model state; LISTBOX observations are read-only bounded system messages, not simulated mouse/keyboard input.",
+                     "No operation is timed by a fixed dwell: status is polled immediately with a ten-second condition bound; ordinary CLI calls cap at five seconds.",
+                     "Cancellation/blocked I/O, admission/close races, every resource cap, hostile reparse swaps, ACL denial and crash recovery are not forced by these cases.",
+                     "File actions use owned fixture files only. Exact byte checks cover UTF8 BOM/CRLF and binary NUL; operation status does not substitute for disk or native control observations."
+                 ],
+    "status":  "passed_background_files_actions_subset",
+    "hosts":  [
+                  35852
+              ],
+    "shells":  [
+                   31988
+               ],
+    "clientPids":  [
+                       37496,
+                       32488,
+                       33104,
+                       15324,
+                       35420,
+                       37100,
+                       28148,
+                       25844,
+                       28852,
+                       26460,
+                       33244,
+                       38656,
+                       39732,
+                       34596,
+                       20572,
+                       34608,
+                       38528,
+                       37252,
+                       27288,
+                       30060,
+                       9484,
+                       39808,
+                       26548,
+                       23464,
+                       35012,
+                       13684,
+                       19904,
+                       39764
+                   ],
+    "elapsedMs":  2841,
+    "finished":  "2026-09-28T15:46:56.9839588+09:00"
+}

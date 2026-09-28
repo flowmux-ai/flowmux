@@ -1,0 +1,23 @@
+{
+  "name": "files-actions-clippy-lint-fix",
+  "command": [
+    "cargo",
+    "xwin",
+    "clippy",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 398963,
+  "exitCode": 0,
+  "elapsedSeconds": 28.398
+}

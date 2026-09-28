@@ -1,0 +1,6 @@
+[files-actions-editor-guard] started pid=39040, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00
+[files-actions-editor-guard] running 5/120s, owned processes=18
+[check] passed copy_rename_and_move_reject_clean_or_dirty_open_editor_source_preserving_disk_and_actual_monaco
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-589a637a-e85d-4c99-8d0b-b23ea3395a0b
+{"status":"passed_background_files_actions_subset","case":"editor-guard","checks":1,"elapsedMs":5299}
+[files-actions-editor-guard] passed in 6.05s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00\result.json

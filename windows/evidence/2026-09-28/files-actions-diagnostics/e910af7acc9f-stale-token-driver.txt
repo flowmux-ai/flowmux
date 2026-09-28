@@ -1,0 +1,5 @@
+[files-actions-stale-token] started pid=37908, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831
+[check] passed stale_tokens_and_out_of_range_indices_reject_all_file_actions_without_mutation
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-c04f24b5-89bd-4918-a250-ec32714ea7e2
+{"status":"passed_background_files_actions_subset","case":"stale-token","checks":1,"elapsedMs":2547}
+[files-actions-stale-token] passed in 3.24s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831\result.json

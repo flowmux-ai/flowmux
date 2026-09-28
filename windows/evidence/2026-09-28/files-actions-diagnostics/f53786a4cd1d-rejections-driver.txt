@@ -1,0 +1,5 @@
+[files-actions-rejections] started pid=39908, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede
+[check] passed collisions_missing_parent_invalid_names_and_reparse_paths_reject_without_source_destination_or_outside_changes
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-actions-f54fce70-1738-4623-8c81-c5db907d479d
+{"status":"passed_background_files_actions_subset","case":"rejections","checks":1,"elapsedMs":3890}
+[files-actions-rejections] passed in 4.611s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede\result.json

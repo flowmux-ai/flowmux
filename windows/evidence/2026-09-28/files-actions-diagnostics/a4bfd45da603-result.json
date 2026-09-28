@@ -1,0 +1,23 @@
+{
+  "name": "files-actions-clippy",
+  "command": [
+    "cargo",
+    "xwin",
+    "clippy",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "deadlineSeconds": 300,
+  "status": "failed",
+  "pid": 397161,
+  "exitCode": 101,
+  "elapsedSeconds": 24.359
+}

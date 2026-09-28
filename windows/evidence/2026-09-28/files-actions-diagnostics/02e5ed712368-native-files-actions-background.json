@@ -1,0 +1,578 @@
+{
+    "started":  "2026-09-28T15:46:58.5660259+09:00",
+    "mode":  "background",
+    "case":  "rejections",
+    "checks":  [
+                   {
+                       "name":  "collisions_missing_parent_invalid_names_and_reparse_paths_reject_without_source_destination_or_outside_changes",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  31960,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T06:46:58.6873218Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d\\files 한글 한 😀",
+                                                      "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                      "pid":  31960,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-31960-c32d0d4f-59c5-4677-b705-2f960b480f89",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "4a57f75c-3be5-48eb-baef-8c96208e1642",
+                                                      "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                  },
+                             "discoveryElapsedMs":  94,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  774,
+                             "treeRequests":  2,
+                             "elapsedMs":  957,
+                             "finished":  "2026-09-28T06:46:59.6452398Z"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  2483,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d\\files 한글 한 😀\\rejections",
+                                            "current_owner":  {
+                                                                  "generation":  1,
+                                                                  "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                                  "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                                  "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                              },
+                                            "destination_handle":  2559524,
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  3,
+                                            "last_error":  null,
+                                            "list_handle":  1183208,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  3,
+                                            "native_selected_indices":  [
+
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "operation":  null,
+                                            "owner":  {
+                                                          "generation":  1,
+                                                          "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                          "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                          "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                      },
+                                            "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                            "panel_handle":  35851390,
+                                            "rendered_rows":  3,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d\\files 한글 한 😀\\rejections",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  true,
+                                                             "expanded":  false,
+                                                             "index":  0,
+                                                             "name":  "junction 밖",
+                                                             "path":  "junction 밖",
+                                                             "reparse":  true,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  1,
+                                                             "name":  "원본 한글.txt",
+                                                             "path":  "원본 한글.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  2,
+                                                             "name":  "존재 한.txt",
+                                                             "path":  "존재 한.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         }
+                                                     ],
+                                            "selected_count":  0,
+                                            "selected_paths":  [
+
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  1,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  3,
+                                            "source":  "4a57f75c-3be5-48eb-baef-8c96208e1642",
+                                            "stale":  false,
+                                            "token":  "4a179640-12db-4287-9fdf-daa8a525a335",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "rejections",
+                             "native":  {
+                                            "Host":  6161850,
+                                            "Panel":  35851390,
+                                            "List":  1183208,
+                                            "ProcessId":  31960,
+                                            "Count":  3,
+                                            "Caret":  0,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "[!] junction 밖",
+                                                         "    원본 한글.txt",
+                                                         "    존재 한.txt"
+                                                     ],
+                                            "Selected":  [
+
+                                                         ],
+                                            "ElapsedMs":  4
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "elapsedMs":  55,
+                             "polls":  1,
+                             "accepted":  {
+                                              "accepted":  true,
+                                              "destination":  "존재 한.txt",
+                                              "id":  "9a97e7a4-7675-4648-89dd-8d234ce9792b",
+                                              "kind":  "copy",
+                                              "source":  "원본 한글.txt",
+                                              "status":  "accepted"
+                                          },
+                             "case":  "rejections",
+                             "kind":  "file-operation",
+                             "operation":  {
+                                               "accepted":  true,
+                                               "cancel_requested":  false,
+                                               "destination":  "존재 한.txt",
+                                               "error":  "native no-replacement rename failed",
+                                               "id":  "9a97e7a4-7675-4648-89dd-8d234ce9792b",
+                                               "kind":  "copy",
+                                               "outcome":  {
+                                                               "error":  "native no-replacement rename failed"
+                                                           },
+                                               "owner":  {
+                                                             "generation":  2,
+                                                             "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                             "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                             "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                         },
+                                               "source":  "원본 한글.txt",
+                                               "status":  "failed"
+                                           }
+                         },
+                         {
+                             "elapsedMs":  50,
+                             "polls":  1,
+                             "accepted":  {
+                                              "accepted":  true,
+                                              "destination":  "존재 한.txt",
+                                              "id":  "77b160de-c25d-4c0f-b219-18d5eb885db8",
+                                              "kind":  "move",
+                                              "source":  "원본 한글.txt",
+                                              "status":  "accepted"
+                                          },
+                             "case":  "rejections",
+                             "kind":  "file-operation",
+                             "operation":  {
+                                               "accepted":  true,
+                                               "cancel_requested":  false,
+                                               "destination":  "존재 한.txt",
+                                               "error":  "native no-replacement rename failed",
+                                               "id":  "77b160de-c25d-4c0f-b219-18d5eb885db8",
+                                               "kind":  "move",
+                                               "outcome":  {
+                                                               "error":  "native no-replacement rename failed"
+                                                           },
+                                               "owner":  {
+                                                             "generation":  4,
+                                                             "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                             "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                             "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                         },
+                                               "source":  "원본 한글.txt",
+                                               "status":  "failed"
+                                           }
+                         },
+                         {
+                             "elapsedMs":  39,
+                             "polls":  1,
+                             "accepted":  {
+                                              "accepted":  true,
+                                              "destination":  "존재 한.txt",
+                                              "id":  "b1cf0c2b-0d57-4bb9-a8a0-4de1b6331215",
+                                              "kind":  "rename",
+                                              "source":  "원본 한글.txt",
+                                              "status":  "accepted"
+                                          },
+                             "case":  "rejections",
+                             "kind":  "file-operation",
+                             "operation":  {
+                                               "accepted":  true,
+                                               "cancel_requested":  false,
+                                               "destination":  "존재 한.txt",
+                                               "error":  "native no-replacement rename failed",
+                                               "id":  "b1cf0c2b-0d57-4bb9-a8a0-4de1b6331215",
+                                               "kind":  "rename",
+                                               "outcome":  {
+                                                               "error":  "native no-replacement rename failed"
+                                                           },
+                                               "owner":  {
+                                                             "generation":  6,
+                                                             "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                             "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                             "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                         },
+                                               "source":  "원본 한글.txt",
+                                               "status":  "failed"
+                                           }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "없는 부모/target.txt",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "handle-relative file open/create failed"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "../escape.txt",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "trailing space/dot is unsupported"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "/absolute.txt",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "invalid file name length"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "NUL",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "Windows device names are unsupported"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "stream.txt:ads",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "invalid file name character"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "trailing.",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "trailing space/dot is unsupported"
+                                          }
+                         },
+                         {
+                             "action":  "copy",
+                             "source":  "원본 한글.txt",
+                             "destination":  "junction 밖/new.txt",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "reparse entries are unsupported"
+                                          }
+                         },
+                         {
+                             "action":  "rename",
+                             "source":  "원본 한글.txt",
+                             "destination":  "child/leaf.txt",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "Rename needs one new file name, not a path"
+                                          }
+                         },
+                         {
+                             "action":  "move",
+                             "source":  "junction 밖",
+                             "destination":  "renamed-junction",
+                             "case":  "rejections",
+                             "kind":  "rejected-file-operation",
+                             "response":  {
+                                              "error":  "Files row is not a supported regular file"
+                                          }
+                         },
+                         {
+                             "path":  "원본 한글.txt",
+                             "case":  "rejections",
+                             "sha256":  "25eb9f57889034efa576373bfcff0d564723e42d545d88481cf9ab74703c208e",
+                             "bytes":  14,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "path":  "존재 한.txt",
+                             "case":  "rejections",
+                             "sha256":  "5dac14e00dd88ae2ec1d0eb798fca25917d3a666d7bf0bcb3f0023f8fa099398",
+                             "bytes":  19,
+                             "kind":  "exact-file-bytes"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  2483,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d\\files 한글 한 😀\\rejections",
+                                            "current_owner":  {
+                                                                  "generation":  24,
+                                                                  "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                                  "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                                  "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                              },
+                                            "destination_handle":  2559524,
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  3,
+                                            "last_error":  null,
+                                            "list_handle":  1183208,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  3,
+                                            "native_selected_indices":  [
+
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "operation":  null,
+                                            "owner":  {
+                                                          "generation":  24,
+                                                          "instance":  "254385a5-2b97-4623-8d45-4adc47ff7a9f",
+                                                          "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                                          "workspace":  "da2188db-fb35-48ef-9888-a90daeb3a676"
+                                                      },
+                                            "pane":  "26603414-96be-45ea-8f31-8230f2035623",
+                                            "panel_handle":  35851390,
+                                            "rendered_rows":  3,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d\\files 한글 한 😀\\rejections",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  true,
+                                                             "expanded":  false,
+                                                             "index":  0,
+                                                             "name":  "junction 밖",
+                                                             "path":  "junction 밖",
+                                                             "reparse":  true,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  1,
+                                                             "name":  "원본 한글.txt",
+                                                             "path":  "원본 한글.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  2,
+                                                             "name":  "존재 한.txt",
+                                                             "path":  "존재 한.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         }
+                                                     ],
+                                            "selected_count":  0,
+                                            "selected_paths":  [
+
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  24,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  3,
+                                            "source":  "4a57f75c-3be5-48eb-baef-8c96208e1642",
+                                            "stale":  false,
+                                            "token":  "ecc3e88b-7040-4f9c-a45d-a502582ee458",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "rejections",
+                             "native":  {
+                                            "Host":  6161850,
+                                            "Panel":  35851390,
+                                            "List":  1183208,
+                                            "ProcessId":  31960,
+                                            "Count":  3,
+                                            "Caret":  0,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "[!] junction 밖",
+                                                         "    원본 한글.txt",
+                                                         "    존재 한.txt"
+                                                     ],
+                                            "Selected":  [
+
+                                                         ],
+                                            "ElapsedMs":  0
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  31960,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "No physical keyboard/mouse/IME, glyph rendering, clipboard, native dialogs, DPI or accessibility checks.",
+                     "Commands exercise retained native model state; LISTBOX observations are read-only bounded system messages, not simulated mouse/keyboard input.",
+                     "No operation is timed by a fixed dwell: status is polled immediately with a ten-second condition bound; ordinary CLI calls cap at five seconds.",
+                     "Cancellation/blocked I/O, admission/close races, every resource cap, hostile reparse swaps, ACL denial and crash recovery are not forced by these cases.",
+                     "File actions use owned fixture files only. Exact byte checks cover UTF8 BOM/CRLF and binary NUL; operation status does not substitute for disk or native control observations."
+                 ],
+    "status":  "passed_background_files_actions_subset",
+    "hosts":  [
+                  31960
+              ],
+    "shells":  [
+                   37408
+               ],
+    "clientPids":  [
+                       25072,
+                       11392,
+                       27632,
+                       2924,
+                       18332,
+                       37436,
+                       39388,
+                       37528,
+                       15656,
+                       26412,
+                       26344,
+                       39176,
+                       17976,
+                       39188,
+                       29076,
+                       4744,
+                       29400,
+                       34836,
+                       31912,
+                       29552,
+                       32420,
+                       20232,
+                       37932,
+                       2804,
+                       34300,
+                       36748,
+                       37244,
+                       35708,
+                       17892,
+                       33652,
+                       28432,
+                       36688,
+                       32740,
+                       35956,
+                       39632,
+                       7984,
+                       11072,
+                       5328,
+                       39136,
+                       4468,
+                       36456,
+                       33644,
+                       31892,
+                       30940,
+                       30672,
+                       27072,
+                       39380,
+                       29492,
+                       2288,
+                       29928,
+                       36088,
+                       39416,
+                       11128,
+                       24044,
+                       38044,
+                       27196,
+                       2092
+                   ],
+    "elapsedMs":  3890,
+    "finished":  "2026-09-28T15:47:02.4564661+09:00"
+}

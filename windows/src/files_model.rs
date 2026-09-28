@@ -34,6 +34,116 @@ pub enum Op {
     Refresh(PaneArgs),
     Open(RowArgs),
     Hide(PaneArgs),
+    /// Copy one closed regular file without replacing an existing destination.
+    Copy(ActionArgs),
+    /// Rename one closed regular file within its current directory.
+    Rename(RenameArgs),
+    /// Move one closed regular file within the captured root and volume.
+    Move(ActionArgs),
+    OperationStatus(OperationArgs),
+    OperationCancel(OperationArgs),
+}
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionArgs {
+    #[arg(long, value_parser = crate::command::parse_id)]
+    pub pane: Uuid,
+    #[arg(long)]
+    pub token: Uuid,
+    #[arg(long)]
+    pub index: usize,
+    #[arg(long)]
+    pub destination: String,
+}
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameArgs {
+    #[arg(long, value_parser = crate::command::parse_id)]
+    pub pane: Uuid,
+    #[arg(long)]
+    pub token: Uuid,
+    #[arg(long)]
+    pub index: usize,
+    #[arg(long)]
+    pub name: String,
+}
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperationArgs {
+    #[arg(long)]
+    pub id: Uuid,
+}
+
+#[cfg(test)]
+mod action_grammar_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn action_arguments_preserve_unicode_and_require_retained_identity() {
+        let pane = Uuid::new_v4().to_string();
+        let token = Uuid::new_v4().to_string();
+        for name in ["copy", "move"] {
+            let parsed = crate::command::Cli::try_parse_from([
+                "flowmuxctl",
+                "files",
+                name,
+                "--pane",
+                &pane,
+                "--token",
+                &token,
+                "--index",
+                "3",
+                "--destination",
+                "한글/한 é😀.txt",
+            ])
+            .unwrap();
+            let crate::command::Command::Files { op } = parsed.command else {
+                panic!("wrong command");
+            };
+            let encoded = serde_json::to_value(&op).unwrap();
+            assert_eq!(encoded["destination"], "한글/한 é😀.txt");
+            assert_eq!(encoded["index"], 3);
+            assert!(serde_json::from_value::<Op>(encoded).is_ok());
+            assert!(crate::command::Cli::try_parse_from([
+                "flowmuxctl",
+                "files",
+                name,
+                "--pane",
+                &pane,
+                "--index",
+                "3",
+                "--destination",
+                "한글/한 é😀.txt",
+            ])
+            .is_err());
+        }
+        let parsed = crate::command::Cli::try_parse_from([
+            "flowmuxctl",
+            "files",
+            "rename",
+            "--pane",
+            &pane,
+            "--token",
+            &token,
+            "--index",
+            "0",
+            "--name",
+            "새 이름😀.txt",
+        ])
+        .unwrap();
+        let crate::command::Command::Files {
+            op: Op::Rename(args),
+        } = parsed.command
+        else {
+            panic!("wrong command");
+        };
+        assert_eq!(args.name, "새 이름😀.txt");
+        assert!(serde_json::from_value::<Op>(
+            serde_json::json!({"op":"operation_cancel", "id":token, "force":true})
+        )
+        .is_err());
+    }
 }
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -421,6 +531,19 @@ impl Model {
         uninspected.sort();
         paths.extend(uninspected);
         paths
+    }
+    /// Reconcile only a confirmed single-file rename/move before refreshing.
+    /// This does not create a new selection for an unselected source.
+    pub fn remap_selected_path(&mut self, source: &str, destination: &str) {
+        if self.selected.remove(source) {
+            self.selected.insert(destination.to_owned());
+        }
+        if self.caret.as_deref() == Some(source) {
+            self.caret = Some(destination.to_owned());
+        }
+        if self.anchor.as_deref() == Some(source) {
+            self.anchor = Some(destination.to_owned());
+        }
     }
     fn renew(&mut self) -> Uuid {
         let token = Uuid::new_v4();
@@ -950,6 +1073,34 @@ mod tests {
                 .collect(),
         );
         assert!(invalid.validate().is_err());
+    }
+    #[test]
+    fn confirmed_move_remaps_selection_without_selecting_an_unselected_file() {
+        let mut model = Model::default();
+        let mut initial = snapshot(vec![
+            row("원본.txt", false, false),
+            row("다른.txt", false, false),
+        ]);
+        let token = model.apply(initial.clone()).unwrap();
+        model.select(token, 0, SelectionMode::Replace).unwrap();
+        model.remap_selected_path("원본.txt", "한😀.txt");
+        model.remap_selected_path("다른.txt", "unselected.txt");
+        assert_eq!(model.selected_paths(), ["한😀.txt"]);
+        assert_eq!(model.caret.as_deref(), Some("한😀.txt"));
+        assert_eq!(model.anchor.as_deref(), Some("한😀.txt"));
+        initial.rows = vec![
+            row("한😀.txt", false, false),
+            row("unselected.txt", false, false),
+        ];
+        initial.path_bytes = initial.root.to_str().unwrap().len()
+            + initial
+                .rows
+                .iter()
+                .map(|row| row.path.len() + row.name.len())
+                .sum::<usize>();
+        initial.owner.generation += 1;
+        model.apply(initial).unwrap();
+        assert_eq!(model.selected_paths(), ["한😀.txt"]);
     }
     #[test]
     fn path_validation_and_byte_pages_preserve_exact_unicode() {

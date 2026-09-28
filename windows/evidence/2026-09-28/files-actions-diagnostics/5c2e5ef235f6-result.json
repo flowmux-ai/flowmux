@@ -1,0 +1,21 @@
+{
+  "name": "files-actions-unit-build",
+  "command": [
+    "cargo",
+    "xwin",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--lib",
+    "--no-run"
+  ],
+  "deadlineSeconds": 180,
+  "status": "passed",
+  "pid": 409566,
+  "exitCode": 0,
+  "elapsedSeconds": 133.001
+}

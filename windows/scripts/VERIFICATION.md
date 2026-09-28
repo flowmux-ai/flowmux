@@ -16,6 +16,13 @@ it is never a passing result and is never automatically retried.
    to catch target-specific imports and lint failures early. Reuse that result
    at the commit boundary when its source inputs stay unchanged. Run cheap native
    handle/path tests as soon as the test binary exists, before broader UI suites.
+   Use debug-profile native unit builds for these iterations (`cargo xwin test
+   --manifest-path windows/Cargo.toml --target x86_64-pc-windows-msvc --locked
+   --lib --no-run`, without `--release`). Before executing the test binary, run
+   `python3 windows/scripts/fetch-conpty.py --output windows/target/x86_64-pc-windows-msvc/debug/deps`.
+   Tests load the bundled ConPTY runtime beside their executable; missing fixture
+   dependencies must be fixed before interpreting test failures. For another
+   profile, use that test executable's directory as `--output`.
 2. Stop on the first failure. Inspect the failed step's stdout/stderr, result
    JSON and native evidence before changing anything. Retry only that failed
    step after a relevant fix. Keep the earlier evidence. Do not lengthen a
@@ -25,7 +32,8 @@ it is never a passing result and is never automatically retried.
    test. Use `-Extended` for transport/deadline changes and final release
    validation; this deliberate long-duration assertion must not be shortened.
 4. At a commit/release boundary, run required Clippy, native tests, release
-   build and packaging once for the final source. Reuse successful results
+   build and packaging once for the final source. Keep release compilation out
+   of the debug fix/test loop. Reuse successful results
    while their inputs and artifacts are unchanged. Do not rebuild a debug
    executable while a live test is using it. Never run desktop suites in
    parallel: they share machine resources even when their hosts are isolated.

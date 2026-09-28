@@ -1,0 +1,211 @@
+{
+  "schema": 1,
+  "started": "2026-09-28T06:45:32.953074+00:00",
+  "status": "passed",
+  "selectedCases": [
+    "copy-bytes",
+    "rejections",
+    "editor-guard",
+    "stale-token"
+  ],
+  "serial": true,
+  "failFast": true,
+  "retries": 0,
+  "jobDeadlineSeconds": 120,
+  "results": [
+    {
+      "case": "copy-bytes",
+      "kind": "refresh",
+      "label": "files-actions-copy-bytes",
+      "started": "2026-09-28T06:45:32.965854+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-cases/copy-bytes.ps1",
+        "files-actions-copy-bytes",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-runs/147acfd2-621b-41cd-a8fd-51aabd2aa59f/copy-bytes-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e/native-files-actions-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-copy-bytes-bd28bd4f-ad59-4671-a514-262694f13ecd/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-actions-copy-bytes-bd28bd4f-ad59-4671-a514-262694f13ecd\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-42dd10cc-d2ef-4f54-b03b-7ea3c162847e",
+      "runner": {
+        "name": "files-actions-copy-bytes",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\copy-bytes.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T06:46:53.3181505Z",
+        "pid": 28928,
+        "exitCode": 0,
+        "activeBeforeCleanup": 2,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 3.737,
+        "finished": "2026-09-28T06:46:57.0604849Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-copy-bytes-bd28bd4f-ad59-4671-a514-262694f13ecd/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-copy-bytes-bd28bd4f-ad59-4671-a514-262694f13ecd/stderr.txt",
+      "evidenceStatus": "passed_background_files_actions_subset",
+      "evidenceCase": "copy-bytes",
+      "checks": [
+        {
+          "name": "long_nested_unicode_copy_preserves_exact_utf8_bom_crlf_and_binary_nul_bytes_without_editor",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 4.764,
+      "finished": "2026-09-28T06:45:37.731943+00:00"
+    },
+    {
+      "case": "rejections",
+      "kind": "refresh",
+      "label": "files-actions-rejections",
+      "started": "2026-09-28T06:45:37.754767+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-cases/rejections.ps1",
+        "files-actions-rejections",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-runs/147acfd2-621b-41cd-a8fd-51aabd2aa59f/rejections-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-f54fce70-1738-4623-8c81-c5db907d479d",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-f54fce70-1738-4623-8c81-c5db907d479d/native-files-actions-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-f54fce70-1738-4623-8c81-c5db907d479d",
+      "runner": {
+        "name": "files-actions-rejections",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\rejections.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T06:46:57.9367170Z",
+        "pid": 39908,
+        "exitCode": 0,
+        "activeBeforeCleanup": 0,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 4.611,
+        "finished": "2026-09-28T06:47:02.5503203Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-rejections-8f752c6e-eeb1-444e-a2bb-6ea2dee75ede/stderr.txt",
+      "evidenceStatus": "passed_background_files_actions_subset",
+      "evidenceCase": "rejections",
+      "checks": [
+        {
+          "name": "collisions_missing_parent_invalid_names_and_reparse_paths_reject_without_source_destination_or_outside_changes",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 5.445,
+      "finished": "2026-09-28T06:45:43.199843+00:00"
+    },
+    {
+      "case": "editor-guard",
+      "kind": "refresh",
+      "label": "files-actions-editor-guard",
+      "started": "2026-09-28T06:45:43.217040+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-cases/editor-guard.ps1",
+        "files-actions-editor-guard",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-runs/147acfd2-621b-41cd-a8fd-51aabd2aa59f/editor-guard-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-589a637a-e85d-4c99-8d0b-b23ea3395a0b",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-589a637a-e85d-4c99-8d0b-b23ea3395a0b/native-files-actions-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-589a637a-e85d-4c99-8d0b-b23ea3395a0b",
+      "runner": {
+        "name": "files-actions-editor-guard",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\editor-guard.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T06:47:03.3782649Z",
+        "pid": 39040,
+        "exitCode": 0,
+        "activeBeforeCleanup": 3,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 6.05,
+        "finished": "2026-09-28T06:47:09.4330573Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-editor-guard-0cb4fffa-f16d-4484-a49f-3a64dcea7b00/stderr.txt",
+      "evidenceStatus": "passed_background_files_actions_subset",
+      "evidenceCase": "editor-guard",
+      "checks": [
+        {
+          "name": "copy_rename_and_move_reject_clean_or_dirty_open_editor_source_preserving_disk_and_actual_monaco",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 6.856,
+      "finished": "2026-09-28T06:45:50.091116+00:00"
+    },
+    {
+      "case": "stale-token",
+      "kind": "refresh",
+      "label": "files-actions-stale-token",
+      "started": "2026-09-28T06:45:50.108517+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-cases/stale-token.ps1",
+        "files-actions-stale-token",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-actions-runs/147acfd2-621b-41cd-a8fd-51aabd2aa59f/stale-token-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-c04f24b5-89bd-4918-a250-ec32714ea7e2",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-actions-c04f24b5-89bd-4918-a250-ec32714ea7e2/native-files-actions-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-actions-c04f24b5-89bd-4918-a250-ec32714ea7e2",
+      "runner": {
+        "name": "files-actions-stale-token",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\stale-token.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T06:47:10.2080254Z",
+        "pid": 37908,
+        "exitCode": 0,
+        "activeBeforeCleanup": 8,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 3.24,
+        "finished": "2026-09-28T06:47:13.4525801Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-actions-stale-token-c65e450f-fd0a-4f0a-907f-dca520a2b831/stderr.txt",
+      "evidenceStatus": "passed_background_files_actions_subset",
+      "evidenceCase": "stale-token",
+      "checks": [
+        {
+          "name": "stale_tokens_and_out_of_range_indices_reject_all_file_actions_without_mutation",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 4.007,
+      "finished": "2026-09-28T06:45:54.115549+00:00"
+    }
+  ],
+  "notRun": [],
+  "finished": "2026-09-28T06:45:54.132424+00:00"
+}

@@ -1,0 +1,42 @@
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error[E0425]: cannot find value `EM_SETLIMITTEXT` in this scope
+   --> src/native/files.rs:223:45
+    |
+223 |             SendMessageW(panel.destination, EM_SETLIMITTEXT, 16384, 0);
+    |                                             ^^^^^^^^^^^^^^^
+    |
+   ::: /home/junsu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-sys-0.61.2/src/Windows/Win32/UI/WindowsAndMessaging/mod.rs:659:1
+    |
+659 | pub const CB_LIMITTEXT: u32 = 321u32;
+    | --------------------------- similarly named constant `CB_LIMITTEXT` defined here
+    |
+help: a constant with a similar name exists
+    |
+223 -             SendMessageW(panel.destination, EM_SETLIMITTEXT, 16384, 0);
+223 +             SendMessageW(panel.destination, CB_LIMITTEXT, 16384, 0);
+    |
+
+error: unnecessary `>= y + 1` or `x - 1 >=`
+   --> src/files_operation_fs.rs:174:9
+    |
+174 |         root.encode_utf16().count() + request.source.encode_utf16().count() + 1 <= MAX_PATH_UNITS
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change it to: `root.encode_utf16().count() + request.source.encode_utf16().count() < MAX_PATH_UNITS`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#int_plus_one
+    = note: `-D clippy::int-plus-one` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::int_plus_one)]`
+
+error: unnecessary `>= y + 1` or `x - 1 >=`
+   --> src/files_operation_fs.rs:175:16
+    |
+175 |               && root.encode_utf16().count() + request.destination.encode_utf16().count() + 1
+    |  ________________^
+176 | |                 <= MAX_PATH_UNITS,
+    | |_________________________________^ help: change it to: `root.encode_utf16().count() + request.destination.encode_utf16().count() < MAX_PATH_UNITS`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#int_plus_one
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `flowmux-windows` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `flowmux-windows` (lib test) due to 3 previous errors

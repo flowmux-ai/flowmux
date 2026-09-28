@@ -1,0 +1,13 @@
+{
+    "name":  "files-actions-editor-guard",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-actions-cases\\editor-guard.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T06:47:03.3782649Z",
+    "pid":  39040,
+    "exitCode":  0,
+    "activeBeforeCleanup":  3,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  6.05,
+    "finished":  "2026-09-28T06:47:09.4330573Z"
+}

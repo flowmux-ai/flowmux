@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "started": "2026-09-28T06:52:40.860304+00:00",
+  "status": "passed",
+  "selectedCases": [
+    "selection"
+  ],
+  "serial": true,
+  "failFast": true,
+  "retries": 0,
+  "jobDeadlineSeconds": 120,
+  "results": [
+    {
+      "case": "selection",
+      "kind": "refresh",
+      "label": "files-selection",
+      "started": "2026-09-28T06:52:40.872465+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-cases/selection.ps1",
+        "files-selection",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-runs/9c4903c9-2128-45dc-ac7f-e67f3bab79d3/selection-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-ef3e122d-37e0-4d54-b777-fdc209241108",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-ef3e122d-37e0-4d54-b777-fdc209241108/native-files-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-selection-b4e66196-4181-4a89-b197-fc23463f71ef/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-selection-b4e66196-4181-4a89-b197-fc23463f71ef\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-ef3e122d-37e0-4d54-b777-fdc209241108",
+      "runner": {
+        "name": "files-selection",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-cases\\selection.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T06:54:01.3652889Z",
+        "pid": 37244,
+        "exitCode": 0,
+        "activeBeforeCleanup": 2,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 3.968,
+        "finished": "2026-09-28T06:54:05.3369941Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-selection-b4e66196-4181-4a89-b197-fc23463f71ef/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-selection-b4e66196-4181-4a89-b197-fc23463f71ef/stderr.txt",
+      "evidenceStatus": "passed_background_files_subset",
+      "evidenceCase": "selection",
+      "checks": [
+        {
+          "name": "files_replace_toggle_range_and_collapsed_descendant_selection_match_native_listbox",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 5.224,
+      "finished": "2026-09-28T06:52:46.088335+00:00"
+    }
+  ],
+  "notRun": [],
+  "finished": "2026-09-28T06:52:46.124319+00:00"
+}

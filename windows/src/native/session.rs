@@ -687,8 +687,7 @@ mod tests {
         std::fs::write(&path, b"not a Windows executable").unwrap();
         let shell = crate::shell::Shell::profile(&path.to_string_lossy());
         let before = unsafe { GetThreadErrorMode() };
-        let handles_before = handles();
-        for _ in 0..5 {
+        let attempt = || {
             let start = std::time::Instant::now();
             let result = Session::spawn(
                 &std::env::temp_dir(),
@@ -707,9 +706,22 @@ mod tests {
                 "invalid-image error did not return promptly"
             );
             assert_eq!(unsafe { GetThreadErrorMode() }, before);
+        };
+        // Match the other handle-growth checks: initialize this failure path
+        // before measuring repeated attempts. First-use platform state is not
+        // evidence that each failed spawn leaks another handle.
+        attempt();
+        thread::sleep(std::time::Duration::from_millis(200));
+        let handles_before = handles();
+        for _ in 0..5 {
+            attempt();
         }
         thread::sleep(std::time::Duration::from_millis(200));
-        assert!(handles() <= handles_before + 4);
+        let handles_after = handles();
+        assert!(
+            handles_after <= handles_before + 4,
+            "invalid-image spawns grew handles from {handles_before} to {handles_after}"
+        );
         std::fs::remove_file(path).unwrap();
     }
 }

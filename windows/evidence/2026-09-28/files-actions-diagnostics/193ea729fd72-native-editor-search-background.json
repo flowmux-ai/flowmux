@@ -1,0 +1,346 @@
+{
+    "started":  "2026-09-28T15:53:33.0051517+09:00",
+    "mode":  "background",
+    "case":  "search-open",
+    "checks":  [
+                   {
+                       "name":  "guarded_search_open_selects_actual_utf16_range_and_rejects_changed_disk_buffer_and_expired_tokens",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  17540,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T06:53:33.1887691Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-cbe261bd-d07f-495b-a731-7668cb9f2ccb\\files 한글 한 😀",
+                                                      "pane":  "41e54ba0-6587-40e2-91f3-c2c6891e0e27",
+                                                      "pid":  17540,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-17540-d60ddc8e-f32f-44f1-8c0a-cf82a7b7319d",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "4a7af354-e4cf-4aaf-85fe-6c39e8cff5f5",
+                                                      "workspace":  "37b28a66-422f-46a6-ab9b-bf796fc7762d"
+                                                  },
+                             "discoveryElapsedMs":  161,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  923,
+                             "treeRequests":  2,
+                             "elapsedMs":  1119,
+                             "finished":  "2026-09-28T06:53:34.3089092Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-cbe261bd-d07f-495b-a731-7668cb9f2ccb\\state\\editor-profile",
+                             "surface":  "5f15a76b-3ee2-4935-87bb-a7bf6a4fec06",
+                             "pid":  17540,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-cbe261bd-d07f-495b-a731-7668cb9f2ccb\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-cbe261bd-d07f-495b-a731-7668cb9f2ccb\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "query":  "GOLD",
+                             "case":  "search-open",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  0,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  21,
+                                                                  "searched_files":  2,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  3
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  4,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "nested 한글/선택 한 😀.txt",
+                                                                                                 "preview":  "😀 GOLD 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  4
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "7bd5d81f-1d1a-4613-a826-c934354b78f0",
+                                              "token":  "6a54098b-c1db-4d7a-8249-5f736046c186"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "GOLD",
+                             "case":  "search-open",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  0,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  21,
+                                                                  "searched_files":  2,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  3
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  4,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "nested 한글/선택 한 😀.txt",
+                                                                                                 "preview":  "😀 GOLD 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  4
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "6957070e-38c8-4d4a-affe-9ce30ddef247",
+                                              "token":  "dd8111ea-9b57-4d1f-90ac-7b4de156f0f4"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "GOLD",
+                             "case":  "search-open",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  0,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  0,
+                                                                  "searched_files":  2,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  3
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  4,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "nested 한글/선택 한 😀.txt",
+                                                                                                 "preview":  "😀 GOLD 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  4
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "27ea9be5-962e-4f30-b506-6fad56fbe681",
+                                              "token":  "14be90d0-fddf-4e41-9b96-832d0cdfc963"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "GOLD",
+                             "case":  "search-open",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  0,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  0,
+                                                                  "searched_files":  2,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  3
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  0,
+                                                                                                 "length":  4,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "nested 한글/선택 한 😀.txt",
+                                                                                                 "preview":  "GOLD edited 😀",
+                                                                                                 "previewColumn":  0,
+                                                                                                 "previewLength":  4
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "cce4b73d-2ff3-4268-b91f-4a78498e1fc9",
+                                              "token":  "a66a8244-f392-42e4-aafc-633c4e0631c7"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "rejection":  {
+                                               "error":  "search results expired; run the search again"
+                                           },
+                             "openedSelection":  {
+                                                     "end_column":  8,
+                                                     "end_line":  1,
+                                                     "start_column":  4,
+                                                     "start_line":  1
+                                                 },
+                             "case":  "search-open",
+                             "staleBuffer":  "14be90d0-fddf-4e41-9b96-832d0cdfc963",
+                             "freshSelection":  {
+                                                    "end_column":  5,
+                                                    "end_line":  1,
+                                                    "start_column":  1,
+                                                    "start_line":  1
+                                                },
+                             "staleDisk":  "6a54098b-c1db-4d7a-8249-5f736046c186",
+                             "opened":  "nested 한글\\선택 한 😀.txt",
+                             "expired":  {
+                                             "error":  "search results expired; run the search again"
+                                         }
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  17540,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph rendering, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "Monaco ranges are one-based UTF-16; workspace search ranges are zero-based UTF-16. NFD strings are checked ordinally without asserting Unicode normalization equivalence.",
+                     "In-flight cancellation, supersession, blocked filesystem deadlines and queued close/move races are not forced by these native cases; idle cancellation only verifies the idle command contract.",
+                     "Guarded stale results are changed before opening; a concurrent filesystem swap between validation and the shared document read is covered separately by deterministic worker tests.",
+                     "No network/UNC/reparse paths, hostile ACLs, directory floods or exhaustive scanner budget limits are exercised."
+                 ],
+    "status":  "passed_background_editor_search_subset",
+    "hosts":  [
+                  17540
+              ],
+    "shells":  [
+                   26416
+               ],
+    "clientPids":  [
+                       25364,
+                       2524,
+                       28012,
+                       27728,
+                       12848,
+                       6604,
+                       15656,
+                       18860,
+                       13516,
+                       19572,
+                       33692,
+                       9912,
+                       34868,
+                       7260,
+                       12744,
+                       21008,
+                       14316,
+                       33144,
+                       32984,
+                       13100,
+                       2768,
+                       25684,
+                       7712,
+                       33832,
+                       15308,
+                       35888,
+                       28764,
+                       37496,
+                       30340,
+                       13296,
+                       33300,
+                       13836,
+                       29472,
+                       3004,
+                       9196,
+                       2312,
+                       33004,
+                       27712,
+                       23224,
+                       34780,
+                       26460,
+                       2680,
+                       37932,
+                       32644
+                   ],
+    "elapsedMs":  5270,
+    "finished":  "2026-09-28T15:53:38.2750592+09:00"
+}

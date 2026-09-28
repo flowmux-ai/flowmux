@@ -1243,7 +1243,7 @@ flowmux --json files refresh --pane <pane-id>
 flowmux --json files hide --pane <pane-id>
 ```
 
-All commands require an explicit pane. Use the current status token and each
+The listing commands above require an explicit pane. Use the current status token and each
 row's retained `index`; response page offsets and native LISTBOX positions are
 separate indices. Status responses contain at most 500 rows and one MiB; follow
 `next_offset` to read the remaining rendered rows. `more` increases the rendered
@@ -1263,7 +1263,28 @@ before enumeration. Unicode spelling is preserved without NFC/NFD normalization.
 The host retains at most 32 pane caches under a conservative 16 MiB accounting
 limit. Failed admission is explicit; requests are not retried automatically.
 
-This stage supports read-only browsing and explicit refresh. File mutations,
-external applications, clipboard actions, automatic tree watching and persisted
-tree restoration remain unimplemented here. Physical keyboard/mouse/IME, visual
+**Copy**, **Rename** and **Move** act on one selected regular file. Enter a
+root-relative destination for Copy/Move or one new leaf name for Rename. The
+parent directory must exist; existing destinations are never overwritten. Close
+the source editor document first, including a clean document before Copy.
+Copy preserves raw bytes up to 16 MiB.
+
+```powershell
+flowmux --json files copy --pane <pane-id> --token <token> --index <row-index> --destination 'folder/복사.txt'
+flowmux --json files rename --pane <pane-id> --token <token> --index <row-index> --name '이름 변경.txt'
+flowmux --json files move --pane <pane-id> --token <token> --index <row-index> --destination 'folder/이동.txt'
+flowmux --json files operation-status --id <operation-id>
+flowmux --json files operation-cancel --id <operation-id>
+```
+
+Acceptance returns `operation.id`; query its outcome before retrying. Only one
+file operation runs per host, with four-second preparation and 30-second commit
+budgets. Cancellation/deadlines are cooperative between OS calls: the operation
+remains active until its worker returns, and close/editor operations reject while
+it is active. The latest 64 terminal receipts remain queryable without a pane.
+Completion refreshes the listing. See the [file-action evidence](evidence/2026-09-28/files-actions.md).
+
+Clipboard cut/paste, batch/directory operations, remote/reparse/case-sensitive
+paths, overwrite, external applications, automatic tree watching and persisted
+tree restoration remain unsupported here. Physical keyboard/mouse/IME, visual
 layout, DPI and accessibility acceptance remain pending.
