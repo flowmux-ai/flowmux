@@ -42,6 +42,7 @@ pub fn terminal_shell(
     config: &SshWorkspaceConfig,
     cwd: Option<&str>,
     tmux_session: Option<&str>,
+    attach: bool,
 ) -> anyhow::Result<Shell> {
     config.validate().map_err(anyhow::Error::msg)?;
     ensure!(
@@ -66,17 +67,20 @@ pub fn terminal_shell(
                 && uuid::Uuid::parse_str(suffix).is_ok(),
             "Invalid flowmux tmux session"
         );
-        // -A attaches to the persisted session if it survives. Keep cwd in -c
-        // rather than an earlier cd, so reattachment does not depend on that
-        // directory still existing. A missing tmux/server is reported in the PTY.
-        let directory = cwd
-            .map(|path| format!(" -c {}", shell_quote(path)))
-            .unwrap_or_default();
-        format!(
-            "exec tmux -u new-session -A -s {}{directory} {}",
-            shell_quote(session),
-            shell_quote(login)
-        )
+        if attach {
+            // A missing attempted/restored session must fail visibly instead of
+            // silently starting another shell. Reattach never changes its cwd.
+            format!("exec tmux -u attach-session -t {}", shell_quote(session))
+        } else {
+            let directory = cwd
+                .map(|path| format!(" -c {}", shell_quote(path)))
+                .unwrap_or_default();
+            format!(
+                "exec tmux -u new-session -s {}{directory} {}",
+                shell_quote(session),
+                shell_quote(login)
+            )
+        }
     } else {
         let directory = cwd
             .map(|path| format!("cd {} || exit; ", shell_quote(path)))
@@ -141,7 +145,7 @@ mod tests {
         config.target.port = Some(2222);
         config.target.identity_file = Some(PathBuf::from(identity));
         config.target.config_file = Some(PathBuf::from(ssh_config));
-        let shell = terminal_shell(&config, None, None).unwrap();
+        let shell = terminal_shell(&config, None, None, false).unwrap();
         assert_eq!(shell.program, "ssh");
         assert!(shell.args.windows(2).any(|args| args == ["-i", identity]));
         assert!(shell.args.windows(2).any(|args| args == ["-F", ssh_config]));
@@ -156,7 +160,7 @@ mod tests {
             || arg == "/dev/null"
             || arg.contains("/bin/false")));
         assert_eq!(config.cwd.as_deref(), Some(remote));
-        let changed = terminal_shell(&config, Some("/next"), None).unwrap();
+        let changed = terminal_shell(&config, Some("/next"), None, false).unwrap();
         assert!(changed
             .args
             .last()
@@ -169,10 +173,10 @@ mod tests {
         for host in ["-oProxyCommand=bad", "host name", "host\nnext"] {
             let mut config = config();
             config.target.host = host.into();
-            assert!(terminal_shell(&config, None, None).is_err());
+            assert!(terminal_shell(&config, None, None, false).is_err());
         }
         for cwd in ["relative", "C:\\local", "/line\nnext", "/nul\0end"] {
-            assert!(terminal_shell(&config(), Some(cwd), None).is_err());
+            assert!(terminal_shell(&config(), Some(cwd), None, false).is_err());
         }
         let mut forwarding = config();
         forwarding.forwards.push(SshForwardSpec {
@@ -181,11 +185,17 @@ mod tests {
             local_port: None,
             https: false,
         });
-        assert!(terminal_shell(&forwarding, None, None)
+        assert!(terminal_shell(&forwarding, None, None, false)
             .unwrap_err()
             .to_string()
             .contains("not implemented"));
-        assert!(terminal_shell(&config(), Some(&format!("/{}", "x".repeat(32700))), None).is_err());
+        assert!(terminal_shell(
+            &config(),
+            Some(&format!("/{}", "x".repeat(32700))),
+            None,
+            false
+        )
+        .is_err());
     }
 
     #[test]
@@ -194,25 +204,43 @@ mod tests {
         config.tmux = true;
         config.cwd = Some("/remote/한글 'folder'".into());
         let session = "flowmux-50b631aa8fdf47d695081721fdc26c63";
-        let first = terminal_shell(&config, None, Some(session)).unwrap();
+        let first = terminal_shell(&config, None, Some(session), false).unwrap();
         let restored: SshWorkspaceConfig =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
-        assert_eq!(
-            terminal_shell(&restored, None, Some(session)).unwrap(),
-            first
-        );
         assert_eq!(first.args.last().unwrap(),
-            "exec tmux -u new-session -A -s 'flowmux-50b631aa8fdf47d695081721fdc26c63' -c '/remote/한글 '\\''folder'\\''' 'exec \"${SHELL:-/bin/sh}\" -l'");
-        assert!(terminal_shell(&config, None, None).is_err());
+            "exec tmux -u new-session -s 'flowmux-50b631aa8fdf47d695081721fdc26c63' -c '/remote/한글 '\\''folder'\\''' 'exec \"${SHELL:-/bin/sh}\" -l'");
+        let reconnect = terminal_shell(
+            &restored,
+            Some("/missing/한 'old cwd'"),
+            Some(session),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            reconnect.args.last().unwrap(),
+            "exec tmux -u attach-session -t 'flowmux-50b631aa8fdf47d695081721fdc26c63'"
+        );
+        assert_eq!(
+            &reconnect.args[..reconnect.args.len() - 1],
+            &first.args[..first.args.len() - 1]
+        );
+        assert!(terminal_shell(&config, None, None, false).is_err());
         for invalid in [
             "flowmux-",
             "flowmux-not-a-uuid",
             "other-50b631aa8fdf47d695081721fdc26c63",
             "flowmux-50b631aa8fdf47d695081721fdc26c63;exit",
         ] {
-            assert!(terminal_shell(&config, None, Some(invalid)).is_err());
+            for attach in [false, true] {
+                assert!(terminal_shell(&config, None, Some(invalid), attach).is_err());
+            }
         }
         config.tmux = false;
-        assert!(terminal_shell(&config, None, Some(session)).is_err());
+        assert!(terminal_shell(&config, None, Some(session), true).is_err());
+        // A plain SSH reconnect still starts a login shell and honors remote cwd.
+        assert_eq!(
+            terminal_shell(&config, None, None, true).unwrap(),
+            terminal_shell(&config, None, None, false).unwrap()
+        );
     }
 }

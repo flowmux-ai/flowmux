@@ -319,6 +319,7 @@ impl App {
             workspace.ssh.as_ref().unwrap(),
             cwd.as_deref(),
             tmux_session.as_deref(),
+            false,
         )?;
         super::super::shell::resolve(&shell)?;
         self.workspaces.push(workspace);
@@ -343,7 +344,13 @@ impl App {
             .ssh
             .as_ref()
             .context("SSH workspace configuration missing")?;
-        crate::ssh::terminal_shell(config, cwd.as_deref(), tmux_session.as_deref()).map(Some)
+        crate::ssh::terminal_shell(
+            config,
+            cwd.as_deref(),
+            tmux_session.as_deref(),
+            self.ssh_attempted.contains(&id),
+        )
+        .map(Some)
     }
 
     // Outer Option identifies a remote terminal; inner None means login home.

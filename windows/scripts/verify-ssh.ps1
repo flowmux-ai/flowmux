@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Own hidden windows and an isolated loopback Git sshd; run under run-check.ps1 with a 100s cap.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[Alias('Host')][string]$SshHost='',[int]$Port=22,[string]$IdentityFile='',[string]$ConfigFile='',[string]$RemoteDirectory='')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[Alias('Host')][string]$SshHost='',[int]$Port=22,[string]$IdentityFile='',[string]$ConfigFile='',[string]$RemoteDirectory='',[switch]$Tmux)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -8,7 +8,7 @@ Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'Ch
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs'),(Join-Path $PSScriptRoot 'PaneToolsFixture.cs')
 $base=if($env:FLOWMUX_TEST_ARTIFACT_ROOT){$env:FLOWMUX_TEST_ARTIFACT_ROOT}else{[IO.Path]::GetTempPath()}
 $directory=Join-Path $base ('ssh-한글-한-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
-$fixture=New-Object EditorFixture($directory);$clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$server=$null;$out=$null;$err=$null;$serverOut=$null;$serverErr=$null;$pipeName=$null;$cleanup=$false;$failure=$null;$checks=0;$proofMarkers=@{}
+$fixture=New-Object EditorFixture($directory);$clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$server=$null;$out=$null;$err=$null;$serverOut=$null;$serverErr=$null;$pipeName=$null;$cleanup=$false;$failure=$null;$checks=0;$proofMarkers=@{};$tmuxSessions=@()
 $diagnostic=[ordered]@{mode='owned-hidden-real-SSH';physicalInput=$false;physicalIme=$false;checks=@();lastTree=$null}
 function Require([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
 function Same([string]$A,[string]$B){return [string]::Equals($A,$B,[StringComparison]::Ordinal)}
@@ -104,9 +104,41 @@ function Retained-History([string]$Surface,[string]$Marker){
  Require ($Marker -and $Marker.Contains('한글 한 😀')) 'History assertion requires a previously acknowledged unique Unicode marker'
  $screen=Request @('read-screen','--surface',$Surface,'--recent');$flat=$screen.text.Replace("`r",'').Replace("`n",'');Require ($flat.Contains($Marker)) 'SSH disconnect/reconnect erased acknowledged Unicode terminal history'
 }
-function Check-Config($Tree,[string]$Workspace,[string]$Name){$ws=@($Tree.workspaces|Where-Object {$_.id -ceq $Workspace});Require ($ws.Count -eq 1 -and $ws[0].ssh -and (Same $ws[0].name $Name) -and (Same $ws[0].ssh.cwd $RemoteDirectory) -and (Same $ws[0].ssh.target.identity_file $IdentityFile) -and (Same $ws[0].ssh.target.config_file $ConfigFile) -and $ws[0].ssh.target.port -eq $Port -and -not $ws[0].ssh.tmux) 'SSH config/name paths lost original Unicode or connection options';return $ws[0]}
+function Check-Config($Tree,[string]$Workspace,[string]$Name,[bool]$ExpectedTmux=$false){$ws=@($Tree.workspaces|Where-Object {$_.id -ceq $Workspace});Require ($ws.Count -eq 1 -and $ws[0].ssh -and (Same $ws[0].name $Name) -and (Same $ws[0].ssh.cwd $RemoteDirectory) -and (Same $ws[0].ssh.target.identity_file $IdentityFile) -and (Same $ws[0].ssh.target.config_file $ConfigFile) -and $ws[0].ssh.target.port -eq $Port -and [bool]$ws[0].ssh.tmux -eq $ExpectedTmux) 'SSH config/name paths lost original Unicode or connection options';return $ws[0]}
+function Tmux-Remote([string]$Command,[int]$Exit=0){
+ $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe';return (Run $ssh @('-T','-F',$ConfigFile,'-i',$IdentityFile,'-p',[string]$Port,'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=3',$SshHost,$Command) $Exit).Trim()
+}
+function Tmux-Session([string]$Surface){return 'flowmux-'+([guid]$Surface).ToString('N')}
+function Tmux-Pid([string]$Session){$value=Tmux-Remote ('tmux display-message -p -t '''+$Session+''' ''#{pane_pid}''');Require ($value -match '^[1-9][0-9]*$') 'Real tmux did not report its remote pane PID';return $value}
+function Tmux-Proof($Identity,[string]$Value,[string]$PanePid){
+ $tag='TMUX_'+[guid]::NewGuid().ToString('N').Substring(0,8)+' 한글 한 😀:';$octal=([Text.Encoding]::UTF8.GetBytes($tag)|ForEach-Object {'\'+[Convert]::ToString($_,8).PadLeft(3,'0')}) -join '';$expected=$tag+$Value+':'+$PanePid+':'+$RemoteDirectory
+ Request @('focus-tab',$Identity.surface)|Out-Null;Request @('send-keys',$Identity.pane,('printf '''+$octal+'%s:%s:%s\n'' "$FLOWMUX_TMUX_VERIFY" "$$" "$PWD"'))|Out-Null;Request @('send-key','Enter','--surface',$Identity.surface)|Out-Null
+ $timer=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$timer.ElapsedMilliseconds;Require ($left -ge 100) 'Actual tmux shell state proof exceeded five seconds';$screen=Request @('read-screen','--surface',$Identity.surface,'--recent') 0 ([int]$left);$diagnostic.tmuxScreen=$screen;if($screen.text.Replace("`r",'').Replace("`n",'').Contains($expected)){break};Start-Sleep -Milliseconds 20}while($true)
+}
+function Invoke-TmuxCase{
+ Require ($SshHost -and $IdentityFile -and $ConfigFile -and $RemoteDirectory.StartsWith('/') -and $Port -ge 1 -and $Port -le 65535) '-Tmux requires an explicit real SSH fixture Host, Port, IdentityFile, pinned ConfigFile and RemoteDirectory'
+ $version=Tmux-Remote 'tmux -V';Require ($version -match '^tmux ') 'The explicit SSH fixture has no real tmux'
+ $tree=Start-Host @('--shell=cmd','--cwd',$fixture.Root);$local=Request @('identify');$original=@($tree.surfaces);$panel=Open-Dialog;$name='tmux 한글 한 😀'
+ Fill $panel @{host=$SshHost;cwd=$RemoteDirectory;name=$name;port=[string]$Port;identity=$IdentityFile;config=$ConfigFile};[OptionsFixture]::SetChecked([long]$panel.window,[long]$panel.tmux,$hostProcess.Id,$true);$tree=Tree;Require ($tree.ssh_dialog.tmux_checked) 'Native tmux checkbox was not checked';Submit $panel
+ $tree=Await {param($t) -not $t.ssh_dialog -and @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};$remote=Request @('identify');$ws=Check-Config $tree $remote.workspace $name $true;$session=Tmux-Session $remote.surface;$script:tmuxSessions+=,$session
+ Require ($ws.root.content.surfaces[0].kind.type -ceq 'ssh_terminal' -and $ws.root.content.surfaces[0].kind.tmux_session -ceq $session) 'Initial tmux session name does not belong to the created surface'
+ $tree=Await {param($t) $t.ssh_toolbar.state -ceq 'connected'};$panePid=Tmux-Pid $session;$value=[guid]::NewGuid().ToString('N');Request @('send-keys',$remote.pane,('FLOWMUX_TMUX_VERIFY='+$value))|Out-Null;Request @('send-key','Enter','--surface',$remote.surface)|Out-Null;Tmux-Proof $remote $value $panePid;Stable (Tree) $original;Passed 'tmux-native-create-real-remote-shell-PID-Unicode-marker-and-state'
+ $tree=Tree;$sshBefore=@($tree.surfaces|Where-Object {$_.id -ceq $remote.surface})[0];$bar=Toolbar $tree $remote.workspace 'connected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.disconnect,$hostProcess.Id)
+ $tree=Await {param($t) $t.ssh_toolbar.state -ceq 'disconnected' -and @($t.surfaces|Where-Object {$_.id -ceq $remote.surface -and $_.resources_released -and -not $_.running}).Count -eq 1};Tmux-Remote ('tmux has-session -t '''+$session+'''')|Out-Null;Require ((Tmux-Pid $session) -ceq $panePid) 'Disconnect replaced or terminated the actual remote tmux pane'
+ Request @('new-tab')|Out-Null;$offline=Request @('identify');$offlineSession=Tmux-Session $offline.surface;$script:tmuxSessions+=,$offlineSession;$tree=Tree;Require ($offline.workspace -ceq $remote.workspace -and @($tree.surfaces).Count -eq 3 -and @($tree.surfaces|Where-Object {$_.id -cne $local.surface -and $_.running}).Count -eq 0) 'Offline tmux tab spawned before Connect';Tmux-Remote ('tmux has-session -t '''+$offlineSession+'''') 1|Out-Null
+ $bar=Toolbar $tree $remote.workspace 'disconnected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.connect,$hostProcess.Id);$tree=Await {param($t) $t.ssh_toolbar.state -ceq 'connected' -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};Stable $tree $original
+ $sshAfter=@($tree.surfaces|Where-Object {$_.id -ceq $remote.surface})[0];Require ($sshAfter.pid -ne $sshBefore.pid -and $sshAfter.view_handle -eq $sshBefore.view_handle -and $sshAfter.holder.window -eq $sshBefore.holder.window -and (Tmux-Pid $session) -ceq $panePid) 'Reconnect replaced a retained view or remote tmux process';Tmux-Proof $remote $value $panePid;$offlinePid=Tmux-Pid $offlineSession;Require ($offlinePid -cne $panePid) 'First offline-tab launch did not create a separate tmux pane';Passed 'tmux-disconnect-retains-state-reconnect-attaches-and-offline-tab-first-start-creates'
+ Request @('focus-tab',$remote.surface)|Out-Null;$tree=Tree;$bar=Toolbar $tree $remote.workspace 'connected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.disconnect,$hostProcess.Id);$tree=Await {param($t) $t.ssh_toolbar.state -ceq 'disconnected' -and @($t.surfaces|Where-Object {$_.id -cne $local.surface -and $_.running}).Count -eq 0}
+ $saved=Request @('save-state');Stop-Host;$tree=Start-Host @('--restore-window',$saved.window) $true;Check-Config $tree $remote.workspace $name $true|Out-Null;Require (@($tree.surfaces).Count -eq 3 -and @($tree.surfaces|Where-Object {$_.id -in @($remote.surface,$offline.surface) -and -not $_.running}).Count -eq 2) 'Restored tmux tabs changed IDs or auto-connected'
+ Request @('focus-tab',$remote.surface)|Out-Null;$tree=Tree;$bar=Toolbar $tree $remote.workspace 'disconnected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.connect,$hostProcess.Id);$tree=Await {param($t) $t.ssh_toolbar.state -ceq 'connected'};Require ((Tmux-Pid $session) -ceq $panePid -and (Tmux-Pid $offlineSession) -ceq $offlinePid) 'Restore created new remote tmux panes';Tmux-Proof $remote $value $panePid;Passed 'tmux-save-restore-stays-disconnected-and-attaches-same-remote-state'
+ $diagnostic.tmuxPhase='disconnect-after-restore';$tree=Tree;$bar=Toolbar $tree $remote.workspace 'connected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.disconnect,$hostProcess.Id);$tree=Await {param($t) $t.ssh_toolbar.state -ceq 'disconnected' -and @($t.surfaces|Where-Object {$_.id -cne $local.surface -and $_.running}).Count -eq 0}
+ $diagnostic.tmuxPhase='attach-missing';Tmux-Remote ('tmux kill-session -t '''+$session+'''')|Out-Null;Tmux-Remote ('tmux has-session -t '''+$session+'''') 1|Out-Null;$before=@($tree.surfaces|Where-Object {$_.id -ceq $local.surface});$shape=$tree.workspaces|ConvertTo-Json -Depth 40 -Compress
+ $bar=Toolbar $tree $remote.workspace 'disconnected';[OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$bar.controls.connect,$hostProcess.Id);$tree=Await {param($t) $t.ssh_toolbar.state -ceq 'failed' -and @($t.surfaces|Where-Object {$_.id -ceq $remote.surface -and -not $_.running -and $_.resources_released -and $_.exit_code -ne 0}).Count -eq 1};Toolbar $tree $remote.workspace 'failed'|Out-Null;Tmux-Remote ('tmux has-session -t '''+$session+'''') 1|Out-Null;Require ((Tmux-Pid $offlineSession) -ceq $offlinePid -and (Same ($tree.workspaces|ConvertTo-Json -Depth 40 -Compress) $shape)) 'Missing tmux session was recreated or changed retained layout';Stable $tree $before;Passed 'missing-remote-tmux-session-fails-attach-without-recreating-shell'
+ Stop-Host
+}
 try{
  $doctor=(Run $cli @('doctor'))|ConvertFrom-Json;Require ($doctor.status -ceq 'ok' -and $doctor.background_testing) 'A hidden debug SSH build is required'
+ if($Tmux){Invoke-TmuxCase}else{
  if(-not $SshHost){Configure-Server}else{Require ($IdentityFile -and $ConfigFile -and $RemoteDirectory.StartsWith('/')) 'External fixture requires identity, pinned noninteractive config and absolute remote directory'}
  $tree=Start-Host @('--shell=cmd','--cwd',$fixture.Root);$original=@($tree.surfaces);$local=Request @('identify');$panel=Open-Dialog;$native=[OptionsFixture]::Describe([long]$panel.window,$hostProcess.Id)
  Require ($panel.owner -eq $tree.window_handle -and $native.Owner -eq $tree.window_handle -and $native.Enabled -and -not $native.OwnerEnabled -and -not $panel.native_visible -and [Math]::Abs(([ChromeFixture]::Size([long]$panel.window,$hostProcess.Id))[0]-460*$native.Dpi/96.0) -le 1) 'SSH dialog is not the hidden owned modal with a 460-DIP client'
@@ -196,14 +228,16 @@ try{
  $tree=Tree;$after=Request @('identify');Require ($after.surface -ceq $identity.surface -and (Same ($tree.workspaces|ConvertTo-Json -Depth 40 -Compress) $shape) -and @($tree.surfaces).Count -eq 1) 'Disabled SSH toolbar command changed a browser-only workspace';Stable $tree $localBefore;$browserAfter=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];Require ($browserAfter.view_handle -eq $browserBefore.view_handle -and $browserAfter.url -ceq 'about:blank') 'Disabled SSH toolbar command replaced its browser';Passed 'browser-only-SSH-workspace-disables-Authentication-Connect-Disconnect-and-ignores-stale-commands'
 
  Stop-Host
+ }
 }catch{$failure=$_.Exception.Message}
 finally{
  $cleanup=$true
  if($hostProcess){try{if(-not $hostProcess.HasExited -and $pipeName){Request @('quit','--discard-state')|Out-Null;$null=$hostProcess.WaitForExit(3000)}}catch{if(-not $failure){$failure='Cleanup: '+$_.Exception.Message}}
   try{if(-not $hostProcess.HasExited){$hostProcess.Kill();[CliProbe]::WaitAfterKill($hostProcess);if(-not $failure){$failure='Host required forced cleanup'}};$null=$out.Wait(500);$null=$err.Wait(500);$diagnostic.hostStdout=[CliProbe]::Output($out);$diagnostic.hostStderr=[CliProbe]::Output($err)}catch{if(-not $failure){$failure=$_.Exception.Message}}finally{$hostProcess.Dispose()}}
+ if($Tmux){$tmuxSessions+=@($diagnostic.lastTree.surfaces|Where-Object {$_.shell.program -ceq 'ssh'}|ForEach-Object {Tmux-Session $_.id});foreach($session in @($tmuxSessions|Select-Object -Unique)){try{Tmux-Remote ('tmux kill-session -t '''+$session+''' 2>/dev/null || true')|Out-Null;Tmux-Remote ('tmux has-session -t '''+$session+'''') 1|Out-Null}catch{if(-not $failure){$failure='Owned tmux session cleanup: '+$_.Exception.Message}}}}
  if($server){try{if(-not $server.HasExited){$server.Kill();[CliProbe]::WaitAfterKill($server)};Require ($serverOut.Wait(500)-and $serverErr.Wait(500)) 'sshd output pipes did not close';$diagnostic.serverStderr=[CliProbe]::Output($serverErr)}catch{if(-not $failure){$failure='sshd cleanup: '+$_.Exception.Message}}finally{$server.Dispose()}}
  try{$fixture.Dispose()}catch{if(-not $failure){$failure='Fixture cleanup: '+$_.Exception.Message}}
 }
 if($failure){$diagnostic.failure=$failure;$diagnostic.elapsedMs=$clock.ElapsedMilliseconds;$diagnostic|ConvertTo-Json -Depth 60|Set-Content -Encoding UTF8 -LiteralPath (Join-Path $directory 'failure.json');throw $failure}
 Remove-Item -LiteralPath $directory -Recurse -Force
-Write-Output ("passed: $checks hidden SSH groups; actual loopback/external SSH Unicode and remote-CWD markers verified; elapsed="+$clock.ElapsedMilliseconds+'ms')
+Write-Output ("passed: $checks hidden SSH groups (tmux=$Tmux); actual loopback/external SSH Unicode and remote-CWD markers verified; elapsed="+$clock.ElapsedMilliseconds+'ms')

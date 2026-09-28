@@ -210,6 +210,7 @@ impl App {
             workspace.ssh.as_ref().unwrap(),
             remote.as_deref(),
             tmux_session.as_deref(),
+            false,
         )?;
         super::super::shell::resolve(&shell)?;
         crate::ssh::set_remote_cwd(&mut workspace.root, workspace.focused, id, remote.clone());

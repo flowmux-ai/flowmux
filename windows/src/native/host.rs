@@ -539,6 +539,7 @@ struct App {
     workspace_close: Option<workspaces::Close>,
     ssh_dialog: Option<ssh_panel::Panel>,
     ssh_disconnected: HashSet<WorkspaceId>,
+    ssh_attempted: HashSet<SurfaceId>,
     initial_cwd: PathBuf,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
@@ -710,6 +711,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             })?;
         let settings_error = initial_settings.as_ref().err().cloned();
         let settings = initial_settings.unwrap_or_default();
+        let mut ssh_attempted = HashSet::new();
         if restoring_window {
             // Old checkpoints always launched Windows PowerShell. Changing the
             // default affects future terminals, never silently changes old ones.
@@ -721,6 +723,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
                                 shells.entry(tab.id).or_default();
                             }
                             SurfaceKind::SshTerminal { cwd, tmux_session } => {
+                                ssh_attempted.insert(tab.id);
                                 let config = ws
                                     .ssh
                                     .as_ref()
@@ -731,6 +734,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
                                         config,
                                         cwd.as_deref(),
                                         tmux_session.as_deref(),
+                                        true,
                                     )?,
                                 );
                             }
@@ -752,6 +756,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             .collect();
         let mut app = App {
             ssh_disconnected,
+            ssh_attempted,
             shells,
             settings_worker,
             settings,
@@ -2402,6 +2407,11 @@ impl App {
         surface.send(&HostMessage::SessionStart {
             session: generation,
         })?;
+        // Once launch is attempted, reconnect must not silently recreate a
+        // vanished tmux session, including after a local spawn failure.
+        if remote {
+            self.ssh_attempted.insert(id);
+        }
         let session = Session::spawn_after(
             &cwd,
             &shell,
@@ -2883,6 +2893,7 @@ impl App {
         self.browser_cancel(surface, "browser closed during script request");
         self.browsers.remove(&surface);
         self.shells.remove(&surface);
+        self.ssh_attempted.remove(&surface);
         self.surfaces.remove(&surface);
         self.detached.remove(&surface);
         if self
