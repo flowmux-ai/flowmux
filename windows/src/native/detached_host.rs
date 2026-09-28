@@ -253,6 +253,11 @@ impl App {
                 self.focus_active()
             }
             detached::Signal::Close => self.close_detached(surface),
+            detached::Signal::RenameTab => {
+                self.detached.get(&surface).unwrap().cancel_drag();
+                self.select(surface)?;
+                self.edit_metadata(workspaces::EditTarget::TabName(surface))
+            }
         }
     }
 

@@ -22,6 +22,7 @@ pub(super) enum Signal {
     Layout,
     Moved,
     Activated,
+    RenameTab,
     Close,
     Pointer(u32, i32, i32),
 }
@@ -236,6 +237,7 @@ impl Window {
                     | WS_VISIBLE
                     | WS_TABSTOP
                     | BS_OWNERDRAW as u32
+                    | if id == TAB { BS_NOTIFY as u32 } else { 0 }
                     | if enabled { 0 } else { WS_DISABLED },
                 0,
                 0,
@@ -695,16 +697,16 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
             0
         }
         WM_COMMAND => {
-            if (w >> 16) as u32 == BN_CLICKED
-                && l != 0
+            if l != 0
                 && IsWindowEnabled(window) != 0
                 && IsWindowEnabled(l as HWND) != 0
                 && GetParent(l as HWND) == window
                 && GetDlgCtrlID(l as HWND) == (w & 0xffff) as i32
             {
-                match w & 0xffff {
-                    CLOSE | WORKSPACE_CLOSE => emit(window, Signal::Close),
-                    TAB | WORKSPACE => emit(window, Signal::Activated),
+                match ((w >> 16) as u32, w & 0xffff) {
+                    (BN_CLICKED, CLOSE | WORKSPACE_CLOSE) => emit(window, Signal::Close),
+                    (BN_CLICKED, TAB | WORKSPACE) => emit(window, Signal::Activated),
+                    (BN_DOUBLECLICKED, TAB) => emit(window, Signal::RenameTab),
                     _ => {}
                 }
             }

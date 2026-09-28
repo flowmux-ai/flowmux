@@ -165,6 +165,7 @@ unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
                     surface,
                     x: point.x,
                     y: point.y,
+                    double_click: message == WM_LBUTTONDBLCLK,
                 },
                 Action::Workspace(workspace) => panes::Pointer::WorkspaceDown {
                     workspace,
@@ -1006,7 +1007,15 @@ impl App {
                 0,
                 wide("BUTTON").as_ptr(),
                 wide(name.replace('&', "&&")).as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32,
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | BS_OWNERDRAW as u32
+                    | if matches!(action, Action::Tab(..)) {
+                        BS_NOTIFY as u32
+                    } else {
+                        0
+                    },
                 0,
                 0,
                 1,

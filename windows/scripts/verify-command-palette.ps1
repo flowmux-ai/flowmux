@@ -62,6 +62,20 @@ function Open-Metadata([string]$Id,[long]$Owner=0){
 function Metadata-Text($Panel,[string]$Value){[OptionsFixture]::SetTextAndNotify([long]$Panel.window,[long]$Panel.input,$owned.Id,$Value)}
 function Metadata-Click($Panel,[ValidateSet('apply','cancel','picker')][string]$Action){[OptionsFixture]::Click([long]$Panel.window,[long]$Panel.$Action,$owned.Id)}
 function Metadata-Closed{$tree=Await {param($t) -not $t.metadata -or -not $t.metadata.open};Owner-Restored $tree;Require ((Identities $tree) -ceq $identities) 'Metadata changed a terminal process';return $tree}
+function Tab-Header($Tree,[string]$Id){
+    $frames=@($Tree.detached_windows|Where-Object {$_.surface -ceq $Id})
+    if($frames.Count){Require ($frames.Count -eq 1) 'Tab has multiple detached owners';$parent=[long]$frames[0].window_handle;$handle=[long]$frames[0].tab}
+    else{$tabs=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'tab' -and $_.surface -ceq $Id -and $_.layout_visible});Require ($tabs.Count -eq 1) 'Tab has no unique visible header';$parent=[long]$Tree.window_handle;$handle=[long]$tabs[0].handle}
+    $bounds=[OptionsFixture]::RelativeBounds($parent,$handle,$owned.Id);Require ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Tab header has empty bounds'
+    return @{owner=$parent;handle=$handle;bounds=$bounds}
+}
+function Double-Metadata($Tree,[string]$Id){
+    $header=Tab-Header $Tree $Id
+    [OptionsFixture]::TabDoubleClick($header.owner,$header.handle,$owned.Id,[int]($header.bounds.Width/2),[int]($header.bounds.Height/2))
+    $tree=Await {param($t) $t.metadata.open};Metadata $tree $header.owner|Out-Null
+    Require (-not $tree.chrome.tab_dragging) 'Double-click left a tab drag candidate'
+    return $tree
+}
 function Passed([string]$Name){$script:checks+=$Name}
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
@@ -130,7 +144,17 @@ try {
 
     $browser=(Request @('browser','open','about:blank','--pane',$survivor.pane)).browser_pane_opened;Request @('focus-pane',$browser.pane)|Out-Null
     $tree=Menu-Open;Require (@($tree.command_palette.entries|Where-Object {$_.id -ceq 'action:terminal-search'}).Count -eq 0) 'Browser palette offers terminal-only search'
-    $tree=Dismiss $tree;Require ((Request @('identify')).surface -ceq $browser.surface) 'Browser palette changed its target';Request @('close-tab',$browser.surface)|Out-Null
+    $tree=Dismiss $tree;Require ((Request @('identify')).surface -ceq $browser.surface) 'Browser palette changed its target'
+    $browserBefore=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];$browserTab=Surface $tree $browser.surface
+    $tree=Double-Metadata $tree $browser.surface;$panel=Metadata $tree
+    Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $browserTab.title) 'Browser double-click captured a different tab'
+    Metadata-Text $panel '   ';Metadata-Click $panel 'apply';$tree=Metadata-Closed;$unchanged=Surface $tree $browser.surface
+    Require ($unchanged.title -ceq $browserTab.title -and $unchanged.title_locked -eq $browserTab.title_locked) 'Whitespace-only browser rename changed its title or lock'
+    $tree=Double-Metadata $tree $browser.surface;$panel=Metadata $tree;$browserName='브라우저 한 é 😀 & 이름';Metadata-Text $panel ('  '+$browserName+'  ');Metadata-Click $panel 'apply';$tree=Metadata-Closed
+    $browserAfter=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];$renamedBrowser=Surface $tree $browser.surface
+    Require ($renamedBrowser.title -ceq $browserName -and $renamedBrowser.title_locked -and $browserAfter.view_handle -eq $browserBefore.view_handle -and $browserAfter.url -ceq $browserBefore.url -and (Request @('identify')).surface -ceq $browser.surface) 'Browser header rename changed view identity, URL, selection or Unicode title'
+    Passed 'browser-header-doubleclick-trim-and-whitespace-noop-preserve-view-and-lock'
+    Request @('close-tab',$browser.surface)|Out-Null
     $tree=Await {param($t) @($t.browsers).Count -eq 0};Owner-Restored $tree;Require ((Identities $tree) -ceq $identities) 'Browser palette or cleanup replaced a terminal';Passed 'contextual-action-availability-and-browser-toolbar-entry'
 
     # Native metadata dialogs reuse the palette, settings theme and original
@@ -194,6 +218,18 @@ try {
     Require (-not (Workspace $tree $initial.workspace).color) 'Blank color did not clear the workspace override';Same-Identity $initial
     Passed 'metadata-color-native-swatch-hidden-chooser-guard-hex-Apply-and-empty-Clear'
 
+    $header=Tab-Header $tree $initial.surface;$x=[int]($header.bounds.Width/2);$y=[int]($header.bounds.Height/2)
+    [OptionsFixture]::TabPointerDown($header.owner,$header.handle,$owned.Id,$x,$y)
+    [OptionsFixture]::HostPointer($header.owner,$owned.Id,0x202,($header.bounds.X+$x),($header.bounds.Y+$y))
+    $tree=Await {param($t) -not $t.chrome.tab_dragging};Require (-not $tree.metadata.open -and (Identities $tree) -ceq $identities) 'Single header click opened metadata or changed a terminal';Same-Identity $initial
+    $beforeTab=Surface $tree $initial.surface;$tree=Double-Metadata $tree $initial.surface;$panel=Metadata $tree
+    Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $beforeTab.title) 'Terminal double-click captured another title';Same-Identity $initial
+    $headerName='헤더 한 é 😀 & 이름';Metadata-Text $panel ('  '+$headerName+'  ');Metadata-Click $panel 'apply';$tree=Metadata-Closed;$tab=Surface $tree $initial.surface
+    Require ($tab.title -ceq $headerName -and $tab.title_locked) 'Header rename did not trim only outer whitespace and preserve Unicode';Same-Identity $initial
+    $tree=Double-Metadata $tree $initial.surface;$panel=Metadata $tree;Metadata-Text $panel '   ';Metadata-Click $panel 'apply';$tree=Metadata-Closed;$tab=Surface $tree $initial.surface
+    Require ($tab.title -ceq $headerName -and $tab.title_locked) 'Whitespace-only terminal rename changed the locked title';Same-Identity $initial
+    Passed 'terminal-header-singleclick-no-dialog-doubleclick-Unicode-trim-and-empty-noop'
+
     # Closing the owner through IPC must dispose the modal panel before the
     # detached HWND dies, without disabling the surviving main workbench.
     Request @('new-tab','--shell=cmd')|Out-Null;$temporary=Request @('identify')
@@ -208,6 +244,15 @@ try {
     Require ($tree.command_palette.open -and $tree.command_palette.selected -ceq 'metadata:tab-name') 'Detaching lost the selected palette target'
     Execute $tree;$tree=Await {param($t) $t.metadata.open -and -not $t.command_palette.open};$panel=Metadata $tree ([long]$frame.window_handle)
     Require (-not ([OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id)).Enabled) 'Detached metadata owner was not disabled';Owner-Restored $tree
+    $detachedIds=Identities $tree;Metadata-Click $panel 'cancel'
+    $tree=Await {param($t) -not $t.metadata.open};Require ([OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id).Enabled) 'Detached metadata Cancel left its owner disabled'
+    $tree=Double-Metadata $tree $temporary.surface;$panel=Metadata $tree ([long]$frame.window_handle)
+    $detachedName='분리 헤더 한 é 😀 & 이름';Metadata-Text $panel ('  '+$detachedName+'  ');Metadata-Click $panel 'apply'
+    $tree=Await {param($t) -not $t.metadata.open};$tab=Surface $tree $temporary.surface
+    Require ($tab.title -ceq $detachedName -and $tab.title_locked -and (Identities $tree) -ceq $detachedIds -and [OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id).Enabled) 'Detached header rename changed title, terminal identities or owner restoration';Owner-Restored $tree
+    Require ([OptionsFixture]::Text([long]$frame.tab,$owned.Id) -ceq $detachedName.Replace('&','&&')) 'Detached native header did not show the renamed title'
+    Passed 'detached-header-doubleclick-uses-exact-modal-owner-and-retains-PIDs'
+    $tree=Double-Metadata $tree $temporary.surface;$panel=Metadata $tree ([long]$frame.window_handle)
     Metadata-Text $panel '닫힐 한 😀 & draft';$oldEdit=$panel.edit_id
     Request @('close-tab',$temporary.surface)|Out-Null
     $tree=Await {param($t) $null -eq $t.metadata -and @($t.detached_windows|Where-Object {$_.surface -ceq $temporary.surface}).Count -eq 0 -and @($t.surfaces|Where-Object {$_.id -ceq $temporary.surface}).Count -eq 0}

@@ -70,10 +70,12 @@ public static class OptionsFixture {
         long flags=1L;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;
         if(!PostMessage(hwnd,up?0x101U:0x100U,new IntPtr(key),new IntPtr(flags)))throw new InvalidOperationException("Could not post owned key event");
     }
-    public static void TabPointerDown(long parent,long child,int owner,int x,int y) {
+    public static void TabPointerDown(long parent,long child,int owner,int x,int y) {TabPointerPress(parent,child,owner,x,y,0x201);}
+    public static void TabDoubleClick(long parent,long child,int owner,int x,int y) {TabPointerPress(parent,child,owner,x,y,0x203);}
+    private static void TabPointerPress(long parent,long child,int owner,int x,int y,uint message) {
         var hwnd=Child(parent,child,owner);Rect bounds;
         if(!IsWindowEnabled(hwnd)||!GetClientRect(hwnd,out bounds)||x<0||y<0||x>=bounds.Right||y>=bounds.Bottom)throw new InvalidOperationException("Owned tab press lies outside its client");
-        Message(hwnd,0x201,new IntPtr(1),PointerPoint(x,y));
+        Message(hwnd,message,new IntPtr(1),PointerPoint(x,y));
     }
     private static IntPtr PointerPoint(int x,int y) {
         if(x<short.MinValue||x>short.MaxValue||y<short.MinValue||y>short.MaxValue)throw new ArgumentOutOfRangeException("Owned pointer coordinate");

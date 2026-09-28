@@ -71,6 +71,7 @@ pub(super) enum Pointer {
         surface: SurfaceId,
         x: i32,
         y: i32,
+        double_click: bool,
     },
     WorkspaceDown {
         workspace: WorkspaceId,
@@ -214,6 +215,7 @@ impl App {
                 surface,
                 x,
                 y,
+                double_click,
             } => {
                 self.cancel_drag();
                 let valid_source = self.locate(surface).is_some_and(|(workspace, source, _)| {
@@ -227,6 +229,11 @@ impl App {
                 });
                 if !valid_source || !visible_source {
                     return Ok(());
+                }
+                if double_click {
+                    self.select(surface)?;
+                    self.rebuild()?;
+                    return self.edit_metadata(workspaces::EditTarget::TabName(surface));
                 }
                 self.drag = Some(Drag::Tab {
                     workspace: self.workspace().id,

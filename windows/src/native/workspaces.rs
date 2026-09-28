@@ -811,6 +811,10 @@ impl App {
                         "window is saving before close"
                     );
                     let target = target.context("no metadata target")?;
+                    // Linux treats a blank tab-name response as dismissal.
+                    if matches!(target, EditTarget::TabName(_)) && value.trim().is_empty() {
+                        return Ok(());
+                    }
                     let current = self.metadata_text(target)?;
                     // Automatic title changes do not invalidate a pending rename.
                     // A competing manual name or mode change does.
@@ -845,7 +849,7 @@ impl App {
                                 None,
                             )?;
                         }
-                        EditTarget::TabName(id) => self.rename_tab(id, value)?,
+                        EditTarget::TabName(id) => self.rename_tab(id, value.trim().to_owned())?,
                     }
                     Ok(())
                 })();
