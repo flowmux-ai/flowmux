@@ -1,0 +1,17 @@
+{
+  "name": "keybindings-package",
+  "command": [
+    "env",
+    "NSISDIR=/tmp/flowmux-windows-tools/nsis/usr/share/nsis",
+    "/tmp/flowmux-windows-tools/nsis/usr/bin/makensis",
+    "-V3",
+    "-DBINARY_DIR=/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/keybindings-release",
+    "-DOUTPUT_FILE=dist/flowmux-windows-0.10.1-dev-keybindings-x64-setup.exe",
+    "windows/installer.nsi"
+  ],
+  "deadlineSeconds": 45,
+  "status": "passed",
+  "pid": 485538,
+  "exitCode": 0,
+  "elapsedSeconds": 12.369
+}

@@ -145,8 +145,9 @@ impl Store {
         // Re-read under the lock: independent updates from different windows merge.
         // Only an explicit reset may replace an invalid schema; I/O errors still fail.
         let current = if matches!(op, SettingsOp::Reset) {
-            self.bytes()?;
-            Document::default()
+            self.bytes()?
+                .and_then(|bytes| Document::decode(&bytes).ok())
+                .unwrap_or_default()
         } else {
             self.read()?
         };
@@ -184,7 +185,7 @@ fn change(current: &Document, op: &SettingsOp) -> anyhow::Result<Document> {
             expected,
         } => current.terminal.changed(*key, value, expected.as_deref())?,
         SettingsOp::Reset => Default::default(),
-        SettingsOp::Shell { .. } => current.terminal.clone(),
+        SettingsOp::Shell { .. } | SettingsOp::Keybindings { .. } => current.terminal.clone(),
         SettingsOp::Show => anyhow::bail!("show does not write settings"),
     };
     let default_shell = match op {
@@ -214,6 +215,10 @@ fn change(current: &Document, op: &SettingsOp) -> anyhow::Result<Document> {
         revision: Uuid::new_v4(),
         terminal,
         default_shell,
+        keybindings: match op {
+            SettingsOp::Keybindings { op } => crate::keybindings::change(&current.keybindings, op)?,
+            _ => current.keybindings.clone(),
+        },
     };
     // UTF-16 argv limits do not bound JSON's UTF-8 size (e.g. long Korean argv).
     // Never write a file that our own bounded reader cannot load afterwards.
@@ -309,6 +314,58 @@ mod tests {
             a.update(&SettingsOp::Reset).unwrap().terminal,
             Default::default()
         );
+        // Shortcut CAS covers the whole override map; other settings still merge.
+        use crate::keybindings::{KeybindingOverrides, Op, ResetArgs, SetArgs};
+        a.update(&set(SettingKey::FontSize, "22", None)).unwrap();
+        let bind = |action: &str, accels: Vec<&str>, expected| SettingsOp::Keybindings {
+            op: Op::Set(SetArgs {
+                action: action.into(),
+                accels: accels.into_iter().map(String::from).collect(),
+                expected,
+            }),
+        };
+        let first = a
+            .update(&bind(
+                "toggle-workspace-overview",
+                vec!["Ctrl+Alt+Q"],
+                Some(KeybindingOverrides::default()),
+            ))
+            .unwrap();
+        assert_eq!(first.terminal.font_size, 22);
+        let second = b
+            .update(&bind(
+                "new-browser-surface",
+                vec![],
+                Some(first.keybindings.clone()),
+            ))
+            .unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        assert!(a
+            .update(&bind(
+                "toggle-workspace-overview",
+                vec!["Ctrl+Alt+K"],
+                Some(first.keybindings)
+            ))
+            .is_err());
+        assert!(a
+            .update(&bind(
+                "toggle-workspace-overview",
+                vec!["Ctrl+N"],
+                Some(second.keybindings.clone())
+            ))
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        let general_reset = a.update(&SettingsOp::Reset).unwrap();
+        assert_eq!(general_reset.keybindings, second.keybindings);
+        let bindings_reset = a
+            .update(&SettingsOp::Keybindings {
+                op: Op::Reset(ResetArgs {
+                    expected: Some(general_reset.keybindings),
+                }),
+            })
+            .unwrap();
+        assert!(bindings_reset.keybindings.is_empty());
+        assert_eq!(bindings_reset.terminal, general_reset.terminal);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

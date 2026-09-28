@@ -1,0 +1,23 @@
+{
+  "build": "windows/dist/checks/keybindings-units-build-1ea9a790-706d-4772-a5cf-9774b14af2a4/result.json",
+  "files": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux_windows-940f179605ae9006.exe",
+      "path": "windows/dist/keybindings-tests/flowmux_windows-940f179605ae9006.exe",
+      "sha256": "6fe8de40c65d00a57e3da2237b2f38bfd05174a1d1abdf8cd5df8bf450b5d2c2",
+      "bytes": 32120320
+    },
+    {
+      "source": "windows/dist/keybindings-debug/conpty.dll",
+      "path": "windows/dist/keybindings-tests/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920
+    },
+    {
+      "source": "windows/dist/keybindings-debug/x64/OpenConsole.exe",
+      "path": "windows/dist/keybindings-tests/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296
+    }
+  ]
+}

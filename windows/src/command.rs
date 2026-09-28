@@ -203,6 +203,13 @@ pub enum Command {
     ChromeCapture {
         path: PathBuf,
     },
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    TestShortcut {
+        #[arg(value_parser = parse_id)]
+        surface: Uuid,
+        event: String,
+    },
     /// Print the session-local PowerShell prompt integration for manual reinstallation.
     ShellIntegration,
     Identify,
@@ -423,6 +430,11 @@ pub enum Command {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum SettingsOp {
     Show,
+    /// Show or customize supported Windows shortcuts.
+    Keybindings {
+        #[command(subcommand)]
+        op: crate::keybindings::Op,
+    },
     /// Set the shell for future tabs/workspaces. Existing terminals keep their shell.
     Shell {
         program: String,

@@ -23,6 +23,8 @@ delete window.__flowmuxIdentity;
 const send = message => window.ipc.postMessage(JSON.stringify({ ...identity, message }));
 const initialSettings = window.__flowmuxSettings;
 delete window.__flowmuxSettings;
+const initialBindings = window.__flowmuxBindings;
+delete window.__flowmuxBindings;
 const backgroundTesting = window.__flowmuxBackgroundTesting === true;
 delete window.__flowmuxBackgroundTesting;
 const terminal = new Terminal({
@@ -70,10 +72,10 @@ terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title })
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
 terminal.textarea.addEventListener('beforeinput', () => { clipboard.cancel(); selection.forget(); }, true);
 
+const paneShortcuts = new PaneShortcuts();
 const settings = new Settings(terminal, () => {
   if (document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
-}, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document, minimap);
-const paneShortcuts = new PaneShortcuts();
+}, send, () => composing || restoring, () => { find.invalidate(); outputSearch.changed(); }, document, minimap, paneShortcuts);
 window.addEventListener('blur', () => { paneShortcuts.reset(); clipboard.cancel(); menu.close(false); selection.primaryUp(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { clipboard.cancel(); menu.close(false); }
@@ -85,11 +87,11 @@ terminal.textarea.addEventListener('compositionstart', () => { composing = true;
 terminal.textarea.addEventListener('compositionend', () => {
   paste.settleComposition(); composing = false; queueMicrotask(() => settings.flush());
 });
-terminal.attachCustomKeyEventHandler(event => {
+const handleKeyEvent = event => {
   if (clipboard.key(event, composing || restoring || !!paste.settling || paneShortcuts.rightAlt)) return false;
   input.keyEvent(event);
   if (event.type === 'keydown' && event.keyCode === 229) paste.settleComposition();
-  const paneAction = paneShortcuts.event(event, composing);
+  const paneAction = paneShortcuts.event(event, composing || restoring || !!paste.settling || !!terminal.options.disableStdin);
   if (paneAction) {
     event.preventDefault();
     if (paneAction !== 'consume') send(paneAction);
@@ -100,16 +102,12 @@ terminal.attachCustomKeyEventHandler(event => {
     if (event.type === 'keydown') { clipboard.cancel(); selection.forget(); }
     return true;
   }
-  if (event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'KeyF') {
-    event.preventDefault();
-    find.open(true);
-    return false;
-  }
   if (event.type === 'keydown' && !['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) {
     clipboard.cancel(); selection.forget();
   }
   return true;
-});
+};
+terminal.attachCustomKeyEventHandler(handleKeyEvent);
 new ResizeObserver(() => {
   if (!restoring && document.body.clientWidth > 20 && document.body.clientHeight > 20) fit.fit();
   minimap.changed();
@@ -133,9 +131,18 @@ window.flowmuxHost = message => {
       surfaceVisible = message.visible;
       minimap.visibility(surfaceVisible && (!document.hidden || backgroundTesting));
       if (!surfaceVisible) { clipboard.cancel(); menu.close(false); selection.primaryUp(); }
-    } else if (message.type === 'settings') settings.receive(message.document);
+    } else if (message.type === 'test_shortcut' && backgroundTesting) {
+      // Exercise the same custom hook on an owned hidden renderer. This neither
+      // dispatches a DOM/OS key nor asks xterm to produce text or IME composition.
+      const supplied = message.event;
+      const event = { type: 'keydown', key: supplied.code, ctrlKey: false, altKey: false,
+        shiftKey: false, metaKey: false, repeat: false, isComposing: false, keyCode: 0,
+        ...supplied, getModifierState: name => name === 'AltGraph' && !!supplied.altGraph,
+        preventDefault() {} };
+      send({ type: 'shortcut_tested', request: message.request, forwarded: handleKeyEvent(event) });
+    } else if (message.type === 'settings') settings.receive(message.document, message.bindings);
     else if (message.type === 'focus') { if (!restoring) { fit.fit(); find.focus(); } }
-    else if (message.type === 'open_find') { if (!restoring) find.open(true); }
+    else if (message.type === 'open_find') { if (!restoring && !composing && !paste.settling && !terminal.options.disableStdin) find.open(message.focus !== false); }
     else if (message.type === 'open_search_hit') {
       if (message.commit) { find.close(false); fit.fit(); }
       output.receive(message);
@@ -159,6 +166,6 @@ window.flowmuxHost = message => {
   } catch (error) { send({ type: 'fault', message: String(error) }); }
 };
 fit.fit();
-settings.receive(initialSettings);
+settings.receive(initialSettings, initialBindings);
 send({ type: 'ready' });
 // The native host grants focus after readiness. Hidden tabs must not steal it.

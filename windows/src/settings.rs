@@ -182,6 +182,11 @@ pub struct Document {
     pub terminal: TerminalSettings,
     #[serde(default)]
     pub default_shell: crate::shell::Shell,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::keybindings::KeybindingOverrides::is_empty"
+    )]
+    pub keybindings: crate::keybindings::KeybindingOverrides,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -190,6 +195,7 @@ impl Default for Document {
             revision: Uuid::nil(),
             terminal: TerminalSettings::default(),
             default_shell: Default::default(),
+            keybindings: Default::default(),
         }
     }
 }
@@ -203,6 +209,7 @@ impl Document {
         anyhow::ensure!(value.version == 1, "unsupported settings version");
         value.terminal.validate()?;
         value.default_shell.validate()?;
+        crate::keybindings::validate(&value.keybindings)?;
         Ok(value)
     }
 }

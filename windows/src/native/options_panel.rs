@@ -16,6 +16,8 @@ thread_local! {
 }
 const SAVE_TIMER: usize = 7;
 const INPUT_BASE: usize = 200;
+#[path = "keybindings_panel.rs"]
+mod bindings;
 
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
@@ -29,6 +31,7 @@ pub(crate) enum UiAction {
     Reload,
     Close,
     Layout,
+    Bindings(bindings::Signal),
 }
 fn emit(action: UiAction) {
     post(Event::OptionsUi(action));
@@ -105,7 +108,9 @@ unsafe extern "system" fn procedure(
         WM_COMMAND => {
             let id = wparam & 0xffff;
             let code = (wparam >> 16) as u32;
-            if (INPUT_BASE..INPUT_BASE + 10).contains(&id) {
+            if let Some(signal) = bindings::command(id, code) {
+                emit(UiAction::Bindings(signal));
+            } else if (INPUT_BASE..INPUT_BASE + 10).contains(&id) {
                 if !SYNCING.with(Cell::get) && matches!(code, EN_CHANGE | CBN_SELCHANGE) {
                     emit(UiAction::Changed(id - INPUT_BASE));
                 } else if matches!(code, EN_SETFOCUS | CBN_SETFOCUS) {
@@ -115,6 +120,7 @@ unsafe extern "system" fn procedure(
                 match id {
                     1 => emit(UiAction::Tab(0)),
                     2 => emit(UiAction::Tab(1)),
+                    6 => emit(UiAction::Tab(2)),
                     3 => emit(UiAction::Reset),
                     4 => emit(UiAction::Close),
                     5 => emit(UiAction::Reload),
@@ -141,7 +147,11 @@ unsafe extern "system" fn edit_proc(
     match message {
         WM_IME_ENDCOMPOSITION => {
             COMPOSING.with(|c| c.set(0));
-            emit(UiAction::Changed(id));
+            if let Some(signal) = bindings::command(id, EN_CHANGE) {
+                emit(UiAction::Bindings(signal));
+            } else {
+                emit(UiAction::Changed(id));
+            }
         }
         WM_NCDESTROY => {
             if COMPOSING.with(Cell::get) == window as isize {
@@ -167,7 +177,8 @@ struct Row {
 pub(crate) struct Panel {
     pub(super) edit_id: Uuid,
     window: HWND,
-    tabs: [HWND; 2],
+    tabs: [HWND; 3],
+    bindings: Option<bindings::Bindings>,
     heading: HWND,
     viewport: HWND,
     groups: Vec<(usize, HWND)>,
@@ -225,7 +236,8 @@ impl Panel {
             let mut p = Self {
                 edit_id: Uuid::nil(),
                 window,
-                tabs: [std::ptr::null_mut(); 2],
+                tabs: [std::ptr::null_mut(); 3],
+                bindings: None,
                 heading: std::ptr::null_mut(),
                 viewport: std::ptr::null_mut(),
                 groups: vec![],
@@ -253,6 +265,7 @@ impl Panel {
                     2,
                     WS_TABSTOP | BS_PUSHLIKE as u32 | BS_AUTORADIOBUTTON as u32,
                 )?,
+                p.child("BUTTON", "Keybindings", 6, WS_TABSTOP)?,
             ];
             p.heading = p.child("STATIC", "", 20, SS_NOPREFIX)?;
             p.status = p.child("STATIC", "", 21, SS_NOPREFIX)?;
@@ -339,6 +352,7 @@ impl Panel {
                 "Color theme",
                 vec![("Dark", "dark"), ("Light", "light")],
             )?;
+            p.bindings = Some(bindings::Bindings::new(&p)?);
             p.layout();
             Ok(p)
         }
@@ -382,6 +396,8 @@ impl Panel {
                     hwnd,
                     if class == "STATIC" {
                         chrome::ControlRole::Static
+                    } else if class == "LISTBOX" {
+                        chrome::ControlRole::Listbox
                     } else {
                         chrome::ControlRole::Edit
                     },
@@ -484,6 +500,10 @@ impl Panel {
             // generation until completion; never reload over a newer edit.
             if self.pending.is_none()
                 && COMPOSING.with(Cell::get) == 0
+                && !self
+                    .bindings
+                    .as_ref()
+                    .is_some_and(bindings::Bindings::has_draft)
                 && self.rows.iter().all(|row| {
                     row.due.is_none() && row.error.is_none() && Self::value(row) == row.baseline
                 })
@@ -502,6 +522,9 @@ impl Panel {
     }
     pub(super) fn reload(&mut self, document: &crate::settings::Document, error: Option<&str>) {
         self.shell = document.default_shell.clone();
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.reload(document);
+        }
         for row in &mut self.rows {
             let value = row
                 .key
@@ -524,7 +547,7 @@ impl Panel {
         }
     }
     pub(super) fn select(&mut self, page: usize) {
-        if page < 2 {
+        if page < 3 {
             self.page = page;
             self.scroll.set(0);
             self.layout();
@@ -549,7 +572,13 @@ impl Panel {
         self.schedule();
     }
     fn schedule(&self) {
-        if self.pending.is_none() && self.rows.iter().any(|row| row.due.is_some()) {
+        if self.pending.is_none()
+            && (self.rows.iter().any(|row| row.due.is_some())
+                || self
+                    .bindings
+                    .as_ref()
+                    .is_some_and(bindings::Bindings::queued))
+        {
             unsafe {
                 SetTimer(self.window, SAVE_TIMER, 50, None);
             }
@@ -567,8 +596,22 @@ impl Panel {
                 }
             }
         }
+        if self
+            .bindings
+            .as_ref()
+            .is_some_and(bindings::Bindings::queued)
+        {
+            return Some(bindings::SAVE_INDEX);
+        }
         self.schedule();
         None
+    }
+    pub(super) fn bindings_signal(&mut self, signal: bindings::Signal) {
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.signal(signal, self.pending.is_none());
+        }
+        self.enable();
+        self.schedule();
     }
     pub(super) fn operation(
         &self,
@@ -580,6 +623,13 @@ impl Panel {
             COMPOSING.with(Cell::get) == 0,
             "finish text composition before changing a setting"
         );
+        if index == bindings::SAVE_INDEX {
+            return self
+                .bindings
+                .as_ref()
+                .context("Keybindings page unavailable")?
+                .operation(document);
+        }
         let row = self.rows.get(index).context("Options field not found")?;
         let value = Self::value(row);
         if let Some(key) = row.key {
@@ -618,6 +668,11 @@ impl Panel {
     pub(super) fn begin(&mut self, index: usize) {
         let value = self.rows.get(index).map(Self::value).unwrap_or_default();
         self.pending = Some((index, value));
+        if index == bindings::SAVE_INDEX {
+            if let Some(bindings) = self.bindings.as_mut() {
+                bindings.begin();
+            }
+        }
         if index == usize::MAX {
             for row in &mut self.rows {
                 row.due = None;
@@ -628,6 +683,11 @@ impl Panel {
         self.enable();
     }
     pub(super) fn failed(&mut self, index: usize, error: &str) {
+        if index == bindings::SAVE_INDEX {
+            if let Some(bindings) = self.bindings.as_mut() {
+                bindings.failed(error);
+            }
+        }
         if let Some(row) = self.rows.get_mut(index) {
             row.error = Some(error.into());
         }
@@ -645,6 +705,15 @@ impl Panel {
             InvalidateRect(self.window, std::ptr::null(), 1);
         }
         let applied = if completed { self.pending.take() } else { None };
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.update(
+                document,
+                error,
+                applied
+                    .as_ref()
+                    .is_some_and(|(index, _)| *index == bindings::SAVE_INDEX),
+            );
+        }
         let mut shell_baseline_updated = false;
         for (index, row) in self.rows.iter_mut().enumerate() {
             let value = row
@@ -700,6 +769,9 @@ impl Panel {
                 .is_some_and(|(index, _)| *index == usize::MAX);
             for row in &self.rows {
                 EnableWindow(row.input, i32::from(!resetting));
+            }
+            if let Some(bindings) = self.bindings.as_ref() {
+                bindings.enable(self.pending.is_none());
             }
             EnableWindow(self.reset, i32::from(self.pending.is_none()));
             EnableWindow(self.reload, i32::from(self.pending.is_none()));
@@ -776,8 +848,10 @@ impl Panel {
                 self.heading,
                 wide(if self.page == 0 {
                     "Terminal appearance and behavior"
-                } else {
+                } else if self.page == 1 {
                     "Terminal and native window colors"
+                } else {
+                    "Keyboard shortcuts for terminal input"
                 })
                 .as_ptr(),
             );
@@ -790,7 +864,7 @@ impl Panel {
                 client.right - px(40),
                 viewport_height,
             );
-            let content_height = if self.page == 0 { px(562) } else { px(94) };
+            let content_height = if self.page == 1 { px(94) } else { px(562) };
             let offset = self
                 .scroll
                 .get()
@@ -872,10 +946,21 @@ impl Panel {
                 px(90),
                 px(28),
             );
+            ShowWindow(self.viewport, SW_SHOWNA);
+            ShowWindow(self.reset, if self.page < 2 { SW_SHOWNA } else { SW_HIDE });
+            if let Some(bindings) = self.bindings.as_ref() {
+                bindings.layout(
+                    self.page == 2,
+                    view.right,
+                    content_height,
+                    GetDpiForWindow(self.window),
+                    offset,
+                );
+            }
         }
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":if self.page==0{"general"}else{"theme"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize}],"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         if COMPOSING.with(Cell::get) != 0 || message.wParam == 229 {
@@ -895,12 +980,19 @@ impl Panel {
                 emit(UiAction::Close);
                 return true;
             }
-            if self.rows.iter().any(|row| {
-                row.choices.is_empty()
-                    && message.hwnd == row.input
-                    && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
-                    && message.wParam == 13
-            }) {
+            if (self
+                .bindings
+                .as_ref()
+                .is_some_and(|bindings| bindings.editing(message.hwnd))
+                && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+                && message.wParam == 13)
+                || self.rows.iter().any(|row| {
+                    row.choices.is_empty()
+                        && message.hwnd == row.input
+                        && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+                        && message.wParam == 13
+                })
+            {
                 return false;
             }
             IsDialogMessageW(self.window, message) != 0

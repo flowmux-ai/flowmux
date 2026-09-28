@@ -40,6 +40,7 @@ pub enum ClientMessage {
     SettingsApplied {
         revision: Uuid,
         terminal: crate::settings::TerminalSettings,
+        bindings: Vec<crate::keybindings::Binding>,
         background: String,
         foreground: String,
     },
@@ -68,11 +69,16 @@ pub enum ClientMessage {
         sequence: u64,
     },
     Focus,
-    FocusDirection {
-        direction: crate::command::FocusDirection,
+    Shortcut {
+        action: String,
+        chord: crate::keybindings::Chord,
+        revision: Uuid,
     },
-    TogglePaneZoom,
-    ToggleOverview,
+    #[cfg(debug_assertions)]
+    ShortcutTested {
+        request: Uuid,
+        forwarded: bool,
+    },
     Title {
         title: String,
     },
@@ -151,6 +157,7 @@ pub enum HostMessage {
     },
     Settings {
         document: crate::settings::Document,
+        bindings: Vec<crate::keybindings::Binding>,
     },
     Output {
         sequence: u64,
@@ -171,7 +178,14 @@ pub enum HostMessage {
         close: bool,
         focus: bool,
     },
-    OpenFind,
+    OpenFind {
+        focus: bool,
+    },
+    #[cfg(debug_assertions)]
+    TestShortcut {
+        request: Uuid,
+        event: serde_json::Value,
+    },
     SearchBuffer {
         search: Uuid,
         after: u64,

@@ -14,13 +14,15 @@ export function options(settings) {
 // Apply only the newest desired settings after composition/restore has ended.
 // No focus calls, synthetic input or terminal recreation belong in this path.
 export class Settings {
-  constructor(terminal, fit, send, blocked, changed, document, minimap) {
-    Object.assign(this,{terminal,fit,send,blocked,changed,document,minimap}); this.pending=null;
+  constructor(terminal, fit, send, blocked, changed, document, minimap, shortcuts) {
+    Object.assign(this,{terminal,fit,send,blocked,changed,document,minimap,shortcuts}); this.pending=null;
   }
-  receive(document) { this.pending=document; this.flush(); }
+  receive(document, bindings) { this.pending={ document, bindings }; this.flush(); }
   flush() {
     if (!this.pending || this.blocked()) return;
-    const desired=this.pending; this.pending=null;
+    const {document:desired,bindings}=this.pending;
+    this.shortcuts?.configure(desired.revision,bindings);
+    this.pending=null;
     const settings=desired.terminal, opts=options(settings);
     for (const [key,value] of Object.entries(opts)) this.terminal.options[key]=value;
     const theme=this.terminal.options.theme;
@@ -29,7 +31,7 @@ export class Settings {
     this.minimap?.configure(settings);
     this.changed(); this.fit();
     const actual=this.terminal.options;
-    this.send({type:'settings_applied',revision:desired.revision,
+    this.send({type:'settings_applied',revision:desired.revision,bindings:this.shortcuts?.snapshot() ?? [],
       terminal:{font_family:actual.fontFamily,font_size:actual.fontSize,theme:settings.theme,
         scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle,
         minimap_enabled:settings.minimap_enabled,minimap_width:settings.minimap_width,minimap_opacity:settings.minimap_opacity},

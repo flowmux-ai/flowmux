@@ -1,0 +1,564 @@
+{
+  "stage": "native-keybindings",
+  "status": "frozen",
+  "artifacts": {
+    "89716967bf4e-result.json": {
+      "source": "windows/dist/checks/keybindings-clippy-a7d7fa79-1c38-4b49-89c5-001bd19f49d0/result.json",
+      "source_bytes": 2593,
+      "source_sha256": "800f954651d61fe1043e85436c905a6bb9165cd8c716865c3712d4fc8f1a7308",
+      "bytes": 2593,
+      "sha256": "800f954651d61fe1043e85436c905a6bb9165cd8c716865c3712d4fc8f1a7308"
+    },
+    "e8849541a8fb-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-clippy-a7d7fa79-1c38-4b49-89c5-001bd19f49d0/stdout.txt",
+      "source_bytes": 2304,
+      "source_sha256": "cc193b7aa33cea59d0012cb15e5d0fe156cc9e39e110c969c881317553d196d9",
+      "bytes": 2304,
+      "sha256": "cc193b7aa33cea59d0012cb15e5d0fe156cc9e39e110c969c881317553d196d9"
+    },
+    "3dfc7833dd77-result.json": {
+      "source": "windows/dist/checks/keybindings-clippy-fixed-4c422816-2973-4fde-902b-f5d60a11a1b1/result.json",
+      "source_bytes": 2597,
+      "source_sha256": "45d53088d8fae92efe95391414690b45982833fc2375c9ad09c13206c5258e55",
+      "bytes": 2597,
+      "sha256": "45d53088d8fae92efe95391414690b45982833fc2375c9ad09c13206c5258e55"
+    },
+    "e847246f0afd-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-clippy-fixed-4c422816-2973-4fde-902b-f5d60a11a1b1/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "0189afa1aa865c3ebd39891fa642c325ee444cdf456d3496dbea91783065c2d4",
+      "bytes": 216,
+      "sha256": "0189afa1aa865c3ebd39891fa642c325ee444cdf456d3496dbea91783065c2d4"
+    },
+    "86ceafc16a51-result.json": {
+      "source": "windows/dist/checks/keybindings-debug-8bbdaa34-fdd9-4f03-bcb3-97c9f6433f37/result.json",
+      "source_bytes": 2610,
+      "source_sha256": "bb260f87d19259b6f20750734608f945cdca8d43b49a1903f5d15f90506e27d1",
+      "bytes": 2610,
+      "sha256": "bb260f87d19259b6f20750734608f945cdca8d43b49a1903f5d15f90506e27d1"
+    },
+    "ba84a8d564c7-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-debug-8bbdaa34-fdd9-4f03-bcb3-97c9f6433f37/stdout.txt",
+      "source_bytes": 372,
+      "source_sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b",
+      "bytes": 372,
+      "sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b"
+    },
+    "1c16677427f0-result.json": {
+      "source": "windows/dist/checks/keybindings-native-c6d81f79-b78e-47af-9456-c16e33196398/result.json",
+      "source_bytes": 489,
+      "source_sha256": "a24eea039c511f18c29938f6c837abf753bde07969da26969dcfc6a2ede76f8e",
+      "bytes": 473,
+      "sha256": "a830e8448b2d664be35c2528ccd3612c2465421d721636d8167eeb28dec91f11"
+    },
+    "2fc3316a2dd3-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-native-c6d81f79-b78e-47af-9456-c16e33196398/stdout.txt",
+      "source_bytes": 174,
+      "source_sha256": "b9472d19519fce6903cd87506b50b1f7f55a442a418da7a15628f3e66a86bfd3",
+      "bytes": 173,
+      "sha256": "5270b52f04040557d0fc876b75da09663d29b27f541adbc08c849abb2839bcf2"
+    },
+    "79aa5b72a217-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-native-c6d81f79-b78e-47af-9456-c16e33196398/stderr.txt",
+      "source_bytes": 543,
+      "source_sha256": "233f2197cd0d74ebb077bc3bcfaa68067a625b2a90d9d60331757479d82a74ae",
+      "bytes": 533,
+      "sha256": "af54f6316e3469342cc47c2bdb637a7ef36e59d5cb58c07c2aad95267580cfbd"
+    },
+    "d20920739729-result.json": {
+      "source": "windows/dist/checks/keybindings-native-final-b8f17d6c-4b2c-4625-9acd-dbc2cfc87feb/result.json",
+      "source_bytes": 493,
+      "source_sha256": "d2a43d1d4f6a6ad6cd2cd0f998d5d41c18fea429d425dc10626d6cb101c0f86f",
+      "bytes": 477,
+      "sha256": "e0e82f7145847e75705f2b9247ba348b715506a4b4b302b98c84e2710272b0c3"
+    },
+    "50401f4c256d-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-native-final-b8f17d6c-4b2c-4625-9acd-dbc2cfc87feb/stdout.txt",
+      "source_bytes": 223,
+      "source_sha256": "56d747f158f58e96853c8a373ca08e1fd97c4acf865bb6689dabaaf1636954b2",
+      "bytes": 221,
+      "sha256": "fa6705a5b4e3a5374d3e73624d7b288885046af26591c83f6112f0a08ffad00a"
+    },
+    "5adb31ccd134-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-native-final-b8f17d6c-4b2c-4625-9acd-dbc2cfc87feb/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "072a43efb688-result.json": {
+      "source": "windows/dist/checks/keybindings-native-notify-94e62d58-7e0e-4abc-8d1a-eadb3b076619/result.json",
+      "source_bytes": 495,
+      "source_sha256": "f3a64a5199cbb3e48aa06af991a34c667ff92a9729fbb4662d4a6db01993dff8",
+      "bytes": 479,
+      "sha256": "972fca132f1197ce166eab7c81b8217a53f2c6b0b571dca5679890af9d08c00c"
+    },
+    "6292339a7932-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-native-notify-94e62d58-7e0e-4abc-8d1a-eadb3b076619/stdout.txt",
+      "source_bytes": 223,
+      "source_sha256": "99d3b85ac3ac366a907d826ed7a9c353fcc668255ce9595cf85b5a7dca94dc54",
+      "bytes": 221,
+      "sha256": "d4e2b120249e5744b73f4b85997616c5f949c0b2121fdd4f5ce33d6028542c04"
+    },
+    "c66bf565a0b0-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-native-notify-94e62d58-7e0e-4abc-8d1a-eadb3b076619/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "304d45519d8d-result.json": {
+      "source": "windows/dist/checks/keybindings-node-68c153b4-dd4d-4c40-9809-d87b71148c01/result.json",
+      "source_bytes": 284,
+      "source_sha256": "c08a43ad47cf2ec223093013246169dfb748bcbce3a70968491166a4f8a5176e",
+      "bytes": 284,
+      "sha256": "c08a43ad47cf2ec223093013246169dfb748bcbce3a70968491166a4f8a5176e"
+    },
+    "682d5987b5bb-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-node-68c153b4-dd4d-4c40-9809-d87b71148c01/stdout.txt",
+      "source_bytes": 2206,
+      "source_sha256": "9a402b41aa5eb265c769682c098577408eaa02b145eddd60fc16c03a07fc07d7",
+      "bytes": 2206,
+      "sha256": "9a402b41aa5eb265c769682c098577408eaa02b145eddd60fc16c03a07fc07d7"
+    },
+    "2feb04b02407-result.json": {
+      "source": "windows/dist/checks/keybindings-options-regression-16611fa9-799a-4243-b38c-5e457dd8f575/result.json",
+      "source_bytes": 508,
+      "source_sha256": "528b1a91f1b27cfa2acb0f9ef2200fe6ed9ce7948a07104d9bad799acbbfded8",
+      "bytes": 492,
+      "sha256": "36bd3aaa6a8f6372dd7d0f4993d473e1d6db7b32ce3086e0f7f0daddf02a1557"
+    },
+    "2b81fad22170-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-options-regression-16611fa9-799a-4243-b38c-5e457dd8f575/stdout.txt",
+      "source_bytes": 251,
+      "source_sha256": "f8fb68fbbddbd39aa35b58c8dbdb29c9ad77c39b11ef7a1c9997340eeaeb62d8",
+      "bytes": 249,
+      "sha256": "1d1bca3129d50099ccece2fcefb2897e7a5f8f7fba591a4afe92e360c59c08b0"
+    },
+    "2200f3d9640e-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-options-regression-16611fa9-799a-4243-b38c-5e457dd8f575/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "e65c2baf9d2e-result.json": {
+      "source": "windows/dist/checks/keybindings-package-fdfedd8d-1b1e-4e98-975e-424798ff86c5/result.json",
+      "source_bytes": 561,
+      "source_sha256": "0794925f3def20f6627d5557e012dbfacc99a28679fde2d55c1f2382103929e2",
+      "bytes": 561,
+      "sha256": "0794925f3def20f6627d5557e012dbfacc99a28679fde2d55c1f2382103929e2"
+    },
+    "9429fac7eecb-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-package-fdfedd8d-1b1e-4e98-975e-424798ff86c5/stdout.txt",
+      "source_bytes": 1323,
+      "source_sha256": "fa9ae8cf027adcfe5013bd4291d0994337dbdca68dd0020c3d3b86c25b5af4c6",
+      "bytes": 1323,
+      "sha256": "fa9ae8cf027adcfe5013bd4291d0994337dbdca68dd0020c3d3b86c25b5af4c6"
+    },
+    "7ffbbb0a88a8-result.json": {
+      "source": "windows/dist/checks/keybindings-release-b0a01c94-4908-4fa4-bda8-e54928a5e770/result.json",
+      "source_bytes": 2650,
+      "source_sha256": "f07656744e40b07b998c9d2963701d4f0d9831040088cf25801810de345e4b5c",
+      "bytes": 2650,
+      "sha256": "f07656744e40b07b998c9d2963701d4f0d9831040088cf25801810de345e4b5c"
+    },
+    "48c4dc340f2b-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-release-b0a01c94-4908-4fa4-bda8-e54928a5e770/stdout.txt",
+      "source_bytes": 374,
+      "source_sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df",
+      "bytes": 374,
+      "sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df"
+    },
+    "a147fb0f1106-result.json": {
+      "source": "windows/dist/checks/keybindings-release-doctor-4415d05f-2d46-46f0-b58b-2617bf74276e/result.json",
+      "source_bytes": 507,
+      "source_sha256": "726f0fa8b53d3fca1b0ae3cf45a535c1efddf0d900db03e2ac93adb1dc44ffbf",
+      "bytes": 491,
+      "sha256": "ab05fb56ee42b5692f86fe3f68030d1b363a9d75a450ca3efd96272a95125791"
+    },
+    "d8770f804457-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-release-doctor-4415d05f-2d46-46f0-b58b-2617bf74276e/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f"
+    },
+    "e0c7ac503180-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-release-doctor-4415d05f-2d46-46f0-b58b-2617bf74276e/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "59ae757d39f1-result.json": {
+      "source": "windows/dist/checks/keybindings-terminal-build-59d8d70d-926e-4271-933c-55c8d342603e/result.json",
+      "source_bytes": 245,
+      "source_sha256": "cdfa140d1e893fb4e98908da3031385d850fd6d86a83ff0a25ffbd241066f683",
+      "bytes": 245,
+      "sha256": "cdfa140d1e893fb4e98908da3031385d850fd6d86a83ff0a25ffbd241066f683"
+    },
+    "7321abe8667b-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-terminal-build-59d8d70d-926e-4271-933c-55c8d342603e/stdout.txt",
+      "source_bytes": 59,
+      "source_sha256": "034e31158fab94a3330a6799f17e4475f3221d43290a04a70e47e0cd56cccf4d",
+      "bytes": 58,
+      "sha256": "9693cdfe1c00e426329edb76b956b7c7b9518056673bb188ddc090826c15e571"
+    },
+    "948aafcc2c09-result.json": {
+      "source": "windows/dist/checks/keybindings-terminal-regression-e4f35eb8-f869-4242-8e7e-a5c4e96dbd54/result.json",
+      "source_bytes": 237,
+      "source_sha256": "f4222ecfbc3d96a48dfd74b6115a7d2a34b1542376289402c3220685bf625b35",
+      "bytes": 237,
+      "sha256": "f4222ecfbc3d96a48dfd74b6115a7d2a34b1542376289402c3220685bf625b35"
+    },
+    "bc111b4e946f-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-terminal-regression-e4f35eb8-f869-4242-8e7e-a5c4e96dbd54/stdout.txt",
+      "source_bytes": 14601,
+      "source_sha256": "ca85f7b3376cca72f9033121de75f89041b5596ac4b04a110d5f2bcdde1ea5d3",
+      "bytes": 14601,
+      "sha256": "ca85f7b3376cca72f9033121de75f89041b5596ac4b04a110d5f2bcdde1ea5d3"
+    },
+    "c6c1f49cc193-result.json": {
+      "source": "windows/dist/checks/keybindings-unit-native-16b9eeb5-f190-4a63-b523-f1f4b841e5f2/result.json",
+      "source_bytes": 498,
+      "source_sha256": "eba73883e69e7cddce18b3957cc3abef19ba9a8becd2a3861618b2add3bb7d8c",
+      "bytes": 482,
+      "sha256": "125f9b19dd1e07c4ad25f073fa245a8091841b21dcfad44074d9052c942fb978"
+    },
+    "d21ed34aa455-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-unit-native-16b9eeb5-f190-4a63-b523-f1f4b841e5f2/stdout.txt",
+      "source_bytes": 3205,
+      "source_sha256": "e894fd7bef53a08b3339233928e7e599a22dc41ebf932f3cc1cb2c581ac591e4",
+      "bytes": 3199,
+      "sha256": "270cba354bf912786f6d98d6dc970d0eccdbfa38f76e9ac408bee5ef81c6fa40"
+    },
+    "5624b8164787-stderr.txt": {
+      "source": "windows/dist/checks/keybindings-unit-native-16b9eeb5-f190-4a63-b523-f1f4b841e5f2/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "73e90d72376b-result.json": {
+      "source": "windows/dist/checks/keybindings-units-build-1ea9a790-706d-4772-a5cf-9774b14af2a4/result.json",
+      "source_bytes": 2563,
+      "source_sha256": "2a7a3856a10da07509fdc0b8e85d7b6247b181c86fbd0316ed111771bdcb0822",
+      "bytes": 2563,
+      "sha256": "2a7a3856a10da07509fdc0b8e85d7b6247b181c86fbd0316ed111771bdcb0822"
+    },
+    "20cdec5f3f73-stdout.txt": {
+      "source": "windows/dist/checks/keybindings-units-build-1ea9a790-706d-4772-a5cf-9774b14af2a4/stdout.txt",
+      "source_bytes": 339,
+      "source_sha256": "d31e6d8a68094649198e79b17d45e679fd5b9eaeb147d9e5680d4c4fbf36d463",
+      "bytes": 339,
+      "sha256": "d31e6d8a68094649198e79b17d45e679fd5b9eaeb147d9e5680d4c4fbf36d463"
+    },
+    "7f1df0a546ff-native-keybindings-background.json": {
+      "source": "windows/dist/evidence/keybindings-518a4489-9e0a-4195-ace4-e8b4a7093227/native-keybindings-background.json",
+      "source_bytes": 1486351,
+      "source_sha256": "6ab5149f9f10701a826c9027503b4e09d0718096b0c766542cf456dd6ef4546f",
+      "bytes": 1472306,
+      "sha256": "73607e71f3a7d4f1676cc4b7a9cd77167381998e855dc938a67111af0c19cca5"
+    },
+    "d76007028c49-native-keybindings-background.json": {
+      "source": "windows/dist/evidence/keybindings-b12a0918-fa54-4b93-952d-91e9b41964cd/native-keybindings-background.json",
+      "source_bytes": 1238813,
+      "source_sha256": "ce3a8a9ac79c90bb58ae17ccac331754e3bfefc89acedb4a66945e602646a939",
+      "bytes": 1227178,
+      "sha256": "2ad336d353d0b47bcb4ac928a560f4eed8154fb293d603488e18b16aaad50750"
+    },
+    "6055b7299400-native-keybindings-background.json": {
+      "source": "windows/dist/evidence/keybindings-f90c3b29-be1f-4972-8a42-50c094cc831f/native-keybindings-background.json",
+      "source_bytes": 1486673,
+      "source_sha256": "9fed29d4235fdad1fa7cdd9a40be8f2158e12b64e91c9130e873b0a633783bd7",
+      "bytes": 1472628,
+      "sha256": "c2828af7f6c3777f2d98faa38aba067900ca3a3cc93165429b32134dd03a2b00"
+    },
+    "ba7965e2a4d0-native-options-live-background.json": {
+      "source": "windows/dist/evidence/options-live-9ad0da9c-a13f-47d8-a0fc-4171559d2557/native-options-live-background.json",
+      "source_bytes": 1805536,
+      "source_sha256": "2f39d32d7f01ff55436b1fdb2cec89568b50e523dfc0ad4a89c2402f4f9f05e0",
+      "bytes": 1788109,
+      "sha256": "e9f44125acbe48d1bf96fbb752f3df004a2abe597b6157c05bcf624c14096209"
+    },
+    "4c8864455f1b-keybindings-source.json": {
+      "source": "windows/dist/keybindings-source.json",
+      "source_bytes": 15607,
+      "source_sha256": "6749a32482ff7fa0f8becb5b38df97d8ec8c8081193298485601b0e4c3a4b606",
+      "bytes": 15607,
+      "sha256": "6749a32482ff7fa0f8becb5b38df97d8ec8c8081193298485601b0e4c3a4b606"
+    },
+    "32886d111e5a-keybindings-verifiers-source.json": {
+      "source": "windows/dist/keybindings-verifiers-source.json",
+      "source_bytes": 1297,
+      "source_sha256": "da4fd0ac461c408842fcfa92a36d6cadd367f2700df6bceb2386a95221206300",
+      "bytes": 1297,
+      "sha256": "da4fd0ac461c408842fcfa92a36d6cadd367f2700df6bceb2386a95221206300"
+    },
+    "3d8f2ca72f1d-keybindings-debug-staging.json": {
+      "source": "windows/dist/keybindings-debug-staging.json",
+      "source_bytes": 2272,
+      "source_sha256": "0150b0284f13a26edf2f2f3e46c5795ae52b982900e71caf1edbb023abc84f97",
+      "bytes": 2272,
+      "sha256": "0150b0284f13a26edf2f2f3e46c5795ae52b982900e71caf1edbb023abc84f97"
+    },
+    "e95ea06737a0-keybindings-release-staging.json": {
+      "source": "windows/dist/keybindings-release-staging.json",
+      "source_bytes": 2298,
+      "source_sha256": "f37fb23fb7f231e4d3ffba42f9317b2b93bab7193786c216a1efdf3b4e253926",
+      "bytes": 2298,
+      "sha256": "f37fb23fb7f231e4d3ffba42f9317b2b93bab7193786c216a1efdf3b4e253926"
+    },
+    "3725b891011e-keybindings-tests-staging.json": {
+      "source": "windows/dist/keybindings-tests-staging.json",
+      "source_bytes": 935,
+      "source_sha256": "c42c486939fa34506ff53db0303e7cfe8a88362154412b4eb143be07be9a3e43",
+      "bytes": 935,
+      "sha256": "c42c486939fa34506ff53db0303e7cfe8a88362154412b4eb143be07be9a3e43"
+    },
+    "5743bc86cda4-keybindings-unit-evidence.json": {
+      "source": "windows/dist/keybindings-unit-evidence.json",
+      "source_bytes": 4995,
+      "source_sha256": "9ea4ceb579e43cb1ad0e04f6ba41d51e6b9f5f10e58f329d581589c561240453",
+      "bytes": 4947,
+      "sha256": "e6c0fc0dfbafff523234cbf0e315641374c465dfb5e650d6f1bce0e00b83084b"
+    },
+    "0a54aaa4a161-native-keybindings-release-entrypoints.json": {
+      "source": "windows/evidence/2026-09-28/native-keybindings-release-entrypoints.json",
+      "source_bytes": 1361,
+      "source_sha256": "f88c520b4760f4e7390da34c1b4cc313f1eb5d2bbe4e49595660bbea7ee77e1a",
+      "bytes": 1317,
+      "sha256": "36185588e1dd5fa4df400b52c33dcef04ef09e7aa515f1ef1461f6a447bca75a"
+    }
+  },
+  "checks": {
+    "windows/dist/checks/keybindings-clippy-a7d7fa79-1c38-4b49-89c5-001bd19f49d0/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 23.918,
+      "files": {
+        "result": "89716967bf4e-result.json",
+        "stdout.txt": "e8849541a8fb-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-clippy-fixed-4c422816-2973-4fde-902b-f5d60a11a1b1/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 24.736,
+      "files": {
+        "result": "3dfc7833dd77-result.json",
+        "stdout.txt": "e847246f0afd-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-debug-8bbdaa34-fdd9-4f03-bcb3-97c9f6433f37/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 88.667,
+      "files": {
+        "result": "86ceafc16a51-result.json",
+        "stdout.txt": "ba84a8d564c7-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-native-c6d81f79-b78e-47af-9456-c16e33196398/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 12.124,
+      "files": {
+        "result": "1c16677427f0-result.json",
+        "stdout.txt": "2fc3316a2dd3-stdout.txt",
+        "stderr.txt": "79aa5b72a217-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-native-final-b8f17d6c-4b2c-4625-9acd-dbc2cfc87feb/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 7.597,
+      "files": {
+        "result": "d20920739729-result.json",
+        "stdout.txt": "50401f4c256d-stdout.txt",
+        "stderr.txt": "5adb31ccd134-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-native-notify-94e62d58-7e0e-4abc-8d1a-eadb3b076619/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 8.326,
+      "files": {
+        "result": "072a43efb688-result.json",
+        "stdout.txt": "6292339a7932-stdout.txt",
+        "stderr.txt": "c66bf565a0b0-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-node-68c153b4-dd4d-4c40-9809-d87b71148c01/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.309,
+      "files": {
+        "result": "304d45519d8d-result.json",
+        "stdout.txt": "682d5987b5bb-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-options-regression-16611fa9-799a-4243-b38c-5e457dd8f575/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 9.238,
+      "files": {
+        "result": "2feb04b02407-result.json",
+        "stdout.txt": "2b81fad22170-stdout.txt",
+        "stderr.txt": "2200f3d9640e-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-package-fdfedd8d-1b1e-4e98-975e-424798ff86c5/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 12.369,
+      "files": {
+        "result": "e65c2baf9d2e-result.json",
+        "stdout.txt": "9429fac7eecb-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-release-b0a01c94-4908-4fa4-bda8-e54928a5e770/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 117.125,
+      "files": {
+        "result": "7ffbbb0a88a8-result.json",
+        "stdout.txt": "48c4dc340f2b-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-release-doctor-4415d05f-2d46-46f0-b58b-2617bf74276e/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.964,
+      "files": {
+        "result": "a147fb0f1106-result.json",
+        "stdout.txt": "d8770f804457-stdout.txt",
+        "stderr.txt": "e0c7ac503180-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-terminal-build-59d8d70d-926e-4271-933c-55c8d342603e/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 2.022,
+      "files": {
+        "result": "59ae757d39f1-result.json",
+        "stdout.txt": "7321abe8667b-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-terminal-regression-e4f35eb8-f869-4242-8e7e-a5c4e96dbd54/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.02,
+      "files": {
+        "result": "948aafcc2c09-result.json",
+        "stdout.txt": "bc111b4e946f-stdout.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-unit-native-16b9eeb5-f190-4a63-b523-f1f4b841e5f2/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.271,
+      "files": {
+        "result": "c6c1f49cc193-result.json",
+        "stdout.txt": "d21ed34aa455-stdout.txt",
+        "stderr.txt": "5624b8164787-stderr.txt"
+      }
+    },
+    "windows/dist/checks/keybindings-units-build-1ea9a790-706d-4772-a5cf-9774b14af2a4/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 82.599,
+      "files": {
+        "result": "73e90d72376b-result.json",
+        "stdout.txt": "20cdec5f3f73-stdout.txt"
+      }
+    }
+  },
+  "native": {
+    "windows/dist/evidence/keybindings-518a4489-9e0a-4195-ace4-e8b4a7093227/native-keybindings-background.json": {
+      "original_status": "passed",
+      "acceptance": "hidden_native_subset_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "7f1df0a546ff-native-keybindings-background.json"
+      }
+    },
+    "windows/dist/evidence/keybindings-b12a0918-fa54-4b93-952d-91e9b41964cd/native-keybindings-background.json": {
+      "original_status": "failed",
+      "acceptance": "failed_or_incomplete",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "d76007028c49-native-keybindings-background.json"
+      }
+    },
+    "windows/dist/evidence/keybindings-f90c3b29-be1f-4972-8a42-50c094cc831f/native-keybindings-background.json": {
+      "original_status": "passed",
+      "acceptance": "superseded_by_final_strict_collision_run",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "6055b7299400-native-keybindings-background.json"
+      }
+    },
+    "windows/dist/evidence/options-live-9ad0da9c-a13f-47d8-a0fc-4171559d2557/native-options-live-background.json": {
+      "original_status": "passed_hidden_options_live_subset",
+      "acceptance": "hidden_native_subset_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "ba7965e2a4d0-native-options-live-background.json"
+      }
+    }
+  },
+  "hashes": {
+    "windows/dist/keybindings-debug/flowmux.exe#47ef0e2340cfb1913fa4ebaa383cfaf99da4b0c161971ad22f4f0b1184217134": {
+      "path": "windows/dist/keybindings-debug/flowmux.exe",
+      "bytes": 33244160,
+      "sha256": "47ef0e2340cfb1913fa4ebaa383cfaf99da4b0c161971ad22f4f0b1184217134"
+    },
+    "windows/dist/keybindings-debug/flowmuxctl.exe#2fd9e5764ec56c1c97fa709fc6ae511fcf08475def4f9653f271dce125dfc18e": {
+      "path": "windows/dist/keybindings-debug/flowmuxctl.exe",
+      "bytes": 3398144,
+      "sha256": "2fd9e5764ec56c1c97fa709fc6ae511fcf08475def4f9653f271dce125dfc18e"
+    },
+    "windows/dist/keybindings-debug/flowmux-command.exe#444e26718ca742c99eb2ed99e299c91094f98e128f8eaf4deb99bf607baeb6fb": {
+      "path": "windows/dist/keybindings-debug/flowmux-command.exe",
+      "bytes": 3509760,
+      "sha256": "444e26718ca742c99eb2ed99e299c91094f98e128f8eaf4deb99bf607baeb6fb"
+    },
+    "windows/dist/keybindings-release/flowmux.exe#d96e96e17da2f1ef83faaead99ed4a156f604445c1017cfec93fcd83bd53af95": {
+      "path": "windows/dist/keybindings-release/flowmux.exe",
+      "bytes": 22699520,
+      "sha256": "d96e96e17da2f1ef83faaead99ed4a156f604445c1017cfec93fcd83bd53af95"
+    },
+    "windows/dist/keybindings-release/flowmuxctl.exe#cf1b18d536abfe9b7ba6f37839fff1bc8f38dbe1d1137c6b70dbaa700fb2af91": {
+      "path": "windows/dist/keybindings-release/flowmuxctl.exe",
+      "bytes": 1944064,
+      "sha256": "cf1b18d536abfe9b7ba6f37839fff1bc8f38dbe1d1137c6b70dbaa700fb2af91"
+    },
+    "windows/dist/keybindings-release/flowmux-command.exe#f9a98a186feff74e0e2bc524651e56aa53e1c85b21dc232295ce5a622534d705": {
+      "path": "windows/dist/keybindings-release/flowmux-command.exe",
+      "bytes": 2002944,
+      "sha256": "f9a98a186feff74e0e2bc524651e56aa53e1c85b21dc232295ce5a622534d705"
+    },
+    "windows/dist/keybindings-tests/flowmux_windows-940f179605ae9006.exe#6fe8de40c65d00a57e3da2237b2f38bfd05174a1d1abdf8cd5df8bf450b5d2c2": {
+      "path": "windows/dist/keybindings-tests/flowmux_windows-940f179605ae9006.exe",
+      "bytes": 32120320,
+      "sha256": "6fe8de40c65d00a57e3da2237b2f38bfd05174a1d1abdf8cd5df8bf450b5d2c2"
+    },
+    "windows/dist/flowmux-windows-0.10.1-dev-keybindings-x64-setup.exe#503905258730eb70bd4c7d15955a3d19818d9fc82dc36f2aa2948e4e609f4b75": {
+      "path": "windows/dist/flowmux-windows-0.10.1-dev-keybindings-x64-setup.exe",
+      "bytes": 5980244,
+      "sha256": "503905258730eb70bd4c7d15955a3d19818d9fc82dc36f2aa2948e4e609f4b75"
+    }
+  },
+  "updated_utc": "2026-09-28T10:07:50.313836+00:00",
+  "acceptance": {
+    "feature_status": "U09 partial; 62 partial / 52 pending; no completed features",
+    "native_groups": {
+      "keybindings_final": 8,
+      "options_regression": 9
+    },
+    "windows_unit_tests": 32,
+    "node_tests": 62,
+    "duplicate_or_excluded": [
+      "Node focused subset 9 is included in the full 62, not additional.",
+      "First native Keybindings run failed after 6 groups and is excluded.",
+      "Intermediate passed Keybindings run is preserved; final strict-collision run replaces its acceptance.",
+      "Cargo debug/release publication failures remain failed; native runs used freshly linked and independently staged deps."
+    ],
+    "limitations": [
+      "Controlled native HWND messages and renderer-handler calls only; no physical OS keyboard, IME/TSF, clipboard or focus evidence.",
+      "Browser/editor/native-control shortcuts and full Linux binding presentation remain incomplete.",
+      "Installer was generated but not run."
+    ]
+  }
+}

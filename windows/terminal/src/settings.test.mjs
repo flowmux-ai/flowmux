@@ -2,19 +2,64 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Settings } from './settings.mjs';
-const documentFor=(revision,font_size,theme='dark')=>({revision,terminal:{font_size,theme,font_family:'"한글 한 😀", monospace',scrollback:1000,cursor_blink:false,cursor_style:'bar',minimap_enabled:true,minimap_width:40,minimap_opacity:50}});
-test('settings defer and coalesce across composition/restore without focus or input',()=>{
-  let blocked=true, fits=0, changes=0; const replies=[], maps=[];
-  const terminal={options:{fontSize:14},focus(){throw Error('focus stolen');},write(){throw Error('input/output changed');}};
-  const document={body:{style:{}}};
-  const controller=new Settings(terminal,()=>{ assert.equal(maps.at(-1).minimap_width,40); fits++; },message=>replies.push(message),()=>blocked,()=>changes++,document,{ configure: settings=>maps.push(settings) });
-  controller.receive(documentFor('old',20)); controller.receive(documentFor('new',24,'light'));
-  assert.equal(terminal.options.fontSize,14); assert.equal(replies.length,0);
-  assert.equal(maps.length,0);
-  blocked=false; controller.flush(); controller.flush();
-  assert.equal(terminal.options.fontSize,24); assert.equal(replies.length,1); assert.equal(replies[0].revision,'new');
-  assert.equal(replies[0].terminal.font_family,'"한글 한 😀", monospace');
-  assert.equal(replies[0].background,'#ffffff'); assert.equal(document.body.style.color,'#202124');
-  assert.equal(fits,1); assert.equal(changes,1);
-  assert.equal(maps.length,1); assert.equal(replies[0].terminal.minimap_opacity,50);
+import { PaneShortcuts } from './pane-shortcuts.mjs';
+const documentFor = (revision, font_size, theme = 'dark') => ({ revision, terminal: { font_size, theme,
+  font_family: '"한글 한 😀", monospace', scrollback: 1000, cursor_blink: false, cursor_style: 'bar',
+  minimap_enabled: true, minimap_width: 40, minimap_opacity: 50 } });
+const bindingsFor = code => [{ action: 'terminal-search', chord: { code, ctrl: true, alt: false, shift: true } }];
+const key = code => ({ type: 'keydown', key: code, code, ctrlKey: true, shiftKey: true });
+function fixture() {
+  const state = { blocked: false, fits: 0, changes: 0, replies: [], maps: [] };
+  const terminal = { options: { fontSize: 14 }, focus() { throw Error('focus stolen'); }, write() { throw Error('input/output changed'); } };
+  const document = { body: { style: {} } }, shortcuts = new PaneShortcuts();
+  const controller = new Settings(terminal, () => { assert.equal(state.maps.at(-1).minimap_width, 40); state.fits++; },
+    message => state.replies.push(message), () => state.blocked, () => state.changes++, document,
+    { configure: settings => state.maps.push(settings) }, shortcuts);
+  return { state, terminal, document, shortcuts, controller };
+}
+
+test('settings and bindings defer and coalesce across composition/restore without focus or input', () => {
+  const { state, terminal, document, shortcuts, controller } = fixture(); state.blocked = true;
+  controller.receive(documentFor('old', 20), bindingsFor('KeyF'));
+  controller.receive(documentFor('new', 24, 'light'), bindingsFor('KeyG'));
+  assert.equal(terminal.options.fontSize, 14); assert.equal(state.replies.length, 0);
+  assert.equal(state.maps.length, 0); assert.deepEqual(shortcuts.snapshot(), []);
+  state.blocked = false; controller.flush(); controller.flush();
+  assert.equal(terminal.options.fontSize, 24); assert.equal(state.replies.length, 1);
+  assert.equal(state.replies[0].revision, 'new'); assert.deepEqual(state.replies[0].bindings, bindingsFor('KeyG'));
+  assert.equal(state.replies[0].terminal.font_family, '"한글 한 😀", monospace');
+  assert.equal(state.replies[0].background, '#ffffff'); assert.equal(document.body.style.color, '#202124');
+  assert.equal(state.fits, 1); assert.equal(state.changes, 1);
+  assert.equal(state.maps.length, 1); assert.equal(state.replies[0].terminal.minimap_opacity, 50);
+  assert.equal(shortcuts.event(key('KeyF'), false), undefined);
+  assert.equal(shortcuts.event(key('KeyG'), false).revision, 'new');
+});
+
+test('shortcut messages retain the actually applied revision until the pending table is applied', () => {
+  const { state, shortcuts, controller } = fixture();
+  controller.receive(documentFor('revision-a', 16), bindingsFor('KeyF'));
+  state.blocked = true;
+  controller.receive(documentFor('revision-b', 18), bindingsFor('KeyG'));
+  // Host compares this revision against its current document and rejects stale requests.
+  assert.equal(shortcuts.event(key('KeyF'), false).revision, 'revision-a');
+  assert.equal(shortcuts.event(key('KeyG'), false), undefined);
+  assert.equal(state.replies.length, 1);
+  state.blocked = false; controller.flush();
+  assert.equal(shortcuts.event(key('KeyF'), false), undefined);
+  assert.equal(shortcuts.event(key('KeyG'), false).revision, 'revision-b');
+  assert.deepEqual(state.replies.map(reply => reply.revision), ['revision-a', 'revision-b']);
+  state.replies[1].bindings[0].chord.code = 'KeyX';
+  assert.equal(shortcuts.event(key('KeyG'), false).action, 'terminal-search');
+});
+
+test('invalid resolved tables cannot partially apply settings or acknowledge an unapplied revision', () => {
+  const { state, terminal, shortcuts, controller } = fixture();
+  controller.receive(documentFor('revision-a', 16), bindingsFor('KeyF'));
+  const conflicting = [...bindingsFor('KeyG'), ...bindingsFor('KeyG')];
+  assert.throws(() => controller.receive(documentFor('rejected', 20), conflicting), /Conflicting/);
+  assert.equal(terminal.options.fontSize, 16); assert.equal(state.replies.length, 1);
+  assert.equal(shortcuts.event(key('KeyF'), false).revision, 'revision-a');
+  controller.receive(documentFor('unbound', 18), []);
+  assert.equal(terminal.options.fontSize, 18); assert.deepEqual(state.replies.at(-1).bindings, []);
+  assert.equal(shortcuts.event(key('KeyF'), false), undefined);
 });

@@ -1,0 +1,42 @@
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error[E0308]: mismatched types
+  --> src/native/keybindings.rs:44:39
+   |
+13 |     ) -> anyhow::Result<()> {
+   |          ------------------ expected `std::result::Result<(), anyhow::Error>` because of return type
+...
+44 |             Some(FocusLeft) => return self.focus_direction(source, FocusDirection::Left),
+   |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), Error>`, found `Result<Option<PaneId>, Error>`
+   |
+   = note: expected enum `std::result::Result<(), _>`
+              found enum `std::result::Result<std::option::Option<flowmux_core::PaneId>, _>`
+
+error[E0599]: no method named `with_browser_accelerator_keys` found for struct `wry::WebViewBuilder<'a>` in the current scope
+    --> src/native/host.rs:899:14
+     |
+ 895 |           let view = WebViewBuilder::new_with_web_context(&mut self.context)
+     |  ____________________-
+ 896 | |             .with_background_color((40, 44, 52, 255))
+ 897 | |             .with_devtools(false)
+ 898 | |             .with_hotkeys_zoom(false)
+ 899 | |             .with_browser_accelerator_keys(false)
+     | |             -^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `wry::WebViewBuilder<'_>`
+     | |_____________|
+     |
+     |
+    ::: /home/junsu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wry-0.57.0/src/lib.rs:1802:6
+     |
+1802 |     fn with_browser_accelerator_keys(self, enabled: bool) -> Self;
+     |        ----------------------------- the method is available for `wry::WebViewBuilder<'_>` here
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: trait `WebViewBuilderExtWindows` which provides `with_browser_accelerator_keys` is implemented but not in scope; perhaps you want to import it
+     |
+   2 + use wry::WebViewBuilderExtWindows;
+     |
+
+Some errors have detailed explanations: E0308, E0599.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `flowmux-windows` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `flowmux-windows` (lib test) due to 2 previous errors

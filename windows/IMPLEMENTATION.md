@@ -812,3 +812,35 @@ The full shell baseline (program and argv) is compared under the writer lock.
 Nine hidden UI groups and nine native store/CLI tests passed. These do not
 establish physical IME/TSF/focus acceptance or complete Linux Options parity.
 Feature totals remain 61 partial / 53 pending. See [evidence](evidence/2026-09-28/options-live.md).
+
+
+## 2026-09-28 — Keybindings Options and live terminal routing
+
+Options adds a searchable Keybindings page using the shared 37 ActionIds and
+built-in defaults through a read-only Rust module include. Twenty-eight actions
+are configurable for terminal input; seven have no configurable Windows terminal
+binding and Copy/Paste remain fixed. Native Save/Unbind/Use default/Reset controls
+use the existing settings worker, validation and whole-map compare-and-swap.
+General Reset preserves valid bindings; Keybindings Reset changes only bindings.
+
+The renderer atomically replaces the resolved table and acknowledges its full
+contents and revision. Host dispatch checks the current acknowledged revision,
+active/visible/ready surface and existing close/editor/overview guards. IME,
+AltGraph, right Alt, repeat, restoration and paste guards remain in the renderer,
+with clipboard handling first. Terminal WebView browser accelerator keys are
+disabled to avoid conflicting built-in browser commands.
+
+Eight hidden native Keybindings groups pass in 6.907 s, including actual native
+control edits, invalid Unicode drafts, application composition guards, rebind/
+unbind/default/reset, CAS conflicts and controlled renderer-handler dispatch.
+Nine existing Options regression groups pass in 8.265 s; 32 counted Windows unit
+tests and 62 Node tests also pass. A verifier-only multiline EDIT notification
+omission caused an earlier bounded failure; its logs are preserved. The corrected
+fixture sends EN_CHANGE to the exact owned hidden parent and does not synthesize
+physical keyboard input.
+
+U09 advances to partial: **62 partial / 52 pending**, with no completed feature
+rows. Browser/editor/native-control shortcut routing, full editor priority,
+physical Korean IME/TSF, focus, DPI/accessibility, complete Linux presentation
+and remaining action support are open. See [the evidence record](evidence/2026-09-28/keybindings.md)
+for source, binary, installer and validation boundaries.

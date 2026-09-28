@@ -1,0 +1,103 @@
+﻿# SPDX-License-Identifier: GPL-3.0-or-later
+# Hidden owned Keybindings; 50s work + bounded cleanup, outer Job60s.
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+$ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+$BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
+Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
+$directory=Join-Path $PSScriptRoot ('..\dist\evidence\keybindings-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+$clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-keybindings';hosts=@();checks=@();observations=@();desktopInput=$false;clipboardAccess=$false;imeGuardMessageSimulation=$true;physicalIme=$false;deferred='Owned WM_IME_START/END messages exercise only application guards; they do not establish OS Korean IME/TSF correctness. The renderer hook is synthetic: physical keyboard/focus/IME and WebView/OS accelerator routing, per-monitor DPI, accessibility and composed visual acceptance are not established.'}
+function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
+function Budget([int]$Maximum=5000){if($cleaning){return $Maximum};$left=50000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Keybindings work budget expired';return [int][Math]::Min($Maximum,$left)}
+function Probe([string[]]$Arguments,[int]$Maximum=5000){
+    Budget|Out-Null;$p=[CliProbe]::Start($cli,$Arguments,$directory,$directory);$script:clients+=,$p.Id;$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
+    try {Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI deadline exceeded; no retry';Require ($out.Wait(500) -and $err.Wait(500)) 'CLI output did not close';Require ($p.ExitCode -eq 0) ('CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
+    catch {$evidence.observations+=@{kind='cli-failure';arguments=$Arguments;stdout=[CliProbe]::Output($out);stderr=[CliProbe]::Output($err)};throw}
+    finally {if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
+}
+function Request([string[]]$Arguments,[int]$Maximum=5000){Require ([bool]$pipeName) 'Explicit owned pipe required';return Probe (@('--pipe',$pipeName,'--json')+$Arguments) $Maximum}
+function Tree([int]$Maximum=5000){$t=Request @('tree') $Maximum;Require ($t.background_testing) 'Host is not in background mode';[OptionsFixture]::Describe([long]$t.window_handle,$owned.Id)|Out-Null;return $t}
+function Identities($Tree){return (@($Tree.surfaces|Sort-Object id|ForEach-Object {$_.id.ToString()+':'+$_.pid.ToString()}) -join ',')}
+function Ack($Status){return @($Status.surfaces).Count -gt 0 -and @($Status.surfaces|Where-Object {-not $_.applied -or $_.applied.revision -ne $Status.document.revision}).Count -eq 0}
+function Await([scriptblock]$Condition){$wait=[Diagnostics.Stopwatch]::StartNew();$last=$null;do{$left=5000-$wait.ElapsedMilliseconds;if($left -le 0){$evidence.observations+=@{kind='condition-timeout';settings=$last};throw 'Keybindings condition exceeded five seconds'};$s=Request @('settings','show') ([int]$left);if($s.options){[OptionsFixture]::Describe([long]$s.options.window,$owned.Id)|Out-Null};$last=$s;if(& $Condition $s){return $s};Start-Sleep -Milliseconds 20}while($true)}
+function Click($Status,[long]$Control){[OptionsFixture]::Click([long]$Status.options.window,$Control,$owned.Id)}
+function Record([string]$Name,$Status){$evidence.observations+=@{name=$Name;settings=$Status;window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);controls=@([ChromeFixture]::Read([long]$Status.options.window,$owned.Id));viewportControls=@([ChromeFixture]::Read([long]$Status.options.viewport,$owned.Id))}}
+
+
+function Binding-Row($Status,[string]$Action){$rows=@($Status.options.keybindings.actions|Where-Object {$_.action -ceq $Action});Require ($rows.Count -eq 1) ('Missing binding action '+$Action);return $rows[0]}
+function Binding-Parent($Status,[long]$Control){$parent=[long]$Status.options.keybindings.parent;Require ($parent -eq [long]$Status.options.viewport -and [OptionsFixture]::Parent($Control,$owned.Id) -eq $parent) 'Keybindings control parent mismatch';return $parent}
+function Binding-Click($Status,[string]$Control){$handle=[long]$Status.options.keybindings.$Control;[OptionsFixture]::Click((Binding-Parent $Status $handle),$handle,$owned.Id)}
+function Draft($Status,[string]$Text){$handle=[long]$Status.options.keybindings.input;[OptionsFixture]::SetTextAndNotify((Binding-Parent $Status $handle),$handle,$owned.Id,$Text)}
+function Choose($Status,[string]$Action){$handle=[long]$Status.options.keybindings.search;[OptionsFixture]::SetText((Binding-Parent $Status $handle),$handle,$owned.Id,$Action);return Await {param($s) $s.options.keybindings.selected -ceq $Action -and @($s.options.keybindings.visible_actions).Count -eq 1}}
+function Guard($Status,[bool]$Active){$handle=[long]$Status.options.keybindings.input;[OptionsFixture]::CompositionGuard((Binding-Parent $Status $handle),$handle,$owned.Id,$Active)}
+function Bound($Status,[string]$Action,[string]$Code,[bool]$Ctrl,[bool]$Alt,[bool]$Shift){$bindings=@($Status.surfaces[0].applied.bindings|Where-Object {$_.action -ceq $Action});return $bindings.Count -eq 1 -and $bindings[0].chord.code -ceq $Code -and $bindings[0].chord.ctrl -eq $Ctrl -and $bindings[0].chord.alt -eq $Alt -and $bindings[0].chord.shift -eq $Shift}
+function Settled($Status){return -not $Status.options.pending -and -not $Status.options.keybindings.pending -and -not $Status.options.keybindings.queued -and (Ack $Status)}
+function Shortcut([string]$Surface,[hashtable]$Event,[bool]$Forwarded){$result=Request @('test-shortcut',$Surface,($Event|ConvertTo-Json -Compress));$evidence.observations+=@{name='renderer-shortcut-hook';event=$Event;response=$result};Require ($result.surface -eq $Surface -and $result.forwarded -eq $Forwarded) 'Renderer shortcut forwarding differed';return $result}
+function Await-Tree([scriptblock]$Condition){$wait=[Diagnostics.Stopwatch]::StartNew();$tree=$null;do{$left=5000-$wait.ElapsedMilliseconds;if($left -le 0){$evidence.observations+=@{kind='tree-condition-timeout';tree=$tree};throw 'Tree condition exceeded five seconds'};$tree=Tree ([int]$left);if(& $Condition $tree){$script:shells=@($script:shells+@($tree.surfaces.pid)|Sort-Object -Unique);return $tree};Start-Sleep -Milliseconds 20}while($true)}
+function Stable([string]$Before){$tree=Tree;Require ((Identities $tree) -ceq $Before) 'A rejected shortcut changed terminal identities';return $tree}
+try {
+    $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
+    $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$directory),$directory,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();$evidence.hosts+=,$owned.Id
+    $file=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($owned.Id).json"
+    do {Require (-not $owned.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Host discovery exceeded eight seconds or exited';if((Test-Path -LiteralPath $file) -and (Get-Item -LiteralPath $file).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json;Require ($record.pid -eq $owned.Id -and [bool]$record.pipe) 'Wrong discovery owner';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
+    $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';Require ((Request @('identify') ([int][Math]::Min(5000,$left))).pid -eq $owned.Id) 'Pipe owner mismatch'
+    do {$left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup readiness exceeded eight seconds';$tree=Tree ([int][Math]::Min(5000,$left));if(@($tree.surfaces).Count -eq 1 -and $tree.surfaces[0].ready -and $tree.surfaces[0].running){break};Start-Sleep -Milliseconds 20}while($true)
+    $evidence.observations+=@{name='startup';elapsedMs=$startup.ElapsedMilliseconds;pipe=$pipeName};$shells=@($tree.surfaces.pid);$originalPid=$tree.surfaces[0].pid;$identities=Identities $tree;$active=(Request @('identify')).surface
+
+    $status=Await {param($s) Ack $s};$catalog=Request @('settings','keybindings','show');Require (@($catalog.catalog).Count -eq 37 -and @($catalog.catalog|Where-Object {$_.supported}).Count -eq 28 -and @($catalog.bindings).Count -eq 28) 'Supported keybinding catalogue differs'
+    $entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});Require ($entry.Count -eq 1) 'Settings entry missing';[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry[0].handle,$owned.Id)
+    $status=Await {param($s) $s.options -and $s.options.open};Click $status ([long]$status.options.tabs[2].handle);$status=Await {param($s) $s.options.page -eq 'keybindings' -and $s.options.keybindings}
+    $window=[OptionsFixture]::Describe([long]$status.options.window,$owned.Id);Require ($window.Owner -eq $tree.window_handle -and $window.OwnerEnabled -and -not $status.options.modal) 'Keybindings page is not in the owned nonmodal Options window'
+    Require (@($status.options.keybindings.actions).Count -eq 37 -and @($status.options.keybindings.actions|Where-Object {$_.supported}).Count -eq 28) 'UI catalogue support differs'
+    $viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
+    foreach($name in @('search','list','input','save','unbind','default','reset')){$handle=[long]$status.options.keybindings.$name;$bounds=[OptionsFixture]::RelativeBounds((Binding-Parent $status $handle),$handle,$owned.Id);Require ($bounds.X -ge 0 -and $bounds.Y -ge 0 -and $bounds.Width -gt 0 -and $bounds.Height -gt 0 -and $bounds.X+$bounds.Width -le $viewSize[0]) ('Keybindings control exceeds scroll content width: '+$name)}
+    foreach($name in @('search','input')){$bounds=[OptionsFixture]::RelativeBounds([long]$status.options.viewport,[long]$status.options.keybindings.$name,$owned.Id);Require ($bounds.Y+$bounds.Height -le $viewSize[1]) ('Top Keybindings input is clipped: '+$name)}
+    [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true);$status=Await {param($s) $s.options.scroll_offset -gt 0}
+    foreach($name in @('save','unbind','default','reset')){$bounds=[OptionsFixture]::RelativeBounds([long]$status.options.viewport,[long]$status.options.keybindings.$name,$owned.Id);Require ($bounds.Y -ge 0 -and $bounds.Y+$bounds.Height -le $viewSize[1]) ('Scrolled Keybindings button is unreachable: '+$name)}
+    Record 'keybindings-scrolled-actions' $status;[OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
+    $status=Choose $status 'toggle-session-panel';Require (-not (Binding-Row $status 'toggle-session-panel').supported) 'Unavailable action appears editable';$inputs=@([ChromeFixture]::Read([long]$status.options.viewport,$owned.Id)|Where-Object {$_.Handle -eq [long]$status.options.keybindings.input});Require ($inputs.Count -eq 1 -and -not $inputs[0].Enabled) 'Unavailable action edit is enabled'
+    $status=Choose $status 'new-surface';Record 'owned-keybindings-catalog-and-search' $status;$evidence.checks+=@{name='owned_options_keybindings_catalog_search_disabled_unsupported_and_bounds';passed=$true}
+
+    $defaultEvent=@{code='KeyT';key='t';ctrlKey=$true;shiftKey=$true};Shortcut $active $defaultEvent $false|Out-Null
+    $tree=Await-Tree {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};Require (@($tree.surfaces|Where-Object {$_.id -eq $active -and $_.pid -eq $originalPid}).Count -eq 1) 'Default shortcut replaced its original terminal';$active=(Request @('identify')).surface
+    $status=Await {param($s) (Ack $s) -and (Bound $s 'new-surface' 'KeyT' $true $false $true)};$identities=Identities $tree;$evidence.checks+=@{name='default_ctrl_shift_t_runs_actual_renderer_hook_and_creates_one_terminal';passed=$true}
+
+    $raw="Ctrl+Alt+Y`r`n한글 한 é 😀 &";Guard $status $true;Draft $status $raw
+    $status=Await {param($s) $s.options.composing -and $s.options.keybindings.draft -ceq $raw};Binding-Click $status 'save';Request @('settings','set','font-size','17')|Out-Null
+    $status=Await {param($s) $s.document.terminal.font_size -eq 17 -and (Ack $s)};Require ($status.options.composing -and $status.options.keybindings.draft -ceq $raw -and (Bound $status 'new-surface' 'KeyT' $true $false $true)) 'IME guard committed or replaced the raw shortcut draft';Record 'owned-ime-guard-draft-held-across-other-setting' $status
+    Guard $status $false;$status=Await {param($s) -not $s.options.composing};Binding-Click $status 'save';$status=Await {param($s) [bool]$s.options.keybindings.error -and -not $s.options.pending};Require ($status.options.keybindings.draft -ceq $raw -and (Bound $status 'new-surface' 'KeyT' $true $false $true)) 'Invalid Unicode accelerator changed persisted bindings or erased raw draft'
+    Draft $status 'Ctrl+N';Binding-Click $status 'save';$status=Await {param($s) $s.options.keybindings.error -match 'duplicate' -and (Settled $s) -and $s.options.keybindings.draft -ceq 'Ctrl+N'};Require ((Bound $status 'new-surface' 'KeyT' $true $false $true)) 'Colliding shortcut was committed'
+    Draft $status 'Ctrl+Shift+C';Binding-Click $status 'save';$status=Await {param($s) $s.options.keybindings.error -match 'reserved' -and $s.options.keybindings.draft -ceq 'Ctrl+Shift+C'};Require ((Bound $status 'new-surface' 'KeyT' $true $false $true)) 'Reserved clipboard shortcut was committed'
+    Record 'invalid-conflicting-and-reserved-drafts' $status;$evidence.checks+=@{name='controlled_ime_guard_raw_unicode_invalid_conflict_and_reserved_drafts_preserved';passed=$true;scope='application guard messages only, not physical Korean IME'}
+
+    Draft $status 'Ctrl+Alt+Y';Binding-Click $status 'save';$status=Await {param($s) (Settled $s) -and (Bound $s 'new-surface' 'KeyY' $true $true $false)};Record 'rebound-and-renderer-acknowledged' $status
+    Shortcut $active $defaultEvent $true|Out-Null;Stable $identities|Out-Null
+    $rebound=@{code='KeyY';key='y';ctrlKey=$true;altKey=$true};Shortcut $active $rebound $false|Out-Null
+    $tree=Await-Tree {param($t) @($t.surfaces).Count -eq 3 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};$active=(Request @('identify')).surface;$status=Await {param($s) Ack $s};$identities=Identities $tree
+    $evidence.checks+=@{name='native_save_rebinds_without_old_default_and_actual_new_chord_creates_one_terminal';passed=$true}
+    foreach($guardEvent in @(@{repeat=$true;forwarded=$false},@{isComposing=$true;forwarded=$true},@{keyCode=229;forwarded=$true},@{altGraph=$true;forwarded=$true},@{key='Dead';forwarded=$true},@{metaKey=$true;forwarded=$true})){$event=$rebound.Clone();$expected=$guardEvent.forwarded;foreach($name in $guardEvent.Keys){if($name -ne 'forwarded'){$event[$name]=$guardEvent[$name]}};Shortcut $active $event $expected|Out-Null;Stable $identities|Out-Null}
+    Shortcut $active @{code='AltRight';key='Alt';altKey=$true} $true|Out-Null;Shortcut $active $rebound $true|Out-Null;Shortcut $active @{type='keyup';code='AltRight';key='Alt'} $true|Out-Null;Stable $identities|Out-Null
+    $evidence.checks+=@{name='actual_renderer_repeat_composition_229_altgraph_dead_meta_rightalt_guards_do_not_dispatch';passed=$true;scope='controlled renderer hook, not OS key routing or IME'}
+
+    Binding-Click $status 'unbind';$status=Await {param($s) (Settled $s) -and @($s.surfaces[0].applied.bindings|Where-Object {$_.action -eq 'new-surface'}).Count -eq 0};Shortcut $active $rebound $true|Out-Null;Stable $identities|Out-Null
+    Binding-Click $status 'default';$status=Await {param($s) (Settled $s) -and (Bound $s 'new-surface' 'KeyT' $true $false $true)};Record 'unbind-then-default' $status;$evidence.checks+=@{name='native_unbind_stops_dispatch_and_use_default_restores_exact_binding';passed=$true}
+    Draft $status 'Ctrl+Alt+U';$status=Await {param($s) $s.options.keybindings.draft -ceq 'Ctrl+Alt+U' -and (Binding-Row $s 'new-surface').dirty};Request @('settings','keybindings','set','new-surface','Ctrl+Alt+J')|Out-Null
+    $status=Await {param($s) (Ack $s) -and (Bound $s 'new-surface' 'KeyJ' $true $true $false)};Require ($status.options.keybindings.draft -ceq 'Ctrl+Alt+U') 'External binding change erased unsaved local draft';Binding-Click $status 'save'
+    $status=Await {param($s) $s.options.keybindings.error -match 'changed elsewhere|conflict' -and -not $s.options.pending};Require ($status.options.keybindings.draft -ceq 'Ctrl+Alt+U' -and (Bound $status 'new-surface' 'KeyJ' $true $true $false)) 'Stale native shortcut draft overwrote external winner';Record 'keybindings-cas-conflict' $status
+    Click $status ([long]$status.options.reload);$status=Await {param($s) -not $s.options.keybindings.error};$status=Choose $status 'new-surface';Require ($status.options.keybindings.draft -ceq 'Ctrl+Alt+J') 'Reload did not recover external winner'
+    Request @('settings','keybindings','clear','new-surface')|Out-Null;$status=Await {param($s) (Ack $s) -and (Bound $s 'new-surface' 'KeyT' $true $false $true)};$evidence.checks+=@{name='external_binding_cas_preserves_winner_and_local_draft_until_explicit_reload';passed=$true}
+    Request @('settings','keybindings','set','toggle-pane-zoom','Ctrl+Alt+L')|Out-Null;$status=Await {param($s) (Ack $s) -and (Bound $s 'toggle-pane-zoom' 'KeyL' $true $true $false)};Binding-Click $status 'reset'
+    $status=Await {param($s) (Settled $s) -and (Bound $s 'toggle-pane-zoom' 'KeyM' $true $true $false) -and @($s.surfaces[0].applied.bindings).Count -eq 28};Require ($status.document.terminal.font_size -eq 17) 'Reset keybindings changed another setting'
+    Request @('settings','keybindings','reset')|Out-Null;$status=Await {param($s) Ack $s};Click $status ([long]$status.options.close);$status=Await {param($s) -not $s.options.open};$tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry[0].handle,$owned.Id)
+    $status=Await {param($s) $s.options.open};Click $status ([long]$status.options.tabs[2].handle);$status=Await {param($s) $s.options.page -eq 'keybindings' -and (Ack $s)};Require ($status.document.terminal.font_size -eq 17 -and @($status.surfaces[0].applied.bindings).Count -eq 28 -and (Identities (Tree)) -ceq $identities) 'Reset/reopen changed settings or surviving terminal PIDs'
+    Record 'reset-close-reopen' $status;$evidence.checks+=@{name='keybindings_only_reset_and_reopen_preserve_general_setting_and_terminal_pids';passed=$true};$evidence.status='passed'
+} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
+finally {
+    $cleaning=$true
+    if($owned){try{if(-not $owned.HasExited){$stop=[Diagnostics.Stopwatch]::StartNew();if($pipeName){Request @('quit','--discard-state') 2500|Out-Null};if(-not $owned.WaitForExit([int][Math]::Max(1,5000-$stop.ElapsedMilliseconds))){throw 'Owned host cleanup deadline exceeded'}}}catch{$cleanupErrors+=$_.Exception.Message;if(-not $owned.HasExited){$owned.Kill();[CliProbe]::WaitAfterKill($owned)}}
+        $evidence.observations+=@{name='host-exit';pid=$owned.Id;exitCode=$owned.ExitCode;stdoutComplete=$hostOut.Wait(500);stderrComplete=$hostErr.Wait(500);stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)};$owned.Dispose()}
+    if($cleanupErrors.Count){$evidence.status='failed';$evidence.cleanupErrors=$cleanupErrors};$evidence.clientPids=$clients;$evidence.shells=$shells;$evidence.elapsedMs=$clock.ElapsedMilliseconds;$evidence.finished=[DateTime]::UtcNow.ToString('o');$evidence|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 (Join-Path $directory 'native-keybindings-background.json');Write-Output ('Evidence: '+$directory)
+}
+if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
+[ordered]@{status=$evidence.status;checks=$evidence.checks.Count;elapsedMs=$evidence.elapsedMs}|ConvertTo-Json -Compress

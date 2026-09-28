@@ -53,6 +53,7 @@ impl App {
                         if surface.ready || surface.restoring {
                             if let Err(error) = surface.send(&HostMessage::Settings {
                                 document: self.settings.clone(),
+                                bindings: crate::keybindings::resolved(&self.settings.keybindings)?,
                             }) {
                                 report(&format!("settings delivery: {error:#}"));
                             }
@@ -149,6 +150,10 @@ impl App {
                     panel.reload(&self.settings, self.settings_error.as_deref());
                 }
                 return Ok(());
+            }
+            UiAction::Bindings(signal) => {
+                panel.bindings_signal(signal);
+                return self.options_save_next();
             }
             UiAction::Changed(index) => {
                 panel.changed(index);

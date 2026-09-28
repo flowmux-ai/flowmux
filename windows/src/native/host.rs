@@ -40,7 +40,7 @@ use windows_sys::Win32::{
         WindowsAndMessaging::*,
     },
 };
-use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
+use wry::{WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 #[path = "appearance.rs"]
 mod appearance;
 #[path = "browser.rs"]
@@ -53,6 +53,8 @@ mod downloads;
 mod editor;
 #[path = "files.rs"]
 mod files;
+#[path = "keybindings.rs"]
+mod keybindings;
 #[path = "keys.rs"]
 mod keys;
 #[path = "notifications.rs"]
@@ -392,6 +394,8 @@ struct App {
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
     pending_keys: HashMap<Uuid, keys::PendingKey>,
+    #[cfg(debug_assertions)]
+    pending_shortcuts: HashMap<Uuid, PendingRead>,
     pending_selections: HashMap<Uuid, PendingRead>,
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
@@ -610,6 +614,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
             pending_keys: HashMap::new(),
+            #[cfg(debug_assertions)]
+            pending_shortcuts: HashMap::new(),
             pending_selections: HashMap::new(),
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
@@ -868,9 +874,10 @@ impl App {
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
-            "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBackgroundTesting={};",
+            "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBindings={};window.__flowmuxBackgroundTesting={};",
             serde_json::to_string(&identity)?,
-            serde_json::to_string(&self.settings)?, self.background_test
+            serde_json::to_string(&self.settings)?,
+            serde_json::to_string(&crate::keybindings::resolved(&self.settings.keybindings)?)?, self.background_test
         );
         #[cfg(debug_assertions)]
         let init = if std::env::var_os("FLOWMUX_TEST_INPUT_TRACE").is_some() {
@@ -889,6 +896,7 @@ impl App {
             .with_background_color((40, 44, 52, 255))
             .with_devtools(false)
             .with_hotkeys_zoom(false)
+            .with_browser_accelerator_keys(false)
             .with_visible(false)
             .with_focused(false)
             .with_clipboard(!self.background_test)
@@ -1324,6 +1332,17 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                #[cfg(debug_assertions)]
+                self.pending_shortcuts.retain(|_, request| {
+                    if request.started.elapsed() > Duration::from_secs(2) {
+                        let _ = request.reply.try_send(
+                            json!({"error":"renderer shortcut test exceeded two seconds"}),
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                });
                 self.files_tick();
                 self.editor_tick();
                 self.browser_tick();
@@ -1484,6 +1503,7 @@ impl App {
                 }
                 surface.send(&HostMessage::Settings {
                     document: self.settings.clone(),
+                    bindings: crate::keybindings::resolved(&self.settings.keybindings)?,
                 })?;
                 if let Some(screen) = self.restore_screens.remove(&id) {
                     surface.send(&HostMessage::Restore { screen })?;
@@ -1507,10 +1527,14 @@ impl App {
                 terminal,
                 background,
                 foreground,
+                bindings,
             } => {
-                if revision == self.settings.revision && terminal == self.settings.terminal {
+                if revision == self.settings.revision
+                    && terminal == self.settings.terminal
+                    && bindings == crate::keybindings::resolved(&self.settings.keybindings)?
+                {
                     self.surfaces.get_mut(&id).unwrap().applied_settings = Some(
-                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground}),
+                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground,"bindings":bindings}),
                     );
                 }
             }
@@ -1572,22 +1596,22 @@ impl App {
                     }
                 }
             }
-            ClientMessage::FocusDirection { direction } => {
-                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
-                {
-                    self.focus_direction(id, direction)?;
-                }
-            }
-            ClientMessage::TogglePaneZoom => {
-                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
-                {
-                    self.toggle_zoom(id)?;
-                }
-            }
-            ClientMessage::ToggleOverview => {
-                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
-                {
-                    self.overview_toggle()?;
+            ClientMessage::Shortcut {
+                action,
+                chord,
+                revision,
+            } => self.shortcut(id, &action, &chord, revision)?,
+            #[cfg(debug_assertions)]
+            ClientMessage::ShortcutTested { request, forwarded } => {
+                if let Some(pending) = self.pending_shortcuts.get(&request) {
+                    anyhow::ensure!(
+                        self.background_test && pending.surface == id,
+                        "invalid shortcut test acknowledgement"
+                    );
+                    let pending = self.pending_shortcuts.remove(&request).unwrap();
+                    let _ = pending
+                        .reply
+                        .try_send(json!({"surface":id,"request":request,"forwarded":forwarded}));
                 }
             }
             ClientMessage::Title { title } => {
@@ -2345,11 +2369,13 @@ impl App {
             Action::Find => {
                 // The native button explicitly opens the current terminal's find bar.
                 // Background test hosts never request desktop or DOM focus.
-                if !self.background_test
-                    && self.surfaces.get(&self.active()).is_some_and(|s| s.ready)
-                {
-                    self.focus_active()?;
-                    self.surfaces[&self.active()].send(&HostMessage::OpenFind)?;
+                if self.surfaces.get(&self.active()).is_some_and(|s| s.ready) {
+                    if !self.background_test {
+                        self.focus_active()?;
+                    }
+                    self.surfaces[&self.active()].send(&HostMessage::OpenFind {
+                        focus: !self.background_test,
+                    })?;
                 }
                 return Ok(());
             }
@@ -2475,6 +2501,16 @@ impl App {
                 ));
             }
             Command::Settings { op } => {
+                if matches!(
+                    op,
+                    crate::command::SettingsOp::Keybindings {
+                        op: crate::keybindings::Op::Show
+                    }
+                ) {
+                    return Ok(Some(
+                        json!({"revision":self.settings.revision,"scope":"terminal","catalog":crate::keybindings::catalog(&self.settings.keybindings)?,"bindings":crate::keybindings::resolved(&self.settings.keybindings)?}),
+                    ));
+                }
                 if matches!(op, crate::command::SettingsOp::Show) {
                     return Ok(Some(self.settings_status()));
                 }
@@ -2502,6 +2538,11 @@ impl App {
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
+            }
+            #[cfg(debug_assertions)]
+            Command::TestShortcut { surface, event } => {
+                self.test_shortcut(SurfaceId(surface), &event, reply)?;
+                return Ok(None);
             }
             #[cfg(debug_assertions)]
             Command::ChromeCapture { path } => {

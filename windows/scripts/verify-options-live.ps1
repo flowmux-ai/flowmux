@@ -42,7 +42,7 @@ try {
     $status=Await {param($s) $s.options -and $s.options.open};$window=[OptionsFixture]::Describe([long]$status.options.window,$owned.Id);$scale=[Math]::Max(96,$window.Dpi)/96.0
     Require ($window.Owner -eq $tree.window_handle -and $window.OwnerEnabled -and $window.Enabled -and -not $status.options.modal -and $window.Title -ceq 'Options') 'Options ownership/nonmodal state is wrong'
     Require (($window.Style -band 0x00CF0000) -eq 0x00CF0000 -and [Math]::Abs($window.Width-760*$scale) -le 3 -and [Math]::Abs($window.Height-720*$scale) -le 3) 'Options window style/initial size differs'
-    Require (($status.options.tabs.name -join ',') -ceq 'General,Theme' -and $status.options.page -eq 'general') 'Unexpected Options pages'
+    Require (($status.options.tabs.name -join ',') -ceq 'General,Theme,Keybindings' -and $status.options.page -eq 'general') 'Unexpected Options pages'
     $controls=@([ChromeFixture]::Read([long]$status.options.window,$owned.Id));Require (@($controls|Where-Object {$_.Shown -and $_.Class -eq 'Button' -and (($_.Style -band 15) -ne 11 -or $_.Font -eq 0)}).Count -eq 0) 'Options buttons are not themed native controls'
 
 

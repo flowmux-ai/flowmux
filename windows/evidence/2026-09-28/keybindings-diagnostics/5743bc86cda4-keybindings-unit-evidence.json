@@ -1,0 +1,45 @@
+{
+    "totalPassed":  32,
+    "checks":  [
+                   {
+                       "passed":  21,
+                       "filter":  "keybindings::",
+                       "pid":  27288,
+                       "stderr":  "",
+                       "expected":  21,
+                       "exitCode":  0,
+                       "stdout":  "\nrunning 21 tests\ntest keybindings::shared::tests::clear_removes_single_override ... ok\ntest keybindings::shared::tests::copy_and_paste_are_excluded_from_editable_set ... ok\ntest keybindings::shared::tests::defaults_cover_every_action ... ok\ntest keybindings::shared::tests::defaults_leave_editor_local_shortcuts_unbound ... ok\ntest keybindings::shared::tests::empty_array_unbinds_action ... ok\ntest keybindings::shared::tests::empty_object_deserializes_to_default ... ok\ntest keybindings::shared::tests::from_wire_round_trips_every_variant ... ok\ntest keybindings::shared::tests::linux_defaults_leave_native_editing_chords_unbound ... ok\ntest keybindings::shared::tests::multi_accel_action_round_trips ... ok\ntest keybindings::shared::tests::non_editable_keys_lists_copy_and_paste_when_set ... ok\ntest keybindings::shared::tests::open_tig_default_serializes_and_can_be_rebound ... ok\ntest keybindings::shared::tests::pane_zoom_default_can_be_rebound ... ok\ntest keybindings::shared::tests::resolve_ignores_user_override_for_copy_and_paste ... ok\ntest keybindings::shared::tests::resolve_overlays_only_specified_actions ... ok\ntest keybindings::shared::tests::resolve_returns_defaults_when_overrides_are_empty ... ok\ntest keybindings::shared::tests::serde_round_trip_preserves_overrides ... ok\ntest keybindings::shared::tests::terminal_search_default_serializes_and_can_be_rebound ... ok\ntest keybindings::shared::tests::unknown_keys_are_listed_but_do_not_break_resolve ... ok\ntest keybindings::shared::tests::wire_strings_are_unique ... ok\ntest keybindings::shared::tests::workspace_overview_default_can_be_rebound ... ok\ntest keybindings::tests::defaults_aliases_conflicts_reserved_and_unbind_are_validated ... ok\n\ntest result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 237 filtered out; finished in 0.01s\n\n"
+                   },
+                   {
+                       "passed":  1,
+                       "filter":  "native::settings_store::tests",
+                       "pid":  40868,
+                       "stderr":  "",
+                       "expected":  1,
+                       "exitCode":  0,
+                       "stdout":  "\nrunning 1 test\ntest native::settings_store::tests::settings_lock_merge_conflict_corruption_and_failed_replace_preserve_data ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 257 filtered out; finished in 0.10s\n\n"
+                   },
+                   {
+                       "passed":  8,
+                       "filter":  "command::tests",
+                       "pid":  34536,
+                       "stderr":  "",
+                       "expected":  8,
+                       "exitCode":  0,
+                       "stdout":  "\nrunning 8 tests\ntest command::tests::browser_commands_roundtrip_pane_context_and_reject_unknown_options ... ok\ntest command::tests::capture_alias_and_recent_reads_preserve_targeting_and_legacy_wire_requests ... ok\ntest command::tests::context_preserves_old_ipc_commands_and_roundtrips_stable_surface ... ok\ntest command::tests::extracted_command_args_preserve_cli_and_flat_tagged_wire ... ok\ntest command::tests::notification_cli_and_wire_keep_source_and_operation_unambiguous ... ok\ntest command::tests::send_key_preserves_old_wire_shape_and_adds_explicit_surface_routing ... ok\ntest command::tests::shell_cli_and_legacy_requests_keep_each_argv_item_separate ... ok\ntest command::tests::unified_entry_parses_launch_options_and_commands_without_first_argument_routing ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 0.07s\n\n"
+                   },
+                   {
+                       "passed":  2,
+                       "filter":  "protocol::tests",
+                       "pid":  40656,
+                       "stderr":  "",
+                       "expected":  2,
+                       "exitCode":  0,
+                       "stdout":  "\nrunning 2 tests\ntest protocol::tests::parser_ack_releases_only_output_already_sent ... ok\ntest protocol::tests::stale_surface_and_foreign_origin_cannot_write_to_a_terminal ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 256 filtered out; finished in 0.00s\n\n"
+                   }
+               ],
+    "sha256":  "6fe8de40c65d00a57e3da2237b2f38bfd05174a1d1abdf8cd5df8bf450b5d2c2",
+    "expectedTotal":  32,
+    "status":  "passed",
+    "executable":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\keybindings-tests\\flowmux_windows-940f179605ae9006.exe"
+}

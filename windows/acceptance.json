@@ -396,8 +396,11 @@
     {
       "id": "U09",
       "feature": "키 재설정·37개 ActionId·편집기 우선순위",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/keybindings.md"
+      ],
+      "notes": "Native Options now contains a searchable Keybindings page using the existing shared 37 ActionIds/defaults without modifying shared code. Twenty-eight terminal-input actions support rebind/unbind/default/reset, seven have no configurable Windows terminal binding, and Copy/Paste remain fixed. Writes validate normalized collisions/reserved chords and compare the whole override map under the settings lock. General Reset preserves valid bindings; the page has separate Reset. Settings ACK includes the entire resolved table and revision; host dispatch requires that exact current revision and an active visible ready terminal. Eight hidden native groups verify real native controls, Unicode draft retention and controlled IME guards, CAS, actual renderer-handler rebind/unbind/new-tab dispatch and guard suppression; Options regression nine groups, Windows unit 32 and Node 62 tests pass. The renderer hook is not physical OS keyboard/IME/TSF evidence. Browser/editor/native-control routing, full editor priority, Linux-equivalent binding presentation, physical focus/IME/DPI/accessibility and all 37 actions remain incomplete."
     },
     {
       "id": "U10",
