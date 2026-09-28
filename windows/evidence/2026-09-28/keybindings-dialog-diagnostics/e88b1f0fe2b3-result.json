@@ -1,0 +1,25 @@
+{
+  "name": "keybindings-dialog-clippy-keys",
+  "command": [
+    "env",
+    "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static",
+    "PATH=/tmp/flowmux-windows-tools/bin:/tmp/flowmux-windows-tools/llvm/usr/lib/llvm-18/bin:/home/junsu/.codex/packages/app-server-daemon/releases/0.158.0-x86_64-unknown-linux-musl/codex-path:/home/junsu/.local/bin:/home/junsu/.codex/tmp/arg0/codex-arg0si1tdm:/home/junsu/.codex/packages/app-server-daemon/releases/0.158.0-x86_64-unknown-linux-musl/codex-path:/home/junsu/.codex/tmp/arg0/codex-arg0XcgcRn:/home/junsu/.codex/packages/app-server-daemon/releases/0.157.1-x86_64-unknown-linux-musl/codex-path:/home/junsu/.codex/tmp/arg0/codex-arg0Qg8NhX:/home/junsu/.codex/packages/standalone/releases/0.157.1-x86_64-unknown-linux-musl/codex-path:/home/junsu/.local/share/flowmux/shims:/home/junsu/.local/bin:/home/junsu/.cargo/bin:/home/junsu/.local/share/flowmux/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files (x86)/VMware/VMware Workstation/bin/:/mnt/c/Program Files/Microsoft SDKs/Azure/CLI2/wbin:/mnt/c/Program Files (x86)/NAT Service:/mnt/c/Windows/system32:/mnt/c/Windows:/mnt/c/Windows/System32/Wbem:/mnt/c/Windows/System32/WindowsPowerShell/v1.0/:/mnt/c/Windows/System32/OpenSSH/:/mnt/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/dotnet/:/mnt/c/Users/jundu/AppData/Roaming/npm:/mnt/c/Program Files/NVIDIA Corporation/NVIDIA app/NvDLISR:/mnt/c/Program Files/nodejs/:/mnt/c/Program Files/GitHub CLI/:/mnt/c/Users/jundu/.local/bin:/mnt/c/Users/jundu/AppData/Local/Programs/cursor/resources/app/codeBin:/mnt/c/tizen-studio/tools/ide/bin:/mnt/c/Users/jundu/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/jundu/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/dev:/mnt/c/Users/jundu/AppData/Local/Programs/Ollama:/mnt/c/Users/jundu/.dotnet/tools:/mnt/c/Users/jundu/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Users/jundu/AppData/Roaming/npm:/snap/bin",
+    "LD_LIBRARY_PATH=/tmp/flowmux-windows-tools/llvm/usr/lib/x86_64-linux-gnu",
+    "cargo",
+    "xwin",
+    "clippy",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 493948,
+  "exitCode": 0,
+  "elapsedSeconds": 24.83
+}

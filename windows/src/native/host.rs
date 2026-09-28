@@ -2550,7 +2550,12 @@ impl App {
                     self.background_test,
                     "chrome capture requires an owned hidden debug host"
                 );
-                return if let Some(window) = self.overview_capture_window() {
+                return if let Some(window) = self
+                    .options
+                    .as_ref()
+                    .and_then(appearance::Panel::capture_window)
+                    .or_else(|| self.overview_capture_window())
+                {
                     chrome::capture_subtree(window, &path)
                 } else {
                     chrome::capture(self.window, &path)

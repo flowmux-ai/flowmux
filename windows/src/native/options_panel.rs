@@ -184,6 +184,7 @@ pub(crate) struct Panel {
     groups: Vec<(usize, HWND)>,
     scroll: Cell<i32>,
     status: HWND,
+    status_is_help: Cell<bool>,
     reset: HWND,
     close: HWND,
     reload: HWND,
@@ -195,6 +196,9 @@ pub(crate) struct Panel {
 }
 impl Drop for Panel {
     fn drop(&mut self) {
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.dismiss();
+        }
         unsafe {
             DestroyWindow(self.window);
         }
@@ -243,6 +247,7 @@ impl Panel {
                 groups: vec![],
                 scroll: Cell::new(0),
                 status: std::ptr::null_mut(),
+                status_is_help: Cell::new(false),
                 reset: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
                 reload: std::ptr::null_mut(),
@@ -495,6 +500,9 @@ impl Panel {
         background: bool,
     ) {
         chrome::window_theme(self.window, document.terminal.theme);
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.environment(background, document.terminal.theme);
+        }
         if !self.open {
             // A close may have flushed committed drafts to the worker. Keep its
             // generation until completion; never reload over a newer edit.
@@ -512,6 +520,14 @@ impl Panel {
                 self.reload(document, error);
             }
             self.open = true;
+        }
+        if self
+            .bindings
+            .as_ref()
+            .is_some_and(bindings::Bindings::modal)
+        {
+            self.bindings.as_ref().unwrap().focus();
+            return;
         }
         if !background {
             unsafe {
@@ -535,20 +551,39 @@ impl Panel {
             row.error = None;
             row.due = None;
         }
-        self.status(
-            error.unwrap_or("Changes save automatically and apply to all flowmux windows."),
-        );
+        if let Some(error) = error {
+            self.status(error);
+        } else {
+            self.default_status();
+        }
         self.enable();
         self.layout();
     }
     pub(super) fn status(&self, text: &str) {
+        self.status_is_help.set(false);
         unsafe {
             SetWindowTextW(self.status, wide(text).as_ptr());
         }
     }
+    fn default_status(&self) {
+        self.status(if self.page == 2 {
+            "Shortcut edits save after OK. Reset and Unbind in the edit dialog only change the draft."
+        } else {
+            "Changes save automatically and apply to all flowmux windows."
+        });
+        self.status_is_help.set(true);
+    }
     pub(super) fn select(&mut self, page: usize) {
-        if page < 3 {
+        if page < 3
+            && !self
+                .bindings
+                .as_ref()
+                .is_some_and(bindings::Bindings::modal)
+        {
             self.page = page;
+            if self.status_is_help.get() {
+                self.default_status();
+            }
             self.scroll.set(0);
             self.layout();
         }
@@ -607,8 +642,21 @@ impl Panel {
         None
     }
     pub(super) fn bindings_signal(&mut self, signal: bindings::Signal) {
+        if let bindings::Signal::Reveal(index) = signal {
+            let delta = self
+                .bindings
+                .as_ref()
+                .map_or(0, |bindings| bindings.reveal_delta(index));
+            if delta != 0 {
+                self.scroll_by(delta);
+            }
+            return;
+        }
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.signal(signal, self.pending.is_none());
+        }
+        if let Some(error) = self.bindings.as_ref().and_then(bindings::Bindings::error) {
+            self.status(error);
         }
         self.enable();
         self.schedule();
@@ -750,11 +798,11 @@ impl Panel {
         }
         let draft_error = self.rows.iter().find_map(|row| row.error.as_deref());
         if completed || self.pending.is_none() {
-            self.status(
-                draft_error
-                    .or(error)
-                    .unwrap_or("Changes save automatically and apply to all flowmux windows."),
-            );
+            if let Some(error) = draft_error.or(error) {
+                self.status(error);
+            } else {
+                self.default_status();
+            }
         }
         self.enable();
         self.schedule();
@@ -778,9 +826,18 @@ impl Panel {
         }
     }
     pub(super) fn reset_ready(&self) -> bool {
-        self.open && self.pending.is_none() && COMPOSING.with(Cell::get) == 0
+        self.open
+            && self.pending.is_none()
+            && COMPOSING.with(Cell::get) == 0
+            && !self
+                .bindings
+                .as_ref()
+                .is_some_and(bindings::Bindings::modal)
     }
     pub(super) fn hide(&mut self) {
+        if let Some(bindings) = self.bindings.as_mut() {
+            bindings.dismiss();
+        }
         self.open = false;
         for row in &mut self.rows {
             if row.due.is_some() {
@@ -864,7 +921,13 @@ impl Panel {
                 client.right - px(40),
                 viewport_height,
             );
-            let content_height = if self.page == 1 { px(94) } else { px(562) };
+            let content_height = match self.page {
+                1 => px(94),
+                2 => self.bindings.as_ref().map_or(px(562), |bindings| {
+                    bindings.content_height(GetDpiForWindow(self.window))
+                }),
+                _ => px(562),
+            };
             let offset = self
                 .scroll
                 .get()
@@ -934,7 +997,7 @@ impl Panel {
             place(self.reset, px(20), client.bottom - px(40), px(155), px(28));
             place(
                 self.reload,
-                px(184),
+                px(if self.page == 2 { 302 } else { 184 }),
                 client.bottom - px(40),
                 px(125),
                 px(28),
@@ -952,17 +1015,33 @@ impl Panel {
                 bindings.layout(
                     self.page == 2,
                     view.right,
-                    content_height,
                     GetDpiForWindow(self.window),
                     offset,
+                    client.bottom,
                 );
             }
         }
+    }
+    #[cfg(debug_assertions)]
+    pub(in super::super) fn capture_window(&self) -> Option<HWND> {
+        self.open.then(|| {
+            self.bindings
+                .as_ref()
+                .and_then(bindings::Bindings::capture_window)
+                .unwrap_or(self.window)
+        })
     }
     pub(super) fn diagnostics(&self) -> Value {
         json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
+        if self
+            .bindings
+            .as_ref()
+            .is_some_and(|bindings| bindings.handle_message(message))
+        {
+            return true;
+        }
         if COMPOSING.with(Cell::get) != 0 || message.wParam == 229 {
             return false;
         }
@@ -980,19 +1059,12 @@ impl Panel {
                 emit(UiAction::Close);
                 return true;
             }
-            if (self
-                .bindings
-                .as_ref()
-                .is_some_and(|bindings| bindings.editing(message.hwnd))
-                && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
-                && message.wParam == 13)
-                || self.rows.iter().any(|row| {
-                    row.choices.is_empty()
-                        && message.hwnd == row.input
-                        && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
-                        && message.wParam == 13
-                })
-            {
+            if self.rows.iter().any(|row| {
+                row.choices.is_empty()
+                    && message.hwnd == row.input
+                    && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+                    && message.wParam == 13
+            }) {
                 return false;
             }
             IsDialogMessageW(self.window, message) != 0

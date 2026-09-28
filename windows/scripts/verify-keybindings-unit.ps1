@@ -7,7 +7,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
 $exe=(Resolve-Path -LiteralPath $Executable).Path
 $checks=@()
 $cases=@(
- @{filter='keybindings::';expected=21},
+ @{filter='keybindings::';expected=22},
  @{filter='native::settings_store::tests';expected=1},
  @{filter='command::tests';expected=8},
  @{filter='protocol::tests';expected=2}

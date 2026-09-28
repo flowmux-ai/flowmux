@@ -1,48 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Native Keybindings page. Raw edit drafts are never normalized in place.
+//! Linux-style action rows with a transactional, owned shortcut editor.
 use super::*;
 use crate::keybindings::{self, KeybindingOverrides, Op};
-const SEARCH: usize = 600;
-const LIST: usize = 601;
-pub(super) const EDIT: usize = 602;
-const SAVE: usize = 603;
-const CLEAR: usize = 604;
-const DEFAULT: usize = 605;
-const RESET: usize = 606;
+#[path = "keybindings_editor.rs"]
+mod editor;
+const RESET_ALL: usize = 606;
+const ROW_BASE: usize = 1000;
 pub(super) const SAVE_INDEX: usize = usize::MAX - 1;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Signal {
-    Filter,
-    Select,
-    Changed,
-    Save,
-    Clear,
-    Default,
-    Reset,
+    Edit(usize),
+    Editor(Uuid, editor::Signal),
+    ResetAll,
+    Reveal(usize),
+}
+fn emit(signal: Signal) {
+    super::emit(UiAction::Bindings(signal));
 }
 pub(super) fn command(id: usize, code: u32) -> Option<Signal> {
     match (id, code) {
-        (SEARCH, EN_CHANGE) if !SYNCING.with(Cell::get) => Some(Signal::Filter),
-        (LIST, LBN_SELCHANGE) => Some(Signal::Select),
-        (EDIT, EN_CHANGE) if !SYNCING.with(Cell::get) => Some(Signal::Changed),
-        (SAVE, BN_CLICKED) => Some(Signal::Save),
-        (CLEAR, BN_CLICKED) => Some(Signal::Clear),
-        (DEFAULT, BN_CLICKED) => Some(Signal::Default),
-        (RESET, BN_CLICKED) => Some(Signal::Reset),
+        (RESET_ALL, BN_CLICKED) => Some(Signal::ResetAll),
+        (id, BN_CLICKED) if (ROW_BASE..ROW_BASE + 37).contains(&id) => {
+            Some(Signal::Edit(id - ROW_BASE))
+        }
+        (id, BN_SETFOCUS) if (ROW_BASE..ROW_BASE + 37).contains(&id) => {
+            Some(Signal::Reveal(id - ROW_BASE))
+        }
         _ => None,
     }
 }
-struct Draft {
+struct Row {
     action: String,
     label: String,
     supported: bool,
-    reason: String,
-    raw: String,
-    baseline: Vec<String>,
-    expected: KeybindingOverrides,
-    error: Option<String>,
-    dirty: bool,
+    defaults: Vec<String>,
+    accels: Vec<String>,
+    title: HWND,
+    subtitle: HWND,
+    accel: HWND,
+    edit: HWND,
 }
 #[derive(Clone, Copy)]
 enum Kind {
@@ -55,360 +52,335 @@ struct Request {
     raw: String,
     kind: Kind,
     expected: KeybindingOverrides,
-    drafts: Vec<String>,
+    editor: Option<Uuid>,
 }
 pub(super) struct Bindings {
+    owner: HWND,
+    viewport: HWND,
     hint: HWND,
-    search: HWND,
-    list: HWND,
-    title: HWND,
-    input: HWND,
-    detail: HWND,
-    save: HWND,
-    clear: HWND,
-    defaults: HWND,
     reset: HWND,
-    rows: Vec<Draft>,
-    filtered: Vec<usize>,
+    rows: Vec<Row>,
     selected: Option<usize>,
+    editor: Option<editor::Panel>,
+    editor_expected: KeybindingOverrides,
     request: Option<Request>,
     pending: Option<Request>,
     baseline: KeybindingOverrides,
     error: Option<String>,
+    background: bool,
+    theme: crate::settings::Theme,
 }
 impl Bindings {
     pub(super) fn new(panel: &Panel) -> anyhow::Result<Self> {
-        let hint = panel.child_in(panel.viewport, "STATIC", "Terminal input only; browser/editor/native shortcuts are not yet configurable. One shortcut per line: Ctrl+Shift+Y or <Ctrl><Shift>y. Save applies immediately; empty unbinds.", 610, SS_NOPREFIX)?;
-        let search = panel.child_in(
-            panel.viewport,
-            "EDIT",
-            "",
-            SEARCH,
-            WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL as u32,
-        )?;
-        let list = panel.child_in(
-            panel.viewport,
-            "LISTBOX",
-            "",
-            LIST,
-            WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY as u32 | LBS_NOINTEGRALHEIGHT as u32,
-        )?;
-        let title = panel.child_in(
-            panel.viewport,
-            "STATIC",
-            "Select an action",
-            611,
-            SS_NOPREFIX,
-        )?;
-        let input = panel.child_in(
-            panel.viewport,
-            "EDIT",
-            "",
-            EDIT,
-            WS_TABSTOP
-                | WS_BORDER
-                | WS_VSCROLL
-                | ES_MULTILINE as u32
-                | ES_AUTOVSCROLL as u32
-                | ES_WANTRETURN as u32,
-        )?;
-        let detail = panel.child_in(panel.viewport, "STATIC", "", 612, SS_NOPREFIX)?;
-        let save = panel.child_in(panel.viewport, "BUTTON", "Save shortcut", SAVE, WS_TABSTOP)?;
-        let clear = panel.child_in(panel.viewport, "BUTTON", "Unbind", CLEAR, WS_TABSTOP)?;
-        let defaults =
-            panel.child_in(panel.viewport, "BUTTON", "Use default", DEFAULT, WS_TABSTOP)?;
-        let reset = panel.child_in(
-            panel.viewport,
+        let hint = panel.child_in(panel.viewport, "STATIC", "Changes take effect after OK. Terminal input only; browser/editor/native shortcuts are not configurable. Clipboard Copy/Paste keep fixed defaults. Unavailable actions are shown read-only.", 610, SS_NOPREFIX)?;
+        let reset = panel.child(
             "BUTTON",
-            "Reset all keybindings",
-            RESET,
+            "Reset all keybindings to defaults",
+            RESET_ALL,
             WS_TABSTOP,
         )?;
-        unsafe {
-            SendMessageW(search, EM_LIMITTEXT, 256, 0);
-            SendMessageW(input, EM_LIMITTEXT, 2048, 0);
-            SendMessageW(
-                search,
-                0x1501,
-                1,
-                wide("Search actions…").as_ptr() as LPARAM,
-            );
-            checked(SetWindowSubclass(input, Some(edit_proc), EDIT, 0))?;
-            checked(SetWindowSubclass(search, Some(edit_proc), SEARCH, 0))?;
+        let mut rows = Vec::new();
+        for item in keybindings::catalog(&KeybindingOverrides::default())?
+            .into_iter()
+            .filter(|item| !matches!(item.action.as_str(), "copy" | "paste"))
+        {
+            let index = rows.len();
+            let title = panel.child_in(
+                panel.viewport,
+                "STATIC",
+                &item.label,
+                1100 + index,
+                SS_NOPREFIX,
+            )?;
+            let subtitle = panel.child_in(
+                panel.viewport,
+                "STATIC",
+                &item.action,
+                1200 + index,
+                SS_NOPREFIX,
+            )?;
+            let accel = panel.child_in(panel.viewport, "STATIC", "", 1300 + index, SS_NOPREFIX)?;
+            let edit = panel.child_in(
+                panel.viewport,
+                "BUTTON",
+                "Edit",
+                ROW_BASE + index,
+                WS_TABSTOP | BS_NOTIFY as u32,
+            )?;
+            chrome::register_control(subtitle, chrome::ControlRole::Caption);
+            chrome::register_control(accel, chrome::ControlRole::Caption);
+            rows.push(Row {
+                action: item.action,
+                label: item.label,
+                supported: item.supported,
+                defaults: item.defaults,
+                accels: item.accels,
+                title,
+                subtitle,
+                accel,
+                edit,
+            });
         }
-        Ok(Self {
+        let page = Self {
+            owner: panel.window,
+            viewport: panel.viewport,
             hint,
-            search,
-            list,
-            title,
-            input,
-            detail,
-            save,
-            clear,
-            defaults,
             reset,
-            rows: vec![],
-            filtered: vec![],
+            rows,
             selected: None,
+            editor: None,
+            editor_expected: KeybindingOverrides::default(),
             request: None,
             pending: None,
             baseline: KeybindingOverrides::default(),
             error: None,
-        })
+            background: true,
+            theme: crate::settings::Theme::Dark,
+        };
+        page.render_rows();
+        Ok(page)
     }
-    pub(super) fn layout(&self, visible: bool, width: i32, height: i32, dpi: u32, offset: i32) {
+    pub(super) fn environment(&mut self, background: bool, theme: crate::settings::Theme) {
+        self.background = background;
+        self.theme = theme;
+        if let Some(editor) = self.editor.as_ref() {
+            editor.theme(theme);
+        }
+    }
+    pub(super) fn content_height(&self, dpi: u32) -> i32 {
+        (80 + self.rows.len() as i32 * 68) * dpi.max(96) as i32 / 96
+    }
+    pub(super) fn layout(
+        &self,
+        visible: bool,
+        width: i32,
+        dpi: u32,
+        offset: i32,
+        owner_height: i32,
+    ) {
         let px = |n: i32| n * dpi.max(96) as i32 / 96;
-        let top = px(4);
-        let bottom = height - px(12);
-        let middle = px(8) + (width - px(28)) * 40 / 100;
-        let right = width - middle - px(8);
-        let placements = [
-            (self.hint, px(8), top, width - px(16), px(56)),
-            (self.search, px(8), top + px(60), width - px(16), px(30)),
-            (
-                self.list,
-                px(8),
-                top + px(100),
-                middle - px(20),
-                (bottom - top - px(144)).max(px(40)),
-            ),
-            (self.title, middle, top + px(100), right, px(44)),
-            (
-                self.input,
-                middle,
-                top + px(148),
-                right,
-                (bottom - top - px(264)).max(px(52)),
-            ),
-            (
-                self.detail,
-                middle,
-                (bottom - px(110)).max(top + px(190)),
-                right,
-                px(72),
-            ),
-            (self.save, middle, bottom - px(32), px(112), px(28)),
-            (
-                self.clear,
-                middle + px(118),
-                bottom - px(32),
-                px(66),
-                px(28),
-            ),
-            (
-                self.defaults,
-                middle + px(190),
-                bottom - px(32),
-                (right - px(190)).max(px(68)),
-                px(28),
-            ),
-            (self.reset, px(8), bottom - px(28), middle - px(20), px(28)),
-        ];
         unsafe {
-            for (window, x, y, w, h) in placements {
+            let place = |window: HWND, x: i32, y: i32, w: i32, h: i32| {
                 SetWindowPos(
                     window,
                     std::ptr::null_mut(),
                     x,
-                    y - offset,
+                    y,
                     w.max(1),
                     h.max(1),
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
                 ShowWindow(window, if visible { SW_SHOWNA } else { SW_HIDE });
+            };
+            place(self.hint, px(8), px(4) - offset, width - px(16), px(64));
+            for (index, row) in self.rows.iter().enumerate() {
+                let y = px(80 + index as i32 * 68) - offset;
+                let left = (width - px(110)) * 48 / 100;
+                let chip_x = left + px(12);
+                place(row.title, px(8), y, left - px(12), px(28));
+                place(row.subtitle, px(8), y + px(28), left - px(12), px(22));
+                place(
+                    row.accel,
+                    chip_x,
+                    y + px(8),
+                    width - chip_x - px(94),
+                    px(42),
+                );
+                place(row.edit, width - px(82), y + px(10), px(74), px(30));
+            }
+            place(self.reset, px(20), owner_height - px(40), px(270), px(28));
+        }
+    }
+    fn render_rows(&self) {
+        unsafe {
+            for row in &self.rows {
+                let text = if row.accels.is_empty() {
+                    "(unbound)".to_owned()
+                } else {
+                    row.accels.join(", ")
+                };
+                SetWindowTextW(row.accel, wide(text).as_ptr());
+                SetWindowTextW(
+                    row.subtitle,
+                    wide(if row.supported {
+                        row.action.clone()
+                    } else {
+                        format!("{} · shortcut unavailable", row.action)
+                    })
+                    .as_ptr(),
+                );
             }
         }
     }
-    pub(super) fn editing(&self, hwnd: HWND) -> bool {
-        hwnd == self.input || hwnd == self.search
+    pub(super) fn reveal_delta(&self, index: usize) -> i32 {
+        let Some(row) = self.rows.get(index) else {
+            return 0;
+        };
+        unsafe {
+            let mut rect = RECT::default();
+            let mut viewport = RECT::default();
+            GetWindowRect(row.edit, &mut rect);
+            GetWindowRect(self.viewport, &mut viewport);
+            if rect.top < viewport.top {
+                rect.top - viewport.top - 8
+            } else if rect.bottom > viewport.bottom {
+                rect.bottom - viewport.bottom + 8
+            } else {
+                0
+            }
+        }
+    }
+    pub(super) fn focus(&self) {
+        if let Some(editor) = self.editor.as_ref() {
+            editor.focus();
+        }
+    }
+    pub(super) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+    pub(super) fn modal(&self) -> bool {
+        self.editor.is_some()
     }
     pub(super) fn has_draft(&self) -> bool {
-        self.request.is_some()
-            || self.pending.is_some()
-            || self.rows.iter().any(|row| row.dirty || row.error.is_some())
+        self.editor.is_some() || self.request.is_some() || self.pending.is_some()
     }
     pub(super) fn queued(&self) -> bool {
         self.request.is_some()
     }
     pub(super) fn enable(&self, idle: bool) {
-        let supported = self
-            .selected
-            .is_some_and(|index| self.rows[index].supported);
         unsafe {
-            EnableWindow(self.input, i32::from(supported));
-            for control in [self.save, self.clear, self.defaults] {
-                EnableWindow(control, i32::from(idle && supported));
-            }
-            EnableWindow(self.reset, i32::from(idle));
-        }
-    }
-    fn store_draft(&mut self) {
-        if let Some(index) = self.selected {
-            if self.rows[index].supported {
-                self.rows[index].raw = Panel::text(self.input);
-                self.rows[index].dirty = true;
-                self.rows[index].error = None;
-            }
-        }
-    }
-    fn capture_current(&mut self) {
-        if self.selected.is_some_and(|index| {
-            self.rows[index].supported && self.rows[index].raw != Panel::text(self.input)
-        }) {
-            self.store_draft();
-        }
-    }
-    fn fill_selected(&self) {
-        let Some(index) = self.selected else {
-            SYNCING.with(|value| value.set(true));
-            unsafe {
-                SetWindowTextW(self.title, wide("No matching actions").as_ptr());
-                SetWindowTextW(self.input, wide("").as_ptr());
-                SetWindowTextW(
-                    self.detail,
-                    wide("Change the search to select an action.").as_ptr(),
+            for row in &self.rows {
+                EnableWindow(
+                    row.edit,
+                    i32::from(
+                        idle && row.supported && self.editor.is_none() && self.request.is_none(),
+                    ),
                 );
             }
-            SYNCING.with(|value| value.set(false));
-            return;
-        };
-        let row = &self.rows[index];
-        SYNCING.with(|value| value.set(true));
-        unsafe {
-            SetWindowTextW(
-                self.title,
-                wide(format!("{}\n{}", row.label, row.action)).as_ptr(),
-            );
-            if Panel::text(self.input) != row.raw {
-                SetWindowTextW(self.input, wide(&row.raw).as_ptr());
-            }
-            SetWindowTextW(
-                self.detail,
-                wide(row.error.as_deref().unwrap_or(&row.reason)).as_ptr(),
-            );
-        }
-        SYNCING.with(|value| value.set(false));
-    }
-    fn filter(&mut self) {
-        let query = Panel::text(self.search).to_lowercase();
-        self.filtered = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| {
-                query.is_empty()
-                    || row.label.to_lowercase().contains(&query)
-                    || row.action.contains(&query)
-            })
-            .map(|(index, _)| index)
-            .collect();
-        if !self
-            .selected
-            .is_some_and(|index| self.filtered.contains(&index))
-        {
-            self.selected = self.filtered.first().copied();
-        }
-        unsafe {
-            SendMessageW(self.list, WM_SETREDRAW, 0, 0);
-            SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
-            for index in &self.filtered {
-                let row = &self.rows[*index];
-                let label = format!(
-                    "{}{}",
-                    row.label,
-                    if row.supported { "" } else { " (not editable)" }
-                );
-                SendMessageW(self.list, LB_ADDSTRING, 0, wide(label).as_ptr() as LPARAM);
-            }
-            if let Some(position) = self.selected.and_then(|index| {
-                self.filtered
-                    .iter()
-                    .position(|candidate| *candidate == index)
-            }) {
-                SendMessageW(self.list, LB_SETCURSEL, position, 0);
-            }
-            SendMessageW(self.list, WM_SETREDRAW, 1, 0);
-            InvalidateRect(self.list, std::ptr::null(), 1);
+            EnableWindow(self.reset, i32::from(idle && self.editor.is_none()));
         }
     }
     pub(super) fn reload(&mut self, document: &crate::settings::Document) {
+        if self.editor.is_some() {
+            return;
+        }
         self.request = None;
         self.pending = None;
-        self.baseline = document.keybindings.clone();
         self.error = None;
-        match keybindings::catalog(&document.keybindings) {
-            Ok(catalog) => {
-                self.rows=catalog.into_iter().map(|item| Draft {
-                    reason: if item.supported {
-                        "Applies to terminal input. Browser, editor and native controls keep their current shortcuts.".into()
-                    } else if matches!(item.action.as_str(), "copy" | "paste") {
-                        "Clipboard shortcuts are fixed to preserve copy, paste and terminal Ctrl+C behavior; they cannot be rebound here.".into()
-                    } else { "This action has no configurable Windows terminal shortcut; no binding is dispatched here.".into() },
-                    action:item.action,label:item.label,supported:item.supported,
-                    raw:item.accels.join("\r\n"),baseline:item.accels,expected:document.keybindings.clone(),error:None,dirty:false,
-                }).collect();
-                self.selected = (!self.rows.is_empty()).then_some(0);
-                self.filter();
-                self.fill_selected();
+        self.baseline = document.keybindings.clone();
+        if let Ok(catalog) = keybindings::catalog(&document.keybindings) {
+            for row in &mut self.rows {
+                if let Some(item) = catalog.iter().find(|item| item.action == row.action) {
+                    row.accels = item.accels.clone();
+                }
             }
-            Err(error) => self.error = Some(error.to_string()),
         }
+        self.render_rows();
     }
     pub(super) fn signal(&mut self, signal: Signal, idle: bool) {
-        if matches!(signal, Signal::Changed) {
-            self.store_draft();
-            return;
-        }
-        if COMPOSING.with(Cell::get) != 0 {
-            return;
-        }
         match signal {
-            Signal::Filter => {
-                self.capture_current();
-                self.filter();
-                self.fill_selected();
-            }
-            Signal::Select => {
-                self.capture_current();
-                let position = unsafe { SendMessageW(self.list, LB_GETCURSEL, 0, 0) };
-                if let Some(index) = self.filtered.get(position as usize).copied() {
-                    self.selected = Some(index);
-                    self.fill_selected();
+            Signal::Edit(index) if idle && self.request.is_none() => {
+                if let Some(editor) = self.editor.as_ref() {
+                    editor.focus();
+                    return;
                 }
-            }
-            Signal::Save | Signal::Clear | Signal::Default if idle => {
-                let Some(index) = self.selected.filter(|index| self.rows[*index].supported) else {
+                let Some(row) = self.rows.get(index).filter(|row| row.supported) else {
                     return;
                 };
-                self.store_draft();
-                if matches!(signal, Signal::Clear) {
-                    self.rows[index].raw.clear();
-                    self.fill_selected();
+                match editor::Panel::new(
+                    self.owner,
+                    &row.label,
+                    &row.accels.join(", "),
+                    self.background,
+                ) {
+                    Ok(editor) => {
+                        editor.theme(self.theme);
+                        self.editor_expected = self.baseline.clone();
+                        self.selected = Some(index);
+                        self.error = None;
+                        self.editor = Some(editor);
+                    }
+                    Err(error) => self.error = Some(error.to_string()),
                 }
-                self.rows[index].error = None;
-                self.error = None;
-                self.request = Some(Request {
-                    action: Some(index),
-                    raw: self.rows[index].raw.clone(),
-                    kind: if matches!(signal, Signal::Default) {
-                        Kind::Default
-                    } else {
-                        Kind::Set
-                    },
-                    expected: self.rows[index].expected.clone(),
-                    drafts: Vec::new(),
-                });
             }
-            Signal::Reset if idle => {
-                self.capture_current();
-                self.error = None;
+            Signal::Editor(id, signal) => {
+                let Some(dialog) = self.editor.as_mut().filter(|editor| editor.id == id) else {
+                    return;
+                };
+                match signal {
+                    editor::Signal::Cancel => {
+                        if self
+                            .request
+                            .as_ref()
+                            .is_some_and(|request| request.editor == Some(id))
+                        {
+                            self.request = None;
+                        }
+                        self.editor.take();
+                        self.selected = None;
+                        self.error = None;
+                    }
+                    editor::Signal::Changed => {
+                        self.error = None;
+                        dialog.status("");
+                    }
+                    editor::Signal::Layout => dialog.layout(),
+                    editor::Signal::CaptureCancel => dialog.capture_close(),
+                    editor::Signal::Capture
+                        if idle && self.request.is_none() && !dialog.composing() =>
+                    {
+                        if let Err(error) = dialog.capture_start() {
+                            dialog.status(&error.to_string());
+                        }
+                    }
+                    editor::Signal::Reset | editor::Signal::Unbind
+                        if idle && self.request.is_none() && !dialog.composing() =>
+                    {
+                        if let Some(index) = self.selected {
+                            dialog.set_raw(&if matches!(signal, editor::Signal::Reset) {
+                                self.rows[index].defaults.join(", ")
+                            } else {
+                                String::new()
+                            });
+                            dialog.status("");
+                            self.error = None;
+                        }
+                    }
+                    editor::Signal::Confirm
+                        if self.pending.is_none()
+                            && self.request.is_none()
+                            && !dialog.composing() =>
+                    {
+                        if let Some(index) = self.selected {
+                            let raw = dialog.raw();
+                            let values = split_accels(&raw);
+                            let kind = if values == self.rows[index].defaults {
+                                Kind::Default
+                            } else {
+                                Kind::Set
+                            };
+                            self.request = Some(Request {
+                                action: Some(index),
+                                raw,
+                                kind,
+                                expected: self.editor_expected.clone(),
+                                editor: Some(id),
+                            });
+                            dialog.pending(true);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Signal::ResetAll if idle && self.editor.is_none() && self.request.is_none() => {
                 self.request = Some(Request {
                     action: None,
                     raw: String::new(),
                     kind: Kind::Reset,
                     expected: self.baseline.clone(),
-                    drafts: self.rows.iter().map(|row| row.raw.clone()).collect(),
+                    editor: None,
                 });
+                self.error = None;
             }
             _ => {}
         }
@@ -430,13 +402,7 @@ impl Bindings {
             }),
             Kind::Set => Op::Set(keybindings::SetArgs {
                 action: self.rows[request.action.unwrap()].action.clone(),
-                accels: request
-                    .raw
-                    .lines()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_owned)
-                    .collect(),
+                accels: split_accels(&request.raw),
                 expected,
             }),
         };
@@ -445,14 +411,17 @@ impl Bindings {
     }
     pub(super) fn begin(&mut self) {
         self.pending = self.request.take();
+        if let Some(editor) = self.editor.as_mut() {
+            editor.pending(true);
+        }
     }
     pub(super) fn failed(&mut self, error: &str) {
-        let request = self.request.take();
-        if let Some(index) = request.and_then(|request| request.action) {
-            self.rows[index].error = Some(error.into());
-        }
+        self.request = None;
         self.error = Some(error.into());
-        self.fill_selected();
+        if let Some(editor) = self.editor.as_mut() {
+            editor.status(error);
+            editor.pending(false);
+        }
     }
     pub(super) fn update(
         &mut self,
@@ -460,67 +429,83 @@ impl Bindings {
         error: Option<&str>,
         completed: bool,
     ) {
-        // Native EN_CHANGE posts a queued event. Read the live EDIT before an
-        // earlier worker reply can overwrite keystrokes not yet drained by App.
-        self.capture_current();
         let pending = if completed { self.pending.take() } else { None };
         self.baseline = document.keybindings.clone();
-        let Ok(catalog) = keybindings::catalog(&document.keybindings) else {
-            return;
-        };
-        for (index, row) in self.rows.iter_mut().enumerate() {
-            let Some(item) = catalog.iter().find(|item| item.action == row.action) else {
-                continue;
-            };
-            let own = pending.as_ref().is_some_and(|request| {
-                request.action == Some(index) || matches!(request.kind, Kind::Reset)
-            });
-            let composing =
-                self.selected == Some(index) && COMPOSING.with(Cell::get) == self.input as isize;
-            if own && error.is_none() {
-                let unchanged = pending.as_ref().is_some_and(|request| {
-                    if matches!(request.kind, Kind::Reset) {
-                        request.drafts.get(index) == Some(&row.raw)
-                    } else {
-                        row.raw == request.raw
-                    }
-                });
-                if unchanged && !composing {
-                    row.raw = item.accels.join("\r\n");
-                    row.dirty = false;
+        self.theme = document.terminal.theme;
+        if let Ok(catalog) = keybindings::catalog(&document.keybindings) {
+            for row in &mut self.rows {
+                if let Some(item) = catalog.iter().find(|item| item.action == row.action) {
+                    row.accels = item.accels.clone();
                 }
-                row.baseline = item.accels.clone();
-                row.expected = document.keybindings.clone();
-                row.error = None;
-            } else if !row.dirty && !composing {
-                row.raw = item.accels.join("\r\n");
-                row.baseline = item.accels.clone();
-                row.expected = document.keybindings.clone();
-            } else if error.is_none()
-                && pending
-                    .as_ref()
-                    .is_some_and(|request| request.expected == row.expected)
-            {
-                // Rebase other drafts only over our acknowledged CAS write, not external changes.
-                row.expected = document.keybindings.clone();
             }
-            if own && error.is_some() {
-                row.error = error.map(str::to_owned);
+            self.render_rows();
+        }
+        let mut close = false;
+        if let Some(dialog) = self.editor.as_mut() {
+            dialog.theme(self.theme);
+            if let Some(request) = pending
+                .as_ref()
+                .filter(|request| request.editor == Some(dialog.id))
+            {
+                dialog.pending(false);
+                if let Some(error) = error {
+                    dialog.status(error);
+                    self.error = Some(error.into());
+                } else {
+                    self.editor_expected = document.keybindings.clone();
+                    close = dialog.raw() == request.raw && !dialog.composing();
+                    if !close {
+                        dialog.status("Saved. Newer draft remains unsaved; press OK to apply it.");
+                    }
+                    self.error = None;
+                }
             }
         }
-        if completed {
+        if close {
+            self.editor.take();
+            self.selected = None;
+        }
+        if completed && error.is_some() {
             self.error = error.map(str::to_owned);
         }
-        // Updating other fields must never replace an active native IME buffer.
-        if COMPOSING.with(Cell::get) != self.input as isize {
-            self.fill_selected();
+    }
+    pub(super) fn dismiss(&mut self) {
+        if self
+            .request
+            .as_ref()
+            .is_some_and(|request| request.editor.is_some())
+        {
+            self.request = None;
         }
+        self.editor.take();
+        self.selected = None;
+    }
+    pub(super) fn handle_message(&self, message: &MSG) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|editor| editor.handle_message(message))
+    }
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.editor.as_ref().map(editor::Panel::capture_window)
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"scope":"terminal_input","auto_apply":false,"parent":unsafe{GetParent(self.input)} as usize,
-            "search":self.search as usize,"list":self.list as usize,"input":self.input as usize,"save":self.save as usize,"unbind":self.clear as usize,"default":self.defaults as usize,"reset":self.reset as usize,
-            "selected":self.selected.map(|index|&self.rows[index].action),"draft":Panel::text(self.input),"pending":self.pending.is_some(),"queued":self.request.is_some(),"error":self.error,
-            "visible_actions":self.filtered.iter().map(|index|&self.rows[*index].action).collect::<Vec<_>>(),
-            "actions":self.rows.iter().map(|row|json!({"action":row.action,"label":row.label,"supported":row.supported,"accels":row.baseline,"draft":row.raw,"dirty":row.dirty,"error":row.error,"reason":row.reason})).collect::<Vec<_>>()})
+        let mut editor = self.editor.as_ref().map(editor::Panel::diagnostics);
+        if let Some(Value::Object(value)) = &mut editor {
+            value.insert(
+                "action".into(),
+                json!(self.selected.map(|index| &self.rows[index].action)),
+            );
+        }
+        json!({"scope":"terminal_input","auto_apply":false,"parent":self.viewport as usize,"reset":self.reset as usize,
+            "reset_parent":self.owner as usize,"editor":editor,"pending":self.pending.is_some(),"queued":self.request.is_some(),"error":self.error,
+            "fixed_clipboard":["copy","paste"],"actions":self.rows.iter().map(|row|json!({"action":row.action,"label":row.label,"supported":row.supported,"accels":row.accels,"edit":row.edit as usize,"accel_handle":row.accel as usize,"chip_text":if row.accels.is_empty(){"(unbound)".to_owned()}else{row.accels.join(", ")}})).collect::<Vec<_>>()})
     }
+}
+fn split_accels(raw: &str) -> Vec<String> {
+    raw.split([',', '\r', '\n'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
 }

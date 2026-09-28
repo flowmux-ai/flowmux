@@ -1,0 +1,21 @@
+{
+  "name": "keybindings-dialog-format-keys",
+  "command": [
+    "rustfmt",
+    "--edition",
+    "2021",
+    "--config",
+    "skip_children=true",
+    "--check",
+    "windows/src/keybindings.rs",
+    "windows/src/native/host.rs",
+    "windows/src/native/keybindings_panel.rs",
+    "windows/src/native/keybindings_editor.rs",
+    "windows/src/native/options_panel.rs"
+  ],
+  "deadlineSeconds": 30,
+  "status": "passed",
+  "pid": 494580,
+  "exitCode": 0,
+  "elapsedSeconds": 0.306
+}

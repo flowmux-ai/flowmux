@@ -38,4 +38,22 @@ public static class OptionsFixture {
     // Exercises only the app's message guard, not OS IME/TSF composition behavior.
     public static void CompositionGuard(long parent,long child,int owner,bool active) {var hwnd=Child(parent,child,owner);Message(hwnd,active?0x10DU:0x10EU,IntPtr.Zero,IntPtr.Zero);Owned(parent,owner);}
     public static void Scroll(long window,int owner,bool end) {Message(Owned(window,owner),0x115,new IntPtr(end?7:6),IntPtr.Zero);}
+    public static void ScrollPage(long window,int owner,bool down) {Message(Owned(window,owner),0x115,new IntPtr(down?3:2),IntPtr.Zero);}
+    public static void ScrollLine(long window,int owner,bool down) {Message(Owned(window,owner),0x115,new IntPtr(down?1:0),IntPtr.Zero);}
+    // Direct owned-window messages exercise capture dispatch without physical
+    // input, desktop focus, GetKeyState, SetKeyboardState or an OS IME session.
+    public static void KeyMessage(long window,int owner,int key,int scan,bool up,bool extended,bool system,bool repeat) {
+        var hwnd=Owned(window,owner);if(key<0||key>255||scan<0||scan>255)throw new ArgumentOutOfRangeException("Owned capture key");
+        long flags=1L|((long)scan<<16);if(extended)flags|=1L<<24;if(system)flags|=1L<<29;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;
+        Message(hwnd,system?(up?0x105U:0x104U):(up?0x101U:0x100U),new IntPtr(key),new IntPtr(flags));
+    }
+    public static void WindowCompositionGuard(long window,int owner,bool active) {Message(Owned(window,owner),active?0x10DU:0x10EU,IntPtr.Zero,IntPtr.Zero);}
+    [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr w,IntPtr l);
+    // Post to the exact owned control so the real message loop chooses its
+    // Enter action. No focus, physical keyboard or direct WM_COMMAND dispatch.
+    public static void PostEnter(long control,int owner) {
+        var hwnd=Owned(control,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned Enter target is disabled");
+        if(!PostMessage(hwnd,0x100,new IntPtr(13),new IntPtr(1L|(0x1CL<<16))))throw new InvalidOperationException("Could not post owned Enter keydown");
+        if(!PostMessage(hwnd,0x101,new IntPtr(13),new IntPtr(1L|(0x1CL<<16)|(1L<<30)|(1L<<31))))throw new InvalidOperationException("Could not post owned Enter keyup");
+    }
 }

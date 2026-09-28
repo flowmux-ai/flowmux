@@ -1,0 +1,2 @@
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.05s

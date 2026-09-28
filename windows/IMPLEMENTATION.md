@@ -844,3 +844,45 @@ rows. Browser/editor/native-control shortcut routing, full editor priority,
 physical Korean IME/TSF, focus, DPI/accessibility, complete Linux presentation
 and remaining action support are open. See [the evidence record](evidence/2026-09-28/keybindings.md)
 for source, binary, installer and validation boundaries.
+
+## 2026-09-28 — Keybindings rows, edit modal and key capture
+
+Keybindings follows Linux's per-action rows with label, action ID, current
+binding and Edit: 35 rows, 28 configurable terminal actions, seven disabled
+editors and help for the two fixed clipboard bindings. Reset all keybindings
+stays outside the scrolling viewport. An Options-owned 420×220-DIP edit modal
+opens a 320×140-DIP capture modal. Reset/Unbind/capture change only the draft;
+Cancel discards unsubmitted changes and OK validates/saves through the existing
+worker and full-map CAS. General/Theme retain automatic application. The footer
+explains OK-based saving while preserving real error and Saving messages.
+
+Final hidden dialog coverage passed **eight groups in 9.436 s**, including Enter
+on Cancel/Reset/Unbind/Capture/OK and the input through the real message loop.
+Existing Options regression passed **nine groups in 8.486 s**. Records are
+`keybindings-dialog-ae36a423-a035-4627-b55b-7f9a3b99d334` and
+`options-live-bda36cae-61cb-4bd3-85e0-bcdd2225dac1` under `windows/dist/evidence`.
+Earlier passing runs are superseded, not added to those counts. Unchanged core
+coverage passed **33 Windows unit tests in 1.148 s** before the UI-only fixes:
+22 keybindings, one settings store, eight CLI and two protocol tests. Final
+Clippy passed in **24.83 s**; changed Rust files pass formatting checks.
+
+PNG review found truncated dialog button labels and an incorrect auto-save
+footer; both were corrected. A fixture-only cross-process HFONT measurement
+failed in 6.266 s and was removed; actual owned bounds and PNG inspection remain.
+Review then found Enter invoking OK on every focused button. The old executable
+reproduced the Cancel failure in 5.004 s; final verification above passes after
+routing Enter to its target button. All failed/superseded records remain intact.
+
+Final rows/edit/capture PNGs match the reviewed pixels. They cover native client
+buttons and STATIC text, not EDIT input raster, title bars or composed WebViews.
+Actual EDIT text and geometry are inspected separately. Debug Cargo publication
+failed with OS error 5 after linking (83.2 s); fresh deps outputs were checked
+and separately staged while the user's app continued running. Release, package
+and hash provenance is recorded in [the evidence](evidence/2026-09-28/keybindings-dialog.md).
+The installer candidate is `flowmux-windows-0.10.1-dev-keybindings-dialog-x64-setup.exe`;
+it is not installed over the running user application.
+
+Physical Korean IME/TSF, keyboard/focus and OS accelerator delivery, per-monitor
+DPI/accessibility, full General/Theme/Update settings and complete Linux parity
+remain unverified or incomplete. Acceptance stays **62 partial / 52 pending**,
+U09 partial; no feature is marked complete.

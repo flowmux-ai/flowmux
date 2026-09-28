@@ -1,0 +1,13 @@
+{
+    "name":  "keybindings-dialog-release-doctor",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\release-keybindings-dialog-doctor.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T10:39:32.4412517Z",
+    "pid":  12268,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.869,
+    "finished":  "2026-09-28T10:39:33.3138252Z"
+}

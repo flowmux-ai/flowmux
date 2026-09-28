@@ -1,0 +1,15 @@
+{
+  "files": {
+    "windows/scripts/verify-keybindings-dialog.ps1": "cc7686d922371bbd3d5644e927f831ceb5e19c83bf8ba682df785c8927bf4050",
+    "windows/scripts/verify-keybindings-unit.ps1": "1fea9874c5321fde6a94fe4bff3666ac91253cc2538dda14643a0923ffffaa68",
+    "windows/scripts/verify-options-live.ps1": "80fa4392a69445ecc2e48c2f3da506bc44fd7e1b2e36deb787d748b52758f7fd",
+    "windows/scripts/OptionsFixture.cs": "4d814f57ed3a6d3a5d6ee8edd08a8f582435856601577543a01966b07d139daf",
+    "windows/scripts/ChromeFixture.cs": "effd7596cb20f6791fd2e0b85b31310e4f6b348ce8d9bf5d53acf5023b596764",
+    "windows/scripts/CliProbe.cs": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+    "windows/scripts/CheckJob.cs": "ffd8ef338039da1d9a0df1fe633fd1ab5616deec3eee6a58b05ff356f6df55a9",
+    "windows/scripts/run-check.ps1": "be91420be27baaed5647ae8ba11963e6a38ed8ee5010151bf099dad5158d9ef3",
+    "windows/scripts/run-check.py": "0d2f149904170d6b09eb167c6e12d65af44fda31fcb32696a139656a88f98933",
+    "windows/installer.nsi": "b19819e88eb831a9a3cc0e3208cb5e404852dee9082d72de973f9235a5bd827c",
+    "windows/acceptance.json": "23814bbc1ece5866a37c00c9562fc58311cb8d780f4c2ed4ee706a4146f59bf2"
+  }
+}

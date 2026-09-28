@@ -147,6 +147,69 @@ pub fn parse(accel: &str) -> anyhow::Result<Chord> {
     Ok(chord)
 }
 
+/// Format an owned native key capture without querying global keyboard state.
+/// The caller owns IME/AltGraph/Windows-key guards and passes tracked modifiers.
+pub fn captured_key(
+    vkey: u32,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+) -> anyhow::Result<Option<String>> {
+    let key = match vkey {
+        // Modifier/lock keys and IME control messages never become bindings.
+        0x10..=0x12
+        | 0x14..=0x16
+        | 0x19..=0x1a
+        | 0x5b..=0x5c
+        | 0x90..=0x91
+        | 0xa0..=0xa5
+        | 0xe5
+        | 0xe7 => return Ok(None),
+        0x30..=0x39 => (vkey as u8 as char).to_string(),
+        0x41..=0x5a => (vkey as u8 as char).to_ascii_lowercase().to_string(),
+        0x70..=0x87 => format!("F{}", vkey - 0x70 + 1),
+        _ => match vkey {
+            0x08 => "BackSpace",
+            0x09 => "Tab",
+            0x0d => "Return",
+            0x1b => "Escape",
+            0x20 => "space",
+            0x21 => "Page_Up",
+            0x22 => "Page_Down",
+            0x23 => "End",
+            0x24 => "Home",
+            0x25 => "Left",
+            0x26 => "Up",
+            0x27 => "Right",
+            0x28 => "Down",
+            0x2d => "Insert",
+            0x2e => "Delete",
+            0xba => "semicolon",
+            0xbb => "equal",
+            0xbc => "comma",
+            0xbd => "minus",
+            0xbe => "period",
+            0xbf => "slash",
+            0xc0 => "grave",
+            0xdb => "bracketleft",
+            0xdc => "backslash",
+            0xdd => "bracketright",
+            0xde => "apostrophe",
+            _ => bail!("unsupported native shortcut key: 0x{vkey:02X}"),
+        }
+        .into(),
+    };
+    let mut accelerator = String::new();
+    for (enabled, modifier) in [(ctrl, "<Ctrl>"), (alt, "<Alt>"), (shift, "<Shift>")] {
+        if enabled {
+            accelerator.push_str(modifier);
+        }
+    }
+    accelerator.push_str(&key);
+    parse(&accelerator)?;
+    Ok(Some(accelerator))
+}
+
 fn modifier(chord: &mut Chord, value: &str) -> anyhow::Result<()> {
     let flag = match value.to_ascii_lowercase().as_str() {
         "ctrl" | "control" | "primary" => &mut chord.ctrl,
@@ -318,6 +381,56 @@ fn editable_action(value: &str) -> anyhow::Result<ActionId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_capture_ignores_modifiers_ime_and_locks_and_validates_physical_chords() {
+        for vkey in [
+            0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x19, 0x1a, 0x5b, 0x5c, 0x90, 0x91, 0xa0, 0xa1,
+            0xa2, 0xa3, 0xa4, 0xa5, 0xe5, 0xe7,
+        ] {
+            assert_eq!(captured_key(vkey, true, true, true).unwrap(), None);
+        }
+        assert_eq!(
+            captured_key(0x4b, true, false, false).unwrap().as_deref(),
+            Some("<Ctrl>k")
+        );
+        assert_eq!(
+            captured_key(0x21, true, true, true).unwrap().as_deref(),
+            Some("<Ctrl><Alt><Shift>Page_Up")
+        );
+        assert_eq!(
+            captured_key(0x87, false, false, false).unwrap().as_deref(),
+            Some("F24")
+        );
+        for (vkey, code) in [
+            (0xba, "Semicolon"),
+            (0xbb, "Equal"),
+            (0xbc, "Comma"),
+            (0xbd, "Minus"),
+            (0xbe, "Period"),
+            (0xbf, "Slash"),
+            (0xc0, "Backquote"),
+            (0xdb, "BracketLeft"),
+            (0xdc, "Backslash"),
+            (0xdd, "BracketRight"),
+            (0xde, "Quote"),
+        ] {
+            let accel = captured_key(vkey, true, false, true).unwrap().unwrap();
+            let chord = parse(&accel).unwrap();
+            assert_eq!(chord.code, code);
+            assert!(chord.ctrl && chord.shift && !chord.alt);
+        }
+        for (vkey, ctrl, alt, shift) in [
+            (0x43, true, false, false),
+            (0x56, true, false, true),
+            (0x73, false, true, false),
+            (0x2e, true, true, false),
+            (0x41, false, false, true),
+            (0x31, false, false, false),
+            (0xe2, true, false, false),
+        ] {
+            assert!(captured_key(vkey, ctrl, alt, shift).is_err());
+        }
+    }
     #[test]
     fn defaults_aliases_conflicts_reserved_and_unbind_are_validated() {
         let defaults = KeybindingOverrides::default();

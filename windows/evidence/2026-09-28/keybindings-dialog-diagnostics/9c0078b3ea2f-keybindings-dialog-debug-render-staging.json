@@ -1,0 +1,49 @@
+{
+  "cargo_result": "windows/dist/checks/keybindings-dialog-debug-render-2c82bb29-009e-480f-8633-a8dacf9e0484/result.json",
+  "cargo_status": "failed",
+  "reason": "Fresh linked deps separately staged; canonical GUI publication may fail because the user app holds it open. Running GUI unchanged. Cargo can update other canonical entrypoints.",
+  "files": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux.exe",
+      "path": "windows/dist/keybindings-dialog-debug-render/flowmux.exe",
+      "sha256": "1f043b5fca547253ec09f6e04c31a073fb8e2d836170ca88aede8e4cd95a45a8",
+      "bytes": 33284096,
+      "mtime_utc": "2026-09-28T10:37:04.110188+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmuxctl.exe",
+      "path": "windows/dist/keybindings-dialog-debug-render/flowmuxctl.exe",
+      "sha256": "0e2dbd406b7c7e2d657f2c6672b30e47cfae2ef4dfc8f746ddb6ad5ece14744d",
+      "bytes": 3398144,
+      "mtime_utc": "2026-09-28T10:36:58.460761+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux_command.exe",
+      "path": "windows/dist/keybindings-dialog-debug-render/flowmux-command.exe",
+      "sha256": "bdc2e62c68b77b4f94c9579ca8d0e5421d6f6c6c5b81459381bd4f06a80a0f4a",
+      "bytes": 3509760,
+      "mtime_utc": "2026-09-28T10:36:58.512821+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux_command.exe",
+      "path": "windows/dist/keybindings-dialog-debug-render/flowmux.com",
+      "sha256": "bdc2e62c68b77b4f94c9579ca8d0e5421d6f6c6c5b81459381bd4f06a80a0f4a",
+      "bytes": 3509760,
+      "mtime_utc": "2026-09-28T10:36:58.512821+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/conpty.dll",
+      "path": "windows/dist/keybindings-dialog-debug-render/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920,
+      "mtime_utc": "2026-09-27T13:06:38.039997+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/x64/OpenConsole.exe",
+      "path": "windows/dist/keybindings-dialog-debug-render/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296,
+      "mtime_utc": "2026-09-27T13:06:38.064433+00:00"
+    }
+  ]
+}

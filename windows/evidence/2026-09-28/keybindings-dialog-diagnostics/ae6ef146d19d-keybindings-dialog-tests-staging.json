@@ -1,0 +1,7 @@
+{
+  "cargo_result": "windows/dist/checks/keybindings-dialog-unit-build-8bb087cc-014e-4a12-9b40-d53f4d5eeb77/result.json",
+  "source_snapshot": "windows/dist/keybindings-dialog-source-final.json",
+  "test_executable": "windows/dist/keybindings-dialog-tests/flowmux_windows-940f179605ae9006.exe",
+  "sha256": "3c9c0697f58c12946ccb9d36deb41c4b9bc1dfbacb472e20d557155bea9d8b9a",
+  "source_mtime": 1790591637.2840967
+}

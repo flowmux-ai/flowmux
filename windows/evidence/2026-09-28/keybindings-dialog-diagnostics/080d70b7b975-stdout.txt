@@ -1,0 +1,2 @@
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\options-live-e3a6275a-3873-4599-810e-5691640f45e1
+{"status":"passed_hidden_options_live_subset","checks":9,"elapsedMs":8851}
