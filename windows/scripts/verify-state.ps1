@@ -2,6 +2,7 @@
 # Hidden debug hosts and a unique state directory only. No desktop input.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
     [ValidateSet('all','detached')][string]$Case='all')
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
@@ -14,7 +15,7 @@ if ($Case -eq 'detached') {
     Add-Type -AssemblyName System.Drawing
     Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 }
-$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('state-' + [guid]::NewGuid())
+$directory = Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('state-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 $stateDirectory = Join-Path $directory 'state'

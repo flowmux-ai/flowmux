@@ -1,6 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned hosts only. Read parsed screens through IPC; never touch desktop input or clipboard.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
@@ -8,7 +9,7 @@ $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flo
 $doctor=& $cli doctor|ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('minimap-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('minimap-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $probe=Join-Path $directory 'minimap-probe.exe';$control=Join-Path $directory 'control.txt'
 Add-Type -Path (Join-Path $PSScriptRoot 'MinimapProbe.cs') -OutputAssembly $probe -OutputType ConsoleApplication

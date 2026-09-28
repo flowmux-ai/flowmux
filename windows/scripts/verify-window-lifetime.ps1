@@ -1,6 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Owned hidden processes only; never writes PATH/registry or sends desktop input.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$ExpectCoupled)
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
@@ -10,7 +11,7 @@ $doctor=(& $control doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) {throw 'A working debug build is required; no host was launched.'}
 Copy-Item (Join-Path $BuildDirectory 'flowmux-command.exe') $console
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('window-lifetime-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('window-lifetime-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null; $directory=(Resolve-Path $directory).Path
 $cwd=Join-Path $directory '한글 한 😀 space & #';[IO.Directory]::CreateDirectory($cwd)|Out-Null
 $hosts=New-Object 'System.Collections.Generic.List[object]'

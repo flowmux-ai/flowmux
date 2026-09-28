@@ -1,12 +1,13 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned live Options; 50s work + bounded cleanup, outer Job60s.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 . (Join-Path $PSScriptRoot 'OptionsEvidence.ps1')
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('options-live-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('options-live-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
 $evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-options-live';hosts=@();checks=@();observations=@();desktopInput=$false;clipboardAccess=$false;imeGuardMessageSimulation=$true;physicalIme=$false;deferred='Owned WM_IME_START/END messages exercise only application guards; they do not establish OS Korean IME/TSF correctness. Physical keyboard/focus/IME, per-monitor DPI, accessibility and composed visual acceptance are not established.'}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}

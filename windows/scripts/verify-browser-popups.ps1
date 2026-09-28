@@ -4,12 +4,13 @@ param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
     [ValidateSet('all','startup','url','target','blank','history','source-pin','hidden','move','source-close','child-close','manual-close','policy','capacity','flood','final-close')][string]$Case='all'
 )
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'PopupFixture.cs')
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('browser-popups-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('browser-popups-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=$null;$process=$null;$pipeName=$null;$stdout=$null;$stderr=$null
 $hosts=@();$shells=@();$clients=@();$cleanupErrors=@()

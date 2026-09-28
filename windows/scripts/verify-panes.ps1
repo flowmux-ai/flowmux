@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Always hidden, isolated state. No desktop input, native clicks or IME automation.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
@@ -8,7 +9,7 @@ $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor = (& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no window was launched.' }
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
-$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('panes-' + [guid]::NewGuid())
+$directory = Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('panes-' + [guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory = (Resolve-Path $directory).Path
 $hosts = New-Object 'System.Collections.Generic.List[System.Diagnostics.Process]'

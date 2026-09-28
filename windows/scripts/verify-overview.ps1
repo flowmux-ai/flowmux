@@ -1,12 +1,13 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned overview workflow; 48s work + bounded cleanup, outer Job60s.
 param([ValidateSet('workflow','dirty','browser')][string]$Case='workflow',[string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'OverviewFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 if($Case -eq 'browser'){Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')}
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('overview-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('overview-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $workBudget=if($Case -eq 'browser'){45000}else{48000};$fixture=$null;$clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$clients=@();$shells=@();$cleaning=$false;$cleanupErrors=@();$hostOut=$null;$hostErr=$null
 $evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-overview';case=$Case;hosts=@();checks=@();observations=@();artifacts=@();desktopInput=$false;clipboardAccess=$false;imeSimulation=$false;previewPolicy='Only logically visible, ready active pane WebViews are captured. Inactive workspace thumbnails are unsupported in this slice; errors are retained, with no synthetic substitutes.';terminalRasterLimitation='Prior hidden terminal capture showed background and cursor without terminal text; PNG success does not establish terminal glyph rendering.';deferred='Inactive workspace thumbnails, hidden terminal glyph rendering, physical keyboard/focus/IME, per-monitor DPI, accessibility and composed GPU/desktop visual acceptance are not established.'}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}

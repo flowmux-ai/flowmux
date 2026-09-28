@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Exercises only the newly launched native window. Never addresses the WSL instance.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [int]$Cycles = 0, [switch]$Interactive)
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
@@ -12,7 +13,7 @@ if ($LASTEXITCODE -ne 0 -or (-not $Interactive -and -not $doctor.background_test
 }
 if ($Cycles -gt 0) { Add-Type -Path (Join-Path $PSScriptRoot 'HandleProbe.cs') }
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
-$evidenceDirectory = $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' })
+$evidenceDirectory = $env:FLOWMUX_TEST_ARTIFACT_ROOT
 New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
 $previousBackground = $env:FLOWMUX_TEST_BACKGROUND
 try {

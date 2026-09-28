@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden debug host only. No desktop keyboard/mouse input or activation.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [int]$Lines = 10000)
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
 $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor = (& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no window was launched.' }
-$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) 'output-load'
+$directory = Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT 'output-load'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 $probe = Join-Path $PSScriptRoot 'OutputProbe.ps1'

@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Defaults to a hidden debug host. -Interactive explicitly enables desktop input.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug", [switch]$Interactive)
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $BuildDirectory = (Resolve-Path $BuildDirectory).Path
-$directory = Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) 'tab-move'
+$directory = Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT 'tab-move'
 New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $directory = (Resolve-Path $directory).Path
 $probe = Join-Path $directory 'input-probe.exe'

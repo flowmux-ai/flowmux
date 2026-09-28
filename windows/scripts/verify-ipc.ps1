@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden hosts only. No desktop input, visible windows, or persistent user state.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
@@ -36,7 +37,7 @@ public static class IpcProbe {
     }
 }
 '@
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('ipc-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('ipc-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory=(Resolve-Path $directory).Path
 $hosts=New-Object 'System.Collections.Generic.List[object]'

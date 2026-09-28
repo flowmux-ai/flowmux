@@ -23,6 +23,9 @@ Thumbs.db
 
 # Agent-generated planning documents
 /docs/superpowers/
+/docs/evidence/
+/docs/*-20??-??-??.md
+/docs/*-evidence-*.json
 
 # Local-only upstream tracking (kept out of the published tree)
 /.upstream-cmux/

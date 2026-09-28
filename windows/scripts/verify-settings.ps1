@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned hosts, isolated shared settings/state, no desktop input.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path; $cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -15,7 +16,7 @@ public static class SettingsFile {
     public static extern bool MoveFileEx(string from,string to,uint flags);
 }
 '@
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('settings-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('settings-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory) | Out-Null
 $directory=(Resolve-Path $directory).Path
 $configDirectory=Join-Path $directory 'config'; $configPath=Join-Path $configDirectory 'config.json'

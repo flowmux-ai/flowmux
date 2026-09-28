@@ -4,12 +4,13 @@ param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
     [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
 )
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'EditorOpenLifetime.cs')
-$directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('editor-'+[guid]::NewGuid())
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('editor-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object EditorFixture($directory)
 $process=$null;$pipeName=$null;$stdout=$null;$stderr=$null;$hostExitRecorded=$false;$hostForced=$false

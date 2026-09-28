@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 param([string]$Installer = "$PSScriptRoot\..\dist\flowmux-windows-0.10.1-dev-x64-setup.exe")
+if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $Installer = (Resolve-Path $Installer).Path
 $registry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\flowmux-windows'
@@ -53,7 +54,7 @@ try {
     $evidence.checks += @{ name = 'uninstall_restores_exact_user_path_and_value_type'; passed = $restored }
     if (-not $restored) { $evidence.status = 'failed'; $evidence.cleanupError = 'Uninstall did not restore PATH/registration' }
     $evidence.finished = (Get-Date).ToString('o')
-    $directory = $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' })
+    $directory = $env:FLOWMUX_TEST_ARTIFACT_ROOT
     if ($evidence.status -eq 'failed' -or $evidence.uninstallExitCode -ne 0) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
     if ($evidence.status -eq 'failed' -or $evidence.uninstallExitCode -ne 0) { $evidence | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 (Join-Path $directory 'installer-smoke.json') }
 }
