@@ -49,6 +49,7 @@ impl App {
                         chrome::window_theme(window.window, self.settings.terminal.theme);
                     }
                     self.editor_apply_theme()?;
+                    self.worktrees.refresh_theme()?;
                     unsafe {
                         InvalidateRect(self.window, std::ptr::null(), 1);
                     }

@@ -40,3 +40,4 @@ pub mod ssh;
 pub mod state;
 pub mod theme;
 pub mod window_launch;
+pub mod worktrees;

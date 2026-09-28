@@ -135,14 +135,13 @@ impl App {
         let px = |value: i32| (value as f64 * scale).round() as i32;
         let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
         let ssh_bar = self.ssh_toolbar_height(workspace, client.right);
+        let available = (client.right - sidebar - px(8)).max(1);
+        let files_width = self.files_dock_width(workspace, available, scale);
+        let worktrees_width = self.worktrees_width(available - files_width, scale);
         let content = model::Rect {
             x: sidebar + px(4),
             y: px(4) + ssh_bar,
-            width: (client.right
-                - sidebar
-                - px(8)
-                - self.files_dock_width(workspace, (client.right - sidebar - px(8)).max(1), scale))
-            .max(1),
+            width: (available - files_width - worktrees_width).max(1),
             height: (client.bottom - px(8) - ssh_bar).max(1),
         };
         let mut geometry = model::Layout::default();

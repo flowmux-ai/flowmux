@@ -20,6 +20,7 @@ pub(crate) enum Choice {
 enum Target {
     Editor(u64),
     Workspace(Uuid),
+    Worktree(Uuid, bool), // The boolean selects a read-only information dialog.
 }
 
 #[derive(Clone)]
@@ -39,7 +40,7 @@ fn choose(window: HWND, choice: Choice) {
         let route = routes.get_mut(&(window as isize))?;
         if route.busy
             || route.submitted
-            || (matches!(route.target, Target::Workspace(_)) && choice == Choice::Discard)
+            || (!matches!(route.target, Target::Editor(_)) && choice == Choice::Discard)
         {
             return None;
         }
@@ -49,6 +50,9 @@ fn choose(window: HWND, choice: Choice) {
     match target {
         Some(Target::Editor(id)) => post(Event::Editor(Signal::CloseChoice(id, choice))),
         Some(Target::Workspace(id)) => post(Event::WorkspaceClose(id, choice == Choice::Save)),
+        Some(Target::Worktree(id, _)) => post(Event::Worktrees(
+            super::super::worktrees::Signal::Choice(id, choice == Choice::Save),
+        )),
         None => {}
     }
 }
@@ -82,8 +86,11 @@ fn layout(window: HWND) {
         let width = (area.right - margin * 2).max(1);
         let button_y = (area.bottom - px(50)).max(0);
         let status_y = (button_y - px(40)).max(px(60));
-        let workspace = matches!(route.target, Target::Workspace(_));
-        let count = if workspace { 2 } else { 3 };
+        let count = match route.target {
+            Target::Editor(_) => 3,
+            Target::Worktree(_, true) => 1,
+            _ => 2,
+        };
         let gap = px(10);
         let button_width = ((width - gap * (count - 1)) / count).clamp(1, px(96));
         let group_x = (area.right - margin - (button_width * count + gap * (count - 1))).max(0);
@@ -231,6 +238,32 @@ impl Panel {
         )
     }
 
+    pub(crate) fn worktree(
+        owner: HWND,
+        id: Uuid,
+        heading: &str,
+        body: &str,
+        accept: Option<&str>,
+        background: bool,
+    ) -> anyhow::Result<Self> {
+        let panel = Self::create(
+            owner,
+            Target::Worktree(id, accept.is_none()),
+            heading,
+            body,
+            6,
+            background,
+        )?;
+        unsafe {
+            if let Some(label) = accept {
+                SetWindowTextW(panel.controls[5], wide(label).as_ptr());
+            } else {
+                SetWindowTextW(panel.controls[3], wide("Close").as_ptr());
+            }
+        }
+        Ok(panel)
+    }
+
     fn create(
         owner: HWND,
         target: Target,
@@ -239,7 +272,8 @@ impl Panel {
         count: usize,
         background: bool,
     ) -> anyhow::Result<Self> {
-        let workspace = matches!(target, Target::Workspace(_));
+        let workspace = !matches!(target, Target::Editor(_));
+        let information = matches!(target, Target::Worktree(_, true));
         unsafe {
             anyhow::ensure!(IsWindow(owner) != 0, "editor close owner no longer exists");
             let instance = GetModuleHandleW(std::ptr::null());
@@ -320,13 +354,15 @@ impl Panel {
                     WS_TABSTOP | BS_OWNERDRAW as u32,
                 )?;
             }
-            panel.controls[5] = panel.child(
-                "BUTTON",
-                if workspace { "Close" } else { "Save" },
-                SAVE,
-                WS_TABSTOP | BS_OWNERDRAW as u32,
-            )?;
-            if workspace {
+            if !information {
+                panel.controls[5] = panel.child(
+                    "BUTTON",
+                    if workspace { "Close" } else { "Save" },
+                    SAVE,
+                    WS_TABSTOP | BS_OWNERDRAW as u32,
+                )?;
+            }
+            if workspace && !information {
                 chrome::set_role(panel.controls[5], chrome::Role::Destructive);
             }
             ROUTES.with(|routes| {
@@ -408,7 +444,7 @@ impl Panel {
                             let choice = if message.wParam == 27 || message.hwnd == self.controls[3]
                             {
                                 Choice::Cancel
-                            } else if matches!(self.target, Target::Workspace(_)) {
+                            } else if !matches!(self.target, Target::Editor(_)) {
                                 if message.hwnd == self.controls[5] {
                                     Choice::Save
                                 } else {
@@ -467,9 +503,10 @@ impl Panel {
         let (id, workspace) = match self.target {
             Target::Editor(id) => (json!(id), false),
             Target::Workspace(id) => (json!(id), true),
+            Target::Worktree(id, _) => (json!(id), true),
         };
         json!({"window":self.window as usize,"owner":unsafe { GetWindow(self.window,GW_OWNER) } as usize,
-            "id":id,"kind":if workspace { "workspace" } else { "editor" },"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
+            "id":id,"kind":if matches!(self.target,Target::Worktree(..)) { "worktree" } else if workspace { "workspace" } else { "editor" },"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
             "save":if workspace { 0 } else { self.controls[5] as usize },
             "confirm":if workspace { self.controls[5] as usize } else { 0 },
             "close":if workspace { self.controls[5] as usize } else { 0 },"discard":self.controls[4] as usize,"cancel":self.controls[3] as usize,

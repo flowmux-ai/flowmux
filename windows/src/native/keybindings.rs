@@ -393,6 +393,7 @@ impl App {
             Some(TogglePaneZoom) => Action::TogglePaneZoom,
             Some(ToggleWorkspaceOverview) => Action::Overview,
             Some(ToggleFileBrowser) => Action::ShowFiles,
+            Some(ToggleWorktreePanel) => Action::Worktrees,
             _ => return Ok(()),
         };
         self.action(action)

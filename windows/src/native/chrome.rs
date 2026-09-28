@@ -256,6 +256,7 @@ pub(super) enum Role {
 pub(super) enum ChromeIcon {
     Settings,
     Files,
+    Worktrees,
     Search,
     CommandPalette,
     OpenFile,
@@ -1408,6 +1409,13 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         (4, -4, 6, -6),
                     ] {
                         line(a, b, c, d);
+                    }
+                }
+                ChromeIcon::Worktrees => {
+                    line(-4, -4, -4, 4);
+                    line(-4, 1, 4, -3);
+                    for (a, b) in [(-4, -6), (-4, 6), (5, -5)] {
+                        Ellipse(item.hDC, x(a - 2), y(b - 2), x(a + 2) + 1, y(b + 2) + 1);
                     }
                 }
                 ChromeIcon::Files => {

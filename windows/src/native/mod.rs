@@ -7,6 +7,7 @@ mod session;
 mod settings_store;
 mod shell;
 mod state_store;
+mod worktree_git;
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;

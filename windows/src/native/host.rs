@@ -97,6 +97,10 @@ pub(super) mod surface_host;
 mod tab_menu;
 #[path = "workspaces.rs"]
 mod workspaces;
+#[path = "worktree_panel.rs"]
+mod worktree_panel;
+#[path = "worktrees.rs"]
+mod worktrees;
 
 const WAKE: u32 = WM_APP + 1;
 thread_local! {
@@ -113,6 +117,7 @@ enum Event {
     WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
     Files(files::Signal),
+    Worktrees(worktrees::Signal),
     Browser(browser::Signal),
     Layout,
     WindowMoved,
@@ -441,6 +446,7 @@ impl Surface {
 enum Action {
     OpenEditor,
     ShowFiles,
+    Worktrees,
     NewBrowser,
     Notifications,
     Settings,
@@ -562,6 +568,7 @@ struct App {
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
     overview: overview::Controller,
+    worktrees: worktrees::Controller,
     pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
@@ -832,6 +839,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             options: None,
             command_palette: command_palette::Controller::default(),
             overview: overview::Controller::default(),
+            worktrees: worktrees::Controller::default(),
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
@@ -877,6 +885,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.focus_active()?;
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.worktrees.shutdown();
         app.files_shutdown();
         app.editor_cancel_opens(None, "window closed before editor Open completed");
         app.editor_preparer.take();
@@ -963,6 +972,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.overview_handle_message(&message)
                 && !app.options_handle_message(&message)
                 && !app.search.handle_message(&message)
+                && !app.worktrees.handle_message(&message)
                 && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
                 && !app.downloads.handle_message(&message)
@@ -1077,6 +1087,7 @@ impl App {
             ("Command Palette", Action::CommandPalette),
             ("Workspace overview", Action::Overview),
             ("Files", Action::ShowFiles),
+            ("Worktrees", Action::Worktrees),
             ("Search", Action::SearchAll),
             ("Open file", Action::OpenEditor),
             ("Notices", Action::Notifications),
@@ -1388,6 +1399,7 @@ impl App {
         panes::cache_sidebar(sidebar, client.bottom, px(4), !self.background_test);
         let bar = px(28);
         self.files_reconcile();
+        self.worktrees_reconcile()?;
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
         if let Some(pane) = self.zoomed {
             geometry.panes = vec![(pane, content)];
@@ -1417,6 +1429,19 @@ impl App {
             }),
             scale,
         )?;
+        let worktrees_width = self.worktrees_width(
+            (client.right - content.x - px(4) - dock_width).max(1),
+            scale,
+        );
+        self.worktrees_layout(
+            (worktrees_width > 0).then_some(model::Rect {
+                x: client.right - px(4) - dock_width - worktrees_width,
+                y: content.y,
+                width: worktrees_width,
+                height: content.height,
+            }),
+            scale,
+        );
         let areas = &geometry.panes;
         let visible: HashMap<_, _> = view_areas
             .iter()
@@ -1587,20 +1612,23 @@ impl App {
                 | Action::Overview
                 | Action::CommandPalette
                 | Action::ShowFiles
+                | Action::Worktrees
                 | Action::SearchAll
                 | Action::OpenEditor => {
                     let x = match control.action {
                         Action::Settings => px(4),
                         Action::Overview => px(36),
                         Action::CommandPalette => px(68),
-                        Action::OpenEditor => sidebar - px(100),
+                        Action::OpenEditor => sidebar - px(132),
+                        Action::Worktrees => sidebar - px(100),
                         Action::ShowFiles => sidebar - px(68),
                         _ => sidebar - px(36),
                     };
                     (sidebar
                         >= px(match control.action {
                             Action::CommandPalette => 200,
-                            Action::OpenEditor => 168,
+                            Action::OpenEditor => 232,
+                            Action::Worktrees => 168,
                             _ => 136,
                         })
                         && footer_top >= px(40))
@@ -1778,6 +1806,7 @@ impl App {
     }
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
+            Event::Worktrees(signal) => self.worktrees_event(signal)?,
             Event::EmptyWindowShortcut(action) => self.empty_window_shortcut_action(action)?,
             Event::SshDialog(id, action) => self.ssh_dialog_action(id, action)?,
             Event::SshPorts(id, action) => self.ssh_ports_action(id, action)?,
@@ -1881,6 +1910,7 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                self.worktrees_reconcile()?;
                 self.ssh_ports_tick()?;
                 #[cfg(debug_assertions)]
                 self.pending_terminal_ui_tests.retain(|_, request| {
@@ -3145,6 +3175,7 @@ impl App {
             Action::EmptyState => return Ok(()),
             Action::OpenEditor => return self.editor_pick_action(),
             Action::ShowFiles => return self.files_show_current(),
+            Action::Worktrees => return self.toggle_worktrees(),
             Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Settings => return self.settings_menu(),
@@ -3447,7 +3478,7 @@ impl App {
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
                 return Ok(Some(
                     json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
-                        "last_new_window_pid":last_new_window_pid,
+                        "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),

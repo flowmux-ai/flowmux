@@ -328,6 +328,10 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
 // Validate the OS-reported owner before sending any command bytes. A syntactically
 // valid discovery record or pipe name alone is not process identity evidence.
 fn open_verified_pipe(name: &str) -> anyhow::Result<transport::Pipe> {
+    open_verified_pipe_until(name, Instant::now() + Duration::from_secs(3))
+}
+
+fn open_verified_pipe_until(name: &str, deadline: Instant) -> anyhow::Result<transport::Pipe> {
     let expected = discovery::pipe_pid(name)?;
     let mut options = OpenOptions::new();
     options
@@ -335,7 +339,6 @@ fn open_verified_pipe(name: &str) -> anyhow::Result<transport::Pipe> {
         .write(true)
         .security_qos_flags(SECURITY_IDENTIFICATION)
         .custom_flags(FILE_FLAG_OVERLAPPED);
-    let deadline = Instant::now() + Duration::from_secs(3);
     let file = loop {
         match options.open(name) {
             Ok(file) => break file,
@@ -371,4 +374,98 @@ fn open_verified_pipe(name: &str) -> anyhow::Result<transport::Pipe> {
         "pipe server PID mismatch: expected {expected}, found {actual}"
     );
     Ok(transport::Pipe::new(file.into())?)
+}
+
+/// Read other native windows before a destructive worktree operation. Discovery
+/// is only a hint; verify the pipe's live OS owner, and fail closed on uncertainty.
+pub(super) fn other_window_paths(
+    cancel: &std::sync::atomic::AtomicBool,
+) -> anyhow::Result<Vec<PathBuf>> {
+    use std::sync::atomic::Ordering;
+    fn paths(value: &Value, out: &mut Vec<PathBuf>) {
+        match value {
+            Value::Array(values) => values.iter().for_each(|value| paths(value, out)),
+            Value::Object(object) => {
+                for (key, value) in object {
+                    if matches!(key.as_str(), "cwd" | "workspace_root") {
+                        if let Some(path) = value.as_str() {
+                            out.push(path.into());
+                        }
+                    } else {
+                        paths(value, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut used = Vec::new();
+    let request = serde_json::to_vec(&Request {
+        command: Command::Tree,
+        caller_surface: None,
+        caller_cwd: None,
+    })?;
+    for name in discovery::candidates(&data_dir()?.join("instances")) {
+        let pid = discovery::pipe_pid(&name)?;
+        if pid == std::process::id() {
+            continue;
+        }
+        anyhow::ensure!(
+            !cancel.load(Ordering::Acquire) && Instant::now() < deadline,
+            "Worktree usage check was cancelled or exceeded five seconds"
+        );
+        // Discovery can outlive its process and that PID can be reused. Only
+        // an existing, kernel-verified pipe identifies another flowmux window.
+        let mut pipe = match open_verified_pipe_until(&name, deadline) {
+            Ok(pipe) => pipe,
+            Err(error) if error.downcast_ref::<std::io::Error>().is_some_and(|e| {
+                matches!(e.raw_os_error(), Some(code) if code == ERROR_FILE_NOT_FOUND as i32 || code == ERROR_PATH_NOT_FOUND as i32)
+            }) => continue,
+            Err(error) => return Err(error.context("Cannot verify another flowmux window's worktree usage")),
+        };
+        let raw = unsafe {
+            OpenProcess(
+                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            )
+        };
+        if raw.is_null() {
+            if unsafe { GetLastError() } == ERROR_INVALID_PARAMETER {
+                continue;
+            }
+            anyhow::bail!("Cannot verify another flowmux window before removing a worktree");
+        }
+        let process = unsafe { OwnedHandle::from_raw_handle(raw) };
+        if unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } == WAIT_OBJECT_0 {
+            continue;
+        }
+        let result = (|| -> anyhow::Result<Value> {
+            let stop = transport::Event::new()?;
+            let mut bytes = request.clone();
+            bytes.push(b'\n');
+            pipe.write_all(&bytes, deadline, &stop)?;
+            let frame = pipe.read_frame(server::MAX_REPLY_BYTES, deadline, &stop)?;
+            Ok(serde_json::from_slice(&frame)?)
+        })();
+        let tree = match result {
+            Ok(tree) => tree,
+            Err(_)
+                if unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } == WAIT_OBJECT_0 =>
+            {
+                continue
+            }
+            Err(error) => {
+                return Err(error.context("Cannot verify another flowmux window's worktree usage"))
+            }
+        };
+        let workspaces = tree["workspaces"]
+            .as_array()
+            .context("Another flowmux window returned no workspace state")?;
+        for workspace in workspaces.iter().filter(|w| w["ssh"].is_null()) {
+            paths(workspace, &mut used);
+        }
+    }
+    Ok(used)
 }
