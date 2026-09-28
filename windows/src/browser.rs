@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const MAX_URL_BYTES: usize = 16 * 1024;
+/// Saved binding identity only; deliberately excluded from the public URL policy.
+pub fn ssh_preview_id(value: &str) -> Option<Uuid> {
+    let id = value.strip_prefix("flowmux-ssh-preview://")?;
+    let parsed = Uuid::parse_str(id).ok()?;
+    (id == parsed.hyphenated().to_string()).then_some(parsed)
+}
 pub fn url(value: &str) -> anyhow::Result<String> {
     anyhow::ensure!(
         value.len() <= MAX_URL_BYTES && !value.chars().any(char::is_control),
@@ -253,6 +259,23 @@ mod tests {
             assert!(url(value).is_err(), "{value}");
         }
         assert!(url(&format!("https://example.com/{}", "한".repeat(3000))).is_err());
+    }
+    #[test]
+    fn ssh_preview_binding_is_exact_and_never_a_public_navigation_url() {
+        let id = Uuid::new_v4();
+        let binding = format!("flowmux-ssh-preview://{id}");
+        assert_eq!(ssh_preview_id(&binding), Some(id));
+        assert!(url(&binding).is_err());
+        for invalid in [
+            format!("{binding}/"),
+            format!("{binding}?port=80"),
+            format!("{binding}#fragment"),
+            format!("{binding}@localhost"),
+            format!("flowmux-ssh-preview://{}", id.simple()),
+            binding.to_uppercase(),
+        ] {
+            assert_eq!(ssh_preview_id(&invalid), None);
+        }
     }
     #[test]
     fn browser_placement_reuses_right_sibling_and_preserves_source_terminal_identity() {

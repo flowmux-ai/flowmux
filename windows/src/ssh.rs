@@ -6,7 +6,7 @@ use crate::shell::Shell;
 use anyhow::ensure;
 use flowmux_core::{
     ssh::{shell_quote, validate_remote_cwd},
-    SshWorkspaceConfig,
+    SshForwardSpec, SshTarget, SshWorkspaceConfig,
 };
 
 pub fn set_remote_cwd(
@@ -46,10 +46,6 @@ pub fn terminal_shell(
 ) -> anyhow::Result<Shell> {
     config.validate().map_err(anyhow::Error::msg)?;
     ensure!(
-        config.forwards.is_empty(),
-        "SSH port forwarding is not implemented on Windows"
-    );
-    ensure!(
         config.tmux == tmux_session.is_some(),
         "SSH tmux configuration and terminal session do not match"
     );
@@ -88,6 +84,47 @@ pub fn terminal_shell(
         format!("{directory}{login}")
     };
     let mut args = vec!["-tt".into()];
+    args.extend(connection_args(&config.target)?);
+    args.extend([config.target.host.clone(), command]);
+    let shell = Shell {
+        program: "ssh".into(),
+        args,
+    };
+    shell.validate()?;
+    Ok(shell)
+}
+
+pub fn forwarding_shell(
+    target: &SshTarget,
+    spec: &SshForwardSpec,
+    local_port: u16,
+) -> anyhow::Result<Shell> {
+    spec.validate().map_err(anyhow::Error::msg)?;
+    ensure!(local_port != 0, "Resolved local forward port must not be zero");
+    ensure!(
+        spec.local_port.is_none_or(|requested| requested == local_port),
+        "Resolved local forward port differs from the requested port"
+    );
+    let mut args = vec!["-N".into(), "-T".into()];
+    args.extend(connection_args(target)?);
+    args.extend([
+        "-o".into(),
+        "ExitOnForwardFailure=yes".into(),
+        "-L".into(),
+        format!("127.0.0.1:{local_port}:127.0.0.1:{}", spec.remote_port),
+        target.host.clone(),
+    ]);
+    let shell = Shell {
+        program: "ssh".into(),
+        args,
+    };
+    shell.validate()?;
+    Ok(shell)
+}
+
+fn connection_args(target: &SshTarget) -> anyhow::Result<Vec<String>> {
+    target.validate().map_err(anyhow::Error::msg)?;
+    let mut args = Vec::new();
     for option in [
         "ForwardAgent=no",
         "ForwardX11=no",
@@ -98,7 +135,6 @@ pub fn terminal_shell(
     ] {
         args.extend(["-o".into(), option.into()]);
     }
-    let target = &config.target;
     if let Some(user) = &target.user {
         args.extend(["-l".into(), user.clone()]);
     }
@@ -111,19 +147,12 @@ pub fn terminal_shell(
     if let Some(path) = &target.config_file {
         args.extend(["-F".into(), path.to_str().unwrap().into()]);
     }
-    args.extend([target.host.clone(), command]);
-    let shell = Shell {
-        program: "ssh".into(),
-        args,
-    };
-    shell.validate()?;
-    Ok(shell)
+    Ok(args)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flowmux_core::{SshForwardSpec, SshTarget};
     use std::path::PathBuf;
 
     fn config() -> SshWorkspaceConfig {
@@ -169,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_targets_remote_directories_forwarding_and_oversized_commands() {
+    fn rejects_invalid_targets_remote_directories_and_oversized_commands() {
         for host in ["-oProxyCommand=bad", "host name", "host\nnext"] {
             let mut config = config();
             config.target.host = host.into();
@@ -185,10 +214,11 @@ mod tests {
             local_port: None,
             https: false,
         });
-        assert!(terminal_shell(&forwarding, None, None, false)
-            .unwrap_err()
-            .to_string()
-            .contains("not implemented"));
+        let shell = terminal_shell(&forwarding, None, None, false).unwrap();
+        // Forward workers own their listeners; terminal tabs never duplicate them.
+        assert!(!shell.args.iter().any(|arg| arg == "-L"));
+        forwarding.forwards[0].remote_port = 0;
+        assert!(terminal_shell(&forwarding, None, None, false).is_err());
         assert!(terminal_shell(
             &config(),
             Some(&format!("/{}", "x".repeat(32700))),
@@ -196,6 +226,54 @@ mod tests {
             false
         )
         .is_err());
+    }
+
+    #[test]
+    fn forwarding_argv_preserves_target_and_limits_binding_to_exact_loopback_ports() {
+        let mut target = SshTarget::parse("dev@[::1]").unwrap();
+        target.port = Some(2222);
+        let identity = r"C:\키 한 😀\private 'key'";
+        let config_path = r"C:\한글\config & file";
+        target.identity_file = Some(PathBuf::from(identity));
+        target.config_file = Some(PathBuf::from(config_path));
+        let mut spec = SshForwardSpec {
+            id: uuid::Uuid::new_v4(),
+            remote_port: 65535,
+            local_port: None,
+            https: true,
+        };
+        let shell = forwarding_shell(&target, &spec, 49152).unwrap();
+        assert_eq!(shell.program, "ssh");
+        assert_eq!(&shell.args[..2], ["-N", "-T"]);
+        for pair in [
+            ["-i", identity],
+            ["-F", config_path],
+            ["-l", "dev"],
+            ["-p", "2222"],
+            ["-o", "ExitOnForwardFailure=yes"],
+            ["-o", "PermitLocalCommand=no"],
+            ["-o", "RemoteCommand=none"],
+            ["-L", "127.0.0.1:49152:127.0.0.1:65535"],
+        ] {
+            assert!(shell.args.windows(2).any(|args| args == pair));
+        }
+        assert_eq!(shell.args.last().unwrap(), "::1");
+        assert!(!shell.args.iter().any(|arg| arg == "-tt" || arg.contains("ControlMaster")));
+        spec.https = false; // HTTPS affects previews, not SSH transport arguments.
+        assert_eq!(forwarding_shell(&target, &spec, 49152).unwrap(), shell);
+        assert!(forwarding_shell(&target, &spec, 0).is_err());
+        spec.local_port = Some(49151);
+        assert!(forwarding_shell(&target, &spec, 49152).is_err());
+        spec.local_port = Some(49152);
+        assert_eq!(forwarding_shell(&target, &spec, 49152).unwrap(), shell);
+        spec.remote_port = 0;
+        assert!(forwarding_shell(&target, &spec, 49152).is_err());
+        spec.remote_port = 80;
+        spec.local_port = Some(0);
+        assert!(forwarding_shell(&target, &spec, 49152).is_err());
+        spec.local_port = None;
+        target.host = "-oProxyCommand=bad".into();
+        assert!(forwarding_shell(&target, &spec, 49152).is_err());
     }
 
     #[test]

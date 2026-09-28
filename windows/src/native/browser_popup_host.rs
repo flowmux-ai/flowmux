@@ -54,6 +54,14 @@ impl App {
             opener.visible && !opener.native_closed.get(),
             "popup opener is hidden or closed"
         );
+        anyhow::ensure!(
+            opener.preview_binding.is_none() || opener.preview_generation.is_some(),
+            "SSH preview has expired"
+        );
+        let preview = opener
+            .preview_binding
+            .clone()
+            .map(|binding| (binding, opener.preview_generation));
         let separate = if let Some(window) = self.detached.get(&request.surface) {
             anyhow::ensure!(
                 window.workspace == self.workspaces[index].id,
@@ -70,6 +78,13 @@ impl App {
         let previous = self.workspaces.clone();
         let mut candidate = previous.clone();
         let opened = domain::open(&mut candidate[index], request.surface, request.uri.clone())?;
+        if let Some((binding, _)) = &preview {
+            candidate[index].root.set_surface_browser_url(
+                opened.pane,
+                opened.surface,
+                binding.clone(),
+            );
+        }
         let destination = if separate {
             Some(model::detach_surface(&mut candidate, opened.surface)?)
         } else {
@@ -91,6 +106,9 @@ impl App {
             anyhow::bail!("popup opener changed during browser construction");
         }
         child.popup_opener = Some(request.surface);
+        if let Some((binding, generation)) = preview {
+            child.inherit_preview(Some(binding), generation);
+        }
         child.popup_user_initiated = Some(request.user_initiated);
         child.url = opened.url;
         let core = match unsafe { child.view.controller().CoreWebView2() } {

@@ -20,13 +20,16 @@ mod popup_host;
 #[path = "browser_wait.rs"]
 pub(super) mod wait;
 const MAX_SCRIPT: usize = 128 * 1024;
+const PREVIEW_EXPIRED: &str =
+    "SSH port preview expired. Connect its port forward and reopen the preview.";
+const EXPIRED_HTML: &str = "<!doctype html><meta charset=utf-8><meta http-equiv=Content-Security-Policy content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>SSH preview expired</title><style>body{font:16px system-ui;margin:3em;color:#777}</style><h1>SSH preview expired</h1><p>Connect its port forward and reopen the preview.</p>";
 pub(super) enum Signal {
     Popup,
     PopupClose(SurfaceId, Uuid),
-    Navigation(SurfaceId, u64),
-    Loaded(SurfaceId, u64, Option<i32>),
-    Denied(SurfaceId, String),
-    Metadata(SurfaceId),
+    Navigation(SurfaceId, Uuid, u64),
+    Loaded(SurfaceId, Uuid, u64, Option<i32>),
+    Denied(SurfaceId, Uuid, String),
+    Metadata(SurfaceId, Uuid),
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
     Capture(Uuid, Result<Vec<u8>, String>),
@@ -102,6 +105,9 @@ pub(super) struct Browser {
     forward: bool,
     zoom: f64,
     pub(super) error: Option<String>,
+    pub(super) preview_binding: Option<String>,
+    pub(super) preview_generation: Option<SurfaceId>,
+    preview_blocked: Rc<Cell<bool>>,
     refs: dom::Refs,
     dom_key: String,
     find_key: String,
@@ -124,6 +130,8 @@ impl Browser {
         let popup_visibility = Rc::new(Cell::new(None));
         let native_closed = Rc::new(Cell::new(false));
         let nav_closed = native_closed.clone();
+        let preview_blocked = Rc::new(Cell::new(false));
+        let nav_blocked = preview_blocked.clone();
         let epoch = Arc::new(AtomicU64::new(0));
         let nav_epoch = epoch.clone();
         let nav_sender = app.sender.clone();
@@ -141,7 +149,7 @@ impl Browser {
                 .with_devtools(false)
                 .with_hotkeys_zoom(false)
                 .with_document_title_changed_handler(move |_| {
-                    title_sender.send(Event::Browser(Signal::Metadata(id)))
+                    title_sender.send(Event::Browser(Signal::Metadata(id, instance)))
                 })
                 .with_permission_handler(move |_| {
                     if background {
@@ -180,15 +188,23 @@ impl Browser {
                     let mut uri = Default::default();
                     args.Uri(&mut uri)?;
                     let uri = webview2_com::take_pwstr(uri);
+                    if nav_blocked.get() && uri != "about:blank" {
+                        args.SetCancel(true)?;
+                        return Ok(());
+                    }
                     if let Err(error) = domain::url(&uri) {
                         args.SetCancel(true)?;
-                        nav_sender.send(Event::Browser(Signal::Denied(id, error.to_string())));
+                        nav_sender.send(Event::Browser(Signal::Denied(
+                            id,
+                            instance,
+                            error.to_string(),
+                        )));
                         return Ok(());
                     }
                     let mut navigation = 0;
                     args.NavigationId(&mut navigation)?;
                     nav_epoch.store(navigation, Ordering::SeqCst);
-                    nav_sender.send(Event::Browser(Signal::Navigation(id, navigation)));
+                    nav_sender.send(Event::Browser(Signal::Navigation(id, instance, navigation)));
                     Ok(())
                 })),
                 &mut token,
@@ -209,7 +225,9 @@ impl Browser {
                         args.WebErrorStatus(&mut status)?;
                         Some(status.0)
                     };
-                    load_sender.send(Event::Browser(Signal::Loaded(id, navigation, error)));
+                    load_sender.send(Event::Browser(Signal::Loaded(
+                        id, instance, navigation, error,
+                    )));
                     Ok(())
                 })),
                 &mut token,
@@ -261,6 +279,9 @@ impl Browser {
             forward: false,
             zoom: 1.0,
             error: None,
+            preview_binding: None,
+            preview_generation: None,
+            preview_blocked,
             refs: dom::Refs::new(id.0),
             viewport_revision: 0,
             viewport: None,
@@ -287,6 +308,12 @@ impl Browser {
             self.back = back.as_bool();
             self.forward = forward.as_bool();
         }
+        if self.preview_blocked.get() {
+            self.back = false;
+            self.forward = false;
+            self.loading = false;
+            self.error = Some(PREVIEW_EXPIRED.into());
+        }
         self.chrome.update(
             &self.url,
             self.back,
@@ -303,9 +330,19 @@ impl Browser {
         // need to reject their old native viewport after a reparent.
         self.viewport_revision = self.viewport_revision.wrapping_add(1);
     }
+    pub(super) fn inherit_preview(
+        &mut self,
+        binding: Option<String>,
+        generation: Option<SurfaceId>,
+    ) {
+        self.preview_blocked
+            .set(binding.is_some() && generation.is_none());
+        self.preview_binding = binding;
+        self.preview_generation = generation;
+    }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
         let viewport = self.holder.view_bounds(&self.view);
-        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
+        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"instance":self.instance,"preview_binding":self.preview_binding,"preview_generation":self.preview_generation,"preview_expired":self.preview_blocked.get(),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64) -> anyhow::Result<()> {
         if self.native_closed.get() {
@@ -325,7 +362,7 @@ impl Browser {
             self.chrome.visible(show, self.background);
             self.visible = show;
             self.popup_visibility
-                .set(show.then_some(self.visibility_revision));
+                .set((show && !self.preview_blocked.get()).then_some(self.visibility_revision));
         }
         if let Some(area) = area {
             let area = model::Rect { x: 0, y: 0, ..area };
@@ -345,6 +382,7 @@ impl Browser {
         Ok(())
     }
     fn navigate(&mut self, url: &str) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.preview_blocked.get(), "{PREVIEW_EXPIRED}");
         let url = domain::url(url)?;
         self.refs.clear();
         self.view.load_url(&url)?;
@@ -354,6 +392,10 @@ impl Browser {
         Ok(())
     }
     fn operation(&mut self, action: u16) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.preview_blocked.get() || !matches!(action, 1..=3 | 5),
+            "{PREVIEW_EXPIRED}"
+        );
         self.error = None;
         if matches!(action, 1..=3) {
             self.refs.clear();
@@ -452,13 +494,175 @@ impl App {
         )
     }
     pub(super) fn add_browser_view(&mut self, id: SurfaceId, url: String) -> anyhow::Result<()> {
+        let preview = domain::ssh_preview_id(&url).map(|_| self.ssh_preview_target(&url, id));
         let mut browser = Browser::new(self, id)?;
-        if let Err(error) = browser.navigate(&url) {
+        let navigation = if let Some(target) = preview {
+            browser.inherit_preview(
+                Some(url),
+                target.as_ref().map(|(generation, _)| *generation),
+            );
+            if let Some((_, actual)) = target {
+                browser.navigate(&actual)
+            } else {
+                browser.error = Some(PREVIEW_EXPIRED.into());
+                browser
+                    .view
+                    .load_html(EXPIRED_HTML)
+                    .map_err(anyhow::Error::from)
+            }
+        } else {
+            browser.navigate(&url)
+        };
+        if let Err(error) = navigation {
             self.browser_cancel(id, "browser navigation failed during construction");
             return Err(error);
         }
         self.browsers.insert(id, browser);
         Ok(())
+    }
+    pub(super) fn open_ssh_preview(
+        &mut self,
+        workspace: WorkspaceId,
+        forward: Uuid,
+    ) -> anyhow::Result<()> {
+        self.ssh_lifecycle_guard()?;
+        let index = self
+            .workspaces
+            .iter()
+            .position(|ws| ws.id == workspace)
+            .context("SSH workspace no longer exists")?;
+        anyhow::ensure!(
+            self.workspaces[index]
+                .ssh
+                .as_ref()
+                .is_some_and(|config| { config.forwards.iter().any(|spec| spec.id == forward) }),
+            "SSH port forward no longer exists"
+        );
+        let source = self.workspaces[index].active();
+        self.ensure_attached(source)?;
+        let binding = format!("flowmux-ssh-preview://{forward}");
+        anyhow::ensure!(
+            self.ssh_preview_target(&binding, source).is_some(),
+            "SSH port forward is not active"
+        );
+        self.refresh_ssh_previews()?;
+        if let Some(id) = self.browsers.iter().find_map(|(id, browser)| {
+            (browser.preview_binding.as_deref() == Some(binding.as_str())
+                && self
+                    .locate(*id)
+                    .is_some_and(|(ws, _, _)| self.workspaces[ws].id == workspace))
+            .then_some(*id)
+        }) {
+            self.select(id)?;
+            self.layout()?;
+            return self.focus_active();
+        }
+        let index = self
+            .workspaces
+            .iter()
+            .position(|ws| ws.id == workspace)
+            .context("SSH workspace no longer exists")?;
+        let mut candidate = self.workspaces[index].clone();
+        let source = candidate.focused;
+        let opened = domain::open(&mut candidate, source, binding.clone(), false)?;
+        let previous = std::mem::replace(&mut self.workspaces[index], candidate);
+        if let Err(error) = self.add_browser_view(opened.surface, binding) {
+            self.workspaces[index] = previous;
+            return Err(error);
+        }
+        self.active_workspace = index;
+        self.zoomed = None;
+        self.rebuild()
+    }
+    pub(super) fn refresh_ssh_previews(&mut self) -> anyhow::Result<()> {
+        let replacements: Vec<_> = self
+            .browsers
+            .iter()
+            .filter_map(|(id, browser)| {
+                let binding = browser.preview_binding.as_ref()?;
+                let target = self
+                    .ssh_preview_target(binding, *id)
+                    .map(|(generation, _)| generation);
+                (target != browser.preview_generation).then_some((*id, binding.clone()))
+            })
+            .collect();
+        if replacements.is_empty() {
+            return Ok(());
+        }
+        let mut retired: std::collections::HashSet<_> =
+            replacements.iter().map(|(id, _)| *id).collect();
+        loop {
+            let children: Vec<_> = self
+                .browsers
+                .iter()
+                .filter_map(|(id, browser)| {
+                    browser
+                        .popup_opener
+                        .filter(|opener| retired.contains(opener))
+                        .map(|_| *id)
+                        .filter(|id| !retired.contains(id))
+                })
+                .collect();
+            if children.is_empty() {
+                break;
+            }
+            retired.extend(children);
+        }
+        let popups: Vec<_> = retired
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.browsers
+                    .get(id)
+                    .is_some_and(|browser| browser.popup_opener.is_some())
+            })
+            .collect();
+        // Revoke every callback/deferral before destruction can pump COM messages.
+        for id in &retired {
+            if let Some(browser) = self.browsers.get(id) {
+                browser.native_closed.set(true);
+                browser.popup_visibility.set(None);
+                browser.epoch.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        for id in &retired {
+            self.browser_cancel(*id, PREVIEW_EXPIRED);
+            self.browsers.remove(id);
+        }
+        // A popup can retain its opener through WindowProxy; retire both sides.
+        for id in popups {
+            if let Some((index, _, _)) = self.locate(id) {
+                let final_tab = self.workspaces[index]
+                    .leaves()
+                    .iter()
+                    .map(|(_, _, tabs)| tabs.len())
+                    .sum::<usize>()
+                    == 1;
+                if final_tab {
+                    let workspace = self.workspaces[index].id;
+                    if self.workspaces.len() == 1 {
+                        self.workspaces.clear();
+                        self.active_workspace = 0;
+                    } else {
+                        model::remove_workspace(
+                            &mut self.workspaces,
+                            &mut self.active_workspace,
+                            workspace,
+                        )?;
+                    }
+                } else {
+                    crate::browser_popup::close(&mut self.workspaces[index], id)?;
+                }
+            }
+            self.remove_surface(id);
+        }
+        self.normalize_main_workspace();
+        for (id, binding) in replacements {
+            if self.locate(id).is_some() {
+                self.add_browser_view(id, binding)?;
+            }
+        }
+        self.rebuild_without_focus()
     }
     fn browser_refresh(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         let Some(browser) = self.browsers.get_mut(&id) else {
@@ -470,11 +674,14 @@ impl App {
         browser.refresh()?;
         let url = browser.url.clone();
         let title = browser.title.clone();
+        let bound = browser.preview_binding.is_some();
         if let Some((ws, pane, _)) = self.locate(id) {
-            if let Ok(url) = domain::url(&url) {
-                self.workspaces[ws]
-                    .root
-                    .set_surface_browser_url(pane, id, url);
+            if !bound {
+                if let Ok(url) = domain::url(&url) {
+                    self.workspaces[ws]
+                        .root
+                        .set_surface_browser_url(pane, id, url);
+                }
             }
             if !title.is_empty() {
                 self.workspaces[ws]
@@ -501,6 +708,9 @@ impl App {
         });
     }
     pub(super) fn browser_tick(&mut self) {
+        if let Err(error) = self.refresh_ssh_previews() {
+            report(&format!("SSH preview refresh: {error:#}"));
+        }
         self.browser_capture_tick();
         self.download_tick();
         let now = Instant::now();
@@ -556,7 +766,14 @@ impl App {
             Signal::WaitResult(id, poll, epoch, result) => {
                 self.browser_wait_result(id, poll, epoch, result)
             }
-            Signal::Navigation(id, navigation) => {
+            Signal::Navigation(id, instance, navigation) => {
+                if self
+                    .browsers
+                    .get(&id)
+                    .is_none_or(|browser| browser.instance != instance)
+                {
+                    return Ok(());
+                }
                 let epoch = self
                     .browsers
                     .get(&id)
@@ -578,7 +795,14 @@ impl App {
                     }
                 }
             }
-            Signal::Loaded(id, navigation, error) => {
+            Signal::Loaded(id, instance, navigation, error) => {
+                if self
+                    .browsers
+                    .get(&id)
+                    .is_none_or(|browser| browser.instance != instance)
+                {
+                    return Ok(());
+                }
                 if let Some(browser) = self.browsers.get_mut(&id) {
                     if browser.epoch.load(Ordering::SeqCst) == navigation {
                         browser.loading = false;
@@ -589,13 +813,28 @@ impl App {
                 }
                 self.browser_refresh(id)?;
             }
-            Signal::Denied(id, error) => {
+            Signal::Denied(id, instance, error) => {
+                if self
+                    .browsers
+                    .get(&id)
+                    .is_none_or(|browser| browser.instance != instance)
+                {
+                    return Ok(());
+                }
                 if let Some(browser) = self.browsers.get_mut(&id) {
                     browser.error = Some(error);
                 }
                 self.browser_refresh(id)?;
             }
-            Signal::Metadata(id) => self.browser_refresh(id)?,
+            Signal::Metadata(id, instance) => {
+                if self
+                    .browsers
+                    .get(&id)
+                    .is_some_and(|browser| browser.instance == instance)
+                {
+                    self.browser_refresh(id)?;
+                }
+            }
             Signal::Ui(id, mut action) => {
                 if action == 11 {
                     let Some(browser) = self.browsers.get(&id) else {
@@ -764,6 +1003,7 @@ impl App {
     ) -> anyhow::Result<()> {
         let browser = self.browsers.get(&id).context("browser was closed")?;
         anyhow::ensure!(!browser.native_closed.get(), "browser window has closed");
+        anyhow::ensure!(!browser.preview_blocked.get(), "{PREVIEW_EXPIRED}");
         anyhow::ensure!(
             !browser.loading,
             "wait for browser navigation to finish before evaluating a script"

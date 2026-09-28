@@ -79,8 +79,16 @@ mod search;
 mod shells;
 #[path = "ssh.rs"]
 mod ssh;
+#[path = "ssh_forward.rs"]
+mod ssh_forward;
+#[path = "ssh_listener.rs"]
+mod ssh_listener;
 #[path = "ssh_panel.rs"]
 mod ssh_panel;
+#[path = "ssh_ports.rs"]
+mod ssh_ports;
+#[path = "ssh_ports_panel.rs"]
+mod ssh_ports_panel;
 #[path = "surface_host.rs"]
 pub(super) mod surface_host;
 #[path = "tab_menu.rs"]
@@ -96,6 +104,8 @@ thread_local! {
 enum Event {
     EmptyWindowShortcut(crate::keybindings::ActionId),
     SshDialog(Uuid, ssh_panel::UiAction),
+    SshPorts(Uuid, ssh_ports_panel::UiAction),
+    SshForwardUi(SurfaceId, ssh_forward::UiAction),
     TabMenu(Uuid, tab_menu::UiAction),
     WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
@@ -540,6 +550,8 @@ struct App {
     ssh_dialog: Option<ssh_panel::Panel>,
     ssh_disconnected: HashSet<WorkspaceId>,
     ssh_attempted: HashSet<SurfaceId>,
+    ssh_ports: Option<ssh_ports_panel::Panel>,
+    ssh_forwards: HashMap<Uuid, ssh_forward::Forward>,
     initial_cwd: PathBuf,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
@@ -757,6 +769,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         let mut app = App {
             ssh_disconnected,
             ssh_attempted,
+            ssh_ports: None,
+            ssh_forwards: HashMap::new(),
             shells,
             settings_worker,
             settings,
@@ -865,10 +879,12 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.ssh_dialog.take();
+        app.ssh_ports.take();
         app.workspace_close.take();
         app.metadata.take();
         app.tab_menu.take();
         app.browsers.clear();
+        app.ssh_forwards.clear();
         app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
         app.detached.clear();
@@ -924,6 +940,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                     .is_some_and(|close| close.panel.handle_message(&message))
                 && !app
                     .ssh_dialog
+                    .as_ref()
+                    .is_some_and(|panel| panel.handle_message(&message))
+                && !app
+                    .ssh_ports
                     .as_ref()
                     .is_some_and(|panel| panel.handle_message(&message))
                 && !app.editor_close_handle_message(&message)
@@ -1206,13 +1226,24 @@ impl App {
                 }
             }
         }
+        let bindings = crate::keybindings::resolved(&self.settings.keybindings)?;
+        let view = self.terminal_view(surface, self.window, bindings)?;
+        self.surfaces.insert(surface, view);
+        Ok(())
+    }
+    fn terminal_view(
+        &mut self,
+        surface: SurfaceId,
+        parent: HWND,
+        bindings: Vec<crate::keybindings::Binding>,
+    ) -> anyhow::Result<Surface> {
         let identity = Identity::new(surface.0);
         let dispatch = self.sender.clone();
         let init = format!(
             "window.__flowmuxIdentity={};window.__flowmuxSettings={};window.__flowmuxBindings={};window.__flowmuxBackgroundTesting={};window.__flowmuxTheme={};",
             serde_json::to_string(&identity)?,
             serde_json::to_string(&self.settings)?,
-            serde_json::to_string(&crate::keybindings::resolved(&self.settings.keybindings)?)?, self.background_test,
+            serde_json::to_string(&bindings)?, self.background_test,
             serde_json::to_string(&crate::theme::resolve(&self.settings.terminal))?
         );
         #[cfg(debug_assertions)]
@@ -1228,7 +1259,7 @@ impl App {
         } else {
             init
         };
-        let holder = surface_host::Host::new(self.window)?;
+        let holder = surface_host::Host::new(parent)?;
         let view = WebViewBuilder::new_with_web_context(&mut self.context)
             .with_background_color((40, 44, 52, 255))
             .with_devtools(false)
@@ -1287,36 +1318,32 @@ impl App {
             .build_as_child(&Parent(holder.window))
             .context("Cannot create the terminal WebView2 view")?;
         install_drag_escape(&view, holder.window)?;
-        self.surfaces.insert(
-            surface,
-            Surface {
-                startup_error: None,
-                applied_settings: None,
-                menu_capabilities: None,
-                view,
-                holder,
-                identity,
-                session: None,
-                session_generation: Uuid::nil(),
-                session_after: 0,
-                ssh_connected: false,
-                cols: 80,
-                rows: 24,
-                ready: false,
-                restoring: false,
-                cwd_reported: false,
-                visible: false,
-                process_pid: None,
-                exit_code: None,
-                output_ended: false,
-                output_sequence: 0,
-                acknowledged_sequence: 0,
-                notification_sniffer: Default::default(),
-                observed_output_bytes: 0,
-                last_output_ms: None,
-            },
-        );
-        Ok(())
+        Ok(Surface {
+            startup_error: None,
+            applied_settings: None,
+            menu_capabilities: None,
+            view,
+            holder,
+            identity,
+            session: None,
+            session_generation: Uuid::nil(),
+            session_after: 0,
+            ssh_connected: false,
+            cols: 80,
+            rows: 24,
+            ready: false,
+            restoring: false,
+            cwd_reported: false,
+            visible: false,
+            process_pid: None,
+            exit_code: None,
+            output_ended: false,
+            output_sequence: 0,
+            acknowledged_sequence: 0,
+            notification_sniffer: Default::default(),
+            observed_output_bytes: 0,
+            last_output_ms: None,
+        })
     }
     fn layout(&mut self) -> anyhow::Result<()> {
         chrome::configure_settings(
@@ -1726,6 +1753,17 @@ impl App {
         match event {
             Event::EmptyWindowShortcut(action) => self.empty_window_shortcut_action(action)?,
             Event::SshDialog(id, action) => self.ssh_dialog_action(id, action)?,
+            Event::SshPorts(id, action) => self.ssh_ports_action(id, action)?,
+            Event::SshForwardUi(id, action) => {
+                if let Some(forward) = self.ssh_forwards.values_mut().find(|f| f.surface == id) {
+                    if matches!(action, ssh_forward::UiAction::Reconnect) {
+                        let workspace = forward.workspace;
+                        self.ssh_connect(workspace)?;
+                    } else {
+                        forward.ui(action)?;
+                    }
+                }
+            }
             Event::Editor(event) => self.editor_event(event)?,
             Event::Files(event) => self.files_event(event)?,
             Event::Browser(event) => self.browser_event(event)?,
@@ -1792,6 +1830,7 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                self.ssh_ports_tick()?;
                 #[cfg(debug_assertions)]
                 self.pending_terminal_ui_tests.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(2) {
@@ -1907,6 +1946,13 @@ impl App {
             }
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
             Event::Session(id, generation, message) => {
+                if let Some(forward) = self.ssh_forwards.values_mut().find(|f| f.surface == id) {
+                    if forward.session_generation() == generation {
+                        forward.session_event(message)?;
+                        self.ssh_forward_refresh()?;
+                    }
+                    return Ok(());
+                }
                 if self
                     .surfaces
                     .get(&id)
@@ -1970,6 +2016,14 @@ impl App {
         Ok(())
     }
     fn bridge(&mut self, id: SurfaceId, origin: &str, body: &str) -> anyhow::Result<()> {
+        if let Some(forward) = self.ssh_forwards.values_mut().find(|f| f.surface == id) {
+            let before = forward.state().to_owned();
+            let result = forward.bridge(origin, body, &self.settings);
+            if before != forward.state() {
+                self.ssh_forward_refresh()?;
+            }
+            return result;
+        }
         let Some(surface) = self.surfaces.get(&id) else {
             return Ok(());
         };
@@ -3003,7 +3057,8 @@ impl App {
                 return self.new_workspace(None, None, None).map(|_| ());
             }
             Action::NewSshWorkspace => return self.show_ssh_dialog(),
-            Action::SshStatus(_) | Action::SshPorts(_) => return Ok(()),
+            Action::SshStatus(_) => return Ok(()),
+            Action::SshPorts(id) => return self.show_ssh_ports(id),
             Action::SshConnect(id) => return self.ssh_connect(id),
             Action::SshDisconnect(id) => return self.ssh_disconnect(id),
             Action::SshAuthentication(id) => return self.ssh_authentication(id),
@@ -3258,6 +3313,7 @@ impl App {
                     .as_ref()
                     .map(tab_menu::Menu::capture_window)
                     .or_else(|| self.ssh_dialog.as_ref().map(|panel| panel.window))
+                    .or_else(|| self.ssh_ports.as_ref().map(|panel| panel.window))
                     .or_else(|| {
                         self.options
                             .as_ref()
@@ -3301,6 +3357,8 @@ impl App {
                         "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
                         "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
                         "ssh_dialog":self.ssh_dialog.as_ref().map(ssh_panel::Panel::diagnostics),
+                        "ssh_ports":self.ssh_ports.as_ref().map(ssh_ports_panel::Panel::status),
+                        "ssh_forwards":self.ssh_forwards.values().map(ssh_forward::Forward::status).collect::<Vec<_>>(),
                         "ssh_toolbar":self.ssh_toolbar_status(),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),

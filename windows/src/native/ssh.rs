@@ -18,7 +18,7 @@ impl App {
             .collect())
     }
 
-    fn ssh_lifecycle_guard(&self) -> anyhow::Result<()> {
+    pub(super) fn ssh_lifecycle_guard(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.pending_save.is_none()
                 && self.close_request.is_none()
@@ -32,10 +32,11 @@ impl App {
 
     pub(super) fn ssh_action_enabled(&self, action: &Action) -> bool {
         let workspace = match *action {
-            Action::SshConnect(id) | Action::SshDisconnect(id) | Action::SshAuthentication(id) => {
-                id
-            }
-            Action::SshStatus(_) | Action::SshPorts(_) => return false,
+            Action::SshConnect(id)
+            | Action::SshDisconnect(id)
+            | Action::SshAuthentication(id)
+            | Action::SshPorts(id) => id,
+            Action::SshStatus(_) => return false,
             _ => return true,
         };
         if self.current_workspace().is_none_or(|ws| ws.id != workspace) {
@@ -44,7 +45,16 @@ impl App {
         let Ok(ids) = self.ssh_surface_ids(workspace) else {
             return false;
         };
-        if !ids.iter().any(|id| self.surfaces.contains_key(id)) {
+        if matches!(action, Action::SshPorts(_)) {
+            return true;
+        }
+        let forwards = self
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace)
+            .and_then(|w| w.ssh.as_ref())
+            .is_some_and(|c| !c.forwards.is_empty());
+        if !ids.iter().any(|id| self.surfaces.contains_key(id)) && !forwards {
             return false;
         }
         let status = self.ssh_status(workspace);
@@ -57,10 +67,15 @@ impl App {
                         })
                     })
             }
-            Action::SshDisconnect(_) => status["tabs"].as_object().is_some_and(|tabs| {
-                tabs.values()
-                    .any(|tab| matches!(tab["state"].as_str(), Some("connecting" | "connected")))
-            }),
+            Action::SshDisconnect(_) => {
+                self.ssh_forwards.values().any(|f| {
+                    f.workspace == workspace && matches!(f.state(), "connecting" | "connected")
+                }) || status["tabs"].as_object().is_some_and(|tabs| {
+                    tabs.values().any(|tab| {
+                        matches!(tab["state"].as_str(), Some("connecting" | "connected"))
+                    })
+                })
+            }
             Action::SshAuthentication(_) => true,
             _ => false,
         }
@@ -118,6 +133,17 @@ impl App {
                 }),
             );
         }
+        let forwards: Vec<_> = self.workspaces.iter().find(|w| w.id == workspace).and_then(|w| w.ssh.as_ref()).into_iter().flat_map(|c| &c.forwards).map(|spec| {
+            let runtime = self.ssh_forwards.get(&spec.id);
+            if !disconnected {
+                if let Some(forward) = runtime {
+                    connecting |= forward.state() == "connecting";
+                    connected |= forward.state() == "connected";
+                    if error.is_none() { error.clone_from(&forward.error); }
+                }
+            }
+            json!({"id":spec.id,"remote_port":spec.remote_port,"local_port":runtime.filter(|f| f.state()=="connected").map(|f| f.port),"active":runtime.is_some_and(|f| f.state()=="connected"),"state":runtime.map_or("disconnected", |f| f.state())})
+        }).collect();
         let state = if disconnected {
             "disconnected"
         } else if error.is_some() {
@@ -129,13 +155,20 @@ impl App {
         } else {
             "disconnected"
         };
-        json!({"workspace":workspace,"state":state,"error":error,"tabs":tabs})
+        json!({"workspace":workspace,"state":state,"error":error,"tabs":tabs,"forwards":forwards})
     }
 
     pub(super) fn ssh_connect(&mut self, workspace: WorkspaceId) -> anyhow::Result<()> {
         self.ssh_lifecycle_guard()?;
         let ids = self.ssh_surface_ids(workspace)?;
-        anyhow::ensure!(!ids.is_empty(), "SSH workspace has no terminal tabs");
+        anyhow::ensure!(
+            !ids.is_empty()
+                || self.workspaces[self.workspace_index(workspace)?]
+                    .ssh
+                    .as_ref()
+                    .is_some_and(|c| !c.forwards.is_empty()),
+            "SSH workspace has no terminal tabs or forwards"
+        );
         anyhow::ensure!(
             !ids.iter().any(|id| self
                 .surfaces
@@ -165,6 +198,7 @@ impl App {
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
         self.ssh_disconnected.remove(&workspace);
+        self.ssh_forwards_connect(workspace)?;
         for (id, shell) in shells {
             self.shells.insert(id, shell);
         }
@@ -184,6 +218,7 @@ impl App {
         self.ssh_lifecycle_guard()?;
         let ids = self.ssh_surface_ids(workspace)?;
         self.ssh_disconnected.insert(workspace);
+        let forward_failure = self.ssh_forwards_disconnect(workspace).err();
         // Retire every process before any WebView notification can fail. Sequence
         // counters stay intact so already submitted parser ACKs remain valid.
         for id in &ids {
@@ -196,7 +231,7 @@ impl App {
                 surface.output_ended = true;
             }
         }
-        let mut failure = None;
+        let mut failure = forward_failure;
         for id in ids {
             self.cancel_surface_search(id);
             self.cancel_terminal_requests(id);
@@ -215,11 +250,41 @@ impl App {
 
     pub(super) fn ssh_authentication(&mut self, workspace: WorkspaceId) -> anyhow::Result<()> {
         self.ssh_lifecycle_guard()?;
+        if let Some(forward) = self
+            .ssh_forwards
+            .values_mut()
+            .find(|f| f.workspace == workspace && f.state() == "connecting")
+        {
+            return forward.show();
+        }
         let ids: Vec<_> = self
             .ssh_surface_ids(workspace)?
             .into_iter()
             .filter(|id| self.surfaces.contains_key(id))
             .collect();
+        let authenticating = ids.iter().any(|id| {
+            self.surfaces
+                .get(id)
+                .is_some_and(|s| s.session.is_some() && s.exit_code.is_none() && !s.ssh_connected)
+        });
+        if !authenticating {
+            if let Some(forward) = self
+                .ssh_forwards
+                .values_mut()
+                .find(|f| f.workspace == workspace && f.state() == "failed")
+            {
+                return forward.show();
+            }
+        }
+        if ids.is_empty() {
+            if let Some(forward) = self
+                .ssh_forwards
+                .values_mut()
+                .find(|f| f.workspace == workspace)
+            {
+                return forward.show();
+            }
+        }
         let current = self.current_surface();
         let id = ids
             .iter()

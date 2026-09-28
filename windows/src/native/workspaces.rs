@@ -692,6 +692,23 @@ impl App {
         self.metadata.take();
         self.workspaces
             .retain(|workspace| !ids.contains(&workspace.id));
+        let forward_ids: Vec<_> = self
+            .ssh_forwards
+            .iter()
+            .filter(|(_, f)| ids.contains(&f.workspace))
+            .map(|(id, _)| *id)
+            .collect();
+        let retired: Vec<_> = forward_ids
+            .into_iter()
+            .filter_map(|id| self.ssh_forwards.remove(&id))
+            .collect();
+        if self
+            .ssh_ports
+            .as_ref()
+            .is_some_and(|panel| ids.contains(&panel.workspace))
+        {
+            self.ssh_ports.take();
+        }
         self.active_workspace = active
             .and_then(|id| {
                 self.workspaces
@@ -705,6 +722,7 @@ impl App {
         for surface in surfaces {
             self.remove_surface(surface);
         }
+        drop(retired);
         self.search_tick()?;
         self.rebuild()
     }

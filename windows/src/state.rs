@@ -164,6 +164,10 @@ impl WindowState {
             );
             if let Some(ssh) = &ws.ssh {
                 ssh.validate().map_err(anyhow::Error::msg)?;
+                ensure!(ssh.forwards.len() <= 16, "too many SSH port forwards");
+                for forward in &ssh.forwards {
+                    ensure!(ids.insert(forward.id), "duplicate SSH forward identity");
+                }
             }
             validate_pane(&ws.root, ws.ssh.as_ref(), 0, &mut ids, &mut surfaces)?;
             ensure!(
@@ -299,7 +303,13 @@ fn validate_pane(
                         crate::editor::validate_session(session)?;
                     }
                     SurfaceKind::Browser { initial_url } => {
-                        crate::browser::url(initial_url.as_deref().unwrap_or("about:blank"))?;
+                        let url = initial_url.as_deref().unwrap_or("about:blank");
+                        if crate::browser::ssh_preview_id(url).is_some() {
+                            ensure!(ssh.is_some(), "SSH preview outside an SSH workspace");
+                            // A removed forward restores as an expired preview.
+                        } else {
+                            crate::browser::url(url)?;
+                        }
                     }
                     _ => anyhow::bail!("unsupported saved surface; original file was preserved"),
                 }
@@ -414,6 +424,62 @@ mod tests {
         assert!(WindowState::decode(&legacy).unwrap().workspaces[0]
             .ssh
             .is_none());
+    }
+    #[test]
+    fn ssh_preview_checkpoint_preserves_binding_and_rejects_invalid_forward_ownership() {
+        let mut state = sample();
+        let screen = state.screens.values().next().unwrap().clone();
+        let forward = flowmux_core::SshForwardSpec {
+            id: Uuid::new_v4(), remote_port: 3000, local_port: None, https: false,
+        };
+        let config = flowmux_core::SshWorkspaceConfig {
+            target: flowmux_core::SshTarget::parse("dev@example.test").unwrap(),
+            cwd: None, tmux: false, forwards: vec![forward.clone()],
+        };
+        let mut workspace = Workspace::new_ssh("C:/한글".into(), config.clone(), None).unwrap();
+        let terminal = workspace.active();
+        let source = workspace.focused;
+        let binding = format!("flowmux-ssh-preview://{}", forward.id);
+        let preview = crate::browser::open(&mut workspace, source, binding.clone(), false).unwrap();
+        state.active_workspace = Some(workspace.id);
+        state.workspaces = vec![workspace];
+        state.screens = HashMap::from([(terminal, screen.clone())]);
+        let restored = WindowState::decode(&state.encode().unwrap()).unwrap();
+        assert!(matches!(
+            &restored.workspaces[0].root.find_surface(preview.pane, preview.surface).unwrap().kind,
+            SurfaceKind::Browser { initial_url: Some(url) } if url == &binding
+        ));
+        let mut orphan = state.clone();
+        orphan.workspaces[0].ssh.as_mut().unwrap().forwards.clear();
+        assert!(WindowState::decode(&orphan.encode().unwrap()).is_ok());
+        let mut duplicate = state.clone();
+        let other = Workspace::new_ssh("C:/other".into(), config, None).unwrap();
+        duplicate.screens.insert(other.active(), screen);
+        duplicate.workspaces.push(other);
+        assert!(duplicate.encode().is_err());
+        let mut overflow = state.clone();
+        let forwards = &mut overflow.workspaces[0].ssh.as_mut().unwrap().forwards;
+        while forwards.len() < 16 {
+            forwards.push(flowmux_core::SshForwardSpec { id: Uuid::new_v4(), ..forward.clone() });
+        }
+        assert!(overflow.encode().is_ok());
+        overflow.workspaces[0].ssh.as_mut().unwrap().forwards.push(
+            flowmux_core::SshForwardSpec { id: Uuid::new_v4(), ..forward }
+        );
+        assert!(overflow.encode().is_err());
+        let mut local = sample();
+        let source = local.workspaces[0].focused;
+        crate::browser::open(&mut local.workspaces[0], source, binding, false).unwrap();
+        assert!(local.encode().is_err());
+        for suffix in ["/", "?port=80", "#fragment"] {
+            let mut invalid = state.clone();
+            let binding = format!("flowmux-ssh-preview://{}{suffix}",
+                invalid.workspaces[0].ssh.as_ref().unwrap().forwards[0].id);
+            invalid.workspaces[0].root.set_surface_browser_url(
+                preview.pane, preview.surface, binding,
+            );
+            assert!(invalid.encode().is_err());
+        }
     }
 
     #[test]

@@ -369,6 +369,8 @@ impl App {
         for surface in surfaces {
             self.remove_surface(surface);
         }
+        self.ssh_ports.take();
+        self.ssh_forwards.clear();
         for control in self.controls.drain(..) {
             chrome::unregister(control.hwnd);
             unsafe {
