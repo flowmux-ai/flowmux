@@ -239,6 +239,7 @@ impl App {
                 surface.session_generation = Uuid::new_v4();
                 surface.session.take();
                 surface.ssh_connected = false;
+                surface.pending_tig = false;
                 surface.startup_error = None;
                 surface.exit_code = Some(0);
                 surface.output_ended = true;

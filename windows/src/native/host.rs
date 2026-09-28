@@ -418,6 +418,7 @@ struct Surface {
     session_generation: Uuid,
     session_after: u64,
     ssh_connected: bool,
+    pending_tig: bool,
     cols: u16,
     rows: u16,
     ready: bool,
@@ -1353,6 +1354,7 @@ impl App {
             session_generation: Uuid::nil(),
             session_after: 0,
             ssh_connected: false,
+            pending_tig: false,
             cols: 80,
             rows: 24,
             ready: false,
@@ -2063,10 +2065,12 @@ impl App {
                         }
                         SessionEvent::OutputEnd => surface.output_ended = true,
                         SessionEvent::Exit(code) => {
+                            surface.pending_tig = false;
                             surface.exit_code = Some(code);
                             surface.send(&HostMessage::Exit { code })?;
                         }
                         SessionEvent::Error(message) => {
+                            surface.pending_tig = false;
                             report(&format!("terminal {id}: {message}"))
                         }
                     }
@@ -2233,6 +2237,7 @@ impl App {
                         {
                             self.close_ssh_auth()?;
                         }
+                        self.flush_pending_tig(id)?;
                         self.refresh_ssh_toolbar();
                     }
                 }
@@ -2579,6 +2584,7 @@ impl App {
                 surface.ready = true;
                 surface.restoring = false;
                 surface.startup_error = Some(error.clone());
+                surface.pending_tig = false;
                 surface.send(&if remote {
                     HostMessage::SshStatus {
                         state: "failed".into(),
@@ -2605,6 +2611,7 @@ impl App {
         surface.session = Some(session);
         surface.ready = true;
         surface.restoring = false;
+        self.flush_pending_tig(id)?;
         self.refresh_ssh_toolbar();
         if self.current_surface() == Some(id) {
             self.focus_active()?;
@@ -3470,7 +3477,7 @@ impl App {
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "observed_output_bytes":surface.observed_output_bytes,"last_output_ms":surface.last_output_ms,
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
-                    "visible":surface.visible,
+                    "visible":surface.visible,"pending_tig":surface.pending_tig,
                     "settings":surface.applied_settings,
                     "shell":self.shells[id],"startup_error":surface.startup_error,
                     "bounds":surface.holder.view_bounds(&surface.view),"holder":surface.holder.diagnostics(),

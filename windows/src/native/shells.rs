@@ -9,6 +9,59 @@ pub(super) enum NewTerminal {
     Split(SplitDirection),
 }
 impl App {
+    pub(super) fn open_tig(&mut self, source: SurfaceId) -> anyhow::Result<()> {
+        let (workspace, _, _) = self.locate(source).context("Tig source no longer exists")?;
+        anyhow::ensure!(
+            !self.closing
+                && !self.close_accepted
+                && self.close_request.is_none()
+                && self.pending_save.is_none()
+                && self.editor_barrier.is_none()
+                && !self.overview.is_open()
+                && !self.command_palette.is_open()
+                && unsafe { IsWindowEnabled(self.surface_window(source)) } != 0
+                && !self
+                    .ssh_auth_window
+                    .as_ref()
+                    .is_some_and(|(id, _)| *id == source),
+            "Window is busy"
+        );
+        anyhow::ensure!(
+            !self
+                .ssh_disconnected
+                .contains(&self.workspaces[workspace].id),
+            "Connect the SSH workspace before opening Tig"
+        );
+        // The ordinary new-tab path owns cwd, default shell and detached guards.
+        let id = self.new_terminal(source, None, None, NewTerminal::Tab)?;
+        self.surfaces
+            .get_mut(&id)
+            .context("Tig terminal was not created")?
+            .pending_tig = true;
+        self.flush_pending_tig(id)
+    }
+
+    pub(super) fn flush_pending_tig(&mut self, id: SurfaceId) -> anyhow::Result<()> {
+        let remote = self.remote_directory(id).is_some();
+        let Some(surface) = self.surfaces.get_mut(&id) else {
+            return Ok(());
+        };
+        if !surface.pending_tig
+            || !surface.ready
+            || surface.restoring
+            || surface.session.is_none()
+            || surface.exit_code.is_some()
+            || (remote && !surface.ssh_connected)
+        {
+            return Ok(());
+        }
+        // Consume before enqueueing: a failed write must never replay on reconnect.
+        if std::mem::take(&mut surface.pending_tig) {
+            surface.session.as_ref().unwrap().input(b"tig\r".to_vec())?;
+        }
+        Ok(())
+    }
+
     pub(super) fn new_workspace(
         &mut self,
         caller: Option<SurfaceId>,

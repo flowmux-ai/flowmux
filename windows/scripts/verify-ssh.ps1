@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Own hidden windows and an isolated loopback Git sshd; run under run-check.ps1 with a 100s cap.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[Alias('Host')][string]$SshHost='',[int]$Port=22,[string]$IdentityFile='',[string]$ConfigFile='',[string]$RemoteDirectory='',[switch]$Tmux,[switch]$Ports)
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[Alias('Host')][string]$SshHost='',[int]$Port=22,[string]$IdentityFile='',[string]$ConfigFile='',[string]$RemoteDirectory='',[switch]$Tmux,[switch]$Ports,[switch]$Tig)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -67,6 +67,11 @@ function Configure-Server{
  $known=Join-Path $directory 'known_hosts';$global=Join-Path $directory 'global_known_hosts';$pub=([IO.File]::ReadAllText($hostKey+'.pub')).Trim().Split(' ');Write-Utf8 $known @('[127.0.0.1]:'+$Port+' '+$pub[0]+' '+$pub[1]);Write-Utf8 $global @()
  Write-Utf8 $ConfigFile @('Host *','  BatchMode yes','  IdentitiesOnly yes','  StrictHostKeyChecking yes','  ConnectTimeout 3',('  UserKnownHostsFile "'+$known.Replace('\','/')+'"'),('  GlobalKnownHostsFile "'+$global.Replace('\','/')+'"'))
  $serverConfig=Join-Path $directory 'sshd_config';Write-Utf8 $serverConfig @("Port $Port",'ListenAddress 127.0.0.1',('HostKey "'+(Posix $hostKey)+'"'),('PidFile "'+(Posix (Join-Path $directory 'sshd.pid'))+'"'),('AuthorizedKeysFile "'+(Posix (Join-Path $directory 'authorized_keys'))+'"'),'StrictModes no','PasswordAuthentication no','KbdInteractiveAuthentication no','PubkeyAuthentication yes','UseDNS no','LogLevel ERROR','PrintLastLog no','PrintMotd no',$(if($Ports){'AllowTcpForwarding yes'}else{'AllowTcpForwarding no'}),'X11Forwarding no')
+ if($Tig){
+  # sshd builds a fresh remote environment; inherited parent variables alone are insufficient.
+  $remoteSettings='SetEnv GIT_CONFIG_NOSYSTEM=1 "GIT_CONFIG_GLOBAL='+(Posix $env:GIT_CONFIG_GLOBAL)+'" "TIGRC_USER='+(Posix $env:TIGRC_USER)+'" "TIGRC_SYSTEM='+(Posix $env:TIGRC_SYSTEM)+'"'
+  [IO.File]::AppendAllText($serverConfig,$remoteSettings+[Environment]::NewLine,(New-Object Text.UTF8Encoding($false)))
+ }
  $script:server=[CliProbe]::Start($sshd,@('-D','-e','-f',(Posix $serverConfig)),$directory,$directory);$script:serverOut=$server.StandardOutput.ReadToEndAsync();$script:serverErr=$server.StandardError.ReadToEndAsync();$timer=[Diagnostics.Stopwatch]::StartNew();$listening=$false
  do{Require (-not $server.HasExited -and $timer.ElapsedMilliseconds -lt 4000) 'Owned loopback sshd did not listen within four seconds';$tcp=New-Object Net.Sockets.TcpClient;try{$task=$tcp.ConnectAsync('127.0.0.1',$Port);if($task.Wait(100)-and $tcp.Connected){$listening=$true}}catch{}finally{$tcp.Dispose()};if(-not $listening){Start-Sleep -Milliseconds 20}}until($listening)
  $script:SshHost=$user+'@127.0.0.1';$script:RemoteDirectory=Posix $fixture.Root
@@ -118,6 +123,63 @@ function Tmux-Remote([string]$Command,[int]$Exit=0){
  $ssh=Join-Path $env:WINDIR 'System32\OpenSSH\ssh.exe';return (Run $ssh @('-T','-F',$ConfigFile,'-i',$IdentityFile,'-p',[string]$Port,'-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=3',$SshHost,$Command) $Exit).Trim()
 }
 function Tmux-Session([string]$Surface){return 'flowmux-'+([guid]$Surface).ToString('N')}
+function Tig-Screen([string]$Surface,[string]$Text,[string]$Buffer=''){
+ $timer=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$timer.ElapsedMilliseconds;Require ($left -ge 100) 'Actual remote tig/prompt screen exceeded five seconds';$screen=Request @('read-screen','--surface',$Surface,'--recent') 0 ([int]$left);$diagnostic.tigScreen=$screen;$flat=$screen.text.Replace("`r",'').Replace("`n",'');if($flat.Contains($Text)-and (-not $Buffer -or $screen.screen.buffer -ceq $Buffer)){return $flat};Start-Sleep -Milliseconds 20}while($true)
+}
+function Tig-Open($Source){
+ Request @('focus-tab',$Source.surface)|Out-Null;$before=Tree;$ids=@($before.surfaces.id)
+ $reply=Request @('test-shortcut',$Source.surface,'{"code":"KeyG","key":"g","ctrlKey":true,"altKey":true}')
+ Require ($reply.surface -ceq $Source.surface -and -not $reply.forwarded) 'Actual Ctrl+Alt+G was not handled'
+ $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -notin $ids -and $_.ready -and $_.running}).Count -eq 1};$target=Request @('identify')
+ Require ($target.surface -notin $ids -and $target.workspace -ceq $Source.workspace -and $target.pane -ceq $Source.pane -and @($tree.surfaces).Count -eq $ids.Count+1) 'Open Tig did not create exactly one target SSH tab in the source pane';Stable $tree $before.surfaces
+ return $target
+}
+function Invoke-TigCase{
+ Require (-not $SshHost -and -not $IdentityFile -and -not $ConfigFile -and -not $RemoteDirectory) '-Tig only permits its owned loopback Git sshd fixture'
+ $git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe';$tigExe=Join-Path $env:ProgramFiles 'Git\usr\bin\tig.exe';Require ((Test-Path $git)-and (Test-Path $tigExe)) 'Actual Git/tig prerequisite missing'
+ $hooks=Join-Path $directory 'empty-hooks';[IO.Directory]::CreateDirectory($hooks)|Out-Null
+ $gitArgs=@('-c',('core.hooksPath='+$hooks),'-c','core.fsmonitor=false','-c','commit.gpgsign=false','-c','user.name=Flowmux Fixture','-c','user.email=fixture@localhost','-C',$fixture.Root)
+ $emptyConfig=Join-Path $directory 'empty-gitconfig';Write-Utf8 $emptyConfig @();$emptyTig=Join-Path $directory 'empty-tigrc';Write-Utf8 $emptyTig @();$systemTig=Join-Path $env:ProgramFiles 'Git\etc\tigrc';Require (Test-Path $systemTig) 'Installed default tig configuration is missing'
+ $oldGitGlobal=$env:GIT_CONFIG_GLOBAL;$oldGitSystem=$env:GIT_CONFIG_NOSYSTEM;$oldTigUser=$env:TIGRC_USER;$oldTigSystem=$env:TIGRC_SYSTEM
+ try{$env:GIT_CONFIG_GLOBAL=$emptyConfig;$env:GIT_CONFIG_NOSYSTEM='1';$env:TIGRC_USER=$emptyTig;$env:TIGRC_SYSTEM=$systemTig
+  Run $git ($gitArgs+@('init','--quiet',('--template='+$hooks)))|Out-Null
+  $subject='FM_TIG_'+[guid]::NewGuid().ToString('N').Substring(0,8)+' 한글 한';Run $git ($gitArgs+@('commit','--quiet','--allow-empty','-m',$subject))|Out-Null
+ Configure-Server;$tree=Start-Host @('--temporary','--shell=cmd','--cwd',$fixture.Root);$original=@($tree.surfaces)
+ $panel=Open-Dialog;Fill $panel @{host=$SshHost;cwd=$RemoteDirectory;name='실제 원격 tig 한';port=[string]$Port;identity=$IdentityFile;config=$ConfigFile};Submit $panel
+ $tree=Await {param($t) -not $t.ssh_dialog -and $t.ssh_toolbar.state -ceq 'connected'};$source=Request @('identify');Remote-Proof $source.surface $source.pane|Out-Null
+ $sourceBefore=@((Tree).surfaces|Where-Object {$_.id -ceq $source.surface})[0];$target=Tig-Open $source
+ Tig-Screen $target.surface $subject 'alternate'|Out-Null;$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $target.surface -and -not $_.pending_tig}).Count -eq 1};Stable $tree (@($sourceBefore)+$original)
+ $sourceScreen=Request @('read-screen','--surface',$source.surface,'--recent');Require (-not $sourceScreen.text.Contains($subject)) 'Tig command ran in the original SSH terminal'
+ Request @('send-keys',$target.pane,'q')|Out-Null;Tig-Screen $target.surface '' 'normal'|Out-Null;Remote-Proof $target.surface $target.pane|Out-Null
+ Passed 'CtrlAltG-opens-real-remote-tig-in-new-same-pane-tab-preserving-source-and-returns-to-same-shell'
+
+ $promptConfig=Join-Path $directory 'tig prompt config 한';$promptKnown=Join-Path $directory 'tig prompt known_hosts';$promptGlobal=Join-Path $directory 'tig prompt global_known_hosts';Write-Utf8 $promptKnown @();Write-Utf8 $promptGlobal @()
+ Write-Utf8 $promptConfig @('Host *','  BatchMode no','  IdentitiesOnly yes','  StrictHostKeyChecking ask','  ConnectTimeout 3',('  UserKnownHostsFile "'+$promptKnown.Replace('\','/')+'"'),('  GlobalKnownHostsFile "'+$promptGlobal.Replace('\','/')+'"'))
+ $fingerprint=((Run (Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe') @('-l','-f',(Join-Path $directory 'host-key.pub'))) -split '\s+')[1];Require ($fingerprint.StartsWith('SHA256:')) 'Owned host key has no expected fingerprint'
+ $panel=Open-Dialog;Fill $panel @{host=$SshHost;cwd=$RemoteDirectory;name='인증 대기 한';port=[string]$Port;identity=$IdentityFile;config=$promptConfig};Submit $panel
+ $tree=Await {param($t) -not $t.ssh_dialog -and $t.ssh_toolbar.state -ceq 'connecting'};$waiting=Request @('identify')
+ $sourcePrompt=Tig-Screen $waiting.surface 'Are you sure you want to continue connecting';Require ($sourcePrompt.Contains($fingerprint)) 'Source prompt is not the owned fixture key';$waitingBefore=@((Tree).surfaces|Where-Object {$_.id -ceq $waiting.surface})[0]
+ $authenticated=Tig-Open $waiting;$prompt=Tig-Screen $authenticated.surface 'Are you sure you want to continue connecting'
+ Require ($prompt.Contains($fingerprint)-and -not $prompt.Contains($subject)-and $prompt -notmatch '(?i)\btig\b') 'Target received tig before authentication or prompted for a different host key'
+ $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $authenticated.surface -and $_.pending_tig}).Count -eq 1) 'Unauthenticated target lost its pending tig intent';Stable $tree @($waitingBefore)
+ # Send only to the active target after matching the exact isolated host-key fingerprint.
+ Request @('send-keys',$authenticated.pane,'yes')|Out-Null;Request @('send-key','Enter','--surface',$authenticated.surface)|Out-Null
+ Tig-Screen $authenticated.surface $subject 'alternate'|Out-Null;$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $authenticated.surface -and -not $_.pending_tig}).Count -eq 1};Stable $tree (@($waitingBefore,$sourceBefore)+$original)
+ $sourcePrompt=Tig-Screen $waiting.surface 'Are you sure you want to continue connecting';Require (-not $sourcePrompt.Contains($subject)-and $sourcePrompt -notmatch '(?i)\btig\b') 'Authentication or tig command was sent to the source prompt'
+ $hostPublic=([IO.File]::ReadAllText((Join-Path $directory 'host-key.pub')) -split '\s+')[1];Require ([IO.File]::ReadAllText($promptKnown).Contains($hostPublic)) 'Target did not accept the exact owned host key'
+ Request @('send-keys',$authenticated.pane,'q')|Out-Null;Tig-Screen $authenticated.surface '' 'normal'|Out-Null;Remote-Proof $authenticated.surface $authenticated.pane|Out-Null
+ Passed 'unknown-host-prompt-retains-tig-without-input-until-exact-target-authenticates'
+ # Erase only the test-owned known-hosts file, creating another real pending prompt.
+ Write-Utf8 $promptKnown @();$cancelled=Tig-Open $waiting;$prompt=Tig-Screen $cancelled.surface 'Are you sure you want to continue connecting'
+ Require ($prompt.Contains($fingerprint)-and $prompt -notmatch '(?i)\btig\b') 'Cancellation target is not waiting for the exact fixture key'
+ $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $cancelled.surface -and $_.pending_tig -and $_.running}).Count -eq 1}
+ Require ($tree.ssh_toolbar.workspace -ceq $waiting.workspace) 'Disconnect would affect a different workspace'
+ [OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$tree.ssh_toolbar.controls.disconnect,$hostProcess.Id)
+ $tree=Await {param($t) $t.ssh_toolbar.state -ceq 'disconnected' -and @($t.surfaces|Where-Object {$_.id -ceq $cancelled.surface -and -not $_.pending_tig -and -not $_.running -and $_.resources_released}).Count -eq 1};Stable $tree (@($sourceBefore)+$original)
+ Passed 'explicit-disconnect-clears-pending-tig-and-releases-only-its-SSH-workspace'
+ Stop-Host
+ }finally{$env:GIT_CONFIG_GLOBAL=$oldGitGlobal;$env:GIT_CONFIG_NOSYSTEM=$oldGitSystem;$env:TIGRC_USER=$oldTigUser;$env:TIGRC_SYSTEM=$oldTigSystem}
+}
 function Tmux-Pid([string]$Session){$value=Tmux-Remote ('tmux display-message -p -t '''+$Session+''' ''#{pane_pid}''');Require ($value -match '^[1-9][0-9]*$') 'Real tmux did not report its remote pane PID';return $value}
 function Tmux-Proof($Identity,[string]$Value,[string]$PanePid){
  $tag='TMUX_'+[guid]::NewGuid().ToString('N').Substring(0,8)+' 한글 한 😀:';$octal=([Text.Encoding]::UTF8.GetBytes($tag)|ForEach-Object {'\'+[Convert]::ToString($_,8).PadLeft(3,'0')}) -join '';$expected=$tag+$Value+':'+$PanePid+':'+$RemoteDirectory
@@ -221,8 +283,8 @@ function Invoke-PortsCase{
 
 try{
  $doctor=(Run $cli @('doctor'))|ConvertFrom-Json;Require ($doctor.status -ceq 'ok' -and $doctor.background_testing) 'A hidden debug SSH build is required'
- Require (-not ($Tmux -and $Ports)) 'Choose either -Tmux or -Ports'
- if($Ports){Invoke-PortsCase}elseif($Tmux){Invoke-TmuxCase}else{
+ Require (([int][bool]$Tmux+[int][bool]$Ports+[int][bool]$Tig) -le 1) 'Choose only one of -Tmux, -Ports or -Tig'
+ if($Tig){Invoke-TigCase}elseif($Ports){Invoke-PortsCase}elseif($Tmux){Invoke-TmuxCase}else{
  if(-not $SshHost){Configure-Server}else{Require ($IdentityFile -and $ConfigFile -and $RemoteDirectory.StartsWith('/')) 'External fixture requires identity, pinned noninteractive config and absolute remote directory'}
  $tree=Start-Host @('--shell=cmd','--cwd',$fixture.Root);$original=@($tree.surfaces);$local=Request @('identify');$panel=Open-Dialog;$native=[OptionsFixture]::Describe([long]$panel.window,$hostProcess.Id)
  Require ($panel.owner -eq $tree.window_handle -and $native.Owner -eq $tree.window_handle -and $native.Enabled -and -not $native.OwnerEnabled -and -not $panel.native_visible -and [Math]::Abs(([ChromeFixture]::Size([long]$panel.window,$hostProcess.Id))[0]-460*$native.Dpi/96.0) -le 1) 'SSH dialog is not the hidden owned modal with a 460-DIP client'
@@ -352,4 +414,4 @@ finally{
 }
 if($failure){$diagnostic.failure=$failure;$diagnostic.elapsedMs=$clock.ElapsedMilliseconds;$diagnostic|ConvertTo-Json -Depth 60|Set-Content -Encoding UTF8 -LiteralPath (Join-Path $directory 'failure.json');throw $failure}
 Remove-Item -LiteralPath $directory -Recurse -Force
-Write-Output ("passed: $checks hidden SSH groups (tmux=$Tmux; ports=$Ports); actual loopback/external SSH Unicode and remote-CWD markers verified; elapsed="+$clock.ElapsedMilliseconds+'ms')
+Write-Output ("passed: $checks hidden SSH groups (tmux=$Tmux; ports=$Ports; tig=$Tig); actual loopback/external SSH Unicode and remote-CWD markers verified; elapsed="+$clock.ElapsedMilliseconds+'ms')

@@ -388,6 +388,7 @@ impl App {
             Some(NewBrowserSurface) => Action::NewBrowser,
             Some(NewWorkspace) => Action::NewWorkspace,
             Some(NewWindow) => return self.new_window(Some(source)),
+            Some(OpenTig) => return self.open_tig(source),
             Some(TerminalSearch) => Action::Find,
             Some(SearchAllTerminals) => Action::SearchAll,
             Some(TogglePaneZoom) => Action::TogglePaneZoom,
