@@ -31,4 +31,6 @@ for path in sorted((root / "assets/licenses").glob("Microsoft-WebView2-*.txt")):
 sections.append("\n" + "=" * 72 + "\nMicrosoft.Windows.Console.ConPTY 1.24.260710001\n"
                 + (root / "assets/licenses/Microsoft-ConPTY-LICENSE.txt").read_text(encoding="utf-8-sig"))
 notice = "\n".join(line.rstrip() for line in "".join(sections).splitlines()).rstrip() + "\n"
-(root / "assets/THIRD_PARTY_RUST.txt").write_text(notice, encoding="utf-8")
+output = root / "assets/THIRD_PARTY_RUST.txt"
+if not output.exists() or output.read_text(encoding="utf-8") != notice:
+    output.write_text(notice, encoding="utf-8")
