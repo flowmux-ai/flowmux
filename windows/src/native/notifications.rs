@@ -25,7 +25,7 @@ impl App {
                 GetForegroundWindow() == source.map_or(self.window, |id| self.surface_window(id))
             }
             && source.is_some_and(|id| {
-                id == self.active()
+                self.current_surface() == Some(id)
                     && (self.surfaces.get(&id).is_some_and(|s| s.visible)
                         || self.browsers.get(&id).is_some_and(|s| s.visible))
             })
@@ -162,18 +162,22 @@ impl App {
         self.notifications.store.mark_read(id);
         self.refresh_notifications();
         if !self.background_test {
+            let surface = self.current_surface();
+            let owner = surface.map_or(self.window, |id| self.surface_window(id));
             unsafe {
                 ShowWindow(
-                    self.surface_window(self.active()),
-                    if IsIconic(self.surface_window(self.active())) != 0 {
+                    owner,
+                    if IsIconic(owner) != 0 {
                         SW_RESTORE
                     } else {
                         SW_SHOW
                     },
                 );
-                SetForegroundWindow(self.surface_window(self.active()));
+                SetForegroundWindow(owner);
             }
-            self.focus_active()?;
+            if surface.is_some() {
+                self.focus_active()?;
+            }
         }
         Ok(json!({"opened":true,"id":id,"surface":entry.surface}))
     }

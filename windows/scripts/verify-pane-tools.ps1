@@ -105,7 +105,8 @@ try {
  Click $a.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Require (@($tree.tab_menu.menu.rows).Count -eq 1 -and -not $tree.tab_menu.menu.rows[0].enabled) 'Final pane Close is not disabled';$tree=Menu-Dismiss $tree
  $tree=Workspace-Menu $a.workspace;$workspaceMenu=$tree.tab_menu.menu
  Require ((@($workspaceMenu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace||Change tab name|Change color…||Close tab|Close all tabs||Show in folder|Copy path') 'Workspace menu differs from Linux action and separator order'
- foreach($label in @('New SSH Workspace','Close tab','Close all tabs')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and -not $row[0].enabled) ('Unsupported/final workspace action enabled: '+$label)}
+ foreach($label in @('New SSH Workspace')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and -not $row[0].enabled) ('Unsupported workspace action enabled: '+$label)}
+ foreach($label in @('Close tab','Close all tabs')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and $row[0].enabled) ('Workspace close action missing: '+$label)}
  Require ($tree.tab_menu.folder -ceq $fixture.Root -and $tree.tab_menu.copy_text -ceq $fixture.Root -and @($workspaceMenu.rows|Where-Object {$_.separator}).Count -eq 3) 'Workspace context lost its Unicode CWD or native separators'
  [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,40,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 3};Require ($tree.tab_menu.menu.id -ceq $workspaceMenu.id) 'Menu navigation replaced the workspace target'
  [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,35,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 10}
@@ -117,7 +118,7 @@ try {
  [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,12,$blankY);$tree=Await {param($t) $t.tab_menu.kind -ceq 'creation'}
  Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace') 'Empty sidebar context did not use the creation menu';$tree=Menu-Dismiss $tree
  [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,([int]$tree.chrome.sidebar_actual_width+20),$blankY);$tree=Tree;Require (-not $tree.tab_menu) 'Workspace creation menu escaped the sidebar bounds'
- $evidence.checks+=@{name='workspace_Linux_menu_order_disabled_final_and_unsupported_actions_native_separators_and_modeless_Escape';passed=$true}
+ $evidence.checks+=@{name='workspace_Linux_menu_order_Close_actions_disabled_SSH_native_separators_and_modeless_Escape';passed=$true}
  # Tab context menus remain modeless while the normal IPC loop answers Tree.
  Request @('workspace','rename',$a.workspace,'원본 한글 한')|Out-Null;Request @('focus-tab',$a.surface)|Out-Null
  $tree=Menu-Open $a.surface;$rootMenu=$tree.tab_menu

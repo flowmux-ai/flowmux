@@ -767,7 +767,11 @@ impl App {
             .active
             .and_then(|pane| self.files.states.get(&pane))
             .is_some_and(|state| {
-                state.visible && state.owner.workspace == self.workspaces[workspace].id.0
+                state.visible
+                    && self
+                        .workspaces
+                        .get(workspace)
+                        .is_some_and(|workspace| state.owner.workspace == workspace.id.0)
             });
         if visible {
             ((320.0 * scale).round() as i32)
@@ -784,7 +788,10 @@ impl App {
         self.files_dispatch(op, Some(reply))
     }
     pub(super) fn files_show_current(&mut self) -> anyhow::Result<()> {
-        let pane = self.workspace().focused;
+        let pane = self
+            .current_workspace()
+            .context("No active workspace for Files")?
+            .focused;
         if self.files.active == Some(pane)
             && self
                 .files
@@ -797,7 +804,7 @@ impl App {
         }
         self.files_dispatch(
             domain::Op::Show(domain::ShowArgs {
-                pane: self.workspace().focused.0,
+                pane: pane.0,
                 root: None,
             }),
             None,
@@ -1435,7 +1442,9 @@ impl App {
         value["dock_visible"] = json!(
             self.files.active == Some(pane)
                 && state.visible
-                && state.owner.workspace == self.workspace().id.0
+                && self
+                    .current_workspace()
+                    .is_some_and(|workspace| state.owner.workspace == workspace.id.0)
         );
         value["dock_scope"] = json!("window");
         value["dock_bounds"] = json!(state
@@ -1607,11 +1616,11 @@ impl App {
         scale: f64,
     ) -> anyhow::Result<()> {
         self.files_reconcile();
-        let workspace = self.workspace().id.0;
+        let workspace = self.current_workspace().map(|workspace| workspace.id.0);
         for (pane, state) in &mut self.files.states {
             let visible = self.files.active == Some(*pane)
                 && state.visible
-                && state.owner.workspace == workspace;
+                && Some(state.owner.workspace) == workspace;
             if let Some(panel) = &mut state.panel {
                 panel.layout(area.filter(|_| visible), scale, self.background_test);
             }

@@ -200,14 +200,20 @@ try {
     if ((Invoke-Flowmux @('identify')).surface -ne $a.surface) { throw 'Closing active workspace did not select the adjacent survivor' }
     Invoke-Flowmux @('workspace','color',$a.workspace,'--clear') | Out-Null
     $before=Invoke-Flowmux @('tree')
-    Reject @('workspace','close',$a.workspace)
+    if($before.workspaces[0].color){throw 'Clear color failed'}
+    Invoke-Flowmux @('workspace','close',$a.workspace)|Out-Null
+    Assert-Stopped @($before.surfaces.pid)
     $after=Invoke-Flowmux @('tree')
-    if ($after.workspaces[0].color -or $after.surfaces[0].pid -ne $before.surfaces[0].pid -or $after.workspaces.Count -ne 1) { throw 'Clear color or final workspace protection failed' }
-    $evidence.checks+=@{ name='active_workspace_close_selects_survivor_color_clear_and_final_workspace_protection' }
+    if (@($after.workspaces).Count -or @($after.surfaces).Count -or $null -ne $after.active_workspace -or -not $after.main_empty -or $after.main_closed -or $after.window_handle -ne $before.window_handle) { throw 'Final workspace close did not retain a truly empty main' }
+    Reject @('identify')
+    Invoke-Flowmux @('new-workspace','--cwd',$directory,'--shell=cmd')|Out-Null
+    $again=Invoke-Flowmux @('identify');$after=Wait-Tree {param($t) @($t.surfaces).Count -eq 1 -and $t.surfaces[0].ready -and $t.surfaces[0].running -and $t.surfaces[0].pid};$script:shellPids+=@($after.surfaces.pid)
+    if($again.workspace -eq $a.workspace -or $after.main_empty){throw 'New workspace reused an empty identity'}
+    $evidence.checks+=@{ name='active_workspace_close_selects_survivor_color_clear_final_close_keeps_empty_main_and_new_workspace_works' }
     Invoke-Flowmux @('quit') | Out-Null
     if (-not $restored.WaitForExit((Budget 5000))) { throw 'Restored host did not exit within five seconds' };if($restored.ExitCode -ne 0){throw 'Restored host exited with failure'}
     $evidence.status='passed_background_workspace_subset'
-    $evidence.pending='Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and empty-window UI remain pending.'
+    $evidence.pending='Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and composed empty-window appearance remain pending.'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
     $script:cleaning=$true

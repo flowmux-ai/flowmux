@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Owned asynchronous dirty-editor decision; the editor barrier owns its lifetime.
+//! Owned asynchronous editor and workspace close decisions.
 use super::super::chrome;
 use super::*;
 use std::cell::{Cell, RefCell};
@@ -16,9 +16,15 @@ pub(crate) enum Choice {
     Cancel,
 }
 
+#[derive(Clone, Copy)]
+enum Target {
+    Editor(u64),
+    Workspace(Uuid),
+}
+
 #[derive(Clone)]
 struct Route {
-    id: u64,
+    target: Target,
     controls: [isize; 6],
     busy: bool,
     submitted: bool,
@@ -28,17 +34,22 @@ thread_local! {
 }
 
 fn choose(window: HWND, choice: Choice) {
-    let id = ROUTES.with(|routes| {
+    let target = ROUTES.with(|routes| {
         let mut routes = routes.borrow_mut();
         let route = routes.get_mut(&(window as isize))?;
-        if route.busy || route.submitted {
+        if route.busy
+            || route.submitted
+            || (matches!(route.target, Target::Workspace(_)) && choice == Choice::Discard)
+        {
             return None;
         }
         route.submitted = true;
-        Some(route.id)
+        Some(route.target)
     });
-    if let Some(id) = id {
-        post(Event::Editor(Signal::CloseChoice(id, choice)));
+    match target {
+        Some(Target::Editor(id)) => post(Event::Editor(Signal::CloseChoice(id, choice))),
+        Some(Target::Workspace(id)) => post(Event::WorkspaceClose(id, choice == Choice::Save)),
+        None => {}
     }
 }
 
@@ -71,8 +82,11 @@ fn layout(window: HWND) {
         let width = (area.right - margin * 2).max(1);
         let button_y = (area.bottom - px(50)).max(0);
         let status_y = (button_y - px(40)).max(px(60));
-        let button_width = ((width - px(20)) / 3).clamp(1, px(96));
-        let group_x = (area.right - margin - (button_width * 3 + px(20))).max(0);
+        let workspace = matches!(route.target, Target::Workspace(_));
+        let count = if workspace { 2 } else { 3 };
+        let gap = px(10);
+        let button_width = ((width - gap * (count - 1)) / count).clamp(1, px(96));
+        let group_x = (area.right - margin - (button_width * count + gap * (count - 1))).max(0);
         let boxes = [
             (margin, px(16), width, px(32)),
             (margin, px(60), width, (status_y - px(70)).max(1)),
@@ -85,13 +99,16 @@ fn layout(window: HWND) {
                 px(30),
             ),
             (
-                group_x + button_width * 2 + px(20),
+                group_x + (button_width + gap) * (count - 1),
                 button_y,
                 button_width,
                 px(30),
             ),
         ];
         for (control, (x, y, width, height)) in route.controls.into_iter().zip(boxes) {
+            if control == 0 {
+                continue;
+            }
             SetWindowPos(
                 control as HWND,
                 std::ptr::null_mut(),
@@ -159,10 +176,10 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
     chrome::message(window, message, w, l).unwrap_or_else(|| DefWindowProcW(window, message, w, l))
 }
 
-pub(super) struct Panel {
+pub(crate) struct Panel {
     window: HWND,
     owner: HWND,
-    id: u64,
+    target: Target,
     controls: [HWND; 6],
     owner_disabled: bool,
     previous_focus: HWND,
@@ -181,7 +198,48 @@ impl Panel {
             !labels.is_empty(),
             "dirty editor decision requires a document"
         );
-        let body = body_text(labels);
+        Self::create(
+            owner,
+            Target::Editor(id),
+            "Save changes before closing?",
+            &body_text(labels),
+            labels.len(),
+            background,
+        )
+    }
+
+    pub(crate) fn workspace(
+        owner: HWND,
+        id: Uuid,
+        summary: &str,
+        count: usize,
+        background: bool,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(count > 0, "workspace close requires a workspace");
+        let heading = if count == 1 {
+            "Close workspace?"
+        } else {
+            "Close workspaces?"
+        };
+        Self::create(
+            owner,
+            Target::Workspace(id),
+            heading,
+            summary,
+            count,
+            background,
+        )
+    }
+
+    fn create(
+        owner: HWND,
+        target: Target,
+        heading: &str,
+        body: &str,
+        count: usize,
+        background: bool,
+    ) -> anyhow::Result<Self> {
+        let workspace = matches!(target, Target::Workspace(_));
         unsafe {
             anyhow::ensure!(IsWindow(owner) != 0, "editor close owner no longer exists");
             let instance = GetModuleHandleW(std::ptr::null());
@@ -201,15 +259,14 @@ impl Panel {
             let mut bounds = RECT::default();
             checked(GetWindowRect(owner, &mut bounds))?;
             let width = 540 * dpi / 96;
-            let height = (260
-                + labels.len().min(8).saturating_sub(1) as i32 * 22
-                + if labels.len() > 8 { 22 } else { 0 })
-                * dpi
-                / 96;
+            let height =
+                (260 + count.min(8).saturating_sub(1) as i32 * 22 + if count > 8 { 22 } else { 0 })
+                    * dpi
+                    / 96;
             let window = CreateWindowExW(
                 WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME,
                 class.as_ptr(),
-                wide("Save changes before closing?").as_ptr(),
+                wide(heading).as_ptr(),
                 WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN,
                 bounds.left + (bounds.right - bounds.left - width) / 2,
                 bounds.top + (bounds.bottom - bounds.top - height) / 2,
@@ -224,7 +281,7 @@ impl Panel {
             let mut panel = Self {
                 window,
                 owner,
-                id,
+                target,
                 controls: [std::ptr::null_mut(); 6],
                 owner_disabled: false,
                 previous_focus: std::ptr::null_mut(),
@@ -233,13 +290,13 @@ impl Panel {
             };
             panel.controls[0] = panel.child(
                 "STATIC",
-                "Save changes before closing?",
+                heading,
                 10,
                 windows_sys::Win32::System::SystemServices::SS_NOPREFIX,
             )?;
             panel.controls[1] = panel.child(
                 "EDIT",
-                &body,
+                body,
                 11,
                 WS_VSCROLL
                     | WS_TABSTOP
@@ -255,19 +312,28 @@ impl Panel {
             )?;
             panel.controls[3] =
                 panel.child("BUTTON", "Cancel", CANCEL, WS_TABSTOP | BS_OWNERDRAW as u32)?;
-            panel.controls[4] = panel.child(
+            if !workspace {
+                panel.controls[4] = panel.child(
+                    "BUTTON",
+                    "Discard",
+                    DISCARD,
+                    WS_TABSTOP | BS_OWNERDRAW as u32,
+                )?;
+            }
+            panel.controls[5] = panel.child(
                 "BUTTON",
-                "Discard",
-                DISCARD,
+                if workspace { "Close" } else { "Save" },
+                SAVE,
                 WS_TABSTOP | BS_OWNERDRAW as u32,
             )?;
-            panel.controls[5] =
-                panel.child("BUTTON", "Save", SAVE, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            if workspace {
+                chrome::set_role(panel.controls[5], chrome::Role::Destructive);
+            }
             ROUTES.with(|routes| {
                 routes.borrow_mut().insert(
                     window as isize,
                     Route {
-                        id,
+                        target,
                         controls: panel.controls.map(|control| control as isize),
                         busy: false,
                         submitted: false,
@@ -284,7 +350,7 @@ impl Panel {
             }
             if !background {
                 ShowWindow(window, SW_SHOW);
-                SetFocus(panel.controls[5]);
+                SetFocus(panel.controls[if workspace { 3 } else { 5 }]);
             }
             Ok(panel)
         }
@@ -330,7 +396,7 @@ impl Panel {
         Ok(window)
     }
 
-    pub(super) fn handle_message(&self, message: &MSG) -> bool {
+    pub(crate) fn handle_message(&self, message: &MSG) -> bool {
         unsafe {
             if message.hwnd != self.window && IsChild(self.window, message.hwnd) == 0 {
                 return false;
@@ -342,6 +408,12 @@ impl Panel {
                             let choice = if message.wParam == 27 || message.hwnd == self.controls[3]
                             {
                                 Choice::Cancel
+                            } else if matches!(self.target, Target::Workspace(_)) {
+                                if message.hwnd == self.controls[5] {
+                                    Choice::Save
+                                } else {
+                                    Choice::Cancel
+                                }
                             } else if message.hwnd == self.controls[4] {
                                 Choice::Discard
                             } else {
@@ -373,10 +445,16 @@ impl Panel {
         });
         unsafe {
             for button in &self.controls[3..] {
-                EnableWindow(*button, 0);
+                if !button.is_null() {
+                    EnableWindow(*button, 0);
+                }
             }
         }
-        self.status("Saving…");
+        self.status(if matches!(self.target, Target::Workspace(_)) {
+            "Closing…"
+        } else {
+            "Saving…"
+        });
     }
 
     pub(super) fn status(&self, text: &str) {
@@ -385,10 +463,16 @@ impl Panel {
         }
     }
 
-    pub(super) fn diagnostics(&self) -> Value {
+    pub(crate) fn diagnostics(&self) -> Value {
+        let (id, workspace) = match self.target {
+            Target::Editor(id) => (json!(id), false),
+            Target::Workspace(id) => (json!(id), true),
+        };
         json!({"window":self.window as usize,"owner":unsafe { GetWindow(self.window,GW_OWNER) } as usize,
-            "id":self.id,"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
-            "save":self.controls[5] as usize,"discard":self.controls[4] as usize,"cancel":self.controls[3] as usize,
+            "id":id,"kind":if workspace { "workspace" } else { "editor" },"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
+            "save":if workspace { 0 } else { self.controls[5] as usize },
+            "confirm":if workspace { self.controls[5] as usize } else { 0 },
+            "close":if workspace { self.controls[5] as usize } else { 0 },"discard":self.controls[4] as usize,"cancel":self.controls[3] as usize,
             "busy":self.busy.get(),"status":self.text(self.controls[2]),
             "native_visible":unsafe { IsWindowVisible(self.window) != 0 }})
     }

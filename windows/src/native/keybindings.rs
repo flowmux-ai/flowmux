@@ -14,7 +14,7 @@ impl App {
         let Some(surface) = self.surfaces.get(&source) else {
             return Ok(());
         };
-        if self.active() != source
+        if self.current_surface() != Some(source)
             || !surface.visible
             || !surface.ready
             || surface.restoring
@@ -48,6 +48,9 @@ impl App {
         source: SurfaceId,
         action: ActionId,
     ) -> anyhow::Result<()> {
+        let (source_workspace, _, _) = self
+            .locate(source)
+            .context("No active workspace for shortcut source")?;
         anyhow::ensure!(
             !self.close_accepted
                 && self.close_request.is_none()
@@ -61,9 +64,12 @@ impl App {
             match action {
                 CloseSurface => return self.close_detached(source),
                 TerminalSearch => {
-                    self.surfaces[&source].send(&HostMessage::OpenFind {
-                        focus: !self.background_test,
-                    })?;
+                    self.surfaces
+                        .get(&source)
+                        .context("Shortcut requires a terminal surface")?
+                        .send(&HostMessage::OpenFind {
+                            focus: !self.background_test,
+                        })?;
                     return Ok(());
                 }
                 QuitApp => return self.request_close(CloseRequest::Native),
@@ -95,8 +101,7 @@ impl App {
             Some(NextSurface | PrevSurface) => {
                 let previous = ActionId::from_wire(action) == Some(PrevSurface);
                 let (_, pane, _) = self.locate(source).context("shortcut source disappeared")?;
-                let (_, _, tabs) = self
-                    .workspace()
+                let (_, _, tabs) = self.workspaces[source_workspace]
                     .leaves()
                     .into_iter()
                     .find(|(id, _, _)| *id == pane)

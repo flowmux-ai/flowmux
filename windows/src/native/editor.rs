@@ -11,6 +11,7 @@ use flowmux_editor::{EditorMessage, HostMessage as EditorMessageOut};
 use std::collections::HashSet;
 #[path = "editor_close_panel.rs"]
 mod close_panel;
+pub(super) use close_panel::Panel as ClosePanel;
 #[path = "editor_picker.rs"]
 mod editor_picker;
 #[path = "editor_view.rs"]
@@ -155,6 +156,10 @@ pub(super) enum Operation {
         surfaces: Vec<SurfaceId>,
     },
     Workspace(WorkspaceId),
+    Workspaces {
+        ids: Vec<WorkspaceId>,
+        surfaces: Vec<SurfaceId>,
+    },
     MainWindow {
         surfaces: Vec<SurfaceId>,
     },
@@ -1132,7 +1137,9 @@ impl App {
                 .then_some(*id)
                 .into_iter()
                 .collect(),
-            Operation::Pane { surfaces, .. } | Operation::MainWindow { surfaces } => surfaces
+            Operation::Pane { surfaces, .. }
+            | Operation::MainWindow { surfaces }
+            | Operation::Workspaces { surfaces, .. } => surfaces
                 .iter()
                 .filter(|id| self.editors.contains_key(id))
                 .copied()
@@ -1262,7 +1269,7 @@ impl App {
             &barrier.operation,
             Operation::Window(_) | Operation::QuitDiscard(_)
         ) || matches!(&barrier.operation, Operation::Tab(surface)
-            if self.workspaces.len() == 1 && self.detached.contains_key(surface));
+            if self.workspaces.len() == 1 && self.main_closed && self.detached.contains_key(surface));
         self.editor_bypass = true;
         let result = (|| -> anyhow::Result<()> {
             match barrier.operation {
@@ -1277,6 +1284,7 @@ impl App {
                     );
                     self.close_pane(pane, None)?;
                 }
+                Operation::Workspaces { ids, surfaces } => self.close_workspaces(ids, surfaces)?,
                 Operation::Workspace(id) => {
                     self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;
                 }
@@ -1319,7 +1327,9 @@ impl App {
     fn editor_close_owner(&self, operation: &Operation) -> HWND {
         match operation {
             Operation::Tab(surface) => self.surface_window(*surface),
-            Operation::Window(CloseRequest::Native) => self.surface_window(self.active()),
+            Operation::Window(CloseRequest::Native) => self
+                .current_surface()
+                .map_or(self.window, |surface| self.surface_window(surface)),
             _ => self.window,
         }
     }

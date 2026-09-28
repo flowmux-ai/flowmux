@@ -9,6 +9,46 @@ pub(super) enum NewTerminal {
     Split(SplitDirection),
 }
 impl App {
+    pub(super) fn new_workspace(
+        &mut self,
+        caller: Option<SurfaceId>,
+        cwd: Option<PathBuf>,
+        requested: Option<Shell>,
+    ) -> anyhow::Result<SurfaceId> {
+        if let Some(source) = caller.or_else(|| self.current_surface()) {
+            return self.new_terminal(source, cwd, requested, NewTerminal::Workspace);
+        }
+        anyhow::ensure!(
+            self.close_request.is_none() && !self.close_accepted && self.editor_barrier.is_none(),
+            "Window is busy"
+        );
+        if let Some(path) = &cwd {
+            anyhow::ensure!(
+                path.is_absolute()
+                    || (!path.has_root()
+                        && !matches!(
+                            path.components().next(),
+                            Some(std::path::Component::Prefix(_))
+                        )),
+                "ambiguous cwd; use an absolute Windows path"
+            );
+        }
+        let cwd = std::path::absolute(cwd.map_or_else(
+            || self.initial_cwd.clone(),
+            |path| self.initial_cwd.join(path),
+        ))?;
+        anyhow::ensure!(cwd.is_dir(), "working directory does not exist");
+        let spec = requested.unwrap_or_else(|| self.settings.default_shell.clone());
+        shell::resolve(&spec)?;
+        let workspace = Workspace::new(cwd);
+        let surface = workspace.active();
+        self.workspaces.push(workspace);
+        self.active_workspace = self.workspaces.len() - 1;
+        self.detached_focus = None;
+        self.shells.insert(surface, spec);
+        self.rebuild()?;
+        Ok(surface)
+    }
     pub(super) fn new_terminal(
         &mut self,
         source: SurfaceId,

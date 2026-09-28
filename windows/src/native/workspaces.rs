@@ -5,6 +5,13 @@ use super::*;
 mod editor;
 pub(super) use editor::{EditAction, Panel};
 
+pub(super) struct Close {
+    id: Uuid,
+    ids: Vec<WorkspaceId>,
+    surfaces: Vec<SurfaceId>,
+    pub(super) panel: super::editor::ClosePanel,
+}
+
 pub(super) fn set_caption(window: HWND, caption: &str) {
     let escaped = caption.replace('&', "&&");
     unsafe {
@@ -122,7 +129,10 @@ impl App {
                     .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
                     .map(|rgb| ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff));
                 chrome::Role::Workspace {
-                    selected: self.workspace().id == id || self.is_detached_workspace(id),
+                    selected: self
+                        .current_workspace()
+                        .is_some_and(|workspace| workspace.id == id)
+                        || self.is_detached_workspace(id),
                     color,
                 }
             }
@@ -139,8 +149,13 @@ impl App {
                         _ => chrome::SurfaceIcon::Terminal,
                     });
                 chrome::Role::Tab {
-                    selected: self.workspace().root.active_surface_id(pane) == Some(surface),
-                    focused: self.workspace().focused == pane,
+                    selected: self
+                        .current_workspace()
+                        .and_then(|workspace| workspace.root.active_surface_id(pane))
+                        == Some(surface),
+                    focused: self
+                        .current_workspace()
+                        .is_some_and(|workspace| workspace.focused == pane),
                     kind,
                 }
             }
@@ -211,7 +226,9 @@ impl App {
                     },
                 );
             }
-            chrome::set_role(control.hwnd, self.chrome_role(&control.action));
+            if !matches!(control.action, Action::EmptyState) {
+                chrome::set_role(control.hwnd, self.chrome_role(&control.action));
+            }
         }
     }
     pub(super) fn pane_surface_ids(&self, pane: PaneId) -> anyhow::Result<Vec<SurfaceId>> {
@@ -303,8 +320,8 @@ impl App {
     pub(super) fn chrome_status(&self) -> Value {
         let controls=self.controls.iter().map(|control| {
             let (kind,pane,surface,workspace,selected)=match control.action {
-                Action::Workspace(id)=>("workspace",None,None,Some(id),id==self.workspace().id),
-                Action::Tab(pane,surface)=>("tab",Some(pane),Some(surface),None,self.workspace().root.active_surface_id(pane)==Some(surface)),
+                Action::Workspace(id)=>("workspace",None,None,Some(id),self.current_workspace().is_some_and(|workspace| workspace.id == id)),
+                Action::Tab(pane,surface)=>("tab",Some(pane),Some(surface),None,self.current_workspace().and_then(|workspace|workspace.root.active_surface_id(pane))==Some(surface)),
                 Action::TabClose(pane,surface)=>("tab_close",Some(pane),Some(surface),None,false),
                 Action::PaneAdd(pane,surface)=>("pane_add",Some(pane),Some(surface),None,false),
                 Action::PaneMenu(pane,surface)=>("pane_menu",Some(pane),Some(surface),None,false),
@@ -315,6 +332,7 @@ impl App {
                 Action::SidebarScroll(d)=>(if d<0 {"sidebar_previous"}else{"sidebar_next"},None,None,None,false),
                 Action::NewWorkspace=>("workspace_add",None,None,None,false),
                 Action::WorkspaceMenu=>("workspace_header",None,None,None,false),
+                Action::EmptyState=>("empty_state",None,None,None,false),
                 Action::Settings=>("settings",None,None,None,false),
                 Action::CommandPalette=>("command_palette",None,None,None,false),
                 Action::Overview=>("overview",None,None,None,false),
@@ -329,7 +347,7 @@ impl App {
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|p==self.workspace().focused),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
         let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
@@ -417,29 +435,8 @@ impl App {
                     self.close_detached(surface)?;
                     return Ok(json!({"ok":true}));
                 }
-                anyhow::ensure!(
-                    self.main_workspace_indices().len() > 1,
-                    "cannot close the final workspace; close the window instead"
-                );
-                if self.editor_guard(super::editor::Operation::Workspace(id), None)? {
-                    return Ok(json!({"pending":true}));
-                }
-                let active = self.workspace().id == id;
-                let removed =
-                    model::remove_workspace(&mut self.workspaces, &mut self.active_workspace, id)?;
-                if active {
-                    self.zoomed = None;
-                }
-                for (_, _, tabs) in removed.leaves() {
-                    for tab in tabs {
-                        self.remove_surface(tab.id);
-                    }
-                }
-                self.search_tick()?;
-                self.rebuild_without_focus()?;
-                if active {
-                    self.focus_active()?;
-                }
+                let surfaces = self.workspace_surface_ids(&[id])?;
+                self.close_workspaces(vec![id], surfaces)?;
             }
         }
         Ok(json!({"ok":true}))
@@ -459,7 +456,7 @@ impl App {
             }
             Action::Workspace(id) => self.workspace_menu(id, Some(point)),
             Action::WorkspaceMenu | Action::NewWorkspace => {
-                self.show_workspace_menu(self.workspace().id, point, true)
+                self.workspace_creation_menu(Some(point))
             }
             Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
                 self.show_tab_menu(pane, surface, point)
@@ -539,40 +536,159 @@ impl App {
         });
         self.show_workspace_menu(self.workspaces[index].id, point, creation)
     }
-    pub(super) fn confirm_close_workspace(&mut self, id: WorkspaceId) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.main_workspace_indices().len() > 1,
-            "cannot close the final workspace; close the window instead"
-        );
-        let workspace = &self.workspaces[self.workspace_index(id)?];
-        // Native confirmation may activate a window. Hidden verifiers must not
-        // touch the desktop; editor close decisions use their own hidden dialog.
-        anyhow::ensure!(
-            !self.background_test,
-            "Workspace close confirmation is disabled in background hosts"
-        );
-        let count = workspace
-            .leaves()
-            .iter()
-            .flat_map(|(_, _, tabs)| tabs)
-            .filter(|tab| matches!(tab.kind, SurfaceKind::Terminal { .. }))
-            .count();
-        let confirmed = unsafe {
-            MessageBoxW(
-                self.window,
-                wide(format!(
-                    "Close workspace ‘{}’ and terminate its {} terminal processes?",
-                    workspace.name, count
-                ))
-                .as_ptr(),
-                wide("Close workspace").as_ptr(),
-                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING,
-            ) == IDYES
-        };
-        if confirmed {
-            self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;
+    pub(super) fn workspace_creation_menu(
+        &mut self,
+        point: Option<(i32, i32)>,
+    ) -> anyhow::Result<()> {
+        let point = point.unwrap_or_else(|| {
+            let hwnd = self
+                .controls
+                .iter()
+                .find(|control| matches!(control.action, Action::WorkspaceMenu))
+                .map_or(self.window, |control| control.hwnd);
+            let mut rect = RECT::default();
+            unsafe {
+                GetWindowRect(hwnd, &mut rect);
+            }
+            (rect.left, rect.bottom)
+        });
+        self.show_creation_menu(point)
+    }
+    pub(super) fn workspace_surface_ids(
+        &self,
+        ids: &[WorkspaceId],
+    ) -> anyhow::Result<Vec<SurfaceId>> {
+        let mut surfaces = Vec::new();
+        for id in ids {
+            let workspace = &self.workspaces[self.workspace_index(*id)?];
+            anyhow::ensure!(
+                !self.is_detached_workspace(*id),
+                "Separate windows are not in this close request"
+            );
+            surfaces.extend(
+                workspace
+                    .leaves()
+                    .into_iter()
+                    .flat_map(|(_, _, tabs)| tabs.into_iter().map(|tab| tab.id)),
+            );
         }
-        self.focus_active()
+        surfaces.sort_by_key(|surface| surface.0);
+        Ok(surfaces)
+    }
+    pub(super) fn confirm_close_workspaces(&mut self, ids: Vec<WorkspaceId>) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
+        anyhow::ensure!(
+            !ids.is_empty()
+                && self.workspace_close.is_none()
+                && self.editor_barrier.is_none()
+                && self.close_request.is_none()
+                && !self.close_accepted
+                && self.pending_save.is_none()
+                && self.editor_open_pending.is_empty()
+                && unsafe { IsWindowEnabled(self.window) } != 0,
+            "Window is busy"
+        );
+        let surfaces = self.workspace_surface_ids(&ids)?;
+        let summary = if ids.len() == 1 {
+            format!(
+                "Close workspace ‘{}’ and stop its tabs?",
+                self.workspaces[self.workspace_index(ids[0])?].name
+            )
+        } else {
+            format!(
+                "This will close all {} workspaces and stop their tabs.",
+                ids.len()
+            )
+        };
+        let id = Uuid::new_v4();
+        let panel = super::editor::ClosePanel::workspace(
+            self.window,
+            id,
+            &summary,
+            ids.len(),
+            self.background_test,
+        )?;
+        self.workspace_close = Some(Close {
+            id,
+            ids,
+            surfaces,
+            panel,
+        });
+        Ok(())
+    }
+    pub(super) fn workspace_close_choice(
+        &mut self,
+        id: Uuid,
+        accepted: bool,
+    ) -> anyhow::Result<()> {
+        if self
+            .workspace_close
+            .as_ref()
+            .is_none_or(|close| close.id != id)
+        {
+            return Ok(());
+        }
+        let Close {
+            ids,
+            surfaces,
+            panel,
+            ..
+        } = self.workspace_close.take().unwrap();
+        drop(panel);
+        if accepted {
+            self.close_workspaces(ids, surfaces)?;
+        } else {
+            self.focus_active()?;
+        }
+        Ok(())
+    }
+    pub(super) fn close_workspaces(
+        &mut self,
+        ids: Vec<WorkspaceId>,
+        surfaces: Vec<SurfaceId>,
+    ) -> anyhow::Result<()> {
+        self.files_operation_guard()?;
+        anyhow::ensure!(
+            self.close_request.is_none()
+                && !self.close_accepted
+                && self.pending_save.is_none()
+                && self.editor_open_pending.is_empty(),
+            "Window is busy"
+        );
+        anyhow::ensure!(
+            self.workspace_surface_ids(&ids)? == surfaces,
+            "Workspace tabs changed while close was pending"
+        );
+        if self.editor_guard(
+            super::editor::Operation::Workspaces {
+                ids: ids.clone(),
+                surfaces: surfaces.clone(),
+            },
+            None,
+        )? {
+            return Ok(());
+        }
+        let active = self.current_workspace().map(|workspace| workspace.id);
+        self.cancel_drag();
+        self.tab_menu.take();
+        self.metadata.take();
+        self.workspaces
+            .retain(|workspace| !ids.contains(&workspace.id));
+        self.active_workspace = active
+            .and_then(|id| {
+                self.workspaces
+                    .iter()
+                    .position(|workspace| workspace.id == id)
+            })
+            .unwrap_or(0);
+        self.normalize_main_workspace();
+        self.zoomed = None;
+        self.detached_focus = None;
+        for surface in surfaces {
+            self.remove_surface(surface);
+        }
+        self.search_tick()?;
+        self.rebuild()
     }
     fn metadata_text(&self, target: EditTarget) -> anyhow::Result<String> {
         match target {

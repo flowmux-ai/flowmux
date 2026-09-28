@@ -815,7 +815,7 @@ impl App {
     }
     pub(super) fn download_ui(&mut self, action: UiAction) -> anyhow::Result<()> {
         let generation = match action {
-            UiAction::Show => return self.download_show_for(self.active()),
+            UiAction::Show => return self.download_show_for(self.target(None, None)?),
             UiAction::Open(generation)
             | UiAction::Folder(generation)
             | UiAction::Cancel(generation)

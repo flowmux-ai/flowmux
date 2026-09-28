@@ -91,7 +91,8 @@ pub struct WindowState {
     pub version: u32,
     pub window: Uuid,
     pub workspaces: Vec<Workspace>,
-    pub active_workspace: WorkspaceId,
+    // Some serializes as the existing UUID string; null represents an alive empty window.
+    pub active_workspace: Option<WorkspaceId>,
     pub screens: HashMap<SurfaceId, SavedScreen>,
     #[serde(default)]
     pub shells: HashMap<SurfaceId, crate::shell::Shell>,
@@ -126,16 +127,27 @@ impl WindowState {
             (MIN_SIDEBAR_WIDTH..=MAX_SIDEBAR_WIDTH).contains(&self.sidebar_width_dip),
             "invalid saved sidebar width"
         );
-        ensure!(
-            !self.workspaces.is_empty() && self.workspaces.len() <= 64,
-            "invalid workspace count"
-        );
-        ensure!(
-            self.workspaces
-                .iter()
-                .any(|w| w.id == self.active_workspace),
-            "active workspace missing"
-        );
+        ensure!(self.workspaces.len() <= 64, "invalid workspace count");
+        if self.workspaces.is_empty() {
+            ensure!(
+                self.active_workspace.is_none(),
+                "empty window has an active workspace"
+            );
+            ensure!(
+                self.screens.is_empty()
+                    && self.shells.is_empty()
+                    && self.detached_windows.is_empty()
+                    && self.detached_focus.is_none()
+                    && !self.main_closed,
+                "empty window retains session data or has no live main window"
+            );
+        } else {
+            ensure!(
+                self.active_workspace
+                    .is_some_and(|active| self.workspaces.iter().any(|w| w.id == active)),
+                "active workspace missing"
+            );
+        }
         let mut ids = HashSet::from([self.window]);
         let mut surfaces = HashSet::new();
         for ws in &self.workspaces {
@@ -283,7 +295,7 @@ pub(crate) fn sample() -> WindowState {
     WindowState {
         version: 1,
         window: Uuid::new_v4(),
-        active_workspace: ws.id,
+        active_workspace: Some(ws.id),
         screens: HashMap::from([(
             ws.active(),
             SavedScreen {
@@ -305,6 +317,81 @@ pub(crate) fn sample() -> WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_main_window_roundtrips_and_existing_active_uuid_still_loads() {
+        let original = sample();
+        let id = original.workspaces[0].id;
+        let legacy = serde_json::to_value(&original).unwrap();
+        assert_eq!(legacy["active_workspace"], serde_json::to_value(id).unwrap());
+        assert_eq!(
+            WindowState::decode(&serde_json::to_vec(&legacy).unwrap())
+                .unwrap()
+                .active_workspace,
+            Some(id)
+        );
+        let empty = WindowState {
+            workspaces: Vec::new(),
+            active_workspace: None,
+            screens: HashMap::new(),
+            ..original
+        };
+        let encoded = empty.encode().unwrap();
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&encoded).unwrap()["active_workspace"]
+                .is_null()
+        );
+        let restored = WindowState::decode(&encoded).unwrap();
+        assert!(restored.workspaces.is_empty());
+        assert!(restored.active_workspace.is_none());
+        assert!(!restored.main_closed);
+        assert_eq!(restored.window, empty.window);
+    }
+    #[test]
+    fn empty_main_window_rejects_orphaned_state_and_nonempty_requires_active_workspace() {
+        let original = sample();
+        let surface = original.workspaces[0].active();
+        let empty = WindowState {
+            workspaces: Vec::new(),
+            active_workspace: None,
+            screens: HashMap::new(),
+            ..original.clone()
+        };
+        for change in 0..6 {
+            let mut invalid = empty.clone();
+            match change {
+                0 => invalid.active_workspace = original.active_workspace,
+                1 => invalid.screens = original.screens.clone(),
+                2 => {
+                    invalid.shells.insert(surface, crate::shell::Shell::default());
+                }
+                3 => {
+                    invalid.detached_windows.insert(
+                        surface,
+                        SavedPlacement {
+                            left: 0,
+                            top: 0,
+                            width: 800,
+                            height: 600,
+                            maximized: false,
+                            sidebar_width_dip: None,
+                        },
+                    );
+                }
+                4 => invalid.detached_focus = Some(surface),
+                _ => invalid.main_closed = true,
+            }
+            assert!(invalid.encode().is_err());
+            assert!(WindowState::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        }
+        for active in [None, Some(WorkspaceId::new())] {
+            let invalid = WindowState {
+                active_workspace: active,
+                ..original.clone()
+            };
+            assert!(invalid.encode().is_err());
+            assert!(WindowState::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        }
+    }
     #[test]
     fn separate_windows_preserve_old_state_and_validate_placement_and_ownership() {
         let old = sample();
@@ -328,6 +415,8 @@ mod tests {
         };
         let mut state = old.clone();
         state.detached_windows.insert(surface, placement);
+        // A live empty main window may coexist with only detached workspaces.
+        assert!(state.encode().is_ok());
         state.main_closed = true;
         state.detached_focus = Some(surface);
         let restored = WindowState::decode(&state.encode().unwrap()).unwrap();

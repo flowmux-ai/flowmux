@@ -46,7 +46,10 @@ impl Controller {
 impl App {
     fn palette_entries(&self) -> anyhow::Result<Vec<Entry>> {
         let mut entries = Vec::new();
-        if let Some((workspace, _, _)) = self.locate(self.active()) {
+        if let Some((workspace, _, _)) = self
+            .current_surface()
+            .and_then(|surface| self.locate(surface))
+        {
             let workspace = self.workspaces[workspace].id;
             for (id, label, target) in [
                 (
@@ -80,6 +83,9 @@ impl App {
             ("move-tab", "Move tab…", Action::MoveTabMenu),
             ("detach-tab", "Move to new window", Action::DetachTab),
         ] {
+            if self.current_surface().is_none() && !Self::empty_action(&action) {
+                continue;
+            }
             entries.push(Entry {
                 id: format!("native:{id}"),
                 label: label.into(),
@@ -154,6 +160,21 @@ impl App {
             self.editor_barrier.is_none(),
             "editor synchronization is in progress"
         );
+        if self.current_surface().is_none() {
+            match target {
+                Target::Keybinding(action) => {
+                    anyhow::ensure!(
+                        matches!(action, ActionId::NewWorkspace | ActionId::QuitApp),
+                        "No active workspace"
+                    );
+                    return Ok(());
+                }
+                Target::Native(action) => {
+                    anyhow::ensure!(Self::empty_action(action), "No active workspace")
+                }
+                _ => {}
+            }
+        }
         match target {
             Target::Metadata(
                 workspaces::EditTarget::WorkspaceName(id)
@@ -276,7 +297,15 @@ impl App {
                 match entry.target {
                     Target::Metadata(target) => self.edit_metadata(target)?,
                     Target::Native(action) => self.action(action)?,
-                    Target::Keybinding(action) => self.keybinding_action(self.active(), action)?,
+                    Target::Keybinding(ActionId::NewWorkspace) => {
+                        self.action(Action::NewWorkspace)?
+                    }
+                    Target::Keybinding(ActionId::QuitApp) => {
+                        self.request_close(CloseRequest::Native)?
+                    }
+                    Target::Keybinding(action) => {
+                        self.keybinding_action(self.target(None, None)?, action)?
+                    }
                     Target::Workspace(id) => self.action(Action::Workspace(id))?,
                     Target::Surface(id) => {
                         self.select(id)?;

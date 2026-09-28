@@ -2,7 +2,7 @@
 # Bounded hidden native Monaco verification. Run through run-check.ps1 (120s).
 param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
+    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -13,6 +13,7 @@ $directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object EditorFixture($directory)
 $process=$null;$pipeName=$null;$stdout=$null;$stderr=$null;$hostExitRecorded=$false;$hostForced=$false
+$closeAllClock=if($Case -eq 'close-all'){[Diagnostics.Stopwatch]::StartNew()}else{$null}
 $hosts=@();$shells=@();$clients=@();$ownedEditors=@();$cleanupErrors=@();$storageObserved=@()
 $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';case=$Case;checks=@();observations=@();clipboardAccess=$false;desktopInput=$false;externalSites=$false;realImeTest=$false;unicodeComparison='ordinal';deferred=@(
     'Physical keyboard/mouse/IME, glyph fidelity, native system dialogs, clipboard, DPI and accessibility are not exercised; owned app close dialogs use exact hidden HWND messages.',
@@ -29,12 +30,14 @@ $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';case=$Ca
 function Same-Text([string]$Left,[string]$Right) {return [string]::Equals($Left,$Right,[StringComparison]::Ordinal)}
 function Passed([string]$Name) {$script:evidence.checks+=@{name=$Name;passed=$true};Write-Host ('[check] passed '+$Name)}
 function Begin-Probe([string]$File,[string[]]$Arguments) {
+    if($script:closeAllClock -and $script:closeAllClock.ElapsedMilliseconds -ge 90000){throw 'Close-all exhausted its 90-second work budget'}
     $p=[CliProbe]::Start($File,$Arguments,$directory,$directory)
     $job=[pscustomobject]@{process=$p;pid=$p.Id;file=$File;arguments=$Arguments;output=$p.StandardOutput.ReadToEndAsync();error=$p.StandardError.ReadToEndAsync();completed=$false}
     $script:clients+=$job;return $job
 }
 function End-Command($Job,[int[]]$AllowedExits=@(0),[ValidateRange(1,20000)][int]$TimeoutMilliseconds=5000) {
     try {
+        if($script:closeAllClock){$remaining=90000-$script:closeAllClock.ElapsedMilliseconds;if($remaining -lt 100){throw 'Close-all work deadline reached'};$TimeoutMilliseconds=[int][Math]::Min(5000,[Math]::Min($TimeoutMilliseconds,$remaining))}
         if(-not $Job.process.WaitForExit($TimeoutMilliseconds)) {$Job.process.Kill();[CliProbe]::WaitAfterKill($Job.process);throw ('Owned CLI exceeded '+$TimeoutMilliseconds+'ms; not retried')}
         $outDone=$Job.output.Wait(1000);$errDone=$Job.error.Wait(1000)
         if(-not $outDone -or -not $errDone) {throw 'Owned CLI output did not close'}
@@ -82,7 +85,8 @@ function Remaining-StartupBudget([Diagnostics.Stopwatch]$Clock) {
     if($remaining -le 0) {throw 'Owned host exceeded its total eight-second startup budget'}
     return [int]$remaining
 }
-function Start-Owned([bool]$Persistent=$false,[string]$Restore='') {
+function Start-Owned([bool]$Persistent=$false,[string]$Restore='',[bool]$AllowEmpty=$false) {
+    if($AllowEmpty -and -not $Restore){throw 'Empty startup is limited to explicit checkpoint restore'}
     $arguments=@('--temporary','--shell=cmd','--cwd',$fixture.Root)
     if($Persistent) {$arguments=@('--new-window','--shell=cmd','--cwd',$fixture.Root)}
     if($Restore) {$arguments=@('--restore-window',$Restore)}
@@ -107,16 +111,19 @@ function Start-Owned([bool]$Persistent=$false,[string]$Restore='') {
         } while($true)
         $startup.discoveryElapsedMs=$startupWatch.ElapsedMilliseconds;$startup.stage='identify'
         $startup.identityBudgetMs=Remaining-StartupBudget $startupWatch
-        $identity=Request @('identify') 0 $startup.identityBudgetMs
-        $startup.identityResponse=$identity;$startup.identityElapsedMs=$startupWatch.ElapsedMilliseconds
+        if(-not $AllowEmpty){
+            $identity=Request @('identify') 0 $startup.identityBudgetMs
+            $startup.identityResponse=$identity;$startup.identityElapsedMs=$startupWatch.ElapsedMilliseconds
+            if($identity.pid -ne $process.Id) {throw 'Wrong pipe owner'}
+        }
         Remaining-StartupBudget $startupWatch|Out-Null
-        if($identity.pid -ne $process.Id) {throw 'Wrong pipe owner'}
         $startup.stage='terminal-readiness';$startup.treeRequests=0
         do {
             $startup.treeRequests++
             $tree=Tree (Remaining-StartupBudget $startupWatch)
             Remaining-StartupBudget $startupWatch|Out-Null
             if(@($tree.surfaces|Where-Object {-not $_.ready}).Count -eq 0) {
+                if($AllowEmpty){[OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)|Out-Null;if(-not $tree.main_empty -or $tree.main_closed -or @($tree.workspaces).Count -or $null -ne $tree.active_workspace){throw 'Empty checkpoint unexpectedly restored a workspace or closed main'}}
                 $script:shells+=@($tree.surfaces|Where-Object {$_.pid -and $script:shells -notcontains $_.pid}|ForEach-Object {$_.pid})
                 $startup.stage='complete';$startup.status='ready'
                 return $tree
@@ -239,6 +246,44 @@ function Wait-EditorRemoved([string]$Surface) {
         }
         Start-Sleep -Milliseconds 20
     } while($true)
+}
+function Wait-CloseAll([scriptblock]$Condition) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $left=5000-$watch.ElapsedMilliseconds
+        if($left -lt 100){throw 'Close-all condition deadline reached (five-second limit)'}
+        if($process.HasExited){throw 'Close-all exited the broker instead of retaining its main window'}
+        $tree=Tree ([int]$left);$script:evidence.lastTree=$tree
+        [OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)|Out-Null
+        if(& $Condition $tree){return $tree}
+        Start-Sleep -Milliseconds 20
+    }while($true)
+}
+function Open-CloseAll([string]$Workspace) {
+    $tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Workspace -and $_.layout_visible})
+    if($row.Count -ne 1){throw 'Close-all source has no unique visible owned workspace row'}
+    [OptionsFixture]::ContextMenu([long]$tree.window_handle,[long]$row[0].handle,$process.Id)
+    $tree=Wait-CloseAll {param($t) $t.tab_menu.kind -ceq 'workspace' -and $t.tab_menu.workspace -ceq $Workspace}
+    $menu=$tree.tab_menu.menu;$native=[OptionsFixture]::Describe([long]$menu.window,$process.Id)
+    if($menu.native_visible -ne $false -or $native.Owner -ne $tree.window_handle -or -not $native.OwnerEnabled){throw 'Close-all menu escaped its hidden modeless owner'}
+    $row=@($menu.rows|Where-Object {$_.label -ceq 'Close all tabs'})
+    if($row.Count -ne 1 -or -not $row[0].enabled){throw 'Native Close all tabs action is unavailable'}
+    [OptionsFixture]::ClickMenu([long]$menu.window,[long]$row[0].window,$process.Id)
+    $tree=Wait-CloseAll {param($t) $t.workspace_close_dialog -and -not $t.tab_menu}
+    $dialog=$tree.workspace_close_dialog;$native=[OptionsFixture]::Describe([long]$dialog.window,$process.Id)
+    if(-not $dialog.id -or $dialog.owner -ne $tree.window_handle -or $native.Owner -ne $tree.window_handle -or -not $native.Enabled -or $native.OwnerEnabled -or $dialog.native_visible -ne $false){throw 'Workspace confirmation is not the exact owned hidden modal'}
+    foreach($key in @('confirm','cancel')){if([OptionsFixture]::Parent([long]$dialog.$key,$process.Id) -ne $dialog.window){throw 'Workspace confirmation control has the wrong owner'}}
+    return $dialog
+}
+function Confirm-CloseAll($Dialog){[OptionsFixture]::ClickMenu([long]$Dialog.window,[long]$Dialog.confirm,$process.Id)}
+function New-MainWorkspace {
+    $tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_add' -and $_.layout_visible})
+    if($button.Count -ne 1){throw 'Empty main omitted its native New workspace entry'}
+    [OptionsFixture]::Click([long]$tree.window_handle,[long]$button[0].handle,$process.Id)
+    $tree=Wait-CloseAll {param($t) -not $t.main_empty -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running -or -not $_.pid}).Count -eq 0}
+    $script:source=Request @('identify');$match=@($tree.surfaces|Where-Object {$_.id -ceq $script:source.surface})
+    if($match.Count -ne 1){throw 'New workspace did not create a ready terminal'}
+    $script:terminal=$match[0];$script:shells+=,$terminal.pid;return $tree
 }
 function Editor-Command([string]$Surface,[string]$Action,[string[]]$Options=@(),[int]$Exit=0) {
     $r=Request (@('editor','command',$Surface,$Action)+$Options) $Exit
@@ -379,9 +424,9 @@ function Assert-SavedSession($Actual,$Expected,[string]$Context) {
 try {
     $doctor=End-Command (Begin-Probe $cli @('doctor'))
     if(-not $doctor.background_testing -or $doctor.status -ne 'ok') {throw 'Working hidden debug build required; no host launched'}
-    $tree=Start-Owned;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
+    $tree=Start-Owned ($Case -eq 'close-all');$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
     if($Case -eq 'startup') {Passed 'hidden_debug_doctor_and_owned_host_readiness'}
-    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
+    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
         if($Case -ne 'all' -and $Case -ne $group) {continue}
         Clean-Editors;$fixture.ReleaseLocks();Request @('focus-tab',$terminal.id)|Out-Null
         switch($group) {
@@ -952,6 +997,79 @@ try {
                 Assert-Bytes $otherPath ([EditorFixture]::Original);Assert-Terminal
                 Passed 'native_separate_discard_closes_only_target_window_without_writing_dirty_content'
             }
+            'close-all' {
+                if(-not $script:closeAllClock){$script:closeAllClock=[Diagnostics.Stopwatch]::StartNew()}
+                Close-Fixtures
+                if($Case -eq 'all'){Finish-Host;$tree=Start-Owned $true;$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]}
+                $name='close all 저장 한글 한 😀.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$true,$true)
+                $opened=Open-Editor $path;Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                Request @('workspace','rename',$source.workspace,'전체 닫기 원본 한')|Out-Null
+                Request @('new-workspace','--cwd',$fixture.Root,'--shell=cmd')|Out-Null;$otherSource=Request @('identify');Request @('workspace','rename',$otherSource.workspace,'전체 닫기 둘째 😀')|Out-Null
+                $tree=Wait-CloseAll {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running -or -not $_.pid}).Count -eq 0};$script:shells+=@($tree.surfaces.pid)
+                Request @('focus-tab',$opened.surface)|Out-Null
+                $read=Assert-Text $opened.surface ([EditorFixture]::Edited) $true;$before=Status $opened.surface;$beforeTree=Tree;$closingPids=@($beforeTree.surfaces.pid)
+                $dialog=Open-CloseAll $source.workspace
+                [OptionsFixture]::PostEnter([long]$dialog.window,$process.Id)
+                $tree=Wait-CloseAll {param($t) -not $t.workspace_close_dialog -and -not $t.editor_close_dialog -and -not $t.editor_synchronizing}
+                $retained=Read-Editor $opened.surface
+                if(-not (Same-Text ($tree.workspaces|ConvertTo-Json -Depth 50 -Compress) ($beforeTree.workspaces|ConvertTo-Json -Depth 50 -Compress)) -or $retained.document_id -ne $read.document_id -or $retained.active_version -ne $read.active_version -or -not $retained.dirty -or -not (Same-Text $retained.content ([EditorFixture]::Edited))){throw 'Default Cancel changed workspace or dirty document state'}
+                Assert-Terminal;foreach($old in $beforeTree.surfaces){if(@($tree.surfaces|Where-Object {$_.id -ceq $old.id -and $_.pid -eq $old.pid -and $_.running}).Count -ne 1){throw 'Default Cancel replaced a workspace terminal'}}
+                if(-not ([OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)).Enabled){throw 'Default Cancel left the main owner disabled'}
+                Passed 'Close_all_workspace_confirmation_defaults_Enter_to_Cancel_without_mutation'
+
+                $dialog=Open-CloseAll $source.workspace;Confirm-CloseAll $dialog
+                $dialog=Wait-CloseDialog ([long]$tree.window_handle) @($name);Choose-Close $dialog 'cancel'
+                $retained=Wait-EditorUnsealed $opened.surface;$tree=Tree;$after=Status $opened.surface
+                if($retained.document_id -ne $read.document_id -or $retained.active_version -ne $read.active_version -or -not $retained.dirty -or -not (Same-Text $retained.content ([EditorFixture]::Edited)) -or $after.view_handle -ne $before.view_handle -or $tree.main_empty -or $tree.main_closed){throw 'Close-all dirty Cancel lost the live editor or document'}
+                Assert-Terminal;foreach($old in $beforeTree.surfaces){if(@($tree.surfaces|Where-Object {$_.id -ceq $old.id -and $_.pid -eq $old.pid -and $_.running}).Count -ne 1){throw 'Dirty Cancel replaced a workspace terminal'}};Assert-Bytes $path ([EditorFixture]::Original) $true $true
+                Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
+                if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))){throw 'Close-all Cancel lost Monaco undo'}
+                Editor-Command $opened.surface 'redo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
+                Passed 'Close_all_dirty_Cancel_preserves_Unicode_document_version_view_undo_and_terminal_PID'
+
+                $oldMain=[long]$tree.window_handle;$dialog=Open-CloseAll $source.workspace;Confirm-CloseAll $dialog
+                $dialog=Wait-CloseDialog $oldMain @($name);Choose-Close $dialog 'save'
+                $tree=Wait-CloseAll {param($t) $t.main_empty -and -not $t.main_closed -and @($t.workspaces).Count -eq 0 -and @($t.surfaces).Count -eq 0 -and @($t.editors).Count -eq 0 -and @($t.browsers).Count -eq 0 -and -not $t.editor_synchronizing -and -not $t.workspace_close_dialog -and -not $t.editor_close_dialog -and @(Get-Process -Id $closingPids -ErrorAction SilentlyContinue).Count -eq 0}
+                Forget-Editor $opened.surface
+                if($tree.window_handle -ne $oldMain -or $null -ne $tree.active_workspace -or @($tree.layout.panes).Count -or -not ([OptionsFixture]::Describe($oldMain,$process.Id)).Enabled){throw 'Save Close all replaced, closed, disabled or repopulated the empty main'}
+                Assert-Bytes $path ([EditorFixture]::Edited) $true $true
+                $saved=Request @('save-state');$checkpoint=[IO.File]::ReadAllText($saved.path,[Text.Encoding]::UTF8)|ConvertFrom-Json
+                if(@($checkpoint.workspaces).Count -or $null -ne $checkpoint.active_workspace -or $checkpoint.main_closed -or ($checkpoint.detached_windows -and @($checkpoint.detached_windows.psobject.Properties).Count)){throw 'Empty checkpoint contains phantom workspace/focus or closed-main state'}
+                Finish-Host $true;$tree=Start-Owned $true $saved.window $true
+                if(@($tree.surfaces).Count -or @($tree.editors).Count -or @($tree.browsers).Count -or @($tree.detached_windows).Count -or @($tree.layout.panes).Count -or $tree.state.window -ne $saved.window){throw 'Empty restore created a session or lost its saved window identity'}
+                Passed 'Close_all_Save_persists_exact_BOM_CRLF_bytes_and_restores_a_live_truly_empty_main'
+
+                $tree=New-MainWorkspace;$mainSource=$source;$mainTerminal=$terminal
+                Request @('new-tab','--cwd',$fixture.Root,'--shell=cmd')|Out-Null;$separate=Request @('identify')
+                $tree=Wait-CloseAll {param($t) @($t.surfaces|Where-Object {$_.id -ceq $separate.surface -and $_.ready -and $_.running -and $_.pid}).Count -eq 1}
+                $survivor=@($tree.surfaces|Where-Object {$_.id -ceq $separate.surface})[0];$script:shells+=,$survivor.pid
+                Request @('detach-tab',$separate.surface)|Out-Null
+                $tree=Wait-CloseAll {param($t) @($t.detached_windows|Where-Object {$_.surface -ceq $separate.surface}).Count -eq 1};$frame=@($tree.detached_windows|Where-Object {$_.surface -ceq $separate.surface})[0]
+                [OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)|Out-Null;$detachedSource=Request @('identify')
+                if($detachedSource.surface -cne $separate.surface){throw 'Detach did not retain its captured active surface'}
+                Request @('send-keys',$detachedSource.pane,'echo FLOWMUX_CLOSE_ALL_SURVIVOR')|Out-Null;Request @('send-key','Enter','--pane',$detachedSource.pane)|Out-Null
+                $markerWatch=[Diagnostics.Stopwatch]::StartNew()
+                do{$left=5000-$markerWatch.ElapsedMilliseconds;if($left -lt 100){throw 'Detached marker exceeded five seconds'};$screen=Request @('read-screen','--surface',$separate.surface) 0 ([int]$left);if($screen.text.Contains('FLOWMUX_CLOSE_ALL_SURVIVOR')){break};Start-Sleep -Milliseconds 20}while($true)
+                $name='close all 버리기 한.txt';$discardPath=$fixture.Write($name,[EditorFixture]::Original,$false,$false)
+                $opened=Open-Editor $discardPath $mainSource.pane;Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
+                $dialog=Open-CloseAll $mainSource.workspace;Confirm-CloseAll $dialog
+                $dialog=Wait-CloseDialog ([long]$tree.window_handle) @($name);Choose-Close $dialog 'discard'
+                $tree=Wait-CloseAll {param($t) $t.main_empty -and -not $t.main_closed -and @($t.editors).Count -eq 0 -and @($t.surfaces).Count -eq 1 -and -not $t.workspace_close_dialog -and -not $t.editor_close_dialog -and -not $t.editor_synchronizing -and -not (Get-Process -Id $mainTerminal.pid -ErrorAction SilentlyContinue)}
+                Forget-Editor $opened.surface;Assert-Bytes $discardPath ([EditorFixture]::Original)
+                $after=@($tree.surfaces|Where-Object {$_.id -ceq $separate.surface})[0];$afterFrame=@($tree.detached_windows|Where-Object {$_.surface -ceq $separate.surface})
+                if($afterFrame.Count -ne 1 -or $afterFrame[0].window_handle -ne $frame.window_handle -or $after.pid -ne $survivor.pid -or -not $after.running -or $after.view_handle -ne $survivor.view_handle -or $after.holder.parent -ne $frame.window_handle -or @($tree.workspaces).Count -ne 1 -or @($tree.layout.panes).Count){throw 'Main Discard Close all replaced or closed the detached terminal'}
+                $screen=Request @('read-screen','--surface',$separate.surface)
+                if(-not $screen.text.Contains('FLOWMUX_CLOSE_ALL_SURVIVOR')){throw 'Close all erased detached terminal output'}
+                [OptionsFixture]::Describe([long]$frame.window_handle,$process.Id)|Out-Null
+                Passed 'Restored_empty_New_workspace_and_Discard_Close_all_keep_detached_HWND_PID_and_output'
+
+                [FindFixture]::PostClose([long]$frame.window_handle,$process.Id)
+                $tree=Wait-CloseAll {param($t) $t.main_empty -and -not $t.main_closed -and @($t.detached_windows).Count -eq 0 -and @($t.workspaces).Count -eq 0 -and @($t.surfaces).Count -eq 0 -and -not $t.state.saving -and -not (Get-Process -Id $survivor.pid -ErrorAction SilentlyContinue)}
+                if($null -ne $tree.active_workspace -or -not ([OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)).Enabled){throw 'Final detached close destroyed or disabled the retained empty main'}
+                Passed 'Closing_final_detached_frame_keeps_empty_main_and_IPC_alive'
+                if($Case -eq 'all'){$tree=New-MainWorkspace}
+                $script:closeAllClock=$null
+            }
             'move' {
                 $path=$fixture.Write('move root 한글\move 한글.txt',[EditorFixture]::Original,$false,$false);$editorRoot=$fixture.File('move root 한글');$opened=Open-Editor $path '' $editorRoot
                 Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null
@@ -1227,11 +1345,12 @@ try {
                 Passed 'acknowledged_dirty_recovery_survives_owned_host_termination_and_saves_only_after_explicit_monaco_recover'
             }
         }
-        if($process) {Assert-Terminal;Tree|Out-Null}
+        if($process) {if($group -ne 'close-all'){Assert-Terminal};Tree|Out-Null}
     }
     $evidence.status='passed_background_editor_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {
+    $script:closeAllClock=$null
     $fixture.ReleaseLocks()
     foreach($job in $clients) {
         if(-not $job.completed) {try {if(-not $job.process.HasExited) {$job.process.Kill();[CliProbe]::WaitAfterKill($job.process)};$job.process.Dispose();$job.completed=$true} catch {$cleanupErrors+=$_.Exception.Message}}

@@ -30,8 +30,15 @@ impl App {
             self.detached.insert(surface, window);
         }
         self.main_closed = main_closed;
-        self.detached_focus =
-            focus.or_else(|| main_closed.then(|| self.workspaces[self.active_workspace].active()));
+        self.detached_focus = focus.or_else(|| {
+            main_closed
+                .then(|| {
+                    self.workspaces
+                        .get(self.active_workspace)
+                        .map(Workspace::active)
+                })
+                .flatten()
+        });
         self.normalize_main_workspace();
         Ok(())
     }
@@ -112,7 +119,7 @@ impl App {
         }
     }
 
-    fn normalize_main_workspace(&mut self) {
+    pub(super) fn normalize_main_workspace(&mut self) {
         let indices = self.main_workspace_indices();
         if !indices.contains(&self.active_workspace) {
             self.active_workspace = indices.first().copied().unwrap_or(0);
@@ -277,7 +284,7 @@ impl App {
             .detached
             .get(&surface)
             .context("separate window no longer exists")?;
-        if self.workspaces.len() == 1 {
+        if self.workspaces.len() == 1 && self.main_closed {
             if native_closed
                 && (self.close_request.is_some() || self.files_operation_guard().is_err())
             {
@@ -298,7 +305,12 @@ impl App {
         if !native_closed && self.editor_guard(editor::Operation::Tab(surface), None)? {
             return Ok(());
         }
-        model::remove_workspace(&mut self.workspaces, &mut self.active_workspace, workspace)?;
+        if self.workspaces.len() == 1 {
+            self.workspaces.clear();
+            self.active_workspace = 0;
+        } else {
+            model::remove_workspace(&mut self.workspaces, &mut self.active_workspace, workspace)?;
+        }
         // Close the WebView and holder before destroying their top-level HWND.
         self.remove_surface(surface);
         self.normalize_main_workspace();
@@ -337,6 +349,7 @@ impl App {
         self.files_shutdown();
         self.editor_cancel_opens(None, "main window closed before editor Open completed");
         self.options.take();
+        self.workspace_close.take();
         self.metadata.take();
         self.tab_menu.take();
         let detached: Vec<_> = self

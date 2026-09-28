@@ -563,6 +563,10 @@ impl App {
         if self.editor_barrier.is_some() || self.close_request.is_some() {
             return Ok(());
         }
+        let saved_surface = self
+            .current_workspace()
+            .context("No active workspace for overview")?
+            .active();
         if self.overview.gdiplus == 0 {
             let input = Startup {
                 version: 1,
@@ -583,7 +587,7 @@ impl App {
         self.overview.errors.clear();
         self.overview.attempted.clear();
         self.overview.queued.clear();
-        self.overview.panel = Some(Panel::new(self.window, self.active())?);
+        self.overview.panel = Some(Panel::new(self.window, saved_surface)?);
         self.overview.started = Some(Instant::now());
         self.overview_refresh()?;
         self.overview_layout()?;
@@ -613,7 +617,7 @@ impl App {
         if !self.background_test {
             unsafe {
                 if !selected
-                    && self.active() == surface
+                    && self.current_surface() == Some(surface)
                     && IsWindow(focus) != 0
                     && (focus == self.window || IsChild(self.window, focus) != 0)
                 {
@@ -716,6 +720,9 @@ impl App {
         if !self.overview.is_open() {
             return Ok(());
         }
+        let Some(active_workspace) = self.current_workspace().map(|workspace| workspace.id) else {
+            return self.overview_dismiss(false);
+        };
         self.overview.expire_generation();
         let expired = self.overview.budget_expired();
         let ids: Vec<_> = self.workspaces.iter().map(|w| w.id).collect();
@@ -809,7 +816,7 @@ impl App {
                     Paint {
                         workspace: workspace.id,
                         name: workspace.name.clone(),
-                        selected: workspace.id == self.workspaces[self.active_workspace].id,
+                        selected: workspace.id == active_workspace,
                         previews,
                     },
                 );

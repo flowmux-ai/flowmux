@@ -91,6 +91,7 @@ thread_local! {
 }
 enum Event {
     TabMenu(Uuid, tab_menu::UiAction),
+    WorkspaceClose(Uuid, bool),
     Editor(editor::Signal),
     Files(files::Signal),
     Browser(browser::Signal),
@@ -442,6 +443,7 @@ enum Action {
     PaneSplitDown(PaneId, SurfaceId),
     PaneBrowser(PaneId, SurfaceId),
     SidebarScroll(i32),
+    EmptyState,
 }
 struct Control {
     hwnd: HWND,
@@ -517,6 +519,8 @@ struct App {
     drop_preview: Option<chrome::DropPreview>,
     metadata: Option<workspaces::Panel>,
     tab_menu: Option<tab_menu::Menu>,
+    workspace_close: Option<workspaces::Close>,
+    initial_cwd: PathBuf,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
     overview: overview::Controller,
@@ -589,8 +593,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             let active = state
                 .workspaces
                 .iter()
-                .position(|w| w.id == state.active_workspace)
-                .unwrap();
+                .position(|w| Some(w.id) == state.active_workspace)
+                .unwrap_or(0);
             (state.workspaces, active, state.screens, state.shells)
         }
         None => (
@@ -749,6 +753,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             drop_preview: None,
             metadata: None,
             tab_menu: None,
+            workspace_close: None,
+            initial_cwd: cwd.clone(),
             options: None,
             command_palette: command_palette::Controller::default(),
             overview: overview::Controller::default(),
@@ -808,6 +814,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.overview));
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
+        app.workspace_close.take();
         app.metadata.take();
         app.tab_menu.take();
         app.browsers.clear();
@@ -856,6 +863,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 .tab_menu
                 .as_ref()
                 .is_some_and(|menu| menu.handle_message(&message))
+                && !app
+                    .workspace_close
+                    .as_ref()
+                    .is_some_and(|close| close.panel.handle_message(&message))
                 && !app.editor_close_handle_message(&message)
                 && !app.command_palette.handle_message(&message)
                 && !app.overview_handle_message(&message)
@@ -893,10 +904,31 @@ impl App {
     fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspaces[self.active_workspace]
     }
-    fn active(&self) -> SurfaceId {
+    fn current_workspace(&self) -> Option<&Workspace> {
+        self.workspaces
+            .get(self.active_workspace)
+            .filter(|workspace| !self.is_detached_workspace(workspace.id))
+    }
+    fn current_surface(&self) -> Option<SurfaceId> {
         self.detached_focus
             .filter(|id| self.detached.contains_key(id))
-            .unwrap_or_else(|| self.workspace().active())
+            .or_else(|| self.current_workspace().map(Workspace::active))
+    }
+    fn active(&self) -> SurfaceId {
+        self.current_surface()
+            .expect("active surface required by this operation")
+    }
+    fn empty_action(action: &Action) -> bool {
+        matches!(
+            action,
+            Action::NewWorkspace
+                | Action::WorkspaceMenu
+                | Action::Settings
+                | Action::CommandPalette
+                | Action::Notifications
+                | Action::SidebarScroll(_)
+                | Action::EmptyState
+        )
     }
     fn rebuild(&mut self) -> anyhow::Result<()> {
         self.rebuild_without_focus()?;
@@ -965,11 +997,13 @@ impl App {
                 Action::Workspace(id),
             ));
         }
+        if self.current_workspace().is_none() {
+            desired.push(("No workspaces yet".into(), Action::EmptyState));
+        }
         for (pane, active, tabs) in self
-            .workspace()
-            .leaves()
+            .current_workspace()
             .into_iter()
-            .filter(|_| !self.main_workspace_indices().is_empty())
+            .flat_map(Workspace::leaves)
         {
             for tab in tabs {
                 desired.push((tab.title.clone(), Action::Tab(pane, tab.id)));
@@ -1024,17 +1058,22 @@ impl App {
         self.layout()
     }
     fn button(&mut self, name: &str, action: Action) -> anyhow::Result<()> {
+        let empty = matches!(action, Action::EmptyState);
         let id = self.controls.len() + 100;
         anyhow::ensure!(id < 65535, "too many controls");
         let hwnd = unsafe {
             CreateWindowExW(
                 0,
-                wide("BUTTON").as_ptr(),
+                wide(if empty { "STATIC" } else { "BUTTON" }).as_ptr(),
                 wide(name.replace('&', "&&")).as_ptr(),
                 WS_CHILD
                     | WS_VISIBLE
-                    | WS_TABSTOP
-                    | BS_OWNERDRAW as u32
+                    | if empty {
+                        windows_sys::Win32::System::SystemServices::SS_CENTER
+                            | windows_sys::Win32::System::SystemServices::SS_NOPREFIX
+                    } else {
+                        WS_TABSTOP | BS_OWNERDRAW as u32
+                    }
                     | if matches!(action, Action::Tab(..)) {
                         BS_NOTIFY as u32
                     } else {
@@ -1060,7 +1099,12 @@ impl App {
             );
         }
         let role = self.chrome_role(&action);
-        chrome::register_button(hwnd, role);
+        if empty {
+            chrome::register_control(hwnd, chrome::ControlRole::Static);
+        } else {
+            chrome::register_button(hwnd, role);
+        }
+
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().insert(hwnd as isize, action.clone()));
         self.controls.push(Control { hwnd, action });
         Ok(())
@@ -1321,8 +1365,9 @@ impl App {
             .unwrap_or(0);
         let max_offset = main_indices.len().saturating_sub(visible_rows.max(1));
         self.sidebar_offset = self.sidebar_offset.min(max_offset);
-        if self.sidebar_active != Some(self.workspace().id) {
-            self.sidebar_active = Some(self.workspace().id);
+        let active_workspace = self.current_workspace().map(|workspace| workspace.id);
+        if self.sidebar_active != active_workspace {
+            self.sidebar_active = active_workspace;
             if main_active < self.sidebar_offset {
                 self.sidebar_offset = main_active;
             }
@@ -1331,7 +1376,21 @@ impl App {
             }
         }
         for control in &self.controls {
+            unsafe {
+                windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+                    control.hwnd,
+                    i32::from(
+                        self.current_workspace().is_some() || Self::empty_action(&control.action),
+                    ),
+                );
+            }
             let rect = match control.action {
+                Action::EmptyState => Some((
+                    content.x,
+                    content.y + (content.height - px(32)).max(0) / 2,
+                    content.width,
+                    px(32),
+                )),
                 Action::NewWorkspace => {
                     (sidebar >= px(36)).then_some((px(4), px(5), px(28), px(28)))
                 }
@@ -1502,13 +1561,25 @@ impl App {
         if self.background_test || self.overview.is_open() || self.command_palette.is_open() {
             return Ok(());
         }
-        self.ack_focused_notifications(self.active());
-        if let Some(editor) = self.editors.get(&self.active()) {
+        let Some(active) = self.current_surface() else {
+            if let Some(control) = self
+                .controls
+                .iter()
+                .find(|control| matches!(control.action, Action::NewWorkspace))
+            {
+                unsafe {
+                    SetFocus(control.hwnd);
+                }
+            }
+            return Ok(());
+        };
+        self.ack_focused_notifications(active);
+        if let Some(editor) = self.editors.get(&active) {
             return editor.view.focus();
         }
         if let Some(browser) = self
             .browsers
-            .get(&self.active())
+            .get(&active)
             .filter(|b| !b.native_closed.get())
         {
             let mut info = GUITHREADINFO {
@@ -1525,7 +1596,7 @@ impl App {
                 browser.view.focus()?;
             }
         }
-        if let Some(surface) = self.surfaces.get(&self.active()) {
+        if let Some(surface) = self.surfaces.get(&active) {
             if surface.ready {
                 let mut info = GUITHREADINFO {
                     cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
@@ -1557,7 +1628,9 @@ impl App {
             Event::Activated => {
                 if !self.main_closed {
                     self.detached_focus = None;
-                    self.ack_focused_notifications(self.active());
+                    if let Some(surface) = self.current_surface() {
+                        self.ack_focused_notifications(surface);
+                    }
                 }
             }
             Event::Detached(surface, signal) => self.detached_event(surface, signal)?,
@@ -1606,6 +1679,7 @@ impl App {
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(id, action) => self.metadata_action(id, action)?,
             Event::TabMenu(id, action) => self.tab_menu_action(id, action)?,
+            Event::WorkspaceClose(id, accepted) => self.workspace_close_choice(id, accepted)?,
             Event::ContextMenu(action, x, y) if !self.overview.is_open() => {
                 self.cancel_drag();
                 self.context_menu(action, x, y)?
@@ -2152,7 +2226,7 @@ impl App {
         surface.session = Some(session);
         surface.ready = true;
         surface.restoring = false;
-        if self.active() == id {
+        if self.current_surface() == Some(id) {
             self.focus_active()?;
         }
         Ok(())
@@ -2194,7 +2268,10 @@ impl App {
                 version: 1,
                 window: store.id,
                 workspaces: self.workspaces.clone(),
-                active_workspace: self.workspace().id,
+                active_workspace: self
+                    .workspaces
+                    .get(self.active_workspace)
+                    .map(|workspace| workspace.id),
                 screens: HashMap::new(),
                 shells: self.shells.clone(),
                 sidebar_width_dip: self.sidebar_width_dip,
@@ -2430,7 +2507,9 @@ impl App {
                 .find_map(|ws| ws.root.active_surface_id(PaneId(pane)))
                 .context("pane not found")
         } else {
-            let id = caller.unwrap_or_else(|| self.active());
+            let id = caller
+                .or_else(|| self.current_surface())
+                .context("No active workspace; create a workspace first")?;
             anyhow::ensure!(
                 self.locate(id).is_some(),
                 "calling surface no longer exists"
@@ -2498,10 +2577,9 @@ impl App {
         self.rebuild()
     }
     fn move_menu(&mut self) -> anyhow::Result<()> {
-        let surface = self.active();
-        let pane = self.workspace().focused;
-        let tabs = self
-            .workspace()
+        let surface = self.target(None, None)?;
+        let (workspace, pane, _) = self.locate(surface).context("Tab no longer exists")?;
+        let tabs = self.workspaces[workspace]
             .leaves()
             .into_iter()
             .find(|(id, _, _)| *id == pane)
@@ -2665,7 +2743,12 @@ impl App {
             !self.close_accepted && self.close_request.is_none(),
             "window is saving before close"
         );
+        anyhow::ensure!(
+            self.current_surface().is_some() || Self::empty_action(&action),
+            "No active workspace; create a workspace first"
+        );
         match action {
+            Action::EmptyState => return Ok(()),
             Action::OpenEditor => return self.editor_pick_action(),
             Action::ShowFiles => return self.files_show_current(),
             Action::NewBrowser => return self.new_browser_tab(self.active()),
@@ -2676,9 +2759,7 @@ impl App {
             }
             Action::Overview => return self.overview_toggle(),
             Action::NewWorkspace => {
-                return self
-                    .new_terminal(self.active(), None, None, shells::NewTerminal::Workspace)
-                    .map(|_| ());
+                return self.new_workspace(None, None, None).map(|_| ());
             }
             Action::Workspace(id) => {
                 let index = self.workspace_index(id)?;
@@ -2692,7 +2773,7 @@ impl App {
                 self.active_workspace = index;
                 self.detached_focus = None;
             }
-            Action::WorkspaceMenu => return self.workspace_menu(self.workspace().id, None),
+            Action::WorkspaceMenu => return self.workspace_creation_menu(None),
             Action::NewTab => {
                 return self
                     .new_terminal(self.active(), None, None, shells::NewTerminal::Tab)
@@ -2951,7 +3032,7 @@ impl App {
                     "view_handle":surface.view.hwnd().0 as usize,
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd)})).collect();
                 return Ok(Some(
-                    json!({"workspaces":self.workspaces,"active_workspace":self.workspace().id,"surfaces":surfaces,
+                    json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
                         "editor_open_pending":self.editor_open_pending.len(),
@@ -2965,6 +3046,7 @@ impl App {
                         "command_palette":self.command_palette.diagnostics(),
                         "metadata":self.metadata.as_ref().map(workspaces::Panel::diagnostics),
                         "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
+                        "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,
@@ -3245,12 +3327,7 @@ impl App {
                 )?;
             }
             Command::NewWorkspace { cwd, shell } => {
-                self.new_terminal(
-                    self.target(None, caller)?,
-                    cwd,
-                    shell.requested()?,
-                    shells::NewTerminal::Workspace,
-                )?;
+                self.new_workspace(caller, cwd, shell.requested()?)?;
             }
             Command::Workspace { op } => {
                 if let WorkspaceOp::Close { workspace } = &op {

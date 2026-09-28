@@ -246,7 +246,7 @@ impl App {
             domain::close(&mut candidate, id)?;
             None
         };
-        let focused = index == self.active_workspace && self.active() == id;
+        let focused = index == self.active_workspace && self.current_surface() == Some(id);
         self.workspaces[index] = candidate;
         self.remove_surface(id);
         if self.zoomed == Some(pane)

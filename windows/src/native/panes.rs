@@ -145,12 +145,9 @@ impl App {
             height: (client.bottom - px(8)).max(1),
         };
         let mut geometry = model::Layout::default();
-        model::partition(
-            &self.workspaces[workspace].root,
-            content,
-            px(5),
-            &mut geometry,
-        );
+        if let Some(workspace) = self.workspaces.get(workspace) {
+            model::partition(&workspace.root, content, px(5), &mut geometry);
+        }
         Ok((geometry, content))
     }
 
