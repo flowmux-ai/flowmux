@@ -1,0 +1,7 @@
+Host discovery exceeded eight seconds or exited
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-o
+verview.ps1:11 문자:73
++ ... ool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
++                                                          ~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Host discovery ...conds or exited:String) [], RuntimeException
+    + FullyQualifiedErrorId : Host discovery exceeded eight seconds or exited

@@ -1,0 +1,13 @@
+{
+    "name":  "ui-parity-next-release-doctor",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\release-ui-parity-next-doctor.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T09:13:32.7539215Z",
+    "pid":  6132,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.968,
+    "finished":  "2026-09-28T09:13:33.7256341Z"
+}

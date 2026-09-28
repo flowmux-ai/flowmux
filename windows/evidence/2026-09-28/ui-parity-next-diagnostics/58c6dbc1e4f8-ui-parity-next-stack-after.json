@@ -1,0 +1,66 @@
+{
+  "recorded_at_utc": "2026-09-28T09:02:39.544303+00:00",
+  "stage": "after_args_extraction",
+  "executable": {
+    "path": "windows/dist/ui-parity-next-verified-debug/flowmux.exe",
+    "bytes": 32793088,
+    "sha256": "d4845d10f5fa64e775de5e4a1f1ccb24afd059df3230c6dae4305ce4c8c6edc6"
+  },
+  "pdb": {
+    "path": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux.pdb",
+    "bytes": 129437696,
+    "sha256": "bda094c6434e28bed00eeadd6778c445c86d9efc6f507ff4dfefd8e13807ac9e",
+    "guid_bytes": "011c65decdd89d744c4c44205044422e",
+    "age": 1,
+    "matches_executable_rsds": true
+  },
+  "main_stack_reserve_bytes": 1048576,
+  "main_stack_commit_bytes": 4096,
+  "frames": [
+    {
+      "function": "<flowmux_windows::command::Command as clap::Subcommand>::augment_subcommands",
+      "pdb_public_symbol": "_ZN86_$LT$flowmux_windows..command..Command$u20$as$u20$clap_builder..derive..Subcommand$GT$19augment_subcommands17hfe80b979c2fe7625E",
+      "rva": "0x637d40",
+      "stack_allocation_bytes": 488992,
+      "stack_allocation_hex": "0x77620"
+    },
+    {
+      "function": "<flowmux_windows::browser::Op as clap::Subcommand>::augment_subcommands",
+      "pdb_public_symbol": "_ZN81_$LT$flowmux_windows..browser..Op$u20$as$u20$clap_builder..derive..Subcommand$GT$19augment_subcommands17h03238343a6b52961E",
+      "rva": "0x716ca0",
+      "stack_allocation_bytes": 338840,
+      "stack_allocation_hex": "0x52b98"
+    },
+    {
+      "function": "<flowmux_windows::command::NotifyArgs as clap::Args>::augment_args",
+      "pdb_public_symbol": "_ZN83_$LT$flowmux_windows..command..NotifyArgs$u20$as$u20$clap_builder..derive..Args$GT$12augment_args17h5ab9f3d5eebcde5aE",
+      "rva": "0x636550",
+      "stack_allocation_bytes": 40440,
+      "stack_allocation_hex": "0x9df8"
+    },
+    {
+      "function": "<flowmux_windows::command::FindArgs as clap::Args>::augment_args",
+      "pdb_public_symbol": "_ZN81_$LT$flowmux_windows..command..FindArgs$u20$as$u20$clap_builder..derive..Args$GT$12augment_args17h305f5f774970ba76E",
+      "rva": "0x634a50",
+      "stack_allocation_bytes": 40520,
+      "stack_allocation_hex": "0x9e48"
+    },
+    {
+      "function": "<flowmux_windows::command::NotifyCompleteArgs as clap::Args>::augment_args",
+      "pdb_public_symbol": "_ZN91_$LT$flowmux_windows..command..NotifyCompleteArgs$u20$as$u20$clap_builder..derive..Args$GT$12augment_args17hd24c297ee7218e95E",
+      "rva": "0x64b2a0",
+      "stack_allocation_bytes": 26440,
+      "stack_allocation_hex": "0x6748"
+    }
+  ],
+  "two_nested_builder_allocation_bytes": 827832,
+  "before_record": "windows/dist/ui-parity-next-stack-before.json",
+  "before_two_nested_builder_allocation_bytes": 932880,
+  "command_frame_reduction_bytes": 105048,
+  "command_frame_reduction_percent": 17.684,
+  "combined_frame_reduction_bytes": 105048,
+  "unallocated_reserve_after_two_frames_bytes": 220744,
+  "source_snapshot": "windows/dist/ui-parity-next-source-stack-fix.json",
+  "method": "Read-only objdump -p PE optional header and x64 unwind ALLOC_LARGE records; manually parse MSF/PDB DBI symbol-record stream S_PUB32 to map .text offsets to exact function RVA. PDB GUID/age matched executable RSDS record. No executable/compiler/test was run. Listed bytes are compiler-emitted local stack allocations, excluding pushed registers, callers and runtime/OS overhead. Nesting follows clap Command containing the Browser subcommand.",
+  "limitations": "Compiler-emitted stack allocations exclude saved registers, other caller/callee frames and runtime/OS overhead. The Command and Browser builders are nested; separate Args builders are alternative child calls, so their allocations are not all added simultaneously. This static measurement does not claim runtime success; root runs bounded native verification separately. Stack reserve was not changed."
+}

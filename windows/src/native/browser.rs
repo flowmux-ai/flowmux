@@ -94,11 +94,11 @@ pub(super) struct Browser {
     pub(super) native_closed: Rc<Cell<bool>>,
     url: String,
     title: String,
-    loading: bool,
+    pub(super) loading: bool,
     back: bool,
     forward: bool,
     zoom: f64,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     refs: dom::Refs,
     dom_key: String,
     find_key: String,
@@ -388,6 +388,21 @@ pub(super) fn profile(background: bool) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 impl App {
+    pub(super) fn new_browser_tab(&mut self, source: SurfaceId) -> anyhow::Result<()> {
+        let (index, pane, _) = self.locate(source).context("source pane not found")?;
+        let mut candidate = self.workspaces[index].clone();
+        let tab = flowmux_core::PaneSurface::browser("Browser", "about:blank".into());
+        let id = tab.id;
+        candidate
+            .root
+            .add_surface_to_leaf(pane, tab)
+            .context("source pane disappeared")?;
+        candidate.focused = pane;
+        self.add_browser_view(id, "about:blank".into())?;
+        self.workspaces[index] = candidate;
+        self.active_workspace = index;
+        self.rebuild()
+    }
     pub(super) fn open_browser(
         &mut self,
         source: SurfaceId,

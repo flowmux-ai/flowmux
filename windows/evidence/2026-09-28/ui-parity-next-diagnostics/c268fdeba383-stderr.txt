@@ -1,0 +1,7 @@
+Dirty close did not reject through editor barrier
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-p
+ane-tools.ps1:13 문자:73
++ ... ool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
++                                                          ~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Dirty close did... editor barrier:String) [], RuntimeException
+    + FullyQualifiedErrorId : Dirty close did not reject through editor barrier

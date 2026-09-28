@@ -1,0 +1,311 @@
+{
+  "stage": "native-ui-parity-focus",
+  "status": "frozen",
+  "artifacts": {
+    "0b47ce7c2802-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-clippy-a29fca3a-f4e6-4c14-972f-f54029831dec/result.json",
+      "source_bytes": 2595,
+      "source_sha256": "7727dd3b6e20923d03a027c3b8d2d6d42f9b37f7989c5a947ae419ae66444ac6",
+      "bytes": 2595,
+      "sha256": "7727dd3b6e20923d03a027c3b8d2d6d42f9b37f7989c5a947ae419ae66444ac6"
+    },
+    "7840858eb0f4-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-clippy-a29fca3a-f4e6-4c14-972f-f54029831dec/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "3d5349fa8a4013650dffeb2e1cdb42bb86e285efd39205dc6cd786ffce13fc09",
+      "bytes": 216,
+      "sha256": "3d5349fa8a4013650dffeb2e1cdb42bb86e285efd39205dc6cd786ffce13fc09"
+    },
+    "f76f549fa998-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-debug-c843297c-9015-45d8-9a4b-c165bdb9af1f/result.json",
+      "source_bytes": 2614,
+      "source_sha256": "13e7e22f62295841e2034bb4520323e8e88258c22ac12918871090613c12e0fe",
+      "bytes": 2614,
+      "sha256": "13e7e22f62295841e2034bb4520323e8e88258c22ac12918871090613c12e0fe"
+    },
+    "52e55867c609-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-debug-c843297c-9015-45d8-9a4b-c165bdb9af1f/stdout.txt",
+      "source_bytes": 372,
+      "source_sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b",
+      "bytes": 372,
+      "sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b"
+    },
+    "75f9dbdfe71b-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-overview-375c9161-6409-42d9-a6c0-a38e5ddd0314/result.json",
+      "source_bytes": 507,
+      "source_sha256": "fd33410ef94a70d89b9692ccf3e443ef92f1b2309114e243580863fcb6e601c6",
+      "bytes": 491,
+      "sha256": "e38cbc9f60bdce7ee284c3c09037f356e917f5452403e0df663583dcae401382"
+    },
+    "0987488f77b2-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-overview-375c9161-6409-42d9-a6c0-a38e5ddd0314/stdout.txt",
+      "source_bytes": 243,
+      "source_sha256": "216afaef9526c25405425debb60973d01b8035203fed0de0a05ba187929d8dd9",
+      "bytes": 241,
+      "sha256": "6a022891ffd62ba7ee604e8cbf28e0b03582696f7666239bae038d2c2a983a32"
+    },
+    "fe829ae0f727-stderr.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-overview-375c9161-6409-42d9-a6c0-a38e5ddd0314/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "4b5644e3b1b8-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-pane-f188743b-7968-4c03-92ac-2e41718f00b2/result.json",
+      "source_bytes": 500,
+      "source_sha256": "0844df2f7ce10c0b89df206da054ce4b7b4d98ac1f688767105e4f3c32eaa43a",
+      "bytes": 484,
+      "sha256": "5e6afd68921e079cb95a757fb18d31844e22129d4313fd6dfa959c32fd7a55d8"
+    },
+    "87fb024bf976-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-pane-f188743b-7968-4c03-92ac-2e41718f00b2/stdout.txt",
+      "source_bytes": 251,
+      "source_sha256": "2da5b7c80360ba8aa5b66fbfe69a3023aa21143d05ff89c39720e69859337c52",
+      "bytes": 249,
+      "sha256": "524c85de9e54f8249f3033661ac3e1849efd24a5b24092a2bf3928fcfe38332f"
+    },
+    "83b8ba3e5bb3-stderr.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-pane-f188743b-7968-4c03-92ac-2e41718f00b2/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "2f9087451db4-native-overview-background.json": {
+      "source": "windows/dist/evidence/overview-56025cf3-cf2d-49e9-8c32-a0f6309d2a56/native-overview-background.json",
+      "source_bytes": 556529,
+      "source_sha256": "b54e2b6a409c34245c07ae4819132f7b5c1a57cba797af95d4ceadf82adb774a",
+      "bytes": 550760,
+      "sha256": "622456f20c00a1b353644609798bc82f30129627932e27095004093b4840cf44"
+    },
+    "ee2eacffc1eb-overview-real-previews.png": {
+      "source": "windows/dist/evidence/overview-56025cf3-cf2d-49e9-8c32-a0f6309d2a56/overview-real-previews.png",
+      "source_bytes": 17213,
+      "source_sha256": "7d1d88d736ceff704dad7861f3937ff3e52636b0951852e8a6767a412a261fc9",
+      "bytes": 17213,
+      "sha256": "7d1d88d736ceff704dad7861f3937ff3e52636b0951852e8a6767a412a261fc9"
+    },
+    "9d106c8b6d97-overview-short-window.png": {
+      "source": "windows/dist/evidence/overview-56025cf3-cf2d-49e9-8c32-a0f6309d2a56/overview-short-window.png",
+      "source_bytes": 4403,
+      "source_sha256": "c1a20685dbe476f766044193f9eda1c3e40271c3b3e6ffb16e1f41ea7d9e13dc",
+      "bytes": 4403,
+      "sha256": "c1a20685dbe476f766044193f9eda1c3e40271c3b3e6ffb16e1f41ea7d9e13dc"
+    },
+    "82af33d79787-native-pane-tools-background.json": {
+      "source": "windows/dist/evidence/pane-tools-bc9009af-64cd-4468-8cbe-905e327cfc5e/native-pane-tools-background.json",
+      "source_bytes": 969669,
+      "source_sha256": "62c104ea3fc44636b961e4051240f90e9a45a47fa564480a000cb8775b4c6f3f",
+      "bytes": 959262,
+      "sha256": "dc6be6f0252926686a22a1fd6ad179d08c992a0d99aefaec340e12229e5390fa"
+    },
+    "a519b3a881f5-ui-parity-focus-source-final.json": {
+      "source": "windows/dist/ui-parity-focus-source-final.json",
+      "source_bytes": 15129,
+      "source_sha256": "d93eba60ac155329df290e5dc4efb2df14920b1a306d142160282d469e42de30",
+      "bytes": 15129,
+      "sha256": "d93eba60ac155329df290e5dc4efb2df14920b1a306d142160282d469e42de30"
+    },
+    "fc5926955aec-ui-parity-focus-debug-staging.json": {
+      "source": "windows/dist/ui-parity-focus-debug-staging.json",
+      "source_bytes": 2300,
+      "source_sha256": "6d83873bf6fee26fa6ca29ebac5be655d85c169ebc1a469be66501cfd5cb4926",
+      "bytes": 2300,
+      "sha256": "6d83873bf6fee26fa6ca29ebac5be655d85c169ebc1a469be66501cfd5cb4926"
+    },
+    "900f649f8fbd-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-package-9b24808d-d324-42e7-b7ec-f549218f2ede/result.json",
+      "source_bytes": 573,
+      "source_sha256": "016e899bedd3e342b2a9d0da85803ea177dd2a37e86d6372dc3cc8254430ad09",
+      "bytes": 573,
+      "sha256": "016e899bedd3e342b2a9d0da85803ea177dd2a37e86d6372dc3cc8254430ad09"
+    },
+    "98d8da173d58-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-package-9b24808d-d324-42e7-b7ec-f549218f2ede/stdout.txt",
+      "source_bytes": 1335,
+      "source_sha256": "dc7482f59c86c5a2b312dd5a1df5d2548936d132bfb94b78fda6a4f2e10ff7ad",
+      "bytes": 1335,
+      "sha256": "dc7482f59c86c5a2b312dd5a1df5d2548936d132bfb94b78fda6a4f2e10ff7ad"
+    },
+    "6cfb7346f341-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-release-doctor-433c5448-1298-43a4-9696-568655d488c5/result.json",
+      "source_bytes": 514,
+      "source_sha256": "e0599529db0fc9d0d3d5e82104733ef97f5b98f24f8a0ff3267344bb1aa284bb",
+      "bytes": 498,
+      "sha256": "0d21a3fb51a631d77fc03908abc458fa19b088424cf4f96432af3c230e3d69d6"
+    },
+    "3188442c59f1-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-release-doctor-433c5448-1298-43a4-9696-568655d488c5/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f"
+    },
+    "fd6073269b89-stderr.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-release-doctor-433c5448-1298-43a4-9696-568655d488c5/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "6c9f7ce73cc3-result.json": {
+      "source": "windows/dist/checks/ui-parity-focus-release-e06ed51f-1632-4c5b-aa3c-cbccc61e468f/result.json",
+      "source_bytes": 2654,
+      "source_sha256": "baa1950b6ff2573d4c92756925d0e31be55ffc2433c9f0bb6d92b52d35943a22",
+      "bytes": 2654,
+      "sha256": "baa1950b6ff2573d4c92756925d0e31be55ffc2433c9f0bb6d92b52d35943a22"
+    },
+    "fcd9c19199bd-stdout.txt": {
+      "source": "windows/dist/checks/ui-parity-focus-release-e06ed51f-1632-4c5b-aa3c-cbccc61e468f/stdout.txt",
+      "source_bytes": 374,
+      "source_sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df",
+      "bytes": 374,
+      "sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df"
+    },
+    "240e203536ac-ui-parity-focus-release-staging.json": {
+      "source": "windows/dist/ui-parity-focus-release-staging.json",
+      "source_bytes": 2326,
+      "source_sha256": "ace0e5dc0e90c12a4a0aebe99661471e7a8305226f03052cc372de0ef92f2a5c",
+      "bytes": 2326,
+      "sha256": "ace0e5dc0e90c12a4a0aebe99661471e7a8305226f03052cc372de0ef92f2a5c"
+    },
+    "56d3d21284b4-native-ui-parity-focus-release-entrypoints.json": {
+      "source": "windows/evidence/2026-09-28/native-ui-parity-focus-release-entrypoints.json",
+      "source_bytes": 1361,
+      "source_sha256": "82f8ed9d06ab83fc9a29874751b441c6807aeffd2734a5a0a93bb08d3e6ccd3b",
+      "bytes": 1317,
+      "sha256": "08a7a5d875e8bb3d4aec73b0f0749d0af4965651dce2b5893ce8ce5d6727e85f"
+    }
+  },
+  "checks": {
+    "windows/dist/checks/ui-parity-focus-clippy-a29fca3a-f4e6-4c14-972f-f54029831dec/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 24.319,
+      "files": {
+        "result": "0b47ce7c2802-result.json",
+        "stdout.txt": "7840858eb0f4-stdout.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-debug-c843297c-9015-45d8-9a4b-c165bdb9af1f/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 81.129,
+      "files": {
+        "result": "f76f549fa998-result.json",
+        "stdout.txt": "52e55867c609-stdout.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-overview-375c9161-6409-42d9-a6c0-a38e5ddd0314/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 6.021,
+      "files": {
+        "result": "75f9dbdfe71b-result.json",
+        "stdout.txt": "0987488f77b2-stdout.txt",
+        "stderr.txt": "fe829ae0f727-stderr.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-pane-f188743b-7968-4c03-92ac-2e41718f00b2/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 10.278,
+      "files": {
+        "result": "4b5644e3b1b8-result.json",
+        "stdout.txt": "87fb024bf976-stdout.txt",
+        "stderr.txt": "83b8ba3e5bb3-stderr.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-package-9b24808d-d324-42e7-b7ec-f549218f2ede/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 11.761,
+      "files": {
+        "result": "900f649f8fbd-result.json",
+        "stdout.txt": "98d8da173d58-stdout.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-release-doctor-433c5448-1298-43a4-9696-568655d488c5/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.891,
+      "files": {
+        "result": "6cfb7346f341-result.json",
+        "stdout.txt": "3188442c59f1-stdout.txt",
+        "stderr.txt": "fd6073269b89-stderr.txt"
+      }
+    },
+    "windows/dist/checks/ui-parity-focus-release-e06ed51f-1632-4c5b-aa3c-cbccc61e468f/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 117.725,
+      "files": {
+        "result": "6c9f7ce73cc3-result.json",
+        "stdout.txt": "fcd9c19199bd-stdout.txt"
+      }
+    }
+  },
+  "native": {
+    "windows/dist/evidence/overview-56025cf3-cf2d-49e9-8c32-a0f6309d2a56/native-overview-background.json": {
+      "original_status": "passed_hidden_overview_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "2f9087451db4-native-overview-background.json",
+        "png0": "ee2eacffc1eb-overview-real-previews.png",
+        "png1": "9d106c8b6d97-overview-short-window.png"
+      }
+    },
+    "windows/dist/evidence/pane-tools-bc9009af-64cd-4468-8cbe-905e327cfc5e/native-pane-tools-background.json": {
+      "original_status": "passed_background_pane_tools_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "82af33d79787-native-pane-tools-background.json"
+      }
+    }
+  },
+  "hashes": {
+    "windows/dist/ui-parity-focus-debug/flowmux.exe#dabc76357ed25023feac9f1f63f6371b23ed11c0ac1168d1b8524fae60646b29": {
+      "path": "windows/dist/ui-parity-focus-debug/flowmux.exe",
+      "bytes": 32794112,
+      "sha256": "dabc76357ed25023feac9f1f63f6371b23ed11c0ac1168d1b8524fae60646b29"
+    },
+    "windows/dist/ui-parity-focus-debug/flowmuxctl.exe#16e0db5a81cde02143ea62a619b684931fc72a4aef88f2506cdca14cab621993": {
+      "path": "windows/dist/ui-parity-focus-debug/flowmuxctl.exe",
+      "bytes": 3363328,
+      "sha256": "16e0db5a81cde02143ea62a619b684931fc72a4aef88f2506cdca14cab621993"
+    },
+    "windows/dist/ui-parity-focus-debug/flowmux.com#96e9e2fba7f64060a46dfdbe8fd5e11661122bd1d45c62c4854779713b8ce985": {
+      "path": "windows/dist/ui-parity-focus-debug/flowmux.com",
+      "bytes": 3474432,
+      "sha256": "96e9e2fba7f64060a46dfdbe8fd5e11661122bd1d45c62c4854779713b8ce985"
+    },
+    "windows/dist/ui-parity-focus-release/flowmux.exe#b5a182e00af40f79b0f0d283cc1c12182838a8792eb1584cf640e0e7474a179c": {
+      "path": "windows/dist/ui-parity-focus-release/flowmux.exe",
+      "bytes": 22496768,
+      "sha256": "b5a182e00af40f79b0f0d283cc1c12182838a8792eb1584cf640e0e7474a179c"
+    },
+    "windows/dist/ui-parity-focus-release/flowmuxctl.exe#8f5d988d6708c8d644863c83b2827404716a226355332fe4a00a05989ed7ab3d": {
+      "path": "windows/dist/ui-parity-focus-release/flowmuxctl.exe",
+      "bytes": 1921024,
+      "sha256": "8f5d988d6708c8d644863c83b2827404716a226355332fe4a00a05989ed7ab3d"
+    },
+    "windows/dist/ui-parity-focus-release/flowmux.com#f860ccc50d1ddc5370f1cf868f2b88d2c3569d6d4512eb39e2269a41129752b4": {
+      "path": "windows/dist/ui-parity-focus-release/flowmux.com",
+      "bytes": 1980416,
+      "sha256": "f860ccc50d1ddc5370f1cf868f2b88d2c3569d6d4512eb39e2269a41129752b4"
+    },
+    "windows/dist/flowmux-windows-0.10.1-dev-ui-parity-focus-x64-setup.exe#d6d23c78b13d4ecdb2a8a549ad5da311aa788a14710dda35f7140c9d4f241982": {
+      "path": "windows/dist/flowmux-windows-0.10.1-dev-ui-parity-focus-x64-setup.exe",
+      "bytes": 5920563,
+      "sha256": "d6d23c78b13d4ecdb2a8a549ad5da311aa788a14710dda35f7140c9d4f241982"
+    }
+  },
+  "updated_utc": "2026-09-28T09:26:08.378885+00:00",
+  "frozen_utc": "2026-09-28T09:26:47.466934+00:00",
+  "validation": {
+    "artifacts_and_originals_hash_verified": 25,
+    "staged_binary_hashes_verified": 7,
+    "current_runtime_source_files_verified": 140,
+    "windows_jobs_with_zero_active_after_cleanup": 3,
+    "repeated_native_groups_passed": 7,
+    "scope": "Repeats seven of the previous twenty groups; physical keyboard focus/IME remain unverified."
+  }
+}

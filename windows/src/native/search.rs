@@ -6,6 +6,10 @@ use std::collections::VecDeque;
 #[path = "search_panel.rs"]
 mod panel;
 pub(super) use panel::UiAction;
+// Renderer previews contain at most 220 Unicode scalars. Even JSON's six-byte
+// control-character escaping plus per-hit metadata stays below the existing
+// 1 MiB bridge limit at 700 hits. CLI pages remain exactly PAGE_SIZE (500).
+const UI_RESULT_LIMIT: usize = 700;
 
 #[derive(Clone, serde::Serialize)]
 pub(super) struct Hit {
@@ -20,6 +24,7 @@ struct Run {
     query: String,
     match_case: bool,
     offset: usize,
+    limit: usize,
     queue: VecDeque<SurfaceId>,
     waiting: Option<(SurfaceId, u64, Instant)>,
     hits: Vec<Hit>,
@@ -45,6 +50,28 @@ pub(super) struct Controller {
     debounce: Option<Instant>,
 }
 impl Controller {
+    pub(super) fn diagnostics(&self) -> Value {
+        let mut value = self
+            .panel
+            .as_ref()
+            .map_or(Value::Null, |panel| panel.diagnostics());
+        if let Value::Object(object) = &mut value {
+            object.insert("search".into(), json!(self.run.as_ref().map(|run| run.id)));
+            object.insert(
+                "result_limit".into(),
+                json!(self.run.as_ref().map_or(PAGE_SIZE, |run| run.limit)),
+            );
+            object.insert("ui_result_limit".into(), json!(UI_RESULT_LIMIT));
+            object.insert(
+                "pending".into(),
+                json!(self
+                    .run
+                    .as_ref()
+                    .is_some_and(|run| run.waiting.is_some() || !run.queue.is_empty())),
+            );
+        }
+        value
+    }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         self.panel
             .as_ref()
@@ -64,8 +91,8 @@ impl App {
             json!({"search":id,"query":run.query,"match_case":run.match_case,"offset":run.offset,
             "pending":run.waiting.is_some() || !run.queue.is_empty(),"cancelled":run.cancelled,
             "total":run.total,"searched":run.searched,"unavailable":run.unavailable,"hits":run.hits,
-            "page_size":PAGE_SIZE,"panel_rows":self.search.panel.as_ref().map(|p|p.rows()),
-            "panel_handle":self.search.panel.as_ref().map(|p|p.window as usize)}),
+            "page_size":PAGE_SIZE,"result_limit":run.limit,"panel_rows":self.search.panel.as_ref().map(|p|p.rows()),
+            "panel_handle":self.search.panel.as_ref().map(|p|p.window as usize),"dialog":self.search.diagnostics()}),
         )
     }
     pub(super) fn cancel_search(&mut self, id: Uuid) -> anyhow::Result<()> {
@@ -102,6 +129,19 @@ impl App {
         match_case: bool,
         offset: usize,
     ) -> anyhow::Result<Uuid> {
+        self.begin_search_limited(query, match_case, offset, PAGE_SIZE)
+    }
+    fn begin_search_limited(
+        &mut self,
+        query: String,
+        match_case: bool,
+        offset: usize,
+        limit: usize,
+    ) -> anyhow::Result<Uuid> {
+        anyhow::ensure!(
+            (1..=UI_RESULT_LIMIT).contains(&limit),
+            "invalid search result limit"
+        );
         output_search::validate_query(&query)?;
         if let Some(run) = &self.search.run {
             self.cancel_search(run.id)?;
@@ -122,6 +162,7 @@ impl App {
             query: query.clone(),
             match_case,
             offset,
+            limit,
             queue,
             waiting: None,
             hits: Vec::new(),
@@ -162,7 +203,7 @@ impl App {
                 query: run.query.clone(),
                 match_case: run.match_case,
                 skip: run.offset.saturating_sub(run.total),
-                limit: PAGE_SIZE - run.hits.len(),
+                limit: run.limit - run.hits.len(),
             });
             if let Err(error) = result {
                 run.unavailable
@@ -210,7 +251,7 @@ impl App {
         anyhow::ensure!(
             expected == id
                 && sequence >= after
-                && hits.len() <= PAGE_SIZE - run.hits.len()
+                && hits.len() <= run.limit - run.hits.len()
                 && hits.len() <= total,
             "invalid output search response"
         );
@@ -318,7 +359,7 @@ impl App {
             // since making a hidden view visible may resize/reflow its grid.
             let activate = (|| -> anyhow::Result<u64> {
                 self.select(id)?;
-                self.rebuild()?;
+                self.rebuild_without_focus()?;
                 let surface = self
                     .surfaces
                     .get(&id)
@@ -370,14 +411,28 @@ impl App {
             let status = if run.cancelled {
                 "Search cancelled".to_owned()
             } else {
-                format!("{}{} matching lines · {} terminals · {} unavailable · Page {} · Refresh to include new output",
-                    if pending {"Searching… "} else {""},run.total,run.searched,run.unavailable.len(),run.offset/PAGE_SIZE+1)
+                format!(
+                    "{}{} of {} matching lines · {} terminals · {} unavailable{}",
+                    if pending { "Searching… " } else { "" },
+                    run.hits.len(),
+                    run.total,
+                    run.searched,
+                    run.unavailable.len(),
+                    if !pending && run.limit == UI_RESULT_LIMIT && run.total > run.limit {
+                        " · 700-result display limit; refine your query for more results"
+                    } else {
+                        ""
+                    }
+                )
             };
             panel.status(&status);
             panel.results(&run.hits);
             panel.buttons(
                 !pending && !run.cancelled && run.offset > 0,
-                !pending && !run.cancelled && run.offset.saturating_add(PAGE_SIZE) < run.total,
+                !pending
+                    && !run.cancelled
+                    && run.limit < UI_RESULT_LIMIT
+                    && run.offset.saturating_add(run.limit) < run.total,
                 !pending && !run.cancelled && !run.hits.is_empty(),
             );
         }
@@ -427,6 +482,10 @@ impl App {
         }
         match action {
             UiAction::Show => {
+                chrome::window_theme(
+                    self.search.panel.as_ref().unwrap().window,
+                    self.settings.terminal.theme,
+                );
                 self.search
                     .panel
                     .as_ref()
@@ -436,6 +495,10 @@ impl App {
             UiAction::Layout => self.search.panel.as_ref().unwrap().layout(),
             UiAction::Tick => return self.search_tick(),
             UiAction::Changed => {
+                if self.search.panel.as_ref().unwrap().composing() {
+                    self.search.debounce = None;
+                    return Ok(());
+                }
                 let (query, match_case) = self.search.panel.as_ref().unwrap().read_query();
                 if !self
                     .search
@@ -450,7 +513,15 @@ impl App {
                     self.search.panel.as_ref().unwrap().schedule();
                 }
             }
-            UiAction::Refresh | UiAction::Next | UiAction::Previous => {
+            UiAction::Refresh | UiAction::More => {
+                if self.search.panel.as_ref().unwrap().composing() {
+                    self.search
+                        .panel
+                        .as_ref()
+                        .unwrap()
+                        .status("Finish composing text before searching");
+                    return Ok(());
+                }
                 let (query, match_case) = self.search.panel.as_ref().unwrap().read_query();
                 if query.is_empty() {
                     if let Some(run) = &self.search.run {
@@ -462,13 +533,28 @@ impl App {
                         .unwrap()
                         .status("Search retained output in all workspaces in this window");
                 } else {
-                    let offset = self.search.run.as_ref().map_or(0, |r| r.offset);
-                    let offset = match action {
-                        UiAction::Next => offset.saturating_add(PAGE_SIZE),
-                        UiAction::Previous => offset.saturating_sub(PAGE_SIZE),
-                        _ => 0,
+                    let limit = if matches!(action, UiAction::More) {
+                        let Some(run) = self.search.run.as_ref().filter(|run| {
+                            !run.cancelled
+                                && run.waiting.is_none()
+                                && run.queue.is_empty()
+                                && run.query == query
+                                && run.match_case == match_case
+                                && run.limit < UI_RESULT_LIMIT
+                        }) else {
+                            return Ok(());
+                        };
+                        run.limit.saturating_add(PAGE_SIZE).min(UI_RESULT_LIMIT)
+                    } else {
+                        PAGE_SIZE
                     };
-                    self.begin_search(query, match_case, offset)?;
+                    if let Err(error) = self.begin_search_limited(query, match_case, 0, limit) {
+                        self.search
+                            .panel
+                            .as_ref()
+                            .unwrap()
+                            .status(&error.to_string());
+                    }
                 }
             }
             UiAction::Open => {
@@ -486,15 +572,13 @@ impl App {
                     }
                 }
             }
-            UiAction::Cancel | UiAction::Close => {
+            UiAction::Close => {
                 self.search.debounce = None;
                 if let Some(run) = &self.search.run {
                     self.cancel_search(run.id)?;
                 }
-                if matches!(action, UiAction::Close) {
-                    self.search.panel.as_ref().unwrap().hide();
-                    self.focus_active()?;
-                }
+                self.search.panel.as_ref().unwrap().hide();
+                self.focus_active()?;
             }
         }
         Ok(())

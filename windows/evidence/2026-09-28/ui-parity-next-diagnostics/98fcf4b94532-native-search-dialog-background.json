@@ -1,0 +1,26 @@
+{
+    "started":  "2026-09-28T08:54:20.0239794Z",
+    "mode":  "hidden-native-search-dialog",
+    "checks":  [
+
+               ],
+    "observations":  [
+                         {
+                             "stdoutComplete":  true,
+                             "exitCode":  -1073741571,
+                             "stderrComplete":  true,
+                             "pid":  38976,
+                             "stderr":  "\nthread \u0027main\u0027 (33424) has overflowed its stack\n",
+                             "kind":  "host-exit",
+                             "stdout":  ""
+                         }
+                     ],
+    "desktopInput":  false,
+    "clipboardAccess":  false,
+    "physicalIme":  false,
+    "status":  "failed",
+    "error":  "Owned host startup exceeded 8 seconds",
+    "cleanupError":  "Owned host did not exit cleanly with both output pipes closed",
+    "finished":  "2026-09-28T08:54:23.5474221Z",
+    "elapsedMs":  3837
+}

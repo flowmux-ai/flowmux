@@ -1,0 +1,13 @@
+{
+    "name":  "ui-parity-focus-pane",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\run-ui-parity-focus-pane.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T09:24:50.1124737Z",
+    "pid":  40788,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  10.278,
+    "finished":  "2026-09-28T09:25:00.3942119Z"
+}

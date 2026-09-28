@@ -72,6 +72,7 @@ pub enum ClientMessage {
         direction: crate::command::FocusDirection,
     },
     TogglePaneZoom,
+    ToggleOverview,
     Title {
         title: String,
     },

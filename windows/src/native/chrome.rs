@@ -52,6 +52,12 @@ pub(super) enum ChromeIcon {
     Reload,
     Stop,
     More,
+    Maximize,
+    Restore,
+    SplitRight,
+    SplitDown,
+    Browser,
+    Overview,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -874,6 +880,34 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 LineTo(item.hDC, x(c), y(d));
             };
             match kind {
+                ChromeIcon::Maximize => {
+                    Rectangle(item.hDC, x(-6), y(-6), x(6) + 1, y(6) + 1);
+                }
+                ChromeIcon::Restore => {
+                    Rectangle(item.hDC, x(-6), y(-2), x(2) + 1, y(6) + 1);
+                    line(-2, -3, -2, -6);
+                    line(-2, -6, 6, -6);
+                    line(6, -6, 6, 2);
+                    line(6, 2, 3, 2);
+                }
+                ChromeIcon::SplitRight | ChromeIcon::SplitDown => {
+                    Rectangle(item.hDC, x(-7), y(-6), x(7) + 1, y(6) + 1);
+                    if matches!(kind, ChromeIcon::SplitRight) {
+                        line(0, -6, 0, 6);
+                    } else {
+                        line(-7, 0, 7, 0);
+                    }
+                }
+                ChromeIcon::Browser => {
+                    Ellipse(item.hDC, x(-7), y(-7), x(7) + 1, y(7) + 1);
+                    Ellipse(item.hDC, x(-3), y(-7), x(3) + 1, y(7) + 1);
+                    line(-7, 0, 7, 0);
+                }
+                ChromeIcon::Overview => {
+                    for (left, top) in [(-7, -7), (1, -7), (-7, 1), (1, 1)] {
+                        Rectangle(item.hDC, x(left), y(top), x(left + 6) + 1, y(top + 6) + 1);
+                    }
+                }
                 ChromeIcon::Back | ChromeIcon::Forward => {
                     let sign = if matches!(kind, ChromeIcon::Back) {
                         -1
@@ -1236,6 +1270,18 @@ pub(super) fn message(
 /// control print handling; WebView contents are outside this artifact's scope.
 #[cfg(debug_assertions)]
 pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Value> {
+    capture_impl(window, path, false)
+}
+
+/// Paint a real owned native subtree, including its custom WM_DRAWITEM handlers.
+/// The root itself may be logically hidden; descendants retain normal visibility.
+#[cfg(debug_assertions)]
+pub(super) fn capture_subtree(window: HWND, path: &std::path::Path) -> anyhow::Result<Value> {
+    capture_impl(window, path, true)
+}
+
+#[cfg(debug_assertions)]
+fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::Result<Value> {
     use std::io::Write;
     use windows_sys::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
@@ -1278,10 +1324,16 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
         owner == unsafe { GetCurrentProcessId() } && thread == unsafe { GetCurrentThreadId() },
         "native capture must run on the exact owning UI thread"
     );
+    let root = unsafe { GetAncestor(window, GA_ROOT) };
+    let mut root_owner = 0;
+    let root_thread = unsafe { GetWindowThreadProcessId(root, &mut root_owner) };
     anyhow::ensure!(
-        unsafe { IsWindowVisible(window) } == 0
-            && unsafe { GetAncestor(window, GA_ROOT) } == window,
-        "native capture requires an owned hidden top-level window"
+        !root.is_null()
+            && root_owner == owner
+            && root_thread == thread
+            && unsafe { IsWindowVisible(root) } == 0
+            && (subtree || root == window),
+        "native capture requires an owned hidden top-level ancestor"
     );
     let mut client = RECT::default();
     checked(unsafe { GetClientRect(window, &mut client) })?;
@@ -1338,16 +1390,49 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
         message(window, WM_ERASEBKGND, surface.dc as WPARAM, 0) == Some(1),
         "native background painter was unavailable"
     );
-    let controls: Vec<_> = STATE.with(|slot| {
-        slot.borrow()
-            .controls
-            .iter()
-            .map(|(hwnd, entry)| (*hwnd as HWND, *entry))
+    let registered = STATE.with(|slot| slot.borrow().controls.clone());
+    let controls: Vec<_> = if subtree {
+        // Native sibling z-order is top first. Reverse each sibling list so an
+        // overlapping close button paints after the card beneath it.
+        fn descendants(
+            parent: HWND,
+            depth: usize,
+            remaining: &mut usize,
+            result: &mut Vec<HWND>,
+        ) -> anyhow::Result<()> {
+            anyhow::ensure!(depth <= 64, "native capture subtree is too deep");
+            let first = unsafe { GetWindow(parent, GW_CHILD) };
+            let mut child = if first.is_null() {
+                first
+            } else {
+                unsafe { GetWindow(first, GW_HWNDLAST) }
+            };
+            while !child.is_null() {
+                anyhow::ensure!(*remaining > 0, "native capture exceeds 4096 child windows");
+                *remaining -= 1;
+                if unsafe { GetWindowLongPtrW(child, GWL_STYLE) } & WS_VISIBLE as isize != 0 {
+                    result.push(child);
+                    descendants(child, depth + 1, remaining, result)?;
+                }
+                child = unsafe { GetWindow(child, GW_HWNDPREV) };
+            }
+            Ok(())
+        }
+        let mut ordered = Vec::new();
+        descendants(window, 0, &mut 4096, &mut ordered)?;
+        ordered
+            .into_iter()
+            .filter_map(|hwnd| registered.get(&(hwnd as isize)).map(|entry| (hwnd, *entry)))
             .collect()
-    });
+    } else {
+        registered
+            .into_iter()
+            .map(|(hwnd, entry)| (hwnd as HWND, entry))
+            .collect()
+    };
     let mut rendered = Vec::new();
     for (child, entry) in controls {
-        if unsafe { GetParent(child) } != window
+        if (!subtree && unsafe { GetParent(child) } != window)
             || unsafe { GetWindowLongPtrW(child, GWL_STYLE) } & WS_VISIBLE as isize == 0
         {
             continue;
@@ -1357,6 +1442,12 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
         {
             continue;
         }
+        let mut child_owner = 0;
+        anyhow::ensure!(
+            unsafe { GetWindowThreadProcessId(child, &mut child_owner) } == thread
+                && child_owner == owner,
+            "native capture child left its owning UI thread"
+        );
         let mut rect = RECT::default();
         checked(unsafe { GetWindowRect(child, &mut rect) })?;
         unsafe {
@@ -1371,6 +1462,35 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
         if child_width <= 0 || child_height <= 0 {
             continue;
         }
+        let mut clip = rect;
+        if subtree {
+            let mut ancestor = unsafe { GetParent(child) };
+            loop {
+                anyhow::ensure!(!ancestor.is_null(), "native capture child was detached");
+                let mut ancestor_owner = 0;
+                anyhow::ensure!(
+                    unsafe { GetWindowThreadProcessId(ancestor, &mut ancestor_owner) } == thread
+                        && ancestor_owner == owner,
+                    "native capture ancestor left its owning UI thread"
+                );
+                let mut bounds = RECT::default();
+                checked(unsafe { GetClientRect(ancestor, &mut bounds) })?;
+                unsafe {
+                    MapWindowPoints(ancestor, window, (&mut bounds as *mut RECT).cast(), 2);
+                }
+                clip.left = clip.left.max(bounds.left);
+                clip.top = clip.top.max(bounds.top);
+                clip.right = clip.right.min(bounds.right);
+                clip.bottom = clip.bottom.min(bounds.bottom);
+                if ancestor == window {
+                    break;
+                }
+                ancestor = unsafe { GetParent(ancestor) };
+            }
+            if clip.right <= clip.left || clip.bottom <= clip.top {
+                continue;
+            }
+        }
         let token = unsafe { SaveDC(surface.dc) };
         checked((token != 0) as i32)?;
         let _restore = SavedDc {
@@ -1381,7 +1501,13 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
             SetViewportOrgEx(surface.dc, rect.left, rect.top, std::ptr::null_mut())
         })?;
         unsafe {
-            IntersectClipRect(surface.dc, 0, 0, child_width, child_height);
+            IntersectClipRect(
+                surface.dc,
+                clip.left - rect.left,
+                clip.top - rect.top,
+                clip.right - rect.left,
+                clip.bottom - rect.top,
+            );
         }
         if entry.button.is_some() {
             let native_state = unsafe { SendMessageW(child, BM_GETSTATE, 0, 0) } as u32;
@@ -1410,7 +1536,22 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
                 },
                 ..Default::default()
             };
-            anyhow::ensure!(draw_button(&item), "registered native button did not paint");
+            if subtree {
+                let painted = unsafe {
+                    SendMessageW(
+                        GetParent(child),
+                        WM_DRAWITEM,
+                        item.CtlID as WPARAM,
+                        (&item as *const DRAWITEMSTRUCT) as LPARAM,
+                    )
+                };
+                anyhow::ensure!(
+                    painted != 0,
+                    "production owner-draw handler did not paint the native button"
+                );
+            } else {
+                anyhow::ensure!(draw_button(&item), "registered native button did not paint");
+            }
         } else {
             unsafe {
                 SendMessageW(
@@ -1423,7 +1564,8 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
         }
         rendered.push(
             json!({"handle":child as isize,"kind":if entry.button.is_some(){"button"}else{"static"},
-            "x":rect.left,"y":rect.top,"width":child_width,"height":child_height}),
+            "x":rect.left,"y":rect.top,"width":child_width,"height":child_height,
+            "clip":{"x":clip.left,"y":clip.top,"width":clip.right-clip.left,"height":clip.bottom-clip.top}}),
         );
     }
     checked(unsafe { GdiFlush() })?;
@@ -1466,6 +1608,6 @@ pub(super) fn capture(window: HWND, path: &std::path::Path) -> anyhow::Result<Va
     output.flush()?;
     Ok(
         json!({"path":path,"width":width,"height":height,"background":background,"controls":rendered,
-        "scope":"actual native chrome painters; WebView pixels omitted","format":"bmp-rgb32"}),
+        "scope":if subtree {"production native subtree WM_DRAWITEM; may include cached owned WebView2 CapturePreview thumbnails; not a composed GPU or desktop capture"} else {"actual native chrome painters; WebView pixels omitted"},"format":"bmp-rgb32","subtree":subtree,"root_handle":window as usize}),
     )
 }

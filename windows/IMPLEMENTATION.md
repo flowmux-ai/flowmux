@@ -764,3 +764,38 @@ The static-CRT release build also linked all three entrypoints before canonical
 GUI publication failed (117.627 s). Fresh outputs were verified and staged; all
 three release doctor entrypoints passed in 1.035 s. The development installer is
 packaged separately and is not installed into the running user session.
+
+
+## 2026-09-28 — Search modal, pane tools and workspace overview
+
+The owned search dialog now follows the Linux modal/query/results structure,
+with explicit 700-hit UI cap and unchanged 500-hit CLI pages. Pane headers expose
+zoom, split right/down, new tab/browser and a Close Pane menu. Whole-pane close
+seals all editors before mutation and refuses the final pane. Browser addition
+uses the source pane; CLI browser-open keeps its documented split placement.
+
+Workspace overview is an actual main-window overlay, with real model cards,
+live names/order, scrolling, selection/dismissal and dirty/final-workspace guards.
+Ready visible WebViews supply bounded native thumbnails; inactive previews and
+last-visible caching remain unimplemented. Terminal Ctrl+Alt+K is connected;
+other WebViews and physical IME/focus/DPI/accessibility remain pending.
+
+Twenty unique hidden native groups, eight CLI/wire tests, shortcut checks and
+final Windows Clippy/format checks passed. The startup stack overflow was fixed
+by separating three clap argument builders (nested frames 932,880→827,832 bytes,
+unchanged one-MiB reserve). A known browser color was verified in the actual
+native overview PNG; early terminal capture may precede rendered glyphs.
+
+U07 advances only to partial: current feature totals are **61 partial/53 pending**
+with no completed feature rows. Canonical GUI publication still fails because
+the running user's executable is locked. Fresh linked binaries were separately
+staged; three release doctor entrypoints and NSIS packaging passed. The new
+installer was not run. Exact source/build/native/artifact boundaries and the
+remaining gaps are in [the evidence record](evidence/2026-09-28/ui-parity-next.md)
+and [UI parity map](UI_PARITY.md).
+
+Final review also restored the existing focus path after successful pane-menu
+closure and requested focus after overview card HWND replacement. The affected
+seven native groups were repeated successfully without desktop input; actual
+physical focus recovery remains unverified. See the [final follow-up](evidence/2026-09-28/ui-parity-focus.md)
+for the two-line source boundary and latest packaging provenance.

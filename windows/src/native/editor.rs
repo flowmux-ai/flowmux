@@ -147,6 +147,10 @@ enum PendingKind {
 }
 pub(super) enum Operation {
     Tab(SurfaceId),
+    Pane {
+        pane: PaneId,
+        surfaces: Vec<SurfaceId>,
+    },
     Workspace(WorkspaceId),
     Window(CloseRequest),
     QuitDiscard(ipc::Reply),
@@ -1031,6 +1035,11 @@ impl App {
                 .then_some(*id)
                 .into_iter()
                 .collect(),
+            Operation::Pane { surfaces, .. } => surfaces
+                .iter()
+                .filter(|id| self.editors.contains_key(id))
+                .copied()
+                .collect(),
             Operation::Workspace(id) => self
                 .editors
                 .keys()
@@ -1099,6 +1108,13 @@ impl App {
                 Operation::Tab(id) => {
                     self.select(id)?;
                     self.action(Action::CloseTab)?;
+                }
+                Operation::Pane { pane, surfaces } => {
+                    anyhow::ensure!(
+                        self.pane_surface_ids(pane)? == surfaces,
+                        "Pane tabs changed while editor close was pending"
+                    );
+                    self.close_pane(pane, None)?;
                 }
                 Operation::Workspace(id) => {
                     self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;

@@ -138,6 +138,56 @@ pub struct Request {
     pub caller_cwd: Option<PathBuf>,
 }
 
+// Keep the unoptimized clap grammar builder below the Windows main-stack limit.
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct NotifyArgs {
+    #[arg(long, default_value = "Terminal")]
+    pub title: String,
+    #[arg(long, default_value="info", value_parser=["info","attention","error","completed"])]
+    pub level: String,
+    pub body: String,
+    #[arg(long, value_parser=parse_id, conflicts_with="surface")]
+    pub pane: Option<Uuid>,
+    #[arg(long, value_parser=parse_id)]
+    pub surface: Option<Uuid>,
+    /// Create an entry without a terminal source.
+    #[arg(long, conflicts_with_all=["pane","surface"])]
+    #[serde(default)]
+    pub global: bool,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct FindArgs {
+    #[arg(required_unless_present = "close", conflicts_with = "close")]
+    pub query: Option<String>,
+    #[arg(long, value_parser = parse_id)]
+    pub surface: Option<Uuid>,
+    #[arg(long, conflicts_with = "close")]
+    #[serde(default)]
+    pub previous: bool,
+    #[arg(long, conflicts_with = "close")]
+    #[serde(default)]
+    pub match_case: bool,
+    #[arg(long, conflicts_with = "close")]
+    #[serde(default)]
+    pub regex: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub close: bool,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct NotifyCompleteArgs {
+    #[arg(long)]
+    pub agent: String,
+    #[arg(long, default_value = "task complete")]
+    pub message: String,
+    #[arg(long, value_parser=parse_id, conflicts_with="surface")]
+    pub pane: Option<Uuid>,
+    #[arg(long, value_parser=parse_id)]
+    pub surface: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
@@ -189,32 +239,9 @@ pub enum Command {
         op: crate::files_model::Op,
     },
     /// Add an in-app notification. Desktop delivery is not yet implemented.
-    Notify {
-        #[arg(long, default_value = "Terminal")]
-        title: String,
-        #[arg(long, default_value="info", value_parser=["info","attention","error","completed"])]
-        level: String,
-        body: String,
-        #[arg(long, value_parser=parse_id, conflicts_with="surface")]
-        pane: Option<Uuid>,
-        #[arg(long, value_parser=parse_id)]
-        surface: Option<Uuid>,
-        /// Create an entry without a terminal source.
-        #[arg(long, conflicts_with_all=["pane","surface"])]
-        #[serde(default)]
-        global: bool,
-    },
+    Notify(NotifyArgs),
     /// Report an agent turn completion without inferring agent identity/state.
-    NotifyComplete {
-        #[arg(long)]
-        agent: String,
-        #[arg(long, default_value = "task complete")]
-        message: String,
-        #[arg(long, value_parser=parse_id, conflicts_with="surface")]
-        pane: Option<Uuid>,
-        #[arg(long, value_parser=parse_id)]
-        surface: Option<Uuid>,
-    },
+    NotifyComplete(NotifyCompleteArgs),
     Downloads {
         #[command(subcommand)]
         op: crate::downloads::Op,
@@ -245,24 +272,7 @@ pub enum Command {
         recent: bool,
     },
     /// Find in a terminal's retained output without activating an inactive tab.
-    Find {
-        #[arg(required_unless_present = "close", conflicts_with = "close")]
-        query: Option<String>,
-        #[arg(long, value_parser = parse_id)]
-        surface: Option<Uuid>,
-        #[arg(long, conflicts_with = "close")]
-        #[serde(default)]
-        previous: bool,
-        #[arg(long, conflicts_with = "close")]
-        #[serde(default)]
-        match_case: bool,
-        #[arg(long, conflicts_with = "close")]
-        #[serde(default)]
-        regex: bool,
-        #[arg(long)]
-        #[serde(default)]
-        close: bool,
-    },
+    Find(FindArgs),
     /// Start a paged literal search across all terminals in this window.
     SearchAll {
         query: String,
@@ -383,6 +393,11 @@ pub enum Command {
         #[arg(value_parser = parse_id)]
         surface: Uuid,
     },
+    /// Close every tab in a pane; refuses the workspace's final pane.
+    ClosePane {
+        #[arg(value_parser = parse_id)]
+        pane: Uuid,
+    },
     /// Move a running tab without restarting its process or terminal view.
     MoveTab {
         #[arg(value_parser = parse_id)]
@@ -494,6 +509,55 @@ pub(crate) fn parse_id(text: &str) -> Result<Uuid, String> {
 mod tests {
     use super::*;
     #[test]
+    fn extracted_command_args_preserve_cli_and_flat_tagged_wire() {
+        let id = Uuid::new_v4().to_string();
+        for (args, expected) in [
+            (
+                vec![
+                    "notify",
+                    "--title",
+                    "한글",
+                    "--level",
+                    "attention",
+                    "body",
+                    "--surface",
+                    &id,
+                ],
+                serde_json::json!({"method":"notify","title":"한글","level":"attention","body":"body","pane":null,"surface":id,"global":false}),
+            ),
+            (
+                vec![
+                    "notify-complete",
+                    "--agent",
+                    "worker",
+                    "--message",
+                    "done",
+                    "--pane",
+                    &id,
+                ],
+                serde_json::json!({"method":"notify_complete","agent":"worker","message":"done","pane":id,"surface":null}),
+            ),
+            (
+                vec![
+                    "find",
+                    "한글",
+                    "--surface",
+                    &id,
+                    "--previous",
+                    "--match-case",
+                    "--regex",
+                ],
+                serde_json::json!({"method":"find","query":"한글","surface":id,"previous":true,"match_case":true,"regex":true,"close":false}),
+            ),
+        ] {
+            let cli = Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).unwrap();
+            let value = serde_json::to_value(&cli.command).unwrap();
+            assert_eq!(value, expected);
+            let decoded: Command = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+    }
+    #[test]
     fn browser_commands_roundtrip_pane_context_and_reject_unknown_options() {
         let id = Uuid::new_v4();
         let pane = format!("pane:{id}");
@@ -593,7 +657,7 @@ mod tests {
         let decoded: Request = serde_json::from_value(wire).unwrap();
         assert!(matches!(
             decoded.command,
-            Command::Notify { global: false, .. }
+            Command::Notify(NotifyArgs { global: false, .. })
         ));
         assert!(
             Cli::try_parse_from(["flowmuxctl", "notify", "--global", "--surface", &id, "x"])

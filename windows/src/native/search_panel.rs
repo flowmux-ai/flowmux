@@ -1,25 +1,65 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Native EDIT/LISTBOX controls; creation never displays the owned window.
+//! Owned modal search, native EDIT/IME and accessible two-line LISTBOX results.
+//! Modality disables only the owner we enabled previously; no nested message loop.
 use super::*;
-use std::cell::RefCell;
-use windows_sys::Win32::UI::Controls::EM_LIMITTEXT;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-
+use std::cell::{Cell, RefCell};
+use windows_sys::Win32::System::SystemServices::SS_NOPREFIX;
+use windows_sys::Win32::UI::{
+    Controls::{
+        DRAWITEMSTRUCT, EM_LIMITTEXT, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_LISTBOX,
+    },
+    Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled},
+    Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+};
+const QUERY_SUBCLASS: usize = 0x464d_5351;
 #[derive(Clone, Copy)]
 pub(crate) enum UiAction {
     Show,
     Changed,
     Refresh,
-    Next,
-    Previous,
+    More,
     Open,
-    Cancel,
     Close,
     Layout,
     Tick,
 }
 fn emit(action: UiAction) {
     post(Event::SearchUi(action));
+}
+#[derive(Clone)]
+struct ResultPaint {
+    caption: HWND,
+    rows: Vec<(String, String)>,
+}
+thread_local! {
+    static COMPOSING: Cell<bool> = const { Cell::new(false) };
+    static SETTING_QUERY: Cell<bool> = const { Cell::new(false) };
+    static PAINT: RefCell<HashMap<isize, ResultPaint>> = RefCell::new(HashMap::new());
+}
+unsafe extern "system" fn query_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    match message {
+        WM_IME_STARTCOMPOSITION => {
+            COMPOSING.with(|v| v.set(true));
+            emit(UiAction::Changed);
+        }
+        WM_IME_ENDCOMPOSITION => {
+            COMPOSING.with(|v| v.set(false));
+            emit(UiAction::Changed);
+        }
+        WM_NCDESTROY => {
+            COMPOSING.with(|v| v.set(false));
+            RemoveWindowSubclass(window, Some(query_proc), QUERY_SUBCLASS);
+        }
+        _ => {}
+    }
+    DefSubclassProc(window, message, wparam, lparam)
 }
 unsafe extern "system" fn procedure(
     window: HWND,
@@ -30,70 +70,182 @@ unsafe extern "system" fn procedure(
     match message {
         WM_CLOSE => {
             emit(UiAction::Close);
-            0
+            return 0;
         }
         WM_SIZE => {
             emit(UiAction::Layout);
-            0
+            return 0;
         }
         WM_TIMER => {
             KillTimer(window, 2);
             emit(UiAction::Tick);
-            0
+            return 0;
+        }
+        WM_GETMINMAXINFO if lparam != 0 => {
+            let info = &mut *(lparam as *mut MINMAXINFO);
+            let dpi = GetDpiForWindow(window).max(96) as i32;
+            info.ptMinTrackSize.x = 400 * dpi / 96;
+            info.ptMinTrackSize.y = 300 * dpi / 96;
+            return 0;
         }
         WM_DPICHANGED => {
-            let r = &*(lparam as *const RECT);
+            let rect = &*(lparam as *const RECT);
             SetWindowPos(
                 window,
                 std::ptr::null_mut(),
-                r.left,
-                r.top,
-                r.right - r.left,
-                r.bottom - r.top,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
             emit(UiAction::Layout);
-            0
+            return 0;
         }
         WM_COMMAND => {
-            let id = wparam & 0xffff;
-            let code = (wparam >> 16) as u32;
-            let action = match (id, code) {
-                (10, EN_CHANGE) | (11, BN_CLICKED) => Some(UiAction::Changed),
+            let action = match (wparam & 0xffff, (wparam >> 16) as u32) {
+                (10, EN_CHANGE) if !SETTING_QUERY.with(Cell::get) => Some(UiAction::Changed),
+                (11, BN_CLICKED) => Some(UiAction::Changed),
                 (1, BN_CLICKED) => Some(UiAction::Refresh),
                 (20, LBN_DBLCLK) => Some(UiAction::Open),
-                (30, BN_CLICKED) => Some(UiAction::Previous),
-                (31, BN_CLICKED) => Some(UiAction::Next),
-                (32, BN_CLICKED) => Some(UiAction::Open),
-                (33, BN_CLICKED) => Some(UiAction::Cancel),
+                (31, BN_CLICKED) => Some(UiAction::More),
                 (2, BN_CLICKED) => Some(UiAction::Close),
                 _ => None,
             };
             if let Some(action) = action {
                 emit(action);
             }
-            0
+            return 0;
         }
-        _ => DefWindowProcW(window, message, wparam, lparam),
+        WM_DRAWITEM if lparam != 0 && draw_result(&*(lparam as *const DRAWITEMSTRUCT)) => return 1,
+        _ => {}
     }
+    if let Some(value) = chrome::message(window, message, wparam, lparam) {
+        return value;
+    }
+    DefWindowProcW(window, message, wparam, lparam)
+}
+unsafe fn draw_result(item: &DRAWITEMSTRUCT) -> bool {
+    if item.CtlType != ODT_LISTBOX {
+        return false;
+    }
+    let row = PAINT.with(|paint| {
+        paint
+            .borrow()
+            .get(&(item.hwndItem as isize))
+            .and_then(|paint| {
+                paint
+                    .rows
+                    .get(item.itemID as usize)
+                    .map(|row| (paint.caption, row.clone()))
+            })
+    });
+    let Some((caption, (location, preview))) = row else {
+        return true;
+    };
+    let saved = SaveDC(item.hDC);
+    if saved == 0 {
+        return false;
+    }
+    let palette = chrome::palette();
+    let selected = item.itemState & ODS_SELECTED != 0;
+    let bg = if selected {
+        palette.selected
+    } else {
+        palette.surface
+    };
+    let foreground = if selected && palette.high_contrast {
+        GetSysColor(COLOR_HIGHLIGHTTEXT)
+    } else {
+        palette.foreground
+    };
+    SetDCBrushColor(item.hDC, bg);
+    FillRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
+    SetBkMode(item.hDC, TRANSPARENT as i32);
+    let dpi = GetDpiForWindow(item.hwndItem).max(96) as i32;
+    let px = |n| n * dpi / 96;
+    let mut rect = RECT {
+        left: item.rcItem.left + px(10),
+        right: item.rcItem.right - px(10),
+        top: item.rcItem.top + px(6),
+        bottom: item.rcItem.top + px(26),
+    };
+    SelectObject(item.hDC, SendMessageW(caption, WM_GETFONT, 0, 0) as HGDIOBJ);
+    SetTextColor(
+        item.hDC,
+        if palette.high_contrast {
+            foreground
+        } else {
+            palette.muted
+        },
+    );
+    let original: Vec<u16> = location.encode_utf16().collect();
+    let text = chrome::caption_for_paint(&original);
+    DrawTextW(
+        item.hDC,
+        text.as_ptr(),
+        text.len() as i32,
+        &mut rect,
+        DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
+    SelectObject(
+        item.hDC,
+        SendMessageW(item.hwndItem, WM_GETFONT, 0, 0) as HGDIOBJ,
+    );
+    SetTextColor(item.hDC, foreground);
+    rect.top = item.rcItem.top + px(28);
+    rect.bottom = item.rcItem.bottom - px(6);
+    let original: Vec<u16> = preview.encode_utf16().collect();
+    let text = chrome::caption_for_paint(&original);
+    DrawTextW(
+        item.hDC,
+        text.as_ptr(),
+        text.len() as i32,
+        &mut rect,
+        DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
+    if item.itemState & ODS_FOCUS != 0 && item.itemState & ODS_NOFOCUSRECT == 0 {
+        DrawFocusRect(item.hDC, &item.rcItem);
+    }
+    RestoreDC(item.hDC, saved);
+    true
 }
 pub(super) struct Panel {
     pub(super) window: HWND,
+    owner: HWND,
+    opened: Cell<bool>,
+    disabled_owner: Cell<bool>,
     query: HWND,
     case: HWND,
     refresh: HWND,
     status: HWND,
     list: HWND,
-    previous: HWND,
-    next: HWND,
-    open: HWND,
-    cancel: HWND,
-    close: HWND,
+    more: HWND,
+    caption: HWND,
     labels: RefCell<Vec<String>>,
     status_text: RefCell<String>,
+    has_more: Cell<bool>,
 }
 impl Drop for Panel {
     fn drop(&mut self) {
+        self.release_owner();
+        PAINT.with(|paint| {
+            paint.borrow_mut().remove(&(self.list as isize));
+        });
+        unsafe {
+            RemoveWindowSubclass(self.query, Some(query_proc), QUERY_SUBCLASS);
+        }
+        for window in [
+            self.query,
+            self.case,
+            self.refresh,
+            self.status,
+            self.list,
+            self.more,
+            self.caption,
+        ] {
+            chrome::unregister(window);
+        }
         unsafe {
             DestroyWindow(self.window);
         }
@@ -108,14 +260,14 @@ impl Panel {
                 lpfnWndProc: Some(procedure),
                 hInstance: instance,
                 hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                hbrBackground: (COLOR_BTNFACE + 1) as HBRUSH,
                 lpszClassName: class.as_ptr(),
-                ..std::mem::zeroed()
+                ..Default::default()
             };
             anyhow::ensure!(
                 RegisterClassW(&spec) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS,
                 "cannot register search window"
             );
+            let dpi = GetDpiForWindow(parent).max(96) as i32;
             let window = CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 class.as_ptr(),
@@ -123,29 +275,29 @@ impl Panel {
                 WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                850,
-                560,
+                760 * dpi / 96,
+                520 * dpi / 96,
                 parent,
                 std::ptr::null_mut(),
                 instance,
                 std::ptr::null(),
             );
             anyhow::ensure!(!window.is_null(), "cannot create search window");
-            // Own the HWND immediately so any subsequent control-creation failure cleans up.
             let mut panel = Self {
                 window,
+                owner: parent,
+                opened: Cell::new(false),
+                disabled_owner: Cell::new(false),
                 query: std::ptr::null_mut(),
                 case: std::ptr::null_mut(),
                 refresh: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
                 list: std::ptr::null_mut(),
-                previous: std::ptr::null_mut(),
-                next: std::ptr::null_mut(),
-                open: std::ptr::null_mut(),
-                cancel: std::ptr::null_mut(),
-                close: std::ptr::null_mut(),
-                labels: RefCell::new(Vec::new()),
+                more: std::ptr::null_mut(),
+                caption: std::ptr::null_mut(),
+                labels: RefCell::new(vec![]),
                 status_text: RefCell::new(String::new()),
+                has_more: Cell::new(false),
             };
             panel.query = panel.child(
                 "EDIT",
@@ -154,6 +306,16 @@ impl Panel {
                 WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             )?;
             SendMessageW(panel.query, EM_LIMITTEXT, 1024, 0);
+            SendMessageW(
+                panel.query,
+                0x1501,
+                1,
+                wide("Search terminal output…").as_ptr() as LPARAM,
+            );
+            anyhow::ensure!(
+                SetWindowSubclass(panel.query, Some(query_proc), QUERY_SUBCLASS, 0) != 0,
+                "cannot preserve search input composition"
+            );
             panel.case = panel.child(
                 "BUTTON",
                 "Match case",
@@ -161,24 +323,37 @@ impl Panel {
                 WS_TABSTOP | BS_AUTOCHECKBOX as u32,
             )?;
             panel.refresh =
-                panel.child("BUTTON", "Refresh", 1, WS_TABSTOP | BS_DEFPUSHBUTTON as u32)?;
-            panel.status = panel.child("STATIC", "", 12, 0)?;
+                panel.child("BUTTON", "Refresh", 1, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.status = panel.child("STATIC", "", 12, SS_NOPREFIX)?;
             panel.list = panel.child(
                 "LISTBOX",
                 "",
                 20,
-                WS_BORDER
-                    | WS_TABSTOP
+                WS_TABSTOP
                     | WS_VSCROLL
-                    | WS_HSCROLL
                     | LBS_NOTIFY as u32
-                    | LBS_NOINTEGRALHEIGHT as u32,
+                    | LBS_NOINTEGRALHEIGHT as u32
+                    | LBS_OWNERDRAWFIXED as u32
+                    | LBS_HASSTRINGS as u32,
             )?;
-            panel.previous = panel.child("BUTTON", "Previous 500", 30, WS_TABSTOP)?;
-            panel.next = panel.child("BUTTON", "Next 500", 31, WS_TABSTOP)?;
-            panel.open = panel.child("BUTTON", "Open result", 32, WS_TABSTOP)?;
-            panel.cancel = panel.child("BUTTON", "Cancel search", 33, WS_TABSTOP)?;
-            panel.close = panel.child("BUTTON", "Close", 2, WS_TABSTOP)?;
+            panel.more = panel.child(
+                "BUTTON",
+                "Show more results",
+                31,
+                WS_TABSTOP | BS_OWNERDRAW as u32,
+            )?;
+            panel.caption = panel.child("STATIC", "", 13, 0)?;
+            chrome::register_control(panel.caption, chrome::ControlRole::Caption);
+            ShowWindow(panel.caption, SW_HIDE);
+            PAINT.with(|paint| {
+                paint.borrow_mut().insert(
+                    panel.list as isize,
+                    ResultPaint {
+                        caption: panel.caption,
+                        rows: vec![],
+                    },
+                );
+            });
             panel.layout();
             panel.status("Search retained output in all workspaces in this window");
             panel.buttons(false, false, false);
@@ -187,7 +362,7 @@ impl Panel {
     }
     fn child(&self, class: &str, text: &str, id: usize, style: u32) -> anyhow::Result<HWND> {
         unsafe {
-            let handle = CreateWindowExW(
+            let window = CreateWindowExW(
                 0,
                 wide(class).as_ptr(),
                 wide(text).as_ptr(),
@@ -201,62 +376,117 @@ impl Panel {
                 GetModuleHandleW(std::ptr::null()),
                 std::ptr::null(),
             );
-            checked((!handle.is_null()) as i32)?;
-            SendMessageW(
-                handle,
-                WM_SETFONT,
-                GetStockObject(DEFAULT_GUI_FONT) as WPARAM,
-                1,
-            );
-            Ok(handle)
+            checked((!window.is_null()) as i32)?;
+            if class == "BUTTON" && style & 0xf == BS_OWNERDRAW as u32 {
+                chrome::register_button(window, chrome::Role::Button);
+            } else {
+                chrome::register_control(
+                    window,
+                    match class {
+                        "LISTBOX" => chrome::ControlRole::Listbox,
+                        "EDIT" => chrome::ControlRole::Edit,
+                        _ => chrome::ControlRole::Static,
+                    },
+                );
+            }
+            Ok(window)
         }
     }
     pub(super) fn layout(&self) {
         unsafe {
             let mut rect = RECT::default();
             GetClientRect(self.window, &mut rect);
-            let scale = GetDpiForWindow(self.window).max(96) as f64 / 96.0;
-            let px = |n: i32| (n as f64 * scale).round() as i32;
-            let width = rect.right;
-            let height = rect.bottom;
-            for (handle, x, y, w, h) in [
-                (self.query, px(12), px(12), (width - px(252)).max(1), px(28)),
-                (self.case, width - px(230), px(12), px(112), px(28)),
-                (self.refresh, width - px(110), px(12), px(98), px(28)),
-                (self.status, px(12), px(48), (width - px(24)).max(1), px(42)),
+            let dpi = GetDpiForWindow(self.window).max(96) as i32;
+            let px = |v| v * dpi / 96;
+            let footer = if self.has_more.get() { px(48) } else { px(12) };
+            for (window, x, y, width, height) in [
+                (
+                    self.query,
+                    px(12),
+                    px(12),
+                    (rect.right - px(224)).max(1),
+                    px(30),
+                ),
+                (self.case, rect.right - px(200), px(12), px(112), px(30)),
+                (self.refresh, rect.right - px(80), px(12), px(68), px(30)),
+                (
+                    self.status,
+                    px(12),
+                    px(50),
+                    (rect.right - px(24)).max(1),
+                    px(36),
+                ),
                 (
                     self.list,
                     px(12),
-                    px(94),
-                    (width - px(24)).max(1),
-                    (height - px(146)).max(1),
+                    px(90),
+                    (rect.right - px(24)).max(1),
+                    (rect.bottom - px(90) - footer).max(1),
                 ),
-                (self.previous, px(12), height - px(40), px(118), px(28)),
-                (self.next, px(138), height - px(40), px(118), px(28)),
-                (self.open, px(264), height - px(40), px(118), px(28)),
-                (self.cancel, px(390), height - px(40), px(118), px(28)),
-                (self.close, width - px(110), height - px(40), px(98), px(28)),
+                (
+                    self.more,
+                    px(12),
+                    rect.bottom - px(40),
+                    (rect.right - px(24)).max(1),
+                    px(28),
+                ),
             ] {
-                if !handle.is_null() {
+                if !window.is_null() {
                     SetWindowPos(
-                        handle,
+                        window,
                         std::ptr::null_mut(),
                         x,
                         y,
-                        w,
-                        h,
+                        width,
+                        height,
                         SWP_NOZORDER | SWP_NOACTIVATE,
                     );
                 }
             }
-            SendMessageW(self.list, LB_SETHORIZONTALEXTENT, px(2400) as usize, 0);
+            SendMessageW(self.list, LB_SETITEMHEIGHT, 0, px(60) as LPARAM);
+            ShowWindow(
+                self.more,
+                if self.has_more.get() {
+                    SW_SHOWNA
+                } else {
+                    SW_HIDE
+                },
+            );
         }
     }
     pub(super) fn show(&self, background: bool) {
+        if !self.opened.replace(true) {
+            unsafe {
+                if IsWindowEnabled(self.owner) != 0 {
+                    self.disabled_owner.set(true);
+                    EnableWindow(self.owner, 0);
+                }
+                let mut owner = RECT::default();
+                let mut rect = RECT::default();
+                GetWindowRect(self.owner, &mut owner);
+                GetWindowRect(self.window, &mut rect);
+                SetWindowPos(
+                    self.window,
+                    std::ptr::null_mut(),
+                    owner.left + ((owner.right - owner.left) - (rect.right - rect.left)) / 2,
+                    owner.top + ((owner.bottom - owner.top) - (rect.bottom - rect.top)) / 2,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+        }
         if !background {
             unsafe {
                 ShowWindow(self.window, SW_SHOW);
                 SetFocus(self.query);
+            }
+        }
+    }
+    fn release_owner(&self) {
+        if self.disabled_owner.replace(false) && unsafe { IsWindow(self.owner) } != 0 {
+            unsafe {
+                EnableWindow(self.owner, 1);
             }
         }
     }
@@ -266,29 +496,53 @@ impl Panel {
         }
     }
     pub(super) fn hide(&self) {
+        self.opened.set(false);
+        self.release_owner();
         unsafe {
+            KillTimer(self.window, 2);
             ShowWindow(self.window, SW_HIDE);
         }
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
+        // Preserve native composition commit/cancel; never translate EDIT Enter
+        // through IsDialogMessage into the Refresh/default button action.
+        if message.hwnd == self.query
+            && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+            && matches!(message.wParam, 13 | 27)
+        {
+            return false;
+        }
         unsafe {
             IsWindowVisible(self.window) != 0
                 && (message.hwnd == self.window || IsChild(self.window, message.hwnd) != 0)
                 && IsDialogMessageW(self.window, message) != 0
         }
     }
+    pub(super) fn composing(&self) -> bool {
+        COMPOSING.with(Cell::get)
+    }
     pub(super) fn query(&self, text: &str, case: bool) {
-        unsafe {
-            SetWindowTextW(self.query, wide(text).as_ptr());
-            SendMessageW(self.case, BM_SETCHECK, usize::from(case), 0);
+        if self.composing() {
+            return;
         }
+        let current = self.read_query();
+        SETTING_QUERY.with(|value| value.set(true));
+        unsafe {
+            if current.0 != text {
+                SetWindowTextW(self.query, wide(text).as_ptr());
+            }
+            if current.1 != case {
+                SendMessageW(self.case, BM_SETCHECK, usize::from(case), 0);
+            }
+        }
+        SETTING_QUERY.with(|value| value.set(false));
     }
     pub(super) fn read_query(&self) -> (String, bool) {
         unsafe {
-            let mut text = vec![0u16; GetWindowTextLengthW(self.query) as usize + 1];
-            let size = GetWindowTextW(self.query, text.as_mut_ptr(), text.len() as i32);
+            let mut text = vec![0u16; GetWindowTextLengthW(self.query).max(0) as usize + 1];
+            let count = GetWindowTextW(self.query, text.as_mut_ptr(), text.len() as i32);
             (
-                String::from_utf16_lossy(&text[..size.max(0) as usize]),
+                String::from_utf16_lossy(&text[..count.max(0) as usize]),
                 SendMessageW(self.case, BM_GETCHECK, 0, 0) == 1,
             )
         }
@@ -298,43 +552,63 @@ impl Panel {
             unsafe {
                 SetWindowTextW(self.status, wide(text).as_ptr());
             }
-            *self.status_text.borrow_mut() = text.to_owned();
+            *self.status_text.borrow_mut() = text.into();
         }
     }
     pub(super) fn results(&self, hits: &[Hit]) {
-        let labels: Vec<_> = hits
+        let rows: Vec<_> = hits
             .iter()
             .map(|hit| {
-                format!(
-                    "{} / {}  —  {}",
-                    hit.workspace,
-                    hit.title,
-                    hit.found.preview.replace(['\r', '\n', '\t'], " ")
+                (
+                    format!("{} / {}", hit.workspace, hit.title),
+                    hit.found.preview.clone(),
                 )
             })
+            .collect();
+        let labels: Vec<_> = rows
+            .iter()
+            .map(|(location, preview)| format!("{location}\n{preview}"))
             .collect();
         if *self.labels.borrow() == labels {
             return;
         }
+        PAINT.with(|paint| {
+            paint.borrow_mut().insert(
+                self.list as isize,
+                ResultPaint {
+                    caption: self.caption,
+                    rows,
+                },
+            );
+        });
         unsafe {
+            let selected = self
+                .selected()
+                .unwrap_or(0)
+                .min(labels.len().saturating_sub(1));
+            let top = SendMessageW(self.list, LB_GETTOPINDEX, 0, 0);
             SendMessageW(self.list, WM_SETREDRAW, 0, 0);
             SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
             for label in &labels {
-                SendMessageW(self.list, LB_ADDSTRING, 0, wide(label).as_ptr() as isize);
+                SendMessageW(self.list, LB_ADDSTRING, 0, wide(label).as_ptr() as LPARAM);
             }
             if !labels.is_empty() {
-                SendMessageW(self.list, LB_SETCURSEL, 0, 0);
+                SendMessageW(self.list, LB_SETCURSEL, selected, 0);
+                SendMessageW(self.list, LB_SETTOPINDEX, top.max(0) as usize, 0);
             }
             SendMessageW(self.list, WM_SETREDRAW, 1, 0);
             InvalidateRect(self.list, std::ptr::null(), 1);
         }
         *self.labels.borrow_mut() = labels;
     }
-    pub(super) fn buttons(&self, previous: bool, next: bool, open: bool) {
+    pub(super) fn buttons(&self, _previous: bool, more: bool, open: bool) {
+        let changed = self.has_more.replace(more) != more;
         unsafe {
-            EnableWindow(self.previous, previous as i32);
-            EnableWindow(self.next, next as i32);
-            EnableWindow(self.open, open as i32);
+            EnableWindow(self.more, i32::from(more));
+            EnableWindow(self.list, i32::from(open));
+        }
+        if changed {
+            self.layout();
         }
     }
     pub(super) fn rows(&self) -> usize {
@@ -343,5 +617,14 @@ impl Panel {
     pub(super) fn selected(&self) -> Option<usize> {
         let index = unsafe { SendMessageW(self.list, LB_GETCURSEL, 0, 0) };
         (index >= 0).then_some(index as usize)
+    }
+    pub(super) fn diagnostics(&self) -> Value {
+        let (query, match_case) = self.read_query();
+        let mut rect = RECT::default();
+        unsafe {
+            GetWindowRect(self.window, &mut rect);
+        }
+        json!({"window":self.window as usize,"owner":self.owner as usize,"modal":true,"open":self.opened.get(),"owner_enabled":unsafe{IsWindowEnabled(self.owner)}!=0,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,
+            "query":query,"match_case":match_case,"composing":self.composing(),"query_handle":self.query as usize,"case_handle":self.case as usize,"refresh_handle":self.refresh as usize,"list_handle":self.list as usize,"more_handle":self.more as usize,"more_visible":self.has_more.get(),"rows":self.rows(),"status":self.status_text.borrow().clone(),"rect":{"x":rect.left,"y":rect.top,"width":rect.right-rect.left,"height":rect.bottom-rect.top},"labels":self.labels.borrow().clone()})
     }
 }

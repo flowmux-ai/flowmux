@@ -1,0 +1,13 @@
+{
+    "name":  "ui-parity-next-pane",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\run-ui-parity-next-pane.ps1",
+    "deadlineSeconds":  60,
+    "status":  "failed",
+    "started":  "2026-09-28T08:54:35.2138390Z",
+    "pid":  31404,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  8.781,
+    "finished":  "2026-09-28T08:54:43.9979269Z"
+}

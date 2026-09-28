@@ -57,6 +57,8 @@ mod files;
 mod keys;
 #[path = "notifications.rs"]
 mod notifications;
+#[path = "overview.rs"]
+mod overview;
 #[path = "panes.rs"]
 mod panes;
 #[path = "paste.rs"]
@@ -95,6 +97,7 @@ enum Event {
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
     OptionsUi(appearance::UiAction),
+    Overview(overview::Signal),
     Download(downloads::Signal),
     Activated,
 }
@@ -292,6 +295,7 @@ enum Action {
     NewBrowser,
     Notifications,
     Settings,
+    Overview,
     NewWorkspace,
     Workspace(WorkspaceId),
     WorkspaceMenu,
@@ -307,6 +311,10 @@ enum Action {
     TabClose(PaneId, SurfaceId),
     PaneAdd(PaneId, SurfaceId),
     PaneMenu(PaneId, SurfaceId),
+    PaneZoom(PaneId, SurfaceId),
+    PaneSplitRight(PaneId, SurfaceId),
+    PaneSplitDown(PaneId, SurfaceId),
+    PaneBrowser(PaneId, SurfaceId),
     SidebarScroll(i32),
 }
 struct Control {
@@ -379,6 +387,7 @@ struct App {
     drag: Option<panes::Drag>,
     metadata: Option<workspaces::Panel>,
     options: Option<appearance::Panel>,
+    overview: overview::Controller,
     pending_reads: HashMap<Uuid, PendingScreen>,
     pending_finds: HashMap<Uuid, PendingRead>,
     pending_pastes: HashMap<Uuid, PendingRead>,
@@ -596,6 +605,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             drag: None,
             metadata: None,
             options: None,
+            overview: overview::Controller::default(),
             pending_reads: HashMap::new(),
             pending_finds: HashMap::new(),
             pending_pastes: HashMap::new(),
@@ -635,6 +645,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         // Cancel and release native download operations before their WebView
         // controllers close (older runtimes invalidate these COM objects).
         app.browser_popups.shutdown();
+        drop(std::mem::take(&mut app.overview));
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.browsers.clear();
@@ -657,7 +668,8 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
-            if !app.options_handle_message(&message)
+            if !app.overview_handle_message(&message)
+                && !app.options_handle_message(&message)
                 && !app.search.handle_message(&message)
                 && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
@@ -732,6 +744,7 @@ impl App {
             ("New workspace", Action::NewWorkspace),
             ("Workspaces", Action::WorkspaceMenu),
             ("Settings", Action::Settings),
+            ("Workspace overview", Action::Overview),
             ("Files", Action::ShowFiles),
             ("Search", Action::SearchAll),
             ("Open file", Action::OpenEditor),
@@ -753,12 +766,28 @@ impl App {
                 desired.push((tab.title.clone(), Action::Tab(pane, tab.id)));
                 desired.push(("Close tab".into(), Action::TabClose(pane, tab.id)));
             }
+            desired.push(("Maximize pane".into(), Action::PaneZoom(pane, active)));
+            desired.push(("Split right".into(), Action::PaneSplitRight(pane, active)));
+            desired.push(("Split down".into(), Action::PaneSplitDown(pane, active)));
             desired.push(("+".into(), Action::PaneAdd(pane, active)));
+            desired.push(("New browser".into(), Action::PaneBrowser(pane, active)));
             desired.push(("Pane actions".into(), Action::PaneMenu(pane, active)));
         }
-        let same_controls=self.controls.len()==desired.len() && self.controls.iter().zip(&desired).all(|(control,(_,action))| {
-            control.action==*action || matches!((&control.action,action),(Action::PaneAdd(a,_),Action::PaneAdd(b,_))|(Action::PaneMenu(a,_),Action::PaneMenu(b,_)) if a==b)
-        });
+        let same_controls = self.controls.len() == desired.len()
+            && self
+                .controls
+                .iter()
+                .zip(&desired)
+                .all(|(control, (_, action))| {
+                    control.action == *action
+                        || matches!((&control.action,action),
+                (Action::PaneAdd(a,_),Action::PaneAdd(b,_))|
+                (Action::PaneMenu(a,_),Action::PaneMenu(b,_))|
+                (Action::PaneZoom(a,_),Action::PaneZoom(b,_))|
+                (Action::PaneSplitRight(a,_),Action::PaneSplitRight(b,_))|
+                (Action::PaneSplitDown(a,_),Action::PaneSplitDown(b,_))|
+                (Action::PaneBrowser(a,_),Action::PaneBrowser(b,_)) if a==b)
+                });
         if same_controls {
             for (control, (label, action)) in self.controls.iter_mut().zip(&desired) {
                 control.action = action.clone();
@@ -782,6 +811,7 @@ impl App {
             }
         }
         self.refresh_notifications();
+        self.overview_refresh()?;
         self.layout()
     }
     fn button(&mut self, name: &str, action: Action) -> anyhow::Result<()> {
@@ -1098,43 +1128,52 @@ impl App {
                         ))
                     }
                 }
-                Action::Settings | Action::ShowFiles | Action::SearchAll | Action::OpenEditor => {
+                Action::Settings
+                | Action::Overview
+                | Action::ShowFiles
+                | Action::SearchAll
+                | Action::OpenEditor => {
                     let x = match control.action {
                         Action::Settings => px(4),
+                        Action::Overview => px(36),
                         Action::OpenEditor => sidebar - px(100),
                         Action::ShowFiles => sidebar - px(68),
                         _ => sidebar - px(36),
                     };
-                    (sidebar >= px(136) && footer_top >= px(40)).then_some((
-                        x,
-                        footer_top + px(4),
-                        px(28),
-                        px(28),
-                    ))
+                    (sidebar
+                        >= px(if matches!(control.action, Action::OpenEditor) {
+                            168
+                        } else {
+                            136
+                        })
+                        && footer_top >= px(40))
+                    .then_some((x, footer_top + px(4), px(28), px(28)))
                 }
                 Action::Tab(pane, surface)
                 | Action::TabClose(pane, surface)
+                | Action::PaneZoom(pane, surface)
+                | Action::PaneSplitRight(pane, surface)
+                | Action::PaneSplitDown(pane, surface)
+                | Action::PaneBrowser(pane, surface)
                 | Action::PaneAdd(pane, surface)
                 | Action::PaneMenu(pane, surface) => areas
                     .iter()
                     .find(|(id, _)| *id == pane)
                     .and_then(|(_, area)| {
-                        if matches!(control.action, Action::PaneMenu(..)) {
-                            let width = px(28).min(area.width).max(1);
-                            return Some((
-                                area.x + area.width - width,
-                                area.y,
-                                width,
-                                bar.min(area.height).max(1),
-                            ));
-                        }
-                        if matches!(control.action, Action::PaneAdd(..)) {
-                            return (area.width >= px(94)).then_some((
-                                area.x + area.width - px(60),
-                                area.y,
-                                px(28),
-                                bar,
-                            ));
+                        let header = workspaces::pane_header_layout(*area, unsafe {
+                            GetDpiForWindow(self.window)
+                        });
+                        let slot = match control.action {
+                            Action::PaneZoom(..) => Some(0),
+                            Action::PaneSplitRight(..) => Some(1),
+                            Action::PaneSplitDown(..) => Some(2),
+                            Action::PaneAdd(..) => Some(3),
+                            Action::PaneBrowser(..) => Some(4),
+                            Action::PaneMenu(..) => Some(5),
+                            _ => None,
+                        };
+                        if let Some(slot) = slot {
+                            return header.tools[slot].map(|r| (r.x, r.y, r.width, r.height));
                         }
                         let tabs = self
                             .workspace()
@@ -1146,7 +1185,7 @@ impl App {
                         let active = self.workspace().root.active_surface_id(pane)?;
                         let active_index =
                             tabs.iter().position(|tab| tab.id == active).unwrap_or(0);
-                        let available = (area.width - px(64)).max(0);
+                        let available = header.tabs_width;
                         let slots = ((available / px(92).max(1)).max(1) as usize).min(tabs.len());
                         let start = active_index.saturating_sub(slots.saturating_sub(1));
                         if at < start || at >= start + slots || available < px(30) {
@@ -1197,10 +1236,11 @@ impl App {
             }
         }
         self.pane_layout = geometry;
+        self.overview_layout()?;
         Ok(())
     }
     fn focus_active(&self) -> anyhow::Result<()> {
-        if self.background_test {
+        if self.background_test || self.overview.is_open() {
             return Ok(());
         }
         self.ack_focused_notifications(self.active());
@@ -1256,7 +1296,7 @@ impl App {
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Activated => self.ack_focused_notifications(self.active()),
-            Event::SidebarScroll(delta) => {
+            Event::SidebarScroll(delta) if !self.overview.is_open() => {
                 self.sidebar_offset = if delta < 0 {
                     self.sidebar_offset.saturating_sub(1)
                 } else {
@@ -1269,20 +1309,26 @@ impl App {
                 self.sidebar_active = None;
                 self.layout()?;
             }
-            Event::Pointer(pointer) => self.pointer(pointer)?,
+            Event::Pointer(pointer) if !self.overview.is_open() => self.pointer(pointer)?,
+            Event::Pointer(_) | Event::SidebarScroll(_) => {}
             Event::Close => self.request_close(CloseRequest::Native)?,
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
             Event::OptionsUi(action) => self.options_ui(action)?,
+            Event::Overview(signal) => self.overview_event(signal)?,
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(action) => self.metadata_action(action)?,
-            Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
+            Event::ContextMenu(action, x, y) if !self.overview.is_open() => {
+                self.context_menu(action, x, y)?
+            }
+            Event::ContextMenu(..) => {}
             Event::Tick => {
                 self.files_tick();
                 self.editor_tick();
                 self.browser_tick();
                 self.search_tick()?;
+                self.overview_tick()?;
                 self.pending_selections.retain(|_, request| {
                     if request.started.elapsed() > Duration::from_secs(12) {
                         let _ = request.reply.try_send(
@@ -1536,6 +1582,12 @@ impl App {
                 if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
                 {
                     self.toggle_zoom(id)?;
+                }
+            }
+            ClientMessage::ToggleOverview => {
+                if self.active() == id && self.surfaces[&id].visible && self.close_request.is_none()
+                {
+                    self.overview_toggle()?;
                 }
             }
             ClientMessage::Title { title } => {
@@ -2220,6 +2272,10 @@ impl App {
     }
     fn action(&mut self, action: Action) -> anyhow::Result<()> {
         anyhow::ensure!(
+            !self.overview.is_open() || matches!(action, Action::Overview),
+            "workspace overview is open"
+        );
+        anyhow::ensure!(
             self.editor_bypass || self.editor_barrier.is_none(),
             "editor synchronization is in progress"
         );
@@ -2230,13 +2286,10 @@ impl App {
         match action {
             Action::OpenEditor => return self.editor_pick_action(),
             Action::ShowFiles => return self.files_show_current(),
-            Action::NewBrowser => {
-                return self
-                    .open_browser(self.active(), "about:blank".into(), false)
-                    .map(|_| ())
-            }
+            Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Settings => return self.settings_menu(),
+            Action::Overview => return self.overview_toggle(),
             Action::NewWorkspace => {
                 return self
                     .new_terminal(self.active(), None, None, shells::NewTerminal::Workspace)
@@ -2319,6 +2372,23 @@ impl App {
                     .map(|_| ());
             }
             Action::PaneMenu(pane, surface) => return self.pane_actions_menu(pane, surface),
+            Action::PaneZoom(pane, surface)
+            | Action::PaneSplitRight(pane, surface)
+            | Action::PaneSplitDown(pane, surface)
+            | Action::PaneBrowser(pane, surface) => {
+                anyhow::ensure!(
+                    self.locate(surface)
+                        .is_some_and(|(_, current, _)| current == pane),
+                    "Pane source changed"
+                );
+                self.select(surface)?;
+                return self.action(match action {
+                    Action::PaneZoom(..) => Action::TogglePaneZoom,
+                    Action::PaneSplitRight(..) => Action::Vertical,
+                    Action::PaneSplitDown(..) => Action::Horizontal,
+                    _ => Action::NewBrowser,
+                });
+            }
             Action::TabClose(pane, surface) => {
                 anyhow::ensure!(
                     self.locate(surface)
@@ -2439,7 +2509,12 @@ impl App {
                     self.background_test,
                     "chrome capture requires an owned hidden debug host"
                 );
-                return chrome::capture(self.window, &path).map(Some);
+                return if let Some(window) = self.overview_capture_window() {
+                    chrome::capture_subtree(window, &path)
+                } else {
+                    chrome::capture(self.window, &path)
+                }
+                .map(Some);
             }
             Command::Tree => {
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
@@ -2462,6 +2537,8 @@ impl App {
                         "editor_picker_pending":self.editor_picker_pending,
                         "close_accepted":self.close_accepted,
                         "popup":self.browser_popup_status(),
+                        "search_dialog":self.search.diagnostics(),
+                        "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
@@ -2543,14 +2620,14 @@ impl App {
                 );
                 return Ok(None);
             }
-            Command::Notify {
+            Command::Notify(crate::command::NotifyArgs {
                 title,
                 level,
                 body,
                 pane,
                 surface,
                 global,
-            } => {
+            }) => {
                 anyhow::ensure!(
                     !(global && (pane.is_some() || surface.is_some()))
                         && !(pane.is_some() && surface.is_some()),
@@ -2568,12 +2645,12 @@ impl App {
                     crate::notifications::level(&level)?,
                 )?));
             }
-            Command::NotifyComplete {
+            Command::NotifyComplete(crate::command::NotifyCompleteArgs {
                 agent,
                 message,
                 pane,
                 surface,
-            } => {
+            }) => {
                 anyhow::ensure!(
                     !agent.trim().is_empty()
                         && agent.len() <= 256
@@ -2594,14 +2671,14 @@ impl App {
             }
             Command::Downloads { op } => return Ok(Some(self.download_command(op)?)),
             Command::Notifications { op } => return self.notification_command(op).map(Some),
-            Command::Find {
+            Command::Find(crate::command::FindArgs {
                 query,
                 surface,
                 previous,
                 match_case,
                 regex,
                 close,
-            } => {
+            }) => {
                 anyhow::ensure!(close != query.is_some(), "provide a query or --close");
                 let query = query.unwrap_or_default();
                 anyhow::ensure!(
@@ -2764,6 +2841,11 @@ impl App {
                 let id = self.target(Some(pane), caller)?;
                 self.select(id)?;
                 self.rebuild()?;
+            }
+            Command::ClosePane { pane } => {
+                if self.close_pane(PaneId(pane), Some(reply.clone()))? {
+                    return Ok(None);
+                }
             }
             Command::ResizePane { pane, ratio } => {
                 let (split, ratio) = self.resize_pane(PaneId(pane), ratio)?;

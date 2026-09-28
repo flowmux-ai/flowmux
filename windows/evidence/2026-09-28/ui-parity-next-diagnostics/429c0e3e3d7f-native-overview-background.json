@@ -1,0 +1,1034 @@
+{
+    "started":  "2026-09-28T09:05:49.5033944Z",
+    "mode":  "hidden-native-overview",
+    "case":  "workflow",
+    "hosts":  [
+                  40864
+              ],
+    "checks":  [
+
+               ],
+    "observations":  [
+                         {
+                             "name":  "startup",
+                             "pipe":  "\\\\.\\pipe\\flowmux-40864-9768732b-e801-4ff1-9119-ddd26999ddb9",
+                             "elapsedMs":  528
+                         },
+                         {
+                             "tree":  {
+                                          "active_workspace":  "eb370a9c-4185-4549-ba36-af3b1c932aa7",
+                                          "background_testing":  true,
+                                          "browsers":  [
+
+                                                       ],
+                                          "chrome":  {
+                                                         "controls":  [
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  1969702,
+                                                                              "kind":  "workspace_add",
+                                                                              "label":  "New workspace",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  4,
+                                                                                           "y":  5
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  26873326,
+                                                                              "kind":  "workspace_header",
+                                                                              "label":  "Workspaces",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  188,
+                                                                                           "x":  36,
+                                                                                           "y":  5
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  266560,
+                                                                              "kind":  "settings",
+                                                                              "label":  "Settings",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  4,
+                                                                                           "y":  729
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Settings",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  1511210,
+                                                                              "kind":  "overview",
+                                                                              "label":  "Workspace overview",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  36,
+                                                                                           "y":  729
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Workspace overview",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  4459954,
+                                                                              "kind":  "files",
+                                                                              "label":  "Files",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  192,
+                                                                                           "y":  729
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Files",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  856362,
+                                                                              "kind":  "search_all",
+                                                                              "label":  "Search",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  224,
+                                                                                           "y":  729
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Search",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  266480,
+                                                                              "kind":  "open_file",
+                                                                              "label":  "Open file",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  160,
+                                                                                           "y":  729
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Open file",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  332050,
+                                                                              "kind":  "notifications",
+                                                                              "label":  "Notifications (0)",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  228,
+                                                                                           "y":  5
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  "Notifications (0)",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  659778,
+                                                                              "kind":  "sidebar_previous",
+                                                                              "label":  "Previous",
+                                                                              "layout_visible":  false,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  1,
+                                                                                           "width":  1,
+                                                                                           "x":  0,
+                                                                                           "y":  0
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  528672,
+                                                                              "kind":  "sidebar_next",
+                                                                              "label":  "Next",
+                                                                              "layout_visible":  false,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  1,
+                                                                                           "width":  1,
+                                                                                           "x":  0,
+                                                                                           "y":  0
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  5705390,
+                                                                              "kind":  "workspace",
+                                                                              "label":  "한글 한 é 😀 \u0026\u0026 overview\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  56,
+                                                                                           "width":  248,
+                                                                                           "x":  6,
+                                                                                           "y":  40
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  "3adc259b-4423-4f1b-9e7f-622b5465d5ba"
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  41224788,
+                                                                              "kind":  "workspace",
+                                                                              "label":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  56,
+                                                                                           "width":  248,
+                                                                                           "x":  6,
+                                                                                           "y":  98
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  "64d11ce6-b27a-427f-b306-6a3a50718077"
+                                                                          },
+                                                                          {
+                                                                              "focused":  false,
+                                                                              "handle":  594106,
+                                                                              "kind":  "workspace",
+                                                                              "label":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed\nC:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  null,
+                                                                              "rect":  {
+                                                                                           "height":  56,
+                                                                                           "width":  248,
+                                                                                           "x":  6,
+                                                                                           "y":  156
+                                                                                       },
+                                                                              "selected":  true,
+                                                                              "surface":  null,
+                                                                              "tooltip":  null,
+                                                                              "workspace":  "eb370a9c-4185-4549-ba36-af3b1c932aa7"
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  32967538,
+                                                                              "kind":  "tab",
+                                                                              "label":  "overview-05612037...",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  168,
+                                                                                           "x":  264,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  true,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  3083556,
+                                                                              "kind":  "tab_close",
+                                                                              "label":  "Close tab",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  22,
+                                                                                           "x":  432,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  725302,
+                                                                              "kind":  "pane_zoom",
+                                                                              "label":  "Maximize pane",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1007,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  "Maximize pane",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  9112824,
+                                                                              "kind":  "pane_split_right",
+                                                                              "label":  "Split right",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1036,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  "Split right",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  790690,
+                                                                              "kind":  "pane_split_down",
+                                                                              "label":  "Split down",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1065,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  "Split down",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  528588,
+                                                                              "kind":  "pane_add",
+                                                                              "label":  "+",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1094,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  null,
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  3018562,
+                                                                              "kind":  "pane_browser",
+                                                                              "label":  "New browser",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1123,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  "New browser",
+                                                                              "workspace":  null
+                                                                          },
+                                                                          {
+                                                                              "focused":  true,
+                                                                              "handle":  18417106,
+                                                                              "kind":  "pane_menu",
+                                                                              "label":  "Pane actions",
+                                                                              "layout_visible":  true,
+                                                                              "native_visible":  false,
+                                                                              "pane":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "rect":  {
+                                                                                           "height":  28,
+                                                                                           "width":  28,
+                                                                                           "x":  1152,
+                                                                                           "y":  4
+                                                                                       },
+                                                                              "selected":  false,
+                                                                              "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                              "tooltip":  "Pane actions",
+                                                                              "workspace":  null
+                                                                          }
+                                                                      ],
+                                                         "dpi":  96,
+                                                         "sidebar_actual_width":  260,
+                                                         "sidebar_capacity":  11,
+                                                         "sidebar_dragging":  false,
+                                                         "sidebar_footer_height_dip":  36,
+                                                         "sidebar_footer_top":  725,
+                                                         "sidebar_gutter_width":  4,
+                                                         "sidebar_list_bottom":  725,
+                                                         "sidebar_list_top":  40,
+                                                         "sidebar_offset":  0,
+                                                         "sidebar_pager_visible":  false,
+                                                         "sidebar_width_dip":  260,
+                                                         "theme":  "dark",
+                                                         "workspace_row_height_dip":  58
+                                                     },
+                                          "close_accepted":  false,
+                                          "editor_open_admitted":  0,
+                                          "editor_open_pending":  0,
+                                          "editor_picker_pending":  false,
+                                          "editors":  [
+
+                                                      ],
+                                          "layout":  {
+                                                         "dividers":  [
+
+                                                                      ],
+                                                         "panes":  [
+                                                                       [
+                                                                           "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                           {
+                                                                               "height":  753,
+                                                                               "width":  916,
+                                                                               "x":  264,
+                                                                               "y":  4
+                                                                           }
+                                                                       ]
+                                                                   ]
+                                                     },
+                                          "overview":  {
+                                                           "capture_budget_expired":  false,
+                                                           "capture_budget_ms":  5000,
+                                                           "capture_elapsed_ms":  2508,
+                                                           "cards":  [
+                                                                         {
+                                                                             "active":  false,
+                                                                             "button":  594162,
+                                                                             "close":  7540076,
+                                                                             "name":  "한글 한 é 😀 \u0026 overview",
+                                                                             "previews":  [
+                                                                                              {
+                                                                                                  "error":  "CapturePreview timed out",
+                                                                                                  "height":  null,
+                                                                                                  "rect":  {
+                                                                                                               "height":  200,
+                                                                                                               "width":  320,
+                                                                                                               "x":  0,
+                                                                                                               "y":  0
+                                                                                                           },
+                                                                                                  "source_png_sha256":  null,
+                                                                                                  "status":  "Preview unavailable",
+                                                                                                  "surface":  "28123b6f-9a04-4964-9d48-85ff910c8d17",
+                                                                                                  "width":  null
+                                                                                              }
+                                                                                          ],
+                                                                             "workspace":  "3adc259b-4423-4f1b-9e7f-622b5465d5ba"
+                                                                         },
+                                                                         {
+                                                                             "active":  false,
+                                                                             "button":  88280054,
+                                                                             "close":  3018868,
+                                                                             "name":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                             "previews":  [
+                                                                                              {
+                                                                                                  "error":  "CapturePreview timed out",
+                                                                                                  "height":  null,
+                                                                                                  "rect":  {
+                                                                                                               "height":  200,
+                                                                                                               "width":  159,
+                                                                                                               "x":  0,
+                                                                                                               "y":  0
+                                                                                                           },
+                                                                                                  "source_png_sha256":  null,
+                                                                                                  "status":  "Preview unavailable",
+                                                                                                  "surface":  "d29e3258-8bd8-40ed-b8df-7cca1c6a8810",
+                                                                                                  "width":  null
+                                                                                              },
+                                                                                              {
+                                                                                                  "error":  "Preview capture slots are awaiting expired callbacks",
+                                                                                                  "height":  null,
+                                                                                                  "rect":  {
+                                                                                                               "height":  200,
+                                                                                                               "width":  158,
+                                                                                                               "x":  162,
+                                                                                                               "y":  0
+                                                                                                           },
+                                                                                                  "source_png_sha256":  null,
+                                                                                                  "status":  "Preview unavailable",
+                                                                                                  "surface":  "7a83b60e-441d-48cd-b924-4ede7974b8b1",
+                                                                                                  "width":  null
+                                                                                              }
+                                                                                          ],
+                                                                             "workspace":  "64d11ce6-b27a-427f-b306-6a3a50718077"
+                                                                         },
+                                                                         {
+                                                                             "active":  true,
+                                                                             "button":  10488978,
+                                                                             "close":  1708126,
+                                                                             "name":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                             "previews":  [
+                                                                                              {
+                                                                                                  "error":  "Preview capture slots are awaiting expired callbacks",
+                                                                                                  "height":  null,
+                                                                                                  "rect":  {
+                                                                                                               "height":  200,
+                                                                                                               "width":  320,
+                                                                                                               "x":  0,
+                                                                                                               "y":  0
+                                                                                                           },
+                                                                                                  "source_png_sha256":  null,
+                                                                                                  "status":  "Preview unavailable",
+                                                                                                  "surface":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                                                  "width":  null
+                                                                                              }
+                                                                                          ],
+                                                                             "workspace":  "eb370a9c-4185-4549-ba36-af3b1c932aa7"
+                                                                         }
+                                                                     ],
+                                                           "columns":  3,
+                                                           "dismiss":  528654,
+                                                           "focused_index":  2,
+                                                           "generation":  1,
+                                                           "offset":  0,
+                                                           "open":  true,
+                                                           "parent":  12586280,
+                                                           "pending_captures":  2,
+                                                           "preview_source":  "owned_webview2_capture_preview",
+                                                           "queued_captures":  0,
+                                                           "status":  856382,
+                                                           "viewport":  4657122,
+                                                           "window":  856216
+                                                       },
+                                          "popup":  {
+                                                        "active":  0,
+                                                        "last_error":  null,
+                                                        "limit":  16,
+                                                        "opened":  0,
+                                                        "pending":  0,
+                                                        "pending_limit":  8,
+                                                        "rejected":  0
+                                                    },
+                                          "search_dialog":  null,
+                                          "state":  {
+                                                        "error":  null,
+                                                        "path":  null,
+                                                        "saving":  false,
+                                                        "window":  null
+                                                    },
+                                          "surfaces":  [
+                                                           {
+                                                               "bounds":  {
+                                                                              "height":  725,
+                                                                              "width":  455,
+                                                                              "x":  725,
+                                                                              "y":  32
+                                                                          },
+                                                               "cols":  47,
+                                                               "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                               "cwd_reported":  true,
+                                                               "exit_code":  null,
+                                                               "id":  "7a83b60e-441d-48cd-b924-4ede7974b8b1",
+                                                               "last_output_ms":  1790586351923,
+                                                               "observed_output_bytes":  359,
+                                                               "output_sequence":  4,
+                                                               "parsed_sequence":  4,
+                                                               "pid":  3820,
+                                                               "ready":  true,
+                                                               "resources_released":  false,
+                                                               "rows":  44,
+                                                               "running":  true,
+                                                               "settings":  {
+                                                                                "background":  "#282c34",
+                                                                                "foreground":  "#ffffff",
+                                                                                "revision":  "00000000-0000-0000-0000-000000000000",
+                                                                                "terminal":  {
+                                                                                                 "cursor_blink":  true,
+                                                                                                 "cursor_style":  "block",
+                                                                                                 "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                                                                 "font_size":  14,
+                                                                                                 "minimap_enabled":  true,
+                                                                                                 "minimap_opacity":  50,
+                                                                                                 "minimap_width":  40,
+                                                                                                 "scrollback":  10000,
+                                                                                                 "theme":  "dark"
+                                                                                             }
+                                                                            },
+                                                               "shell":  {
+                                                                             "args":  [
+
+                                                                                      ],
+                                                                             "program":  "powershell"
+                                                                         },
+                                                               "startup_error":  null,
+                                                               "visible":  false
+                                                           },
+                                                           {
+                                                               "bounds":  {
+                                                                              "height":  725,
+                                                                              "width":  916,
+                                                                              "x":  264,
+                                                                              "y":  32
+                                                                          },
+                                                               "cols":  103,
+                                                               "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                               "cwd_reported":  true,
+                                                               "exit_code":  null,
+                                                               "id":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                               "last_output_ms":  1790586352033,
+                                                               "observed_output_bytes":  359,
+                                                               "output_sequence":  4,
+                                                               "parsed_sequence":  4,
+                                                               "pid":  9176,
+                                                               "ready":  true,
+                                                               "resources_released":  false,
+                                                               "rows":  44,
+                                                               "running":  true,
+                                                               "settings":  {
+                                                                                "background":  "#282c34",
+                                                                                "foreground":  "#ffffff",
+                                                                                "revision":  "00000000-0000-0000-0000-000000000000",
+                                                                                "terminal":  {
+                                                                                                 "cursor_blink":  true,
+                                                                                                 "cursor_style":  "block",
+                                                                                                 "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                                                                 "font_size":  14,
+                                                                                                 "minimap_enabled":  true,
+                                                                                                 "minimap_opacity":  50,
+                                                                                                 "minimap_width":  40,
+                                                                                                 "scrollback":  10000,
+                                                                                                 "theme":  "dark"
+                                                                                             }
+                                                                            },
+                                                               "shell":  {
+                                                                             "args":  [
+
+                                                                                      ],
+                                                                             "program":  "powershell"
+                                                                         },
+                                                               "startup_error":  null,
+                                                               "visible":  true
+                                                           },
+                                                           {
+                                                               "bounds":  {
+                                                                              "height":  725,
+                                                                              "width":  456,
+                                                                              "x":  264,
+                                                                              "y":  32
+                                                                          },
+                                                               "cols":  47,
+                                                               "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                               "cwd_reported":  true,
+                                                               "exit_code":  null,
+                                                               "id":  "d29e3258-8bd8-40ed-b8df-7cca1c6a8810",
+                                                               "last_output_ms":  1790586351331,
+                                                               "observed_output_bytes":  359,
+                                                               "output_sequence":  4,
+                                                               "parsed_sequence":  4,
+                                                               "pid":  15196,
+                                                               "ready":  true,
+                                                               "resources_released":  false,
+                                                               "rows":  44,
+                                                               "running":  true,
+                                                               "settings":  {
+                                                                                "background":  "#282c34",
+                                                                                "foreground":  "#ffffff",
+                                                                                "revision":  "00000000-0000-0000-0000-000000000000",
+                                                                                "terminal":  {
+                                                                                                 "cursor_blink":  true,
+                                                                                                 "cursor_style":  "block",
+                                                                                                 "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                                                                 "font_size":  14,
+                                                                                                 "minimap_enabled":  true,
+                                                                                                 "minimap_opacity":  50,
+                                                                                                 "minimap_width":  40,
+                                                                                                 "scrollback":  10000,
+                                                                                                 "theme":  "dark"
+                                                                                             }
+                                                                            },
+                                                               "shell":  {
+                                                                             "args":  [
+
+                                                                                      ],
+                                                                             "program":  "powershell"
+                                                                         },
+                                                               "startup_error":  null,
+                                                               "visible":  false
+                                                           },
+                                                           {
+                                                               "bounds":  {
+                                                                              "height":  725,
+                                                                              "width":  916,
+                                                                              "x":  264,
+                                                                              "y":  32
+                                                                          },
+                                                               "cols":  103,
+                                                               "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                               "cwd_reported":  true,
+                                                               "exit_code":  null,
+                                                               "id":  "28123b6f-9a04-4964-9d48-85ff910c8d17",
+                                                               "last_output_ms":  1790586350139,
+                                                               "observed_output_bytes":  456,
+                                                               "output_sequence":  10,
+                                                               "parsed_sequence":  10,
+                                                               "pid":  37088,
+                                                               "ready":  true,
+                                                               "resources_released":  false,
+                                                               "rows":  44,
+                                                               "running":  true,
+                                                               "settings":  {
+                                                                                "background":  "#282c34",
+                                                                                "foreground":  "#ffffff",
+                                                                                "revision":  "00000000-0000-0000-0000-000000000000",
+                                                                                "terminal":  {
+                                                                                                 "cursor_blink":  true,
+                                                                                                 "cursor_style":  "block",
+                                                                                                 "font_family":  "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+                                                                                                 "font_size":  14,
+                                                                                                 "minimap_enabled":  true,
+                                                                                                 "minimap_opacity":  50,
+                                                                                                 "minimap_width":  40,
+                                                                                                 "scrollback":  10000,
+                                                                                                 "theme":  "dark"
+                                                                                             }
+                                                                            },
+                                                               "shell":  {
+                                                                             "args":  [
+
+                                                                                      ],
+                                                                             "program":  "cmd"
+                                                                         },
+                                                               "startup_error":  null,
+                                                               "visible":  false
+                                                           }
+                                                       ],
+                                          "window_handle":  12586280,
+                                          "workspaces":  [
+                                                             {
+                                                                 "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                 "focused":  "4b8c417e-5293-4f2a-b028-25399316dc84",
+                                                                 "id":  "3adc259b-4423-4f1b-9e7f-622b5465d5ba",
+                                                                 "name":  "한글 한 é 😀 \u0026 overview",
+                                                                 "root":  {
+                                                                              "content":  {
+                                                                                              "active":  "28123b6f-9a04-4964-9d48-85ff910c8d17",
+                                                                                              "surfaces":  [
+                                                                                                               {
+                                                                                                                   "id":  "28123b6f-9a04-4964-9d48-85ff910c8d17",
+                                                                                                                   "kind":  {
+                                                                                                                                "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                                                                                "shell":  null,
+                                                                                                                                "type":  "terminal"
+                                                                                                                            },
+                                                                                                                   "title":  "overview-05612037...",
+                                                                                                                   "title_locked":  false
+                                                                                                               }
+                                                                                                           ],
+                                                                                              "type":  "tabs"
+                                                                                          },
+                                                                              "id":  "4b8c417e-5293-4f2a-b028-25399316dc84",
+                                                                              "kind":  "leaf"
+                                                                          }
+                                                             },
+                                                             {
+                                                                 "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                 "focused":  "c9ae97fc-8911-47e6-b57a-9f8496b7b139",
+                                                                 "id":  "64d11ce6-b27a-427f-b306-6a3a50718077",
+                                                                 "name":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                 "root":  {
+                                                                              "direction":  "vertical",
+                                                                              "first":  {
+                                                                                            "content":  {
+                                                                                                            "active":  "d29e3258-8bd8-40ed-b8df-7cca1c6a8810",
+                                                                                                            "surfaces":  [
+                                                                                                                             {
+                                                                                                                                 "id":  "d29e3258-8bd8-40ed-b8df-7cca1c6a8810",
+                                                                                                                                 "kind":  {
+                                                                                                                                              "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                                                                                              "shell":  null,
+                                                                                                                                              "type":  "terminal"
+                                                                                                                                          },
+                                                                                                                                 "title":  "overview-05612037...",
+                                                                                                                                 "title_locked":  false
+                                                                                                                             }
+                                                                                                                         ],
+                                                                                                            "type":  "tabs"
+                                                                                                        },
+                                                                                            "id":  "5865f747-d9db-4dd9-a9b3-5a63d5d821dd",
+                                                                                            "kind":  "leaf"
+                                                                                        },
+                                                                              "id":  "5e4ecd39-471f-4cfb-a023-a9fc3aeb636e",
+                                                                              "kind":  "split",
+                                                                              "ratio":  0.5,
+                                                                              "second":  {
+                                                                                             "content":  {
+                                                                                                             "active":  "7a83b60e-441d-48cd-b924-4ede7974b8b1",
+                                                                                                             "surfaces":  [
+                                                                                                                              {
+                                                                                                                                  "id":  "7a83b60e-441d-48cd-b924-4ede7974b8b1",
+                                                                                                                                  "kind":  {
+                                                                                                                                               "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                                                                                               "shell":  null,
+                                                                                                                                               "type":  "terminal"
+                                                                                                                                           },
+                                                                                                                                  "title":  "overview-05612037...",
+                                                                                                                                  "title_locked":  false
+                                                                                                                              }
+                                                                                                                          ],
+                                                                                                             "type":  "tabs"
+                                                                                                         },
+                                                                                             "id":  "c9ae97fc-8911-47e6-b57a-9f8496b7b139",
+                                                                                             "kind":  "leaf"
+                                                                                         }
+                                                                          }
+                                                             },
+                                                             {
+                                                                 "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                 "focused":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                 "id":  "eb370a9c-4185-4549-ba36-af3b1c932aa7",
+                                                                 "name":  "overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                 "root":  {
+                                                                              "content":  {
+                                                                                              "active":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                                              "surfaces":  [
+                                                                                                               {
+                                                                                                                   "id":  "66d65b21-d927-4d25-82a1-84d92b1bec65",
+                                                                                                                   "kind":  {
+                                                                                                                                "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                                                                                                "shell":  null,
+                                                                                                                                "type":  "terminal"
+                                                                                                                            },
+                                                                                                                   "title":  "overview-05612037...",
+                                                                                                                   "title_locked":  false
+                                                                                                               }
+                                                                                                           ],
+                                                                                              "type":  "tabs"
+                                                                                          },
+                                                                              "id":  "c8ab5310-e1a7-4c47-ba6b-8fb10f8eb571",
+                                                                              "kind":  "leaf"
+                                                                          }
+                                                             }
+                                                         ],
+                                          "zoomed_pane":  null
+                                      },
+                             "name":  "preview-settled-before-raster-assertion",
+                             "controls":  [
+                                              {
+                                                  "Handle":  1708126,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close workspace overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                  "X":  1109,
+                                                  "Y":  11,
+                                                  "Width":  28,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  10488978,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open workspace overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                  "X":  778,
+                                                  "Y":  8,
+                                                  "Width":  365,
+                                                  "Height":  296,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  3018868,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close workspace overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                  "X":  728,
+                                                  "Y":  11,
+                                                  "Width":  28,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  88280054,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open workspace overview-05612037-a42e-4a45-bd70-525bcce3e4ed",
+                                                  "X":  397,
+                                                  "Y":  8,
+                                                  "Width":  365,
+                                                  "Height":  296,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  7540076,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close workspace 한글 한 é 😀 \u0026 overview",
+                                                  "X":  347,
+                                                  "Y":  11,
+                                                  "Width":  28,
+                                                  "Height":  26,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              },
+                                              {
+                                                  "Handle":  594162,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open workspace 한글 한 é 😀 \u0026 overview",
+                                                  "X":  16,
+                                                  "Y":  8,
+                                                  "Width":  365,
+                                                  "Height":  296,
+                                                  "Style":  1342242827,
+                                                  "Font":  -653647232,
+                                                  "Shown":  true,
+                                                  "Enabled":  true
+                                              }
+                                          ]
+                         },
+                         {
+                             "stdoutComplete":  true,
+                             "name":  "host-exit",
+                             "exitCode":  0,
+                             "stderrComplete":  true,
+                             "pid":  40864,
+                             "stderr":  "",
+                             "stdout":  ""
+                         }
+                     ],
+    "artifacts":  [
+
+                  ],
+    "desktopInput":  false,
+    "clipboardAccess":  false,
+    "imeSimulation":  false,
+    "deferred":  "Physical keyboard/focus/IME, per-monitor DPI, accessibility and composed visual acceptance are not established.",
+    "status":  "failed",
+    "error":  "No real owned WebView preview captured; visual subset remains unverified",
+    "clientPids":  [
+                       32144,
+                       36928,
+                       32648,
+                       37008,
+                       18216,
+                       33932,
+                       32828,
+                       40648,
+                       33548,
+                       15628,
+                       29192,
+                       40140,
+                       40704,
+                       40364,
+                       37464,
+                       15496,
+                       39956,
+                       35024,
+                       28776,
+                       9660,
+                       31796,
+                       10500,
+                       32308,
+                       31980,
+                       29448,
+                       27460,
+                       23376,
+                       37072,
+                       13168,
+                       38548,
+                       36236,
+                       40828,
+                       9844,
+                       26136,
+                       31416,
+                       40272,
+                       1588,
+                       40324,
+                       944,
+                       28476,
+                       30868,
+                       3484,
+                       26364,
+                       2756,
+                       22120
+                   ],
+    "shells":  [
+                   3820,
+                   9176,
+                   15196,
+                   37088
+               ],
+    "elapsedMs":  5757,
+    "finished":  "2026-09-28T09:05:55.2615834Z"
+}

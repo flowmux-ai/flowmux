@@ -1,0 +1,49 @@
+{
+  "cargo_result": "windows/dist/checks/ui-parity-focus-debug-c843297c-9015-45d8-9a4b-c165bdb9af1f/result.json",
+  "cargo_status": "failed",
+  "reason": "Fresh linked deps separately staged; canonical GUI publication may fail because the user app holds it open. Running GUI unchanged. Cargo can update other canonical entrypoints.",
+  "files": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux.exe",
+      "path": "windows/dist/ui-parity-focus-debug/flowmux.exe",
+      "sha256": "dabc76357ed25023feac9f1f63f6371b23ed11c0ac1168d1b8524fae60646b29",
+      "bytes": 32794112,
+      "mtime_utc": "2026-09-28T09:24:23.053597+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmuxctl.exe",
+      "path": "windows/dist/ui-parity-focus-debug/flowmuxctl.exe",
+      "sha256": "16e0db5a81cde02143ea62a619b684931fc72a4aef88f2506cdca14cab621993",
+      "bytes": 3363328,
+      "mtime_utc": "2026-09-28T09:24:17.614490+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux_command.exe",
+      "path": "windows/dist/ui-parity-focus-debug/flowmux-command.exe",
+      "sha256": "96e9e2fba7f64060a46dfdbe8fd5e11661122bd1d45c62c4854779713b8ce985",
+      "bytes": 3474432,
+      "mtime_utc": "2026-09-28T09:24:17.650528+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/deps/flowmux_command.exe",
+      "path": "windows/dist/ui-parity-focus-debug/flowmux.com",
+      "sha256": "96e9e2fba7f64060a46dfdbe8fd5e11661122bd1d45c62c4854779713b8ce985",
+      "bytes": 3474432,
+      "mtime_utc": "2026-09-28T09:24:17.650528+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/conpty.dll",
+      "path": "windows/dist/ui-parity-focus-debug/conpty.dll",
+      "sha256": "39fba2713e2495117b1591ae8c32a3b904bea7aa66069cf7815e2844c76d75d8",
+      "bytes": 109920,
+      "mtime_utc": "2026-09-27T13:06:38.039997+00:00"
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/debug/x64/OpenConsole.exe",
+      "path": "windows/dist/ui-parity-focus-debug/x64/OpenConsole.exe",
+      "sha256": "b7fd936c2668b87b9ecf7b3366dc6568afc1c6f981874cba3e955a1c35cf8160",
+      "bytes": 1066296,
+      "mtime_utc": "2026-09-27T13:06:38.064433+00:00"
+    }
+  ]
+}

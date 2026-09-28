@@ -32,6 +32,41 @@ pub(super) struct SidebarLayout {
     pub capacity: usize,
     pub pager: bool,
 }
+
+pub(super) struct PaneHeaderLayout {
+    /// Linux order: zoom, split right, split down, add tab, browser, pane menu.
+    pub tools: [Option<model::Rect>; 6],
+    pub tabs_width: i32,
+}
+
+pub(super) fn pane_header_layout(area: model::Rect, dpi: u32) -> PaneHeaderLayout {
+    let px = |value: i32| (value as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
+    let mut layout = PaneHeaderLayout {
+        tools: [None; 6],
+        tabs_width: 0,
+    };
+    if area.width <= 0 || area.height <= 0 {
+        return layout;
+    }
+    let width = px(28);
+    let gap = px(1);
+    let tab_gap = px(4);
+    let available = (area.width - px(30) - tab_gap).max(0);
+    let count = ((available + gap) / (width + gap)).clamp(1, 6) as usize;
+    let occupied = (count as i32 * width + (count as i32 - 1) * gap).min(area.width);
+    let start = area.x + area.width - occupied;
+    layout.tabs_width = (area.width - occupied - tab_gap).max(0);
+    for (offset, slot) in layout.tools[6 - count..].iter_mut().enumerate() {
+        let x = start + offset as i32 * (width + gap);
+        *slot = Some(model::Rect {
+            x,
+            y: area.y,
+            width: width.min(area.x + area.width - x),
+            height: width.min(area.height),
+        });
+    }
+    layout
+}
 impl App {
     pub(super) fn sidebar_layout(&self, height: i32, dpi: u32) -> SidebarLayout {
         let px = |n: i32| (n as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
@@ -110,11 +145,13 @@ impl App {
                 }
             }
             Action::Settings
+            | Action::Overview
             | Action::ShowFiles
             | Action::SearchAll
             | Action::OpenEditor
             | Action::Notifications => chrome::Role::Icon {
                 kind: match action {
+                    Action::Overview => chrome::ChromeIcon::Overview,
                     Action::Settings => chrome::ChromeIcon::Settings,
                     Action::ShowFiles => chrome::ChromeIcon::Files,
                     Action::SearchAll => chrome::ChromeIcon::Search,
@@ -124,10 +161,27 @@ impl App {
                 marked: matches!(action, Action::Notifications)
                     && self.notifications.store.unread_count() > 0,
             },
-            Action::PaneAdd(..)
-            | Action::PaneMenu(..)
-            | Action::TabClose(..)
-            | Action::NewWorkspace => chrome::Role::Tool,
+            Action::PaneZoom(pane, _) => chrome::Role::Icon {
+                kind: if self.zoomed == Some(pane) {
+                    chrome::ChromeIcon::Restore
+                } else {
+                    chrome::ChromeIcon::Maximize
+                },
+                marked: self.zoomed == Some(pane),
+            },
+            Action::PaneSplitRight(..)
+            | Action::PaneSplitDown(..)
+            | Action::PaneBrowser(..)
+            | Action::PaneMenu(..) => chrome::Role::Icon {
+                kind: match action {
+                    Action::PaneSplitRight(..) => chrome::ChromeIcon::SplitRight,
+                    Action::PaneSplitDown(..) => chrome::ChromeIcon::SplitDown,
+                    Action::PaneBrowser(..) => chrome::ChromeIcon::Browser,
+                    _ => chrome::ChromeIcon::More,
+                },
+                marked: false,
+            },
+            Action::PaneAdd(..) | Action::TabClose(..) | Action::NewWorkspace => chrome::Role::Tool,
             _ => chrome::Role::Button,
         }
     }
@@ -137,9 +191,83 @@ impl App {
                 if let Some(label) = self.workspace_caption(id) {
                     set_caption(control.hwnd, &label);
                 }
+            } else if let Action::PaneZoom(pane, _) = control.action {
+                set_caption(
+                    control.hwnd,
+                    if self.zoomed == Some(pane) {
+                        "Restore pane"
+                    } else {
+                        "Maximize pane"
+                    },
+                );
             }
             chrome::set_role(control.hwnd, self.chrome_role(&control.action));
         }
+    }
+    pub(super) fn pane_surface_ids(&self, pane: PaneId) -> anyhow::Result<Vec<SurfaceId>> {
+        self.workspaces
+            .iter()
+            .flat_map(|workspace| workspace.leaves())
+            .find(|(id, _, _)| *id == pane)
+            .map(|(_, _, tabs)| tabs.into_iter().map(|tab| tab.id).collect())
+            .context("Pane no longer exists")
+    }
+    /// Seal every editor before removing any tab or terminal process in the pane.
+    /// True means the asynchronous editor barrier owns the eventual reply.
+    pub(super) fn close_pane(
+        &mut self,
+        pane: PaneId,
+        reply: Option<ipc::Reply>,
+    ) -> anyhow::Result<bool> {
+        anyhow::ensure!(
+            !self.close_accepted && self.close_request.is_none(),
+            "window is saving before close"
+        );
+        let surfaces = self.pane_surface_ids(pane)?;
+        let workspace = self.locate(surfaces[0]).context("Pane no longer exists")?.0;
+        anyhow::ensure!(
+            self.workspaces[workspace].leaves().len() > 1,
+            "cannot close the final pane; close its workspace or window instead"
+        );
+        anyhow::ensure!(
+            self.editor_open_pending.is_empty(),
+            "wait for editor open preparation to finish before closing a pane"
+        );
+        if self.editor_guard(
+            super::editor::Operation::Pane {
+                pane,
+                surfaces: surfaces.clone(),
+            },
+            reply,
+        )? {
+            return Ok(true);
+        }
+        // Removing a cloned tree is atomic with respect to the UI model. No
+        // terminal or editor is dropped until all validation has succeeded.
+        let next = match self.workspaces[workspace].root.clone().remove_leaf(pane) {
+            flowmux_core::RemoveOutcome::Replaced(root) => root,
+            _ => anyhow::bail!("Pane changed before close"),
+        };
+        let focused = self.workspaces[workspace].focused == pane;
+        self.workspaces[workspace].root = next;
+        if focused {
+            self.workspaces[workspace].focused = self.workspaces[workspace]
+                .root
+                .first_leaf_id()
+                .expect("another pane remains after close");
+        }
+        if self.zoomed == Some(pane) {
+            self.zoomed = None;
+        }
+        for surface in surfaces {
+            self.remove_surface(surface);
+        }
+        self.search_tick()?;
+        self.rebuild_without_focus()?;
+        if focused && self.active_workspace == workspace {
+            self.focus_active()?;
+        }
+        Ok(false)
     }
     pub(super) fn pane_actions_menu(
         &mut self,
@@ -150,29 +278,11 @@ impl App {
             .locate(surface)
             .context("Pane source no longer exists")?;
         anyhow::ensure!(current == pane, "Pane source moved");
-        let tabs = self.workspaces[workspace]
-            .leaves()
-            .into_iter()
-            .find(|(id, _, _)| *id == pane)
-            .context("Pane no longer exists")?
-            .2;
-        let mut labels = vec![
-            "New terminal tab".to_owned(),
-            "New browser tab".into(),
-            "Open file…".into(),
-            "Split right".into(),
-            "Split down".into(),
-            "Find in terminal".into(),
-            "Search all terminals".into(),
-            "Maximize / restore pane".into(),
-            "Move tab…".into(),
-            "Close tab".into(),
-            "Workspace actions…".into(),
-        ];
-        labels.extend(
-            tabs.iter()
-                .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
-        );
+        let disabled = if self.workspaces[workspace].leaves().len() == 1 {
+            vec![1]
+        } else {
+            vec![]
+        };
         let hwnd = self
             .controls
             .iter()
@@ -182,10 +292,56 @@ impl App {
         unsafe {
             GetWindowRect(hwnd, &mut rect);
         }
+        if self.popup(&["Close Pane"], &disabled, (rect.left, rect.bottom))? == 1 {
+            anyhow::ensure!(
+                self.locate(surface)
+                    .is_some_and(|(_, current, _)| current == pane),
+                "Pane source changed while menu was open"
+            );
+            self.close_pane(pane, None)?;
+            return self.focus_active();
+        }
+        self.focus_active()
+    }
+    fn tab_actions_menu(
+        &mut self,
+        pane: PaneId,
+        surface: SurfaceId,
+        point: (i32, i32),
+    ) -> anyhow::Result<()> {
+        let (workspace, current, _) = self.locate(surface).context("Tab no longer exists")?;
+        anyhow::ensure!(current == pane, "Tab moved before opening its menu");
+        let tabs = self.workspaces[workspace]
+            .leaves()
+            .into_iter()
+            .find(|(id, _, _)| *id == pane)
+            .context("Pane no longer exists")?
+            .2;
+        let mut labels: Vec<String> = [
+            "Rename tab…",
+            "Move tab…",
+            "Close tab",
+            "Find in terminal",
+            "Search all terminals",
+            "Open file…",
+            "New terminal tab",
+            "New browser tab",
+            "Split right",
+            "Split down",
+            "Maximize / restore pane",
+            "Workspace actions…",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        labels.extend(
+            tabs.iter()
+                .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
+        );
         let choice = self.popup(
             &labels.iter().map(String::as_str).collect::<Vec<_>>(),
             &[],
-            (rect.left, rect.bottom),
+            point,
         )?;
         if choice == 0 {
             return self.focus_active();
@@ -193,11 +349,11 @@ impl App {
         anyhow::ensure!(
             self.locate(surface)
                 .is_some_and(|(_, current, _)| current == pane),
-            "Pane source changed while menu was open"
+            "Tab moved while menu was open"
         );
-        if choice >= 12 {
+        if choice >= 13 {
             let target = tabs
-                .get(choice - 12)
+                .get(choice - 13)
                 .context("Tab selection no longer exists")?
                 .id;
             anyhow::ensure!(
@@ -209,17 +365,20 @@ impl App {
             return self.rebuild();
         }
         self.select(surface)?;
+        if choice == 1 {
+            return self.edit_metadata(EditTarget::TabName(surface));
+        }
         self.action(match choice {
-            1 => Action::NewTab,
-            2 => Action::NewBrowser,
-            3 => Action::OpenEditor,
-            4 => Action::Vertical,
-            5 => Action::Horizontal,
-            6 => Action::Find,
-            7 => Action::SearchAll,
-            8 => Action::TogglePaneZoom,
-            9 => Action::MoveTabMenu,
-            10 => Action::CloseTab,
+            2 => Action::MoveTabMenu,
+            3 => Action::CloseTab,
+            4 => Action::Find,
+            5 => Action::SearchAll,
+            6 => Action::OpenEditor,
+            7 => Action::NewTab,
+            8 => Action::NewBrowser,
+            9 => Action::Vertical,
+            10 => Action::Horizontal,
+            11 => Action::TogglePaneZoom,
             _ => Action::WorkspaceMenu,
         })
     }
@@ -231,10 +390,15 @@ impl App {
                 Action::TabClose(pane,surface)=>("tab_close",Some(pane),Some(surface),None,false),
                 Action::PaneAdd(pane,surface)=>("pane_add",Some(pane),Some(surface),None,false),
                 Action::PaneMenu(pane,surface)=>("pane_menu",Some(pane),Some(surface),None,false),
+                Action::PaneZoom(pane,surface)=>("pane_zoom",Some(pane),Some(surface),None,false),
+                Action::PaneSplitRight(pane,surface)=>("pane_split_right",Some(pane),Some(surface),None,false),
+                Action::PaneSplitDown(pane,surface)=>("pane_split_down",Some(pane),Some(surface),None,false),
+                Action::PaneBrowser(pane,surface)=>("pane_browser",Some(pane),Some(surface),None,false),
                 Action::SidebarScroll(d)=>(if d<0 {"sidebar_previous"}else{"sidebar_next"},None,None,None,false),
                 Action::NewWorkspace=>("workspace_add",None,None,None,false),
                 Action::WorkspaceMenu=>("workspace_header",None,None,None,false),
                 Action::Settings=>("settings",None,None,None,false),
+                Action::Overview=>("overview",None,None,None,false),
                 Action::ShowFiles=>("files",None,None,None,false),
                 Action::SearchAll=>("search_all",None,None,None,false),
                 Action::OpenEditor=>("open_file",None,None,None,false),
@@ -356,13 +520,8 @@ impl App {
                 self.shell_menu(point)
             }
             Action::Workspace(id) => self.workspace_menu(id, Some(point)),
-            Action::Tab(_, id) => {
-                if self.popup(&["Rename tab…"], &[], point)? == 1 {
-                    self.edit_metadata(EditTarget::TabName(id))?;
-                } else {
-                    self.focus_active()?;
-                }
-                Ok(())
+            Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
+                self.tab_actions_menu(pane, surface, point)
             }
             _ => Ok(()),
         }

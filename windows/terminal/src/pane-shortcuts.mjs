@@ -10,6 +10,7 @@ export class PaneShortcuts {
     if (!event.altKey) return;
     if (event.ctrlKey) {
       if (event.code === 'KeyM') return event.repeat ? 'consume' : { type: 'toggle_pane_zoom' };
+      if (event.code === 'KeyK') return event.repeat ? 'consume' : { type: 'toggle_overview' };
       return;
     }
     const direction = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[event.key];

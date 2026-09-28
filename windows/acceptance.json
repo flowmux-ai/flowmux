@@ -182,9 +182,10 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-output-search-background.json",
-        "evidence/2026-09-28/frontend-tests-output-search.txt"
+        "evidence/2026-09-28/frontend-tests-output-search.txt",
+        "evidence/2026-09-28/ui-parity-next.md"
       ],
-      "notes": "Native hidden Windows host searches parsed retained output across inactive tabs/workspaces with literal/case matching, 500-line pages, native result list and two-stage activation. Korean/NFD/emoji, 260+ physical-row soft wraps, append/move preservation, rewrite/reflow/eviction refusal, alternate isolation and cancellation verified. Native mouse/keyboard/IME, visual layout/DPI, sustained-output/load and SSH integration remain pending. Changed-during-scan terminals are reported unavailable; each page rescans current output."
+      "notes": "Native hidden Windows host searches parsed retained output across inactive tabs/workspaces with literal/case matching, 500-line pages, native result list and two-stage activation. Korean/NFD/emoji, 260+ physical-row soft wraps, append/move preservation, rewrite/reflow/eviction refusal, alternate isolation and cancellation verified. Native mouse/keyboard/IME, visual layout/DPI, sustained-output/load and SSH integration remain pending. Changed-during-scan terminals are reported unavailable; each page rescans current output. The new owned 760x520 modal dialog has four passing hidden native groups for owner lifetime, original Unicode query/row captions, 500-to-700 bounded UI results, selection, empty/error state and close. Double-click activation, body preview font and physical IME/keyboard/DPI remain differences."
     },
     {
       "id": "T12",
@@ -309,7 +310,8 @@
       "evidence": [
         "evidence/2026-09-28/native-workspaces-background.json",
         "evidence/2026-09-28/chrome-details.md",
-        "evidence/2026-09-28/chrome-sidebar.md"
+        "evidence/2026-09-28/chrome-sidebar.md",
+        "evidence/2026-09-28/ui-parity-next.md"
       ],
       "notes": "Native menus, UTF-16 name/color editor and CLI workspace operations implemented. Earlier hidden native hosts verify Unicode/ampersand captions, title locks, 41 reorders with stable identities/processes, hidden caller context, targeted multi-terminal/descendant close and metadata/history restart. The preceding chrome stage verified name/current-cwd two-line captions, Unicode cwd and rename/color updates with stable HWNDs/PIDs, rounded/color styling, and five-workspace overflow with four visible rows, active first/last visibility and pager endpoints. Final workspace remains protected; empty-window UI, drag reorder, automatic name reset, broader status metadata, real menu/dialog/IME/DPI/high-contrast/accessibility remain pending. The sidebar now supports per-window preferred width 160–640 DIP (default 260), temporary clamping to reserve 320 DIP of main area, drag cancellation and preserving preference on no-movement clicks. Footer icons/header bell and overflow-only pager placement are implemented; current actual-host drag/layout/restore checks remain pending."
     },
@@ -318,7 +320,8 @@
       "feature": "가로·세로 중첩 split·경계 resize",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-panes-background.json"
+        "evidence/2026-09-28/native-panes-background.json",
+        "evidence/2026-09-28/ui-parity-next.md"
       ],
       "notes": "Nested divider geometry and native drag handlers implemented. Hidden Windows verification checks CLI ratios, native WebView bounds, real ConPTY sizes, invalid request invariance, inactive workspace isolation and restart persistence. Actual divider drag, very small windows, DPI and composition during resize remain pending under background-only constraint."
     },
@@ -329,7 +332,8 @@
       "evidence": [
         "evidence/2026-09-27/native-tab-move-background.json",
         "evidence/2026-09-28/native-workspaces-background.json",
-        "evidence/2026-09-28/chrome-details.md"
+        "evidence/2026-09-28/chrome-details.md",
+        "evidence/2026-09-28/ui-parity-next.md"
       ],
       "notes": "Hidden native hosts verify tab moves/reorder with stable process, surface, output, cwd and calling-surface routing; user-locked Unicode tab names survive shell title output and restart without activation. New hidden chrome checks verify focused-pane tab accents. Terminal/browser/editor glyphs were visually inspected in a separate mixed-surface capture; per-pixel icon identity is not asserted. Native rename dialog constructs hidden and preserves UTF-16 values, but actual menu/dialog IME and keyboard remain pending. Drag/drop, automatic title reset, cross-window and broader feature coverage remain."
     },
@@ -339,7 +343,9 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-panes-background.json",
-        "evidence/2026-09-28/chrome-details.md"
+        "evidence/2026-09-28/chrome-details.md",
+        "evidence/2026-09-28/ui-parity-next.md",
+        "evidence/2026-09-28/ui-parity-focus.md"
       ],
       "notes": "Directional focus and temporary maximize/restore implemented with CLI, native button and guarded fixed shortcuts. Hidden Windows verification checks hidden Korean output, 40 zoom transitions with size convergence, stable processes, structural transitions and restart restoring normal layout. New production native renders verify focused-pane selected-tab accents. Physical keyboard/button/focus, real IME, DPI/high-contrast rendering and accessibility remain pending."
     },
@@ -361,8 +367,12 @@
     {
       "id": "U07",
       "feature": "workspace overview",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/ui-parity-next.md",
+        "evidence/2026-09-28/ui-parity-focus.md"
+      ],
+      "notes": "Owned in-window overview implements real workspace/pane cards, active state, live Unicode name/order updates, clipped scrolling, exact-HWND select/dismiss/close and existing dirty/final-workspace guards. Hidden native workflow and editor-close checks passed. Capture is limited to ready visible tabs; inactive workspace thumbnails are unavailable. A captured hidden terminal raster showed background/cursor without verified glyphs; capture success is not full visual acceptance. Terminal Ctrl+Alt+K only; physical focus/IME/DPI/accessibility and complete Linux visual parity remain pending. A separate browser case verifies 33,714 source-color pixels in the native overview card and unchanged DOM focus/scroll/PIDs. A later mixed capture includes terminal text, but preview freshness and complete glyph preservation remain unverified."
     },
     {
       "id": "U08",
@@ -371,7 +381,9 @@
       "evidence": [
         "evidence/2026-09-28/native-rust-tests-workspaces.txt",
         "evidence/2026-09-28/chrome-sidebar.md",
-        "evidence/2026-09-28/ui-structure.md"
+        "evidence/2026-09-28/ui-structure.md",
+        "evidence/2026-09-28/ui-parity-next.md",
+        "evidence/2026-09-28/ui-parity-focus.md"
       ],
       "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending. A header notification bell and 36-DIP Settings/Files/Search/Open file icon row now retain native captions and tooltips. The earlier sidebar stage has hidden layout/tooltip evidence. Current structural changes add a nonmodal General/Theme Options window, a 320-DIP owned bell popup, one workbench-right Files dock with conditional forms, and 40-DIP browser toolbar/tools. Hidden native groups pass for Options (5), notifications (9), global Files dock (2), browser geometry/lifecycle (8) and file-operation regression (5). Full popup/dialog/drag-preview and physical interaction acceptance remain open."
     },

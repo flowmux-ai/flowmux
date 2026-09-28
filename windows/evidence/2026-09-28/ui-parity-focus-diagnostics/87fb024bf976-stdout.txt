@@ -1,0 +1,2 @@
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\pane-tools-bc9009af-64cd-4468-8cbe-905e327cfc5e
+{"status":"passed_background_pane_tools_subset","checks":2,"elapsedMs":9140}

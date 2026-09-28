@@ -1,0 +1,7 @@
+"3"개의 인수가 있는 "FindButton"을(를) 호출하는 동안 예외가 발생했습니다. "Refusing non-owned search HWND"
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-s
+earch-dialog.ps1:84 문자:5
++     $button=[SearchDialogFixture]::FindButton($owner,'Search',$proces ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : Exception

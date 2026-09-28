@@ -1,0 +1,30 @@
+    Checking flowmux-windows v0.10.1 (/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows)
+error: the borrowed expression implements the required traits
+   --> src/native/overview.rs:760:26
+    |
+760 |                     wide(&format!("Open workspace {}", workspace.name)).as_ptr(),
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `format!("Open workspace {}", workspace.name)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrows_for_generic_args
+    = note: `-D clippy::needless-borrows-for-generic-args` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::needless_borrows_for_generic_args)]`
+
+error: the borrowed expression implements the required traits
+   --> src/native/overview.rs:764:26
+    |
+764 |                     wide(&format!("Close workspace {}", workspace.name)).as_ptr(),
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `format!("Close workspace {}", workspace.name)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrows_for_generic_args
+
+error: the borrowed expression implements the required traits
+   --> src/native/overview.rs:772:22
+    |
+772 |                 wide(&format!("{} workspaces", self.workspaces.len())).as_ptr(),
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `format!("{} workspaces", self.workspaces.len())`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrows_for_generic_args
+
+error: could not compile `flowmux-windows` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `flowmux-windows` (lib test) due to 3 previous errors

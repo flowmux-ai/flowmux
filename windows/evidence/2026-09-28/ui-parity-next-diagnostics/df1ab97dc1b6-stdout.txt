@@ -1,0 +1,1 @@
+{"status":"passed_hidden_search_dialog_subset","checkCount":4,"elapsedMs":4500,"evidence":"C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\search-dialog-8f6f4bb8-13b9-45a7-8b6d-d5c7d76d0977\\native-search-dialog-background.json"}

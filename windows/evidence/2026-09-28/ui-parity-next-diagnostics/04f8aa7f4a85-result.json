@@ -1,0 +1,13 @@
+{
+    "name":  "ui-parity-next-search",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\run-ui-parity-next-search.ps1",
+    "deadlineSeconds":  60,
+    "status":  "failed",
+    "started":  "2026-09-28T08:54:19.3539585Z",
+    "pid":  30848,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  4.345,
+    "finished":  "2026-09-28T08:54:23.7028772Z"
+}
