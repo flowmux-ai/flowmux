@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "revision": "e240c903-c6d5-4fc6-a045-dcecbaed97f7",
+  "terminal": {
+    "font_family": "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace",
+    "font_size": 14,
+    "theme": "dark",
+    "scrollback": 10000,
+    "cursor_blink": true,
+    "cursor_style": "block",
+    "minimap_enabled": true,
+    "minimap_width": 40,
+    "minimap_opacity": 50
+  },
+  "default_shell": {
+    "program": "powershell",
+    "args": []
+  }
+}

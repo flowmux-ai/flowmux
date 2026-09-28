@@ -188,7 +188,17 @@ fn change(current: &Document, op: &SettingsOp) -> anyhow::Result<Document> {
         SettingsOp::Show => anyhow::bail!("show does not write settings"),
     };
     let default_shell = match op {
-        SettingsOp::Shell { program, args } => {
+        SettingsOp::Shell {
+            program,
+            args,
+            expected,
+        } => {
+            anyhow::ensure!(
+                expected
+                    .as_ref()
+                    .is_none_or(|shell| shell == &current.default_shell),
+                "default shell changed elsewhere; reload values"
+            );
             let shell = crate::shell::Shell {
                 program: program.clone(),
                 args: args.clone(),
@@ -236,11 +246,38 @@ mod tests {
         a.update(&set(SettingKey::FontSize, "20", None)).unwrap();
         b.update(&set(SettingKey::Theme, "light", None)).unwrap();
         assert_eq!(b.read().unwrap().terminal.font_size, 20);
+        let before_shell = a
+            .update(&SettingsOp::Shell {
+                program: "cmd".into(),
+                args: vec!["/d".into()],
+                expected: None,
+            })
+            .unwrap()
+            .default_shell;
+        let next_shell = b
+            .update(&SettingsOp::Shell {
+                program: "cmd".into(),
+                args: vec!["/q".into()],
+                expected: Some(before_shell.clone()),
+            })
+            .unwrap();
+        let after_shell = std::fs::read(&path).unwrap();
+        assert!(a
+            .update(&SettingsOp::Shell {
+                program: "cmd".into(),
+                args: vec![],
+                expected: Some(before_shell),
+            })
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), after_shell);
+        assert_eq!(a.read().unwrap().default_shell, next_shell.default_shell);
+        assert_eq!(a.read().unwrap().terminal.font_size, 20);
         let previous = std::fs::read(&path).unwrap();
         assert!(a
             .update(&SettingsOp::Shell {
                 program: "cmd".into(),
-                args: vec!["한".repeat(25000)]
+                args: vec!["한".repeat(25000)],
+                expected: None,
             })
             .is_err());
         assert_eq!(std::fs::read(&path).unwrap(), previous);

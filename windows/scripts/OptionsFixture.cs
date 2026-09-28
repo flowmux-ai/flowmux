@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Only direct messages to exact owned hidden HWNDs; no desktop/IME input or focus.
+// Only direct messages to exact owned hidden HWNDs; no desktop input or focus.
+// Optional composition messages test app guards, not OS IME/TSF behavior.
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -27,4 +28,11 @@ public static class OptionsFixture {
     public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     public static void SetText(long parent,long child,int owner,string value) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned input is disabled");IntPtr result;if(SendMessageTimeout(hwnd,0xC,IntPtr.Zero,value,2,1000,out result)==IntPtr.Zero||result==IntPtr.Zero)throw new InvalidOperationException("Owned text edit failed");Owned(parent,owner);}
     public static void Select(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned combo is disabled");if(Message(hwnd,0x14E,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned combo selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    public sealed class Bounds {public long Parent;public int X,Y,Width,Height;}
+    [DllImport("user32.dll")] private static extern int MapWindowPoints(IntPtr from,IntPtr to,ref Rect rect,uint count);
+    public static long Parent(long handle,int owner) {return GetParent(Owned(handle,owner)).ToInt64();}
+    public static Bounds RelativeBounds(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);Rect bounds;if(!GetWindowRect(hwnd,out bounds))throw new InvalidOperationException("Cannot read owned control bounds");MapWindowPoints(IntPtr.Zero,new IntPtr(parent),ref bounds,2);return new Bounds{Parent=parent,X=bounds.Left,Y=bounds.Top,Width=bounds.Right-bounds.Left,Height=bounds.Bottom-bounds.Top};}
+    // Exercises only the app's message guard, not OS IME/TSF composition behavior.
+    public static void CompositionGuard(long parent,long child,int owner,bool active) {var hwnd=Child(parent,child,owner);Message(hwnd,active?0x10DU:0x10EU,IntPtr.Zero,IntPtr.Zero);Owned(parent,owner);}
+    public static void Scroll(long window,int owner,bool end) {Message(Owned(window,owner),0x115,new IntPtr(end?7:6),IntPtr.Zero);}
 }

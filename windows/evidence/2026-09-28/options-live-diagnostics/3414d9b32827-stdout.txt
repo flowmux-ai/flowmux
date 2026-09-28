@@ -1,0 +1,1 @@
+Verified ConPTY 1.24.260710001 -> windows/target/x86_64-pc-windows-msvc/debug/deps

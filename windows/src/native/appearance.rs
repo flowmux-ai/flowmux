@@ -141,6 +141,7 @@ impl App {
                 if !self.background_test {
                     self.focus_active()?;
                 }
+                self.options_save_next()?;
                 return Ok(());
             }
             UiAction::Reload => {
@@ -149,8 +150,24 @@ impl App {
                 }
                 return Ok(());
             }
+            UiAction::Changed(index) => {
+                panel.changed(index);
+                return self.options_save_next();
+            }
+            UiAction::Save => return self.options_save_next(),
+            UiAction::Scroll(delta) => {
+                panel.scroll_by(delta);
+                return Ok(());
+            }
+            UiAction::ScrollTo(position) => {
+                panel.scroll_to(position);
+                return Ok(());
+            }
+            UiAction::Reveal(index) => {
+                panel.reveal(index);
+                return Ok(());
+            }
             UiAction::Reset => usize::MAX,
-            UiAction::Apply(index) => index,
         };
         let operation = if index == usize::MAX {
             if !panel.reset_ready() {
@@ -166,7 +183,25 @@ impl App {
         if let Some(panel) = self.options.as_mut() {
             match result {
                 Ok(()) => panel.begin(index),
-                Err(error) => panel.status(&format!("{error:#}")),
+                Err(error) => panel.failed(index, &format!("{error:#}")),
+            }
+        }
+        Ok(())
+    }
+    fn options_save_next(&mut self) -> anyhow::Result<()> {
+        // At most ten coalesced fields, never a queue of individual keystrokes.
+        while let Some(index) = self.options.as_mut().and_then(Panel::next_due) {
+            let panel = self.options.as_ref().unwrap();
+            let edit_id = panel.edit_id;
+            let operation = panel.operation(index, &self.settings);
+            let result = operation.and_then(|op| self.settings_submit(op, None, Some(edit_id)));
+            let panel = self.options.as_mut().unwrap();
+            match result {
+                Ok(()) => {
+                    panel.begin(index);
+                    break;
+                }
+                Err(error) => panel.failed(index, &format!("{error:#}")),
             }
         }
         Ok(())

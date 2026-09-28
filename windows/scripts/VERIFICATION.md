@@ -104,3 +104,9 @@ launched through WSL interop.
 
 Job containment follows Microsoft's [Job Objects documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 and [process creation flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags).
+
+Options autosave checks use `verify-options-live.ps1` (outer 60s). The store/CLI
+subsets use `verify-options-unit.ps1 -Executable <staged-test.exe> -OutputPath
+<owned-evidence.json>` (outer 30s); this runner passes filter and harness flags
+as separate argv entries and requires the expected nonzero test counts. A
+process exit code of zero with zero executed tests is not successful verification.

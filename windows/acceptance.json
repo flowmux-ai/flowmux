@@ -103,7 +103,8 @@
       "feature": "기본 셸·tab별 셸·작업 디렉터리",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-shells-background.json"
+        "evidence/2026-09-28/native-shells-background.json",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Windows-only built-in Windows PowerShell/CMD/PowerShell 7 discovery, default and per-tab/workspace executable/argv, split inheritance and persisted per-surface shells implemented. Hidden hosts verify real PowerShell/CMD, exact Unicode cwd/argv, relative CLI cwd, mixed-shell restart, old state and explicit failed-start recovery. PATH/PATHEXT executable ordering has native file tests. Actual PS7 (unavailable locally), other interactive shells, command-language parsing, aliases, UNC/long paths and physical menus/IME remain pending."
     },
@@ -142,7 +143,8 @@
       "feature": "scrollback 용량·일반 scrollbar",
       "status": "partial",
       "evidence": [
-        "evidence/2026-09-28/native-settings-background.json"
+        "evidence/2026-09-28/native-settings-background.json",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Configurable terminal scrollback 0–100000 lines applies to live xterm views and persists across Windows hosts. Hidden native test reduces it to 100, emits 600 lines, verifies old history eviction and retained new output. Native scrollbar/selection/IME, memory/load and complete scrollback parity remain pending."
     },
@@ -213,7 +215,8 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-minimap-background.json",
-        "evidence/2026-09-28/frontend-tests-minimap.txt"
+        "evidence/2026-09-28/frontend-tests-minimap.txt",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Cell-based canvas minimap reads bounded normal-buffer rows via public xterm APIs, including wide Hangul, truecolor, ANSI palette, inverse/dim/invisible and backgrounds. Preview wheel and terminal seek are separate; keyboard navigation, parser-barrier CLI and hidden-tab raster suspension are implemented. Nine hidden native checks verify actual canvas checksums, colors/cells, scroll changes, selection preservation, history clearing and moved/exited surfaces. Physical pointer/keyboard/IME/accessibility, sustained multi-pane load and OSC palette mutation remain pending."
     },
@@ -223,7 +226,8 @@
       "status": "partial",
       "evidence": [
         "evidence/2026-09-28/native-minimap-background.json",
-        "evidence/2026-09-28/frontend-tests-minimap.txt"
+        "evidence/2026-09-28/frontend-tests-minimap.txt",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Shared persisted minimap settings default to enabled/40 CSS pixels/50 percent; width 12..96 and opacity 0..100 apply live. Alternate mode hides painting but retains gutter and ConPTY columns, verified in a hidden native host. Disabled minimaps release raster/gutter and reset preview. Rendering caps preview to 2048 rows and raster scale to 2x; high-DPI/multimonitor/visual/menu and active-composition acceptance remain pending."
     },
@@ -268,7 +272,8 @@
       "evidence": [
         "evidence/2026-09-28/native-settings-background.json",
         "evidence/2026-09-28/chrome-details.md",
-        "evidence/2026-09-28/ui-structure.md"
+        "evidence/2026-09-28/ui-structure.md",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Native Options and CLI implement shared font/fallback list, 6–72px size, dark/light terminal theme and cursor blink/style. Hidden native hosts verify exact Unicode values, actual xterm options/colors and ConPTY grid with stable shell PIDs. Native chrome light/dark rendering now has hidden production-renderer evidence in a two-terminal split with stable terminal identities/PIDs. A later mixed terminal/browser/editor render is separate visual evidence. Real menu/IME/DPI, high contrast, installed font fallback/width, custom themes, remaining popup/panel styling and configurable zoom shortcuts remain pending. The new owned nonmodal Options window groups General/Theme settings; text fields use Apply and combo changes are immediate. Five hidden Options checks pass in 5.285s, including Unicode values, live terminal ACK, validation errors/draft retention and Reset/Close with stable terminal identity. Full theme editing, Keybindings/Update and physical interaction remain open."
     },
@@ -383,7 +388,8 @@
         "evidence/2026-09-28/chrome-sidebar.md",
         "evidence/2026-09-28/ui-structure.md",
         "evidence/2026-09-28/ui-parity-next.md",
-        "evidence/2026-09-28/ui-parity-focus.md"
+        "evidence/2026-09-28/ui-parity-focus.md",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Native workspace/tab context menus and modeless UTF-16 metadata editor implemented. A hidden native Rust test constructs the editor and preserves Unicode values/error text without showing or focusing its HWND. Physical menus, dialogs, IME, DPI/accessibility, popovers and drag previews remain pending. A header notification bell and 36-DIP Settings/Files/Search/Open file icon row now retain native captions and tooltips. The earlier sidebar stage has hidden layout/tooltip evidence. Current structural changes add a nonmodal General/Theme Options window, a 320-DIP owned bell popup, one workbench-right Files dock with conditional forms, and 40-DIP browser toolbar/tools. Hidden native groups pass for Options (5), notifications (9), global Files dock (2), browser geometry/lifecycle (8) and file-operation regression (5). Full popup/dialog/drag-preview and physical interaction acceptance remain open."
     },
@@ -400,9 +406,10 @@
       "evidence": [
         "evidence/2026-09-28/native-settings-background.json",
         "evidence/2026-09-28/chrome-details.md",
-        "evidence/2026-09-28/ui-structure.md"
+        "evidence/2026-09-28/ui-structure.md",
+        "evidence/2026-09-28/options-live.md"
       ],
-      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Native chrome theme changes now have production-renderer evidence with stable terminal identities/PIDs in a two-terminal split. Mixed terminal/browser/editor rendering is captured separately; theme transitions across mixed types and control-handle preservation during theme changes are not established. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI/high-contrast, per-tab options and full settings parity remain pending. The new General/Theme Options window reuses asynchronous field updates and expected-value validation. Its native edit/Apply, theme selection, error draft retention and Reset/Close pass within the five-check 5.285s hidden case. Text fields require Apply, unlike Linux immediate editing; Keybindings/Update and full theme/settings parity remain pending."
+      "notes": "Existing xterm views apply shared terminal settings without shell recreation or requested focus; composition/history restore defers to the latest value. Hidden native tests verify multiple active/inactive tabs, another window, external edits and restart. Native chrome theme changes now have production-renderer evidence with stable terminal identities/PIDs in a two-terminal split. Mixed terminal/browser/editor rendering is captured separately; theme transitions across mixed types and control-handle preservation during theme changes are not established. Mock composition deferral is not real IME evidence. Native menus, real composition/focus/DPI/high-contrast, per-tab options and full settings parity remain pending. The new General/Theme Options window reuses asynchronous field updates and expected-value validation. Its native edit/Apply, theme selection, error draft retention and Reset/Close pass within the five-check 5.285s hidden case. Text fields require Apply, unlike Linux immediate editing; Keybindings/Update and full theme/settings parity remain pending. Options now autosaves supported edits (250 ms debounce for text, immediate selections), with native scrolling groups and per-field CAS. Nine hidden GUI groups verify actual persistent settings and terminal ACKs, raw Unicode drafts, burst edits, application IME-message guards, external changes and close/reopen. Physical OS IME/TSF/focus and complete Linux options/theme/font-picker parity remain unverified or incomplete."
     },
     {
       "id": "U11",
@@ -949,7 +956,8 @@
         "evidence/2026-09-27/native-state-background.json",
         "evidence/2026-09-28/native-settings-background.json",
         "evidence/2026-09-28/native-shells-background.json",
-        "evidence/2026-09-28/chrome-sidebar.md"
+        "evidence/2026-09-28/chrome-sidebar.md",
+        "evidence/2026-09-28/options-live.md"
       ],
       "notes": "Versioned Windows state and shared terminal/default-shell config use exclusive OS leases/locks and atomic replacement. Config merges fields, rejects stale edits, preserves failed/invalid writes and polls external edits. Outgoing JSON also enforces 64KiB when Unicode argv expands UTF-8 size. Shell/argv persist per surface. Theme import, full configuration parity and remaining data/log/cache features are pending. Sidebar preferred width now persists per window (160–640 DIP, default 260); older checkpoints default to 260 and default-width saves omit the field. Older binaries reject checkpoints with nondefault sidebar_width_dip because of deny_unknown_fields. Current native restore validation is pending."
     },

@@ -429,6 +429,10 @@ pub enum SettingsOp {
         #[arg(long = "arg", allow_hyphen_values = true)]
         #[serde(default)]
         args: Vec<String>,
+        // Options compares the complete shell under the settings writer lock.
+        #[arg(skip)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected: Option<crate::shell::Shell>,
     },
     Set {
         #[arg(value_enum)]
@@ -548,6 +552,10 @@ mod tests {
                     "--regex",
                 ],
                 serde_json::json!({"method":"find","query":"한글","surface":id,"previous":true,"match_case":true,"regex":true,"close":false}),
+            ),
+            (
+                vec!["settings", "shell", "cmd", "--arg", "/d"],
+                serde_json::json!({"method":"settings","op":{"action":"shell","program":"cmd","args":["/d"]}}),
             ),
         ] {
             let cli = Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).unwrap();

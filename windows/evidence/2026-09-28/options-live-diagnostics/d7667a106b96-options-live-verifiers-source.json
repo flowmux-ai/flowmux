@@ -1,0 +1,10 @@
+{
+  "created_utc": "2026-09-28T09:45:08.807032+00:00",
+  "files": {
+    "windows/scripts/verify-options-live.ps1": "70a887a2d903622f97a4300d2c1dd4437210ac7f6bd6f73ac0136e965ca0410b",
+    "windows/scripts/verify-options-unit.ps1": "8be5683bf1f53718a2168f67cf0cc44d8ed78620e8ad0d4ab41a86bd7cdc241e",
+    "windows/scripts/OptionsFixture.cs": "a899927745c38486af34ebe1749a6f21fc09d8078d25611c9b7cc8afdebe81c8",
+    "windows/scripts/CliProbe.cs": "50e8b056a7534c2e676cf731b1047cc859883a3e44b5384cf6f88b639f366e4f",
+    "windows/scripts/ChromeFixture.cs": "effd7596cb20f6791fd2e0b85b31310e4f6b348ce8d9bf5d53acf5023b596764"
+  }
+}

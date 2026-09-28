@@ -1,0 +1,13 @@
+{
+    "name":  "options-live-store-tests",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\options-live-tests\\flowmux_windows-940f179605ae9006.exe",
+    "deadlineSeconds":  30,
+    "status":  "passed",
+    "started":  "2026-09-28T09:41:33.0824505Z",
+    "pid":  31920,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.105,
+    "finished":  "2026-09-28T09:41:33.1912027Z"
+}

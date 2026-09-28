@@ -1,0 +1,490 @@
+{
+  "stage": "native-options-live",
+  "status": "frozen",
+  "artifacts": {
+    "0537501c92da-result.json": {
+      "source": "windows/dist/checks/options-live-clippy-1cc1c2b6-7419-4d56-8e44-e19fe80ff2d9/result.json",
+      "source_bytes": 2592,
+      "source_sha256": "a5aff5497a2c6b548c251e3b667e9cdef6c45ad5276d499dac476c7618d8a970",
+      "bytes": 2592,
+      "sha256": "a5aff5497a2c6b548c251e3b667e9cdef6c45ad5276d499dac476c7618d8a970"
+    },
+    "76f107c736e4-stdout.txt": {
+      "source": "windows/dist/checks/options-live-clippy-1cc1c2b6-7419-4d56-8e44-e19fe80ff2d9/stdout.txt",
+      "source_bytes": 216,
+      "source_sha256": "c7f5dc77aa2505e73d32729e87373320d0953229a49f3383d19a978b425562ca",
+      "bytes": 216,
+      "sha256": "c7f5dc77aa2505e73d32729e87373320d0953229a49f3383d19a978b425562ca"
+    },
+    "614297c1bd2f-result.json": {
+      "source": "windows/dist/checks/options-live-command-tests-38cfd3da-252b-47c2-9ff5-9b24140474a7/result.json",
+      "source_bytes": 533,
+      "source_sha256": "caffac868db844c86a1f3f3be344e255069af28efe4e3a61443d2ec43bb95bb3",
+      "bytes": 517,
+      "sha256": "139875e2e224d265b121f9bf933eef15c063ef02447bc8004edd6e33c9d8423e"
+    },
+    "13938a626364-stdout.txt": {
+      "source": "windows/dist/checks/options-live-command-tests-38cfd3da-252b-47c2-9ff5-9b24140474a7/stdout.txt",
+      "source_bytes": 115,
+      "source_sha256": "daa5c2229ee0509bf0e8217d8cb55cc2dc518169201fca17fd513ff07cbd6062",
+      "bytes": 114,
+      "sha256": "85cf5926583fd82c566e2dab904f07fb837050ee972352dd6fad4306a176105a"
+    },
+    "58029d1d3157-stderr.txt": {
+      "source": "windows/dist/checks/options-live-command-tests-38cfd3da-252b-47c2-9ff5-9b24140474a7/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "18e7e7b49bdc-result.json": {
+      "source": "windows/dist/checks/options-live-debug-7732917a-b903-4fac-b1c2-c97bc1113fd9/result.json",
+      "source_bytes": 2611,
+      "source_sha256": "0b6b322030f273891693b9dd7a585157db0569048422c54e172a5b6e874e4ef3",
+      "bytes": 2611,
+      "sha256": "0b6b322030f273891693b9dd7a585157db0569048422c54e172a5b6e874e4ef3"
+    },
+    "c0c6e623993b-stdout.txt": {
+      "source": "windows/dist/checks/options-live-debug-7732917a-b903-4fac-b1c2-c97bc1113fd9/stdout.txt",
+      "source_bytes": 372,
+      "source_sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b",
+      "bytes": 372,
+      "sha256": "45ebcfe620289976ec6f16ab02d0582c87f20109661f332cac53dc83cf6aab0b"
+    },
+    "a4f24dca468f-result.json": {
+      "source": "windows/dist/checks/options-live-native-9578001a-5a1f-4283-b5ac-b49d2cd5f481/result.json",
+      "source_bytes": 490,
+      "source_sha256": "4947e5216523eaae1f07e8a371cf001ef4e8b9f7578e4ff6b617ab9a917a9390",
+      "bytes": 474,
+      "sha256": "c780614c2c5560b27685e5a77e43c15e65eda2395bcac3cb593591fe9a9e3dc6"
+    },
+    "73773e34c00f-stdout.txt": {
+      "source": "windows/dist/checks/options-live-native-9578001a-5a1f-4283-b5ac-b49d2cd5f481/stdout.txt",
+      "source_bytes": 251,
+      "source_sha256": "07a28bc1312877a5337646fde213f6e132d09a8e183fe04a884fd48d3d6dc38a",
+      "bytes": 249,
+      "sha256": "5f0167f8bbe996314d5042c4f054dcf92aa96c3e82a8eef06e746a7c660b3a7a"
+    },
+    "22b2570fa9ad-stderr.txt": {
+      "source": "windows/dist/checks/options-live-native-9578001a-5a1f-4283-b5ac-b49d2cd5f481/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "c11c36840a60-result.json": {
+      "source": "windows/dist/checks/options-live-package-dda262ab-7041-41c4-99f4-2cf63da4399e/result.json",
+      "source_bytes": 563,
+      "source_sha256": "ff42707b1adb1d0575062ee50b8d366fbbae54c1a2da6f474e9a1730780d069a",
+      "bytes": 563,
+      "sha256": "ff42707b1adb1d0575062ee50b8d366fbbae54c1a2da6f474e9a1730780d069a"
+    },
+    "1b872d3d5551-stdout.txt": {
+      "source": "windows/dist/checks/options-live-package-dda262ab-7041-41c4-99f4-2cf63da4399e/stdout.txt",
+      "source_bytes": 1326,
+      "source_sha256": "3572613166d91e841b0ef5bee9181cd722024d086623c34ca1b6755cf52c8407",
+      "bytes": 1326,
+      "sha256": "3572613166d91e841b0ef5bee9181cd722024d086623c34ca1b6755cf52c8407"
+    },
+    "91a226726e69-result.json": {
+      "source": "windows/dist/checks/options-live-release-981e72f3-5839-42cc-8cd2-8a775da2a291/result.json",
+      "source_bytes": 2651,
+      "source_sha256": "25d8e0b0e8743ccdcef18f87b2a4f62edf1b392f31fec120803e35f8f66c7b3f",
+      "bytes": 2651,
+      "sha256": "25d8e0b0e8743ccdcef18f87b2a4f62edf1b392f31fec120803e35f8f66c7b3f"
+    },
+    "cc46bacd6fff-stdout.txt": {
+      "source": "windows/dist/checks/options-live-release-981e72f3-5839-42cc-8cd2-8a775da2a291/stdout.txt",
+      "source_bytes": 374,
+      "source_sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df",
+      "bytes": 374,
+      "sha256": "4616cee24e9ca6903964a58a5037601ade17fab5bfa47fe93990b9a5c16a04df"
+    },
+    "e0917edd06cf-result.json": {
+      "source": "windows/dist/checks/options-live-release-doctor-7dd376b5-342c-46d8-84fb-68eb14b0c06f/result.json",
+      "source_bytes": 509,
+      "source_sha256": "e382e8df16c0c161100087e1d404d11c8aa1c9f31f2c4abcd4e92d78a0607539",
+      "bytes": 493,
+      "sha256": "efa07f84c42f4a54986c112a8d58440773bb94ab28e5121a27110b1341b009c6"
+    },
+    "4b3e1a51f497-stdout.txt": {
+      "source": "windows/dist/checks/options-live-release-doctor-7dd376b5-342c-46d8-84fb-68eb14b0c06f/stdout.txt",
+      "source_bytes": 228,
+      "source_sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f",
+      "bytes": 228,
+      "sha256": "13bad653ffb3820a4bba9e0b34f7ccd6a587ecf15923430d2898a72227b8772f"
+    },
+    "594426b770a7-stderr.txt": {
+      "source": "windows/dist/checks/options-live-release-doctor-7dd376b5-342c-46d8-84fb-68eb14b0c06f/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "275809adc087-result.json": {
+      "source": "windows/dist/checks/options-live-script-check-88e597bc-9642-45b9-9aee-195648c54169/result.json",
+      "source_bytes": 509,
+      "source_sha256": "d16841a39c5bc38770670fce91ee9a1c47c046320e18b731321415f3f03c1dbf",
+      "bytes": 493,
+      "sha256": "ac2cede74ad7bacfabda1a97a157a23082191d8db77ce94b436fc8311fc09ca4"
+    },
+    "799422f1853c-stdout.txt": {
+      "source": "windows/dist/checks/options-live-script-check-88e597bc-9642-45b9-9aee-195648c54169/stdout.txt",
+      "source_bytes": 55,
+      "source_sha256": "ce5a136e184d3182fcbb718ecc7d9ad3a7860e36015c41329d9ebbcc6b5497ec",
+      "bytes": 54,
+      "sha256": "0c54df3bd834e9ff050c50107b62bff1d0949e393f4863372fcc807cda18873d"
+    },
+    "d6362010847f-stderr.txt": {
+      "source": "windows/dist/checks/options-live-script-check-88e597bc-9642-45b9-9aee-195648c54169/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "17616ee7016d-result.json": {
+      "source": "windows/dist/checks/options-live-store-tests-d2d0bc4a-41ae-4802-a3ff-cf6d7d0838a8/result.json",
+      "source_bytes": 531,
+      "source_sha256": "0a41be3751f675d813c24b05080baf4e259e8b21400071e468a3011881a46182",
+      "bytes": 515,
+      "sha256": "fc674fae76c39d517a9bb8eab5fe8cb187ba6316f82c6cc37d015f0ab3c81cd5"
+    },
+    "e710ac2055cb-stdout.txt": {
+      "source": "windows/dist/checks/options-live-store-tests-d2d0bc4a-41ae-4802-a3ff-cf6d7d0838a8/stdout.txt",
+      "source_bytes": 115,
+      "source_sha256": "daa5c2229ee0509bf0e8217d8cb55cc2dc518169201fca17fd513ff07cbd6062",
+      "bytes": 114,
+      "sha256": "85cf5926583fd82c566e2dab904f07fb837050ee972352dd6fad4306a176105a"
+    },
+    "925e167b45c8-stderr.txt": {
+      "source": "windows/dist/checks/options-live-store-tests-d2d0bc4a-41ae-4802-a3ff-cf6d7d0838a8/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "8cda13be8edc-result.json": {
+      "source": "windows/dist/checks/options-live-test-runtime-be1aefd6-491e-49f0-aafd-5eec1bb7ae09/result.json",
+      "source_bytes": 295,
+      "source_sha256": "303c8ab53740767a05bf3d392f1702d8b044b7a5caf2a1a5e018ff1c0390046f",
+      "bytes": 295,
+      "sha256": "303c8ab53740767a05bf3d392f1702d8b044b7a5caf2a1a5e018ff1c0390046f"
+    },
+    "3414d9b32827-stdout.txt": {
+      "source": "windows/dist/checks/options-live-test-runtime-be1aefd6-491e-49f0-aafd-5eec1bb7ae09/stdout.txt",
+      "source_bytes": 83,
+      "source_sha256": "8f7e533fc10fd7c8fb343949038f7be473259a4ab71c08f8a10d2b509b4677f6",
+      "bytes": 83,
+      "sha256": "8f7e533fc10fd7c8fb343949038f7be473259a4ab71c08f8a10d2b509b4677f6"
+    },
+    "801638dbd043-result.json": {
+      "source": "windows/dist/checks/options-live-unit-build-444f2e15-00ca-4e0f-a4b4-a59c8d4f66f6/result.json",
+      "source_bytes": 2563,
+      "source_sha256": "3d9cee75c8512def74db0e5723858e2b432bde6dce35a20842b94b45b1c0052e",
+      "bytes": 2563,
+      "sha256": "3d9cee75c8512def74db0e5723858e2b432bde6dce35a20842b94b45b1c0052e"
+    },
+    "62767ca32cc1-stdout.txt": {
+      "source": "windows/dist/checks/options-live-unit-build-444f2e15-00ca-4e0f-a4b4-a59c8d4f66f6/stdout.txt",
+      "source_bytes": 339,
+      "source_sha256": "e73373ad44b3ad44600e696acfe7fb3ab08a946fd592c42146137783532c30ac",
+      "bytes": 339,
+      "sha256": "e73373ad44b3ad44600e696acfe7fb3ab08a946fd592c42146137783532c30ac"
+    },
+    "01123915d480-result.json": {
+      "source": "windows/dist/checks/options-live-units-counted-38aaf608-78d5-40c9-aaa1-32ac19b3a970/result.json",
+      "source_bytes": 503,
+      "source_sha256": "154f560a179ac9097f37539b9ae49ada838b9d9a2544e46d6ec745b8a7196f35",
+      "bytes": 487,
+      "sha256": "53454a7764f262be96b9daae32f85a45e700b4b95fa8242248fcbfa5825d2357"
+    },
+    "f8d6aaef1a78-stdout.txt": {
+      "source": "windows/dist/checks/options-live-units-counted-38aaf608-78d5-40c9-aaa1-32ac19b3a970/stdout.txt",
+      "source_bytes": 1108,
+      "source_sha256": "2220b7c3cf177382e4ed873746c07be9a1c27cd6108a0d9e5aa6c9c57145af54",
+      "bytes": 1104,
+      "sha256": "656b167cf28fe16334f63afc46a97bb0ddf00059b2c3f2c696ead44839dc2c16"
+    },
+    "19be551cdf9c-stderr.txt": {
+      "source": "windows/dist/checks/options-live-units-counted-38aaf608-78d5-40c9-aaa1-32ac19b3a970/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "959ef66ee86d-result.json": {
+      "source": "windows/dist/checks/options-live-units-final-66264abe-4f3f-4549-aa97-50786004f39a/result.json",
+      "source_bytes": 507,
+      "source_sha256": "f9bb2c2541858750bb2f8ee0dd6c23d194d8309789da8e79a4401cce338f94f6",
+      "bytes": 491,
+      "sha256": "b23f39664ecdf406de57e338b142e505812c8019502e4a0bebccbd0893e8de3a"
+    },
+    "f94ffb740b7e-stdout.txt": {
+      "source": "windows/dist/checks/options-live-units-final-66264abe-4f3f-4549-aa97-50786004f39a/stdout.txt",
+      "source_bytes": 1108,
+      "source_sha256": "ce2357f9d7641fb8a7ab7c69c55a6a961f98d6285b8d1b576de6d73b06cb3a02",
+      "bytes": 1104,
+      "sha256": "998b919c6864bc348baf7f9cfc875c6edd0e1f384b3883d66ca3c9b7b1c86cd9"
+    },
+    "80165e91988c-stderr.txt": {
+      "source": "windows/dist/checks/options-live-units-final-66264abe-4f3f-4549-aa97-50786004f39a/stderr.txt",
+      "source_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "d58b41ad06d2-native-options-live-background.json": {
+      "source": "windows/dist/evidence/options-live-33141109-ed8f-496b-b954-d3cc047cab9e/native-options-live-background.json",
+      "source_bytes": 531684,
+      "source_sha256": "00c000b17f42344afdd630cb0457120bd8fc9337ccfead2e32b29f222e0c63ff",
+      "bytes": 524939,
+      "sha256": "e056d4e7351389f4f780edd5732d682242b43b3f05f424ae63f4b2dfd581f342"
+    },
+    "4a5619ceb2ed-config.json": {
+      "source": "windows/dist/evidence/options-live-33141109-ed8f-496b-b954-d3cc047cab9e/config/config.json",
+      "source_bytes": 441,
+      "source_sha256": "0e75e6f2337758e246965871847013f351b2432e924707e1a0a255d7364a195b",
+      "bytes": 442,
+      "sha256": "f34ee35a141b192f5b4d5ab069753282d49051b6f87a71b06d014c5a0fdc00c0"
+    },
+    "476b05c22acd-options-live-source-final.json": {
+      "source": "windows/dist/options-live-source-final.json",
+      "source_bytes": 15129,
+      "source_sha256": "31a02beda21e4c7d8a4878b831d3ac075b89941338685e5138d08862fe37a2bf",
+      "bytes": 15129,
+      "sha256": "31a02beda21e4c7d8a4878b831d3ac075b89941338685e5138d08862fe37a2bf"
+    },
+    "d7667a106b96-options-live-verifiers-source.json": {
+      "source": "windows/dist/options-live-verifiers-source.json",
+      "source_bytes": 623,
+      "source_sha256": "534a3e31dc7fc017fda4f25b3469fe3ea76c6d2770ad56035b907f4f77e39a5f",
+      "bytes": 623,
+      "sha256": "534a3e31dc7fc017fda4f25b3469fe3ea76c6d2770ad56035b907f4f77e39a5f"
+    },
+    "528650c368d4-options-live-debug-staging.json": {
+      "source": "windows/dist/options-live-debug-staging.json",
+      "source_bytes": 2279,
+      "source_sha256": "406f458bd4bb05c30441f9177ad69fa7b79eb803499f36721f74c3a8895571fe",
+      "bytes": 2279,
+      "sha256": "406f458bd4bb05c30441f9177ad69fa7b79eb803499f36721f74c3a8895571fe"
+    },
+    "618478ff0e3b-options-live-tests-staging.json": {
+      "source": "windows/dist/options-live-tests-staging.json",
+      "source_bytes": 1034,
+      "source_sha256": "4b5c4b747efe649742f47ae6eb0ee1ad381b3870f228f4a1124725bafa23d3c2",
+      "bytes": 1034,
+      "sha256": "4b5c4b747efe649742f47ae6eb0ee1ad381b3870f228f4a1124725bafa23d3c2"
+    },
+    "3602563db2c9-options-live-release-staging.json": {
+      "source": "windows/dist/options-live-release-staging.json",
+      "source_bytes": 2305,
+      "source_sha256": "348629d8e79affa8979b93222f504b1909ae9b41696ef8276fe03f851c65e7a5",
+      "bytes": 2305,
+      "sha256": "348629d8e79affa8979b93222f504b1909ae9b41696ef8276fe03f851c65e7a5"
+    },
+    "2e8ed563d32e-options-live-unit-evidence.json": {
+      "source": "windows/dist/options-live-unit-evidence.json",
+      "source_bytes": 2095,
+      "source_sha256": "451c89fde71825c6582ae5cf273768d6f743a67fbdf832b718d7c4f42405c2a1",
+      "bytes": 2068,
+      "sha256": "46d80abb29d44a6b5129bbcb2b765d28a2a94134bd7f925e3762850ee59f2053"
+    },
+    "cb5268b4c003-options-live-unit-final-evidence.json": {
+      "source": "windows/dist/options-live-unit-final-evidence.json",
+      "source_bytes": 2094,
+      "source_sha256": "4876769a18e3fe21aa0c144c62d49c21e3480e677610ad1538b64ad8efd62a0f",
+      "bytes": 2067,
+      "sha256": "21bd40697cc9c406739895ace12c7ce18ea3030c2dd09b1ba4cac0e7b1d2f62f"
+    },
+    "a65897e8c5c7-native-options-live-release-entrypoints.json": {
+      "source": "windows/evidence/2026-09-28/native-options-live-release-entrypoints.json",
+      "source_bytes": 1361,
+      "source_sha256": "dd74aca9463672f2b8396ce82475969e7d36719d7a97cb12b4d2ede79766b618",
+      "bytes": 1317,
+      "sha256": "568400667ed2a6dac1d4af8da77a69e2434e8d36f360305d44bcf31e14226e66"
+    }
+  },
+  "checks": {
+    "windows/dist/checks/options-live-clippy-1cc1c2b6-7419-4d56-8e44-e19fe80ff2d9/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 25.715,
+      "files": {
+        "result": "0537501c92da-result.json",
+        "stdout.txt": "76f107c736e4-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-command-tests-38cfd3da-252b-47c2-9ff5-9b24140474a7/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.084,
+      "files": {
+        "result": "614297c1bd2f-result.json",
+        "stdout.txt": "13938a626364-stdout.txt",
+        "stderr.txt": "58029d1d3157-stderr.txt"
+      },
+      "acceptance": "zero_tests_not_validation",
+      "executed_tests": 0
+    },
+    "windows/dist/checks/options-live-debug-7732917a-b903-4fac-b1c2-c97bc1113fd9/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 82.336,
+      "files": {
+        "result": "18e7e7b49bdc-result.json",
+        "stdout.txt": "c0c6e623993b-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-native-9578001a-5a1f-4283-b5ac-b49d2cd5f481/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 9.569,
+      "files": {
+        "result": "a4f24dca468f-result.json",
+        "stdout.txt": "73773e34c00f-stdout.txt",
+        "stderr.txt": "22b2570fa9ad-stderr.txt"
+      }
+    },
+    "windows/dist/checks/options-live-package-dda262ab-7041-41c4-99f4-2cf63da4399e/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 12.57,
+      "files": {
+        "result": "c11c36840a60-result.json",
+        "stdout.txt": "1b872d3d5551-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-release-981e72f3-5839-42cc-8cd2-8a775da2a291/result.json": {
+      "status": "failed",
+      "elapsed_seconds": 113.233,
+      "files": {
+        "result": "91a226726e69-result.json",
+        "stdout.txt": "cc46bacd6fff-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-release-doctor-7dd376b5-342c-46d8-84fb-68eb14b0c06f/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.819,
+      "files": {
+        "result": "e0917edd06cf-result.json",
+        "stdout.txt": "4b3e1a51f497-stdout.txt",
+        "stderr.txt": "594426b770a7-stderr.txt"
+      }
+    },
+    "windows/dist/checks/options-live-script-check-88e597bc-9642-45b9-9aee-195648c54169/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.974,
+      "files": {
+        "result": "275809adc087-result.json",
+        "stdout.txt": "799422f1853c-stdout.txt",
+        "stderr.txt": "d6362010847f-stderr.txt"
+      }
+    },
+    "windows/dist/checks/options-live-store-tests-d2d0bc4a-41ae-4802-a3ff-cf6d7d0838a8/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.105,
+      "files": {
+        "result": "17616ee7016d-result.json",
+        "stdout.txt": "e710ac2055cb-stdout.txt",
+        "stderr.txt": "925e167b45c8-stderr.txt"
+      },
+      "acceptance": "zero_tests_not_validation",
+      "executed_tests": 0
+    },
+    "windows/dist/checks/options-live-test-runtime-be1aefd6-491e-49f0-aafd-5eec1bb7ae09/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.307,
+      "files": {
+        "result": "8cda13be8edc-result.json",
+        "stdout.txt": "3414d9b32827-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-unit-build-444f2e15-00ca-4e0f-a4b4-a59c8d4f66f6/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 80.606,
+      "files": {
+        "result": "801638dbd043-result.json",
+        "stdout.txt": "62767ca32cc1-stdout.txt"
+      }
+    },
+    "windows/dist/checks/options-live-units-counted-38aaf608-78d5-40c9-aaa1-32ac19b3a970/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 1.159,
+      "files": {
+        "result": "01123915d480-result.json",
+        "stdout.txt": "f8d6aaef1a78-stdout.txt",
+        "stderr.txt": "19be551cdf9c-stderr.txt"
+      }
+    },
+    "windows/dist/checks/options-live-units-final-66264abe-4f3f-4549-aa97-50786004f39a/result.json": {
+      "status": "passed",
+      "elapsed_seconds": 0.952,
+      "files": {
+        "result": "959ef66ee86d-result.json",
+        "stdout.txt": "f94ffb740b7e-stdout.txt",
+        "stderr.txt": "80165e91988c-stderr.txt"
+      }
+    }
+  },
+  "native": {
+    "windows/dist/evidence/options-live-33141109-ed8f-496b-b954-d3cc047cab9e/native-options-live-background.json": {
+      "original_status": "passed_hidden_options_live_subset",
+      "acceptance": "related_case_only",
+      "sampled_backgrounds": [],
+      "blank_or_placeholder_sample": false,
+      "files": {
+        "evidence": "d58b41ad06d2-native-options-live-background.json"
+      }
+    }
+  },
+  "hashes": {
+    "windows/dist/options-live-debug/flowmux.exe#b40024e4dd38a11e82716a8c202b53bf8f00fd75da6cd65a14676253fa97724e": {
+      "path": "windows/dist/options-live-debug/flowmux.exe",
+      "bytes": 32837632,
+      "sha256": "b40024e4dd38a11e82716a8c202b53bf8f00fd75da6cd65a14676253fa97724e"
+    },
+    "windows/dist/options-live-debug/flowmuxctl.exe#cb16eb276220f3047a758c877b69eef9f4bc192204752dda88df616c1287447c": {
+      "path": "windows/dist/options-live-debug/flowmuxctl.exe",
+      "bytes": 3365888,
+      "sha256": "cb16eb276220f3047a758c877b69eef9f4bc192204752dda88df616c1287447c"
+    },
+    "windows/dist/options-live-debug/flowmux.com#7990510388f53aa4cfe362f77da331e7d26595badde896d9b13bc464a47c0f74": {
+      "path": "windows/dist/options-live-debug/flowmux.com",
+      "bytes": 3476992,
+      "sha256": "7990510388f53aa4cfe362f77da331e7d26595badde896d9b13bc464a47c0f74"
+    },
+    "windows/dist/options-live-tests/flowmux_windows-940f179605ae9006.exe#3756797050aae0b032c0e1de3b6cfee97da4939389288bb6cf2e9914ed29f0ae": {
+      "path": "windows/dist/options-live-tests/flowmux_windows-940f179605ae9006.exe",
+      "bytes": 31728640,
+      "sha256": "3756797050aae0b032c0e1de3b6cfee97da4939389288bb6cf2e9914ed29f0ae"
+    },
+    "windows/dist/options-live-release/flowmux.exe#b118f69009284a9307b6e59df5cd9ce46ca2ff3dc4b3768bfdb8fecb12c0b208": {
+      "path": "windows/dist/options-live-release/flowmux.exe",
+      "bytes": 22517760,
+      "sha256": "b118f69009284a9307b6e59df5cd9ce46ca2ff3dc4b3768bfdb8fecb12c0b208"
+    },
+    "windows/dist/options-live-release/flowmuxctl.exe#f2e82168b2c31dfe674e0af8fb35411aa6965e94b71ef097b88691c15d3d1a0f": {
+      "path": "windows/dist/options-live-release/flowmuxctl.exe",
+      "bytes": 1922048,
+      "sha256": "f2e82168b2c31dfe674e0af8fb35411aa6965e94b71ef097b88691c15d3d1a0f"
+    },
+    "windows/dist/options-live-release/flowmux.com#c40d7342780fa4327015368f9464ee2170604f10a9c4df8e1286b2acae1d075e": {
+      "path": "windows/dist/options-live-release/flowmux.com",
+      "bytes": 1980928,
+      "sha256": "c40d7342780fa4327015368f9464ee2170604f10a9c4df8e1286b2acae1d075e"
+    },
+    "windows/dist/flowmux-windows-0.10.1-dev-options-live-x64-setup.exe#d9ad25b1387439ebffd4b60223fca2a20ed45063c6ab3c5a25b910ac1051bba6": {
+      "path": "windows/dist/flowmux-windows-0.10.1-dev-options-live-x64-setup.exe",
+      "bytes": 5927866,
+      "sha256": "d9ad25b1387439ebffd4b60223fca2a20ed45063c6ab3c5a25b910ac1051bba6"
+    }
+  },
+  "updated_utc": "2026-09-28T09:46:31.310706+00:00",
+  "frozen_utc": "2026-09-28T09:46:08.335389+00:00",
+  "validation": {
+    "artifacts_and_originals_hash_verified": 43,
+    "binary_hashes_verified": 8,
+    "runtime_source_files_verified": 140,
+    "verifier_source_files_verified": 5,
+    "windows_jobs_with_zero_active_after_cleanup": 7,
+    "unique_native_ui_groups_passed": 9,
+    "native_unit_tests_passed": 9,
+    "zero_test_invocations_excluded": 2,
+    "scope": "Application IME message guards only; physical OS IME/TSF/focus and full Linux Options parity remain unverified."
+  }
+}

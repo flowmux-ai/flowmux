@@ -799,3 +799,16 @@ closure and requested focus after overview card HWND replacement. The affected
 seven native groups were repeated successfully without desktop input; actual
 physical focus recovery remains unverified. See the [final follow-up](evidence/2026-09-28/ui-parity-focus.md)
 for the two-line source boundary and latest packaging provenance.
+
+## 2026-09-28 — Options automatic application and native scrolling
+
+Supported General/Theme fields now apply without per-row Apply buttons. Native
+EDIT values debounce for 250 ms; selections submit immediately through the
+existing settings worker. Ten coalesced rows retain newer input during saves,
+preserve invalid/conflicting drafts, defer while composing, and keep committed
+hidden composition results across reopen. The General page uses a clipped
+scrolling viewport with Terminal, Minimap and Shell groups and a fixed footer.
+The full shell baseline (program and argv) is compared under the writer lock.
+Nine hidden UI groups and nine native store/CLI tests passed. These do not
+establish physical IME/TSF/focus acceptance or complete Linux Options parity.
+Feature totals remain 61 partial / 53 pending. See [evidence](evidence/2026-09-28/options-live.md).
