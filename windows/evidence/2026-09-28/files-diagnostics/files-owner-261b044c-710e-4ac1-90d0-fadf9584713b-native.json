@@ -1,0 +1,326 @@
+{
+    "started":  "2026-09-28T15:05:09.2127336+09:00",
+    "mode":  "background",
+    "case":  "owner",
+    "checks":  [
+
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  26344,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T06:05:09.3780891Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\files 한글 한 😀",
+                                                      "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                                      "pid":  26344,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-26344-61173b8d-8cd0-40e4-aa16-fbb76bd62a98",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "7231fcb4-f52f-4fab-aa03-083c9db49fdf",
+                                                      "workspace":  "953bdb63-a331-44a0-bd28-61250bf00cfd"
+                                                  },
+                             "discoveryElapsedMs":  125,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  1057,
+                             "treeRequests":  2,
+                             "elapsedMs":  1295,
+                             "finished":  "2026-09-28T06:05:10.6742178Z"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  1826,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\files 한글 한 😀\\owner",
+                                            "current_owner":  {
+                                                                  "generation":  1,
+                                                                  "instance":  "945db3ab-d4bf-4953-9517-3b075730f30b",
+                                                                  "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                                                  "workspace":  "953bdb63-a331-44a0-bd28-61250bf00cfd"
+                                                              },
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  1,
+                                            "last_error":  null,
+                                            "list_handle":  12390262,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  1,
+                                            "native_selected_indices":  [
+                                                                            0
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "owner":  {
+                                                          "generation":  1,
+                                                          "instance":  "945db3ab-d4bf-4953-9517-3b075730f30b",
+                                                          "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                                          "workspace":  "953bdb63-a331-44a0-bd28-61250bf00cfd"
+                                                      },
+                                            "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                            "panel_handle":  10030956,
+                                            "rendered_rows":  1,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\files 한글 한 😀\\owner",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  true,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  0,
+                                                             "name":  "owner 한글.txt",
+                                                             "path":  "owner 한글.txt",
+                                                             "reparse":  false,
+                                                             "selected":  true
+                                                         }
+                                                     ],
+                                            "selected_count":  1,
+                                            "selected_paths":  [
+                                                                   "owner 한글.txt"
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  1,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  1,
+                                            "source":  "7231fcb4-f52f-4fab-aa03-083c9db49fdf",
+                                            "stale":  false,
+                                            "token":  "3cfada45-1a1d-4c9d-afea-6fe6da002664",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+                                                                           "owner 한글.txt"
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "owner",
+                             "native":  {
+                                            "Host":  51906532,
+                                            "Panel":  10030956,
+                                            "List":  12390262,
+                                            "ProcessId":  26344,
+                                            "Count":  1,
+                                            "Caret":  0,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "    owner 한글.txt"
+                                                     ],
+                                            "Selected":  [
+                                                             0
+                                                         ],
+                                            "ElapsedMs":  4
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\state\\editor-profile",
+                             "surface":  "c800e0c8-badf-4066-92f8-62b543908dfe",
+                             "pid":  26344,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  1826,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\files 한글 한 😀\\owner",
+                                            "current_owner":  {
+                                                                  "generation":  3,
+                                                                  "instance":  "945db3ab-d4bf-4953-9517-3b075730f30b",
+                                                                  "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                                                  "workspace":  "953bdb63-a331-44a0-bd28-61250bf00cfd"
+                                                              },
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  1,
+                                            "last_error":  null,
+                                            "list_handle":  12390262,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  1,
+                                            "native_selected_indices":  [
+                                                                            0
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "owner":  {
+                                                          "generation":  3,
+                                                          "instance":  "945db3ab-d4bf-4953-9517-3b075730f30b",
+                                                          "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                                          "workspace":  "953bdb63-a331-44a0-bd28-61250bf00cfd"
+                                                      },
+                                            "pane":  "8194df43-b09f-40dc-9c17-2bb73c483a58",
+                                            "panel_handle":  10030956,
+                                            "rendered_rows":  1,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515\\files 한글 한 😀\\owner",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  true,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  0,
+                                                             "name":  "owner 한글.txt",
+                                                             "path":  "owner 한글.txt",
+                                                             "reparse":  false,
+                                                             "selected":  true
+                                                         }
+                                                     ],
+                                            "selected_count":  1,
+                                            "selected_paths":  [
+                                                                   "owner 한글.txt"
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  2,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  1,
+                                            "source":  "7231fcb4-f52f-4fab-aa03-083c9db49fdf",
+                                            "stale":  false,
+                                            "token":  "b19e7a62-5c88-4d00-ac64-6f93fce3f600",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+                                                                           "owner 한글.txt"
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "owner",
+                             "native":  {
+                                            "Host":  51906532,
+                                            "Panel":  10030956,
+                                            "List":  12390262,
+                                            "ProcessId":  26344,
+                                            "Count":  1,
+                                            "Caret":  0,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "    owner 한글.txt"
+                                                     ],
+                                            "Selected":  [
+                                                             0
+                                                         ],
+                                            "ElapsedMs":  0
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "stderr":  "error: unrecognized subcommand \u0027close-pane\u0027\n\n  tip: some similar subcommands exist: \u0027capture-pane\u0027, \u0027toggle-pane-zoom\u0027, \u0027focus-pane\u0027, \u0027close-tab\u0027\n\nUsage: flowmuxctl.exe [OPTIONS] \u003cCOMMAND\u003e\n\nFor more information, try \u0027--help\u0027.\n",
+                             "pid":  39744,
+                             "arguments":  [
+                                               "--pipe",
+                                               "\\\\.\\pipe\\flowmux-26344-61173b8d-8cd0-40e4-aa16-fbb76bd62a98",
+                                               "--json",
+                                               "close-pane",
+                                               "3be8a288-d7d6-4694-8e15-875a25cb70ed"
+                                           ],
+                             "kind":  "command-failure",
+                             "reason":  "Owned CLI exit 2: error: unrecognized subcommand \u0027close-pane\u0027\n\n  tip: some similar subcommands exist: \u0027capture-pane\u0027, \u0027toggle-pane-zoom\u0027, \u0027focus-pane\u0027, \u0027close-tab\u0027\n\nUsage: flowmuxctl.exe [OPTIONS] \u003cCOMMAND\u003e\n\nFor more information, try \u0027--help\u0027.\n ",
+                             "stdout":  "",
+                             "file":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\target\\x86_64-pc-windows-msvc\\debug\\flowmuxctl.exe"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  26344,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "No physical keyboard/mouse/IME, glyph rendering, clipboard, native dialogs, DPI or accessibility checks.",
+                     "Commands exercise retained native model state; LISTBOX observations are read-only bounded system messages, not simulated mouse/keyboard input.",
+                     "Paging verifies1105 entries, not every entry/byte/depth/cache/service cap. Blocked directory I/O, in-flight cancellation and queued-close races are not forced. late-show alone deliberately waits for the real15s IPC server expiry while only the owned UI thread is paused.",
+                     "Reparse confinement uses an owned junction to an owned sibling directory. Hostile concurrent reparse swaps, ACL denial, malformed UTF16 names and network roots are not exercised.",
+                     "Files is read-only. Explicit refresh and in-memory selection are checked; filesystem mutations, automatic tree watching and persisted tree restoration are outside this verifier."
+                 ],
+    "status":  "failed",
+    "error":  "Owned command failed: C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\target\\x86_64-pc-windows-msvc\\debug\\flowmuxctl.exe [\"--pipe\",\"\\\\\\\\.\\\\pipe\\\\flowmux-26344-61173b8d-8cd0-40e4-aa16-fbb76bd62a98\",\"--json\",\"close-pane\",\"3be8a288-d7d6-4694-8e15-875a25cb70ed\"]; Owned CLI exit 2: error: unrecognized subcommand \u0027close-pane\u0027\n\n  tip: some similar subcommands exist: \u0027capture-pane\u0027, \u0027toggle-pane-zoom\u0027, \u0027focus-pane\u0027, \u0027close-tab\u0027\n\nUsage: flowmuxctl.exe [OPTIONS] \u003cCOMMAND\u003e\n\nFor more information, try \u0027--help\u0027.\n ",
+    "hosts":  [
+                  26344
+              ],
+    "shells":  [
+                   4832,
+                   26948
+               ],
+    "clientPids":  [
+                       33500,
+                       15500,
+                       39136,
+                       8896,
+                       38012,
+                       3076,
+                       39880,
+                       15328,
+                       4812,
+                       12388,
+                       27724,
+                       36456,
+                       15556,
+                       36128,
+                       33508,
+                       18024,
+                       28164,
+                       27812,
+                       6524,
+                       1588,
+                       32864,
+                       35196,
+                       31820,
+                       31292,
+                       26352,
+                       31372,
+                       16456,
+                       38756,
+                       5584,
+                       27748,
+                       39592,
+                       37716,
+                       38712,
+                       34632,
+                       22956,
+                       35228,
+                       39744,
+                       23856
+                   ],
+    "elapsedMs":  6027,
+    "finished":  "2026-09-28T15:05:15.2397742+09:00"
+}

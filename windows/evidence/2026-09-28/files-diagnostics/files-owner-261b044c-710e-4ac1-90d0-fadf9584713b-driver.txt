@@ -1,0 +1,27 @@
+[files-owner] started pid=38960, deadline=120s; logs: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-owner-261b044c-710e-4ac1-90d0-fadf9584713b
+[files-owner] running 5/120s, owned processes=22
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-20c59e34-7e17-4be8-ae0b-f7b26ad8a515
+Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windo
+ws\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowmux-26344-61173b8d-8cd0-40e4-aa16-fbb
+76bd62a98","--json","close-pane","3be8a288-d7d6-4694-8e15-875a25cb70ed"]; Owned CLI exit 2: error: unrecognized subcomm
+and 'close-pane'
+  tip: some similar subcommands exist: 'capture-pane', 'toggle-pane-zoom', 'focus-pane', 'close-tab'
+Usage: flowmuxctl.exe [OPTIONS] <COMMAND>
+For more information, try '--help'.
+
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-f
+iles.ps1:48 문자:9
++         throw ('Owned command failed: '+$Job.file+' '+($Job.arguments ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Owned command f...try '--help'.
+ :String) [], RuntimeException
+    + FullyQualifiedErrorId : Owned command failed: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-gith
+   ub-com-jsuya\work\flowmux\windows\target\x86_64-pc-windows-msvc\debug\flowmuxctl.exe ["--pipe","\\\\.\\pipe\\flowm
+  ux-26344-61173b8d-8cd0-40e4-aa16-fbb76bd62a98","--json","close-pane","3be8a288-d7d6-4694-8e15-875a25cb70ed"]; Owne
+ d CLI exit 2: error: unrecognized subcommand 'close-pane'
+  tip: some similar subcommands exist: 'capture-pane', 'toggle-pane-zoom', 'focus-pane', 'close-tab'
+Usage: flowmuxctl.exe [OPTIONS] <COMMAND>
+For more information, try '--help'.
+
+
+[files-owner] failed in 7.068s; result: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\checks\files-owner-261b044c-710e-4ac1-90d0-fadf9584713b\result.json

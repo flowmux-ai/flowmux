@@ -1,0 +1,13 @@
+{
+    "name":  "files-late-show",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-cases\\late-show.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T06:06:34.9787284Z",
+    "pid":  37744,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  18.151,
+    "finished":  "2026-09-28T06:06:53.1339428Z"
+}

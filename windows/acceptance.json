@@ -637,8 +637,11 @@
     {
       "id": "F07",
       "feature": "파일 트리·확장·다중 선택·추가 500행",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/files.md"
+      ],
+      "notes": "Native Windows Files child panel implements bounded local tree expansion/collapse, path-based multiple selection, another 500 rendered rows, explicit refresh and retained-row editor Open. Seven distinct hidden native cases pass: nested Unicode >300 UTF-16-unit roots with new/reused Monaco documents, 1105-row paging, selection, refresh/stale tokens, reparse confinement, source-pane ownership/show-hide, and actual queued IPC expiry preserving prior state. One worker/eight admitted requests retain permits through response consumption; four-second original deadlines, 20k entries/four-MiB path cache, 64 expansion/depth, one-MiB status pages and 32-pane/16-MiB host cache are bounded. Read-only listing only; physical keyboard/mouse/IME/focus, glyphs/DPI/accessibility, all limits and hostile filesystem races, automatic tree watching and persisted tree restoration remain unverified or unsupported. See source boundaries and preserved failed verification attempts in the evidence."
     },
     {
       "id": "F08",

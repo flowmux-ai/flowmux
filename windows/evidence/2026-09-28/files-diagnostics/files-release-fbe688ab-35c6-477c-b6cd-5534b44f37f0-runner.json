@@ -1,0 +1,20 @@
+{
+  "name": "files-release",
+  "command": [
+    "cargo",
+    "xwin",
+    "build",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked"
+  ],
+  "deadlineSeconds": 300,
+  "status": "cancelled",
+  "pid": 360173,
+  "exitCode": 143,
+  "signal": "SIGTERM",
+  "elapsedSeconds": 129.45
+}

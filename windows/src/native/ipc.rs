@@ -291,6 +291,14 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
             *root = std::path::absolute(&*root)?;
         }
     }
+    if let Command::Files {
+        op: crate::files_model::Op::Show(args),
+    } = &mut command
+    {
+        if let Some(root) = &mut args.root {
+            *root = std::path::absolute(&*root)?;
+        }
+    }
     let mut bytes = serde_json::to_vec(&Request {
         command,
         caller_cwd: caller_surface.and_then(|_| std::env::current_dir().ok()),

@@ -1,0 +1,19 @@
+{
+  "name": "files-release-resumed",
+  "command": [
+    "cargo",
+    "xwin",
+    "build",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 363853,
+  "exitCode": 0,
+  "elapsedSeconds": 111.935
+}

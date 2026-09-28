@@ -631,9 +631,36 @@ See the [command and limit reference](README.md#editor-search-partial); the
 [search evidence record](evidence/2026-09-28/editor-search.md) tracks measured
 results separately from this implementation description.
 
-F01–F06, F17 and G08 remain partial, with 58 partial/56 pending features and ten
+F01–F07, F17 and G08 remain partial, with 59 partial/55 pending features and ten
 partial/three pending gates. Broader F06 acceptance, physical
 IME/GUI/clipboard/fonts/DPI/accessibility, broader automatic-refresh acceptance
 and the stated watcher limits, viewers, full ACL preservation, exhaustive
 long-path behavior, unsynchronized edit/close races and renderer-crash recovery
 remain pending.
+
+
+The F07 stage adds a native Files child panel usable from terminal-only panes.
+Tree state keeps exact Unicode relative paths, retained snapshot indices and tokens,
+separate logical/visible selection, explicit refresh and 500-row increments. Directory
+I/O runs on one worker with eight admitted requests, including posted responses.
+Each scan retains its original four-second deadline, at most 20,000 visited entries,
+four MiB of path/name storage, 64 expanded directories/levels and one-MiB pages.
+The host bounds 32 pane caches with conservative 16-MiB accounting; selection
+updates are transactional under that cap. Missing descendants of uninspected
+collapsed folders remain unknown. Root failure invalidates old rows for Open.
+
+Windows enumeration validates and reads the same directory handle, rejects reparse
+traversal, confines final handle paths to the captured root and normalizes separators
+before verbatim paths. Files ownership pins workspace, pane, source surface, instance
+and generation. Hide/root replacement/source invalidation cancels pending work.
+Open reuses the existing asynchronous editor preparation and synchronization path;
+its owner survives preparation into editor barriers. Work not yet dispatched can
+be cancelled; already-applied document responses remain reconciled and stale
+operations report an error. No shared editor protocol or Linux/macOS source changed.
+
+Seven distinct hidden native Files cases have passed, including actual LISTBOX
+readback, long Unicode paths, editor reuse, paging, selection, stale-token rejection,
+reparse leaves, source ownership and real queued IPC expiry. Physical UI/IME and
+full F07 parity remain open. See the [Files evidence](evidence/2026-09-28/files.md)
+for source boundaries, failures, measured checks and final packaging results, and
+the [command reference](README.md#files-panel-partial) for supported operations.

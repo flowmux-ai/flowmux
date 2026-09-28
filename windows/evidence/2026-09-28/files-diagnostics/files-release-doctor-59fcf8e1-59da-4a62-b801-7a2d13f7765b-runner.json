@@ -1,0 +1,13 @@
+{
+    "name":  "files-release-doctor",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\release-files-doctor.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T06:13:08.3694518Z",
+    "pid":  20264,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  1.956,
+    "finished":  "2026-09-28T06:13:10.3340553Z"
+}

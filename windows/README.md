@@ -1218,3 +1218,52 @@ unsaved edits until an explicit save. Physical keyboard/IME, search-dialog focus
 clipboard, accessibility and broad filesystem-race acceptance remain pending;
 programmatic or simulated composition checks do not establish physical IME
 behavior.
+
+
+## Files panel (partial)
+
+**Files** opens a native file list beside the current pane, including a
+terminal-only pane. Expand or collapse folders, select a range or toggle individual
+rows, use **More** to show another 500 rows, and **Open** to send one retained text
+file to the existing Monaco editor. **Refresh** rereads the pinned root; **Hide**
+closes the panel while retaining bounded in-memory selection and expansion state.
+The listing includes hidden/generated names; search ignore rules do not hide them.
+Reparse entries appear as unsupported leaves. The root remains pinned when the
+terminal changes its working directory.
+
+```powershell
+flowmux --json files show --pane <pane-id> --root C:\work\project
+flowmux --json files status --pane <pane-id> --offset 0
+flowmux --json files expand --pane <pane-id> --token <token> --index <row-index>
+flowmux --json files collapse --pane <pane-id> --token <token> --index <row-index>
+flowmux --json files select --pane <pane-id> --token <token> --index <row-index> --mode toggle
+flowmux --json files more --pane <pane-id> --token <token>
+flowmux --json files open --pane <pane-id> --token <token> --index <row-index>
+flowmux --json files refresh --pane <pane-id>
+flowmux --json files hide --pane <pane-id>
+```
+
+All commands require an explicit pane. Use the current status token and each
+row's retained `index`; response page offsets and native LISTBOX positions are
+separate indices. Status responses contain at most 500 rows and one MiB; follow
+`next_offset` to read the remaining rendered rows. `more` increases the rendered
+row count. Refresh/expansion changes can invalidate a token. Selected paths hidden
+by a collapsed folder remain selected, but only rendered rows can be opened.
+`last_error`, `stale`, warnings and `truncated` distinguish incomplete or failed
+listings; a root failure prevents opening old rows until a successful refresh.
+Selected-path arrays are bounded summaries and include truncation flags.
+
+Directory I/O runs on one worker with eight admitted requests, including results
+waiting for the host to consume them. Each listing has a four-second budget from
+IPC receipt, at most 20,000 visited entries, four MiB of path/name storage, 64
+expanded directories and 64 levels. Cancellation preserves a blocked operation's
+worker slot until it returns; the UI never joins the worker. Windows directory
+entries come from the same validated handle, and local root confinement is checked
+before enumeration. Unicode spelling is preserved without NFC/NFD normalization.
+The host retains at most 32 pane caches under a conservative 16 MiB accounting
+limit. Failed admission is explicit; requests are not retried automatically.
+
+This stage supports read-only browsing and explicit refresh. File mutations,
+external applications, clipboard actions, automatic tree watching and persisted
+tree restoration remain unimplemented here. Physical keyboard/mouse/IME, visual
+layout, DPI and accessibility acceptance remain pending.

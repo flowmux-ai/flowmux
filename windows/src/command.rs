@@ -178,6 +178,11 @@ pub enum Command {
         #[command(subcommand)]
         op: crate::editor::Op,
     },
+    /// Browse local files in a native panel without leaving the current pane.
+    Files {
+        #[command(subcommand)]
+        op: crate::files_model::Op,
+    },
     /// Add an in-app notification. Desktop delivery is not yet implemented.
     Notify {
         #[arg(long, default_value = "Terminal")]

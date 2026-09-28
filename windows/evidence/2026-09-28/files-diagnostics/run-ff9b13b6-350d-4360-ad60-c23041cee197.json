@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "started": "2026-09-28T05:58:28.940147+00:00",
+  "status": "passed",
+  "selectedCases": [
+    "nested"
+  ],
+  "serial": true,
+  "failFast": true,
+  "retries": 0,
+  "jobDeadlineSeconds": 120,
+  "results": [
+    {
+      "case": "nested",
+      "kind": "refresh",
+      "label": "files-nested",
+      "started": "2026-09-28T05:58:28.950294+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-cases/nested.ps1",
+        "files-nested",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-runs/ff9b13b6-350d-4360-ad60-c23041cee197/nested-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-821686bd-98d1-4e18-aa4d-89bdaac38e75",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-821686bd-98d1-4e18-aa4d-89bdaac38e75/native-files-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-nested-0b647f0f-516d-491b-95e1-ede63fff2a99/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\files-nested-0b647f0f-516d-491b-95e1-ede63fff2a99\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-821686bd-98d1-4e18-aa4d-89bdaac38e75",
+      "runner": {
+        "name": "files-nested",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-cases\\nested.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T05:59:49.3179946Z",
+        "pid": 18304,
+        "exitCode": 0,
+        "activeBeforeCleanup": 1,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 6.016,
+        "finished": "2026-09-28T05:59:55.3380731Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-nested-0b647f0f-516d-491b-95e1-ede63fff2a99/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/files-nested-0b647f0f-516d-491b-95e1-ede63fff2a99/stderr.txt",
+      "evidenceStatus": "passed_background_files_subset",
+      "evidenceCase": "nested",
+      "checks": [
+        {
+          "name": "nested_unicode_long_root_listbox_and_retained_slash_path_opens_reach_new_and_reused_monaco_documents",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 7.053,
+      "finished": "2026-09-28T05:58:36.003619+00:00"
+    }
+  ],
+  "notRun": [],
+  "finished": "2026-09-28T05:58:36.022731+00:00"
+}

@@ -1,0 +1,13 @@
+{
+    "name":  "files-owner",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-cases\\owner.ps1",
+    "deadlineSeconds":  120,
+    "status":  "failed",
+    "started":  "2026-09-28T06:05:08.3110474Z",
+    "pid":  38960,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  7.068,
+    "finished":  "2026-09-28T06:05:15.3830069Z"
+}

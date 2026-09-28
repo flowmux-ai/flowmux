@@ -1,0 +1,3 @@
+[check] passed files_reparse_leaves_and_invalid_roots_reject_activation_without_target_listing_or_file_mutation
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\files-2e88454b-905c-4baf-ba72-8d9e68e00bc3
+{"status":"passed_background_files_subset","case":"confinement","checks":1,"elapsedMs":5235}

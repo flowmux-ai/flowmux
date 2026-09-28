@@ -729,6 +729,7 @@ impl App {
             initial_open: false,
             timed_out: false,
             open_path: None,
+            files_owner: None,
         });
         editor.refresh.activity = Instant::now();
         if let Err(error) = editor.barrier(id, true) {

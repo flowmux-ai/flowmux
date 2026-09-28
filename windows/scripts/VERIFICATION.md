@@ -12,6 +12,10 @@ it is never a passing result and is never automatically retried.
    debug Windows binary once and immediately run the affected native verifier.
    For script-only changes, reuse the existing binary. Record which binary was
    used; do not imply it includes newer Rust changes.
+   Run Windows-target Clippy before expensive native test linking/debug builds
+   to catch target-specific imports and lint failures early. Reuse that result
+   at the commit boundary when its source inputs stay unchanged. Run cheap native
+   handle/path tests as soon as the test binary exists, before broader UI suites.
 2. Stop on the first failure. Inspect the failed step's stdout/stderr, result
    JSON and native evidence before changing anything. Retry only that failed
    step after a relevant fix. Keep the earlier evidence. Do not lengthen a
@@ -64,6 +68,22 @@ The active browser/key suites additionally use bounded post-kill waits and
 nonblocking diagnostic output reads. Download polling uses a five-second IPC
 budget for ordinary commands. Completion checks return as soon as their
 condition is met; only tests of elapsed-time behavior have a deliberate dwell.
+
+## Parallel agent handoffs
+
+Give each agent an explicit file scope and a concrete handoff. Request a progress
+checkpoint within 60 seconds. During an implementation or verification handoff,
+check outstanding agents at least once per minute while doing independent work.
+If an agent has no concrete progress or identified blocker for two minutes,
+interrupt it, inspect its existing changes, and take over or reassign the bounded
+remainder. A reported external blocker does not justify waiting without a limit.
+Optional reviews and next-stage planning must never hold up an otherwise ready
+build; cap those handoffs at two minutes and carry remaining notes separately.
+
+Freeze the affected source before compiling. One lead owns compiler and native
+suite scheduling; other agents can prepare documentation, evidence and later
+plans without changing those inputs. Stop only the stalled owned agent or test,
+preserve partial work and failure logs, and resume at the smallest pending check.
 
 Self-check: `verify-check-runner.ps1` verifies success, preserved exit status,
 and timeout of a process with a live descendant. Inspect `activeAfterCleanup`

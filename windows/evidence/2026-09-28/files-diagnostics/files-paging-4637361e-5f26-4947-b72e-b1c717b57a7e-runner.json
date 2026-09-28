@@ -1,0 +1,13 @@
+{
+    "name":  "files-paging",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\files-cases\\paging.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T06:00:16.3583514Z",
+    "pid":  27712,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  10.377,
+    "finished":  "2026-09-28T06:00:26.7409207Z"
+}

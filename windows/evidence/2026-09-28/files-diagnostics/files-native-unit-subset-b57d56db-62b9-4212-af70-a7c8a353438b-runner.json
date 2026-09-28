@@ -1,0 +1,13 @@
+{
+    "name":  "files-native-unit-subset",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\run-files-unit-subset.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T05:57:49.5317501Z",
+    "pid":  1128,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.567,
+    "finished":  "2026-09-28T05:57:50.1023923Z"
+}

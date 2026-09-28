@@ -1,0 +1,19 @@
+
+running 15 tests
+test files_model::tests::invalid_tree_structure_and_budget_are_rejected_before_apply ... ok
+test files_model::tests::maximum_size_refresh_and_native_selection_remain_path_bounded ... ok
+test files_model::tests::native_selection_is_atomic_and_preserves_exact_caret_anchor ... ok
+test files_model::tests::pages_add_exact_500_and_indices_are_retained_indices ... ok
+test files_model::tests::path_validation_and_byte_pages_preserve_exact_unicode ... ok
+test files_model::tests::refresh_does_not_treat_uninspected_collapsed_children_as_deleted ... ok
+test files_model::tests::refresh_retains_paths_not_old_indices_and_invalid_input_is_atomic ... ok
+test files_model::tests::selection_survives_collapse_without_becoming_another_row ... ok
+test files_service::tests::cancellation_and_posted_responses_keep_their_admission_permits ... ok
+test files_service::tests::drop_does_not_join_a_blocked_worker_and_response_remains_owned ... ok
+test files_service::tests::failures_and_original_deadlines_are_explicit ... ok
+test files_service::tests::native_enumeration_keeps_the_opened_directory_after_path_replacement ... ok
+test files_service::tests::native_nested_forward_slash_unicode_long_path_enumeration ... ok
+test files_service::tests::parser_preserves_exact_unicode_and_rejects_malformed_offsets ... ok
+test files_service::tests::snapshot_expands_only_requested_directories_and_keeps_hidden_names ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 208 filtered out; finished in 0.15s

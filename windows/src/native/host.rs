@@ -49,6 +49,8 @@ mod browser;
 mod downloads;
 #[path = "editor.rs"]
 mod editor;
+#[path = "files.rs"]
+mod files;
 #[path = "keys.rs"]
 mod keys;
 #[path = "notifications.rs"]
@@ -71,6 +73,7 @@ thread_local! {
 }
 enum Event {
     Editor(editor::Signal),
+    Files(files::Signal),
     Browser(browser::Signal),
     Layout,
     Tick,
@@ -212,6 +215,8 @@ unsafe extern "system" fn window_proc(
                 post(Event::Browser(browser::Signal::WaitTick));
             } else if wparam == editor::search::TIMER {
                 post(Event::Editor(editor::Signal::SearchTick));
+            } else if wparam == files::TIMER {
+                post(Event::Files(files::Signal::Tick));
             } else if wparam == 1 {
                 post(Event::Tick);
             }
@@ -265,6 +270,7 @@ impl Surface {
 #[derive(Clone)]
 enum Action {
     OpenEditor,
+    ShowFiles,
     NewBrowser,
     Notifications,
     Settings,
@@ -332,6 +338,7 @@ struct App {
     editor_open_pending: HashMap<u64, editor::PendingOpen>,
     editor_request: u64,
     editor_search_service: Option<crate::editor_search::Service>,
+    files: files::Controller,
     editor_barrier: Option<editor::Barrier>,
     editor_bypass: bool,
     browser_context: Option<WebContext>,
@@ -540,6 +547,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             editor_open_pending: HashMap::new(),
             editor_request: 0,
             editor_search_service: None,
+            files: files::Controller::default(),
             editor_barrier: None,
             editor_bypass: false,
             pending_browser: HashMap::new(),
@@ -582,6 +590,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         }
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.files_shutdown();
         app.editor_cancel_opens(None, "window closed before editor Open completed");
         app.editor_preparer.take();
         app.editor_search_service.take();
@@ -612,6 +621,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         anyhow::ensure!(result != -1, "Windows message loop failed");
         unsafe {
             if !app.search.handle_message(&message)
+                && !app.files_handle_message(&message)
                 && !app.notifications.handle_message(&message)
                 && !app.downloads.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
@@ -700,6 +710,7 @@ impl App {
         }
         self.button("+ Browser", Action::NewBrowser)?;
         self.button("Open file…", Action::OpenEditor)?;
+        self.button("Files", Action::ShowFiles)?;
         self.button("Workspace…", Action::WorkspaceMenu)?;
         self.button(&self.notification_button_text(), Action::Notifications)?;
         self.button(
@@ -908,8 +919,11 @@ impl App {
         } else {
             &geometry.dividers
         });
+        self.files_reconcile();
+        let mut view_areas = geometry.panes.clone();
+        self.files_layout(&mut view_areas, bar, scale)?;
         let areas = &geometry.panes;
-        let visible: HashMap<_, _> = areas
+        let visible: HashMap<_, _> = view_areas
             .iter()
             .map(|(pane, area)| {
                 (
@@ -951,7 +965,7 @@ impl App {
                 });
             browser.layout(area, scale)?;
         }
-        for (pane, area) in areas {
+        for (pane, area) in &view_areas {
             let id = self.workspace().root.active_surface_id(*pane).unwrap();
             if let Some(surface) = self.surfaces.get(&id) {
                 surface.view.set_bounds(bounds(model::Rect {
@@ -966,6 +980,7 @@ impl App {
             let (x, y, width, height) = match control.action {
                 Action::NewBrowser => (px(5), bar + px(128), (sidebar - px(10)).max(1), px(32)),
                 Action::OpenEditor => (px(5), bar + px(168), (sidebar - px(10)).max(1), px(32)),
+                Action::ShowFiles => (px(5), bar + px(208), (sidebar - px(10)).max(1), px(32)),
                 Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
                 Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
                 Action::Notifications => (px(5), bar + px(88), (sidebar - px(10)).max(1), px(32)),
@@ -974,7 +989,7 @@ impl App {
                     let swatch = matches!(control.action, Action::WorkspaceColor(_));
                     (
                         if swatch { px(5) } else { px(23) },
-                        bar + px(208) + i as i32 * px(36),
+                        bar + px(248) + i as i32 * px(36),
                         if swatch {
                             px(16)
                         } else {
@@ -1077,6 +1092,7 @@ impl App {
     fn event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Editor(event) => self.editor_event(event)?,
+            Event::Files(event) => self.files_event(event)?,
             Event::Browser(event) => self.browser_event(event)?,
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
@@ -1094,6 +1110,7 @@ impl App {
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
+                self.files_tick();
                 self.editor_tick();
                 self.browser_tick();
                 self.search_tick()?;
@@ -1667,6 +1684,7 @@ impl App {
         // Keep the IPC reply alive until its transport drains, while preventing
         // late preparations from publishing a new tab into an accepted close.
         self.close_accepted = true;
+        self.files_shutdown();
         self.editor_cancel_opens(
             None,
             "window close was accepted before editor Open completed",
@@ -2040,6 +2058,7 @@ impl App {
         );
         match action {
             Action::OpenEditor => return self.editor_pick_action(),
+            Action::ShowFiles => return self.files_show_current(),
             Action::NewBrowser => {
                 return self
                     .open_browser(self.active(), "about:blank".into(), false)
@@ -2133,6 +2152,9 @@ impl App {
                         | Command::Identify
                         | Command::Capabilities
                         | Command::ReadScreen { .. }
+                        | Command::Files {
+                            op: crate::files_model::Op::Status(_)
+                        }
                         | Command::Quit {
                             discard_state: true
                         }
@@ -2149,11 +2171,15 @@ impl App {
                         | Command::Editor {
                             op: crate::editor::Op::Status(_)
                         }
+                        | Command::Files {
+                            op: crate::files_model::Op::Status(_)
+                        }
                 ),
             "editor synchronization is in progress"
         );
         match command {
             Command::Editor { op } => return self.editor_command(op, caller, reply),
+            Command::Files { op } => return self.files_command(op, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),
             Command::LaunchWindow { context } => {
                 let caller = caller.context("Window launch requires a calling terminal")?;
@@ -2202,7 +2228,9 @@ impl App {
                 "named_key_protocol":"send_key_mode",
                 "editor_status":"partial","editor_commands":["open","pick","status","command","check-disk","flush"],
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
-                "commands":["editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
+                "files_limits":{"pending":crate::files_service::MAX_ADMITTED,"budget_ms":crate::files_service::BUDGET.as_millis(),"page_rows":crate::files_model::PAGE_SIZE,"entries":crate::files_model::MAX_ENTRIES,"expanded":crate::files_model::MAX_EXPANDED},
+                "commands":["files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))

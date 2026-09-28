@@ -1,0 +1,227 @@
+{
+    "started":  "2026-09-28T15:04:54.3993184+09:00",
+    "mode":  "background",
+    "case":  "refresh",
+    "checks":  [
+                   {
+                       "name":  "files_refresh_retains_selection_by_unicode_path_and_rejects_stale_or_out_of_range_open",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  33036,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T06:04:54.6018879Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\files 한글 한 😀",
+                                                      "pane":  "0fa05962-cc43-4c05-9546-52fe6f096ada",
+                                                      "pid":  33036,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-33036-87cc793a-a3ac-4834-a4ee-c33b76b03787",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "83950fb6-2d4a-4ff1-bcae-a1d10af7b7e9",
+                                                      "workspace":  "113af190-c47d-4e60-a701-3d5c9c089551"
+                                                  },
+                             "discoveryElapsedMs":  131,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  1084,
+                             "treeRequests":  2,
+                             "elapsedMs":  1328,
+                             "finished":  "2026-09-28T06:04:55.9304421Z"
+                         },
+                         {
+                             "status":  {
+                                            "cache_bytes":  2138,
+                                            "cached_panes":  1,
+                                            "captured_root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\files 한글 한 😀\\refresh",
+                                            "current_owner":  {
+                                                                  "generation":  2,
+                                                                  "instance":  "54cfb46f-fec1-4d56-a359-e8336ffb6c44",
+                                                                  "pane":  "0fa05962-cc43-4c05-9546-52fe6f096ada",
+                                                                  "workspace":  "113af190-c47d-4e60-a701-3d5c9c089551"
+                                                              },
+                                            "hidden_selected_count":  0,
+                                            "known_rows":  2,
+                                            "last_error":  null,
+                                            "list_handle":  9047556,
+                                            "loading":  false,
+                                            "more_available":  false,
+                                            "native_count":  2,
+                                            "native_selected_indices":  [
+                                                                            1
+                                                                        ],
+                                            "next_offset":  null,
+                                            "offset":  0,
+                                            "owner":  {
+                                                          "generation":  2,
+                                                          "instance":  "54cfb46f-fec1-4d56-a359-e8336ffb6c44",
+                                                          "pane":  "0fa05962-cc43-4c05-9546-52fe6f096ada",
+                                                          "workspace":  "113af190-c47d-4e60-a701-3d5c9c089551"
+                                                      },
+                                            "pane":  "0fa05962-cc43-4c05-9546-52fe6f096ada",
+                                            "panel_handle":  16911556,
+                                            "rendered_rows":  2,
+                                            "root":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\files 한글 한 😀\\refresh",
+                                            "rows":  [
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  0,
+                                                             "name":  "a new 😀.txt",
+                                                             "path":  "a new 😀.txt",
+                                                             "reparse":  false,
+                                                             "selected":  false
+                                                         },
+                                                         {
+                                                             "caret":  false,
+                                                             "depth":  0,
+                                                             "directory":  false,
+                                                             "expanded":  false,
+                                                             "index":  1,
+                                                             "name":  "b 선택 한.txt",
+                                                             "path":  "b 선택 한.txt",
+                                                             "reparse":  false,
+                                                             "selected":  true
+                                                         }
+                                                     ],
+                                            "selected_count":  1,
+                                            "selected_paths":  [
+                                                                   "b 선택 한.txt"
+                                                               ],
+                                            "selected_paths_truncated":  false,
+                                            "service":  {
+                                                            "admitted":  0,
+                                                            "admitted_input_bytes":  0,
+                                                            "completed":  2,
+                                                            "posted":  0,
+                                                            "queued":  0,
+                                                            "rejected":  0,
+                                                            "running":  0,
+                                                            "stopped":  false
+                                                        },
+                                            "snapshot_rows":  2,
+                                            "source":  "83950fb6-2d4a-4ff1-bcae-a1d10af7b7e9",
+                                            "stale":  false,
+                                            "token":  "bc024b58-bce5-4c4c-9ba1-68699fb6b1aa",
+                                            "truncated":  false,
+                                            "visible":  true,
+                                            "visible_selected_paths":  [
+                                                                           "b 선택 한.txt"
+                                                                       ],
+                                            "visible_selected_paths_truncated":  false,
+                                            "warnings":  [
+
+                                                         ]
+                                        },
+                             "case":  "refresh",
+                             "native":  {
+                                            "Host":  113248928,
+                                            "Panel":  16911556,
+                                            "List":  9047556,
+                                            "ProcessId":  33036,
+                                            "Count":  2,
+                                            "Caret":  1,
+                                            "Top":  0,
+                                            "Text":  [
+                                                         "    a new 😀.txt",
+                                                         "    b 선택 한.txt"
+                                                     ],
+                                            "Selected":  [
+                                                             1
+                                                         ],
+                                            "ElapsedMs":  3
+                                        },
+                             "kind":  "native-listbox"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\state\\editor-profile",
+                             "surface":  "bdbfe8ee-0fc9-48eb-b28e-13baa7221602",
+                             "pid":  33036,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-68725294-9fef-44a7-98e7-2b2c3d18c8e1\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  33036,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "No physical keyboard/mouse/IME, glyph rendering, clipboard, native dialogs, DPI or accessibility checks.",
+                     "Commands exercise retained native model state; LISTBOX observations are read-only bounded system messages, not simulated mouse/keyboard input.",
+                     "Paging verifies1105 entries, not every entry/byte/depth/cache/service cap. Blocked directory I/O, in-flight cancellation and queued-close races are not forced. late-show alone deliberately waits for the real15s IPC server expiry while only the owned UI thread is paused.",
+                     "Reparse confinement uses an owned junction to an owned sibling directory. Hostile concurrent reparse swaps, ACL denial, malformed UTF16 names and network roots are not exercised.",
+                     "Files is read-only. Explicit refresh and in-memory selection are checked; filesystem mutations, automatic tree watching and persisted tree restoration are outside this verifier."
+                 ],
+    "status":  "passed_background_files_subset",
+    "hosts":  [
+                  33036
+              ],
+    "shells":  [
+                   31492
+               ],
+    "clientPids":  [
+                       27280,
+                       27436,
+                       8388,
+                       25424,
+                       31284,
+                       26252,
+                       37736,
+                       11216,
+                       30192,
+                       37016,
+                       31616,
+                       8652,
+                       26952,
+                       33876,
+                       36008,
+                       38868,
+                       3104,
+                       1988,
+                       9080,
+                       39788,
+                       18704,
+                       37416,
+                       9776,
+                       23956,
+                       25888,
+                       16416,
+                       32676,
+                       31780,
+                       21792,
+                       32608,
+                       5752,
+                       37896,
+                       38808,
+                       30092,
+                       29488
+                   ],
+    "elapsedMs":  5399,
+    "finished":  "2026-09-28T15:04:59.7966975+09:00"
+}

@@ -38,6 +38,10 @@ pub(super) struct PickerTarget {
 pub(super) enum Completion {
     Ipc(ipc::Reply),
     User(HWND),
+    FilesUi {
+        sender: EventSender,
+        owner: crate::files_model::Owner,
+    },
     SearchUi {
         sender: EventSender,
         surface: SurfaceId,
@@ -49,6 +53,13 @@ impl Completion {
     fn try_send(&self, value: Value) -> Result<(), mpsc::TrySendError<Value>> {
         match self {
             Self::Ipc(reply) => reply.try_send(value),
+            Self::FilesUi { sender, owner } => {
+                sender.send(Event::Files(super::files::Signal::OpenFinished(
+                    owner.clone(),
+                    value,
+                )));
+                Ok(())
+            }
             Self::SearchUi {
                 sender,
                 surface,
@@ -89,6 +100,7 @@ pub(super) struct PendingOpen {
     workspace: WorkspaceId,
     pane: PaneId,
     reply: Completion,
+    files_owner: Option<crate::files_model::Owner>,
 }
 pub(super) struct Editor {
     pub(super) view: editor_view::View,
@@ -124,6 +136,7 @@ struct Pending {
     initial_open: bool,
     timed_out: bool,
     open_path: Option<PathBuf>,
+    files_owner: Option<crate::files_model::Owner>,
 }
 enum PendingKind {
     Command,
@@ -516,6 +529,21 @@ impl App {
                                 if self.editor_refresh_flush(surface, request_id, error.clone()) {
                                     return Ok(());
                                 }
+                                let invalid_files_open = self.editors[&surface]
+                                    .pending
+                                    .as_ref()
+                                    .filter(|p| p.id == request_id && p.open_path.is_some())
+                                    .and_then(|p| p.files_owner.as_ref().map(|owner| (p, owner)))
+                                    .is_some_and(|(p, owner)| {
+                                        !self.files_owner_current(owner)
+                                            || p.started.elapsed()
+                                                >= crate::editor_open::OPEN_BUDGET
+                                    });
+                                if invalid_files_open {
+                                    self.editor_barrier_error(surface, request_id,
+                                        "Files Open was cancelled or expired before document dispatch");
+                                    return Ok(());
+                                }
                                 if let Some(error) = error {
                                     self.editor_barrier_error(surface, request_id, &error)
                                 } else {
@@ -626,6 +654,14 @@ impl App {
                 }
             }
             Signal::Worker(surface, instance, response) => {
+                let invalid_files_open = self
+                    .editors
+                    .get(&surface)
+                    .filter(|e| e.instance == instance)
+                    .and_then(|e| e.pending.as_ref())
+                    .filter(|p| p.id == response.id)
+                    .and_then(|p| p.files_owner.as_ref())
+                    .is_some_and(|owner| !self.files_owner_current(owner));
                 let Some(editor) = self
                     .editors
                     .get_mut(&surface)
@@ -634,6 +670,14 @@ impl App {
                     return Ok(());
                 };
                 editor.inflight.remove(&response.id);
+                if invalid_files_open {
+                    // The document worker may already have applied Open. Keep
+                    // every actual model response and its synchronization chain,
+                    // but never acknowledge the obsolete Files request as success.
+                    if let Some(pending) = &mut editor.pending {
+                        pending.error = Some("Files changed while Open was in flight; review the editor state before retrying".into());
+                    }
+                }
                 editor.backend_ready = response.ready;
                 editor.initialization_failed = response.initialization_failed;
                 editor.refresh_ready();
@@ -1068,15 +1112,91 @@ impl App {
             pending.reply.cancel(reason);
         }
     }
+    pub(super) fn editor_cancel_files_opens(&mut self, instance: Uuid, reason: &str) {
+        let ids: Vec<_> = self
+            .editor_open_pending
+            .iter()
+            .filter(|(_, pending)| {
+                pending
+                    .files_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.instance == instance)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            let pending = self.editor_open_pending.remove(&id).unwrap();
+            pending.ticket.cancel();
+            pending.reply.cancel(reason);
+        }
+        for editor in self.editors.values_mut() {
+            let Some(pending) = editor.pending.as_mut().filter(|p| {
+                p.files_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.instance == instance)
+            }) else {
+                continue;
+            };
+            if pending.open_path.is_some() {
+                // The reuse barrier has not dispatched document I/O yet.
+                let pending = editor.pending.take().unwrap();
+                editor.release(pending.id);
+                editor.error = Some(reason.into());
+                editor.refresh_ready();
+                let _ = pending.reply.try_send(json!({"error":reason}));
+            } else if !pending.timed_out {
+                // Already submitted I/O owns its guard until model reconciliation.
+                pending.error = Some(reason.into());
+                pending.timed_out = true;
+                editor.ready = false;
+                editor.error = Some(reason.into());
+                let _ = pending.reply.try_send(json!({"error":reason}));
+            }
+        }
+    }
+    pub(super) fn editor_open_from_files(
+        &mut self,
+        source: SurfaceId,
+        owner: crate::files_model::Owner,
+        root: PathBuf,
+        path: PathBuf,
+        reply: Option<ipc::Reply>,
+    ) -> anyhow::Result<()> {
+        let (workspace, pane, _) = self
+            .locate(source)
+            .context("Files source surface disappeared before Open")?;
+        anyhow::ensure!(
+            self.workspaces[workspace].id.0 == owner.workspace && pane.0 == owner.pane,
+            "Files source moved before Open; refresh the panel"
+        );
+        let completion = match reply {
+            Some(reply) => Completion::Ipc(reply),
+            None => Completion::FilesUi {
+                sender: self.sender.clone(),
+                owner: owner.clone(),
+            },
+        };
+        self.editor_submit_open(
+            domain::OpenArgs {
+                path,
+                root: Some(root),
+                pane: None,
+            },
+            Some(source),
+            completion,
+            Some(owner),
+        )
+    }
     fn editor_submit_open(
         &mut self,
         args: domain::OpenArgs,
         caller: Option<SurfaceId>,
         reply: Completion,
+        files_owner: Option<crate::files_model::Owner>,
     ) -> anyhow::Result<()> {
         let submitted = match &reply {
             Completion::Ipc(reply) => reply.received_at(),
-            Completion::User(_) => Instant::now(),
+            Completion::User(_) | Completion::FilesUi { .. } => Instant::now(),
             Completion::SearchUi { .. } => {
                 anyhow::bail!("search results require retained-result validation")
             }
@@ -1127,11 +1247,19 @@ impl App {
                 workspace,
                 pane,
                 reply,
+                files_owner,
             },
         );
         Ok(())
     }
     fn editor_open_target(&self, pending: &PendingOpen) -> anyhow::Result<usize> {
+        anyhow::ensure!(
+            pending
+                .files_owner
+                .as_ref()
+                .is_none_or(|owner| self.files_owner_current(owner)),
+            "Files panel changed before Open completed; request was cancelled"
+        );
         anyhow::ensure!(
             !pending.ticket.is_cancelled() && !pending.ticket.is_expired(Instant::now()),
             "editor Open exceeded its original deadline or was cancelled"
@@ -1219,6 +1347,7 @@ impl App {
             initial_open: reuse.is_none(),
             timed_out: false,
             open_path,
+            files_owner: pending.files_owner,
         });
         let layout = self.select(id).and_then(|()| {
             self.zoomed = None;
@@ -1305,6 +1434,7 @@ impl App {
             },
             Some(target.source),
             completion,
+            None,
         )
     }
     fn editor_run_picker(&mut self, target: PickerTarget) {
@@ -1372,7 +1502,7 @@ impl App {
                 Ok(None)
             }
             domain::Op::Open(args) => {
-                self.editor_submit_open(args, caller, Completion::Ipc(reply))?;
+                self.editor_submit_open(args, caller, Completion::Ipc(reply), None)?;
                 Ok(None)
             }
             domain::Op::Pick(args) => {
@@ -1479,6 +1609,7 @@ impl App {
                     initial_open: false,
                     timed_out: false,
                     open_path: None,
+                    files_owner: None,
                 });
                 Ok(None)
             }

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "started": "2026-09-28T05:58:56.187694+00:00",
+  "status": "failed",
+  "selectedCases": [
+    "paging",
+    "selection",
+    "refresh",
+    "confinement",
+    "owner",
+    "late-show"
+  ],
+  "serial": true,
+  "failFast": true,
+  "retries": 0,
+  "jobDeadlineSeconds": 120,
+  "results": [
+    {
+      "case": "paging",
+      "kind": "refresh",
+      "label": "files-paging",
+      "started": "2026-09-28T05:58:56.200003+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-cases/paging.ps1",
+        "files-paging",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/files-runs/21c564ac-0a33-47d9-b535-03e33850b03e/paging-driver.txt",
+      "status": "evidence_error",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-25c4207f-f12b-4249-a597-b355acfe8f24",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/files-25c4207f-f12b-4249-a597-b355acfe8f24/native-files-background.json",
+      "runnerResult": null,
+      "returncode": 0,
+      "runnerResultWindows": null,
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\files-25c4207f-f12b-4249-a597-b355acfe8f24",
+      "evidenceStatus": "passed_background_files_subset",
+      "evidenceCase": "paging",
+      "checks": [
+        {
+          "name": "files_more_and_status_paging_preserve1105_native_rows_and_absolute_retained_indices",
+          "passed": true
+        }
+      ],
+      "error": "Successful process exit lacked matching passed evidence or clean Job cleanup",
+      "elapsedSeconds": 11.24,
+      "finished": "2026-09-28T05:59:07.467624+00:00"
+    }
+  ],
+  "stoppedAt": "paging",
+  "notRun": [
+    "selection",
+    "refresh",
+    "confinement",
+    "owner",
+    "late-show"
+  ],
+  "finished": "2026-09-28T05:59:07.523526+00:00"
+}
