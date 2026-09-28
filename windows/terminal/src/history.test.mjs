@@ -25,7 +25,7 @@ test('restore finishes only after both parser callbacks and moves history out of
   assert.deepEqual(writes, ['한글']);
   assert.equal(done, false);
   callbacks.shift()();
-  assert.ok(writes[1].includes('new PowerShell session'));
+  assert.equal(writes[1], `\x1b[0m\x1b[r\x1b[24;1H\r\n[Restored history]\r\n${'\n'.repeat(23)}`);
   assert.equal(done, false);
   callbacks.shift()();
   assert.equal(done, true);

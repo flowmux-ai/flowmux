@@ -28,6 +28,6 @@ export function restore(terminal, screen, done) {
   terminal.write(screen.data, () => {
     // Put the restored display into scrollback before ConPTY's initial clear.
     // A new process cannot resume the old process's alternate screen or modes.
-    terminal.write(`\x1b[0m\x1b[r\x1b[${screen.rows};1H\r\n[Restored history — new PowerShell session]\r\n${'\n'.repeat(screen.rows - 1)}`, done);
+    terminal.write(`\x1b[0m\x1b[r\x1b[${screen.rows};1H\r\n[Restored history]\r\n${'\n'.repeat(screen.rows - 1)}`, done);
   });
 }
