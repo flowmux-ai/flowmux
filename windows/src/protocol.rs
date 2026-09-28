@@ -28,7 +28,25 @@ pub struct Envelope {
     pub surface: Uuid,
     pub generation: Uuid,
     pub token: Uuid,
+    #[serde(default)]
+    pub session: Option<Uuid>,
     pub message: ClientMessage,
+}
+
+impl Envelope {
+    pub fn accepts_session(&self, current: Uuid) -> bool {
+        !matches!(
+            &self.message,
+            ClientMessage::Input { .. }
+                | ClientMessage::BinaryInput { .. }
+                | ClientMessage::Pasted { request: None, .. }
+                | ClientMessage::Title { .. }
+                | ClientMessage::Cwd { .. }
+                | ClientMessage::Shortcut { .. }
+                | ClientMessage::TerminalMenuAction { .. }
+                | ClientMessage::Focus
+        ) || self.session == Some(current)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -158,6 +176,9 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
+    SessionStart {
+        session: Uuid,
+    },
     TerminalMenuState {
         pane: Uuid,
         split: bool,
@@ -281,7 +302,7 @@ impl Identity {
         }
     }
 
-    pub fn decode(&self, origin: &str, body: &str) -> anyhow::Result<ClientMessage> {
+    pub fn decode(&self, origin: &str, body: &str) -> anyhow::Result<Envelope> {
         anyhow::ensure!(
             origin == TERMINAL_ORIGIN || origin.starts_with(&format!("{TERMINAL_ORIGIN}/")),
             "untrusted terminal origin"
@@ -298,13 +319,13 @@ impl Identity {
                 && envelope.token == self.token,
             "stale or foreign terminal message"
         );
-        if let ClientMessage::Resize { cols, rows } = envelope.message {
+        if let ClientMessage::Resize { cols, rows } = &envelope.message {
             anyhow::ensure!(
-                (2..=1000).contains(&cols) && (1..=1000).contains(&rows),
+                (2..=1000).contains(cols) && (1..=1000).contains(rows),
                 "invalid terminal size"
             );
         }
-        Ok(envelope.message)
+        Ok(envelope)
     }
 }
 
@@ -384,6 +405,67 @@ mod tests {
             .is_err());
         body["generation"] = serde_json::json!(Uuid::new_v4());
         assert!(id.decode(TERMINAL_ORIGIN, &body.to_string()).is_err());
+    }
+
+    #[test]
+    fn replacement_session_rejects_stale_side_effects_without_rejecting_transport() {
+        let identity = Identity::new(Uuid::new_v4());
+        let current = Uuid::new_v4();
+        let previous = Uuid::new_v4();
+        let mut body = serde_json::to_value(&identity).unwrap();
+        let effects = [
+            serde_json::json!({"type":"input","data":"한글 한\r"}),
+            serde_json::json!({"type":"binary_input","data":"\u{1b}"}),
+            serde_json::json!({"type":"pasted","request":null,"sequence":7,
+                "outcome":{"status":"ok","data":"한글","bracketed":false}}),
+            serde_json::json!({"type":"title","title":"이전 제목"}),
+            serde_json::json!({"type":"cwd","path":"/이전/한"}),
+            serde_json::json!({"type":"shortcut","action":"new-tab","revision":current,
+                "chord":{"code":"KeyT","ctrl":true,"alt":false,"shift":true}}),
+            serde_json::json!({"type":"terminal_menu_action","pane":current,"action":"split_right"}),
+            serde_json::json!({"type":"focus"}),
+        ];
+        for message in effects {
+            body["message"] = message;
+            body.as_object_mut().unwrap().remove("session");
+            assert!(!identity
+                .decode(TERMINAL_ORIGIN, &body.to_string())
+                .unwrap()
+                .accepts_session(current));
+            for session in [None, Some(previous), Some(current)] {
+                body["session"] = serde_json::to_value(session).unwrap();
+                let envelope = identity.decode(TERMINAL_ORIGIN, &body.to_string()).unwrap();
+                assert_eq!(envelope.accepts_session(current), session == Some(current));
+            }
+        }
+        for message in [
+            serde_json::json!({"type":"ack","sequence":7}),
+            serde_json::json!({"type":"ready"}),
+            serde_json::json!({"type":"restored"}),
+            serde_json::json!({"type":"resize","cols":80,"rows":24}),
+            serde_json::json!({"type":"key_mode","request":current,"sequence":7,
+                "outcome":{"status":"ok","application_cursor":false}}),
+            serde_json::json!({"type":"pasted","request":current,"sequence":7,
+                "outcome":{"status":"ok","data":"한글","bracketed":false}}),
+            serde_json::json!({"type":"screen","request":current,"sequence":7,
+                "outcome":{"status":"error","message":"closed"}}),
+        ] {
+            body["message"] = message;
+            for session in [None, Some(previous)] {
+                body["session"] = serde_json::to_value(session).unwrap();
+                assert!(identity
+                    .decode(TERMINAL_ORIGIN, &body.to_string())
+                    .unwrap()
+                    .accepts_session(current));
+            }
+        }
+        body.as_object_mut().unwrap().remove("session");
+        assert!(identity
+            .decode(TERMINAL_ORIGIN, &body.to_string())
+            .unwrap()
+            .accepts_session(current));
+        body["message"] = serde_json::json!({"type":"resize","cols":1,"rows":24});
+        assert!(identity.decode(TERMINAL_ORIGIN, &body.to_string()).is_err());
     }
 
     #[test]

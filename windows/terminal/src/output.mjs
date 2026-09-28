@@ -22,6 +22,19 @@ export class Output {
     // those requests while retaining the grid and already submitted writes.
     this.pending = [];
   }
+  startSession(done) {
+    this.cancelPending();
+    // Use the same byte decoder and write FIFO as PTY output. CAN abandons an
+    // incomplete UTF-8/escape sequence; return from a remote alternate screen
+    // and reset modes without clearing the normal buffer or transport sequence.
+    // Saving the active cursor first avoids an old saved position when already
+    // in the normal buffer; on alternate it leaves the normal saved cursor alone.
+    const reset = '\x18\x1b7\x1b[?1049l\x1b[?1000;1006;1016;2026l\x1b[!p';
+    this.terminal.write(new TextEncoder().encode(reset), () => {
+      done?.();
+      this.changed?.();
+    });
+  }
   receive(message) {
     if (message.type === 'output') {
       if (message.sequence !== this.received + 1) throw new Error('Out-of-order terminal output');

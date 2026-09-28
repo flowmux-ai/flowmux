@@ -179,6 +179,7 @@ mod tests {
         outcome.validate(Mode::Viewport).unwrap();
         let message = crate::protocol::Envelope {
             version: crate::protocol::VERSION,
+            session: None,
             surface: uuid::Uuid::new_v4(),
             generation: uuid::Uuid::new_v4(),
             token: uuid::Uuid::new_v4(),

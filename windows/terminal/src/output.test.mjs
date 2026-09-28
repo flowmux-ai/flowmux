@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Output } from './output.mjs';
 import { Paste } from './paste.mjs';
+import xterm from '@xterm/xterm';
 
 test('split Korean UTF-8 stays bytes and screen waits for parser completion', () => {
   const callbacks = [], writes = [], replies = [];
@@ -120,4 +121,69 @@ test('disconnect cancels old actions without losing in-flight output, history or
   assert.deepEqual(actions, ['find:new-find']);
   assert.deepEqual(replies.filter(reply => reply.type === 'ack').map(reply => reply.sequence), [1, 2, 3]);
   assert.deepEqual(replies.filter(reply => reply.request).map(reply => reply.request), ['new-find']);
+});
+
+test('real xterm session reset preserves Korean history and sequence while abandoning old modes and parser state', async () => {
+  const { Terminal } = xterm;
+  const encoded = text => new TextEncoder().encode(text);
+  const history = '이전 한글 한 😀';
+  for (const unfinished of [encoded('\x1b[31;'), encoded('\x1b]2;unfinished'),
+    encoded('\x1bP$qunfinished'), encoded('한').slice(0, 2)]) {
+    const terminal = new Terminal({ cols: 60, rows: 4, scrollback: 20 });
+    try {
+      const replies = [];
+      let tag = 'old';
+      const output = new Output(terminal, message => replies.push({ tag, ...message }));
+      const receive = (sequence, data) => output.receive({ type: 'output', sequence,
+        data: Buffer.from(data).toString('base64') });
+      const fence = () => new Promise(resolve => terminal.write(new Uint8Array(), resolve));
+      receive(1, encoded(`${history}\r\n1\r\n2\r\n3\r\n4\r\n`));
+      receive(2, encoded('\x1b[?1049h\x1b[?1;66;1003;1006;2004;1004hALT'));
+      await fence();
+      assert.equal(terminal.buffer.active.type, 'alternate');
+      assert.equal(terminal.modes.applicationCursorKeysMode, true);
+      assert.equal(terminal.modes.applicationKeypadMode, true);
+      assert.equal(terminal.modes.bracketedPasteMode, true);
+      assert.equal(terminal.modes.mouseTrackingMode, 'any');
+      receive(3, unfinished);
+      const reset = new Promise(resolve => output.startSession(() => { tag = 'new'; resolve(); }));
+      const next = encoded('새 한글 가 😀');
+      receive(4, next.slice(0, 2));
+      receive(5, next.slice(2));
+      await reset; await fence();
+      assert.equal(terminal.buffer.active.type, 'normal');
+      assert.deepEqual(terminal.modes, {
+        applicationCursorKeysMode: false, applicationKeypadMode: false,
+        bracketedPasteMode: false, insertMode: false, mouseTrackingMode: 'none',
+        originMode: false, reverseWraparoundMode: false, sendFocusMode: false,
+        synchronizedOutputMode: false, wraparoundMode: true,
+      });
+      const buffer = terminal.buffer.normal;
+      const text = Array.from({ length: buffer.length }, (_, row) =>
+        buffer.getLine(row).translateToString(true)).join('\n');
+      assert.ok(text.includes(history), JSON.stringify(text));
+      assert.ok(text.includes('새 한글 가 😀'), JSON.stringify(text));
+      assert.equal(output.received, 5); assert.equal(output.parsed, 5);
+      assert.deepEqual(replies.map(reply => [reply.type, reply.sequence, reply.tag]),
+        [['ack', 1, 'old'], ['ack', 2, 'old'], ['ack', 3, 'old'], ['ack', 4, 'new'], ['ack', 5, 'new']]);
+    } finally { terminal.dispose(); }
+  }
+});
+
+test('real xterm reconnect in normal buffer preserves the current cursor and existing Korean cells', async () => {
+  const terminal = new xterm.Terminal({ cols: 60, rows: 4 });
+  try {
+    const output = new Output(terminal, () => {});
+    output.receive({ type: 'output', sequence: 1,
+      data: Buffer.from('보존 한 😀\r\n현재 프롬프트').toString('base64') });
+    await new Promise(resolve => terminal.write(new Uint8Array(), resolve));
+    const before = [terminal.buffer.active.cursorX, terminal.buffer.active.cursorY];
+    await new Promise(resolve => output.startSession(resolve));
+    assert.deepEqual([terminal.buffer.active.cursorX, terminal.buffer.active.cursorY], before);
+    output.receive({ type: 'output', sequence: 2, data: Buffer.from(' 새 연결').toString('base64') });
+    await new Promise(resolve => terminal.write(new Uint8Array(), resolve));
+    assert.equal(terminal.buffer.normal.getLine(0).translateToString(true), '보존 한 😀');
+    assert.equal(terminal.buffer.normal.getLine(1).translateToString(true), '현재 프롬프트 새 연결');
+    assert.equal(output.received, 2); assert.equal(output.parsed, 2);
+  } finally { terminal.dispose(); }
 });

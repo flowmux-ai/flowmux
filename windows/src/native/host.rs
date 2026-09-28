@@ -1255,6 +1255,7 @@ impl App {
                 wry::http::Response::builder()
                     .header("Content-Type", mime)
                     .header("X-Content-Type-Options", "nosniff")
+                    .header("Cache-Control", "no-store")
                     .body(Cow::Borrowed(body))
                     .unwrap()
             })
@@ -1962,8 +1963,11 @@ impl App {
         let Some(surface) = self.surfaces.get(&id) else {
             return Ok(());
         };
-        let message = surface.identity.decode(origin, body)?;
-        match message {
+        let envelope = surface.identity.decode(origin, body)?;
+        if !envelope.accepts_session(surface.session_generation) {
+            return Ok(());
+        }
+        match envelope.message {
             ClientMessage::Ready => {
                 surface.send(&HostMessage::Visibility {
                     visible: surface.visible,
@@ -2377,17 +2381,22 @@ impl App {
             *command = format!("printf '\\033]777;flowmux-ssh-ready;{generation}\\007'; {command}");
         }
         let sender = self.sender.clone();
-        let surface = self.surfaces.get_mut(&id).unwrap();
         anyhow::ensure!(
-            surface.session.is_none(),
+            self.surfaces[&id].session.is_none(),
             "terminal session is already running"
         );
+        self.cancel_surface_search(id);
+        self.cancel_terminal_requests(id);
+        let surface = self.surfaces.get_mut(&id).unwrap();
         surface.session_generation = generation;
         surface.session_after = surface.output_sequence;
         surface.ssh_connected = false;
         surface.exit_code = None;
         surface.output_ended = false;
         surface.notification_sniffer = Default::default();
+        surface.send(&HostMessage::SessionStart {
+            session: generation,
+        })?;
         let session = Session::spawn_after(
             &cwd,
             &shell,

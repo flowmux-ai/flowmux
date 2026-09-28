@@ -20,7 +20,8 @@ import { Minimap } from './minimap.mjs';
 
 const identity = Object.freeze(window.__flowmuxIdentity);
 delete window.__flowmuxIdentity;
-const send = message => window.ipc.postMessage(JSON.stringify({ ...identity, message }));
+let session = null;
+const send = message => window.ipc.postMessage(JSON.stringify({ ...identity, session, message }));
 const initialSettings = window.__flowmuxSettings;
 const initialTheme = window.__flowmuxTheme;
 delete window.__flowmuxTheme;
@@ -31,6 +32,7 @@ const backgroundTesting = window.__flowmuxBackgroundTesting === true;
 delete window.__flowmuxBackgroundTesting;
 const terminal = new Terminal({
   ...options(initialSettings.terminal,initialTheme), allowProposedApi: false,
+  disableStdin: true,
   linkHandler: { activate: (_event, url) => send({ type: 'link', url }) },
 });
 const fit = new FitAddon(), serialize = new SerializeAddon();
@@ -40,6 +42,7 @@ const selection = new Selection(terminal);
 const find = new SearchUi(terminal, () => new SearchAddon(), document, selection);
 const outputSearch = new OutputSearch(terminal, send, undefined, selection);
 let restoring = false, composing = false, surfaceVisible = false, ssh = false;
+let sessionGeneration = 0, sessionResetPending = true, sessionInputReady = false, sessionInputAllowed = false;
 const minimap = new Minimap(terminal, document, () => composing || restoring);
 const paste = new Paste(terminal, () => composing ? 'Finish composing text before pasting.'
   : restoring ? 'Terminal history is being restored.' : null);
@@ -69,12 +72,12 @@ terminal.parser.registerOscHandler(777, value => {
   if (!restoring) send({ type: 'ssh_ready', session: match[1] });
   return true;
 });
-terminal.onData(data => { if (!paste.data(data) && !restoring) input.data(data); });
+terminal.onData(data => { if (!paste.data(data) && !restoring && !terminal.options.disableStdin) input.data(data); });
 terminalElement.addEventListener('paste', event => { clipboard.cancel(); paste.event(event, outcome => {
   if (outcome.status === 'ok' && outcome.data) selection.forget();
   send({ type: 'pasted', request: null, sequence: output.parsed, outcome });
 }); }, true);
-terminal.onBinary(data => { if (!restoring) send({ type: 'binary_input', data }); });
+terminal.onBinary(data => { if (!restoring && !terminal.options.disableStdin) send({ type: 'binary_input', data }); });
 terminal.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
 terminal.onTitleChange(title => { if (!restoring) send({ type: 'title', title }); });
 terminal.textarea.addEventListener('focus', () => send({ type: 'focus' }));
@@ -93,12 +96,12 @@ window.addEventListener('resize', () => menu.close(false));
 terminal.textarea.addEventListener('blur', () => { paneShortcuts.reset(); clipboard.cancel(); });
 terminal.textarea.addEventListener('compositionstart', () => { composing = true; clipboard.cancel(); menu.close(false); selection.forget(); });
 terminal.textarea.addEventListener('compositionend', () => {
-  paste.settleComposition(); composing = false; queueMicrotask(() => settings.flush());
+  paste.settleComposition(refreshSessionInput); composing = false; queueMicrotask(() => settings.flush());
 });
 const handleKeyEvent = event => {
   if (clipboard.key(event, composing || restoring || !!paste.settling || paneShortcuts.rightAlt)) return false;
   input.keyEvent(event);
-  if (event.type === 'keydown' && event.keyCode === 229) paste.settleComposition();
+  if (event.type === 'keydown' && event.keyCode === 229) paste.settleComposition(refreshSessionInput);
   const paneAction = paneShortcuts.event(event, composing || restoring || !!paste.settling || !!terminal.options.disableStdin);
   if (paneAction) {
     event.preventDefault();
@@ -123,14 +126,28 @@ new ResizeObserver(() => {
   .observe(document.getElementById('terminal'));
 window.flowmuxHost = message => {
   try {
-    if (message.type === 'restore') {
+    if (message.type === 'session_start') {
+      const generation = ++sessionGeneration;
+      sessionResetPending = true; sessionInputReady = false; sessionInputAllowed = false;
+      clipboard.cancel(); menu.close(false); paneShortcuts.reset(); input.key = undefined;
+      refreshSessionInput();
+      // Only release an input guard after xterm's deferred IME/229 finalizers.
+      // Never replay text or force a composition to finish across sessions.
+      paste.settleComposition(refreshSessionInput);
+      output.startSession(() => {
+        if (generation !== sessionGeneration) return;
+        session = message.session;
+        sessionResetPending = false;
+        refreshSessionInput();
+      });
+    } else if (message.type === 'restore') {
       clipboard.cancel(); selection.clear(); menu.close(false);
       restoring = true;
       terminal.options.disableStdin = true;
       restore(terminal, message.screen, () => {
         fit.fit();
         restoring = false;
-        terminal.options.disableStdin = false;
+        refreshSessionInput();
         settings.flush();
         minimap.changed();
         send({ type: 'restored' });
@@ -185,29 +202,38 @@ window.flowmuxHost = message => {
     }
     else if (message.type === 'ssh_status') {
       ssh = true;
+      clipboard.cancel();
       if (message.state === 'disconnected') output.cancelPending();
       document.getElementById('status').textContent = message.state === 'connected' ? ''
         : message.state === 'connecting' ? 'SSH connecting — enter authentication in this terminal if requested.'
         : `SSH ${message.state}${message.error ? `: ${message.error}` : ''} `;
-      terminal.options.disableStdin = !['connecting', 'connected'].includes(message.state);
-      if (terminal.options.disableStdin) sshConnectButton();
+      sessionInputAllowed = ['connecting', 'connected'].includes(message.state);
+      refreshSessionInput();
+      if (!sessionInputAllowed) sshConnectButton();
     }
     else if (message.type === 'shell_status') {
       const status=document.getElementById('status');
       status.textContent=message.error ? `Shell could not start: ${message.error} ` : '';
-      terminal.options.disableStdin=!!message.error;
+      sessionInputAllowed = !message.error;
+      refreshSessionInput();
       if (message.error) {
         const retry=document.createElement('button'); retry.textContent='Start Command Prompt';
         retry.addEventListener('click',()=>send({type:'retry_command_prompt'})); status.append(retry);
       }
     }
     else if (message.type === 'exit') {
+      clipboard.cancel(); menu.close(false);
       document.getElementById('status').textContent = `Process exited (${message.code})`;
       if (ssh) sshConnectButton();
-      terminal.options.disableStdin = true;
+      sessionInputAllowed = false;
+      refreshSessionInput();
     } else output.receive(message);
   } catch (error) { send({ type: 'fault', message: String(error) }); }
 };
+function refreshSessionInput() {
+  if (!sessionResetPending && !composing && !paste.settling) sessionInputReady = true;
+  terminal.options.disableStdin = restoring || !sessionInputAllowed || !sessionInputReady;
+}
 function sshConnectButton() {
   const button = document.createElement('button'); button.textContent = 'Connect';
   button.addEventListener('click', () => send({ type: 'ssh_connect' }));

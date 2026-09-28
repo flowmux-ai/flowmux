@@ -21,13 +21,16 @@ export class Paste {
     this.captured = null;
     this.settling = null;
   }
-  settleComposition() {
+  settleComposition(settled) {
     const token = this.settling = {};
     // xterm 6 finalizes compositionend/keyCode 229 from a zero-delay task.
     // Register after its event handler, including when our key hook runs first.
     // This timer only releases a paste guard; it never emits/replays text.
     queueMicrotask(() => setTimeout(() => {
-      if (this.settling === token) this.settling = null;
+      if (this.settling === token) {
+        this.settling = null;
+        settled?.();
+      }
     }, 0));
   }
   // Called before the ordinary keyboard/Shift+Enter path. xterm.paste emits

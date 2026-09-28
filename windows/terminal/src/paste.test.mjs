@@ -96,3 +96,19 @@ test('paste stays blocked through xterm deferred composition finalization withou
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(f.paste.run('다음').data, '다음');
 });
+
+test('settled callback only releases the latest guard after deferred composition input', async () => {
+  const f = fixture(), events = [];
+  f.paste.settleComposition(() => events.push('obsolete'));
+  f.paste.settleComposition(() => {
+    assert.equal(f.paste.settling, null);
+    events.push('release');
+  });
+  setTimeout(() => {
+    assert.notEqual(f.paste.settling, null);
+    events.push('old composition');
+  }, 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(events, ['old composition', 'release']);
+  assert.deepEqual(f.calls, []);
+});
