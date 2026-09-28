@@ -8,8 +8,11 @@ use chrono::Utc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 struct Job {
+    id: Uuid,
     cancel: Arc<AtomicBool>,
     started: Instant,
+    synthetic: bool,
+    retired: bool,
 }
 #[derive(Default)]
 pub(super) struct Controller {
@@ -41,6 +44,7 @@ impl Controller {
     }
     pub(super) fn status(&self) -> Value {
         json!({"state":self.state,"worker_active":self.job.is_some(),"retry":self.retry,
+            "job_id":self.job.as_ref().map(|job|job.id),"retired":self.job.as_ref().is_some_and(|job|job.retired),
             "panel":self.panel.as_ref().map(usage_panel::Panel::diagnostics),
             "bar":self.bar.as_ref().map(usage_panel::Bar::diagnostics)})
     }
@@ -51,8 +55,14 @@ impl Controller {
             .map(|p| p.window)
     }
     pub(super) fn shutdown(&mut self) {
-        if let Some(job) = self.job.take() {
+        if let Some(job) = &mut self.job {
+            job.retired = true;
             job.cancel.store(true, Ordering::Release);
+        }
+        // Keep a cancelled real collector until its completion arrives: reopening
+        // must not create a second account collector while the first drains.
+        if self.job.as_ref().is_some_and(|job| job.synthetic) {
+            self.job.take();
         }
         self.panel.take();
         self.bar.take();
@@ -68,11 +78,14 @@ impl Drop for Controller {
 }
 impl App {
     pub(super) fn usage_initialize(&mut self) -> anyhow::Result<()> {
-        if self.main_closed {
+        if self.main_closed || self.usage.bar.is_some() {
             return Ok(());
         }
         self.usage.bar = Some(usage_panel::Bar::new(self.window)?);
         self.usage_render();
+        // A recently completed refresh may reject collection below. Reopening
+        // still needs the periodic refresh that shutdown cleared.
+        self.usage.next_refresh = Some(Instant::now() + Duration::from_secs(150));
         // Hidden verification must never read a developer's login or contact an account.
         if !self.background_test {
             self.usage_refresh(false)?;
@@ -160,9 +173,13 @@ impl App {
             return Ok(());
         }
         let cancel = Arc::new(AtomicBool::new(false));
+        let id = Uuid::new_v4();
         self.usage.job = Some(Job {
+            id,
             cancel: cancel.clone(),
             started: Instant::now(),
+            synthetic: self.background_test,
+            retired: false,
         });
         self.usage.next_refresh = None;
         self.usage_render();
@@ -179,16 +196,33 @@ impl App {
                         .unwrap_or_else(|_| {
                             failed(UsageErrorKind::Io, "The usage collector failed.")
                         });
-                sender.send(Event::UsageResult(result));
+                sender.send(Event::UsageResult(id, result));
             })
             .is_err()
         {
-            self.usage_result(failed(
-                UsageErrorKind::Io,
-                "Could not start the usage collector.",
-            ))?;
+            self.usage_complete(
+                id,
+                failed(UsageErrorKind::Io, "Could not start the usage collector."),
+            )?;
         }
         Ok(())
+    }
+    pub(super) fn usage_complete(
+        &mut self,
+        id: Uuid,
+        results: [ProviderRefresh; 2],
+    ) -> anyhow::Result<()> {
+        if self.usage.job.as_ref().is_none_or(|job| job.id != id) {
+            return Ok(());
+        }
+        let job = self.usage.job.take().unwrap();
+        if self.main_closed || job.retired {
+            if !self.main_closed {
+                self.usage_refresh(false)?;
+            }
+            return Ok(());
+        }
+        self.usage_result(results)
     }
     pub(super) fn usage_result(&mut self, results: [ProviderRefresh; 2]) -> anyhow::Result<()> {
         if self.main_closed {
@@ -218,6 +252,9 @@ impl App {
             return Ok(());
         }
         if let Some(job) = &self.usage.job {
+            if job.retired {
+                return Ok(());
+            }
             if job.started.elapsed() >= Duration::from_secs(20) {
                 job.cancel.store(true, Ordering::Release);
                 if self.background_test {
@@ -312,10 +349,17 @@ impl App {
                 collected_at: Utc::now(),
             }
         };
-        self.usage_result([
+        let results = [
             refresh(Provider::Claude, "claude"),
             refresh(Provider::Codex, "codex"),
-        ])?;
+        ];
+        if let Some(id) = value.get("job_id") {
+            self.usage_complete(serde_json::from_value(id.clone())?, results)?;
+        } else if let Some(job) = &self.usage.job {
+            self.usage_complete(job.id, results)?;
+        } else {
+            self.usage_result(results)?;
+        }
         Ok(self.usage.status())
     }
 }

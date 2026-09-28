@@ -176,6 +176,7 @@ impl App {
         self.detached_focus = None;
         if self.main_closed {
             self.main_closed = false;
+            self.usage_initialize()?;
             if !self.background_test {
                 unsafe {
                     ShowWindow(self.window, SW_SHOWNOACTIVATE);

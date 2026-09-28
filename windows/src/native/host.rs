@@ -149,7 +149,7 @@ enum Event {
     NotificationUi(notifications::UiAction),
     Sessions(sessions::Signal),
     UsageUi(usage_panel::UiAction),
-    UsageResult([crate::usage::ProviderRefresh; 2]),
+    UsageResult(Uuid, [crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
     Overview(overview::Signal),
     Download(downloads::Signal),
@@ -623,6 +623,14 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
     } else {
         Some(data_dir()?)
     };
+    let terminal_data_root = if background_test {
+        std::env::var_os("FLOWMUX_TEST_STATE_DIR")
+            .or_else(|| std::env::var_os("FLOWMUX_TEST_ARTIFACT_ROOT"))
+            .map(PathBuf::from)
+            .context("background terminal requires an isolated profile directory")?
+    } else {
+        data_dir()?
+    };
     let (store, restored) = if launch.temporary {
         (None, None)
     } else {
@@ -816,7 +824,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             window,
             sender,
             _ipc: ipc,
-            context: WebContext::new(Some(data_dir()?.join("terminal-profile"))),
+            context: WebContext::new(Some(terminal_data_root.join("terminal-profile"))),
             browser_context: None,
             browser_popups: browser::popup::Controller::default(),
             browsers: HashMap::new(),
@@ -1905,7 +1913,7 @@ impl App {
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Sessions(signal) => self.sessions_event(signal)?,
             Event::UsageUi(action) => self.usage_ui(action)?,
-            Event::UsageResult(results) => self.usage_result(results)?,
+            Event::UsageResult(id, results) => self.usage_complete(id, results)?,
             Event::Activated => {
                 if !self.main_closed {
                     self.detached_focus = None;

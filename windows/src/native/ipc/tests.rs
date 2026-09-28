@@ -150,6 +150,26 @@ fn discovery_skips_partial_oversized_mismatched_and_temporary_records() {
 }
 
 #[test]
+fn discovery_publishes_and_replaces_beyond_max_path_with_unicode() {
+    use std::os::windows::ffi::OsStrExt;
+    let root = TestDirectory::new();
+    let mut directory = root.0.clone();
+    while directory.as_os_str().encode_wide().count() < 300 {
+        directory.push("한글-한-e\u{301}-😀-discovery");
+    }
+    let old = test_name();
+    let new = test_name();
+    let path = discovery::publish(&directory, &old).unwrap();
+    assert_eq!(discovery::candidates(&directory), vec![old.clone()]);
+    discovery::publish(&directory, &new).unwrap();
+    discovery::remove_if_current(&path, &old);
+    assert_eq!(discovery::candidates(&directory), vec![new.clone()]);
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+    discovery::remove_if_current(&path, &new);
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+}
+
+#[test]
 fn discovery_atomic_replacement_never_exposes_partial_json() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     let directory = TestDirectory::new();

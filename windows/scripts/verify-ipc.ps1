@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden hosts only. No desktop input, visible windows, or persistent user state.
-param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('existing','long-path')][string]$Case='existing')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -8,6 +8,69 @@ $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor=(& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no host was launched.' }
+if($Case -eq 'long-path') {
+    $clock=[Diagnostics.Stopwatch]::StartNew();$process=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$failure=$null;$cleanupErrors=@();$savedLocal=$env:LOCALAPPDATA;$fixture=$null;$lastTree=$null
+    $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('ipc-long-path-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
+    Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FilesFixture.cs'),(Join-Path $PSScriptRoot 'FilesActionsFixture.cs')
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class IpcLongPathProbe {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
+ [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+ public static byte[] Read(string root,string path) {
+  if(!path.StartsWith(root+"\\",StringComparison.Ordinal))throw new ArgumentException("Discovery is outside the owned fixture");
+  using(var handle=CreateFileW("\\\\?\\"+path.Replace('/','\\'),0x80000000,7,IntPtr.Zero,3,0x80,IntPtr.Zero)) {
+   if(handle.IsInvalid)throw new Win32Exception(Marshal.GetLastWin32Error(),"Owned long discovery read failed");
+   using(var stream=new FileStream(handle,FileAccess.Read)) {
+    if(stream.Length<1||stream.Length>4096)throw new InvalidDataException("Discovery record size is invalid");
+    var bytes=new byte[(int)stream.Length];int used=0;
+    while(used<bytes.Length){int count=stream.Read(bytes,used,bytes.Length-used);if(count==0)throw new EndOfStreamException();used+=count;}return bytes;
+   }
+  }
+ }
+ public static void Hidden(long window,int owner) {uint pid;var hwnd=new IntPtr(window);GetWindowThreadProcessId(hwnd,out pid);if(pid!=owner||IsWindowVisible(hwnd))throw new InvalidOperationException("Expected the exact owned hidden host");}
+}
+'@
+    function Long-Budget([int]$Maximum=5000) {$left=30000-$clock.ElapsedMilliseconds;if($left -le 0){throw 'Long-path IPC exceeded30s'};return [int][Math]::Min($Maximum,$left)}
+    function Long-Request([string[]]$Arguments,[int]$Maximum=5000) {
+        if(-not $pipeName){throw 'Explicit owned pipe required'};$client=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$Arguments),$directory,$directory);$out=$client.StandardOutput.ReadToEndAsync();$err=$client.StandardError.ReadToEndAsync()
+        try{if(-not $client.WaitForExit((Long-Budget $Maximum))){throw 'Owned long-path CLI exceeded deadline'};if(-not $out.Wait(500)-or -not $err.Wait(500)){throw 'Owned long-path CLI output did not close'};if($client.ExitCode -ne 0){throw ('Owned long-path CLI failed: '+[CliProbe]::Output($err))};return ([CliProbe]::Output($out)|ConvertFrom-Json)}
+        finally{if(-not $client.HasExited){$client.Kill();[CliProbe]::WaitAfterKill($client)};$client.Dispose()}
+    }
+    try {
+        $fixture=New-Object FilesFixture($directory);$env:LOCALAPPDATA=$fixture.LongRoot('localappdata');if($env:LOCALAPPDATA.Length -le 300){throw 'Long-path fixture did not exceed300 UTF-16 units'}
+        $startup=[Diagnostics.Stopwatch]::StartNew();$process=[CliProbe]::Start((Join-Path $BuildDirectory 'flowmux.exe'),@('--temporary','--shell=cmd','--cwd',$directory),$directory,$directory);$hostOut=$process.StandardOutput.ReadToEndAsync();$hostErr=$process.StandardError.ReadToEndAsync()
+        $discovery=$env:LOCALAPPDATA+'\flowmux\windows\instances\'+$process.Id+'.json'
+        do {
+            Long-Budget|Out-Null;if($process.HasExited){throw 'Owned long-path host exited before publication'};if($startup.ElapsedMilliseconds -ge 8000){throw 'Long-path discovery exceeded8s'}
+            if([FilesActionsFixture]::Exists($fixture,$discovery)) {
+                $bytes=[IpcLongPathProbe]::Read($fixture.Root,$discovery);$record=(New-Object Text.UTF8Encoding($false,$true)).GetString($bytes)|ConvertFrom-Json
+                if($record.pid -ne $process.Id -or $record.pipe -notmatch ('^\\\\\.\\pipe\\flowmux-'+$process.Id+'-[0-9a-f-]{36}$')){throw 'Long-path discovery published the wrong owned identity'};$pipeName=$record.pipe;break
+            };Start-Sleep -Milliseconds 20
+        }while($true)
+        $identity=Long-Request @('identify');if($identity.pid -ne $process.Id){throw 'Long-path explicit IPC reached another process'}
+        $name='IPC-'+[char]0xD55C+[char]0xAE00+'-'+[char]0x1112+[char]0x1161+[char]0x11AB;Long-Request @('workspace','rename',$identity.workspace,$name)|Out-Null
+        $lastTree=Long-Request @('tree');[IpcLongPathProbe]::Hidden([long]$lastTree.window_handle,$process.Id);if(-not $lastTree.background_testing -or $lastTree.workspaces[0].name -cne $name){throw 'Long-path hidden IPC changed original Unicode metadata'}
+        $ready=[Diagnostics.Stopwatch]::StartNew();while(@($lastTree.surfaces).Count -ne 1 -or -not $lastTree.surfaces[0].ready -or -not $lastTree.surfaces[0].running){if($ready.ElapsedMilliseconds -ge 5000){throw 'Long-path terminal readiness exceeded5s'};Start-Sleep -Milliseconds 20;$lastTree=Long-Request @('tree')}
+        if(-not [IO.Directory]::Exists((Join-Path $directory 'state\terminal-profile')) -or [FilesActionsFixture]::Exists($fixture,($env:LOCALAPPDATA+'\flowmux\windows\terminal-profile'))){throw 'Hidden terminal did not use its isolated test profile'}
+        Long-Request @('quit','--discard-state')|Out-Null;if(-not $process.WaitForExit((Long-Budget 4000)) -or $process.ExitCode -ne 0){throw 'Owned long-path host failed to quit cleanly'}
+        if([FilesActionsFixture]::Exists($fixture,$discovery)){throw 'Normal long-path shutdown left its published discovery record'}
+    } catch {$failure=$_.Exception.Message}
+    finally {
+        if($process){
+            try{if(-not $process.HasExited -and $pipeName){Long-Request @('quit','--discard-state') 2000|Out-Null;$process.WaitForExit((Long-Budget 2000))|Out-Null}}catch{$cleanupErrors+=,$_.Exception.Message}
+            try{if(-not $process.HasExited){$process.Kill();[CliProbe]::WaitAfterKill($process)};if($hostOut){$hostOut.Wait(500)|Out-Null};if($hostErr){$hostErr.Wait(500)|Out-Null};$hostLog=@{pid=$process.Id;exitCode=$process.ExitCode;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)}}catch{$cleanupErrors+=,$_.Exception.Message}finally{$process.Dispose()}
+        }
+        $env:LOCALAPPDATA=$savedLocal;if($fixture){$fixture.Dispose()}
+    }
+    if($failure -or $cleanupErrors.Count){@{error=$failure;cleanupErrors=$cleanupErrors;host=$hostLog;discovery=$discovery;lastTree=$lastTree;elapsedMs=$clock.ElapsedMilliseconds}|ConvertTo-Json -Depth 20|Set-Content -Encoding UTF8 (Join-Path $directory 'ipc.json');throw ($failure+' '+($cleanupErrors -join '; '))}
+    Write-Output ('passed: long-path LOCALAPPDATA publication, hidden explicit IPC and clean discovery removal; elapsed='+$clock.ElapsedMilliseconds+'ms');return
+}
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
 Add-Type -TypeDefinition @'
 using System;

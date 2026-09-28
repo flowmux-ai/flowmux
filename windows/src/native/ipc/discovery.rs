@@ -70,6 +70,8 @@ pub(super) fn publish(directory: &Path, name: &str) -> anyhow::Result<PathBuf> {
         "cannot publish another process's pipe"
     );
     std::fs::create_dir_all(directory)?;
+    // Raw MoveFileExW needs Windows' extended path form, unlike std::fs.
+    let directory = std::fs::canonicalize(directory)?;
     let path = directory.join(format!("{pid}.json"));
     let temporary = directory.join(format!("{pid}.{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| -> anyhow::Result<()> {
