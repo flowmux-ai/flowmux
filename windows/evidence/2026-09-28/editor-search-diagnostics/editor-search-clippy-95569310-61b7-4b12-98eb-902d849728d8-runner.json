@@ -1,0 +1,23 @@
+{
+  "name": "editor-search-clippy",
+  "command": [
+    "cargo",
+    "xwin",
+    "clippy",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 345219,
+  "exitCode": 0,
+  "elapsedSeconds": 33.101
+}

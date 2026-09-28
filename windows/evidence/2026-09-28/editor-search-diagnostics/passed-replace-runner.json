@@ -1,0 +1,13 @@
+{
+    "name":  "editor-search-replace",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\replace.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T05:13:47.3487301Z",
+    "pid":  30428,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  5.164,
+    "finished":  "2026-09-28T05:13:52.5163489Z"
+}

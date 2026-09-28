@@ -1,0 +1,17 @@
+{
+  "name": "editor-search-pure",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--locked",
+    "--lib",
+    "editor"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 342778,
+  "exitCode": 0,
+  "elapsedSeconds": 43.969
+}

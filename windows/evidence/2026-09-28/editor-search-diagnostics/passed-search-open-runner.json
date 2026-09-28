@@ -1,0 +1,13 @@
+{
+    "name":  "editor-search-search-open",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\search-open.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T05:14:05.4141875Z",
+    "pid":  12264,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  7.371,
+    "finished":  "2026-09-28T05:14:12.7911884Z"
+}

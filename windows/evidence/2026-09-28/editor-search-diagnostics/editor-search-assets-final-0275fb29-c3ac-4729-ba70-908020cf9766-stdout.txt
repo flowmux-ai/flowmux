@@ -1,0 +1,5 @@
+
+> flowmux-windows-editor@0.1.0 build
+> node build.mjs
+
+Built offline Windows Monaco assets from unchanged shared frontend sources.

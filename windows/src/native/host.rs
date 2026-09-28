@@ -210,6 +210,8 @@ unsafe extern "system" fn window_proc(
         WM_TIMER => {
             if wparam == browser::wait::TIMER {
                 post(Event::Browser(browser::Signal::WaitTick));
+            } else if wparam == editor::search::TIMER {
+                post(Event::Editor(editor::Signal::SearchTick));
             } else if wparam == 1 {
                 post(Event::Tick);
             }
@@ -329,6 +331,7 @@ struct App {
     editor_picker_pending: bool,
     editor_open_pending: HashMap<u64, editor::PendingOpen>,
     editor_request: u64,
+    editor_search_service: Option<crate::editor_search::Service>,
     editor_barrier: Option<editor::Barrier>,
     editor_bypass: bool,
     browser_context: Option<WebContext>,
@@ -536,6 +539,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             editor_picker_pending: false,
             editor_open_pending: HashMap::new(),
             editor_request: 0,
+            editor_search_service: None,
             editor_barrier: None,
             editor_bypass: false,
             pending_browser: HashMap::new(),
@@ -580,6 +584,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         let result = message_loop(&mut app, events);
         app.editor_cancel_opens(None, "window closed before editor Open completed");
         app.editor_preparer.take();
+        app.editor_search_service.take();
         app._ipc.shutdown(); // Stop accepting commands before terminal teardown.
 
         // Cancel and release native download operations before their WebView

@@ -56,6 +56,13 @@ function windowsRefreshSeal() {
 }
 const windowsPostToHost = postToHost;
 postToHost = (message) => {
+  if (message.type === "search_result_open_requested") {
+    windowsSearchError("Search results expired; run the search again.");
+    return; // Windows opens only a native-retained token/index, never a UI path.
+  }
+  if (["quick_open_requested", "workspace_search_requested", "search_cancelled"].includes(message.type)) {
+    windowsSearchRetained = null;
+  }
   const replacement = (message.type === "conflict_action_requested" &&
     ["keep_mine", "reload_from_disk"].includes(message.action)) ||
     (message.type === "recovery_decision" && message.choice === "restore") ||
@@ -124,6 +131,7 @@ function windowsRead() {
     document_focused: window.document.hasFocus(),
     open_documents: documents.size,
     content: null,
+    selection: null,
     content_truncated: false,
     total_bytes: 0,
     diff_visible: diffDocumentId !== null,
@@ -135,6 +143,8 @@ function windowsRead() {
     quarantined: windowsQuarantined,
   };
   if (document !== undefined) {
+    const selection = editor.getModel() === document.model ? editor.getSelection() : null;
+    result.selection = selection === null ? null : windowsRange(selection);
     const content = document.model.getValue();
     result.total_bytes = utf8ByteLength(content);
     result.content_truncated = result.total_bytes > windowsReadLimit;
@@ -186,6 +196,98 @@ async function windowsSync(document) {
   await windowsWait(() => {
     windowsRequire(syncDocument(document), document.saveError ?? "Cannot synchronize the document.");
   }, () => !document.pendingChanges && document.outstandingChanges.size === 0);
+}
+
+const windowsFindLimit = 500;
+function windowsFindOptions(command) {
+  windowsRequire(windowsValidString(command.query, 4096) && command.query.length > 0,
+    "A nonempty literal query of at most 4096 UTF-8 bytes is required.");
+  windowsRequire(command.regex !== true, "Regular expressions are unavailable for editor commands.");
+  const replacement = command.action !== "find";
+  const pinned = command.document_id !== undefined || command.version !== undefined;
+  windowsRequire(!replacement || pinned, "Replacement requires document_id and version from the current document.");
+  windowsRequire(!pinned || (windowsValidString(command.document_id, 128) && command.document_id.length > 0 &&
+    Number.isSafeInteger(command.version) && command.version >= 1), "Supply a valid document_id and version together.");
+  if (replacement) windowsRequire(windowsValidString(command.text, maxDocumentBytes), "Valid replacement text is required.");
+  return { query: command.query, case_sensitive: command.case_sensitive === true,
+    whole_word: command.whole_word === true, backward: command.backward === true,
+    separators: command.whole_word === true ? editor.getOption(monaco.editor.EditorOption.wordSeparators) : null };
+}
+function windowsFindOwner(document, command) {
+  windowsRequire(documents.get(document.payload.id) === document && activeDocumentId === document.payload.id &&
+    editor.getModel() === document.model, "The active document changed before the search completed.");
+  windowsRequire(command.document_id === undefined || (command.document_id === document.payload.id &&
+    command.version === document.payload.version), "The document or version is stale; find again before replacing.");
+}
+function windowsRange(range) {
+  return { start_line: range.startLineNumber, start_column: range.startColumn,
+    end_line: range.endLineNumber, end_column: range.endColumn };
+}
+function windowsSameRange(left, right) {
+  return left !== null && right !== null && left.startLineNumber === right.startLineNumber &&
+    left.startColumn === right.startColumn && left.endLineNumber === right.endLineNumber && left.endColumn === right.endColumn;
+}
+function windowsFindMatches(document, options) {
+  return document.model.findMatches(options.query, false, false, options.case_sensitive, options.separators, false, windowsFindLimit + 1);
+}
+function windowsFindSelection(document, options, useCurrent) {
+  const selection = editor.getSelection();
+  if (useCurrent && selection !== null) {
+    const current = document.model.findNextMatch(options.query,
+      { lineNumber: selection.startLineNumber, column: selection.startColumn }, false,
+      options.case_sensitive, options.separators, false);
+    if (current !== null && windowsSameRange(current.range, selection)) return current;
+  }
+  const position = selection === null ? { lineNumber: 1, column: 1 } : options.backward
+    ? { lineNumber: selection.startLineNumber, column: selection.startColumn }
+    : { lineNumber: selection.endLineNumber, column: selection.endColumn };
+  return document.model[options.backward ? "findPreviousMatch" : "findNextMatch"](
+    options.query, position, false, options.case_sensitive, options.separators, false);
+}
+function windowsFindResult(document, options, matches, selected, replaced) {
+  const retained = matches.slice(0, windowsFindLimit);
+  const index = selected === null ? -1 : retained.findIndex((match) => windowsSameRange(match.range, selected.range));
+  if (selected !== null) editor.setSelection(selected.range);
+  return { document_id: document.payload.id, version: document.payload.version,
+    query: options.query, case_sensitive: options.case_sensitive, whole_word: options.whole_word, backward: options.backward,
+    count: retained.length, truncated: matches.length > windowsFindLimit,
+    matches: retained.map((match) => windowsRange(match.range)),
+    selected: selected === null ? null : { index: index < 0 ? null : index, range: windowsRange(selected.range) }, replaced };
+}
+async function windowsFind(document, command) {
+  const options = windowsFindOptions(command);
+  // Flush a pending user edit before checking the caller's acknowledged version.
+  // The command seal prevents any new input while that asynchronous ACK arrives.
+  await windowsSync(document);
+  windowsFindOwner(document, command);
+  const matches = windowsFindMatches(document, options);
+  if (command.action === "find") {
+    return windowsFindResult(document, options, matches, windowsFindSelection(document, options, false), 0);
+  }
+  windowsRequire(!document.payload.readOnly, "The document is read-only.");
+  windowsRequire(command.action !== "replace_all" || matches.length <= windowsFindLimit,
+    "Replace All is unavailable for truncated results; narrow the query.");
+  const selected = command.action === "replace_match" ? windowsFindSelection(document, options, true) : null;
+  const edits = command.action === "replace_all" ? matches : selected === null ? [] : [selected];
+  if (edits.length === 0) return windowsFindResult(document, options, matches, null, 0);
+  // Monaco normalizes inserted line endings to the model's LF. Preflight the
+  // exact resulting UTF-8 size before touching the model or its undo history.
+  const replacement = command.text.replace(/\r\n|\r/g, "\n");
+  const insertedBytes = utf8ByteLength(replacement);
+  let bytes = utf8ByteLength(document.model.getValue());
+  for (const match of edits) bytes += insertedBytes - utf8ByteLength(document.model.getValueInRange(match.range));
+  windowsRequire(bytes <= maxDocumentBytes, "Replacement would exceed the 16 MiB document limit.");
+  editor.updateOptions({ readOnly: false });
+  try {
+    editor.pushUndoStop();
+    windowsRequire(editor.executeEdits("flowmux-windows-find", edits.map((match) =>
+      ({ range: match.range, text: replacement, forceMoveMarkers: true }))), "Monaco rejected the replacement.");
+    editor.pushUndoStop();
+  } finally { windowsApplySeal(); }
+  await windowsSync(document);
+  windowsFindOwner(document, {});
+  return windowsFindResult(document, options, windowsFindMatches(document, options),
+    windowsFindSelection(document, options, false), edits.length);
 }
 
 async function windowsSave(document) {
@@ -277,6 +379,10 @@ async function windowsPerform(command) {
   }
   const document = windowsDocument();
   switch (command.action) {
+    case "find":
+    case "replace_match":
+    case "replace_all":
+      return windowsFind(document, command);
     case "replace_text":
       windowsRequire(!document.payload.readOnly, "The document is read-only.");
       windowsRequire(windowsValidString(command.text, maxDocumentBytes), "Replacement text is invalid or exceeds the document limit.");
@@ -353,7 +459,117 @@ async function windowsPerform(command) {
   return windowsRead();
 }
 
+let windowsSearchRetained = null;
+let windowsSearchOpenPending = null;
+const windowsSearchComposing = new Set();
+function windowsSearchError(error) {
+  let text = "", bytes = 0;
+  for (const character of String(error)) {
+    const size = utf8ByteLength(character);
+    if (bytes + size > 4096) break;
+    text += character; bytes += size;
+  }
+  searchStatus.textContent = text;
+}
+const windowsSearchInputChanged = searchInputChanged;
+searchInputChanged = () => {
+  if (windowsSearchComposing.size === 0) windowsSearchInputChanged();
+};
+const windowsScheduleWorkspaceSearch = scheduleWorkspaceSearch;
+scheduleWorkspaceSearch = () => {
+  if (searchMode === "workspace") windowsSearchRetained = null;
+  if (windowsSearchComposing.size === 0) windowsScheduleWorkspaceSearch();
+  else clearSearchTimer();
+};
+const windowsRequestWorkspaceSearch = requestWorkspaceSearch;
+requestWorkspaceSearch = () => {
+  if (windowsSearchComposing.size === 0) windowsRequestWorkspaceSearch();
+  else clearSearchTimer();
+};
+const windowsRenderQuickOpen = renderQuickOpen;
+renderQuickOpen = () => {
+  if (windowsSearchComposing.size === 0) windowsRenderQuickOpen();
+};
+const windowsSearchKeyDown = searchKeyDown;
+searchKeyDown = (event) => {
+  if (!event.isComposing && event.keyCode !== 229 && windowsSearchComposing.size === 0) windowsSearchKeyDown(event);
+};
+const windowsCloseSearchDialog = closeSearchDialog;
+closeSearchDialog = () => {
+  windowsSearchRetained = null;
+  windowsCloseSearchDialog();
+};
+for (const input of [searchQuery, searchInclude, searchExclude]) {
+  input.addEventListener("compositionstart", () => {
+    windowsSearchComposing.add(input);
+    clearSearchTimer();
+    // Quick Open filters a query-independent file index locally. Keep that
+    // index/token (or its pending request); defer only its ranking/rendering.
+    if (searchMode === "workspace") { cancelActiveSearch(); windowsSearchRetained = null; }
+  });
+  input.addEventListener("compositionend", () => {
+    windowsSearchComposing.delete(input);
+    if (windowsSearchComposing.size === 0 && searchDialog.open) searchInputChanged();
+  });
+}
+function windowsCompleteSearch(message, metadata) {
+  if (!searchDialog.open || metadata?.request_id !== activeSearchRequestId ||
+    message?.requestId !== activeSearchRequestId || metadata.kind !== searchMode) return false;
+  try {
+    windowsRequire(isHostMessage(message) && message.surfaceId === surfaceId &&
+      message.type === (searchMode === "quick" ? "quick_open_completed" : "workspace_search_completed"), "Invalid search completion.");
+    windowsRequire(utf8ByteLength(JSON.stringify(message)) <= 1024 * 1024, "Search results exceed the display limit.");
+    const entries = searchMode === "quick" ? message.paths : message.result?.matches;
+    windowsRequire(Array.isArray(entries) && entries.length <= (searchMode === "quick" ? 2000 : 500), "Too many search results.");
+    const error = metadata.error ?? (searchMode === "workspace" ? message.error : null);
+    windowsRequire(error === null || typeof error === "string", "Invalid search error.");
+    for (const entry of entries) {
+      const path = searchMode === "quick" ? entry : entry?.path;
+      windowsRequire(windowsValidString(path, 16 * 1024) && path.length > 0, "Invalid search result path.");
+      if (searchMode === "workspace") {
+        windowsRequire([entry.line, entry.column, entry.length].every((value) => Number.isSafeInteger(value) && value >= 0), "Invalid search result range.");
+      }
+    }
+    windowsRequire(error !== null || (typeof metadata.token === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(metadata.token)), "Search result token is missing.");
+    windowsSearchRetained = error === null ? { token: metadata.token, kind: searchMode,
+      entries: entries.map((entry) => searchMode === "quick" ? { path: entry, line: 0, column: 0, length: 0 }
+        : { path: entry.path, line: entry.line, column: entry.column, length: entry.length }) } : null;
+    window.flowmuxEditorHost.receive(message);
+    if (error !== null) { clearSearchResultNodes(); windowsSearchError(error); }
+    return true;
+  } catch (error) {
+    windowsSearchRetained = null; activeSearchRequestId = null;
+    clearSearchResultNodes(); windowsSearchError(error.message ?? error);
+    return false;
+  }
+}
+openSearchResult = (index) => {
+  if (windowsSearchComposing.size > 0 || windowsSearchOpenPending !== null || windowsCommandBusy ||
+    windowsSealedBarrier !== null || windowsQuarantined) return;
+  const selection = renderedSearchResults[index], retained = windowsSearchRetained;
+  if (selection === undefined || retained === null || retained.kind !== searchMode || !searchDialog.open) {
+    windowsSearchError("Search results expired; run the search again."); return;
+  }
+  const originalIndex = retained.entries.findIndex((entry) => entry.path === selection.path && entry.line === selection.line &&
+    entry.column === selection.column && entry.length === selection.length);
+  if (originalIndex < 0) { windowsSearchError("Search results changed; run the search again."); return; }
+  windowsSearchOpenPending = { token: retained.token, path: selection.path };
+  window.__flowmuxWindowsEditorBridge({ kind: "search_open", token: retained.token, index: originalIndex });
+};
+
 window.flowmuxWindowsEditor = Object.freeze({
+  completeSearch: windowsCompleteSearch,
+  searchOpenFinished(token, error) {
+    if (windowsSearchOpenPending?.token !== token) return;
+    const opened = windowsSearchOpenPending;
+    windowsSearchOpenPending = null;
+    if (!searchDialog.open || windowsSearchRetained?.token !== token) return;
+    if (error !== null) { windowsSearchError(error); return; }
+    const recentIndex = recentPaths.indexOf(opened.path);
+    if (recentIndex >= 0) recentPaths.splice(recentIndex, 1);
+    recentPaths.unshift(opened.path); recentPaths.splice(20);
+    closeSearchDialog(); // Never releases the native-owned editor input guard.
+  },
   barrier(id, seal) {
     try {
       windowsRequire(Number.isSafeInteger(id) && id >= 0 && typeof seal === "boolean", "Invalid editor barrier.");
@@ -476,11 +692,14 @@ window.flowmuxWindowsEditor = Object.freeze({
     }
     try {
       windowsRequire(command !== null && typeof command === "object" && !Array.isArray(command), "Invalid editor command.");
-      windowsRequire(Object.keys(command).every((key) => ["id", "action", "text", "path", "overwrite"].includes(key)), "Unknown editor command field.");
+      windowsRequire(Object.keys(command).every((key) => ["id", "action", "text", "path", "overwrite", "query", "case_sensitive", "whole_word", "backward", "regex", "document_id", "version"].includes(key)), "Unknown editor command field.");
       windowsRequire(typeof command.action === "string" && command.action.length <= 32, "Invalid editor action.");
       windowsRequire(command.overwrite === undefined || typeof command.overwrite === "boolean", "Overwrite must be an explicit boolean.");
       windowsRequire(command.text === undefined || windowsValidString(command.text, maxDocumentBytes), "Invalid or oversized command text.");
       windowsRequire(command.path === undefined || windowsValidString(command.path, 16 * 1024), "Invalid or oversized command path.");
+      for (const field of ["case_sensitive", "whole_word", "backward", "regex"]) {
+        windowsRequire(command[field] === undefined || typeof command[field] === "boolean", "Search options must be explicit booleans.");
+      }
     } catch (error) {
       reply(null, String(error.message ?? error).slice(0, 4096));
       return;

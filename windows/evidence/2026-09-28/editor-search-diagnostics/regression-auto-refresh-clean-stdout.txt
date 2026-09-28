@@ -1,0 +1,230 @@
+[check] passed native_watcher_clean_reload_updates_actual_unicode_monaco_after_apply_ack_preserving_bom_crlf_and_file_bytes
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\editor-a000fa31-5126-41a5-a9f4-ccb421936339
+{
+    "started":  "2026-09-28T14:14:28.0587129+09:00",
+    "mode":  "background",
+    "case":  "auto-refresh-clean",
+    "checks":  [
+                   {
+                       "name":  "native_watcher_clean_reload_updates_actual_unicode_monaco_after_apply_ack_preserving_bom_crlf_and_file_bytes",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  38376,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T05:14:28.1950244Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-a000fa31-5126-41a5-a9f4-ccb421936339\\files 한글 한 😀",
+                                                      "pane":  "78a745b5-4a50-44ae-aa68-e08c90c9701a",
+                                                      "pid":  38376,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-38376-6a3e4413-4aa3-420e-9a63-c36efdfb74f6",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "52028a27-8faf-4e2f-a0e8-327a8a0e436a",
+                                                      "workspace":  "c8f65813-a24a-4ac4-8525-0eea506d5531"
+                                                  },
+                             "discoveryElapsedMs":  80,
+                             "identityBudgetMs":  7919,
+                             "identityElapsedMs":  811,
+                             "treeRequests":  2,
+                             "elapsedMs":  996,
+                             "finished":  "2026-09-28T05:14:29.1925941Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-a000fa31-5126-41a5-a9f4-ccb421936339\\state\\editor-profile",
+                             "surface":  "b887a903-7989-48b1-8a64-99c10e59c311",
+                             "pid":  38376,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-a000fa31-5126-41a5-a9f4-ccb421936339\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-a000fa31-5126-41a5-a9f4-ccb421936339\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "documents":  [
+                                               {
+                                                   "active":  true,
+                                                   "dirty":  false,
+                                                   "disk_status_known":  true,
+                                                   "encoding":  "UTF-8 BOM",
+                                                   "eol":  "CRLF",
+                                                   "external_change":  false,
+                                                   "id":  "document-1",
+                                                   "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-a000fa31-5126-41a5-a9f4-ccb421936339\\files 한글 한 😀\\auto clean 한글 한 😀.txt",
+                                                   "read_only":  false,
+                                                   "version":  2
+                                               }
+                                           ],
+                             "surface":  "b887a903-7989-48b1-8a64-99c10e59c311",
+                             "case":  "auto-refresh-clean",
+                             "after":  {
+                                           "applied_generation":  2,
+                                           "completed_count":  2,
+                                           "deferred_count":  0,
+                                           "generation":  3,
+                                           "last_error":  null,
+                                           "mode":  "native",
+                                           "pending":  false,
+                                           "phase":  null,
+                                           "ready":  true,
+                                           "timed_out":  false,
+                                           "watcher":  {
+                                                           "acknowledged":  2,
+                                                           "cancellation_over_budget":  false,
+                                                           "epoch":  "4e6bab85-0099-4b8f-a791-efc94ac2e077",
+                                                           "generation":  3,
+                                                           "in_flight":  3,
+                                                           "last_error":  null,
+                                                           "ready":  true,
+                                                           "stopped":  false,
+                                                           "stopping":  false
+                                                       }
+                                       },
+                             "before":  {
+                                            "applied_generation":  1,
+                                            "completed_count":  1,
+                                            "deferred_count":  0,
+                                            "generation":  1,
+                                            "last_error":  null,
+                                            "mode":  "native",
+                                            "pending":  false,
+                                            "phase":  null,
+                                            "ready":  true,
+                                            "timed_out":  false,
+                                            "watcher":  {
+                                                            "acknowledged":  1,
+                                                            "cancellation_over_budget":  false,
+                                                            "epoch":  "4e6bab85-0099-4b8f-a791-efc94ac2e077",
+                                                            "generation":  1,
+                                                            "in_flight":  null,
+                                                            "last_error":  null,
+                                                            "ready":  true,
+                                                            "stopped":  false,
+                                                            "stopping":  false
+                                                        }
+                                        },
+                             "kind":  "automatic-refresh-result",
+                             "actualModel":  {
+                                                 "active_version":  2,
+                                                 "close_confirmation":  false,
+                                                 "composing":  false,
+                                                 "content":  "external 한글 한 é 😀 \"quoted\" \\ path \u0026 \u003ctag\u003e\nexternal second\n",
+                                                 "content_truncated":  false,
+                                                 "diff_visible":  false,
+                                                 "dirty":  false,
+                                                 "document_focused":  false,
+                                                 "document_id":  "document-1",
+                                                 "encoding":  "UTF-8 BOM",
+                                                 "eol":  "CRLF",
+                                                 "external_change":  false,
+                                                 "language":  "plaintext",
+                                                 "open_documents":  1,
+                                                 "path":  "auto clean 한글 한 😀.txt",
+                                                 "quarantined":  false,
+                                                 "read_only":  false,
+                                                 "recovery_available":  false,
+                                                 "replacement_pending":  false,
+                                                 "sealed":  false,
+                                                 "selection":  {
+                                                                   "end_column":  1,
+                                                                   "end_line":  1,
+                                                                   "start_column":  1,
+                                                                   "start_line":  1
+                                                               },
+                                                 "total_bytes":  75
+                                             },
+                             "explicitCheckDisk":  false
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  38376,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph fidelity, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "The normal replace-text command synchronizes before replying; closing immediately afterward does not independently force the unsynchronized 150ms edit-debounce race.",
+                     "Failed checkpoint replacement checks close-error unsealing. No existing checkpoint hold/release hook establishes a close arriving while an earlier checkpoint remains in flight.",
+                     "Recovery covers acknowledged edits with an observed recovery file and completed checkpoint before forced owned-host termination; unsynchronized edits, power loss and recovery during an interrupted write are not established.",
+                     "Concurrent Open uses overlapping real CLI processes without delays or hooks; it does not force a particular preparation-completion or cancellation race.",
+                     "Blocked picker checks its explicit background rejection and owned-host visible top-level HWND snapshots before and after; it does not exercise a native dialog or continuously observe transient windows.",
+                     "Automatic refresh burst observations do not assume one watcher event per write; partial-error application does not make unknown disk status healthy, and unlock alone may not replay a consumed status transition.",
+                     "Automatic move/close waits for idle before mutations; post-close absence is bounded observation without a forced queued-callback race.",
+                     "Concurrent-writer races, network/UNC/reparse-point paths and exhaustive ACL semantics are not established."
+                 ],
+    "status":  "passed_background_editor_subset",
+    "hosts":  [
+                  38376
+              ],
+    "shells":  [
+                   12240
+               ],
+    "clientPids":  [
+                       30836,
+                       32700,
+                       26412,
+                       38556,
+                       32608,
+                       18132,
+                       6440,
+                       30564,
+                       23452,
+                       10040,
+                       32312,
+                       29240,
+                       33604,
+                       5220,
+                       38552,
+                       39064,
+                       30428,
+                       25492,
+                       22092,
+                       21048,
+                       33872,
+                       16764,
+                       20176,
+                       22832,
+                       29248,
+                       32136,
+                       33752,
+                       8936,
+                       34940,
+                       36996,
+                       5216,
+                       23496,
+                       30572,
+                       3708,
+                       37924,
+                       32152,
+                       5680,
+                       35224,
+                       29380,
+                       33116,
+                       30832,
+                       35256,
+                       36644,
+                       5968
+                   ],
+    "finished":  "2026-09-28T14:14:33.7174565+09:00"
+}

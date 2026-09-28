@@ -1,0 +1,180 @@
+{
+    "started":  "2026-09-28T14:13:48.0112309+09:00",
+    "mode":  "background",
+    "case":  "replace",
+    "checks":  [
+                   {
+                       "name":  "literal_replacement_uses_version_guard_monaco_undo_and_exact_bom_crlf_save",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  20060,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T05:13:48.1316790Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89\\files 한글 한 😀",
+                                                      "pane":  "6406468a-2b1c-4c23-9762-63a9e84085a8",
+                                                      "pid":  20060,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-20060-d16d601a-2135-4315-a7bc-54598a96d8e5",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "020e265d-2dad-4ad3-8c73-1f404c129eef",
+                                                      "workspace":  "da800b23-b9ad-444b-a049-435384a47695"
+                                                  },
+                             "discoveryElapsedMs":  62,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  767,
+                             "treeRequests":  2,
+                             "elapsedMs":  942,
+                             "finished":  "2026-09-28T05:13:49.0739219Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89\\state\\editor-profile",
+                             "surface":  "e19f2352-7a17-455d-b67e-a8225c07a49b",
+                             "pid":  20060,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "case":  "replace",
+                             "first":  {
+                                           "backward":  false,
+                                           "case_sensitive":  false,
+                                           "count":  1,
+                                           "document_id":  "document-1",
+                                           "matches":  [
+                                                           {
+                                                               "end_column":  3,
+                                                               "end_line":  2,
+                                                               "start_column":  1,
+                                                               "start_line":  2
+                                                           }
+                                                       ],
+                                           "query":  "한글",
+                                           "replaced":  1,
+                                           "selected":  {
+                                                            "index":  0,
+                                                            "range":  {
+                                                                          "end_column":  3,
+                                                                          "end_line":  2,
+                                                                          "start_column":  1,
+                                                                          "start_line":  2
+                                                                      }
+                                                        },
+                                           "truncated":  false,
+                                           "version":  2,
+                                           "whole_word":  false
+                                       },
+                             "replacement":  "바꿈 $1 😀",
+                             "all":  {
+                                         "backward":  false,
+                                         "case_sensitive":  false,
+                                         "count":  0,
+                                         "document_id":  "document-1",
+                                         "matches":  [
+
+                                                     ],
+                                         "query":  "한글",
+                                         "replaced":  1,
+                                         "selected":  null,
+                                         "truncated":  false,
+                                         "version":  3,
+                                         "whole_word":  false
+                                     },
+                             "stale":  {
+                                           "error":  "The document or version is stale; find again before replacing."
+                                       }
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  20060,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph rendering, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "Monaco ranges are one-based UTF-16; workspace search ranges are zero-based UTF-16. NFD strings are checked ordinally without asserting Unicode normalization equivalence.",
+                     "In-flight cancellation, supersession, blocked filesystem deadlines and queued close/move races are not forced by these native cases; idle cancellation only verifies the idle command contract.",
+                     "Guarded stale results are changed before opening; a concurrent filesystem swap between validation and the shared document read is covered separately by deterministic worker tests.",
+                     "No network/UNC/reparse paths, hostile ACLs, directory floods or exhaustive scanner budget limits are exercised."
+                 ],
+    "status":  "passed_background_editor_search_subset",
+    "hosts":  [
+                  20060
+              ],
+    "shells":  [
+                   20576
+               ],
+    "clientPids":  [
+                       36020,
+                       39632,
+                       16316,
+                       17272,
+                       32008,
+                       31816,
+                       33872,
+                       32464,
+                       2672,
+                       36504,
+                       30084,
+                       34900,
+                       34088,
+                       32608,
+                       12640,
+                       3484,
+                       31824,
+                       27164,
+                       31472,
+                       28168,
+                       18132,
+                       12240,
+                       39600,
+                       38424,
+                       6520,
+                       31740,
+                       18664,
+                       36948,
+                       27748,
+                       38444,
+                       23640,
+                       24452,
+                       8148,
+                       23232,
+                       11216,
+                       37584,
+                       32184,
+                       32096,
+                       16220,
+                       17156,
+                       12804,
+                       20552,
+                       24120,
+                       34076
+                   ],
+    "elapsedMs":  4445,
+    "finished":  "2026-09-28T14:13:52.4558942+09:00"
+}

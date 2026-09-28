@@ -1,0 +1,21 @@
+{
+  "name": "editor-search-unit-build",
+  "command": [
+    "cargo",
+    "xwin",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked",
+    "--lib",
+    "--no-run"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 347033,
+  "exitCode": 0,
+  "elapsedSeconds": 118.099
+}

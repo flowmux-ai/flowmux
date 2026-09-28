@@ -590,8 +590,50 @@ release/package/cleanup results and remaining limitations are recorded in the
 [automatic-refresh evidence](evidence/2026-09-28/editor-refresh.md); the earlier
 editor evidence remains historical.
 
-F01–F05, F17 and G08 remain partial, with 57 partial/57 pending features and ten
-partial/three pending gates. Physical IME/GUI/clipboard/fonts/DPI/accessibility,
-broader automatic-refresh acceptance and the stated watcher limits, search/viewers,
-full ACL preservation, exhaustive long-path behavior, unsynchronized edit/close
-races and renderer-crash recovery remain pending.
+The F06 stage implements Windows Quick Open, workspace search and literal
+Monaco find/replace CLI commands. Six distinct hidden native cases passed across
+eight executions. The initial five covered find (4.625s), replace (5.164s), Quick
+Open (4.679s), workspace search (5.195s) and retained-result Open (7.371s); ten
+related editor checks also passed on that initial source. The deadline correction
+passed result Open again (5.990s) and a real IPC deadline case (20.321s). A later
+native unit failure exposed incorrect separators in an extended Win32 result path.
+After that correction, nested Unicode result Open passed (6.265s), all 208 Windows
+unit tests passed (13.135s), and final Windows Clippy (22.328s) and debug build
+(82.702s) passed. Earlier checks retain their source boundaries; the evidence also
+preserves the unit failure and stopped release build. Full F06 acceptance remains
+open. Release/package and cleanup results are recorded separately in the search
+evidence. Quick Open indexes paths without a document flush/snapshot.
+Workspace search uses acknowledged open buffers (including dirty/deleted-file
+overrides), a 16 MiB snapshot cap, two fixed worker threads, eight admitted
+requests and 32 MiB of admitted snapshots. It limits each request to a four-second
+budget, 20,000 visited entries, 64 MiB of file reads, 2,000 indexed paths or 500
+matches, and a 1 MiB result envelope. Cancellation retains a blocked operation's
+worker/permit until that operation returns; the UI never joins search threads.
+
+The scanner confines same-handle Windows reads to the captured local root,
+skips reparse entries and honors bounded in-root ignore files. Individual skipped
+read errors remain visible alongside available results. Queries/rules, expired
+requests and stale snapshots fail explicitly. Workspace matching uses Rust regex
+or literal queries over LF text after stripping one disk UTF-8 BOM; no NFC/NFD
+normalization is applied. Shared workspace ranges use zero-based UTF-16 columns;
+Monaco in-document ranges use one-based UTF-16 columns. Retained-result Open
+checks source hashes and acknowledged buffer identities/versions before reveal.
+Its deadline starts at IPC receipt, includes UI queue time and rejects expired
+work before submission. Late submitted operations retain the synchronization guard
+until model reconciliation completes, while their expired RevealRange is omitted.
+The native deadline case pauses only the verified owned hidden host UI thread,
+waits for the actual server deadline, resumes in finally, verifies unchanged model
+and selection, then proves a fresh result open succeeds. It does not force timeout
+after worker submission or cancellation during flush/snapshot capture.
+In-document CLI replacement is literal, version-pinned, undoable and refuses
+Replace All over truncated matches. Shared editor/platform sources stay read-only.
+See the [command and limit reference](README.md#editor-search-partial); the
+[search evidence record](evidence/2026-09-28/editor-search.md) tracks measured
+results separately from this implementation description.
+
+F01–F06, F17 and G08 remain partial, with 58 partial/56 pending features and ten
+partial/three pending gates. Broader F06 acceptance, physical
+IME/GUI/clipboard/fonts/DPI/accessibility, broader automatic-refresh acceptance
+and the stated watcher limits, viewers, full ACL preservation, exhaustive
+long-path behavior, unsynchronized edit/close races and renderer-crash recovery
+remain pending.

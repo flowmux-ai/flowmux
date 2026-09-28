@@ -15,6 +15,7 @@ pub mod editor;
 pub mod editor_assets;
 pub mod editor_open;
 pub mod editor_recovery;
+pub mod editor_search;
 pub mod editor_watch;
 pub mod editor_worker;
 pub mod keys;

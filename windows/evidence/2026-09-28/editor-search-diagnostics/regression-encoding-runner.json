@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-encoding",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-refresh-cases\\encoding.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T05:15:00.2804111Z",
+    "pid":  25648,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  8.916,
+    "finished":  "2026-09-28T05:15:09.2005000Z"
+}

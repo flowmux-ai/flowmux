@@ -22,6 +22,13 @@ pub enum Op {
     Pick(PickArgs),
     Status(SurfaceArgs),
     Command(CommandArgs),
+    Find(FindArgs),
+    ReplaceMatch(ReplaceArgs),
+    ReplaceAll(ReplaceArgs),
+    QuickOpen(QuickOpenArgs),
+    Search(SearchArgs),
+    SearchCancel(SurfaceArgs),
+    SearchOpen(SearchOpenArgs),
     CheckDisk(SurfaceArgs),
     Flush(SurfaceArgs),
 }
@@ -48,6 +55,184 @@ pub struct OpenArgs {
 pub struct SurfaceArgs {
     #[arg(value_parser = crate::command::parse_id)]
     pub surface: Uuid,
+}
+
+pub const MAX_SEARCH_QUERY_BYTES: usize = 4096;
+pub const MAX_SEARCH_MATCHES: usize = 500;
+pub const MAX_SAFE_VERSION: u64 = 9_007_199_254_740_991;
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FindArgs {
+    #[arg(value_parser = crate::command::parse_id)]
+    pub surface: Uuid,
+    #[arg(long)]
+    pub query: String,
+    #[arg(long)]
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub whole_word: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub backward: bool,
+    #[arg(long)]
+    pub document_id: Option<String>,
+    #[arg(long)]
+    pub version: Option<u64>,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceArgs {
+    #[arg(value_parser = crate::command::parse_id)]
+    pub surface: Uuid,
+    #[arg(long)]
+    pub query: String,
+    #[arg(long)]
+    pub text: String,
+    #[arg(long)]
+    pub document_id: String,
+    #[arg(long)]
+    pub version: u64,
+    #[arg(long)]
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub whole_word: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub backward: bool,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickOpenArgs {
+    #[arg(value_parser = crate::command::parse_id)]
+    pub surface: Uuid,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchArgs {
+    #[arg(value_parser = crate::command::parse_id)]
+    pub surface: Uuid,
+    #[arg(long)]
+    pub query: String,
+    #[arg(long)]
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub whole_word: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub regex: bool,
+    #[arg(long)]
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[arg(long)]
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchOpenArgs {
+    #[arg(value_parser = crate::command::parse_id)]
+    pub surface: Uuid,
+    #[arg(long)]
+    pub token: Uuid,
+    #[arg(long)]
+    pub index: usize,
+}
+
+pub fn validate_query(query: &str) -> anyhow::Result<()> {
+    ensure!(
+        !query.is_empty() && query.len() <= MAX_SEARCH_QUERY_BYTES,
+        "query must contain 1 to 4096 UTF-8 bytes"
+    );
+    ensure!(!query.contains('\0'), "query cannot contain NUL");
+    Ok(())
+}
+
+pub fn validate_document_version(document_id: &str, version: u64) -> anyhow::Result<()> {
+    ensure!(
+        !document_id.is_empty()
+            && document_id.len() <= 128
+            && !document_id.chars().any(char::is_control),
+        "invalid editor document ID"
+    );
+    ensure!(
+        (1..=MAX_SAFE_VERSION).contains(&version),
+        "invalid editor document version"
+    );
+    Ok(())
+}
+
+impl FindArgs {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_query(&self.query)?;
+        ensure!(
+            self.document_id.is_some() == self.version.is_some(),
+            "--document-id and --version must be supplied together"
+        );
+        if let (Some(id), Some(version)) = (&self.document_id, self.version) {
+            validate_document_version(id, version)?;
+        }
+        Ok(())
+    }
+    pub fn command(&self, id: u64) -> anyhow::Result<serde_json::Value> {
+        self.validate()?;
+        let mut value = serde_json::json!({"id":id,"action":"find","query":self.query,
+            "case_sensitive":self.case_sensitive,"whole_word":self.whole_word,
+            "backward":self.backward});
+        if let (Some(document), Some(version)) = (&self.document_id, self.version) {
+            value["document_id"] = serde_json::json!(document);
+            value["version"] = serde_json::json!(version);
+        }
+        Ok(value)
+    }
+}
+
+impl ReplaceArgs {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_query(&self.query)?;
+        validate_document_version(&self.document_id, self.version)?;
+        validate_text(&self.text)
+    }
+    pub fn command(&self, id: u64, all: bool) -> anyhow::Result<serde_json::Value> {
+        self.validate()?;
+        Ok(
+            serde_json::json!({"id":id,"action":if all {"replace_all"} else {"replace_match"},
+            "query":self.query,"text":self.text,"document_id":self.document_id,
+            "version":self.version,"case_sensitive":self.case_sensitive,
+            "whole_word":self.whole_word,"backward":self.backward}),
+        )
+    }
+}
+
+impl SearchArgs {
+    pub fn options(&self) -> anyhow::Result<flowmux_editor::SearchOptions> {
+        validate_query(&self.query)?;
+        ensure!(
+            self.include.len() <= 32 && self.exclude.len() <= 32,
+            "search accepts at most 32 include and 32 exclude patterns"
+        );
+        for pattern in self.include.iter().chain(&self.exclude) {
+            validate_query(pattern)?;
+        }
+        Ok(flowmux_editor::SearchOptions {
+            case_sensitive: self.case_sensitive,
+            whole_word: self.whole_word,
+            use_regex: self.regex,
+            include: self.include.clone(),
+            exclude: self.exclude.clone(),
+            ..Default::default()
+        })
+    }
 }
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
@@ -299,6 +484,137 @@ pub fn session_state(snapshot: EditorSessionSnapshot, zoom: u16) -> EditorSessio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_cli_and_wire_preserve_unicode_and_require_replace_identity() {
+        use clap::Parser;
+        let surface = Uuid::new_v4().to_string();
+        let cli = crate::command::Cli::try_parse_from([
+            "flowmuxctl",
+            "editor",
+            "search",
+            &surface,
+            "--query",
+            "한 😀",
+            "--regex",
+            "--include",
+            "**/*.txt",
+        ])
+        .unwrap();
+        let crate::command::Command::Editor { op } = cli.command else {
+            panic!("wrong command");
+        };
+        let wire = serde_json::to_value(&op).unwrap();
+        assert_eq!(wire["query"], "한 😀");
+        assert!(matches!(
+            serde_json::from_value::<Op>(wire).unwrap(),
+            Op::Search(_)
+        ));
+        assert!(crate::command::Cli::try_parse_from([
+            "flowmuxctl",
+            "editor",
+            "replace-all",
+            &surface,
+            "--query",
+            "한",
+            "--text",
+            "글"
+        ])
+        .is_err());
+        let cli = crate::command::Cli::try_parse_from([
+            "flowmuxctl",
+            "editor",
+            "replace-match",
+            &surface,
+            "--query",
+            "한",
+            "--text",
+            "글",
+            "--document-id",
+            "doc",
+            "--version",
+            "2",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            crate::command::Command::Editor {
+                op: Op::ReplaceMatch(_)
+            }
+        ));
+        assert!(crate::command::Cli::try_parse_from([
+            "flowmuxctl",
+            "editor",
+            "find",
+            &surface,
+            "--query",
+            "한",
+            "--regex"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn search_queries_and_versions_bound_unicode_without_normalizing() {
+        assert!(validate_query(&"한".repeat(1365)).is_ok());
+        assert!(validate_query(&"한".repeat(1366)).is_err());
+        for invalid in ["", "a\0b"] {
+            assert!(validate_query(invalid).is_err());
+        }
+        let mut find = FindArgs {
+            surface: Uuid::nil(),
+            query: "한 😀".into(),
+            case_sensitive: false,
+            whole_word: false,
+            backward: true,
+            document_id: None,
+            version: None,
+        };
+        let value = find.command(7).unwrap();
+        assert_eq!(value["query"], "한 😀");
+        assert!(value.get("version").is_none());
+        find.document_id = Some("doc".into());
+        assert!(find.command(7).is_err());
+        find.version = Some(MAX_SAFE_VERSION);
+        assert!(find.command(7).is_ok());
+        find.version = Some(MAX_SAFE_VERSION + 1);
+        assert!(find.command(7).is_err());
+        assert!(validate_document_version("doc", 0).is_err());
+        assert!(validate_document_version("doc\n", 1).is_err());
+    }
+
+    #[test]
+    fn replacement_and_workspace_options_reject_unbounded_inputs() {
+        let mut replace = ReplaceArgs {
+            surface: Uuid::nil(),
+            query: "한".into(),
+            text: "".into(),
+            document_id: "doc".into(),
+            version: 1,
+            case_sensitive: false,
+            whole_word: false,
+            backward: false,
+        };
+        assert_eq!(replace.command(1, true).unwrap()["action"], "replace_all");
+        replace.text = "\0".into();
+        assert!(replace.validate().is_err());
+        let mut search = SearchArgs {
+            surface: Uuid::nil(),
+            query: "한".into(),
+            case_sensitive: false,
+            whole_word: true,
+            regex: true,
+            include: vec!["**/*.txt".into(); 32],
+            exclude: Vec::new(),
+        };
+        let options = search.options().unwrap();
+        assert!(options.use_regex && options.whole_word);
+        search.include.push("another".into());
+        assert!(search.options().is_err());
+        search.include.clear();
+        search.exclude.push("bad\0pattern".into());
+        assert!(search.options().is_err());
+    }
 
     #[test]
     fn windows_paths_reject_devices_streams_and_aliases_without_normalizing_unicode() {

@@ -1,0 +1,211 @@
+{
+  "schema": 1,
+  "started": "2026-09-28T05:12:27.093113+00:00",
+  "status": "passed",
+  "selectedCases": [
+    "replace",
+    "quick-open",
+    "workspace",
+    "search-open"
+  ],
+  "serial": true,
+  "failFast": true,
+  "retries": 0,
+  "jobDeadlineSeconds": 120,
+  "results": [
+    {
+      "case": "replace",
+      "kind": "refresh",
+      "label": "editor-search-replace",
+      "started": "2026-09-28T05:12:27.104912+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-cases/replace.ps1",
+        "editor-search-replace",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-runs/403a3943-1ff4-4b6d-a689-9dbbab6a21e3/replace-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89/native-editor-search-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-replace-006fbb47-32e3-41d4-adff-ae7942b7fc80/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\editor-search-replace-006fbb47-32e3-41d4-adff-ae7942b7fc80\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-d256f447-1b5c-4519-842e-5f1b7b705f89",
+      "runner": {
+        "name": "editor-search-replace",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\replace.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T05:13:47.3487301Z",
+        "pid": 30428,
+        "exitCode": 0,
+        "activeBeforeCleanup": 2,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 5.164,
+        "finished": "2026-09-28T05:13:52.5163489Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-replace-006fbb47-32e3-41d4-adff-ae7942b7fc80/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-replace-006fbb47-32e3-41d4-adff-ae7942b7fc80/stderr.txt",
+      "evidenceStatus": "passed_background_editor_search_subset",
+      "evidenceCase": "replace",
+      "checks": [
+        {
+          "name": "literal_replacement_uses_version_guard_monaco_undo_and_exact_bom_crlf_save",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 6.092,
+      "finished": "2026-09-28T05:12:33.222150+00:00"
+    },
+    {
+      "case": "quick-open",
+      "kind": "refresh",
+      "label": "editor-search-quick-open",
+      "started": "2026-09-28T05:12:33.250943+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-cases/quick-open.ps1",
+        "editor-search-quick-open",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-runs/403a3943-1ff4-4b6d-a689-9dbbab6a21e3/quick-open-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-3ef04c83-9c8f-47e8-b18d-8eeb85544f33",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-3ef04c83-9c8f-47e8-b18d-8eeb85544f33/native-editor-search-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-quick-open-89e8b46c-b54e-4642-a6ae-b16755bd48aa/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\editor-search-quick-open-89e8b46c-b54e-4642-a6ae-b16755bd48aa\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-3ef04c83-9c8f-47e8-b18d-8eeb85544f33",
+      "runner": {
+        "name": "editor-search-quick-open",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\quick-open.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T05:13:53.4197262Z",
+        "pid": 31808,
+        "exitCode": 0,
+        "activeBeforeCleanup": 2,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 4.679,
+        "finished": "2026-09-28T05:13:58.1030578Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-quick-open-89e8b46c-b54e-4642-a6ae-b16755bd48aa/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-quick-open-89e8b46c-b54e-4642-a6ae-b16755bd48aa/stderr.txt",
+      "evidenceStatus": "passed_background_editor_search_subset",
+      "evidenceCase": "quick-open",
+      "checks": [
+        {
+          "name": "quick_open_indexes_unicode_paths_respects_ignore_rules_and_opens_only_retained_entries",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 5.595,
+      "finished": "2026-09-28T05:12:38.819682+00:00"
+    },
+    {
+      "case": "workspace",
+      "kind": "refresh",
+      "label": "editor-search-workspace",
+      "started": "2026-09-28T05:12:38.847724+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-cases/workspace.ps1",
+        "editor-search-workspace",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-runs/403a3943-1ff4-4b6d-a689-9dbbab6a21e3/workspace-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b/native-editor-search-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-workspace-f4fd75cf-fff9-43b3-988e-804dc20767b6/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\editor-search-workspace-f4fd75cf-fff9-43b3-988e-804dc20767b6\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b",
+      "runner": {
+        "name": "editor-search-workspace",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\workspace.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T05:13:59.1575836Z",
+        "pid": 35160,
+        "exitCode": 0,
+        "activeBeforeCleanup": 4,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 5.195,
+        "finished": "2026-09-28T05:14:04.3581635Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-workspace-f4fd75cf-fff9-43b3-988e-804dc20767b6/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-workspace-f4fd75cf-fff9-43b3-988e-804dc20767b6/stderr.txt",
+      "evidenceStatus": "passed_background_editor_search_subset",
+      "evidenceCase": "workspace",
+      "checks": [
+        {
+          "name": "workspace_search_uses_dirty_buffers_utf16_ranges_ignore_globs_and_regex_without_disk_mutation",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 6.179,
+      "finished": "2026-09-28T05:12:45.026969+00:00"
+    },
+    {
+      "case": "search-open",
+      "kind": "refresh",
+      "label": "editor-search-search-open",
+      "started": "2026-09-28T05:12:45.054175+00:00",
+      "deadlineSeconds": 120,
+      "driverDeadlineSeconds": 135,
+      "command": [
+        "/usr/bin/python3",
+        "/tmp/fm-win-check.py",
+        "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-cases/search-open.ps1",
+        "editor-search-search-open",
+        "120"
+      ],
+      "driverOutput": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/editor-search-runs/403a3943-1ff4-4b6d-a689-9dbbab6a21e3/search-open-driver.txt",
+      "status": "passed",
+      "evidenceDirectory": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-6eea0887-95e6-4966-8290-bda309d81188",
+      "evidenceJson": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/evidence/editor-search-6eea0887-95e6-4966-8290-bda309d81188/native-editor-search-background.json",
+      "runnerResult": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-search-open-d40cfce4-a429-4020-b106-030add16b331/result.json",
+      "returncode": 0,
+      "runnerResultWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\checks\\editor-search-search-open-d40cfce4-a429-4020-b106-030add16b331\\result.json",
+      "evidenceDirectoryWindows": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-6eea0887-95e6-4966-8290-bda309d81188",
+      "runner": {
+        "name": "editor-search-search-open",
+        "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-cases\\search-open.ps1",
+        "deadlineSeconds": 120,
+        "status": "passed",
+        "started": "2026-09-28T05:14:05.4141875Z",
+        "pid": 12264,
+        "exitCode": 0,
+        "activeBeforeCleanup": 2,
+        "activeAfterCleanup": 0,
+        "elapsedSeconds": 7.371,
+        "finished": "2026-09-28T05:14:12.7911884Z"
+      },
+      "runnerStdout": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-search-open-d40cfce4-a429-4020-b106-030add16b331/stdout.txt",
+      "runnerStderr": "/mnt/c/Users/jundu/Documents/Codex/2026-06-10/jsuya-flowmux-https-github-com-jsuya/work/flowmux/windows/dist/checks/editor-search-search-open-d40cfce4-a429-4020-b106-030add16b331/stderr.txt",
+      "evidenceStatus": "passed_background_editor_search_subset",
+      "evidenceCase": "search-open",
+      "checks": [
+        {
+          "name": "guarded_search_open_selects_actual_utf16_range_and_rejects_changed_disk_buffer_and_expired_tokens",
+          "passed": true
+        }
+      ],
+      "elapsedSeconds": 8.405,
+      "finished": "2026-09-28T05:12:53.459131+00:00"
+    }
+  ],
+  "notRun": [],
+  "finished": "2026-09-28T05:12:53.493069+00:00"
+}

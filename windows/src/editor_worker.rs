@@ -10,8 +10,8 @@ use anyhow::{ensure, Context};
 use flowmux_core::EditorSessionState;
 use flowmux_editor::{
     DocumentDiskStatus, DocumentPayload, EditorMessage, EditorSession, EditorViewState,
-    HostMessage, RecoveryOperation, RecoveryStore, TextDocumentEncoding, TextDocumentLineEnding,
-    WorkspaceSearchResult, EDITOR_ZOOM_DEFAULT,
+    HostMessage, RecoveryOperation, RecoveryStore, SearchDocument, TextDocumentEncoding,
+    TextDocumentLineEnding, WorkspaceSearchResult, EDITOR_ZOOM_DEFAULT,
 };
 use serde::Serialize;
 use std::{
@@ -26,6 +26,7 @@ use std::{
 
 pub const MAX_PENDING: usize = 8;
 pub const MAX_QUEUED_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_SEARCH_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum Work {
@@ -36,6 +37,45 @@ pub enum Work {
     DiscardAll,
     PollDisk,
     Snapshot,
+    SearchSnapshot,
+    SearchOpen(SearchOpen),
+}
+
+/// All open paths override disk search, even if the scanner skips a large buffer.
+#[derive(Debug)]
+pub struct SearchBuffer {
+    pub document_id: String,
+    pub version: u64,
+    pub path: PathBuf,
+    pub content: String,
+}
+
+#[derive(Debug)]
+pub struct SearchSnapshot {
+    pub documents: Vec<SearchBuffer>,
+    pub total_bytes: usize,
+}
+
+/// The UI owner resolves a retained result token before submitting this work.
+#[derive(Debug)]
+pub struct SearchOpen {
+    pub path: PathBuf,
+    pub range: Option<SearchRange>,
+    pub expected_document: Option<SearchDocumentVersion>,
+    pub expected_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SearchRange {
+    pub line: u32,
+    pub column: u32,
+    pub length: u32,
+}
+
+#[derive(Debug)]
+pub struct SearchDocumentVersion {
+    pub document_id: String,
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,6 +107,9 @@ pub struct Response {
     pub initialization_failed: bool,
     pub restored_errors: Vec<String>,
     pub error: Option<String>,
+    /// Present only for a successful SearchSnapshot capture. A later recovery
+    /// persistence error can still accompany the captured, acknowledged text.
+    pub search_snapshot: Option<SearchSnapshot>,
 }
 
 #[derive(Default)]
@@ -206,6 +249,22 @@ fn work_size(work: &Work) -> anyhow::Result<usize> {
             editor::validate_path(path)?;
             path.as_os_str().len()
         }
+        Work::SearchOpen(request) => {
+            editor::validate_relative_path(&request.path)?;
+            if let Some(expected) = &request.expected_document {
+                ensure!(
+                    expected.document_id.len() <= 128,
+                    "invalid search document identity"
+                );
+            }
+            if let Some(hash) = &request.expected_sha256 {
+                ensure!(
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                    "invalid search source fingerprint"
+                );
+            }
+            request.path.as_os_str().len().saturating_add(256)
+        }
         Work::Message(message) => match message {
             EditorMessage::DocumentChanged {
                 document_id,
@@ -247,6 +306,9 @@ struct Engine {
     recovery: Option<RecoveryStore>,
     recovery_pending: BTreeMap<PathBuf, RecoveryOperation>,
     documents: BTreeMap<String, DocumentMeta>,
+    document_order: Vec<String>,
+    content_bytes: BTreeMap<String, usize>,
+    search_snapshot: Option<SearchSnapshot>,
     disk_status_unknown: BTreeSet<String>,
     zoom: u16,
     restored_errors: Vec<String>,
@@ -254,6 +316,14 @@ struct Engine {
     operation_error: Option<String>,
     restored_state: EditorSessionState,
 }
+
+struct ContentUpdate {
+    document_id: String,
+    change_sequence: u64,
+    bytes: usize,
+    was_current: bool,
+}
+
 impl Engine {
     fn new(
         root: PathBuf,
@@ -267,6 +337,9 @@ impl Engine {
             recovery: None,
             recovery_pending: BTreeMap::new(),
             documents: BTreeMap::new(),
+            document_order: Vec::new(),
+            content_bytes: BTreeMap::new(),
+            search_snapshot: None,
             disk_status_unknown: BTreeSet::new(),
             zoom: restored.zoom_percent.unwrap_or(EDITOR_ZOOM_DEFAULT),
             restored_errors: Vec::new(),
@@ -383,6 +456,8 @@ impl Engine {
             return self.response(id, Vec::new(), self.startup_error.clone());
         }
         self.operation_error = None;
+        self.search_snapshot = None;
+        let content_update = self.content_update(&work);
         let disk_poll = matches!(&work, Work::PollDisk);
         let result = self.execute(work);
         let (messages, mut error) = match result {
@@ -393,6 +468,7 @@ impl Engine {
             append_error(&mut error, &operation);
         }
         self.update_metadata(&messages);
+        self.record_content_update(content_update, &messages);
         self.update_disk_certainty(disk_poll, error.is_some(), &messages);
         for message in &messages {
             let reason = match message {
@@ -430,7 +506,250 @@ impl Engine {
             }
             Work::PollDisk => Ok(self.poll_disk()),
             Work::Snapshot => Ok(Vec::new()),
+            Work::SearchOpen(request) => self.search_open(request),
+            Work::SearchSnapshot => {
+                self.search_snapshot = Some(self.capture_search_snapshot(|| {
+                    self.session.as_ref().unwrap().search_documents()
+                })?);
+                Ok(Vec::new())
+            }
         }
+    }
+
+    fn content_update(&self, work: &Work) -> Option<ContentUpdate> {
+        let Work::Message(message) = work else {
+            return None;
+        };
+        match message {
+            EditorMessage::DocumentChanged {
+                document_id,
+                document_version,
+                change_sequence,
+                content,
+            }
+            | EditorMessage::SaveRequested {
+                document_id,
+                document_version,
+                change_sequence,
+                content,
+            }
+            | EditorMessage::SaveAsRequested {
+                document_id,
+                document_version,
+                change_sequence,
+                content,
+                ..
+            } => Some(ContentUpdate {
+                document_id: document_id.clone(),
+                change_sequence: *change_sequence,
+                bytes: content.len(),
+                was_current: self
+                    .documents
+                    .get(document_id)
+                    .is_some_and(|document| document.version == *document_version),
+            }),
+            _ => None,
+        }
+    }
+
+    fn record_content_update(&mut self, update: Option<ContentUpdate>, messages: &[HostMessage]) {
+        let Some(update) = update else { return };
+        let acknowledged = messages.iter().any(|message| match message {
+            HostMessage::DocumentChangeApplied {
+                document_id,
+                change_sequence,
+                ..
+            }
+            | HostMessage::SaveCompleted {
+                document_id,
+                change_sequence,
+                ..
+            } => document_id == &update.document_id && *change_sequence == update.change_sequence,
+            HostMessage::SaveAsCompleted {
+                document,
+                change_sequence,
+            } => document.id == update.document_id && *change_sequence == update.change_sequence,
+            _ => false,
+        });
+        if acknowledged {
+            self.content_bytes.insert(update.document_id, update.bytes);
+        } else if update.was_current {
+            // Shared save/change code can mutate text before a later I/O or
+            // recovery error prevents its ACK. Do not guess that length, or use
+            // the request's rejected content for admission. A later full payload
+            // or successful content ACK restores certainty. Stale requests never
+            // reach a mutation and must leave the previous accounting intact.
+            self.content_bytes.remove(&update.document_id);
+        }
+    }
+
+    fn capture_search_snapshot(
+        &self,
+        collect: impl FnOnce() -> Vec<SearchDocument>,
+    ) -> anyhow::Result<SearchSnapshot> {
+        // This check MUST precede search_documents(), whose public shared API
+        // clones every open buffer before returning it. Never admit by a sum
+        // computed after that potentially 128 x 16 MiB allocation.
+        let total_bytes = self.documents.keys().try_fold(0usize, |total, id| {
+            let bytes = self.content_bytes.get(id).context(
+                "editor buffer length is not synchronized; reconcile the document before searching",
+            )?;
+            let next = total
+                .checked_add(*bytes)
+                .context("editor search snapshot size overflow")?;
+            ensure!(
+                next <= MAX_SEARCH_SNAPSHOT_BYTES,
+                "editor search snapshot exceeds 16 MiB of open buffers"
+            );
+            Ok::<_, anyhow::Error>(next)
+        })?;
+        let state = self.session.as_ref().unwrap().session_snapshot();
+        ensure!(
+            state.open_files.len() == self.documents.len(),
+            "editor search document catalog is not synchronized"
+        );
+        // Full payload/close messages maintain the same order as the session.
+        // Do not infer IDs from display paths: Save As through an alias can have
+        // a different display path and canonical identity while keeping its ID.
+        ensure!(
+            self.document_order.len() == self.documents.len(),
+            "editor search document order is not synchronized"
+        );
+        let ordered: Vec<_> = self
+            .document_order
+            .iter()
+            .map(|id| {
+                self.documents
+                    .get(id)
+                    .context("editor search document identity is not synchronized")
+            })
+            .collect::<anyhow::Result<_>>()?;
+        let captured = collect();
+        ensure!(
+            captured.len() == ordered.len(),
+            "editor search snapshot changed while being captured"
+        );
+        let documents = captured
+            .into_iter()
+            .zip(ordered)
+            .map(|(document, metadata)| {
+                ensure!(
+                    Some(document.content.len()) == self.content_bytes.get(&metadata.id).copied(),
+                    "editor search buffer length changed without an acknowledgment"
+                );
+                Ok(SearchBuffer {
+                    document_id: metadata.id.clone(),
+                    version: metadata.version,
+                    path: editor::display_path(document.path),
+                    content: document.content,
+                })
+            })
+            .collect::<anyhow::Result<_>>()?;
+        Ok(SearchSnapshot {
+            documents,
+            total_bytes,
+        })
+    }
+
+    fn search_open(&mut self, request: SearchOpen) -> anyhow::Result<Vec<HostMessage>> {
+        editor::validate_relative_path(&request.path)?;
+        let Some(range) = request.range else {
+            // Quick Open still goes through the ordinary canonical root, file,
+            // document count and recovery validation on this I/O worker.
+            return self.open(request.path);
+        };
+        let hash = request
+            .expected_sha256
+            .as_deref()
+            .context("search range requires a retained source fingerprint")?;
+        let snapshot =
+            self.capture_search_snapshot(|| self.session.as_ref().unwrap().search_documents())?;
+        let path = self.root.join(&request.path);
+        if let Some(document) = snapshot
+            .documents
+            .iter()
+            .find(|document| crate::editor_search::same_path(&document.path, &path))
+        {
+            let expected = request
+                .expected_document
+                .as_ref()
+                .context("search source is now an open buffer; search again")?;
+            ensure!(
+                document.document_id == expected.document_id
+                    && document.version == expected.version,
+                "search result document identity or version is stale; search again"
+            );
+            ensure!(
+                crate::editor_search::content_sha256(&document.content) == hash,
+                "search result buffer content is stale; search again"
+            );
+            validate_search_range(&document.content, range)?;
+            // Do not reopen/reread dirty or deleted buffers from disk. This public
+            // session API activates the already validated display path directly.
+            let index = self
+                .document_order
+                .iter()
+                .position(|id| id == &document.document_id)
+                .context("search document order changed before activation")?;
+            let active_path = self
+                .session
+                .as_ref()
+                .unwrap()
+                .session_snapshot()
+                .open_files
+                .get(index)
+                .context("search document disappeared before activation")?
+                .path
+                .clone();
+            self.session.as_mut().unwrap().activate_path(active_path);
+            return Ok(vec![
+                HostMessage::SetActiveDocument {
+                    document_id: document.document_id.clone(),
+                    document_version: document.version,
+                },
+                reveal_search_range(&document.document_id, document.version, range),
+            ]);
+        }
+        ensure!(
+            request.expected_document.is_none(),
+            "search result buffer was closed or replaced; search again"
+        );
+        crate::editor_search::validate_result_source(&self.root, &request.path, hash)?;
+        let messages = self.open(request.path.clone())?;
+        Ok(self.finish_search_open(&request, messages))
+    }
+
+    fn finish_search_open(
+        &mut self,
+        request: &SearchOpen,
+        mut messages: Vec<HostMessage>,
+    ) -> Vec<HostMessage> {
+        // Opening uses the shared API, which reads again after validation. Check
+        // the actual payload before revealing. Keep its model/activation messages
+        // even on mismatch: that open has already changed the backend session.
+        let checked = (|| -> anyhow::Result<HostMessage> {
+            let document = messages
+                .iter()
+                .find_map(|message| match message {
+                    HostMessage::OpenDocument { document } => Some(document),
+                    _ => None,
+                })
+                .context("search source became an open buffer while opening; search again")?;
+            let hash = request
+                .expected_sha256
+                .as_deref()
+                .context("missing search source fingerprint")?;
+            ensure!(crate::editor_search::content_sha256(&document.content) == hash,
+                "search source changed while opening; document opened without revealing a stale range");
+            let range = request.range.context("missing search result range")?;
+            validate_search_range(&document.content, range)?;
+            Ok(reveal_search_range(&document.id, document.version, range))
+        })();
+        match checked {
+            Ok(reveal) => messages.push(reveal),
+            Err(error) => self.operation_error = Some(format!("{error:#}")),
+        }
+        messages
     }
 
     fn poll_disk(&mut self) -> Vec<HostMessage> {
@@ -604,29 +923,10 @@ impl Engine {
                     error: None,
                 }])
             }
-            EditorMessage::SearchResultOpenRequested {
-                path,
-                line,
-                column,
-                length,
-            } => {
-                editor::validate_relative_path(std::path::Path::new(&path))?;
-                let messages = self.open(path.into())?;
-                let active = self
-                    .session
-                    .as_ref()
-                    .unwrap()
-                    .session_snapshot()
-                    .active_file
-                    .unwrap();
-                let mut messages = messages;
-                messages.extend(
-                    self.session
-                        .as_mut()
-                        .unwrap()
-                        .open_search_result(active, line, column, length)?,
-                );
-                Ok(messages)
+            EditorMessage::SearchResultOpenRequested { .. } => {
+                anyhow::bail!(
+                    "search result open requires a retained result token from its UI owner"
+                )
             }
             message => Ok(self
                 .session
@@ -678,7 +978,12 @@ impl Engine {
             match message {
                 HostMessage::InitializeEditor { documents, .. } => {
                     self.documents.clear();
+                    self.document_order.clear();
+                    self.content_bytes.clear();
                     for document in documents {
+                        self.document_order.push(document.id.clone());
+                        self.content_bytes
+                            .insert(document.id.clone(), document.content.len());
                         self.documents
                             .insert(document.id.clone(), self.metadata(document));
                     }
@@ -686,11 +991,18 @@ impl Engine {
                 HostMessage::OpenDocument { document }
                 | HostMessage::ReplaceDocument { document }
                 | HostMessage::SaveAsCompleted { document, .. } => {
+                    if !self.documents.contains_key(&document.id) {
+                        self.document_order.push(document.id.clone());
+                    }
+                    self.content_bytes
+                        .insert(document.id.clone(), document.content.len());
                     self.documents
                         .insert(document.id.clone(), self.metadata(document));
                 }
                 HostMessage::CloseDocument { document_id, .. } => {
                     self.documents.remove(document_id);
+                    self.document_order.retain(|id| id != document_id);
+                    self.content_bytes.remove(document_id);
                 }
                 HostMessage::DocumentChangeApplied {
                     document_id,
@@ -751,7 +1063,46 @@ impl Engine {
             initialization_failed: self.session.is_none() && self.startup_error.is_some(),
             restored_errors: self.restored_errors.clone(),
             error,
+            search_snapshot: self.search_snapshot.take(),
         }
+    }
+}
+
+fn validate_search_range(content: &str, range: SearchRange) -> anyhow::Result<()> {
+    let line = content
+        .split('\n')
+        .nth(range.line as usize)
+        .context("search result line is invalid")?;
+    let end = range
+        .column
+        .checked_add(range.length)
+        .context("search range overflow")?;
+    let mut units = 0u32;
+    let mut start_valid = range.column == 0;
+    let mut end_valid = end == 0;
+    for character in line.chars() {
+        units += character.len_utf16() as u32;
+        start_valid |= units == range.column;
+        end_valid |= units == end;
+    }
+    ensure!(
+        start_valid && end_valid,
+        "search range is not on valid UTF-16 boundaries"
+    );
+    Ok(())
+}
+
+fn reveal_search_range(
+    document_id: &str,
+    document_version: u64,
+    range: SearchRange,
+) -> HostMessage {
+    HostMessage::RevealRange {
+        document_id: document_id.into(),
+        document_version,
+        line: range.line,
+        column: range.column,
+        length: range.length,
     }
 }
 
@@ -822,6 +1173,385 @@ mod tests {
             change_sequence: 1,
             content: content.into(),
         })
+    }
+
+    fn engine(root: &Directory) -> Engine {
+        Engine::new(
+            root.0.clone(),
+            EditorSessionState::default(),
+            RecoverySetup::Existing(None),
+            &Shared::default(),
+        )
+    }
+
+    fn search_request(path: &str, text: &str, expected: Option<(&str, u64)>) -> SearchOpen {
+        SearchOpen {
+            path: path.into(),
+            range: Some(SearchRange {
+                line: 0,
+                column: 0,
+                length: 1,
+            }),
+            expected_document: expected.map(|(id, version)| SearchDocumentVersion {
+                document_id: id.into(),
+                version,
+            }),
+            expected_sha256: Some(crate::editor_search::content_sha256(text)),
+        }
+    }
+
+    #[test]
+    fn search_snapshot_uses_acknowledged_unicode_and_ignores_stale_edit_lengths() {
+        let root = Directory::new();
+        let first = root.0.join("한글.txt");
+        let second = root.0.join("second.txt");
+        fs::write(&first, "disk\n").unwrap();
+        fs::write(&second, "other").unwrap();
+        let (worker, receive) = start(&root, EditorSessionState::default(), None);
+        let original = payload(&send(&worker, &receive, 1, Work::Open(first.clone())));
+        let other = payload(&send(&worker, &receive, 2, Work::Open(second)));
+        let text = "한글 한 é 😀\n";
+        let changed = send(&worker, &receive, 3, change(&original, text));
+        assert!(changed.error.is_none());
+        let version = changed
+            .documents
+            .iter()
+            .find(|d| d.id == original.id)
+            .unwrap()
+            .version;
+        let rejected = send(&worker, &receive, 4, change(&original, "unacknowledged"));
+        assert!(rejected.error.as_deref().unwrap().contains("stale"));
+        let result = send(&worker, &receive, 5, Work::SearchSnapshot);
+        assert!(result.error.is_none() && result.messages.is_empty());
+        let snapshot = result.search_snapshot.unwrap();
+        assert_eq!(snapshot.total_bytes, text.len() + 5);
+        assert_eq!(snapshot.documents.len(), 2);
+        assert_eq!(snapshot.documents[0].document_id, original.id);
+        assert_eq!(snapshot.documents[0].version, version);
+        assert_eq!(snapshot.documents[0].content, text);
+        assert_eq!(
+            snapshot.documents[0].path,
+            editor::display_path(fs::canonicalize(&first).unwrap())
+        );
+        assert_eq!(snapshot.documents[1].document_id, other.id);
+        assert_eq!(snapshot.documents[1].content, "other");
+        assert_eq!(fs::read_to_string(first).unwrap(), "disk\n");
+        assert!(send(&worker, &receive, 6, Work::Snapshot)
+            .search_snapshot
+            .is_none());
+    }
+
+    #[test]
+    fn search_snapshot_admits_before_clone_and_keeps_oversized_buffer_overrides() {
+        let root = Directory::new();
+        let first = root.0.join("large-a.txt");
+        let second = root.0.join("large-b.txt");
+        let half = MAX_SEARCH_SNAPSHOT_BYTES / 2;
+        fs::write(&first, vec![b'a'; half]).unwrap();
+        fs::write(&second, vec![b'b'; half]).unwrap();
+        let mut engine = engine(&root);
+        assert!(engine.run(1, Work::Open(first)).error.is_none());
+        let opened = engine.run(2, Work::Open(second));
+        assert!(opened.error.is_none());
+        let second_document = payload(&opened);
+        drop(opened);
+        let exact = engine.run(3, Work::SearchSnapshot).search_snapshot.unwrap();
+        assert_eq!(exact.total_bytes, MAX_SEARCH_SNAPSHOT_BYTES);
+        assert_eq!(
+            exact.documents.len(),
+            2,
+            "each >2MiB path must still override disk"
+        );
+        assert!(exact
+            .documents
+            .iter()
+            .all(|document| document.content.len() == half));
+        drop(exact);
+        assert!(engine
+            .run(4, change(&second_document, &"b".repeat(half + 1)))
+            .error
+            .is_none());
+        let rejected =
+            engine.capture_search_snapshot(|| panic!("oversized buffers must not be cloned"));
+        assert!(rejected.unwrap_err().to_string().contains("exceeds 16 MiB"));
+        let version = engine.documents[&second_document.id].version;
+        let closed = engine.run(
+            5,
+            Work::Message(EditorMessage::DiscardCloseRequested {
+                document_id: second_document.id,
+                document_version: version,
+            }),
+        );
+        assert!(closed.error.is_none());
+        let remaining = engine.run(6, Work::SearchSnapshot).search_snapshot.unwrap();
+        assert_eq!(remaining.documents.len(), 1);
+        assert_eq!(remaining.total_bytes, half);
+    }
+
+    #[test]
+    fn search_snapshot_replaces_save_as_paths_and_tracks_clean_disk_replacements() {
+        let root = Directory::new();
+        let original = root.0.join("original.txt");
+        let renamed = root.0.join("저장.txt");
+        fs::write(&original, "base").unwrap();
+        let mut engine = engine(&root);
+        let document = payload(&engine.run(1, Work::Open(original.clone())));
+        let saved = engine.run(
+            2,
+            Work::Message(EditorMessage::SaveAsRequested {
+                document_id: document.id.clone(),
+                document_version: document.version,
+                change_sequence: 1,
+                content: "saved 한글".into(),
+                path: "저장.txt".into(),
+                overwrite: false,
+            }),
+        );
+        assert!(saved.error.is_none());
+        let snapshot = engine.run(3, Work::SearchSnapshot).search_snapshot.unwrap();
+        assert_eq!(snapshot.documents.len(), 1);
+        assert_eq!(
+            snapshot.documents[0].path,
+            editor::display_path(fs::canonicalize(&renamed).unwrap())
+        );
+        assert_eq!(snapshot.documents[0].content, "saved 한글");
+        assert_eq!(snapshot.documents[0].document_id, document.id);
+        assert_eq!(fs::read_to_string(original).unwrap(), "base");
+        fs::write(&renamed, "external 😀\n").unwrap();
+        let polled = engine.run(4, Work::PollDisk);
+        assert!(polled.error.is_none());
+        let current = engine.run(5, Work::SearchSnapshot).search_snapshot.unwrap();
+        assert_eq!(current.total_bytes, "external 😀\n".len());
+        assert_eq!(current.documents[0].content, "external 😀\n");
+        assert!(current.documents[0].version > snapshot.documents[0].version);
+    }
+
+    #[test]
+    fn unacknowledged_current_save_failure_blocks_snapshot_before_clone() {
+        let root = Directory::new();
+        let path = root.0.join("base.txt");
+        fs::write(&path, "base").unwrap();
+        let mut engine = engine(&root);
+        let document = payload(&engine.run(1, Work::Open(path)));
+        let rejected = engine.run(
+            2,
+            Work::Message(EditorMessage::SaveAsRequested {
+                document_id: document.id.clone(),
+                document_version: document.version,
+                change_sequence: 1,
+                content: "larger unsaved content".into(),
+                path: "missing/target.txt".into(),
+                overwrite: false,
+            }),
+        );
+        assert!(rejected.error.is_some());
+        assert!(!engine.content_bytes.contains_key(&document.id));
+        assert!(engine
+            .capture_search_snapshot(|| panic!("unknown lengths must not be cloned"))
+            .unwrap_err()
+            .to_string()
+            .contains("not synchronized"));
+        // A subsequent full acknowledged payload establishes the actual length.
+        assert!(engine.run(3, Work::Initialize).error.is_none());
+        let snapshot = engine.run(4, Work::SearchSnapshot).search_snapshot.unwrap();
+        assert_eq!(snapshot.total_bytes, snapshot.documents[0].content.len());
+    }
+
+    #[test]
+    fn guarded_search_open_checks_buffer_identity_version_hash_before_activation() {
+        let root = Directory::new();
+        let first = root.0.join("first.txt");
+        let second = root.0.join("second.txt");
+        fs::write(&first, "disk").unwrap();
+        fs::write(&second, "other").unwrap();
+        let mut engine = engine(&root);
+        let document = payload(&engine.run(1, Work::Open(first.clone())));
+        let text = "한글 😀 unsaved";
+        let changed = engine.run(2, change(&document, text));
+        let version = changed.documents[0].version;
+        engine.run(3, Work::Open(second.clone()));
+        for request in [
+            search_request("first.txt", text, Some((&document.id, document.version))),
+            search_request("first.txt", "wrong", Some((&document.id, version))),
+            search_request("first.txt", text, Some(("wrong-id", version))),
+            search_request("first.txt", text, None),
+        ] {
+            let response = engine.run(4, Work::SearchOpen(request));
+            assert!(response.error.is_some() && response.messages.is_empty());
+            assert_eq!(
+                response.state.active_file,
+                Some(editor::display_path(fs::canonicalize(&second).unwrap()))
+            );
+        }
+        // An open dirty buffer remains authoritative even after its disk file is deleted.
+        fs::remove_file(first).unwrap();
+        let response = engine.run(
+            5,
+            Work::SearchOpen(search_request(
+                "first.txt",
+                text,
+                Some((&document.id, version)),
+            )),
+        );
+        assert!(response.error.is_none());
+        assert!(response.messages.iter().any(|message| matches!(message,
+            HostMessage::RevealRange { document_id, document_version, .. }
+                if document_id == &document.id && *document_version == version)));
+        assert!(
+            response
+                .documents
+                .iter()
+                .find(|meta| meta.id == document.id)
+                .unwrap()
+                .active
+        );
+    }
+
+    #[test]
+    fn guarded_disk_open_uses_normalized_payload_and_rejects_changed_source() {
+        let root = Directory::new();
+        let path = root.0.join("한글.txt");
+        let text = "한글 😀\nsecond\n";
+        fs::write(&path, "\u{feff}한글 😀\r\nsecond\r\n").unwrap();
+        let mut engine = engine(&root);
+        let stale = engine.run(1, Work::SearchOpen(search_request("한글.txt", "old", None)));
+        assert!(stale.error.is_some() && stale.documents.is_empty() && stale.messages.is_empty());
+        let mut request = search_request("한글.txt", text, None);
+        request.range = Some(SearchRange {
+            line: 0,
+            column: 3,
+            length: 2,
+        });
+        let response = engine.run(2, Work::SearchOpen(request));
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(payload(&response).content, text);
+        assert!(matches!(
+            response.messages.last(),
+            Some(HostMessage::RevealRange {
+                column: 3,
+                length: 2,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn changed_payload_after_disk_validation_keeps_open_messages_without_reveal() {
+        let root = Directory::new();
+        let path = root.0.join("race.txt");
+        fs::write(&path, "original").unwrap();
+        let mut engine = engine(&root);
+        let request = search_request("race.txt", "original", None);
+        crate::editor_search::validate_result_source(
+            &engine.root,
+            &request.path,
+            request.expected_sha256.as_deref().unwrap(),
+        )
+        .unwrap();
+        // Deterministic TOCTOU boundary: mutate between the two real reads.
+        fs::write(&path, "replacement").unwrap();
+        let opened = engine.open(request.path.clone()).unwrap();
+        let messages = engine.finish_search_open(&request, opened);
+        assert!(engine
+            .operation_error
+            .as_deref()
+            .unwrap()
+            .contains("changed while opening"));
+        assert!(messages.iter().any(|message| matches!(message,
+            HostMessage::OpenDocument { document } if document.content == "replacement")));
+        assert!(!messages
+            .iter()
+            .any(|message| matches!(message, HostMessage::RevealRange { .. })));
+        engine.update_metadata(&messages);
+        let error = engine.operation_error.take();
+        let response = engine.response(1, messages, error);
+        assert!(response.error.is_some());
+        assert_eq!(response.documents.len(), 1);
+        assert_eq!(
+            engine
+                .run(2, Work::SearchSnapshot)
+                .search_snapshot
+                .unwrap()
+                .documents[0]
+                .content,
+            "replacement"
+        );
+    }
+
+    #[test]
+    fn quick_open_validates_root_and_raw_search_open_cannot_bypass_token_owner() {
+        let root = Directory::new();
+        fs::write(root.0.join("inside.txt"), "inside").unwrap();
+        let mut engine = engine(&root);
+        for path in ["../outside.txt", "/outside.txt"] {
+            let result = engine.run(
+                1,
+                Work::SearchOpen(SearchOpen {
+                    path: path.into(),
+                    range: None,
+                    expected_document: None,
+                    expected_sha256: None,
+                }),
+            );
+            assert!(result.error.is_some() && result.documents.is_empty());
+        }
+        let raw = engine.run(
+            2,
+            Work::Message(EditorMessage::SearchResultOpenRequested {
+                path: "inside.txt".into(),
+                line: 0,
+                column: 0,
+                length: 1,
+            }),
+        );
+        assert!(raw
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("retained result token"));
+        assert!(raw.documents.is_empty());
+        let opened = engine.run(
+            3,
+            Work::SearchOpen(SearchOpen {
+                path: "inside.txt".into(),
+                range: None,
+                expected_document: None,
+                expected_sha256: None,
+            }),
+        );
+        assert!(opened.error.is_none() && opened.documents.len() == 1);
+        assert!(!opened
+            .messages
+            .iter()
+            .any(|message| matches!(message, HostMessage::RevealRange { .. })));
+    }
+
+    #[test]
+    fn search_ranges_require_real_utf16_boundaries_and_allow_empty_matches() {
+        let text = "한😀글\n";
+        for (column, length) in [(0, 1), (1, 2), (3, 1), (4, 0)] {
+            assert!(validate_search_range(
+                text,
+                SearchRange {
+                    line: 0,
+                    column,
+                    length
+                }
+            )
+            .is_ok());
+        }
+        for (line, column, length) in [(0, 2, 1), (0, 1, 1), (0, 4, 1), (2, 0, 0), (0, u32::MAX, 1)]
+        {
+            assert!(validate_search_range(
+                text,
+                SearchRange {
+                    line,
+                    column,
+                    length
+                }
+            )
+            .is_err());
+        }
     }
 
     #[test]

@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { SearchParams, TextModelSearch } from "monaco-editor/esm/vs/editor/common/model/textModelSearch.js";
+import { Range } from "monaco-editor/esm/vs/editor/common/core/range.js";
+import { Position } from "monaco-editor/esm/vs/editor/common/core/position.js";
 
 const initializer = await readFile(new URL("./initialize.js", import.meta.url), "utf8");
 const adapter = await readFile(new URL("./adapter.js", import.meta.url), "utf8");
@@ -45,6 +48,7 @@ test("initialization authenticates the exact page and hidden focus guards preced
 
 function harness(content = "hello", empty = false) {
   const sent = [], calls = [], composition = {}, models = {}, pending = new Set();
+  const input = () => ({ handlers: {}, addEventListener(name, listener) { this.handlers[name] = listener; } });
   const document = {
     payload: { id: "document-1", relativePath: "한글.txt", encoding: "UTF-8", eol: "LF", dirty: false, readOnly: false, externalChange: false, version: 1 },
     model: { getValue: () => content, getLanguageId: () => "plaintext", getFullModelRange: () => "full-model", undo() {}, redo() {} },
@@ -53,6 +57,7 @@ function harness(content = "hello", empty = false) {
   };
   const editor = {
     readOnly: false,
+    getModel: () => document.model, getSelection: () => null,
     hasWidgetFocus: () => false, hasTextFocus: () => false,
     onDidCompositionStart(fn) { composition.start = fn; }, onDidCompositionEnd(fn) { composition.end = fn; }, onDidDispose() {},
     updateOptions(value) { this.readOnly = value.readOnly; calls.push(["options", value.readOnly]); },
@@ -87,6 +92,18 @@ function harness(content = "hello", empty = false) {
     clearChangeTimer(document) { clearTimeout(document.changeTimer); document.changeTimer = null; },
     requestSaveAll() {}, renderState() { calls.push(["render"]); },
     requestCloseActiveDocument() { context.closeDialog.open = true; calls.push(["close"]); },
+    searchQuery: input(), searchInclude: input(), searchExclude: input(), searchStatus: { textContent: "" },
+    searchMode: "workspace", activeSearchRequestId: null, renderedSearchResults: [], recentPaths: [],
+    searchInputChanged() { calls.push(["search-input"]); },
+    scheduleWorkspaceSearch() { calls.push(["search-schedule"]); },
+    requestWorkspaceSearch() { calls.push(["search-request"]); },
+    renderQuickOpen() { calls.push(["search-render-quick"]); },
+    searchKeyDown(event) { calls.push(["search-key", event.key]); },
+    closeSearchDialog() { context.searchDialog.open = false; calls.push(["search-close"]); },
+    clearSearchTimer() { calls.push(["search-clear-timer"]); },
+    cancelActiveSearch() { context.activeSearchRequestId = null; calls.push(["search-cancel"]); },
+    clearSearchResultNodes() { context.renderedSearchResults = []; calls.push(["search-clear-results"]); },
+    openSearchResult() { throw new Error("The legacy path-only open must not run"); },
   });
   vm.runInContext(adapter, context);
   async function command(action, extra = {}) {
@@ -99,6 +116,277 @@ function harness(content = "hello", empty = false) {
   }
   return { context, command, sent, calls, composition, models, document };
 }
+
+function findHarness(initial) {
+  const state = harness(initial);
+  let content = initial, selection = new Range(1, 1, 1, 1);
+  const undo = [], redo = [];
+  const model = state.document.model;
+  const lines = () => content.split("\n");
+  Object.assign(model, {
+    getValue: () => content, getEOL: () => "\n",
+    getLineCount: () => lines().length,
+    getLineContent: (line) => lines()[line - 1],
+    getLineMaxColumn: (line) => lines()[line - 1].length + 1,
+    getOffsetAt(position) { return lines().slice(0, position.lineNumber - 1).reduce((sum, line) => sum + line.length + 1, 0) + position.column - 1; },
+    getPositionAt(offset) { const before = content.slice(0, offset).split("\n"); return new Position(before.length, before.at(-1).length + 1); },
+    getFullModelRange() { return new Range(1, 1, this.getLineCount(), this.getLineMaxColumn(this.getLineCount())); },
+    getValueInRange(range) { return content.slice(this.getOffsetAt(range.getStartPosition()), this.getOffsetAt(range.getEndPosition())); },
+    findMatches(query, editable, regex, sensitive, separators, capture, limit) {
+      state.calls.push(["find-matches", query, editable, regex, sensitive, separators, capture, limit]);
+      return TextModelSearch.findMatches(this, new SearchParams(query, regex, sensitive, separators), this.getFullModelRange(), capture, limit);
+    },
+    findNextMatch(query, position, regex, sensitive, separators, capture) {
+      return TextModelSearch.findNextMatch(this, new SearchParams(query, regex, sensitive, separators), position, capture);
+    },
+    findPreviousMatch(query, position, regex, sensitive, separators, capture) {
+      return TextModelSearch.findPreviousMatch(this, new SearchParams(query, regex, sensitive, separators), position, capture);
+    },
+    undo() { if (undo.length) { redo.push(content); content = undo.pop(); state.document.pendingChanges = true; } },
+    redo() { if (redo.length) { undo.push(content); content = redo.pop(); state.document.pendingChanges = true; } },
+  });
+  state.context.monaco.editor.EditorOption = { wordSeparators: 1 };
+  Object.assign(state.context.editor, {
+    getModel: () => model, getSelection: () => selection,
+    getOption: () => "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?",
+    setSelection(range) { selection = Range.lift(range); state.calls.push(["selection", range]); },
+    focus() { throw new Error("Find must not request focus"); },
+    executeEdits(source, edits) {
+      state.calls.push(["literal-edits", source, edits.length, this.readOnly, state.context.window.__flowmuxWindowsEditorSealed]);
+      if (this.readOnly) return false;
+      undo.push(content); redo.length = 0;
+      const offsets = edits.map((edit) => ({ start: model.getOffsetAt(edit.range.getStartPosition()), end: model.getOffsetAt(edit.range.getEndPosition()), text: edit.text }));
+      for (const edit of offsets.sort((a, b) => b.start - a.start)) content = content.slice(0, edit.start) + edit.text + content.slice(edit.end);
+      selection = new Range(1, 1, 1, 1);
+      state.document.pendingChanges = true;
+      return true;
+    },
+  });
+  state.context.syncDocument = () => {
+    state.calls.push(["synchronize"]);
+    if (state.document.pendingChanges) {
+      state.document.payload.version += 1; state.document.payload.dirty = true; state.document.pendingChanges = false;
+    }
+    return true;
+  };
+  state.release = () => state.context.window.flowmuxWindowsEditor.releaseBarrier(1);
+  state.pin = () => ({ document_id: state.document.payload.id, version: state.document.payload.version });
+  return state;
+}
+
+test("literal find uses Monaco ranges for Unicode, metacharacters, whole words and backward wrapping without focus", async () => {
+  const state = findHarness("😀 a.b A.B aXb\n한글 한글말 한글");
+  let reply = await state.command("find", { query: "a.b" });
+  assert.equal(reply.error, null); assert.equal(reply.result.count, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(reply.result.selected)), { index: 0, range: { start_line: 1, start_column: 4, end_line: 1, end_column: 7 } });
+  assert.deepEqual(state.calls.find(([call]) => call === "find-matches").slice(2), [false, false, false, null, false, 501]);
+  state.release();
+  reply = await state.command("find", { query: "a.b", backward: true });
+  assert.equal(reply.result.selected.index, 1);
+  state.release();
+  reply = await state.command("find", { query: "a.b", case_sensitive: true });
+  assert.equal(reply.result.count, 1);
+  state.release();
+  reply = await state.command("find", { query: "한글", whole_word: true });
+  assert.equal(reply.result.count, 2); assert.equal(reply.result.matches[1].start_column, 8);
+  assert.equal(state.document.payload.version, 1); assert.equal(state.document.payload.dirty, false);
+});
+
+test("read observes the actual UTF-16 selection without changing model, selection or focus", async () => {
+  const state = findHarness("😀 one\n한글 two");
+  state.context.editor.setSelection(new Range(1, 4, 2, 3));
+  const before = state.calls.length;
+  const reply = await state.command("read");
+  assert.equal(reply.error, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(reply.result.selection)), { start_line: 1, start_column: 4, end_line: 2, end_column: 3 });
+  assert.equal(reply.result.content, "😀 one\n한글 two");
+  assert.equal(reply.result.active_version, 1);
+  assert.deepEqual(state.calls.slice(before), []);
+  state.context.editor.getModel = () => null;
+  assert.equal((await state.command("read")).result.selection, null);
+  assert.equal((await harness("", true).command("read")).result.selection, null);
+});
+
+test("find retains 500 ranges but backward navigation reaches the actual last match; Replace All rejects truncation", async () => {
+  const state = findHarness("x ".repeat(501));
+  const found = await state.command("find", { query: "x", backward: true });
+  assert.equal(found.result.count, 500); assert.equal(found.result.truncated, true);
+  assert.equal(found.result.selected.index, null); assert.equal(found.result.selected.range.start_column, 1001);
+  state.release();
+  const rejected = await state.command("replace_all", { query: "x", text: "y", ...state.pin() });
+  assert.match(rejected.error, /truncated/); assert.equal(state.document.model.getValue(), "x ".repeat(501));
+  assert.equal(state.calls.some(([call]) => call === "literal-edits" || call === "undo-stop"), false);
+});
+
+test("literal Replace All is one undo transaction, preserves LF and returns the synchronized document version", async () => {
+  const state = findHarness("한글.*\n한글.*\n");
+  const reply = await state.command("replace_all", { query: "한글.*", text: "é😀\r\nnext", ...state.pin() });
+  assert.equal(reply.error, null); assert.equal(reply.result.replaced, 2); assert.equal(reply.result.version, 2);
+  assert.equal(reply.result.count, 0); assert.equal(reply.result.selected, null);
+  assert.equal(state.document.model.getValue(), "é😀\nnext\né😀\nnext\n");
+  assert.deepEqual(state.calls.filter(([call]) => call === "literal-edits"), [["literal-edits", "flowmux-windows-find", 2, false, true]]);
+  assert.equal(state.calls.filter(([call]) => call === "undo-stop").length, 2);
+  assert.equal(state.context.editor.readOnly, true);
+  state.release(); await state.command("undo"); assert.equal(state.document.model.getValue(), "한글.*\n한글.*\n");
+  state.release(); await state.command("redo"); assert.equal(state.document.model.getValue(), "é😀\nnext\né😀\nnext\n");
+});
+
+test("Replace Match replaces the selected literal match rather than skipping it and permits deletion", async () => {
+  const state = findHarness("one one one");
+  await state.command("find", { query: "one" }); state.release();
+  const reply = await state.command("replace_match", { query: "one", text: "", ...state.pin() });
+  assert.equal(reply.error, null); assert.equal(reply.result.replaced, 1);
+  assert.equal(state.document.model.getValue(), " one one"); assert.equal(reply.result.count, 2);
+});
+
+test("replacement requires current document and synchronized version and never edits a changed active model", async () => {
+  for (const fields of [{}, { document_id: "other", version: 1 }, { document_id: "document-1", version: 2 }, { document_id: "document-1" }]) {
+    const state = findHarness("old");
+    const reply = await state.command("replace_match", { query: "old", text: "new", ...fields });
+    assert.ok(reply.error); assert.equal(state.document.model.getValue(), "old");
+    assert.equal(state.calls.some(([call]) => call === "literal-edits"), false);
+  }
+  const state = findHarness("old"); state.document.pendingChanges = true;
+  assert.match((await state.command("replace_all", { query: "old", text: "new", ...state.pin() })).error, /stale/);
+  assert.equal(state.document.payload.version, 2); assert.equal(state.document.model.getValue(), "old");
+  const changed = findHarness("old"); changed.context.editor.getModel = () => ({});
+  assert.match((await changed.command("find", { query: "old" })).error, /active document changed/);
+});
+
+test("find and replacement reject regex, empty or oversized queries, malformed options and composition", async () => {
+  for (const extra of [{ query: "" }, { query: "😀".repeat(1025) }, { query: "\ud800" }, { query: "old", regex: true }, { query: "old", backward: "true" }]) {
+    const state = findHarness("old");
+    assert.ok((await state.command("find", extra)).error);
+    assert.equal(state.calls.some(([call]) => call === "selection" || call === "find-matches"), false);
+  }
+  const state = findHarness("old"); state.composition.start();
+  assert.match((await state.command("find", { query: "old" })).error, /composition/);
+  assert.equal(state.calls.length, 0);
+  state.composition.end(); state.document.payload.readOnly = true;
+  assert.equal((await state.command("find", { query: "old" })).error, null); state.release();
+  assert.match((await state.command("replace_all", { query: "old", text: "new", ...state.pin() })).error, /read-only/);
+});
+
+test("replacement preflights full UTF-8 growth before undo or edits and zero matches do not mutate", async () => {
+  const state = findHarness("x".repeat(500));
+  const replacement = "😀".repeat(9000);
+  assert.match((await state.command("replace_all", { query: "x", text: replacement, ...state.pin() })).error, /16 MiB/);
+  assert.equal(state.document.model.getValue(), "x".repeat(500));
+  assert.equal(state.calls.some(([call]) => call === "literal-edits" || call === "undo-stop"), false);
+  state.release();
+  const empty = await state.command("replace_all", { query: "absent", text: "", ...state.pin() });
+  assert.equal(empty.error, null); assert.equal(empty.result.replaced, 0); assert.equal(empty.result.version, 1);
+  assert.equal(state.calls.some(([call]) => call === "literal-edits" || call === "undo-stop"), false);
+});
+
+function searchHarness(kind = "quick") {
+  const state = harness();
+  state.context.searchMode = kind; state.context.searchDialog.open = true;
+  state.context.activeSearchRequestId = "search-1";
+  const receive = state.context.window.flowmuxEditorHost.receive;
+  state.context.window.flowmuxEditorHost.receive = (message) => {
+    receive(message);
+    state.calls.push(["search-completion", message.type]);
+    state.context.activeSearchRequestId = null;
+    state.context.renderedSearchResults = kind === "quick" ? message.paths.map((path) => ({ path, line: 0, column: 0, length: 0 })) : message.result.matches;
+    if (kind === "quick") state.context.renderQuickOpen();
+  };
+  state.complete = (entries, metadata = {}, messageFields = {}) => state.context.window.flowmuxWindowsEditor.completeSearch({
+    surfaceId: "s", requestId: "search-1", type: kind === "quick" ? "quick_open_completed" : "workspace_search_completed",
+    ...(kind === "quick" ? { paths: entries, truncated: false } : { result: { matches: entries, truncated: false, cancelled: false }, error: null }),
+    ...messageFields,
+  }, { request_id: "search-1", token: "native-token", kind, error: null, diagnostics: {}, ...metadata });
+  return state;
+}
+
+test("Quick Open maps a reordered visible row to the exact retained index and waits for native completion", () => {
+  const state = searchHarness();
+  assert.equal(state.complete(["first.txt", "한글.txt"]), true);
+  state.context.renderedSearchResults.reverse();
+  state.context.openSearchResult(0); state.context.openSearchResult(1);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.sent)), [{ kind: "search_open", token: "native-token", index: 1 }]);
+  assert.equal(state.context.searchDialog.open, true); assert.equal(state.context.recentPaths.length, 0);
+  state.context.window.flowmuxWindowsEditor.searchOpenFinished("stale-token", null);
+  assert.equal(state.context.searchDialog.open, true);
+  state.context.window.flowmuxWindowsEditor.barrier(90, true);
+  state.context.window.flowmuxWindowsEditor.searchOpenFinished("native-token", null);
+  assert.equal(state.context.searchDialog.open, false); assert.deepEqual(state.context.recentPaths, ["한글.txt"]);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+});
+
+test("search completion rejects stale or malformed identities and renders bounded Quick Open errors safely", () => {
+  const stale = searchHarness();
+  assert.equal(stale.complete(["old.txt"], { request_id: "search-old" }), false);
+  assert.equal(stale.calls.length, 0);
+  assert.equal(stale.complete(["old.txt"], {}, { surfaceId: "foreign" }), false);
+  assert.match(stale.context.searchStatus.textContent, /Invalid/);
+  const invalid = searchHarness();
+  assert.equal(invalid.complete(Array(2001).fill("file.txt")), false);
+  assert.match(invalid.context.searchStatus.textContent, /Too many/);
+  const failed = searchHarness();
+  assert.equal(failed.complete([], { token: null, error: "<script>한글😀</script>".repeat(400) }), true);
+  assert.ok(Buffer.byteLength(failed.context.searchStatus.textContent) <= 4096);
+  assert.ok(failed.context.searchStatus.textContent.startsWith("<script>"));
+  assert.equal(failed.context.renderedSearchResults.length, 0);
+  failed.context.openSearchResult(0); assert.equal(failed.sent.length, 0);
+});
+
+test("workspace open keeps zero-based UTF-16 selection identity and failure retains results without unsealing", () => {
+  const state = searchHarness("workspace");
+  const entry = { path: "한글.txt", line: 2, column: 3, length: 2, preview: "😀 한글", previewColumn: 3, previewLength: 2 };
+  assert.equal(state.complete([entry]), true);
+  state.context.renderedSearchResults = [{ ...entry, column: 4 }];
+  state.context.openSearchResult(0); assert.equal(state.sent.length, 0);
+  state.context.renderedSearchResults = [entry]; state.context.openSearchResult(0);
+  assert.equal(state.sent[0].index, 0);
+  state.context.window.flowmuxWindowsEditor.barrier(91, true);
+  state.context.window.flowmuxWindowsEditor.searchOpenFinished("native-token", "The file changed; search again.");
+  assert.equal(state.context.searchDialog.open, true); assert.equal(state.context.renderedSearchResults.length, 1);
+  assert.match(state.context.searchStatus.textContent, /file changed/);
+  assert.equal(state.context.window.__flowmuxWindowsEditorSealed, true);
+});
+
+test("a late open acknowledgment cannot close results belonging to a newer search token", () => {
+  const state = searchHarness(); state.complete(["old.txt"]); state.context.openSearchResult(0);
+  state.context.activeSearchRequestId = "search-2";
+  state.complete(["new.txt"], { request_id: "search-2", token: "new-token" }, { requestId: "search-2" });
+  state.context.window.flowmuxWindowsEditor.searchOpenFinished("native-token", null);
+  assert.equal(state.context.searchDialog.open, true);
+  assert.equal(state.context.renderedSearchResults[0].path, "new.txt");
+  state.context.openSearchResult(0); assert.equal(state.sent.at(-1).token, "new-token");
+});
+
+test("query/include/exclude composition defers workspace work and Enter without cancelling native composition", () => {
+  for (const name of ["searchQuery", "searchInclude", "searchExclude"]) {
+    const state = searchHarness("workspace"), input = state.context[name];
+    input.handlers.compositionstart();
+    state.context.searchInputChanged(); state.context.scheduleWorkspaceSearch(); state.context.requestWorkspaceSearch();
+    let prevented = false;
+    state.context.searchKeyDown({ key: "Enter", preventDefault() { prevented = true; } });
+    assert.equal(prevented, false);
+    assert.equal(state.calls.some(([call]) => ["search-input", "search-schedule", "search-request", "search-key"].includes(call)), false);
+    assert.equal(state.context.activeSearchRequestId, null);
+    input.handlers.compositionend();
+    assert.equal(state.calls.at(-1)[0], "search-input");
+  }
+});
+
+test("Quick Open composition retains its query-independent index but defers ranking and opening", () => {
+  const state = searchHarness(); state.context.searchQuery.handlers.compositionstart();
+  assert.equal(state.context.activeSearchRequestId, "search-1");
+  assert.equal(state.complete(["한글.txt"]), true);
+  assert.equal(state.calls.some(([call]) => call === "search-render-quick"), false);
+  state.context.openSearchResult(0); assert.equal(state.sent.length, 0);
+  state.context.searchQuery.handlers.compositionend();
+  state.context.openSearchResult(0); assert.equal(state.sent[0].kind, "search_open");
+});
+
+test("legacy path-only search opens cannot bypass the Windows token bridge", () => {
+  const state = harness();
+  state.context.postToHost({ type: "search_result_open_requested", path: "unexpected.txt", line: 0, column: 0, length: 0 });
+  assert.equal(state.calls.some(([kind]) => kind === "posted"), false);
+  assert.match(state.context.searchStatus.textContent, /expired/);
+});
 
 test("new Windows document and diff models use LF internally without changing disk metadata", () => {
   const state = harness();

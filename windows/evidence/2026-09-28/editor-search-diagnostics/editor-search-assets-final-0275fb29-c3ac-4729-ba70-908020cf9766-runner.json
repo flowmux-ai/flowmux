@@ -1,0 +1,15 @@
+{
+  "name": "editor-search-assets-final",
+  "command": [
+    "npm",
+    "--prefix",
+    "windows/editor",
+    "run",
+    "build"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 343447,
+  "exitCode": 0,
+  "elapsedSeconds": 12.276
+}

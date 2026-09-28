@@ -1,0 +1,13 @@
+{
+    "name":  "editor-search-nested-verifier-static",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-search-verifier-static.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T05:22:56.4412401Z",
+    "pid":  32876,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  0.51,
+    "finished":  "2026-09-28T05:22:56.9562510Z"
+}

@@ -24,7 +24,9 @@ windows/target/debug/flowmuxctl.exe --json tree
 
 Windows editor development is documented in [EDITOR.md](EDITOR.md): the native host
 embeds Monaco in dedicated editor tabs and exposes file operations through the
-`editor` CLI. Desktop entry points and acceptance checks are still in progress.
+`editor` CLI. [Editor search](#editor-search-partial) adds bounded Quick Open,
+workspace search and literal find/replace commands. Desktop entry points and
+acceptance checks are still in progress.
 
 The committed terminal assets allow builds without Node. To change them:
 
@@ -1129,3 +1131,90 @@ groups and installer packaging passed. Results and remaining limits are in the
 Named-target reuse, cross-origin/opener policies, requested window geometry,
 exhaustive pending/close/failure races and physical UI/IME/DPI/accessibility
 acceptance remain open. B11 and G09 remain partial.
+
+## Editor search (partial)
+
+An editor surface supports Quick Open, workspace search and literal in-document
+find/replace. These Windows adapters reuse the shared editor protocol and Monaco
+models without changing shared/Linux/macOS sources. Six distinct hidden native
+cases passed across eight executions: find, replace, Quick Open, workspace search,
+retained-result Open and a delayed result-open deadline. The deadline correction
+passed result Open again (5.990s) and the real IPC deadline case (20.321s). After a
+later Windows path-separator correction, guarded result Open passed with a nested
+Unicode path (6.265s). Ten related editor checks passed on the initial source.
+F06 remains partial; these checks do not establish physical UI or complete Windows
+acceptance.
+Results, source boundaries and remaining limits are tracked in
+[editor search evidence](evidence/2026-09-28/editor-search.md).
+
+```powershell
+# $surface is an editor tab surface UUID; $pipe selects its host window.
+flowmuxctl.exe --pipe $pipe --json editor quick-open $surface
+flowmuxctl.exe --pipe $pipe --json editor search $surface --query '한글' --case-sensitive
+flowmuxctl.exe --pipe $pipe --json editor search $surface --query 'TODO|FIXME' --regex --include '*.rs' --exclude 'generated/**'
+flowmuxctl.exe --pipe $pipe --json editor search-cancel $surface
+# Use the retained response token and original zero-based result index:
+flowmuxctl.exe --pipe $pipe --json editor search-open $surface --token $token --index 0
+
+flowmuxctl.exe --pipe $pipe --json editor find $surface --query '한글' --case-sensitive
+# Use document_id and version from the current find response:
+flowmuxctl.exe --pipe $pipe --json editor replace-match $surface --query '한글' --text '한글 문서' --document-id $documentId --version $version
+flowmuxctl.exe --pipe $pipe --json editor replace-all $surface --query '한글' --text '한국어' --document-id $documentId --version $version
+```
+
+Quick Open builds a workspace-relative path index on the search workers. It does
+not flush or snapshot open document contents; the UI filters the returned paths
+locally. Workspace search first synchronizes edits and captures acknowledged
+buffers. Every open path overrides its disk file, including dirty or deleted
+files; an oversized open buffer is skipped without searching stale disk content
+instead. A snapshot exceeding the aggregate limit fails explicitly.
+
+Workspace search accepts `--case-sensitive`, `--whole-word`, `--regex` and repeated
+`--include`/`--exclude` globs (at most 32 each). Regex uses Rust's Unicode regex
+engine and searches one line at a time. In-document CLI find/replace uses Monaco
+literal matching, with `--case-sensitive`, `--whole-word` and `--backward`; it
+does not expose regex. These engines have different word-boundary semantics.
+Queries contain 1–4096 UTF-8 bytes and cannot contain NUL.
+
+| Search resource | Limit |
+|---|---|
+| Worker threads / admitted requests per host | 2 / 8, including running work |
+| Request budget | 4 seconds, including workspace synchronization and snapshot |
+| Open-buffer snapshot / all admitted snapshots | 16 MiB / 32 MiB |
+| Quick Open paths / workspace matches | 2,000 / 500 |
+| Visited entries / directory depth | 20,000 / 64 |
+| Searched file / aggregate file reads | 2 MiB / 64 MiB |
+| Result response / individual relative path | 1 MiB / 16 KiB UTF-8 |
+| Ignore file / aggregate ignore reads | 64 KiB / 1 MiB |
+
+Traversal honors in-root `.gitignore`, `.ignore` and root `.git/info/exclude`;
+ancestor/global ignore files are not read. Hidden entries are omitted unless
+explicitly allowed by an ignore rule, and `.git`, `node_modules` and `target`
+directories are excluded. The scanner skips symlinks/reparse entries and checks
+the actual Windows file handle against the captured local root before reading
+contents. Binary, unsupported-encoding, oversized and unreadable files are
+reported as skipped; bounded diagnostics preserve individual errors while other
+files can still produce results. `truncated` and diagnostic limit flags indicate
+an incomplete result set. Invalid queries/rules, cancellation, stale snapshots
+and request deadlines produce explicit errors; they are not empty-search success.
+Cancellation is cooperative: an outstanding filesystem call retains its worker
+and admission slot until it returns, even after the host reports a timeout.
+
+Disk search strips one UTF-8 BOM and converts CRLF to LF for matching. NFC/NFD,
+Hangul jamo, combining marks and emoji are otherwise preserved without Unicode
+normalization. Workspace match lines and UTF-16 columns are zero-based;
+in-document results use Monaco's one-based line/UTF-16 column ranges. Retained
+workspace results validate source content hashes and, for open buffers, document
+identity/version before revealing a range. A changed source requires a new
+search. Result-open deadlines include time spent in the UI queue; expired requests
+are rejected before starting worker work. Already submitted work still reconciles
+its actual model changes, while expired selections are suppressed. Quick Open
+validates the selected path when opening it.
+
+Find retains at most 500 ranges. Replace commands require the current document
+identity and acknowledged version, preserve Monaco undo, and keep the 16 MiB
+document limit. Replace All refuses a truncated match set. Replacements remain
+unsaved edits until an explicit save. Physical keyboard/IME, search-dialog focus,
+clipboard, accessibility and broad filesystem-race acceptance remain pending;
+programmatic or simulated composition checks do not establish physical IME
+behavior.

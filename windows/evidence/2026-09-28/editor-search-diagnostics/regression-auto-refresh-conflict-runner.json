@@ -1,0 +1,13 @@
+{
+    "name":  "editor-refresh-auto-refresh-conflict",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\editor-refresh-cases\\auto-refresh-conflict.ps1",
+    "deadlineSeconds":  120,
+    "status":  "passed",
+    "started":  "2026-09-28T05:14:34.6026148Z",
+    "pid":  19940,
+    "exitCode":  0,
+    "activeBeforeCleanup":  2,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  9.611,
+    "finished":  "2026-09-28T05:14:44.2178051Z"
+}

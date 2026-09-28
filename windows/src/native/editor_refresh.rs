@@ -320,6 +320,7 @@ impl App {
                 e.ready
                     && e.pending.is_none()
                     && e.refresh.pending.is_none()
+                    && !e.search.pending()
                     && e.inflight.is_empty()
                     && e.replacements.is_empty()
                     && e.documents.as_array().is_some_and(|docs| !docs.is_empty())

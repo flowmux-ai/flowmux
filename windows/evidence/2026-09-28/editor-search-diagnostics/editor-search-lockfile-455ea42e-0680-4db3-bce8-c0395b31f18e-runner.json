@@ -1,0 +1,16 @@
+{
+  "name": "editor-search-lockfile",
+  "command": [
+    "cargo",
+    "update",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--offline",
+    "--workspace"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 339788,
+  "exitCode": 0,
+  "elapsedSeconds": 0.617
+}

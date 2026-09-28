@@ -1,0 +1,15 @@
+{
+  "name": "editor-search-format-check",
+  "command": [
+    "cargo",
+    "fmt",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--check"
+  ],
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "pid": 347282,
+  "exitCode": 0,
+  "elapsedSeconds": 1.211
+}

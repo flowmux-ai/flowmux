@@ -15,6 +15,8 @@ mod editor_picker;
 mod editor_view;
 #[path = "editor_refresh.rs"]
 mod refresh;
+#[path = "editor_search.rs"]
+pub(super) mod search;
 
 pub(super) enum Signal {
     Prepared(Prepared),
@@ -22,6 +24,9 @@ pub(super) enum Signal {
     Bridge(SurfaceId, Uuid, String, String),
     Worker(SurfaceId, Uuid, Response),
     Watch(SurfaceId, Uuid, crate::editor_watch::Notice),
+    Search(crate::editor_search::Response),
+    SearchTick,
+    SearchOpenFinished(SurfaceId, Uuid, Uuid, Value),
 }
 pub(super) struct PickerTarget {
     source: SurfaceId,
@@ -33,11 +38,28 @@ pub(super) struct PickerTarget {
 pub(super) enum Completion {
     Ipc(ipc::Reply),
     User(HWND),
+    SearchUi {
+        sender: EventSender,
+        surface: SurfaceId,
+        instance: Uuid,
+        token: Uuid,
+    },
 }
 impl Completion {
     fn try_send(&self, value: Value) -> Result<(), mpsc::TrySendError<Value>> {
         match self {
             Self::Ipc(reply) => reply.try_send(value),
+            Self::SearchUi {
+                sender,
+                surface,
+                instance,
+                token,
+            } => {
+                sender.send(Event::Editor(Signal::SearchOpenFinished(
+                    *surface, *instance, *token, value,
+                )));
+                Ok(())
+            }
             Self::User(window) => {
                 if let Some(error) = value.get("error").and_then(Value::as_str) {
                     report(error);
@@ -89,6 +111,7 @@ pub(super) struct Editor {
     replacements: HashSet<u64>,
     pending: Option<Pending>,
     refresh: refresh::State,
+    search: search::State,
 }
 struct Pending {
     id: u64,
@@ -107,6 +130,7 @@ enum PendingKind {
     Flush,
     Disk,
     Open,
+    SearchOpen,
 }
 pub(super) enum Operation {
     Tab(SurfaceId),
@@ -132,6 +156,7 @@ impl Editor {
             && self.backend_ready
             && !self.sync_failed
             && self.refresh.pending.is_none()
+            && !self.search.synchronizing()
             && self.replacements.is_empty()
             && !self.pending.as_ref().is_some_and(|p| p.timed_out);
     }
@@ -196,6 +221,7 @@ impl Editor {
             "dirty_paths":self.dirty,"documents":self.documents,"active_document_id":active,
             "last_error":self.error,"restore_errors":self.restore_errors,"pending":self.pending.is_some(),
             "automatic_refresh":self.refresh.status(),
+            "search":self.search.status(),
             "view_handle":self.view.view.hwnd().0 as usize,"session":self.state})
     }
 }
@@ -267,6 +293,7 @@ impl App {
                 replacements: HashSet::new(),
                 pending: None,
                 refresh,
+                search: search::State::default(),
             },
         );
         Ok(())
@@ -282,6 +309,21 @@ impl App {
     }
     pub(super) fn editor_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Search(response) => self.editor_search_completed(response),
+            Signal::SearchTick => self.editor_search_tick(),
+            Signal::SearchOpenFinished(surface, instance, token, value) => {
+                if let Some(editor) = self
+                    .editors
+                    .get(&surface)
+                    .filter(|e| e.instance == instance)
+                {
+                    let token = serde_json::to_string(&token.to_string())?;
+                    let error = value.get("error").cloned().unwrap_or(Value::Null);
+                    editor.view.view.evaluate_script(&format!(
+                        "window.flowmuxWindowsEditor.searchOpenFinished({token},{error})"
+                    ))?;
+                }
+            }
             Signal::Watch(surface, instance, notice) => {
                 self.editor_watch_notice(surface, instance, notice);
             }
@@ -324,6 +366,27 @@ impl App {
                     "invalid editor instance credentials"
                 );
                 match value["kind"].as_str() {
+                    Some("search_open") => {
+                        let token = value["token"]
+                            .as_str()
+                            .context("missing search token")?
+                            .parse::<Uuid>()?;
+                        let index = value["index"]
+                            .as_u64()
+                            .and_then(|n| usize::try_from(n).ok())
+                            .context("invalid search result index")?;
+                        let completion = Completion::SearchUi {
+                            sender: self.sender.clone(),
+                            surface,
+                            instance,
+                            token,
+                        };
+                        if let Err(error) =
+                            self.editor_search_open(surface, token, index, completion.clone())
+                        {
+                            let _ = completion.try_send(json!({"error":error.to_string()}));
+                        }
+                    }
                     Some("refresh_deferred") => {
                         let id = value["id"].as_u64().context("invalid refresh id")?;
                         self.editor_refresh_deferred(surface, id);
@@ -358,6 +421,13 @@ impl App {
                     }
                     Some("barrier_error") => {
                         let id = value["id"].as_u64().context("invalid editor barrier id")?;
+                        let search_error = value["error"]
+                            .as_str()
+                            .unwrap_or("search could not synchronize")
+                            .to_owned();
+                        if self.editor_search_flush(surface, id, Some(search_error)) {
+                            return Ok(());
+                        }
                         if self.editors[&surface]
                             .refresh
                             .pending
@@ -390,6 +460,32 @@ impl App {
                             "editor surface identity does not match native view"
                         );
                         match message {
+                            EditorMessage::QuickOpenRequested { request_id } => {
+                                self.editor_search_ui(surface, request_id, search::Query::Quick)?;
+                            }
+                            EditorMessage::WorkspaceSearchRequested {
+                                request_id,
+                                query,
+                                options,
+                            } => {
+                                self.editor_search_ui(
+                                    surface,
+                                    request_id,
+                                    search::Query::Workspace { query, options },
+                                )?;
+                            }
+                            EditorMessage::SearchCancelled { request_id } => {
+                                self.editor_search_cancel(
+                                    surface,
+                                    Some(&request_id),
+                                    "search cancelled",
+                                );
+                            }
+                            EditorMessage::SearchResultOpenRequested { .. } => {
+                                anyhow::bail!(
+                                    "search results require the current retained token and index"
+                                );
+                            }
                             EditorMessage::EditorReady => {
                                 if self.editors[&surface].frontend_ready {
                                     self.editors.get_mut(&surface).unwrap().frontend_ready = false;
@@ -407,12 +503,16 @@ impl App {
                                 }
                                 editor.refresh_ready();
                                 if editor.pending.as_ref().is_some_and(|p| {
-                                    matches!(p.kind, PendingKind::Open) && p.open_loaded
+                                    matches!(p.kind, PendingKind::Open | PendingKind::SearchOpen)
+                                        && p.open_loaded
                                 }) {
                                     editor.barrier(editor.pending.as_ref().unwrap().id, false)?;
                                 }
                             }
                             EditorMessage::FlushCompleted { request_id, error } => {
+                                if self.editor_search_flush(surface, request_id, error.clone()) {
+                                    return Ok(());
+                                }
                                 if self.editor_refresh_flush(surface, request_id, error.clone()) {
                                     return Ok(());
                                 }
@@ -482,6 +582,14 @@ impl App {
                                 }
                             }
                             message => {
+                                if !matches!(
+                                    &message,
+                                    EditorMessage::ViewStateChanged { .. }
+                                        | EditorMessage::ActiveDocumentChanged { .. }
+                                        | EditorMessage::ZoomChanged { .. }
+                                ) {
+                                    self.editor_search_invalidate(surface);
+                                }
                                 self.editors.get_mut(&surface).unwrap().refresh.activity =
                                     Instant::now();
                                 let id = self.editor_next();
@@ -539,7 +647,19 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| p.id == response.id && p.phase == refresh::Phase::Working);
                 let mut failure = response.error;
+                let search_snapshot = response.search_snapshot;
+                let search_capture = editor.search.captured(response.id);
+                let late_search_open = editor.pending.as_ref().is_some_and(|p| {
+                    p.id == response.id
+                        && matches!(p.kind, PendingKind::SearchOpen)
+                        && (p.timed_out || p.started.elapsed() >= crate::editor_open::OPEN_BUDGET)
+                });
                 for message in response.messages {
+                    // Already admitted I/O must reconcile actual model state, but
+                    // an expired result may never reveal its old search selection.
+                    if late_search_open && matches!(message, EditorMessageOut::RevealRange { .. }) {
+                        continue;
+                    }
                     let failed = match &message {
                         EditorMessageOut::SaveFailed { reason, .. }
                         | EditorMessageOut::SaveAsFailed { reason, .. }
@@ -577,8 +697,10 @@ impl App {
                 }
                 if let Some(error) = &failure {
                     editor.error = Some(error.clone());
-                    if let Some(pending) = &mut editor.pending {
-                        pending.error = Some(error.clone())
+                    if !search_capture {
+                        if let Some(pending) = &mut editor.pending {
+                            pending.error = Some(error.clone())
+                        }
                     }
                 }
                 let state = editor.state.clone();
@@ -587,6 +709,15 @@ impl App {
                         .root
                         .set_surface_editor_session(pane, surface, state);
                     self.refresh_tab_title(surface);
+                }
+                if search_capture {
+                    self.editor_search_snapshot(
+                        surface,
+                        response.id,
+                        search_snapshot,
+                        failure.clone(),
+                    );
+                    return Ok(());
                 }
                 if automatic {
                     if let Err(error) =
@@ -617,11 +748,10 @@ impl App {
                     .is_some_and(|e| e.pending.as_ref().is_some_and(|p| p.id == response.id))
                 {
                     let editor = self.editors.get_mut(&surface).unwrap();
-                    if editor
-                        .pending
-                        .as_ref()
-                        .is_some_and(|p| matches!(p.kind, PendingKind::Open) && !p.open_loaded)
-                    {
+                    if editor.pending.as_ref().is_some_and(|p| {
+                        matches!(p.kind, PendingKind::Open | PendingKind::SearchOpen)
+                            && !p.open_loaded
+                    }) {
                         let pending = editor.pending.as_mut().unwrap();
                         pending.open_loaded = true;
                         if pending.initial_open && !editor.restore_errors.is_empty() {
@@ -655,7 +785,7 @@ impl App {
                     }
                     let result = if let Some(error) = pending.error {
                         json!({"error":error})
-                    } else if matches!(pending.kind, PendingKind::Open) {
+                    } else if matches!(pending.kind, PendingKind::Open | PendingKind::SearchOpen) {
                         pending.result
                     } else if matches!(pending.kind, PendingKind::Command) {
                         json!({"result":pending.result})
@@ -671,6 +801,7 @@ impl App {
         Ok(())
     }
     fn editor_sync_failure(&mut self, surface: SurfaceId, error: &str) {
+        self.editor_search_cancel(surface, None, error);
         if let Some(editor) = self.editors.get_mut(&surface) {
             editor.error = Some(error.to_owned());
             editor.ready = false;
@@ -704,7 +835,9 @@ impl App {
         } else if let Some(editor) = self.editors.get_mut(&surface) {
             if editor.pending.as_ref().is_some_and(|p| p.id == id) {
                 let pending = editor.pending.take().unwrap();
+                editor.search.discard_open(id);
                 editor.release(id);
+                editor.refresh_ready();
                 let _ = pending.reply.try_send(json!({"error":error}));
             }
         }
@@ -909,6 +1042,7 @@ impl App {
         }
     }
     pub(super) fn editor_remove(&mut self, id: SurfaceId) {
+        self.editor_search_cancel(id, None, "editor closed during search");
         self.editor_cancel_opens(
             Some(id),
             "editor Open source closed before preparation completed",
@@ -943,6 +1077,9 @@ impl App {
         let submitted = match &reply {
             Completion::Ipc(reply) => reply.received_at(),
             Completion::User(_) => Instant::now(),
+            Completion::SearchUi { .. } => {
+                anyhow::bail!("search results require retained-result validation")
+            }
         };
         anyhow::ensure!(
             submitted.elapsed() < crate::editor_open::OPEN_BUDGET,
@@ -1191,6 +1328,49 @@ impl App {
         reply: ipc::Reply,
     ) -> anyhow::Result<Option<Value>> {
         match op {
+            domain::Op::QuickOpen(args) => {
+                self.editor_search_start(
+                    SurfaceId(args.surface),
+                    Uuid::new_v4().to_string(),
+                    search::Query::Quick,
+                    Some(reply),
+                )?;
+                Ok(None)
+            }
+            domain::Op::Search(args) => {
+                let options = args.options()?;
+                self.editor_search_start(
+                    SurfaceId(args.surface),
+                    Uuid::new_v4().to_string(),
+                    search::Query::Workspace {
+                        query: args.query,
+                        options,
+                    },
+                    Some(reply),
+                )?;
+                Ok(None)
+            }
+            domain::Op::SearchCancel(args) => {
+                anyhow::ensure!(
+                    self.editors.contains_key(&SurfaceId(args.surface)),
+                    "editor tab not found"
+                );
+                self.editor_search_cancel(
+                    SurfaceId(args.surface),
+                    None,
+                    "search cancelled by request",
+                );
+                Ok(Some(json!({"ok":true})))
+            }
+            domain::Op::SearchOpen(args) => {
+                self.editor_search_open(
+                    SurfaceId(args.surface),
+                    args.token,
+                    args.index,
+                    Completion::Ipc(reply),
+                )?;
+                Ok(None)
+            }
             domain::Op::Open(args) => {
                 self.editor_submit_open(args, caller, Completion::Ipc(reply))?;
                 Ok(None)
@@ -1211,12 +1391,16 @@ impl App {
                 self.sender.send(Event::Editor(Signal::Pick(target)));
                 Ok(None)
             }
-            domain::Op::Status(args) => Ok(Some(
-                self.editors
+            domain::Op::Status(args) => {
+                let mut status = self
+                    .editors
                     .get(&SurfaceId(args.surface))
                     .context("editor tab not found")?
-                    .status(SurfaceId(args.surface)),
-            )),
+                    .status(SurfaceId(args.surface));
+                status["search_service"] =
+                    serde_json::to_value(self.editor_search_service.as_ref().map(|s| s.status()))?;
+                Ok(Some(status))
+            }
             op => {
                 anyhow::ensure!(
                     self.editor_barrier.is_none(),
@@ -1224,6 +1408,8 @@ impl App {
                 );
                 let surface = match &op {
                     domain::Op::Command(args) => args.surface,
+                    domain::Op::Find(args) => args.surface,
+                    domain::Op::ReplaceMatch(args) | domain::Op::ReplaceAll(args) => args.surface,
                     domain::Op::Flush(args) | domain::Op::CheckDisk(args) => args.surface,
                     _ => unreachable!(),
                 };
@@ -1235,6 +1421,24 @@ impl App {
                 );
                 let id = self.editor_next();
                 let (kind, script) = match op {
+                    domain::Op::Find(args) => (
+                        PendingKind::Command,
+                        format!("window.flowmuxWindowsEditor.command({})", args.command(id)?),
+                    ),
+                    domain::Op::ReplaceMatch(args) => (
+                        PendingKind::Command,
+                        format!(
+                            "window.flowmuxWindowsEditor.command({})",
+                            args.command(id, false)?
+                        ),
+                    ),
+                    domain::Op::ReplaceAll(args) => (
+                        PendingKind::Command,
+                        format!(
+                            "window.flowmuxWindowsEditor.command({})",
+                            args.command(id, true)?
+                        ),
+                    ),
                     domain::Op::Command(args) => {
                         domain::validate_command(&args)?;
                         let mut command =

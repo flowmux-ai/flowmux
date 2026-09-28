@@ -1,0 +1,318 @@
+{
+    "started":  "2026-09-28T14:13:59.8956998+09:00",
+    "mode":  "background",
+    "case":  "workspace",
+    "checks":  [
+                   {
+                       "name":  "workspace_search_uses_dirty_buffers_utf16_ranges_ignore_globs_and_regex_without_disk_mutation",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "kind":  "host-startup",
+                             "pid":  36204,
+                             "restoring":  false,
+                             "restoreWindow":  "",
+                             "budgetMs":  8000,
+                             "started":  "2026-09-28T05:14:00.0546147Z",
+                             "status":  "ready",
+                             "stage":  "complete",
+                             "identityResponse":  {
+                                                      "cwd":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b\\files 한글 한 😀",
+                                                      "pane":  "d252ed50-ac4a-49d0-a114-4c8a65fe44ba",
+                                                      "pid":  36204,
+                                                      "pipe":  "\\\\.\\pipe\\flowmux-36204-56d03534-431e-4f5b-bf32-628cb65fbe07",
+                                                      "platform":  "windows",
+                                                      "shell":  {
+                                                                    "args":  [
+
+                                                                             ],
+                                                                    "program":  "cmd"
+                                                                },
+                                                      "surface":  "551591fd-394d-40b6-a8ab-3b5ceeafbfce",
+                                                      "workspace":  "dbe63371-aee8-45dd-956c-6cc4377c0beb"
+                                                  },
+                             "discoveryElapsedMs":  94,
+                             "identityBudgetMs":  5000,
+                             "identityElapsedMs":  884,
+                             "treeRequests":  2,
+                             "elapsedMs":  1113,
+                             "finished":  "2026-09-28T05:14:01.1693593Z"
+                         },
+                         {
+                             "profilePath":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b\\state\\editor-profile",
+                             "surface":  "2c067706-1152-4d45-907a-4d5ff8125dcb",
+                             "pid":  36204,
+                             "recoveryRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b\\state\\editor-recovery",
+                             "storageRoot":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\editor-search-ac04a15b-c2a0-4c36-9d26-2c333ba7243b\\state",
+                             "kind":  "editor-storage"
+                         },
+                         {
+                             "query":  "TOKEN",
+                             "case":  "workspace",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  12,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  42,
+                                                                  "searched_files":  3,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  7
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  5,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "dirty 한글.txt",
+                                                                                                 "preview":  "😀 TOKEN_DIRTY 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  5
+                                                                                             },
+                                                                                             {
+                                                                                                 "column":  0,
+                                                                                                 "length":  5,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "keep/excluded.txt",
+                                                                                                 "preview":  "TOKEN_EXCLUDED",
+                                                                                                 "previewColumn":  0,
+                                                                                                 "previewLength":  5
+                                                                                             },
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  5,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "keep/visible.txt",
+                                                                                                 "preview":  "😀 TOKEN_KEEP 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  5
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "421b9f00-e460-4649-979c-fcc060aa16aa",
+                                              "token":  "d5ca25e0-2a5f-423f-ae78-0658af8f26b9"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "TOKEN_DISK",
+                             "case":  "workspace",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  12,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  42,
+                                                                  "searched_files":  3,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  7
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "b8bd214e-9f80-44fb-8236-4ff33358c32d",
+                                              "token":  "3c26774e-98b3-432b-b1e4-b245835074dc"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "TOKEN_[A-Z]+",
+                             "case":  "workspace",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  12,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  27,
+                                                                  "searched_files":  1,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  7
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+                                                                                             {
+                                                                                                 "column":  3,
+                                                                                                 "length":  10,
+                                                                                                 "line":  0,
+                                                                                                 "path":  "keep/visible.txt",
+                                                                                                 "preview":  "😀 TOKEN_KEEP 한글",
+                                                                                                 "previewColumn":  3,
+                                                                                                 "previewLength":  10
+                                                                                             }
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "2b9c858e-b8f3-42a2-96ef-8919cbcd4b80",
+                                              "token":  "edc5eb29-8bf4-4b14-a961-6b6fdc19670d"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "query":  "[",
+                             "case":  "workspace",
+                             "response":  {
+                                              "diagnostics":  {
+                                                                  "byte_limit":  false,
+                                                                  "cancelled":  false,
+                                                                  "deadline_exceeded":  false,
+                                                                  "depth_limit":  false,
+                                                                  "entry_limit":  false,
+                                                                  "errors":  [
+
+                                                                             ],
+                                                                  "ignore_bytes":  12,
+                                                                  "result_byte_limit":  false,
+                                                                  "scanned_bytes":  42,
+                                                                  "searched_files":  3,
+                                                                  "skipped_binary":  0,
+                                                                  "skipped_encoding":  0,
+                                                                  "skipped_oversized":  0,
+                                                                  "skipped_path":  0,
+                                                                  "skipped_reparse":  0,
+                                                                  "skipped_unreadable":  0,
+                                                                  "visited_entries":  7
+                                                              },
+                                              "outcome":  {
+                                                              "kind":  "workspace",
+                                                              "result":  {
+                                                                             "cancelled":  false,
+                                                                             "matches":  [
+
+                                                                                         ],
+                                                                             "truncated":  false
+                                                                         }
+                                                          },
+                                              "request_id":  "79ea1b93-5cf8-44ed-8c6f-88d20370f7ae",
+                                              "token":  "a7759b7c-1fed-49d6-87bd-c84b15aea5a4"
+                                          },
+                             "kind":  "search"
+                         },
+                         {
+                             "case":  "workspace",
+                             "inFlightCancellationForced":  false,
+                             "idleCancel":  {
+                                                "ok":  true
+                                            }
+                         },
+                         {
+                             "kind":  "host-exit",
+                             "stderrComplete":  true,
+                             "stdout":  "",
+                             "stdoutComplete":  true,
+                             "stderr":  "",
+                             "exited":  true,
+                             "forced":  false,
+                             "pid":  36204,
+                             "exitCode":  0
+                         }
+                     ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "realImeTest":  false,
+    "unicodeComparison":  "ordinal",
+    "deferred":  [
+                     "Physical keyboard/mouse/IME, glyph rendering, native dialogs, clipboard, DPI and accessibility are not exercised.",
+                     "Monaco ranges are one-based UTF-16; workspace search ranges are zero-based UTF-16. NFD strings are checked ordinally without asserting Unicode normalization equivalence.",
+                     "In-flight cancellation, supersession, blocked filesystem deadlines and queued close/move races are not forced by these native cases; idle cancellation only verifies the idle command contract.",
+                     "Guarded stale results are changed before opening; a concurrent filesystem swap between validation and the shared document read is covered separately by deterministic worker tests.",
+                     "No network/UNC/reparse paths, hostile ACLs, directory floods or exhaustive scanner budget limits are exercised."
+                 ],
+    "status":  "passed_background_editor_search_subset",
+    "hosts":  [
+                  36204
+              ],
+    "shells":  [
+                   32244
+               ],
+    "clientPids":  [
+                       34480,
+                       28028,
+                       5100,
+                       35704,
+                       28408,
+                       28380,
+                       39692,
+                       30296,
+                       34500,
+                       36960,
+                       33540,
+                       30772,
+                       3460,
+                       34776,
+                       38512,
+                       29576,
+                       38356,
+                       36744,
+                       39080,
+                       34960,
+                       23104,
+                       12268,
+                       31824,
+                       3044,
+                       38668,
+                       38944,
+                       31180,
+                       36420,
+                       35672,
+                       30548,
+                       26260
+                   ],
+    "elapsedMs":  4403,
+    "finished":  "2026-09-28T14:14:04.2991110+09:00"
+}
