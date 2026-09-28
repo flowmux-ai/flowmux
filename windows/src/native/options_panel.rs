@@ -1180,9 +1180,8 @@ impl Panel {
             for (i, tab) in self.tabs.iter().enumerate() {
                 chrome::set_role(
                     *tab,
-                    chrome::Role::Workspace {
+                    chrome::Role::Choice {
                         selected: i == self.page,
-                        color: None,
                     },
                 );
                 InvalidateRect(*tab, std::ptr::null(), 1);

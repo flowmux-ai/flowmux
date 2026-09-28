@@ -38,6 +38,19 @@ function Tree {
     if (-not $tree.background_testing -or [CliProbe]::IsWindowVisible($window) -or [CliProbe]::GetForegroundWindow() -eq $window) {throw 'Owned host became visible or foreground'}
     return $tree
 }
+function Assert-WorkspaceUnread($Tree,$Notes) {
+    $rows=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace'})
+    if ($rows.Count -eq 0) {throw 'Native workspace rows are missing'}
+    foreach ($row in $rows) {
+        $workspace=@($Tree.workspaces|Where-Object {$_.id -eq $row.workspace})
+        $expected=@($Notes.entries|Where-Object {-not $_.read -and $_.workspace -eq $row.workspace}).Count -gt 0
+        $caption=[NotificationInspect]::Text([IntPtr]([long]$row.handle))
+        if ($workspace.Count -ne 1 -or $row.unread -isnot [bool] -or $row.unread -ne $expected -or
+            $caption -cne $row.label -or -not $caption.StartsWith($workspace[0].name.Replace('&','&&')+"`n")) {
+            throw 'Workspace unread marker differs from notification ownership or native caption gained a count prefix'
+        }
+    }
+}
 function Wait-Screen([string]$Text) {
     $deadline=(Get-Date).AddSeconds(8)
     do {
@@ -148,13 +161,18 @@ try {
     $notes=Request @('notifications','list')
     if ($notes.entries.Count -ne 3 -or $notes.unread_count -ne 3 -or $notes.entries[0].title -cne $title -or $notes.entries[0].body -cne $body) {throw 'Unicode/list/read contract differs'}
     if ((Request @('notifications','list','--unread')).entries.Count -ne 3) {throw 'Read-only list changed unread state'}
-    $captions=[NotificationInspect]::Captions([IntPtr]([long](Tree).window_handle))
-    if (-not ($captions -contains 'Notifications (3)') -or @($captions|Where-Object {$_ -like '[[]3] *'}).Count -lt 2) {throw 'Native notification/workspace/tab badge captions differ'}
+    $tree=Tree;Assert-WorkspaceUnread $tree $notes
+    $captions=[NotificationInspect]::Captions([IntPtr]([long]$tree.window_handle))
+    $sourceTabs=@($tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.surface -eq $surface})
+    if (-not ($captions -contains 'Notifications (3)') -or $sourceTabs.Count -ne 1 -or
+        -not ([NotificationInspect]::Text([IntPtr]([long]$sourceTabs[0].handle))).StartsWith('[3] ') -or
+        [NotificationInspect]::Text([IntPtr]([long]$sourceTabs[0].handle)) -cne $sourceTabs[0].label) {throw 'Native notification button or source tab count prefix differs'}
     $evidence.checks+=@{name='explicit_unicode_dedup_escalation_read_only_list_and_native_badges';passed=$true;captions=$captions}
 
     Request @('notifications','mark-read',$first.id)|Out-Null
     if ((Request @('notifications','list')).unread_count -ne 2) {throw 'Mark read failed'}
     $shown=Request @('notifications','show')
+    Assert-WorkspaceUnread (Tree) $shown
     $evidence.popoverShowResponse=$shown
     $panel=[IntPtr]([long]$shown.panel_handle)
     if ($shown.unread_count -ne 0 -or $shown.panel_rows -ne 3 -or [CliProbe]::IsWindowVisible($panel) -or [CliProbe]::GetForegroundWindow() -eq $panel) {throw 'Panel was visible or failed to mark existing entries read'}
@@ -189,6 +207,7 @@ try {
     $global=Request @('notify','--global','global')
     $shown=Request @('notifications','list')
     if ($shown.panel_rows -ne 4 -or $shown.unread_count -ne 1 -or $shown.button_text -ne 'Notifications (1)') {throw 'Panel live update did not preserve new unread notice'}
+    Assert-WorkspaceUnread (Tree) $shown
     $evidence.checks+=@{name='native_hidden_popover_close_reopen_and_live_rows';passed=$true;panel=$shown}
     $globalRow=$shown.panel_snapshot.rows|Where-Object {$_.id -eq $global.id}
     [NotificationInspect]::Click([IntPtr]([long]$globalRow.delete_handle),$process.Id)
@@ -197,17 +216,21 @@ try {
     [NotificationInspect]::Click([IntPtr]([long]$afterDelete.panel_snapshot.clear_handle),$process.Id)
     $afterClear=Request @('notifications','list')
     if ($afterClear.entries.Count -ne 0 -or -not $afterClear.panel_snapshot.empty -or $afterClear.panel_snapshot.open) {throw 'Native All Clear failed to empty and dismiss popover'}
+    Assert-WorkspaceUnread (Tree) $afterClear
     if ([NotificationInspect]::Text([NotificationInspect]::GetDlgItem([IntPtr]([long]$afterClear.panel_snapshot.viewport_handle),12)) -cne 'No notifications yet.') {throw 'Empty notification state is missing'}
     $evidence.checks+=@{name='native_row_delete_all_clear_and_empty_state';passed=$true;afterDelete=$afterDelete;afterClear=$afterClear}
     Request @('new-workspace','--shell=cmd')|Out-Null;$target=Request @('identify')
     $newNotice=Request @('notify-complete','--surface',$surface,'--agent','에이전트','--message','완료_😀')
     if (-not $newNotice.accepted -or (Request @('identify')).surface -ne $target.surface) {throw 'Notice activated its source'}
+    Assert-WorkspaceUnread (Tree) (Request @('notifications','list'))
     Request @('move-tab',$surface,'--to-pane',$target.pane)|Out-Null
-    $moved=(Request @('notifications','list')).entries[0]
+    $moveNotes=Request @('notifications','list');$moved=$moveNotes.entries[0]
     if ($moved.surface -ne $surface -or $moved.workspace -ne $target.workspace -or $moved.pane -ne $target.pane -or $moved.level -ne 'turn_completed') {throw 'Move did not resolve stable notification source'}
+    Assert-WorkspaceUnread (Tree) $moveNotes
     Request @('focus-tab',$target.surface)|Out-Null
     Request @('notifications','open',$newNotice.id)|Out-Null
     if ((Request @('identify')).surface -ne $surface -or ((Tree).surfaces|Where-Object {$_.id -eq $surface}).pid -ne $probePid -or (Request @('notifications','list')).unread_count -ne 0) {throw 'Notification did not reopen same source/process'}
+    Assert-WorkspaceUnread (Tree) (Request @('notifications','list'))
     $evidence.checks+=@{name='completion_stays_inactive_and_moves_resolve_same_surface_process';passed=$true}
     Control 'exit';$deadline=(Get-Date).AddSeconds(8)
     do {
@@ -224,8 +247,9 @@ try {
     Request @('close-tab',$surface)|Out-Null
     $active=(Request @('identify')).surface
     $rejected=Request @('notifications','open',$closed.id) 1
-    $row=(Request @('notifications','list')).entries[0]
+    $closedNotes=Request @('notifications','list');$row=$closedNotes.entries[0]
     if (-not $rejected.error.Contains('source was closed') -or -not $row.closed -or $row.read -or (Request @('identify')).surface -ne $active) {throw 'Closed source changed read/focus state'}
+    Assert-WorkspaceUnread (Tree) $closedNotes
     $evidence.checks+=@{name='natural_exit_keeps_source_readable_and_closed_source_is_atomic_error';passed=$true}
     Request @('notifications','clear')|Out-Null
     0..54|ForEach-Object {Request @('notify','--global',('retention_'+$_))|Out-Null}
@@ -238,7 +262,7 @@ try {
     Request @('notifications','clear')|Out-Null
     $empty=Request @('notifications','list')
     if ($empty.entries.Count -ne 0 -or $empty.unread_count -ne 0 -or $empty.panel_rows -ne 0 -or (Request @('notifications','jump-to-unread')).opened) {throw 'Clear/empty jump failed'}
-    Tree|Out-Null
+    Assert-WorkspaceUnread (Tree) $empty
     $evidence.checks+=@{name='bounded_retention_delete_clear_jump_and_invalid_title';passed=$true}
     $otherDirectory=Join-Path $directory 'other';[IO.Directory]::CreateDirectory($otherDirectory)|Out-Null
     $otherProcess=[CliProbe]::Start($gui,@('--temporary','--shell=cmd'),$otherDirectory,$otherDirectory)

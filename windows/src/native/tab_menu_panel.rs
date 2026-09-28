@@ -392,13 +392,7 @@ impl Panel {
                 chrome::register_control(button, chrome::ControlRole::Static);
                 continue;
             }
-            chrome::register_button(
-                button,
-                chrome::Role::Workspace {
-                    selected: false,
-                    color: None,
-                },
-            );
+            chrome::register_button(button, chrome::Role::Choice { selected: false });
             let dc = GetDC(button);
             if !dc.is_null() {
                 let font = SendMessageW(button, WM_GETFONT, 0, 0) as HGDIOBJ;

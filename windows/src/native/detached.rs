@@ -129,6 +129,7 @@ impl Window {
                 chrome::Role::Workspace {
                     selected: true,
                     color: None,
+                    unread: false,
                 },
                 true,
             )?;

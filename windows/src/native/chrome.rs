@@ -239,6 +239,10 @@ pub(super) enum Role {
     Workspace {
         selected: bool,
         color: Option<COLORREF>,
+        unread: bool,
+    },
+    Choice {
+        selected: bool,
     },
     Tab {
         selected: bool,
@@ -1285,6 +1289,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let selected = matches!(
         role,
         Role::Workspace { selected: true, .. }
+            | Role::Choice { selected: true }
             | Role::Tab { selected: true, .. }
             | Role::TabClose { selected: true, .. }
     );
@@ -1292,9 +1297,26 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let hot = hot || item.itemState & ODS_HOTLIGHT != 0;
     let disabled = item.itemState & ODS_DISABLED != 0;
     let suggested = matches!(role, Role::Suggested) && !disabled;
-    let highlighted = selected || pressed || hot;
+    let workspace = matches!(role, Role::Workspace { .. });
+    let highlighted = (!workspace && selected) || pressed || hot;
     let color = if suggested {
         palette.accent
+    } else if workspace {
+        if hot || pressed {
+            if palette.high_contrast {
+                palette.hover
+            } else {
+                // Linux uses alpha(sidebar foreground, 0.055) for both states.
+                let channel = |shift: u32| {
+                    (((palette.foreground >> shift) & 255u32) * 55
+                        + ((palette.background >> shift) & 255u32) * 945)
+                        / 1000
+                };
+                rgb(channel(0), channel(8), channel(16))
+            }
+        } else {
+            palette.background
+        }
     } else if pressed || selected {
         palette.selected
     } else if hot {
@@ -1361,7 +1383,10 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 selected && multiple,
                 dpi,
             );
-        } else if matches!(role, Role::Workspace { .. } | Role::Suggested) && !palette.high_contrast
+        } else if matches!(
+            role,
+            Role::Workspace { .. } | Role::Choice { .. } | Role::Suggested
+        ) && !palette.high_contrast
         {
             fill(item.hDC, &item.rcItem, palette.background);
             SelectObject(item.hDC, GetStockObject(NULL_PEN));
@@ -1379,33 +1404,83 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         } else {
             fill(item.hDC, &item.rcItem, color);
         }
-        match role {
-            Role::Workspace {
-                color: workspace_color,
-                ..
-            } if selected || workspace_color.is_some() => {
-                let inset = if selected {
-                    pixel(6)
-                } else {
-                    ((item.rcItem.bottom - item.rcItem.top - pixel(18)) / 2).max(0)
-                };
-                let stripe = RECT {
+        if matches!(role, Role::Choice { selected: true }) {
+            fill(
+                item.hDC,
+                &RECT {
                     left: item.rcItem.left,
-                    right: item.rcItem.left + pixel(if selected { 5 } else { 2 }),
-                    top: item.rcItem.top + inset,
-                    bottom: item.rcItem.bottom - inset,
-                };
+                    right: item.rcItem.left + pixel(5),
+                    top: item.rcItem.top + pixel(6),
+                    bottom: item.rcItem.bottom - pixel(6),
+                },
+                palette.accent,
+            );
+        }
+        if let Role::Workspace {
+            color: workspace_color,
+            unread,
+            ..
+        } = role
+        {
+            if selected {
                 fill(
                     item.hDC,
-                    &stripe,
-                    if palette.high_contrast {
-                        palette.accent
-                    } else {
-                        workspace_color.unwrap_or(palette.accent)
+                    &RECT {
+                        right: (item.rcItem.left + pixel(5)).min(item.rcItem.right),
+                        ..item.rcItem
                     },
+                    palette.accent,
                 );
             }
-            _ => {}
+            if let Some(workspace_color) = workspace_color {
+                let left = item.rcItem.left + pixel(10) + if selected { pixel(5) } else { 0 };
+                let top = item.rcItem.top + pixel(6);
+                let bottom = item.rcItem.bottom - pixel(6);
+                if left + pixel(4) <= item.rcItem.right && top < bottom {
+                    SelectObject(item.hDC, GetStockObject(NULL_PEN));
+                    SelectObject(item.hDC, GetStockObject(DC_BRUSH));
+                    SetDCBrushColor(
+                        item.hDC,
+                        if palette.high_contrast {
+                            text
+                        } else {
+                            workspace_color
+                        },
+                    );
+                    RoundRect(
+                        item.hDC,
+                        left,
+                        top,
+                        left + pixel(4) + 1,
+                        bottom + 1,
+                        pixel(4),
+                        pixel(4),
+                    );
+                }
+            }
+            if unread {
+                let right = item.rcItem.right - pixel(7);
+                let top = item.rcItem.top + pixel(7);
+                if right - pixel(7) >= item.rcItem.left && top + pixel(7) <= item.rcItem.bottom {
+                    SelectObject(item.hDC, GetStockObject(NULL_PEN));
+                    SelectObject(item.hDC, GetStockObject(DC_BRUSH));
+                    SetDCBrushColor(
+                        item.hDC,
+                        if palette.high_contrast && highlighted {
+                            text
+                        } else {
+                            palette.accent
+                        },
+                    );
+                    Ellipse(
+                        item.hDC,
+                        right - pixel(7),
+                        top,
+                        right + 1,
+                        top + pixel(7) + 1,
+                    );
+                }
+            }
         }
         if palette.high_contrast {
             SetDCBrushColor(item.hDC, palette.border);
@@ -1671,6 +1746,17 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             right: item.rcItem.right - inset,
             ..item.rcItem
         };
+        if let Role::Workspace { color, unread, .. } = role {
+            if selected {
+                rect.left += pixel(5);
+            }
+            if color.is_some() {
+                rect.left += pixel(10);
+            }
+            if unread {
+                rect.right = rect.right.min(item.rcItem.right - pixel(18));
+            }
+        }
         if let Role::Tab { kind, .. } = role {
             if rect.right - rect.left >= pixel(24) {
                 let cx = rect.left + pixel(6);
@@ -1706,7 +1792,10 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 rect.left += pixel(20);
             }
         }
-        let align = if matches!(role, Role::Workspace { .. } | Role::Tab { .. }) {
+        let align = if matches!(
+            role,
+            Role::Workspace { .. } | Role::Choice { .. } | Role::Tab { .. }
+        ) {
             DT_LEFT
         } else {
             DT_CENTER
@@ -1716,7 +1805,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         } else {
             0
         };
-        if matches!(role, Role::Workspace { .. }) && rect.right > rect.left {
+        if matches!(role, Role::Workspace { .. } | Role::Choice { .. }) && rect.right > rect.left {
             let (title, path) = label_text.split_once('\n').unwrap_or((&label_text, ""));
             let title: Vec<u16> = title.encode_utf16().collect();
             let path: Vec<u16> = path.trim_end_matches('\r').encode_utf16().collect();

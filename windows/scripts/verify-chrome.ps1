@@ -90,8 +90,11 @@ function Capture([string]$Name,$Tree) {
     Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its two-line native caption'
     $workspaceIndex=[Array]::IndexOf(@($Tree.workspaces.id),$workspace.id)
     Require ([Math]::Abs($row[0].Y-(40+58*($workspaceIndex-$Tree.chrome.sidebar_offset))*$scale) -le 2) 'Workspace row position differs from visible sidebar order'
-    $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-8),($row[0].Y+12))
-    Require ($selectionPixel -eq $(if($Tree.chrome.theme -eq 'light'){'#dae6f5'}else{'#313741'})) 'Selected workspace was not actually painted in the owned hidden capture'
+    $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-4),($row[0].Y+$row[0].Height-4))
+    Require ($selectionPixel -eq $background) 'Selected workspace does not retain the sidebar background'
+    $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
+    $stripe=[int][Math]::Max(1,[Math]::Round(5*$scale))
+    Require ([ChromeFixture]::ColorCount($path,$row[0].X,$row[0].Y,$stripe,$row[0].Height,$accent) -eq $stripe*$row[0].Height) 'Selected workspace lacks its full-height accent stripe independent of workspace color'
     $muted=if($Tree.chrome.theme -eq 'light'){'#5f6269'}else{'#abb1bc'}
     Require ([ChromeFixture]::ColorCount($path,($row[0].X+12),($row[0].Y+[int](27*$scale)),($row[0].Width-24),([int](20*$scale)),$muted) -gt 5) 'Native second-line path text was not painted'
     $footerHandles=@($Tree.chrome.controls|Where-Object {$_.kind -in @('settings','files','search_all','open_file')}|ForEach-Object {$_.handle})
@@ -122,6 +125,20 @@ function Capture([string]$Name,$Tree) {
         Require (@($tabs|Where-Object {$toolHandles -contains $_.Handle -and ([Math]::Abs($_.Height-22*$scale) -gt 1 -or [Math]::Abs($_.Width-22*$scale) -gt 1)}).Count -eq 0) 'Pane tools are not22DIP at the inset header position'
     }
     return $record
+}
+function Workspace-Unread($Tree,$Capture,[string]$Workspace,[bool]$Unread) {
+    $info=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $Workspace})
+    Require ($info.Count -eq 1 -and $info[0].layout_visible -and $info[0].unread -eq $Unread) 'Workspace unread ownership or row visibility differs'
+    $row=@($Capture.controls|Where-Object {$_.Handle -eq $info[0].handle})[0]
+    $model=@($Tree.workspaces|Where-Object {$_.id -eq $Workspace})[0]
+    Require ($row.Text.StartsWith($model.name.Replace('&','&&')+"`n") -and $row.Text -notmatch '^\[\d+\] ') 'Unread count changed the original workspace title'
+    $scale=[Math]::Max(96,$Capture.dpi)/96.0;$diameter=[int][Math]::Max(1,[Math]::Round(7*$scale));$margin=$diameter
+    $x=$row.X+$row.Width-$margin-$diameter;$y=$row.Y+$margin
+    $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
+    $count=[ChromeFixture]::ColorCount($Capture.path,$x,$y,$diameter,$diameter,$accent)
+    if($Unread){
+        Require ($count -gt $diameter*$diameter/3 -and $count -lt $diameter*$diameter -and [ChromeFixture]::Pixel($Capture.path,($x+[int][Math]::Floor($diameter/2)),($y+[int][Math]::Floor($diameter/2))) -eq $accent) 'Unread workspace dot was not painted as a7DIP circle'
+    }else{Require ($count -eq 0) 'Workspace retained a stale unread dot'}
 }
 function FocusPaint($Tree,$Capture) {
     $scale=[Math]::Max(96,$Capture.dpi)/96.0;$line=[int][Math]::Max(1,[Math]::Round(2*$scale));$one=[int][Math]::Max(1,[Math]::Round($scale));$bar=[int][Math]::Round(28*$scale)
@@ -214,11 +231,26 @@ try {
         }while($true)
         Require ((Identities $tree) -eq $original -and (ControlIds $tree) -eq $controls) 'Metadata change replaced a terminal or native chrome control'
         $metadata=Capture 'unicode-cwd' $tree;$row=@($metadata.controls|Where-Object {$_.Text -eq ($name+"`n"+$changed).Replace('&','&&')})
-        Require ($row.Count -eq 1 -and [ChromeFixture]::Pixel($metadata.path,($row[0].X+1),($row[0].Y+15)) -eq '#12abef') 'Live Unicode path/name or actual model color stripe was lost'
+        $scale=[Math]::Max(96,$metadata.dpi)/96.0;$colorX=$row[0].X+[int][Math]::Round(15*$scale);$colorWidth=[int][Math]::Max(1,[Math]::Round(4*$scale));$colorY=$row[0].Y+[int]($row[0].Height/2)
+        Require ($row.Count -eq 1 -and [ChromeFixture]::ColorCount($metadata.path,$colorX,$colorY,$colorWidth,1,'#12abef') -eq $colorWidth -and [ChromeFixture]::Pixel($metadata.path,($colorX-1),$colorY) -eq $metadata.background -and [ChromeFixture]::Pixel($metadata.path,($colorX+$colorWidth),$colorY) -eq $metadata.background) 'Live Unicode path/name or separate4DIP workspace color bar was lost'
         $evidence.checks+=@{name='unicode_cwd_metadata_and_color_update_preserve_native_handles_and_terminal_process';passed=$true}
         Request @('new-tab','--shell=cmd','--cwd',$changed)|Out-Null;$tree=Ready 2
         Require (@($tree.layout.panes).Count -eq 1 -and (Identities $tree).Contains($original)) 'Multi-tab fixture changed its original pane or terminal'
         $multiple=Capture 'single-pane-multiple-tabs' $tree;FocusPaint $tree $multiple
+        $beforeMove=Identities $tree;$surfaceNotice=Request @('notify','--surface',$source.surface,'--title','한글 한 알림','workspace unread ownership')
+        Require ($surfaceNotice.accepted) 'Owned surface notification was not accepted'
+        $tree=Tree;$unread=Capture 'workspace-unread' $tree;Workspace-Unread $tree $unread $source.workspace $true
+        Request @('new-workspace','--shell=cmd','--cwd',$changed)|Out-Null;$tree=Ready 3;$destination=Request @('identify');$moving=Identities $tree
+        Request @('workspace','rename',$destination.workspace,'알림 이동 작업공간')|Out-Null
+        Request @('move-tab',$source.surface,'--to-pane',$destination.pane)|Out-Null;$tree=Tree
+        Require ((Identities $tree) -eq $moving) 'Moving an unread surface changed a terminal PID'
+        $moved=Capture 'workspace-unread-moved' $tree;Workspace-Unread $tree $moved $source.workspace $false;Workspace-Unread $tree $moved $destination.workspace $true
+        Request @('notifications','mark-read',$surfaceNotice.id)|Out-Null;$tree=Tree
+        $read=Capture 'workspace-read' $tree;Workspace-Unread $tree $read $source.workspace $false;Workspace-Unread $tree $read $destination.workspace $false
+        Request @('move-tab',$source.surface,'--to-pane',$source.pane,'--index','0')|Out-Null
+        Request @('workspace','close',$destination.workspace)|Out-Null;Request @('focus-tab',$source.surface)|Out-Null;$tree=Ready 2
+        Require ((Identities $tree) -eq $beforeMove) 'Workspace unread roundtrip did not preserve the original terminal IDs and PIDs'
+        $evidence.checks+=@{name='workspace_unread_dot_moves_with_surface_and_mark_read_preserves_raw_title_and_processes';passed=$true}
         Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 3
         Require ((Identities $tree).Contains($original)) 'Split replaced the original terminal process'
         $split=Capture 'split' $tree;FocusPaint $tree $split;$stable=Identities $tree;$controls=ControlIds $tree

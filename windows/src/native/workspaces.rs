@@ -121,26 +121,6 @@ impl App {
             .locate(workspace.active())
             .map(|(_, _, cwd)| cwd)
             .unwrap_or_else(|| workspace.cwd.clone());
-        let count = self
-            .notifications
-            .store
-            .entries()
-            .iter()
-            .filter(|entry| {
-                !entry.read
-                    && entry
-                        .surface
-                        .and_then(|s| self.locate(s))
-                        .map(|(i, _, _)| self.workspaces[i].id)
-                        .or(entry.workspace)
-                        == Some(id)
-            })
-            .count();
-        let prefix = if count > 0 {
-            format!("[{count}] ")
-        } else {
-            String::new()
-        };
         let directory = if let Some(config) = &workspace.ssh {
             format!(
                 "{}:{}",
@@ -150,7 +130,18 @@ impl App {
         } else {
             cwd.display().to_string()
         };
-        Some(format!("{prefix}{}\n{}", workspace.name, directory))
+        Some(format!("{}\n{}", workspace.name, directory))
+    }
+    fn workspace_has_unread(&self, id: WorkspaceId) -> bool {
+        self.notifications.store.entries().iter().any(|entry| {
+            !entry.read
+                && entry
+                    .surface
+                    .and_then(|surface| self.locate(surface))
+                    .map(|(index, _, _)| self.workspaces[index].id)
+                    .or(entry.workspace)
+                    == Some(id)
+        })
     }
     pub(super) fn chrome_role(&self, action: &Action) -> chrome::Role {
         match *action {
@@ -168,6 +159,7 @@ impl App {
                         .is_some_and(|workspace| workspace.id == id)
                         || self.is_detached_workspace(id),
                     color,
+                    unread: self.workspace_has_unread(id),
                 }
             }
             Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
@@ -401,7 +393,7 @@ impl App {
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
         let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);

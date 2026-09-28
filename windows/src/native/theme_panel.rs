@@ -172,17 +172,15 @@ impl ThemePanel {
         for preset in &self.presets {
             chrome::set_role(
                 preset.button,
-                chrome::Role::Workspace {
+                chrome::Role::Choice {
                     selected: settings.theme_preset.as_deref() == Some(preset.id.as_str()),
-                    color: None,
                 },
             );
         }
         chrome::set_role(
             self.legacy,
-            chrome::Role::Workspace {
+            chrome::Role::Choice {
                 selected: settings.theme_preset.is_none(),
-                color: None,
             },
         );
     }
