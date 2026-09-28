@@ -45,6 +45,10 @@ pub enum ClientMessage {
         outcome: crate::minimap::Outcome,
     },
     RetryCommandPrompt,
+    SshConnect,
+    SshReady {
+        session: Uuid,
+    },
     Ready,
     SettingsApplied {
         revision: Uuid,
@@ -184,6 +188,10 @@ pub enum HostMessage {
     ShellStatus {
         error: Option<String>,
     },
+    SshStatus {
+        state: String,
+        error: Option<String>,
+    },
     Settings {
         document: Box<crate::settings::Document>,
         bindings: Vec<crate::keybindings::Binding>,
@@ -310,6 +318,16 @@ pub struct OutputWindow {
 }
 
 impl OutputWindow {
+    /// Start a replacement session after output already owned by its renderer.
+    /// The previous session's bytes are not charged to the new credit window.
+    pub fn after(sequence: u64) -> Self {
+        Self {
+            sent: sequence,
+            acknowledged: sequence,
+            ..Self::default()
+        }
+    }
+
     pub fn can_send(&self, bytes: usize) -> bool {
         bytes > 0 && bytes <= OUTPUT_CHUNK_BYTES && self.bytes + bytes <= OUTPUT_WINDOW_BYTES
     }
@@ -386,5 +404,27 @@ mod tests {
         window.acknowledge(window.barrier()).unwrap();
         assert_eq!(window.in_flight_bytes(), 0);
         assert!(window.acknowledge(0).is_err());
+    }
+
+    #[test]
+    fn replacement_output_continues_sequences_and_preserves_credit_at_the_limit() {
+        let after = u64::MAX - 2;
+        let mut window = OutputWindow::after(after);
+        assert_eq!(window.barrier(), after);
+        assert_eq!(window.acknowledged(), after);
+        assert_eq!(window.in_flight_bytes(), 0);
+        assert!(window.acknowledge(after - 1).is_err());
+        assert!(window.acknowledge(after + 1).is_err());
+        window.acknowledge(after).unwrap();
+        assert_eq!(window.sent(OUTPUT_CHUNK_BYTES).unwrap(), after + 1);
+        assert_eq!(window.sent(1).unwrap(), u64::MAX);
+        window.acknowledge(after + 1).unwrap();
+        assert_eq!(window.in_flight_bytes(), 1);
+        assert!(window.sent(1).is_err());
+        assert_eq!(window.barrier(), u64::MAX);
+        assert_eq!(window.in_flight_bytes(), 1);
+        window.acknowledge(u64::MAX).unwrap();
+        assert_eq!(window.in_flight_bytes(), 0);
+        window.acknowledge(u64::MAX).unwrap();
     }
 }

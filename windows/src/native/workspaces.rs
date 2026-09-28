@@ -215,6 +215,7 @@ impl App {
         }
     }
     pub(super) fn refresh_chrome_metadata(&self) {
+        self.refresh_ssh_toolbar();
         for window in self.detached.values() {
             if let Some(workspace) = self.workspaces.iter().find(|w| w.id == window.workspace) {
                 window.workspace_caption(
@@ -238,7 +239,7 @@ impl App {
                     },
                 );
             }
-            if !matches!(control.action, Action::EmptyState) {
+            if !matches!(control.action, Action::EmptyState | Action::SshStatus(_)) {
                 chrome::set_role(control.hwnd, self.chrome_role(&control.action));
             }
         }
@@ -345,6 +346,11 @@ impl App {
                 Action::NewWorkspace=>("workspace_add",None,None,None,false),
                 Action::WorkspaceMenu=>("workspace_header",None,None,None,false),
                 Action::EmptyState=>("empty_state",None,None,None,false),
+                Action::SshStatus(id)=>("ssh_status",None,None,Some(id),false),
+                Action::SshConnect(id)=>("ssh_connect",None,None,Some(id),false),
+                Action::SshDisconnect(id)=>("ssh_disconnect",None,None,Some(id),false),
+                Action::SshAuthentication(id)=>("ssh_authentication",None,None,Some(id),false),
+                Action::SshPorts(id)=>("ssh_ports",None,None,Some(id),false),
                 Action::Settings=>("settings",None,None,None,false),
                 Action::CommandPalette=>("command_palette",None,None,None,false),
                 Action::Overview=>("overview",None,None,None,false),
@@ -863,6 +869,140 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+impl App {
+    pub(super) fn ssh_toolbar_caption(&self, workspace: WorkspaceId) -> String {
+        let Some(ws) = self.workspaces.iter().find(|w| w.id == workspace) else {
+            return String::new();
+        };
+        let Some(config) = &ws.ssh else {
+            return String::new();
+        };
+        let status = self.ssh_status(workspace);
+        let state = status["state"].as_str().unwrap_or("disconnected");
+        let cwd = self.remote_directory(ws.active()).flatten();
+        let mut caption = format!(
+            "SSH {} · {state} · {}",
+            config.target.destination(),
+            cwd.as_deref().unwrap_or("~")
+        );
+        if let Some(error) = status["error"].as_str() {
+            caption.push_str(&format!(" · {error}"));
+        }
+        if state == "connecting" {
+            caption.push_str(" · If SSH needs input, open Authentication");
+        }
+        caption
+    }
+    pub(super) fn refresh_ssh_toolbar(&self) {
+        let Some(workspace) = self.current_workspace().filter(|w| w.ssh.is_some()) else {
+            return;
+        };
+        let status = self.ssh_status(workspace.id);
+        let state = status["state"].as_str().unwrap_or("disconnected");
+        let live = status["tabs"].as_object().is_some_and(|tabs| {
+            tabs.values()
+                .any(|tab| matches!(tab["state"].as_str(), Some("connecting" | "connected")))
+        });
+        for control in &self.controls {
+            let enabled = match control.action {
+                Action::SshStatus(id) => {
+                    set_caption(control.hwnd, &self.ssh_toolbar_caption(id));
+                    continue;
+                }
+                Action::SshConnect(_) => !matches!(state, "connected" | "connecting"),
+                Action::SshDisconnect(_) => live,
+                Action::SshAuthentication(_) => !self.surfaces.is_empty(),
+                Action::SshPorts(_) => false,
+                _ => continue,
+            };
+            unsafe {
+                windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+                    control.hwnd,
+                    i32::from(enabled),
+                );
+            }
+        }
+    }
+    pub(super) fn ssh_toolbar_height(&self, workspace: usize, width: i32) -> i32 {
+        if self
+            .workspaces
+            .get(workspace)
+            .is_none_or(|w| w.ssh.is_none())
+        {
+            return 0;
+        }
+        let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+        let px = |v: i32| (v as f64 * dpi as f64 / 96.0).round() as i32;
+        if width - self.sidebar_width(width, dpi) - px(8) < px(560) {
+            px(64)
+        } else {
+            px(32)
+        }
+    }
+    pub(super) fn ssh_toolbar_rect(
+        &self,
+        action: &Action,
+        width: i32,
+    ) -> Option<(i32, i32, i32, i32)> {
+        self.current_workspace().filter(|w| w.ssh.is_some())?;
+        let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+        let px = |v: i32| (v as f64 * dpi as f64 / 96.0).round() as i32;
+        let left = self.sidebar_width(width, dpi) + px(4);
+        let available = (width - left - px(4)).max(0);
+        let compact = available < px(560);
+        let gap = px(if compact { 4 } else { 8 });
+        let widths = [px(64), px(80), px(104), px(48)];
+        let button_width = widths.iter().sum::<i32>() + 3 * gap;
+        let start = (width - px(4) - button_width).max(left);
+        let top = px(if compact { 36 } else { 4 });
+        if matches!(action, Action::SshStatus(_)) {
+            return Some((
+                left,
+                px(4),
+                if compact {
+                    available
+                } else {
+                    (start - left - gap).max(0)
+                },
+                px(28),
+            ));
+        }
+        let index = match action {
+            Action::SshConnect(_) => 0,
+            Action::SshDisconnect(_) => 1,
+            Action::SshAuthentication(_) => 2,
+            Action::SshPorts(_) => 3,
+            _ => return None,
+        };
+        let x = start + widths[..index].iter().sum::<i32>() + index as i32 * gap;
+        Some((
+            x,
+            top,
+            widths[index].min((width - px(4) - x).max(0)),
+            px(28),
+        ))
+    }
+    pub(super) fn ssh_toolbar_status(&self) -> Option<Value> {
+        let ws = self.current_workspace().filter(|w| w.ssh.is_some())?;
+        let mut status = self.ssh_status(ws.id);
+        let mut controls = serde_json::Map::new();
+        for control in &self.controls {
+            let key = match control.action {
+                Action::SshStatus(_) => "status",
+                Action::SshConnect(_) => "connect",
+                Action::SshDisconnect(_) => "disconnect",
+                Action::SshAuthentication(_) => "authentication",
+                Action::SshPorts(_) => "ports",
+                _ => continue,
+            };
+            controls.insert(key.into(), json!(control.hwnd as usize));
+        }
+        status["controls"] = json!(controls);
+        status["window"] = json!(self.window as usize);
+        Some(status)
     }
 }
 

@@ -92,3 +92,32 @@ test('minimap reads wait for preceding output before sampling cells', () => {
   assert.equal(actions.length, 0); callbacks[0]();
   assert.deepEqual(replies.at(-1), { type: 'minimap', request: 'map', sequence: 1, outcome: { status: 'ok' } });
 });
+
+test('disconnect cancels old actions without losing in-flight output, history or reconnect sequence', () => {
+  const callbacks = [], replies = [], actions = [];
+  let grid = '기존 한 history ';
+  const terminal = { write: (bytes, done) => callbacks.push(() => {
+    grid += Buffer.from(bytes).toString('utf8'); done();
+  }) };
+  const output = new Output(terminal, reply => replies.push(reply), null,
+    message => { actions.push(`find:${message.request}`); return {}; }, null, null,
+    { run: text => { actions.push(`paste:${text}`); return {}; } },
+    { run: action => { actions.push(`selection:${action.kind}`); return {}; } });
+  output.receive({ type: 'output', sequence: 1, data: 'QQ==' });
+  output.receive({ type: 'find', request: 'old-find', after: 3 });
+  output.receive({ type: 'selection', request: 'old-select', after: 3, action: { kind: 'all' } });
+  output.receive({ type: 'paste', request: 'old-paste', after: 3, text: '실행하면 안 됨' });
+  output.cancelPending();
+  assert.equal(output.received, 1); assert.equal(output.parsed, 0);
+  callbacks[0]();
+  assert.equal(grid, '기존 한 history A');
+  output.receive({ type: 'output', sequence: 2, data: 'Qg==' });
+  output.receive({ type: 'find', request: 'new-find', after: 3 });
+  output.receive({ type: 'output', sequence: 3, data: 'Qw==' });
+  callbacks[1](); callbacks[2](); output.flush();
+  assert.equal(grid, '기존 한 history ABC');
+  assert.equal(output.received, 3); assert.equal(output.parsed, 3);
+  assert.deepEqual(actions, ['find:new-find']);
+  assert.deepEqual(replies.filter(reply => reply.type === 'ack').map(reply => reply.sequence), [1, 2, 3]);
+  assert.deepEqual(replies.filter(reply => reply.request).map(reply => reply.request), ['new-find']);
+});

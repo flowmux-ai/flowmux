@@ -190,7 +190,7 @@ impl App {
     ) -> anyhow::Result<()> {
         let (workspace, current, _) = self.locate(surface).context("Tab no longer exists")?;
         anyhow::ensure!(current == pane, "Tab moved before opening its menu");
-        let source_ssh = self.workspaces[workspace].ssh.clone();
+        let source_local = self.workspaces[workspace].ssh.is_none();
         let workspace = self.workspaces[workspace].id;
         let (copy_text, folder) = self.tab_copy_text(surface)?;
         let destinations: Vec<_> = self
@@ -199,7 +199,7 @@ impl App {
             .enumerate()
             .filter_map(|(i, index)| {
                 let target = &self.workspaces[index];
-                (target.id != workspace && target.ssh == source_ssh).then(|| Entry {
+                (target.id != workspace && source_local && target.ssh.is_none()).then(|| Entry {
                     label: format!("{}. {}", i + 1, target.name),
                     enabled: true,
                     action: MenuAction::Destination(target.id),

@@ -342,8 +342,9 @@ pub fn move_surface(
         })
         .context("destination pane not found")?;
     anyhow::ensure!(
-        workspaces[source_ws].ssh == workspaces[target_ws].ssh,
-        "cannot move a tab between different SSH or local workspace contexts"
+        source_ws == target_ws
+            || (workspaces[source_ws].ssh.is_none() && workspaces[target_ws].ssh.is_none()),
+        "cannot move a tab between separate SSH workspaces or local and SSH workspaces"
     );
     let (tab, empty) = workspaces[source_ws]
         .root
@@ -405,8 +406,9 @@ pub fn split_move_surface(
         })
         .context("destination pane not found")?;
     anyhow::ensure!(
-        workspaces[source_ws].ssh == workspaces[target_ws].ssh,
-        "cannot move a tab between different SSH or local workspace contexts"
+        source_ws == target_ws
+            || (workspaces[source_ws].ssh.is_none() && workspaces[target_ws].ssh.is_none()),
+        "cannot move a tab between separate SSH workspaces or local and SSH workspaces"
     );
     if source_pane == target && source_count == 1 {
         return Ok(source_ws);
@@ -630,7 +632,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ssh_tabs_splits_detach_keep_remote_context_and_moves_are_atomic() {
+    fn ssh_tabs_splits_keep_remote_context_and_cross_workspace_moves_are_atomic() {
         let config = flowmux_core::SshWorkspaceConfig {
             target: flowmux_core::SshTarget::parse("user@example.test").unwrap(),
             cwd: Some("/원격/한 e\u{301}".into()),
@@ -683,13 +685,29 @@ mod tests {
             split_move_surface(&mut workspaces, tab, target, SplitDirection::Horizontal).is_err()
         );
         assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
-        let detached = detach_surface(&mut workspaces, tab).unwrap();
-        assert_eq!(workspaces[detached].ssh, Some(config));
-        assert_eq!(workspaces[detached].cwd, local);
-        assert_eq!(workspaces[detached].active(), tab);
-        assert_eq!(workspaces[detached].name, "서버 한");
-        let target = workspaces[0].focused;
-        move_surface(&mut workspaces, tab, target, 0).unwrap();
+        let mut matching = vec![
+            workspaces[0].clone(),
+            Workspace::new_ssh(local.clone(), config.clone(), None).unwrap(),
+        ];
+        let target = matching[1].focused;
+        let before = serde_json::to_value(&matching).unwrap();
+        assert!(move_surface(&mut matching, tab, target, 0).is_err());
+        assert_eq!(serde_json::to_value(&matching).unwrap(), before);
+        assert!(split_move_surface(&mut matching, tab, target, SplitDirection::Vertical).is_err());
+        assert_eq!(serde_json::to_value(&matching).unwrap(), before);
+        let same_workspace = matching[0].focused;
+        move_surface(&mut matching, tab, same_workspace, 0).unwrap();
+        split_move_surface(
+            &mut matching,
+            tab,
+            same_workspace,
+            SplitDirection::Horizontal,
+        )
+        .unwrap();
+        assert_eq!(matching.len(), 2);
+        let before = serde_json::to_value(&workspaces).unwrap();
+        assert!(detach_surface(&mut workspaces, tab).is_err());
+        assert_eq!(serde_json::to_value(&workspaces).unwrap(), before);
         assert_eq!(workspaces.len(), 2);
     }
 

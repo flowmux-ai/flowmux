@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     num::NonZeroIsize,
     path::PathBuf,
     sync::{
@@ -111,7 +111,7 @@ enum Event {
     Saved(Result<(), String>),
     Button(Action),
     Bridge(SurfaceId, String, String),
-    Session(SurfaceId, SessionEvent),
+    Session(SurfaceId, Uuid, SessionEvent),
     Command(Request, ipc::Reply),
     SearchUi(search::UiAction),
     CommandPalette(command_palette::UiAction),
@@ -397,6 +397,9 @@ struct Surface {
     holder: surface_host::Host,
     identity: Identity,
     session: Option<Session>,
+    session_generation: Uuid,
+    session_after: u64,
+    ssh_connected: bool,
     cols: u16,
     rows: u16,
     ready: bool,
@@ -432,6 +435,11 @@ enum Action {
     Overview,
     NewWorkspace,
     NewSshWorkspace,
+    SshStatus(WorkspaceId),
+    SshConnect(WorkspaceId),
+    SshDisconnect(WorkspaceId),
+    SshAuthentication(WorkspaceId),
+    SshPorts(WorkspaceId),
     Workspace(WorkspaceId),
     WorkspaceMenu,
     NewTab,
@@ -530,6 +538,7 @@ struct App {
     tab_menu: Option<tab_menu::Menu>,
     workspace_close: Option<workspaces::Close>,
     ssh_dialog: Option<ssh_panel::Panel>,
+    ssh_disconnected: HashSet<WorkspaceId>,
     initial_cwd: PathBuf,
     options: Option<appearance::Panel>,
     command_palette: command_palette::Controller,
@@ -736,7 +745,13 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
                 initial_shell.unwrap_or_else(|| settings.default_shell.clone()),
             );
         }
+        let ssh_disconnected = workspaces
+            .iter()
+            .filter(|w| restoring_window && w.ssh.is_some())
+            .map(|w| w.id)
+            .collect();
         let mut app = App {
+            ssh_disconnected,
             shells,
             settings_worker,
             settings,
@@ -1042,6 +1057,16 @@ impl App {
         if self.current_workspace().is_none() {
             desired.push(("flowmux\nNo workspaces yet".into(), Action::EmptyState));
         }
+        if let Some(workspace) = self.current_workspace().filter(|w| w.ssh.is_some()) {
+            let id = workspace.id;
+            desired.extend([
+                (self.ssh_toolbar_caption(id), Action::SshStatus(id)),
+                ("Connect".into(), Action::SshConnect(id)),
+                ("Disconnect".into(), Action::SshDisconnect(id)),
+                ("Authentication".into(), Action::SshAuthentication(id)),
+                ("Ports".into(), Action::SshPorts(id)),
+            ]);
+        }
         for (pane, active, tabs) in self
             .current_workspace()
             .into_iter()
@@ -1101,18 +1126,24 @@ impl App {
     }
     fn button(&mut self, name: &str, action: Action) -> anyhow::Result<()> {
         let empty = matches!(action, Action::EmptyState);
+        let label = matches!(action, Action::SshStatus(_));
         let id = self.controls.len() + 100;
         anyhow::ensure!(id < 65535, "too many controls");
         let hwnd = unsafe {
             CreateWindowExW(
                 0,
-                wide(if empty { "STATIC" } else { "BUTTON" }).as_ptr(),
+                wide(if empty || label { "STATIC" } else { "BUTTON" }).as_ptr(),
                 wide(name.replace('&', "&&")).as_ptr(),
                 WS_CHILD
                     | WS_VISIBLE
                     | if empty {
                         windows_sys::Win32::System::SystemServices::SS_CENTER
                             | windows_sys::Win32::System::SystemServices::SS_NOPREFIX
+                    } else if label {
+                        windows_sys::Win32::System::SystemServices::SS_LEFTNOWORDWRAP
+                            | windows_sys::Win32::System::SystemServices::SS_ENDELLIPSIS
+                            | windows_sys::Win32::System::SystemServices::SS_NOPREFIX
+                            | windows_sys::Win32::System::SystemServices::SS_CENTERIMAGE
                     } else {
                         WS_TABSTOP | BS_OWNERDRAW as u32
                     }
@@ -1143,6 +1174,8 @@ impl App {
         let role = self.chrome_role(&action);
         if empty {
             chrome::register_control(hwnd, chrome::ControlRole::EmptyState);
+        } else if label {
+            chrome::register_control(hwnd, chrome::ControlRole::Static);
         } else {
             chrome::register_button(hwnd, role);
         }
@@ -1258,6 +1291,9 @@ impl App {
                 holder,
                 identity,
                 session: None,
+                session_generation: Uuid::nil(),
+                session_after: 0,
+                ssh_connected: false,
                 cols: 80,
                 rows: 24,
                 ready: false,
@@ -1436,6 +1472,11 @@ impl App {
                 );
             }
             let rect = match control.action {
+                Action::SshStatus(_)
+                | Action::SshConnect(_)
+                | Action::SshDisconnect(_)
+                | Action::SshAuthentication(_)
+                | Action::SshPorts(_) => self.ssh_toolbar_rect(&control.action, client.right),
                 Action::EmptyState => Some((content.x, content.y, content.width, content.height)),
                 Action::NewWorkspace => {
                     (sidebar >= px(36)).then_some((px(4), px(5), px(28), px(28)))
@@ -1599,6 +1640,7 @@ impl App {
                 }
             }
         }
+        self.refresh_ssh_toolbar();
         self.pane_layout = geometry;
         self.overview_layout()?;
         Ok(())
@@ -1853,7 +1895,15 @@ impl App {
                 }
             }
             Event::Bridge(id, origin, body) => self.bridge(id, &origin, &body)?,
-            Event::Session(id, message) => {
+            Event::Session(id, generation, message) => {
+                if self
+                    .surfaces
+                    .get(&id)
+                    .is_none_or(|s| s.session_generation != generation)
+                {
+                    return Ok(());
+                }
+                let status_changed = !matches!(message, SessionEvent::Output { .. });
                 let mut notices = Vec::new();
                 if let Some(surface) = self.surfaces.get_mut(&id) {
                     match message {
@@ -1887,6 +1937,9 @@ impl App {
                         // Retain its grid and accept parser ACKs after releasing native resources.
                         surface.session.take();
                     }
+                }
+                if status_changed {
+                    self.refresh_ssh_toolbar();
                 }
                 for notice in notices {
                     self.add_notification(Some(id), notice.title, notice.body, notice.level)?;
@@ -1998,9 +2051,31 @@ impl App {
                     "invalid parser acknowledgement"
                 );
                 if let Some(session) = &surface.session {
-                    session.acknowledge(sequence)?;
+                    if sequence > surface.session_after {
+                        session.acknowledge(sequence)?;
+                    }
                 }
                 surface.acknowledged_sequence = sequence;
+            }
+            ClientMessage::SshConnect => {
+                let (index, _, _) = self.locate(id).context("SSH terminal no longer exists")?;
+                self.ssh_connect(self.workspaces[index].id)?;
+            }
+            ClientMessage::SshReady { session } => {
+                if self.remote_directory(id).is_some() {
+                    let surface = self.surfaces.get_mut(&id).unwrap();
+                    if surface.session_generation == session
+                        && surface.session.is_some()
+                        && surface.exit_code.is_none()
+                    {
+                        surface.ssh_connected = true;
+                        surface.send(&HostMessage::SshStatus {
+                            state: "connected".into(),
+                            error: None,
+                        })?;
+                        self.refresh_ssh_toolbar();
+                    }
+                }
             }
             ClientMessage::Focus => {
                 if let Some((workspace, pane, _)) = self.locate(id) {
@@ -2279,21 +2354,51 @@ impl App {
     }
     fn start_session(&mut self, id: SurfaceId) -> anyhow::Result<()> {
         let (workspace, pane, cwd) = self.locate(id).context("terminal has no workspace")?;
+        let remote = self.remote_directory(id).is_some();
+        let workspace_id = self.workspaces[workspace].id;
+        if remote && self.ssh_disconnected.contains(&workspace_id) {
+            let surface = self.surfaces.get_mut(&id).unwrap();
+            surface.ready = true;
+            surface.restoring = false;
+            surface.send(&HostMessage::SshStatus {
+                state: "disconnected".into(),
+                error: None,
+            })?;
+            self.refresh_ssh_toolbar();
+            return Ok(());
+        }
         if let Some(shell) = self.ssh_shell(id)? {
             self.shells.insert(id, shell);
         }
+        let generation = Uuid::new_v4();
+        let mut shell = self.shells[&id].clone();
+        if remote {
+            let command = shell.args.last_mut().context("SSH bootstrap is missing")?;
+            *command = format!("printf '\\033]777;flowmux-ssh-ready;{generation}\\007'; {command}");
+        }
         let sender = self.sender.clone();
-        let surface = &self.surfaces[&id];
-        let session = Session::spawn(
+        let surface = self.surfaces.get_mut(&id).unwrap();
+        anyhow::ensure!(
+            surface.session.is_none(),
+            "terminal session is already running"
+        );
+        surface.session_generation = generation;
+        surface.session_after = surface.output_sequence;
+        surface.ssh_connected = false;
+        surface.exit_code = None;
+        surface.output_ended = false;
+        surface.notification_sniffer = Default::default();
+        let session = Session::spawn_after(
             &cwd,
-            &self.shells[&id],
+            &shell,
             pane,
             id,
-            self.workspaces[workspace].id,
+            workspace_id,
             &self._ipc.name,
             surface.cols,
             surface.rows,
-            move |event| sender.send(Event::Session(id, event)),
+            surface.output_sequence,
+            move |event| sender.send(Event::Session(id, generation, event)),
         );
         let session = match session {
             Ok(session) => session,
@@ -2304,17 +2409,33 @@ impl App {
                 surface.ready = true;
                 surface.restoring = false;
                 surface.startup_error = Some(error.clone());
-                surface.send(&HostMessage::ShellStatus { error: Some(error) })?;
+                surface.send(&if remote {
+                    HostMessage::SshStatus {
+                        state: "failed".into(),
+                        error: Some(error),
+                    }
+                } else {
+                    HostMessage::ShellStatus { error: Some(error) }
+                })?;
+                self.refresh_ssh_toolbar();
                 return Ok(());
             }
         };
         let surface = self.surfaces.get_mut(&id).unwrap();
         surface.startup_error = None;
-        surface.send(&HostMessage::ShellStatus { error: None })?;
+        surface.send(&if remote {
+            HostMessage::SshStatus {
+                state: "connecting".into(),
+                error: None,
+            }
+        } else {
+            HostMessage::ShellStatus { error: None }
+        })?;
         surface.process_pid = Some(session.pid);
         surface.session = Some(session);
         surface.ready = true;
         surface.restoring = false;
+        self.refresh_ssh_toolbar();
         if self.current_surface() == Some(id) {
             self.focus_active()?;
         }
@@ -2747,16 +2868,6 @@ impl App {
         self.editor_remove(surface);
         self.browser_cancel(surface, "browser closed during script request");
         self.browsers.remove(&surface);
-        self.pending_selections.retain(|_, request| {
-            if request.surface == surface {
-                let _ = request
-                    .reply
-                    .try_send(json!({"error":"terminal closed during selection request"}));
-                false
-            } else {
-                true
-            }
-        });
         self.shells.remove(&surface);
         self.surfaces.remove(&surface);
         self.detached.remove(&surface);
@@ -2769,6 +2880,19 @@ impl App {
                 "terminal closed during checkpoint; previous save preserved".into(),
             ));
         }
+        self.cancel_terminal_requests(surface);
+    }
+    pub(super) fn cancel_terminal_requests(&mut self, surface: SurfaceId) {
+        self.pending_selections.retain(|_, request| {
+            if request.surface == surface {
+                let _ = request
+                    .reply
+                    .try_send(json!({"error":"terminal closed during selection request"}));
+                false
+            } else {
+                true
+            }
+        });
         self.pending_reads.retain(|_, request| {
             let request = &request.read;
             if request.surface == surface {
@@ -2854,6 +2978,10 @@ impl App {
                 return self.new_workspace(None, None, None).map(|_| ());
             }
             Action::NewSshWorkspace => return self.show_ssh_dialog(),
+            Action::SshStatus(_) | Action::SshPorts(_) => return Ok(()),
+            Action::SshConnect(id) => return self.ssh_connect(id),
+            Action::SshDisconnect(id) => return self.ssh_disconnect(id),
+            Action::SshAuthentication(id) => return self.ssh_authentication(id),
             Action::Workspace(id) => {
                 let index = self.workspace_index(id)?;
                 if self.is_detached_workspace(id) {
@@ -3148,6 +3276,7 @@ impl App {
                         "tab_menu":self.tab_menu.as_ref().map(tab_menu::Menu::diagnostics),
                         "workspace_close_dialog":self.workspace_close.as_ref().map(|close|close.panel.diagnostics()),
                         "ssh_dialog":self.ssh_dialog.as_ref().map(ssh_panel::Panel::diagnostics),
+                        "ssh_toolbar":self.ssh_toolbar_status(),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,

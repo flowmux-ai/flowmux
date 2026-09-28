@@ -95,6 +95,24 @@ impl App {
             "panel_handle":self.search.panel.as_ref().map(|p|p.window as usize),"dialog":self.search.diagnostics()}),
         )
     }
+    pub(super) fn cancel_surface_search(&mut self, surface: SurfaceId) {
+        let affected = self
+            .search
+            .run
+            .as_ref()
+            .filter(|run| {
+                run.waiting.is_some_and(|(id, _, _)| id == surface)
+                    || self
+                        .search
+                        .opening
+                        .values()
+                        .any(|pending| pending.surface == surface)
+            })
+            .map(|run| run.id);
+        if let Some(id) = affected {
+            let _ = self.cancel_search(id);
+        }
+    }
     pub(super) fn cancel_search(&mut self, id: Uuid) -> anyhow::Result<()> {
         self.search.debounce = None;
         let run = self

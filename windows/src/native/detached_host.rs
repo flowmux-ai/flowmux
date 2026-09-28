@@ -136,6 +136,11 @@ impl App {
             "window is busy"
         );
         self.ensure_attached(surface)?;
+        let (workspace, _, _) = self.locate(surface).context("source tab missing")?;
+        anyhow::ensure!(
+            self.workspaces[workspace].ssh.is_none(),
+            "SSH tabs cannot be moved to a separate window"
+        );
         anyhow::ensure!(
             self.surfaces.get(&surface).is_some_and(|terminal| terminal.ready && !terminal.restoring)
                 || self.browsers.get(&surface).is_some_and(|browser| !browser.native_closed.get())

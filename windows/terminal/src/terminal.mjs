@@ -39,7 +39,7 @@ terminal.open(document.getElementById('terminal'));
 const selection = new Selection(terminal);
 const find = new SearchUi(terminal, () => new SearchAddon(), document, selection);
 const outputSearch = new OutputSearch(terminal, send, undefined, selection);
-let restoring = false, composing = false, surfaceVisible = false;
+let restoring = false, composing = false, surfaceVisible = false, ssh = false;
 const minimap = new Minimap(terminal, document, () => composing || restoring);
 const paste = new Paste(terminal, () => composing ? 'Finish composing text before pasting.'
   : restoring ? 'Terminal history is being restored.' : null);
@@ -63,6 +63,12 @@ document.addEventListener('pointercancel', () => selection.primaryUp());
 terminalElement.addEventListener('copy', event => selection.copyEvent(event, clipboard.report, !backgroundTesting), true);
 const input = new Input(data => send({ type: 'input', data }));
 observeCwd(terminal, send, () => restoring);
+terminal.parser.registerOscHandler(777, value => {
+  const match = /^flowmux-ssh-ready;([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(value);
+  if (!match) return false;
+  if (!restoring) send({ type: 'ssh_ready', session: match[1] });
+  return true;
+});
 terminal.onData(data => { if (!paste.data(data) && !restoring) input.data(data); });
 terminalElement.addEventListener('paste', event => { clipboard.cancel(); paste.event(event, outcome => {
   if (outcome.status === 'ok' && outcome.data) selection.forget();
@@ -177,6 +183,15 @@ window.flowmuxHost = message => {
     else if (message.type === 'paste_result') {
       document.getElementById('input-status').textContent = message.error ? `Paste failed: ${message.error}` : '';
     }
+    else if (message.type === 'ssh_status') {
+      ssh = true;
+      if (message.state === 'disconnected') output.cancelPending();
+      document.getElementById('status').textContent = message.state === 'connected' ? ''
+        : message.state === 'connecting' ? 'SSH connecting — enter authentication in this terminal if requested.'
+        : `SSH ${message.state}${message.error ? `: ${message.error}` : ''} `;
+      terminal.options.disableStdin = !['connecting', 'connected'].includes(message.state);
+      if (terminal.options.disableStdin) sshConnectButton();
+    }
     else if (message.type === 'shell_status') {
       const status=document.getElementById('status');
       status.textContent=message.error ? `Shell could not start: ${message.error} ` : '';
@@ -188,10 +203,16 @@ window.flowmuxHost = message => {
     }
     else if (message.type === 'exit') {
       document.getElementById('status').textContent = `Process exited (${message.code})`;
+      if (ssh) sshConnectButton();
       terminal.options.disableStdin = true;
     } else output.receive(message);
   } catch (error) { send({ type: 'fault', message: String(error) }); }
 };
+function sshConnectButton() {
+  const button = document.createElement('button'); button.textContent = 'Connect';
+  button.addEventListener('click', () => send({ type: 'ssh_connect' }));
+  document.getElementById('status').append(button);
+}
 fit.fit();
 settings.receive(initialSettings, initialBindings, initialTheme);
 send({ type: 'ready' });

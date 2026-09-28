@@ -161,6 +161,7 @@ fn pipe() -> anyhow::Result<(OwnedHandle, OwnedHandle)> {
 }
 
 impl Session {
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         cwd: &Path,
@@ -173,6 +174,25 @@ impl Session {
         rows: u16,
         emit: impl Fn(SessionEvent) + Send + Sync + 'static,
     ) -> anyhow::Result<Self> {
+        Self::spawn_after(
+            cwd, shell, pane, surface, workspace, pipe_name, cols, rows, 0, emit,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_after(
+        cwd: &Path,
+        shell: &crate::shell::Shell,
+        pane: PaneId,
+        surface: SurfaceId,
+        workspace: WorkspaceId,
+        pipe_name: &str,
+        cols: u16,
+        rows: u16,
+        after: u64,
+        emit: impl Fn(SessionEvent) + Send + Sync + 'static,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(after < u64::MAX, "output sequence exhausted");
         let _error_mode = ErrorMode::suppress_dialogs()?;
         let shell = super::shell::resolve(shell)?;
         let emit = Arc::new(emit);
@@ -316,7 +336,13 @@ impl Session {
             }
             return Err(error.context("Cannot assign terminal process to its job"));
         }
-        let credit: SharedCredit = Arc::new((Mutex::new(Credit::default()), Condvar::new()));
+        let credit: SharedCredit = Arc::new((
+            Mutex::new(Credit {
+                window: OutputWindow::after(after),
+                closed: false,
+            }),
+            Condvar::new(),
+        ));
         let reader_credit = credit.clone();
         let reader_emit = emit.clone();
         thread::Builder::new()
@@ -336,7 +362,14 @@ impl Session {
                             if state.closed {
                                 continue;
                             } // Drain while ConPTY shuts down.
-                            let sequence = state.window.sent(count).unwrap();
+                            let sequence = match state.window.sent(count) {
+                                Ok(sequence) => sequence,
+                                Err(error) => {
+                                    drop(state);
+                                    reader_emit(SessionEvent::Error(error.to_string()));
+                                    break;
+                                }
+                            };
                             drop(state);
                             reader_emit(SessionEvent::Output {
                                 sequence,

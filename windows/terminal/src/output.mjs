@@ -17,6 +17,11 @@ export class Output {
     this.parsed = 0;
     this.pending = [];
   }
+  cancelPending() {
+    // A disconnected session may never deliver its outstanding barriers. Drop
+    // those requests while retaining the grid and already submitted writes.
+    this.pending = [];
+  }
   receive(message) {
     if (message.type === 'output') {
       if (message.sequence !== this.received + 1) throw new Error('Out-of-order terminal output');
