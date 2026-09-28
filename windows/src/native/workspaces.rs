@@ -23,6 +23,117 @@ pub(super) enum EditTarget {
 }
 
 impl App {
+    pub(super) fn pane_actions_menu(
+        &mut self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> anyhow::Result<()> {
+        let (workspace, current, _) = self
+            .locate(surface)
+            .context("Pane source no longer exists")?;
+        anyhow::ensure!(current == pane, "Pane source moved");
+        let tabs = self.workspaces[workspace]
+            .leaves()
+            .into_iter()
+            .find(|(id, _, _)| *id == pane)
+            .context("Pane no longer exists")?
+            .2;
+        let mut labels = vec![
+            "New terminal tab".to_owned(),
+            "New browser tab".into(),
+            "Open file…".into(),
+            "Split right".into(),
+            "Split down".into(),
+            "Find in terminal".into(),
+            "Search all terminals".into(),
+            "Maximize / restore pane".into(),
+            "Move tab…".into(),
+            "Close tab".into(),
+            "Workspace actions…".into(),
+        ];
+        labels.extend(
+            tabs.iter()
+                .map(|tab| format!("Switch to: {}", tab.title.replace('&', "&&"))),
+        );
+        let hwnd = self
+            .controls
+            .iter()
+            .find(|c| matches!(c.action,Action::PaneMenu(p,s) if p==pane&&s==surface))
+            .map_or(self.window, |c| c.hwnd);
+        let mut rect = RECT::default();
+        unsafe {
+            GetWindowRect(hwnd, &mut rect);
+        }
+        let choice = self.popup(
+            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+            &[],
+            (rect.left, rect.bottom),
+        )?;
+        if choice == 0 {
+            return self.focus_active();
+        }
+        anyhow::ensure!(
+            self.locate(surface)
+                .is_some_and(|(_, current, _)| current == pane),
+            "Pane source changed while menu was open"
+        );
+        if choice >= 12 {
+            let target = tabs
+                .get(choice - 12)
+                .context("Tab selection no longer exists")?
+                .id;
+            anyhow::ensure!(
+                self.locate(target)
+                    .is_some_and(|(_, current, _)| current == pane),
+                "Selected tab moved"
+            );
+            self.select(target)?;
+            return self.rebuild();
+        }
+        self.select(surface)?;
+        self.action(match choice {
+            1 => Action::NewTab,
+            2 => Action::NewBrowser,
+            3 => Action::OpenEditor,
+            4 => Action::Vertical,
+            5 => Action::Horizontal,
+            6 => Action::Find,
+            7 => Action::SearchAll,
+            8 => Action::TogglePaneZoom,
+            9 => Action::MoveTabMenu,
+            10 => Action::CloseTab,
+            _ => Action::WorkspaceMenu,
+        })
+    }
+    pub(super) fn chrome_status(&self) -> Value {
+        let controls=self.controls.iter().map(|control| {
+            let (kind,pane,surface,workspace,selected)=match control.action {
+                Action::Workspace(id)=>("workspace",None,None,Some(id),id==self.workspace().id),
+                Action::WorkspaceColor(id)=>("workspace_color",None,None,Some(id),false),
+                Action::Tab(pane,surface)=>("tab",Some(pane),Some(surface),None,self.workspace().root.active_surface_id(pane)==Some(surface)),
+                Action::TabClose(pane,surface)=>("tab_close",Some(pane),Some(surface),None,false),
+                Action::PaneAdd(pane,surface)=>("pane_add",Some(pane),Some(surface),None,false),
+                Action::PaneMenu(pane,surface)=>("pane_menu",Some(pane),Some(surface),None,false),
+                Action::SidebarScroll(d)=>(if d<0 {"sidebar_previous"}else{"sidebar_next"},None,None,None,false),
+                Action::NewWorkspace=>("workspace_add",None,None,None,false),
+                Action::WorkspaceMenu=>("workspace_header",None,None,None,false),
+                Action::Settings=>("settings",None,None,None,false),
+                Action::ShowFiles=>("files",None,None,None,false),
+                Action::SearchAll=>("search_all",None,None,None,false),
+                Action::OpenEditor=>("open_file",None,None,None,false),
+                Action::Notifications=>("notifications",None,None,None,false),
+                _=>("button",None,None,None,false),
+            };
+            unsafe {
+                let mut rect=RECT::default(); GetWindowRect(control.hwnd,&mut rect);
+                let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
+                let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
+                let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
+                json!({"handle":control.hwnd as usize,"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+            }
+        }).collect::<Vec<_>>();
+        json!({"theme":self.settings.terminal.theme,"dpi":unsafe{GetDpiForWindow(self.window)}.max(96),"sidebar_offset":self.sidebar_offset,"controls":controls})
+    }
     pub(super) fn workspace_index(&self, id: WorkspaceId) -> anyhow::Result<usize> {
         self.workspaces
             .iter()
@@ -133,6 +244,7 @@ impl App {
                 GetStockObject(DEFAULT_GUI_FONT) as WPARAM,
                 1,
             );
+            chrome::register_control(hwnd, chrome::ControlRole::Static);
             SWATCHES.with(|colors| colors.borrow_mut().insert(hwnd as isize, native));
             let action = Action::WorkspaceColor(id);
             CONTROL_ACTIONS
@@ -145,6 +257,15 @@ impl App {
         let point = (x, y);
         match action {
             Action::NewTab => self.shell_menu(point),
+            Action::PaneAdd(pane, surface) => {
+                anyhow::ensure!(
+                    self.locate(surface)
+                        .is_some_and(|(_, current, _)| current == pane),
+                    "Pane source changed before shell selection"
+                );
+                self.select(surface)?;
+                self.shell_menu(point)
+            }
             Action::Workspace(id) | Action::WorkspaceColor(id) => {
                 self.workspace_menu(id, Some(point))
             }

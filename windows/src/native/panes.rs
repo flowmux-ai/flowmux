@@ -66,9 +66,9 @@ impl App {
         let sidebar = px(185).min((client.right / 3).max(0));
         let content = model::Rect {
             x: sidebar + px(4),
-            y: px(34) + px(4),
+            y: px(4),
             width: (client.right - sidebar - px(8)).max(1),
-            height: (client.bottom - px(34) - px(8)).max(1),
+            height: (client.bottom - px(8)).max(1),
         };
         let mut geometry = model::Layout::default();
         model::partition(

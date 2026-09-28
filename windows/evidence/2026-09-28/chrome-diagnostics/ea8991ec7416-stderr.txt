@@ -1,0 +1,7 @@
+"3"개의 인수가 있는 "Render"을(를) 호출하는 동안 예외가 발생했습니다. "Owned native control PrintWindow failed"
+위치 C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\scripts\verify-c
+hrome.ps1:47 문자:47
++ ... ame+'.png');$background=[ChromeFixture]::Render($handle,$hostProcess. ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : Win32Exception

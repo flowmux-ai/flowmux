@@ -1,0 +1,13 @@
+{
+    "name":  "chrome-baseline-printwindow",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\chrome-baseline.ps1",
+    "deadlineSeconds":  60,
+    "status":  "failed",
+    "started":  "2026-09-28T07:02:27.3912043Z",
+    "pid":  38428,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  2.409,
+    "finished":  "2026-09-28T07:02:29.8036306Z"
+}

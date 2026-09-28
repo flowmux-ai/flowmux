@@ -66,6 +66,9 @@ unsafe extern "system" fn procedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(result) = chrome::message(window, message, wparam, lparam) {
+        return result;
+    }
     match message {
         WM_COMMAND => {
             let binding = BINDINGS.with(|map| map.borrow().get(&(window as isize)).cloned());
@@ -202,6 +205,7 @@ impl Panel {
                 std::ptr::null(),
             );
             anyhow::ensure!(!window.is_null(), "cannot create Files panel");
+            chrome::register_control(window, chrome::ControlRole::Static);
             let mut panel = Self {
                 window,
                 list: std::ptr::null_mut(),
@@ -265,7 +269,14 @@ impl Panel {
                 0,
                 wide(class).as_ptr(),
                 wide(text).as_ptr(),
-                WS_CHILD | WS_VISIBLE | style,
+                WS_CHILD
+                    | WS_VISIBLE
+                    | style
+                    | if class == "BUTTON" {
+                        BS_OWNERDRAW as u32
+                    } else {
+                        0
+                    },
                 0,
                 0,
                 1,
@@ -276,12 +287,12 @@ impl Panel {
                 std::ptr::null(),
             );
             anyhow::ensure!(!window.is_null(), "cannot create Files control");
-            SendMessageW(
-                window,
-                WM_SETFONT,
-                GetStockObject(DEFAULT_GUI_FONT) as usize,
-                1,
-            );
+            match class {
+                "BUTTON" => chrome::register_button(window, chrome::Role::Button),
+                "EDIT" => chrome::register_control(window, chrome::ControlRole::Edit),
+                "LISTBOX" => chrome::register_control(window, chrome::ControlRole::Listbox),
+                _ => chrome::register_control(window, chrome::ControlRole::Caption),
+            }
             Ok(window)
         }
     }

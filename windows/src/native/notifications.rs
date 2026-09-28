@@ -108,38 +108,25 @@ impl App {
         for control in &self.controls {
             let label = match control.action {
                 Action::Notifications => Some(self.notification_button_text()),
-                Action::Workspace(id) => self
-                    .workspaces
-                    .iter()
-                    .enumerate()
-                    .find(|(_, w)| w.id == id)
-                    .map(|(index, w)| {
-                        let count = entries
-                            .iter()
-                            .filter(|e| {
-                                !e.read
-                                    && e.surface
-                                        .and_then(|s| self.locate(s))
-                                        .map(|(i, _, _)| self.workspaces[i].id)
-                                        .or(e.workspace)
-                                        == Some(id)
-                            })
-                            .count();
-                        let prefix = if count > 0 {
-                            format!("[{count}] ")
-                        } else {
-                            String::new()
-                        };
-                        format!(
-                            "{prefix}{} {}",
-                            if index == self.active_workspace {
-                                "●"
-                            } else {
-                                "○"
-                            },
-                            w.name
-                        )
-                    }),
+                Action::Workspace(id) => self.workspaces.iter().find(|w| w.id == id).map(|w| {
+                    let count = entries
+                        .iter()
+                        .filter(|e| {
+                            !e.read
+                                && e.surface
+                                    .and_then(|s| self.locate(s))
+                                    .map(|(i, _, _)| self.workspaces[i].id)
+                                    .or(e.workspace)
+                                    == Some(id)
+                        })
+                        .count();
+                    let prefix = if count > 0 {
+                        format!("[{count}] ")
+                    } else {
+                        String::new()
+                    };
+                    format!("{prefix}{}", w.name)
+                }),
                 _ => None,
             };
             if let Some(label) = label {

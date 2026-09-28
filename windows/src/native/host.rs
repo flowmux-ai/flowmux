@@ -45,6 +45,8 @@ use wry::{WebContext, WebView, WebViewBuilder, WebViewExtWindows};
 mod appearance;
 #[path = "browser.rs"]
 mod browser;
+#[path = "chrome.rs"]
+mod chrome;
 #[path = "downloads.rs"]
 mod downloads;
 #[path = "editor.rs"]
@@ -76,6 +78,7 @@ enum Event {
     Files(files::Signal),
     Browser(browser::Signal),
     Layout,
+    SidebarScroll(i32),
     Tick,
     Close,
     ExitAfterReply,
@@ -122,7 +125,31 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message != WM_CTLCOLORSTATIC {
+        if let Some(result) = chrome::message(window, message, wparam, lparam) {
+            return result;
+        }
+    }
     match message {
+        WM_MOUSEWHEEL => {
+            let mut point = POINT {
+                x: lparam as u16 as i16 as i32,
+                y: (lparam >> 16) as u16 as i16 as i32,
+            };
+            ScreenToClient(window, &mut point);
+            let mut client = RECT::default();
+            GetClientRect(window, &mut client);
+            let sidebar = ((185.0 * GetDpiForWindow(window).max(96) as f64 / 96.0).round() as i32)
+                .min((client.right / 3).max(0));
+            if point.x >= 0 && point.x < sidebar {
+                let delta = (wparam >> 16) as u16 as i16 as i32;
+                if delta != 0 {
+                    post(Event::SidebarScroll(if delta > 0 { -1 } else { 1 }));
+                }
+                return 0;
+            }
+            DefWindowProcW(window, message, wparam, lparam)
+        }
         WM_CONTEXTMENU => {
             let action =
                 CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(wparam as isize)).cloned());
@@ -141,11 +168,14 @@ unsafe extern "system" fn window_proc(
         }
         WM_CTLCOLORSTATIC => {
             if let Some(color) = workspaces::swatch_color(lparam as HWND) {
+                let brush = chrome::message(window, message, wparam, lparam)
+                    .unwrap_or_else(|| GetSysColorBrush(COLOR_WINDOW) as LRESULT);
                 SetTextColor(wparam as HDC, color);
                 SetBkMode(wparam as HDC, TRANSPARENT as i32);
-                GetSysColorBrush(COLOR_WINDOW) as LRESULT
+                brush
             } else {
-                DefWindowProcW(window, message, wparam, lparam)
+                chrome::message(window, message, wparam, lparam)
+                    .unwrap_or_else(|| DefWindowProcW(window, message, wparam, lparam))
             }
         }
         WM_LBUTTONDOWN | WM_MOUSEMOVE | WM_LBUTTONUP => {
@@ -287,6 +317,10 @@ enum Action {
     SearchAll,
     TogglePaneZoom,
     Tab(PaneId, SurfaceId),
+    TabClose(PaneId, SurfaceId),
+    PaneAdd(PaneId, SurfaceId),
+    PaneMenu(PaneId, SurfaceId),
+    SidebarScroll(i32),
 }
 struct Control {
     hwnd: HWND,
@@ -350,6 +384,8 @@ struct App {
     active_workspace: usize,
     surfaces: HashMap<SurfaceId, Surface>,
     controls: Vec<Control>,
+    sidebar_offset: usize,
+    sidebar_active: Option<WorkspaceId>,
     pane_layout: model::Layout,
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
@@ -558,6 +594,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             active_workspace,
             surfaces: HashMap::new(),
             controls: vec![],
+            sidebar_offset: 0,
+            sidebar_active: None,
             pane_layout: model::Layout::default(),
             zoomed: None,
             drag: None,
@@ -584,6 +622,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             last_save_attempt: Instant::now(),
             state_error: None,
         };
+        chrome::configure(app.settings.terminal.theme, GetDpiForWindow(window).max(96));
+        chrome::window_theme(window, app.settings.terminal.theme);
         app.rebuild()?;
         if !app.background_test {
             ShowWindow(window, SW_SHOW);
@@ -607,6 +647,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(app);
         EVENTS.with(|slot| *slot.borrow_mut() = None);
         DestroyWindow(window);
+        chrome::shutdown();
         CoUninitialize();
         result
     }
@@ -691,47 +732,27 @@ impl App {
             }
         }
         for control in self.controls.drain(..) {
+            chrome::unregister(control.hwnd);
             unsafe {
                 DestroyWindow(control.hwnd);
             }
         }
         for (name, action) in [
-            ("+ Workspace", Action::NewWorkspace),
-            ("+ Tab", Action::NewTab),
-            ("Split right", Action::Vertical),
-            ("Split down", Action::Horizontal),
-            ("Close tab", Action::CloseTab),
-            ("Move tab…", Action::MoveTabMenu),
-            ("Find", Action::Find),
-            ("Search all", Action::SearchAll),
-            ("Maximize pane", Action::TogglePaneZoom),
+            ("+", Action::NewWorkspace),
+            ("Workspaces", Action::WorkspaceMenu),
+            ("Settings", Action::Settings),
+            ("Files", Action::ShowFiles),
+            ("Search", Action::SearchAll),
+            ("Open file", Action::OpenEditor),
+            ("Notices", Action::Notifications),
+            ("Previous", Action::SidebarScroll(-1)),
+            ("Next", Action::SidebarScroll(1)),
         ] {
             self.button(name, action)?;
         }
-        self.button("+ Browser", Action::NewBrowser)?;
-        self.button("Open file…", Action::OpenEditor)?;
-        self.button("Files", Action::ShowFiles)?;
-        self.button("Workspace…", Action::WorkspaceMenu)?;
-        self.button(&self.notification_button_text(), Action::Notifications)?;
-        self.button(
-            if self.settings_error.is_some() {
-                "Settings (!)…"
-            } else {
-                "Settings…"
-            },
-            Action::Settings,
-        )?;
         for index in 0..self.workspaces.len() {
-            let name = format!(
-                "{} {}",
-                if index == self.active_workspace {
-                    "●"
-                } else {
-                    "○"
-                },
-                self.workspaces[index].name
-            );
             let id = self.workspaces[index].id;
+            let name = self.workspaces[index].name.clone();
             self.button(&name, Action::Workspace(id))?;
             if let Some(color) = self.workspaces[index].color.clone() {
                 self.swatch(id, &color)?;
@@ -739,13 +760,11 @@ impl App {
         }
         for (pane, active, tabs) in self.workspace().leaves() {
             for tab in tabs {
-                let title = if active == tab.id {
-                    format!("● {}", tab.title)
-                } else {
-                    tab.title
-                };
-                self.button(&title, Action::Tab(pane, tab.id))?;
+                self.button(&tab.title, Action::Tab(pane, tab.id))?;
+                self.button("Close tab", Action::TabClose(pane, tab.id))?;
             }
+            self.button("+", Action::PaneAdd(pane, active))?;
+            self.button("Pane actions", Action::PaneMenu(pane, active))?;
         }
         self.refresh_notifications();
         self.layout()
@@ -758,7 +777,7 @@ impl App {
                 0,
                 wide("BUTTON").as_ptr(),
                 wide(name.replace('&', "&&")).as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32,
                 0,
                 0,
                 1,
@@ -778,6 +797,20 @@ impl App {
                 1,
             );
         }
+        let role = match action {
+            Action::Workspace(id) => chrome::Role::Workspace {
+                selected: self.workspace().id == id,
+            },
+            Action::Tab(pane, surface) => chrome::Role::Tab {
+                selected: self.workspace().root.active_surface_id(pane) == Some(surface),
+            },
+            Action::PaneAdd(..)
+            | Action::PaneMenu(..)
+            | Action::TabClose(..)
+            | Action::NewWorkspace => chrome::Role::Tool,
+            _ => chrome::Role::Button,
+        };
+        chrome::register_button(hwnd, role);
         CONTROL_ACTIONS.with(|actions| actions.borrow_mut().insert(hwnd as isize, action.clone()));
         self.controls.push(Control { hwnd, action });
         Ok(())
@@ -820,7 +853,7 @@ impl App {
             init
         };
         let view = WebViewBuilder::new_with_web_context(&mut self.context)
-            .with_background_color((23, 25, 31, 255))
+            .with_background_color((40, 44, 52, 255))
             .with_devtools(false)
             .with_hotkeys_zoom(false)
             .with_visible(false)
@@ -908,7 +941,11 @@ impl App {
         let scale = unsafe { GetDpiForWindow(self.window) }.max(96) as f64 / 96.0;
         let px = |value: i32| (value as f64 * scale).round() as i32;
         let sidebar = px(185).min((client.right / 3).max(0));
-        let bar = px(34);
+        let bar = px(28);
+        chrome::configure(
+            self.settings.terminal.theme,
+            unsafe { GetDpiForWindow(self.window) }.max(96),
+        );
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
         if let Some(pane) = self.zoomed {
             geometry.panes = vec![(pane, content)];
@@ -975,66 +1012,171 @@ impl App {
                 }))?;
             }
         }
-        let mut tab_positions: HashMap<PaneId, i32> = HashMap::new();
-        for (index, control) in self.controls.iter().enumerate() {
-            let (x, y, width, height) = match control.action {
-                Action::NewBrowser => (px(5), bar + px(128), (sidebar - px(10)).max(1), px(32)),
-                Action::OpenEditor => (px(5), bar + px(168), (sidebar - px(10)).max(1), px(32)),
-                Action::ShowFiles => (px(5), bar + px(208), (sidebar - px(10)).max(1), px(32)),
-                Action::WorkspaceMenu => (px(5), bar + px(8), (sidebar - px(10)).max(1), px(32)),
-                Action::Settings => (px(5), bar + px(48), (sidebar - px(10)).max(1), px(32)),
-                Action::Notifications => (px(5), bar + px(88), (sidebar - px(10)).max(1), px(32)),
+        let row_height = px(38).max(1);
+        let list_top = px(40);
+        let footer_top = (client.bottom - px(120)).max(list_top);
+        let visible_rows = ((footer_top - list_top) / row_height).max(0) as usize;
+        let max_offset = self.workspaces.len().saturating_sub(visible_rows.max(1));
+        self.sidebar_offset = self.sidebar_offset.min(max_offset);
+        if self.sidebar_active != Some(self.workspace().id) {
+            self.sidebar_active = Some(self.workspace().id);
+            if self.active_workspace < self.sidebar_offset {
+                self.sidebar_offset = self.active_workspace;
+            }
+            if self.active_workspace >= self.sidebar_offset + visible_rows.max(1) {
+                self.sidebar_offset = self.active_workspace + 1 - visible_rows.max(1);
+            }
+        }
+        for control in &self.controls {
+            let rect = match control.action {
+                Action::NewWorkspace => Some((px(4), px(5), px(28), px(28))),
+                Action::WorkspaceMenu => Some((px(36), px(5), (sidebar - px(40)).max(1), px(28))),
                 Action::Workspace(id) | Action::WorkspaceColor(id) => {
                     let i = self.workspaces.iter().position(|w| w.id == id).unwrap();
-                    let swatch = matches!(control.action, Action::WorkspaceColor(_));
-                    (
-                        if swatch { px(5) } else { px(23) },
-                        bar + px(248) + i as i32 * px(36),
-                        if swatch {
-                            px(16)
-                        } else {
-                            (sidebar - px(28)).max(1)
-                        },
-                        px(32),
-                    )
+                    if i < self.sidebar_offset || i >= self.sidebar_offset + visible_rows {
+                        None
+                    } else {
+                        let swatch = matches!(control.action, Action::WorkspaceColor(_));
+                        Some((
+                            if swatch { px(5) } else { px(14) },
+                            list_top + (i - self.sidebar_offset) as i32 * row_height,
+                            if swatch {
+                                px(5)
+                            } else {
+                                (sidebar - px(19)).max(1)
+                            },
+                            row_height - px(2),
+                        ))
+                    }
                 }
-                Action::Tab(pane, _) => {
-                    let Some((_, area)) = areas.iter().find(|(id, _)| *id == pane) else {
+                Action::SidebarScroll(direction) => {
+                    if self.workspaces.len() <= visible_rows {
+                        None
+                    } else {
                         unsafe {
-                            ShowWindow(control.hwnd, SW_HIDE);
+                            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
+                                control.hwnd,
+                                i32::from(if direction < 0 {
+                                    self.sidebar_offset > 0
+                                } else {
+                                    self.sidebar_offset < max_offset
+                                }),
+                            );
                         }
-                        continue;
-                    };
-                    let offset = tab_positions.entry(pane).or_default();
-                    let count = self.workspace().root.surface_count(pane).unwrap_or(1) as i32;
-                    let width = (area.width / count).min(px(200)).max(1);
-                    let result = (area.x + *offset, area.y, width, bar);
-                    *offset += width;
-                    result
+                        Some((
+                            if direction < 0 { px(4) } else { sidebar / 2 },
+                            footer_top,
+                            (sidebar / 2 - px(6)).max(1),
+                            px(24),
+                        ))
+                    }
                 }
-                _ => (px(5 + index as i32 * 130), px(2), px(124), bar - px(2)),
+                Action::Settings
+                | Action::ShowFiles
+                | Action::SearchAll
+                | Action::OpenEditor
+                | Action::Notifications => {
+                    let (col, row) = match control.action {
+                        Action::Settings => (0, 0),
+                        Action::ShowFiles => (1, 0),
+                        Action::SearchAll => (0, 1),
+                        Action::OpenEditor => (1, 1),
+                        _ => (0, 2),
+                    };
+                    let cell = (sidebar - px(8)) / 2;
+                    Some((
+                        px(4) + col * cell,
+                        footer_top + px(28) + row * px(28),
+                        if matches!(control.action, Action::Notifications) {
+                            cell * 2
+                        } else {
+                            cell
+                        },
+                        px(26),
+                    ))
+                }
+                Action::Tab(pane, surface)
+                | Action::TabClose(pane, surface)
+                | Action::PaneAdd(pane, surface)
+                | Action::PaneMenu(pane, surface) => areas
+                    .iter()
+                    .find(|(id, _)| *id == pane)
+                    .and_then(|(_, area)| {
+                        if matches!(control.action, Action::PaneMenu(..)) {
+                            let width = px(28).min(area.width).max(1);
+                            return Some((
+                                area.x + area.width - width,
+                                area.y,
+                                width,
+                                bar.min(area.height).max(1),
+                            ));
+                        }
+                        if matches!(control.action, Action::PaneAdd(..)) {
+                            return (area.width >= px(94)).then_some((
+                                area.x + area.width - px(60),
+                                area.y,
+                                px(28),
+                                bar,
+                            ));
+                        }
+                        let tabs = self
+                            .workspace()
+                            .leaves()
+                            .into_iter()
+                            .find(|(id, _, _)| *id == pane)?
+                            .2;
+                        let at = tabs.iter().position(|tab| tab.id == surface)?;
+                        let active = self.workspace().root.active_surface_id(pane)?;
+                        let active_index =
+                            tabs.iter().position(|tab| tab.id == active).unwrap_or(0);
+                        let available = (area.width - px(64)).max(0);
+                        let slots = ((available / px(92).max(1)).max(1) as usize).min(tabs.len());
+                        let start = active_index.saturating_sub(slots.saturating_sub(1));
+                        if at < start || at >= start + slots || available < px(30) {
+                            return None;
+                        }
+                        let width = (available / slots.max(1) as i32).min(px(190));
+                        let close = matches!(control.action, Action::TabClose(..));
+                        let close_width = if width >= px(72) { px(22) } else { 0 };
+                        if close && close_width == 0 {
+                            return None;
+                        }
+                        Some((
+                            area.x
+                                + (at - start) as i32 * width
+                                + if close { width - close_width } else { 0 },
+                            area.y,
+                            if close {
+                                close_width
+                            } else {
+                                width - close_width
+                            },
+                            bar,
+                        ))
+                    }),
+                _ => None,
             };
             unsafe {
-                if matches!(control.action, Action::TogglePaneZoom) {
-                    SetWindowTextW(
+                if let Some((x, y, width, height)) = rect.filter(|(x, y, width, height)| {
+                    *x >= 0
+                        && *y >= 0
+                        && *width > 0
+                        && *height > 0
+                        && x.saturating_add(*width) <= client.right
+                        && y.saturating_add(*height) <= client.bottom
+                }) {
+                    SetWindowPos(
                         control.hwnd,
-                        wide(if self.zoomed.is_some() {
-                            "Restore pane"
-                        } else {
-                            "Maximize pane"
-                        })
-                        .as_ptr(),
+                        std::ptr::null_mut(),
+                        x,
+                        y,
+                        width.max(1),
+                        height.max(1),
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
                     );
+                } else {
+                    ShowWindow(control.hwnd, SW_HIDE);
                 }
-                SetWindowPos(
-                    control.hwnd,
-                    std::ptr::null_mut(),
-                    x,
-                    y,
-                    width,
-                    height,
-                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
             }
         }
         self.pane_layout = geometry;
@@ -1097,6 +1239,14 @@ impl App {
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Activated => self.ack_focused_notifications(self.active()),
+            Event::SidebarScroll(delta) => {
+                self.sidebar_offset = if delta < 0 {
+                    self.sidebar_offset.saturating_sub(1)
+                } else {
+                    self.sidebar_offset.saturating_add(1)
+                };
+                self.layout()?;
+            }
             Event::Layout => {
                 self.cancel_drag();
                 self.layout()?;
@@ -1818,11 +1968,7 @@ impl App {
         if let Some((workspace, pane, _)) = self.locate(id) {
             let root = &self.workspaces[workspace].root;
             if let Some(title) = root.surface_title(pane, id) {
-                let mut label = if root.active_surface_id(pane) == Some(id) {
-                    format!("● {title}")
-                } else {
-                    title.to_owned()
-                };
+                let mut label = title.to_owned();
                 let unread = self
                     .notifications
                     .store
@@ -2133,6 +2279,34 @@ impl App {
                 }
                 return Ok(());
             }
+            Action::SidebarScroll(delta) => {
+                self.sidebar_offset = if delta < 0 {
+                    self.sidebar_offset.saturating_sub(1)
+                } else {
+                    self.sidebar_offset.saturating_add(1)
+                };
+                return self.layout();
+            }
+            Action::PaneAdd(pane, surface) => {
+                anyhow::ensure!(
+                    self.locate(surface)
+                        .is_some_and(|(_, current, _)| current == pane),
+                    "Pane source changed"
+                );
+                return self
+                    .new_terminal(surface, None, None, shells::NewTerminal::Tab)
+                    .map(|_| ());
+            }
+            Action::PaneMenu(pane, surface) => return self.pane_actions_menu(pane, surface),
+            Action::TabClose(pane, surface) => {
+                anyhow::ensure!(
+                    self.locate(surface)
+                        .is_some_and(|(_, current, _)| current == pane),
+                    "Tab moved before close"
+                );
+                self.select(surface)?;
+                return self.action(Action::CloseTab);
+            }
             Action::Tab(_, surface) => self.select(surface)?,
         }
         self.rebuild()
@@ -2238,6 +2412,14 @@ impl App {
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"All release gates remain pending; see windows/acceptance.json"})))
             }
+            #[cfg(debug_assertions)]
+            Command::ChromeCapture { path } => {
+                anyhow::ensure!(
+                    self.background_test,
+                    "chrome capture requires an owned hidden debug host"
+                );
+                return chrome::capture(self.window, &path).map(Some);
+            }
             Command::Tree => {
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
                     "pid":surface.process_pid,"running":surface.session.is_some() && surface.exit_code.is_none(),
@@ -2259,7 +2441,7 @@ impl App {
                         "editor_picker_pending":self.editor_picker_pending,
                         "close_accepted":self.close_accepted,
                         "popup":self.browser_popup_status(),
-                        "zoomed_pane":self.zoomed,"layout":self.pane_layout,
+                        "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
                             "saving":self.pending_save.is_some(),"error":self.state_error}}),

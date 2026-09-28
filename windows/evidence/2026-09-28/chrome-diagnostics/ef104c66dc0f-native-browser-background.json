@@ -1,0 +1,65 @@
+{
+    "started":  "2026-09-28T16:12:58.3422406+09:00",
+    "mode":  "background",
+    "checks":  [
+                   {
+                       "name":  "native_webview_unicode_dom_address_and_no_terminal_bridge",
+                       "page":  {
+                                    "host":  "undefined",
+                                    "identity":  "undefined",
+                                    "ipc":  "undefined",
+                                    "settings":  "undefined",
+                                    "text":  "첫째 한글 한 é 😀"
+                                },
+                       "passed":  true
+                   },
+                   {
+                       "name":  "native_history_reload_stop_redirect_failure_recovery_and_bounded_zoom",
+                       "failure":  "Navigation failed or stopped (WebView2 error 8)",
+                       "passed":  true
+                   },
+                   {
+                       "popup":  {
+                                     "returnedWindowProxy":  true,
+                                     "pane":  "f69a782f-5f5d-4d3e-a7f3-a9a0cdb99be9",
+                                     "opener":  "7a78a659-b7cb-4a7c-accf-adea1eb0ddaf",
+                                     "surface":  "05dd3337-eea5-476a-8082-571a71d64046",
+                                     "closed":  true
+                                 },
+                       "name":  "forbidden_urls_popup_tab_lifecycle_script_errors_and_terminal_target_rejection",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "right_reuse_down_split_mixed_pane_move_keeps_webview_and_source_process",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inactive_calling_terminal_keeps_own_cwd_in_mixed_pane",
+                       "passed":  true
+                   },
+                   {
+                       "window":  "5b1aa84b-cc03-43e8-99dd-2691731a476f",
+                       "surface":  "7a78a659-b7cb-4a7c-accf-adea1eb0ddaf",
+                       "name":  "browser_only_checkpoint_restart_and_separate_profile_persistence",
+                       "passed":  true
+                   }
+               ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "unicodeComparison":  "ordinal",
+    "status":  "passed_background_browser_subset",
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  29484,
+                  10512
+              ],
+    "shells":  [
+                   28836,
+                   37228,
+                   39288,
+                   29928
+               ],
+    "finished":  "2026-09-28T16:13:13.6904875+09:00"
+}

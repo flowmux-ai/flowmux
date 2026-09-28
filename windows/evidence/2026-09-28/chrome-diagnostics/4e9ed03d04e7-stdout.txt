@@ -1,0 +1,2 @@
+Evidence: C:\Users\jundu\Documents\Codex\2026-06-10\jsuya-flowmux-https-github-com-jsuya\work\flowmux\windows\dist\evidence\chrome-db93826c-a5b5-4b73-9ac9-2557cca6a002
+{"status":"passed_background_chrome_subset","baseline":false,"checks":1,"elapsedMs":5191}

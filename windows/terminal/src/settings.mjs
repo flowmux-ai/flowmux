@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export const themes = Object.freeze({
-  dark: { background: '#17191f', foreground: '#e2e5ed', cursor: '#b9c6ff', selectionBackground: '#455483' },
+  dark: { background: '#282c34', foreground: '#ffffff', cursor: '#b9c6ff', selectionBackground: '#455483',
+    black:'#5c6370', red:'#cc6666', green:'#b5bd68', yellow:'#f0c674', blue:'#81a2be', magenta:'#b294bb', cyan:'#8abeb7', white:'#c5c8c6',
+    brightBlack:'#7f848e', brightRed:'#d54e53', brightGreen:'#b9ca4a', brightYellow:'#e7c547', brightBlue:'#7aa6da', brightMagenta:'#c397d8', brightCyan:'#70c0b1', brightWhite:'#eaeaea' },
   light: { background: '#ffffff', foreground: '#202124', cursor: '#202124', selectionBackground: '#b5cff7',
     black:'#202124', red:'#b42318', green:'#18733b', yellow:'#805500', blue:'#185abc', magenta:'#8f2db3', cyan:'#007580', white:'#c5c7cb',
     brightBlack:'#686b70', brightRed:'#c5221f', brightGreen:'#188038', brightYellow:'#956500', brightBlue:'#1967d2', brightMagenta:'#a142b8', brightCyan:'#00838f', brightWhite:'#f1f3f4' },

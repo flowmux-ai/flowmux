@@ -300,7 +300,7 @@ PowerShell 7, other interactive shells, script-language quoting, real menus/IME,
 DPI and accessibility acceptance remain pending. See
 [shell verification](evidence/2026-09-28/shells.md).
 
-The side panel's **Workspace…** menu (also available by right-clicking a workspace)
+The side panel's **Workspaces** menu (also available by right-clicking a workspace)
 renames, colors, moves up/down and closes workspaces. Right-click a tab to rename
 it. Names preserve Korean, decomposed Unicode, emoji, spaces and literal `&`;
 empty names, control characters and names over 256 UTF-16 units are rejected.
@@ -330,11 +330,12 @@ Closing a workspace terminates all its terminals and descendant processes.
 The native menu asks before closing; an explicit CLI close performs the action.
 Closing the active workspace selects its next neighbor, or its previous one at
 the end. The final workspace is currently protected; use `quit` to close the
-window. Empty-window UI, drag reordering, overflowing side panels, automatic-name
-reset and native menu/dialog/IME/DPI acceptance remain pending. Hidden verification
+window. Overflowing workspace lists now have Previous/Next controls. Empty-window
+UI, drag reordering, automatic-name reset and native menu/dialog/IME/DPI acceptance
+remain pending. Hidden verification
 is available in `scripts/verify-workspaces.ps1`.
 
-The side panel's **Settings…** menu changes terminal font/fallback list, size
+The side panel's **Settings** menu changes terminal font/fallback list, size
 (6–72 pixels), dark/light theme, cursor blink/style and scrollback (0–100000
 lines), plus minimap enable/width/opacity. Larger/smaller/reset text commands change the shared font size. Lowering
 scrollback discards the oldest retained lines. Terminal settings are shared
@@ -375,11 +376,26 @@ Hidden debug hosts use volatile defaults unless the verifier explicitly supplies
 an isolated `FLOWMUX_TEST_CONFIG_DIR`.
 
 Use installed monospaced fonts; Unicode font names are preserved, but font
-availability and glyph coverage are not validated. Settings currently affect
-terminal colors, not native controls or the find bar. Custom themes, font
+availability and glyph coverage are not validated. Dark/light settings now also
+select native shell colors; custom themes, font
 discovery, configurable zoom shortcuts, per-tab settings, real menu/IME/DPI and
 accessibility acceptance remain pending. See
 [settings verification](evidence/2026-09-28/settings.md).
+
+The native shell uses a 185-DIP sidebar with a **Workspaces** header, workspace
+rows beginning at 40 DIP, and 28-DIP pane tab strips. Each pane has a right-edge
+**+** and **Pane actions** menu; overflowing tabs remain reachable from that menu.
+The footer places Settings/Files and Search/Open file in two columns, followed by
+full-width Notices. Theme and DPI updates retain native controls and embedded views while applying
+selection marks and scaled typography. The terminal background/foreground and
+16 ANSI colors now match the existing Linux defaults (dark `#282c34`/`#ffffff`).
+
+This is the first visual alignment step. A hidden native check passes for live
+control geometry, Korean labels, light/dark rendering and unchanged terminal
+identities. Workspace metadata presentation, Agents, symbolic icons, full physical
+DPI/IME and accessibility parity remain open. Offscreen renders use the production
+native renderer and exclude WebView/GPU contents; they cannot establish full
+visual parity. See the [chrome evidence](evidence/2026-09-28/chrome.md).
 
 The terminal minimap is enabled by default at 40 CSS pixels wide and 50% opacity.
 Width accepts 12–96 and opacity 0–100. It previews a movable window of retained

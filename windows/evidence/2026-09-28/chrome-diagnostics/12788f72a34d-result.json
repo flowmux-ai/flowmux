@@ -1,0 +1,15 @@
+{
+  "name": "chrome-terminal-assets",
+  "command": [
+    "npm",
+    "--prefix",
+    "windows/terminal",
+    "run",
+    "build"
+  ],
+  "deadlineSeconds": 30,
+  "status": "passed",
+  "pid": 435084,
+  "exitCode": 0,
+  "elapsedSeconds": 1.628
+}

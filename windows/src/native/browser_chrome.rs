@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Native child controls; never create a desktop window or intercept IME Enter.
+use super::super::chrome as shell_chrome;
 use super::*;
 use windows_sys::Win32::UI::{
     Controls::EM_SETLIMITTEXT,
@@ -7,6 +8,9 @@ use windows_sys::Win32::UI::{
 };
 thread_local! { static OWNERS: RefCell<HashMap<isize, SurfaceId>> = RefCell::new(HashMap::new()); }
 unsafe extern "system" fn procedure(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if let Some(result) = shell_chrome::message(hwnd, msg, w, l) {
+        return result;
+    }
     if msg == WM_COMMAND && (w >> 16) == 0 {
         if let Some(id) = OWNERS.with(|map| map.borrow().get(&(hwnd as isize)).copied()) {
             post(Event::Browser(browser::Signal::Ui(id, w as u16)));
@@ -64,6 +68,7 @@ impl Chrome {
                 std::ptr::null(),
             );
             checked((!window.is_null()) as i32)?;
+            shell_chrome::register_control(window, shell_chrome::ControlRole::Static);
             let mut chrome = Self {
                 window,
                 address: std::ptr::null_mut(),
@@ -115,7 +120,14 @@ impl Chrome {
             0,
             wide(class).as_ptr(),
             wide(text).as_ptr(),
-            WS_CHILD | WS_VISIBLE | style,
+            WS_CHILD
+                | WS_VISIBLE
+                | style
+                | if class == "BUTTON" {
+                    BS_OWNERDRAW as u32
+                } else {
+                    0
+                },
             0,
             0,
             1,
@@ -126,12 +138,11 @@ impl Chrome {
             std::ptr::null(),
         );
         checked((!hwnd.is_null()) as i32)?;
-        SendMessageW(
-            hwnd,
-            WM_SETFONT,
-            GetStockObject(DEFAULT_GUI_FONT) as usize,
-            1,
-        );
+        match class {
+            "BUTTON" => shell_chrome::register_button(hwnd, shell_chrome::Role::Button),
+            "EDIT" => shell_chrome::register_control(hwnd, shell_chrome::ControlRole::Edit),
+            _ => shell_chrome::register_control(hwnd, shell_chrome::ControlRole::Caption),
+        }
         Ok(hwnd)
     }
     pub(super) fn height(scale: f64) -> i32 {

@@ -683,3 +683,22 @@ observations. Final regression/build/package results are tracked separately in
 [file-action evidence](evidence/2026-09-28/files-actions.md). F08 stays partial:
 clipboard cut/paste, batch/directory/remote operations, overwrite and physical
 keyboard/IME/focus acceptance remain open.
+
+
+The first native shell visual alignment stage implements a 185-DIP sidebar,
+Workspaces header and rows starting at 40 DIP, compact 28-DIP tabs, inline close,
+and per-pane +/Pane actions controls with an overflow menu. Sidebar overflow has
+Previous/Next controls; its footer uses two columns for Settings/Files and
+Search/Open file, followed by full-width Notices. Native HWND controls receive
+dark/light drawing and DPI-scaled fonts. The Windows terminal copies the existing
+Linux background, foreground and 16 ANSI colors; Linux/macOS sources are unchanged.
+
+The hidden native chrome check passes in 6.070 seconds using the production
+renderer on an offscreen DIB with actual live control identities. It checks
+non-overlapping geometry, exact light/dark background and selection colors,
+Linux terminal background settings and stable terminal IDs/PIDs. Inspection
+of the dark artifact found legible Korean labels. Initial empty PrintWindow
+captures remain historical capture-only evidence. Workspace metadata presentation,
+Agents, symbolic icons and physical DPI/IME/accessibility parity remain open.
+See [chrome evidence](evidence/2026-09-28/chrome.md); these native-only renders
+exclude WebView/GPU contents and do not establish full visual or installer parity.

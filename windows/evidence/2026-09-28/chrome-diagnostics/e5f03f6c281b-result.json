@@ -1,0 +1,13 @@
+{
+    "name":  "chrome-native-inprocess",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\chrome-native.ps1",
+    "deadlineSeconds":  60,
+    "status":  "passed",
+    "started":  "2026-09-28T07:10:17.7372307Z",
+    "pid":  6192,
+    "exitCode":  0,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  6.07,
+    "finished":  "2026-09-28T07:10:23.8108504Z"
+}

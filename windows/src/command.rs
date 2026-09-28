@@ -148,6 +148,11 @@ pub enum Command {
     },
     /// Check local Windows and WebView2 prerequisites without connecting to a window.
     Doctor,
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    ChromeCapture {
+        path: PathBuf,
+    },
     /// Print the session-local PowerShell prompt integration for manual reinstallation.
     ShellIntegration,
     Identify,

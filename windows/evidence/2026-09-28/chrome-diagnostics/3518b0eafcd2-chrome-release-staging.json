@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "cargo_build_result": "windows/dist/checks/chrome-release-build-cc1d8854-cd28-4867-9520-4569f7fa9638/result.json",
+  "boundary": "fresh linked release/deps outputs; canonical GUI output copy failed; running canonical GUI left unchanged",
+  "earliest_link_time": 1790579442.7974024,
+  "artifacts": [
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux.exe",
+      "path": "windows/dist/chrome-release/flowmux.exe",
+      "bytes": 22185984,
+      "sha256": "e54cdf68567f2cfe330caa1c5197166cf8c7473250233e75308adea8cb6e5e65",
+      "source_mtime": 1790579560.8525212
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmuxctl.exe",
+      "path": "windows/dist/chrome-release/flowmuxctl.exe",
+      "bytes": 1917952,
+      "sha256": "5e57735eac218ddbbf895ad409f10e3c2dc8e7a6814f2be893c4d0222f5fec08",
+      "source_mtime": 1790579535.8212652
+    },
+    {
+      "source": "windows/target/x86_64-pc-windows-msvc/release/deps/flowmux_command.exe",
+      "path": "windows/dist/chrome-release/flowmux-command.exe",
+      "bytes": 1977344,
+      "sha256": "d20e9991fdb7379f30f486a7fb556ef698a838ce457dc0d391c41cb85d9c0875",
+      "source_mtime": 1790579535.8280544
+    }
+  ],
+  "source_snapshot": "windows/dist/chrome-source-final.json",
+  "source_hashes_verified": 212,
+  "independent_review": "Source and PE provenance independently reviewed; GUI top-level publication failed, deps link fresh; cfg debug capture not included in release."
+}

@@ -1,0 +1,291 @@
+{
+    "started":  "2026-09-28T07:00:35.9087900Z",
+    "mode":  "hidden-native-chrome",
+    "baseline":  true,
+    "checks":  [
+                   {
+                       "name":  "historical_hidden_native_chrome_capture_only",
+                       "passed":  true
+                   }
+               ],
+    "observations":  [
+                         {
+                             "pid":  29028,
+                             "pipe":  "\\\\.\\pipe\\flowmux-29028-19ccd4aa-69c5-4d9c-8a8c-4a952aecb404",
+                             "elapsedMs":  1181,
+                             "kind":  "startup"
+                         },
+                         {
+                             "name":  "initial",
+                             "window":  93784520,
+                             "client":  [
+                                            1184,
+                                            761
+                                        ],
+                             "dpi":  96,
+                             "controls":  [
+                                              {
+                                                  "Handle":  18812482,
+                                                  "Class":  "Button",
+                                                  "Text":  "+ Workspace",
+                                                  "X":  5,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  44763900,
+                                                  "Class":  "Button",
+                                                  "Text":  "+ Tab",
+                                                  "X":  135,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  2100900,
+                                                  "Class":  "Button",
+                                                  "Text":  "Split right",
+                                                  "X":  265,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  1838278,
+                                                  "Class":  "Button",
+                                                  "Text":  "Split down",
+                                                  "X":  395,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  16256850,
+                                                  "Class":  "Button",
+                                                  "Text":  "Close tab",
+                                                  "X":  525,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  1642356,
+                                                  "Class":  "Button",
+                                                  "Text":  "Move tab…",
+                                                  "X":  655,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  1770110,
+                                                  "Class":  "Button",
+                                                  "Text":  "Find",
+                                                  "X":  785,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  36703358,
+                                                  "Class":  "Button",
+                                                  "Text":  "Search all",
+                                                  "X":  915,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  788420,
+                                                  "Class":  "Button",
+                                                  "Text":  "Maximize pane",
+                                                  "X":  1045,
+                                                  "Y":  2,
+                                                  "Width":  124,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  12323814,
+                                                  "Class":  "Button",
+                                                  "Text":  "+ Browser",
+                                                  "X":  5,
+                                                  "Y":  162,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  1314576,
+                                                  "Class":  "Button",
+                                                  "Text":  "Open file…",
+                                                  "X":  5,
+                                                  "Y":  202,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  986786,
+                                                  "Class":  "Button",
+                                                  "Text":  "Files",
+                                                  "X":  5,
+                                                  "Y":  242,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  2558016,
+                                                  "Class":  "Button",
+                                                  "Text":  "Workspace…",
+                                                  "X":  5,
+                                                  "Y":  42,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  3673520,
+                                                  "Class":  "Button",
+                                                  "Text":  "Notifications (0)",
+                                                  "X":  5,
+                                                  "Y":  122,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  1314582,
+                                                  "Class":  "Button",
+                                                  "Text":  "Settings…",
+                                                  "X":  5,
+                                                  "Y":  82,
+                                                  "Width":  175,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  96667950,
+                                                  "Class":  "Button",
+                                                  "Text":  "● workspace 한글",
+                                                  "X":  23,
+                                                  "Y":  282,
+                                                  "Width":  157,
+                                                  "Height":  32,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              },
+                                              {
+                                                  "Handle":  27790524,
+                                                  "Class":  "Button",
+                                                  "Text":  "● workspace 한글",
+                                                  "X":  189,
+                                                  "Y":  38,
+                                                  "Width":  200,
+                                                  "Height":  34,
+                                                  "Style":  1342242816,
+                                                  "Font":  76153044,
+                                                  "Shown":  true
+                                              }
+                                          ],
+                             "background":  "#ff00ff",
+                             "layout":  {
+                                            "dividers":  [
+
+                                                         ],
+                                            "panes":  [
+                                                          [
+                                                              "a88c3edc-840f-48d7-8a9e-c52161744a19",
+                                                              {
+                                                                  "height":  719,
+                                                                  "width":  991,
+                                                                  "x":  189,
+                                                                  "y":  38
+                                                              }
+                                                          ]
+                                                      ]
+                                        },
+                             "terminalIdentities":  "ddbbec4a-7104-4b72-8cf0-83e20567defd:13476"
+                         },
+                         {
+                             "stdoutComplete":  true,
+                             "exitCode":  0,
+                             "stderrComplete":  true,
+                             "stderr":  "",
+                             "kind":  "host-exit",
+                             "stdout":  ""
+                         }
+                     ],
+    "artifacts":  [
+                      {
+                          "scope":  "owned hidden native chrome only",
+                          "path":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\chrome-4c72884a-85c5-43df-8f71-be69f1cda8c4\\initial.png",
+                          "sha256":  "7f16ce9a4f98b56a2938e58922d82bda1a63fc191f36a7b1406d327ca5c816d3",
+                          "bytes":  5269
+                      }
+                  ],
+    "desktopInput":  false,
+    "clipboardAccess":  false,
+    "webviewCapture":  false,
+    "deferred":  [
+                     "No physical input, IME, foreground focus, accessibility, per-monitor DPI or full WebView screenshot acceptance.",
+                     "PNG renders owned hidden native controls only; terminal/editor/browser WebView pixels are intentionally absent."
+                 ],
+    "status":  "passed_background_chrome_baseline_capture",
+    "hosts":  [
+                  29028
+              ],
+    "shells":  [
+                   13476
+               ],
+    "clientPids":  [
+                       13824,
+                       23336,
+                       38208,
+                       34616,
+                       7692
+                   ],
+    "elapsedMs":  1681,
+    "finished":  "2026-09-28T07:00:37.5890685Z"
+}

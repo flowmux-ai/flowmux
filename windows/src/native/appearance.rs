@@ -36,6 +36,13 @@ impl App {
                 self.settings_error = None;
                 if self.settings != document {
                     self.settings = document;
+                    chrome::window_theme(self.window, self.settings.terminal.theme);
+                    chrome::configure(self.settings.terminal.theme, unsafe {
+                        GetDpiForWindow(self.window)
+                    });
+                    unsafe {
+                        InvalidateRect(self.window, std::ptr::null(), 1);
+                    }
                     for surface in self.surfaces.values_mut() {
                         surface.applied_settings = None;
                         if surface.ready || surface.restoring {
