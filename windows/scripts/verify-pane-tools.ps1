@@ -9,7 +9,7 @@ Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 
 $directory=Join-Path $(if ($env:FLOWMUX_TEST_ARTIFACT_ROOT) { $env:FLOWMUX_TEST_ARTIFACT_ROOT } else { Join-Path $PSScriptRoot '..\dist\evidence' }) ('pane-tools-한글-한-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object EditorFixture($directory);$path=$fixture.Write('pane close 한글.txt',[EditorFixture]::Original,$false,$false)
 $clock=[Diagnostics.Stopwatch]::StartNew();$hostProcess=$null;$pipeName=$null;$clients=@();$shells=@();$cleanup=$false;$out=$null;$err=$null;$editor=$null
-$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-pane-tools';checks=@();observations=@();desktopInput=$false;physicalIme=$false;deferred=@('Owned WM_COMMAND validates direct production buttons. Desktop pointer/menu navigation and composed GPU pixels are not covered.','Tab menus use owned hidden HWND messages; clipboard and folder launch are never invoked. Legacy pane popup selection remains outside this suite.','The dirty document is acknowledged before close; this does not force an unsynchronized edit debounce race.')}
+$evidence=[ordered]@{started=[DateTime]::UtcNow.ToString('o');mode='hidden-native-pane-tools';checks=@();observations=@();desktopInput=$false;physicalIme=$false;deferred=@('Owned WM_COMMAND validates direct production buttons. Desktop pointer/menu navigation and composed GPU pixels are not covered.','Tab menus use owned hidden HWND messages; clipboard and folder launch are never invoked. Pane/workspace menus use the same modeless native controller.','The dirty document is acknowledged before close; this does not force an unsynchronized edit debounce race.')}
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Budget([int]$Max=5000){if($cleanup){return $Max};$left=55000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Pane tools exceeded55s inner budget';return [int][Math]::Min($Max,$left)}
 function Probe([string[]]$Arguments,[int]$Exit=0,[int]$Max=5000){
@@ -28,13 +28,13 @@ function Check-Geometry($Tree){
  foreach($entry in @($Tree.layout.panes)){$pane=$entry[0];$r=$entry[1];$controls=@($Tree.chrome.controls|Where-Object {$_.pane -eq $pane -and $_.layout_visible});foreach($c in $controls){$n=@($native|Where-Object {$_.Handle -eq $c.handle});Require ($n.Count -eq 1) 'Reported control missing from native HWND tree';$v=$n[0];Require ($v.X -ge $r.x -and $v.Y -ge $r.y -and $v.X+$v.Width -le $r.x+$r.width+1 -and $v.Y+$v.Height -le $r.y+$r.height+1) 'Pane header spills outside owning pane'};for($i=0;$i -lt $controls.Count;$i++){for($j=$i+1;$j -lt $controls.Count;$j++){$a=$controls[$i].rect;$b=$controls[$j].rect;Require (-not ($a.x -lt $b.x+$b.width -and $b.x -lt $a.x+$a.width -and $a.y -lt $b.y+$b.height -and $b.y -lt $a.y+$a.height)) 'Pane header controls overlap'}}}
  $evidence.observations+=@{name='native-header-geometry';tree=$Tree;native=$native}
 }
-function Await([scriptblock]$Condition){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -gt 0) 'Tab menu condition exceeded five seconds';$t=Tree ([int]$left);if(& $Condition $t){return $t};Start-Sleep -Milliseconds 20}while($true)}
+function Await([scriptblock]$Condition){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Native menu condition deadline reached (five-second limit; fewer than 100ms remain)';$t=Tree ([int]$left);if(& $Condition $t){return $t};Start-Sleep -Milliseconds 20}while($true)}
 function Menu-Panel($Panel,[long]$Owner){
  Require ($Panel -and $Panel.id -and $Panel.native_visible -eq $false) 'Missing hidden tab menu generation'
  $native=[OptionsFixture]::Describe([long]$Panel.window,$hostProcess.Id);Require ($Panel.owner -eq $Owner -and $native.Owner -eq $Owner -and $native.Enabled -and $native.OwnerEnabled) 'Tab menu has wrong owner or disabled its modeless owner'
  $size=[ChromeFixture]::Size([long]$Panel.window,$hostProcess.Id);$bottom=0
  foreach($row in @($Panel.rows)){$bounds=[OptionsFixture]::RelativeBounds([long]$Panel.window,[long]$row.window,$hostProcess.Id);$control=[OptionsFixture]::Describe([long]$row.window,$hostProcess.Id)
-  Require ($control.Enabled -eq [bool]$row.enabled -and ($control.Style -band 0xf) -eq 0xb) 'Menu row native state/style differs from diagnostics'
+  if($row.separator){Require (-not $row.enabled -and $row.label -ceq '' -and -not $control.Enabled -and ($control.Style -band 0x1f) -eq 0xd -and [Math]::Abs($bounds.Height-9*$native.Dpi/96.0) -le 1) 'Menu separator is not a disabled nine-DIP ownerdraw STATIC'}else{Require ($control.Enabled -eq [bool]$row.enabled -and ($control.Style -band 0xf) -eq 0xb) 'Menu row native state/style differs from diagnostics'}
   Require ($bounds.X -eq $row.bounds.x -and $bounds.Y -eq $row.bounds.y -and $bounds.Width -eq $row.bounds.width -and $bounds.Height -eq $row.bounds.height) 'Menu row diagnostics differ from native client bounds'
   if($row.layout_visible){Require ($bounds.Width -gt 0 -and $bounds.Height -gt 0 -and $bounds.X -ge 0 -and $bounds.Y -ge $bottom -and $bounds.X+$bounds.Width -le $size[0] -and $bounds.Y+$bounds.Height -le $size[1]) 'Visible menu rows overlap or leave popup client bounds';$bottom=$bounds.Y+$bounds.Height}
  }
@@ -50,6 +50,18 @@ function Menu-Open([string]$Surface){
 function Menu-Click($Panel,[string]$Label){$rows=@($Panel.rows|Where-Object {$_.label -ceq $Label});Require ($rows.Count -eq 1 -and $rows[0].enabled) ('Menu action unavailable: '+$Label);[OptionsFixture]::ClickMenu([long]$Panel.window,[long]$rows[0].window,$hostProcess.Id)}
 function Menu-Dismiss($Tree){[OptionsFixture]::PostEscape([long]$Tree.tab_menu.menu.window,$hostProcess.Id);$t=Await {param($value) -not $value.tab_menu};Require ([OptionsFixture]::Describe([long]$t.window_handle,$hostProcess.Id).Enabled) 'Context dismissal disabled the main owner';return $t}
 function Menu-Move($Tree){Menu-Click $Tree.tab_menu.menu 'Move';$t=Await {param($value) $value.tab_menu.submenu};Menu-Panel $t.tab_menu.submenu ([long]$t.tab_menu.menu.window)|Out-Null;return $t}
+function Workspace-Menu([string]$Id){
+ $t=Tree;$rows=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Id -and $_.layout_visible});Require ($rows.Count -eq 1) 'Workspace context source has no unique visible HWND'
+ [OptionsFixture]::ContextMenu([long]$t.window_handle,[long]$rows[0].handle,$hostProcess.Id)
+ $t=Await {param($value) $value.tab_menu.kind -ceq 'workspace' -and $value.tab_menu.workspace -ceq $Id};Menu-Panel $t.tab_menu.menu ([long]$t.window_handle)|Out-Null;return $t
+}
+function Menu-Metadata($Tree,[string]$Label){
+ Menu-Click $Tree.tab_menu.menu $Label;$t=Await {param($value) $value.metadata.open -and -not $value.tab_menu};$panel=$t.metadata;$native=[OptionsFixture]::Describe([long]$panel.window,$hostProcess.Id)
+ Require ($panel.native_visible -eq $false -and $panel.owner -eq $t.window_handle -and $native.Owner -eq $t.window_handle -and $native.Enabled -and -not $native.OwnerEnabled) 'Workspace menu opened metadata with the wrong modal owner'
+ foreach($key in @('input','apply','cancel')){Require ([OptionsFixture]::Parent([long]$panel.$key,$hostProcess.Id) -eq $panel.window) 'Workspace metadata control has the wrong parent'}
+ return $panel
+}
+function Finish-Metadata($Panel,[string]$Action){[OptionsFixture]::Click([long]$Panel.window,[long]$Panel.$Action,$hostProcess.Id);$t=Await {param($value) -not $value.metadata.open};Require ([OptionsFixture]::Describe([long]$t.window_handle,$hostProcess.Id).Enabled) 'Metadata left its main owner disabled';return $t}
 function Editor-Command([string]$Action,[string[]]$Options=@()){$r=Request (@('editor','command',$editor.surface,$Action)+$Options);if($r.psobject.Properties.Name -contains 'result'){return $r.result};return $r}
 try {
  $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Debug background build required'
@@ -67,7 +79,7 @@ try {
  Click $c.pane 'pane_add';$tree=Ready 4;$newTab=Request @('identify');Require ($newTab.pane -eq $c.pane) 'Add tab split or retargeted source';$stable=@($tree.surfaces)
  Click $c.pane 'pane_browser';$watch=[Diagnostics.Stopwatch]::StartNew();do{$tree=Tree;Require ($watch.ElapsedMilliseconds -lt 5000) 'Browser creation exceeded five seconds';if(@($tree.browsers).Count -eq 1){break};Start-Sleep -Milliseconds 20}while($true)
  $browser=Request @('identify');Require ($browser.pane -eq $c.pane) 'Browser tool opened in the wrong pane';Stable $tree $stable;Check-Geometry $tree
- Click $c.pane 'pane_menu';$tree=Tree;Stable $tree $stable;Require (@($tree.layout.panes).Count -eq 3) 'Hidden pane menu changed layout'
+ Click $c.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Menu-Panel $tree.tab_menu.menu ([long]$tree.window_handle)|Out-Null;Require ($tree.tab_menu.pane -ceq $c.pane -and (@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'Close Pane' -and $tree.tab_menu.menu.rows[0].enabled) 'Pane tool did not expose its captured Close Pane action';$tree=Menu-Dismiss $tree;Stable $tree $stable;Require (@($tree.layout.panes).Count -eq 3) 'Pane menu Escape changed layout'
  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,420,400);$tree=Tree;Check-Geometry $tree;Stable $tree $stable
  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850);$tree=Tree;Check-Geometry $tree
  $evidence.checks+=@{name='native_direct_tools_preserve_existing_terminal_pids_zoom_layout_and_bounded_header_geometry';passed=$true}
@@ -77,13 +89,35 @@ try {
  Require (($before.workspaces|ConvertTo-Json -Depth 30 -Compress) -ceq ($after.workspaces|ConvertTo-Json -Depth 30 -Compress) -and $identity.surface -eq $afterIdentity.surface) 'Rejected whole-pane close changed tabs or logical focus'
  $read=Editor-Command 'read';Require ($read.dirty -and $read.content -ceq [EditorFixture]::Edited -and -not $read.document_focused) 'Rejected close lost dirty text or focused hidden editor'
  $evidence.observations+=@{name='dirty-pane-rejected';response=$rejected;before=$before;after=$after;editorRead=$read}
- Editor-Command 'save'|Out-Null;Request @('close-pane',$c.pane)|Out-Null;$editor=$null;$after=Tree
+ Click $c.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Menu-Click $tree.tab_menu.menu 'Close Pane'
+ $tree=Await {param($t) $t.editor_close_dialog -and -not $t.tab_menu};$dialog=$tree.editor_close_dialog;$native=[OptionsFixture]::Describe([long]$dialog.window,$hostProcess.Id)
+ Require ($dialog.owner -eq $tree.window_handle -and $native.Owner -eq $tree.window_handle -and -not $native.OwnerEnabled -and $native.Enabled -and $dialog.native_visible -eq $false -and -not $dialog.busy) 'Pane Close did not use the owned dirty-editor decision barrier'
+ Require ([OptionsFixture]::Parent([long]$dialog.cancel,$hostProcess.Id) -eq $dialog.window -and $dialog.body.Contains([IO.Path]::GetFileName($path))) 'Pane Close dialog lost its Unicode document or Cancel owner'
+ [OptionsFixture]::Click([long]$dialog.window,[long]$dialog.cancel,$hostProcess.Id);$tree=Await {param($t) -not $t.editor_close_dialog -and -not $t.editor_synchronizing};Stable $tree $stable
+ $read=Editor-Command 'read';Require ($read.dirty -and $read.content -ceq [EditorFixture]::Edited -and @($tree.layout.panes).Count -eq 3 -and [OptionsFixture]::Describe([long]$tree.window_handle,$hostProcess.Id).Enabled) 'Pane Close Cancel lost dirty content, removed a pane or kept its owner disabled'
+ Editor-Command 'save'|Out-Null;Click $c.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Menu-Click $tree.tab_menu.menu 'Close Pane';$after=Await {param($t) -not $t.tab_menu -and @($t.layout.panes).Count -eq 2 -and -not $t.editor_synchronizing};$editor=$null
  $retained=@($stable|Where-Object {$_.id -in @($a.surface,$b.surface)});Stable $after $retained
  Require (@($after.layout.panes).Count -eq 2 -and @($after.surfaces).Count -eq 2 -and @($after.browsers).Count -eq 0 -and @($after.editors).Count -eq 0) 'Successful close did not remove every tab in the target pane'
  Require ($fixture.BytesEqual($path,[EditorFixture]::Encode([EditorFixture]::Edited,$false,$false))) 'Saved editor bytes changed during whole-pane close'
  Request @('close-pane',$b.pane)|Out-Null;$tree=Tree;$final=Request @('close-pane',$a.pane) 1;Require ($final.error -like '*final pane*') 'Final pane close was not refused';Stable (Tree) $original
  $evidence.observations+=@{name='clean-whole-pane-close-and-final-refusal';tree=$tree;final=$final}
  $evidence.checks+=@{name='whole_pane_close_seals_all_editors_rejects_dirty_without_partial_removal_and_preserves_final_pane';passed=$true}
+ Click $a.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Require (@($tree.tab_menu.menu.rows).Count -eq 1 -and -not $tree.tab_menu.menu.rows[0].enabled) 'Final pane Close is not disabled';$tree=Menu-Dismiss $tree
+ $tree=Workspace-Menu $a.workspace;$workspaceMenu=$tree.tab_menu.menu
+ Require ((@($workspaceMenu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace||Change tab name|Change color…||Close tab|Close all tabs||Show in folder|Copy path') 'Workspace menu differs from Linux action and separator order'
+ foreach($label in @('New SSH Workspace','Close tab','Close all tabs')){$row=@($workspaceMenu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and -not $row[0].enabled) ('Unsupported/final workspace action enabled: '+$label)}
+ Require ($tree.tab_menu.folder -ceq $fixture.Root -and $tree.tab_menu.copy_text -ceq $fixture.Root -and @($workspaceMenu.rows|Where-Object {$_.separator}).Count -eq 3) 'Workspace context lost its Unicode CWD or native separators'
+ [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,40,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 3};Require ($tree.tab_menu.menu.id -ceq $workspaceMenu.id) 'Menu navigation replaced the workspace target'
+ [OptionsFixture]::PostKey([long]$workspaceMenu.window,$hostProcess.Id,35,$false,$false);$tree=Await {param($t) $t.tab_menu.menu.selected -eq 10}
+ $bitmap=Join-Path $directory 'workspace-menu.bmp';$capture=Request @('chrome-capture',$bitmap);Require ($capture.root_handle -eq $workspaceMenu.window) 'Workspace bitmap captured another popup'
+ $background=[ChromeFixture]::Pixel($bitmap,0,0)
+ foreach($row in @($workspaceMenu.rows|Where-Object {$_.separator -and $_.layout_visible})){$r=$row.bounds;$plain=[ChromeFixture]::ColorCount($bitmap,$r.x,$r.y,$r.width,$r.height,$background);Require ($plain -lt $r.width*$r.height-5) 'Native separator painter omitted its divider'}
+ $tree=Tree;Require ($tree.tab_menu.menu.id -ceq $workspaceMenu.id) 'Workspace bitmap changed menu generation';Remove-Item -LiteralPath $bitmap -Force;$tree=Menu-Dismiss $tree;Stable $tree $original
+ $blankY=[int]($tree.chrome.sidebar_list_top+2*$tree.chrome.workspace_row_height_dip*$tree.chrome.dpi/96)
+ [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,12,$blankY);$tree=Await {param($t) $t.tab_menu.kind -ceq 'creation'}
+ Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace') 'Empty sidebar context did not use the creation menu';$tree=Menu-Dismiss $tree
+ [OptionsFixture]::ContextMenuAt([long]$tree.window_handle,$hostProcess.Id,([int]$tree.chrome.sidebar_actual_width+20),$blankY);$tree=Tree;Require (-not $tree.tab_menu) 'Workspace creation menu escaped the sidebar bounds'
+ $evidence.checks+=@{name='workspace_Linux_menu_order_disabled_final_and_unsupported_actions_native_separators_and_modeless_Escape';passed=$true}
  # Tab context menus remain modeless while the normal IPC loop answers Tree.
  Request @('workspace','rename',$a.workspace,'원본 한글 한')|Out-Null;Request @('focus-tab',$a.surface)|Out-Null
  $tree=Menu-Open $a.surface;$rootMenu=$tree.tab_menu
@@ -157,6 +191,27 @@ try {
  Require ($returned.surface -ceq $a.surface -and $returned.workspace -ceq $first.workspace -and $returned.pane -ceq $first.pane -and $terminalAfter.view_handle -eq $terminalBefore.view_handle -and $terminalAfter.holder.window -eq $terminalBefore.holder.window -and $terminalAfter.holder.parent -eq $tree.window_handle -and $terminalAfter.holder.root -eq $tree.window_handle) 'Detached context Move did not return the same WebView/holder to the original main workspace'
  Require (@($tree.detached_windows|Where-Object {$_.window_handle -eq $frame.window_handle}).Count -eq 0 -and [OptionsFixture]::Parent([long]$terminalAfter.holder.window,$hostProcess.Id) -eq $tree.window_handle -and [OptionsFixture]::Describe([long]$tree.window_handle,$hostProcess.Id).Enabled) 'Detached context Move retained the old frame or wrong native owner';Stable $tree $menuTerminals
  $evidence.checks+=@{name='detached_tab_context_exact_owner_Move_reattaches_same_HWND_and_PID_and_removes_frame';passed=$true}
+ # Header creation is a separate Linux two-entry menu; existing PTYs survive.
+ $tree=Tree;$header=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_header' -and $_.layout_visible});Require ($header.Count -eq 1) 'Workspace header entry missing'
+ [OptionsFixture]::Click([long]$tree.window_handle,[long]$header[0].handle,$hostProcess.Id);$tree=Await {param($t) $t.tab_menu.kind -ceq 'creation'};Menu-Panel $tree.tab_menu.menu ([long]$tree.window_handle)|Out-Null
+ Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'New workspace|New SSH Workspace' -and $tree.tab_menu.menu.rows[0].enabled -and -not $tree.tab_menu.menu.rows[1].enabled) 'Creation menu order or unsupported SSH state differs'
+ Menu-Click $tree.tab_menu.menu 'New workspace';$tree=Ready 4;$created=Request @('identify');Require ($created.workspace -notin @($first.workspace,$third.workspace) -and -not $tree.tab_menu) 'Native creation reused an existing workspace';Stable $tree $menuTerminals
+ # Pin the new automatic name before comparing unrelated workspace metadata.
+ Request @('workspace','rename',$created.workspace,'새 생성 고정 한 😀')|Out-Null;$tree=Tree
+ $allTerminals=@($tree.surfaces);$oldNames=@{};$oldLocks=@{};foreach($workspace in $tree.workspaces){Require ($workspace.name_locked) 'Workspace comparison requires explicit locked names';$oldNames[$workspace.id]=$workspace.name;$oldLocks[$workspace.id]=$workspace.name_locked}
+ $tree=Workspace-Menu $first.workspace;$captured=$tree.tab_menu.menu.id;Require ((Request @('identify')).workspace -ceq $created.workspace) 'Right-click selected the inactive workspace'
+ Request @('workspace','reorder',$first.workspace,'0')|Out-Null;Request @('focus-tab',$third.surface)|Out-Null;$tree=Tree;Require ($tree.tab_menu.menu.id -ceq $captured -and $tree.tab_menu.workspace -ceq $first.workspace) 'Reorder/focus replaced or retargeted the workspace context'
+ $panel=Menu-Metadata $tree 'Change tab name';Require ([OptionsFixture]::Text([long]$panel.input,$hostProcess.Id) -ceq $oldNames[$first.workspace]) 'Rename opened for the active workspace instead of its captured UUID'
+ $newName='이름 메뉴 한 😀 &';[OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.input,$hostProcess.Id,('  '+$newName+'  '));$tree=Finish-Metadata $panel 'apply'
+ $changed=@($tree.workspaces|Where-Object {$_.id -ceq $first.workspace})[0];Require ($changed.name -ceq $newName -and $changed.name_locked) 'Workspace menu rename did not trim and lock its Unicode title'
+ Require (@($tree.workspaces).Count -eq $oldNames.Count) 'Captured rename changed the workspace identity set';foreach($workspace in $tree.workspaces|Where-Object {$_.id -cne $first.workspace}){Require ($oldNames.ContainsKey($workspace.id) -and $workspace.name -ceq $oldNames[$workspace.id] -and $workspace.name_locked -eq $oldLocks[$workspace.id]) 'Captured rename modified another workspace name or lock'}
+ $row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $first.workspace})[0];Require ([OptionsFixture]::Text([long]$row.handle,$hostProcess.Id).StartsWith($newName.Replace('&','&&')+"`n")) 'Live workspace row did not receive the Unicode name'
+ $tree=Workspace-Menu $first.workspace;$panel=Menu-Metadata $tree 'Change tab name';[OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.input,$hostProcess.Id,'취소 한');$tree=Finish-Metadata $panel 'cancel';Require (@($tree.workspaces|Where-Object {$_.id -ceq $first.workspace})[0].name -ceq $newName) 'Rename Cancel changed the captured workspace'
+ $tree=Workspace-Menu $first.workspace;$panel=Menu-Metadata $tree 'Change color…';[OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.input,$hostProcess.Id,'#2684c7');$tree=Finish-Metadata $panel 'apply'
+ Require (@($tree.workspaces|Where-Object {$_.id -ceq $first.workspace})[0].color -ceq '#2684c7') 'Workspace color Apply changed the wrong target'
+ $tree=Workspace-Menu $first.workspace;$panel=Menu-Metadata $tree 'Change color…';[OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.input,$hostProcess.Id,'#a15c33');$tree=Finish-Metadata $panel 'cancel'
+ Require (@($tree.workspaces|Where-Object {$_.id -ceq $first.workspace})[0].color -ceq '#2684c7') 'Workspace color Cancel overwrote the saved color';Stable $tree $allTerminals
+ $evidence.checks+=@{name='header_creation_preserves_PIDs_and_inactive_workspace_context_captures_UUID_across_reorder_focus_Unicode_rename_color_and_Cancel';passed=$true}
  Request @('quit','--discard-state')|Out-Null;Require ($hostProcess.WaitForExit((Budget 5000))) 'Owned host quit timed out';Require ($hostProcess.ExitCode -eq 0) 'Owned host exit failed';$evidence.status='passed_background_pane_tools_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

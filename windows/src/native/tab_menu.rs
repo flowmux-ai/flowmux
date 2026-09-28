@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Linux tab-menu actions, captured by surface/workspace identity rather than row index.
+//! Themed Linux menus, captured by surface/workspace identity rather than row index.
 use super::*;
 #[path = "tab_menu_panel.rs"]
 mod panel;
@@ -11,6 +11,20 @@ enum MenuAction {
     Copy,
     Move,
     Destination(WorkspaceId),
+    NewWorkspace,
+    RenameWorkspace,
+    WorkspaceColor,
+    CloseWorkspace,
+    ClosePane,
+    Separator,
+    Unsupported,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Tab,
+    Workspace,
+    Creation,
+    Pane,
 }
 #[derive(Clone)]
 struct Entry {
@@ -19,6 +33,7 @@ struct Entry {
     action: MenuAction,
 }
 pub(super) struct Menu {
+    kind: Kind,
     surface: SurfaceId,
     pane: PaneId,
     workspace: WorkspaceId,
@@ -41,7 +56,13 @@ impl Menu {
             || self.menu.handle_message(message)
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"surface":self.surface,"pane":self.pane,"workspace":self.workspace,
+        let kind = match self.kind {
+            Kind::Tab => "tab",
+            Kind::Workspace => "workspace",
+            Kind::Creation => "creation",
+            Kind::Pane => "pane",
+        };
+        json!({"kind":kind,"surface":self.surface,"pane":self.pane,"workspace":self.workspace,
             "copy_text":self.copy_text,"folder":self.folder,"menu":self.menu.diagnostics(),
             "submenu":self.submenu.as_ref().map(panel::Panel::diagnostics)})
     }
@@ -85,18 +106,8 @@ impl App {
         surface: SurfaceId,
         point: (i32, i32),
     ) -> anyhow::Result<()> {
-        self.tab_menu.take();
         let (workspace, current, _) = self.locate(surface).context("Tab no longer exists")?;
         anyhow::ensure!(current == pane, "Tab moved before opening its menu");
-        let owner = self.surface_window(surface);
-        anyhow::ensure!(
-            self.close_request.is_none()
-                && !self.close_accepted
-                && !self.closing
-                && self.editor_barrier.is_none()
-                && unsafe { IsWindowEnabled(owner) } != 0,
-            "Window is busy"
-        );
         let workspace = self.workspaces[workspace].id;
         let (copy_text, folder) = self.tab_copy_text(surface)?;
         let destinations: Vec<_> = self
@@ -135,9 +146,108 @@ impl App {
             enabled: !destinations.is_empty(),
             action: MenuAction::Move,
         });
+        self.show_context_menu(Kind::Tab, surface, entries, destinations, point)
+    }
+    pub(super) fn show_workspace_menu(
+        &mut self,
+        workspace: WorkspaceId,
+        point: (i32, i32),
+        creation: bool,
+    ) -> anyhow::Result<()> {
+        let index = self.workspace_index(workspace)?;
+        let surface = self.workspaces[index].active();
+        let mut rows = vec![
+            ("New workspace", true, MenuAction::NewWorkspace),
+            ("New SSH Workspace", false, MenuAction::Unsupported),
+        ];
+        if !creation {
+            rows.extend([
+                ("", false, MenuAction::Separator),
+                ("Change tab name", true, MenuAction::RenameWorkspace),
+                ("Change color…", true, MenuAction::WorkspaceColor),
+                ("", false, MenuAction::Separator),
+                (
+                    "Close tab",
+                    self.main_workspace_indices().len() > 1,
+                    MenuAction::CloseWorkspace,
+                ),
+                // The Windows host still requires a live workspace. Do not
+                // substitute window closure for Linux's empty workspace view.
+                ("Close all tabs", false, MenuAction::Unsupported),
+                ("", false, MenuAction::Separator),
+                ("Show in folder", true, MenuAction::Folder),
+                (
+                    "Copy path",
+                    !self.tab_copy_text(surface)?.0.is_empty(),
+                    MenuAction::Copy,
+                ),
+            ]);
+        }
+        let entries = rows
+            .into_iter()
+            .map(|(label, enabled, action)| Entry {
+                label: label.into(),
+                enabled,
+                action,
+            })
+            .collect();
+        self.show_context_menu(
+            if creation {
+                Kind::Creation
+            } else {
+                Kind::Workspace
+            },
+            surface,
+            entries,
+            Vec::new(),
+            point,
+        )
+    }
+    pub(super) fn show_pane_menu(
+        &mut self,
+        pane: PaneId,
+        surface: SurfaceId,
+        point: (i32, i32),
+    ) -> anyhow::Result<()> {
+        let (workspace, current, _) = self.locate(surface).context("Pane no longer exists")?;
+        anyhow::ensure!(current == pane, "Pane source moved");
+        let entries = vec![Entry {
+            label: "Close Pane".into(),
+            enabled: self.workspaces[workspace].leaves().len() > 1,
+            action: MenuAction::ClosePane,
+        }];
+        self.show_context_menu(Kind::Pane, surface, entries, Vec::new(), point)
+    }
+    fn show_context_menu(
+        &mut self,
+        kind: Kind,
+        surface: SurfaceId,
+        entries: Vec<Entry>,
+        destinations: Vec<Entry>,
+        point: (i32, i32),
+    ) -> anyhow::Result<()> {
+        self.tab_menu.take();
+        let (workspace, pane, cwd) = self
+            .locate(surface)
+            .context("Menu source no longer exists")?;
+        let workspace = self.workspaces[workspace].id;
+        let owner = self.surface_window(surface);
+        anyhow::ensure!(
+            self.close_request.is_none()
+                && !self.close_accepted
+                && !self.closing
+                && self.editor_barrier.is_none()
+                && unsafe { IsWindowEnabled(owner) } != 0,
+            "Window is busy"
+        );
+        let (copy_text, mut folder) = self.tab_copy_text(surface)?;
+        if kind == Kind::Workspace {
+            folder = Some(cwd);
+        }
         self.cancel_drag();
         let menu = panel::Panel::new(owner, entries, point, self.background_test)?;
         self.tab_menu = Some(Menu {
+            kind,
             surface,
             pane,
             workspace,
@@ -198,10 +308,18 @@ impl App {
             return Ok(());
         };
         let action = entry.action;
-        let (surface, source_pane, source_workspace, owner) =
+        let kind = menu.kind;
+        let (mut surface, source_pane, source_workspace, owner) =
             (menu.surface, menu.pane, menu.workspace, menu.owner);
+        // Workspace actions follow that workspace's focused pane, even if the
+        // user focuses another tab or reorders the sidebar while the menu is open.
+        if matches!(kind, Kind::Workspace | Kind::Creation) {
+            if let Ok(index) = self.workspace_index(source_workspace) {
+                surface = self.workspaces[index].active();
+            }
+        }
         let valid = self.locate(surface).is_some_and(|(ws, pane, _)| {
-            pane == source_pane
+            (matches!(kind, Kind::Workspace | Kind::Creation) || pane == source_pane)
                 && self.workspaces[ws].id == source_workspace
                 && self.surface_window(surface) == owner
         });
@@ -248,7 +366,11 @@ impl App {
                     !self.background_test,
                     "Opening folders is disabled in background hosts"
                 );
-                let (_, folder) = self.tab_copy_text(surface)?;
+                let folder = if kind == Kind::Workspace {
+                    self.locate(surface).map(|(_, _, cwd)| cwd)
+                } else {
+                    self.tab_copy_text(surface)?.1
+                };
                 let folder = folder.context("Tab has no folder")?;
                 unsafe {
                     let result = windows_sys::Win32::UI::Shell::ShellExecuteW(
@@ -278,7 +400,22 @@ impl App {
                     .context("Destination workspace has no pane")?;
                 self.move_tab(surface, pane, usize::MAX)?;
             }
-            MenuAction::Move => unreachable!(),
+            MenuAction::NewWorkspace => {
+                self.new_terminal(surface, None, None, shells::NewTerminal::Workspace)?;
+            }
+            MenuAction::RenameWorkspace => {
+                self.edit_metadata(workspaces::EditTarget::WorkspaceName(source_workspace))?;
+            }
+            MenuAction::WorkspaceColor => {
+                self.edit_metadata(workspaces::EditTarget::WorkspaceColor(source_workspace))?;
+            }
+            MenuAction::CloseWorkspace => self.confirm_close_workspace(source_workspace)?,
+            MenuAction::ClosePane => {
+                if !self.close_pane(source_pane, None)? {
+                    self.focus_active()?;
+                }
+            }
+            MenuAction::Move | MenuAction::Separator | MenuAction::Unsupported => unreachable!(),
         }
         Ok(())
     }

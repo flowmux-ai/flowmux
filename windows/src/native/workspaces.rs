@@ -284,15 +284,10 @@ impl App {
         pane: PaneId,
         surface: SurfaceId,
     ) -> anyhow::Result<()> {
-        let (workspace, current, _) = self
+        let (_, current, _) = self
             .locate(surface)
             .context("Pane source no longer exists")?;
         anyhow::ensure!(current == pane, "Pane source moved");
-        let disabled = if self.workspaces[workspace].leaves().len() == 1 {
-            vec![1]
-        } else {
-            vec![]
-        };
         let hwnd = self
             .controls
             .iter()
@@ -302,17 +297,9 @@ impl App {
         unsafe {
             GetWindowRect(hwnd, &mut rect);
         }
-        if self.popup(&["Close Pane"], &disabled, (rect.left, rect.bottom))? == 1 {
-            anyhow::ensure!(
-                self.locate(surface)
-                    .is_some_and(|(_, current, _)| current == pane),
-                "Pane source changed while menu was open"
-            );
-            self.close_pane(pane, None)?;
-            return self.focus_active();
-        }
-        self.focus_active()
+        self.show_pane_menu(pane, surface, (rect.left, rect.bottom))
     }
+
     pub(super) fn chrome_status(&self) -> Value {
         let controls=self.controls.iter().map(|control| {
             let (kind,pane,surface,workspace,selected)=match control.action {
@@ -471,6 +458,9 @@ impl App {
                 self.shell_menu(point)
             }
             Action::Workspace(id) => self.workspace_menu(id, Some(point)),
+            Action::WorkspaceMenu | Action::NewWorkspace => {
+                self.show_workspace_menu(self.workspace().id, point, true)
+            }
             Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
                 self.show_tab_menu(pane, surface, point)
             }
@@ -529,16 +519,12 @@ impl App {
         id: WorkspaceId,
         point: Option<(i32, i32)>,
     ) -> anyhow::Result<()> {
+        let index = self.workspace_index(id)?;
         anyhow::ensure!(
-            self.close_request.is_none(),
-            "window is saving before close"
+            !self.is_detached_workspace(id),
+            "separate windows have no workspace menu"
         );
-        let actual = self.workspace_index(id)?;
-        let indices = self.main_workspace_indices();
-        let index = indices
-            .iter()
-            .position(|i| *i == actual)
-            .context("separate windows have no workspace menu")?;
+        let creation = point.is_none();
         let point = point.unwrap_or_else(|| {
             let mut rect = RECT::default();
             let hwnd = self
@@ -551,79 +537,40 @@ impl App {
             }
             (rect.left, rect.bottom)
         });
-        let mut disabled = Vec::new();
-        if index == 0 {
-            disabled.push(4);
-        }
-        if index + 1 == indices.len() {
-            disabled.push(5);
-        }
-        if indices.len() == 1 {
-            disabled.push(6);
-        }
-        match self.popup(
-            &[
-                "Rename workspace…",
-                "Workspace color…",
-                "Clear color",
-                "Move up",
-                "Move down",
-                "Close workspace…",
-                "Command Palette…",
-            ],
-            &disabled,
-            point,
-        )? {
-            7 => return self.action(Action::CommandPalette),
-            1 => return self.edit_metadata(EditTarget::WorkspaceName(id)),
-            2 => return self.edit_metadata(EditTarget::WorkspaceColor(id)),
-            3 => {
-                self.workspace_command(
-                    WorkspaceOp::Color {
-                        workspace: id.0,
-                        color: None,
-                        clear: true,
-                    },
-                    None,
-                )?;
-            }
-            choice @ (4 | 5) => {
-                let next = if choice == 4 {
-                    index.saturating_sub(1)
-                } else {
-                    (index + 1).min(indices.len() - 1)
-                };
-                self.workspace_command(
-                    WorkspaceOp::Reorder {
-                        workspace: id.0,
-                        index: next,
-                    },
-                    None,
-                )?;
-            }
-            6 => {
-                if indices.len() == 1 {
-                    anyhow::bail!("cannot close the final workspace; close the window instead");
-                }
-                let ws = &self.workspaces[actual];
-                let count: usize = ws.leaves().iter().map(|(_, _, tabs)| tabs.len()).sum();
-                let confirmed = unsafe {
-                    MessageBoxW(
-                        self.window,
-                        wide(format!(
-                            "Close workspace ‘{}’ and terminate its {} terminal processes?",
-                            ws.name, count
-                        ))
-                        .as_ptr(),
-                        wide("Close workspace").as_ptr(),
-                        MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING,
-                    ) == IDYES
-                };
-                if confirmed {
-                    self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;
-                }
-            }
-            _ => {}
+        self.show_workspace_menu(self.workspaces[index].id, point, creation)
+    }
+    pub(super) fn confirm_close_workspace(&mut self, id: WorkspaceId) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.main_workspace_indices().len() > 1,
+            "cannot close the final workspace; close the window instead"
+        );
+        let workspace = &self.workspaces[self.workspace_index(id)?];
+        // Native confirmation may activate a window. Hidden verifiers must not
+        // touch the desktop; editor close decisions use their own hidden dialog.
+        anyhow::ensure!(
+            !self.background_test,
+            "Workspace close confirmation is disabled in background hosts"
+        );
+        let count = workspace
+            .leaves()
+            .iter()
+            .flat_map(|(_, _, tabs)| tabs)
+            .filter(|tab| matches!(tab.kind, SurfaceKind::Terminal { .. }))
+            .count();
+        let confirmed = unsafe {
+            MessageBoxW(
+                self.window,
+                wide(format!(
+                    "Close workspace ‘{}’ and terminate its {} terminal processes?",
+                    workspace.name, count
+                ))
+                .as_ptr(),
+                wide("Close workspace").as_ptr(),
+                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING,
+            ) == IDYES
+        };
+        if confirmed {
+            self.workspace_command(WorkspaceOp::Close { workspace: id.0 }, None)?;
         }
         self.focus_active()
     }

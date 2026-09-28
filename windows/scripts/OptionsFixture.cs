@@ -30,6 +30,14 @@ public static class OptionsFixture {
         if(!IsWindowEnabled(root)||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned context target is disabled");
         Message(root,0x7B,hwnd,new IntPtr(-1));Owned(parent,owner);
     }
+    public static void ContextMenuAt(long window,int owner,int x,int y) {
+        var hwnd=Owned(window,owner);Rect client;
+        if(!IsWindowEnabled(hwnd)||!GetClientRect(hwnd,out client)||x<0||y<0||x>=client.Right||y>=client.Bottom)
+            throw new InvalidOperationException("Owned context point must be inside its enabled client");
+        var point=new Rect{Left=x,Top=y,Right=x,Bottom=y};
+        MapWindowPoints(hwnd,IntPtr.Zero,ref point,2);
+        Message(hwnd,0x7B,hwnd,PointerPoint(point.Left,point.Top));Owned(window,owner);
+    }
     // Exercise only the popup's deactivation handler; never change focus.
     public static void DeactivateMenu(long popup,int owner,long newActive) {
         var hwnd=Owned(popup,owner);var target=newActive==0?IntPtr.Zero:Owned(newActive,owner);

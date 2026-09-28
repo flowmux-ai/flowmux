@@ -2,8 +2,9 @@
 //! Native tab menus retain stable entries and generation-tagged semantic actions.
 use super::*;
 use std::{cell::Cell, rc::Rc};
+use windows_sys::Win32::System::SystemServices::SS_OWNERDRAW;
 use windows_sys::Win32::UI::{
-    Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODT_BUTTON},
+    Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODT_BUTTON, ODT_STATIC},
     Input::KeyboardAndMouse::GetFocus,
 };
 
@@ -23,12 +24,44 @@ struct Viewport {
     buttons: Vec<HWND>,
     first: usize,
     visible: usize,
-    row_height: i32,
+    row_heights: Vec<i32>,
+    separators: Vec<bool>,
+    height: i32,
     margin: i32,
     width: i32,
     selected: Rc<Cell<Option<usize>>>,
     background: bool,
     move_index: Option<usize>,
+}
+impl Viewport {
+    fn visible_count(&self, first: usize) -> usize {
+        let mut height = 0;
+        self.row_heights[first..]
+            .iter()
+            .take_while(|row| {
+                height += **row;
+                height <= self.height
+            })
+            .count()
+            .max(1)
+    }
+    fn last_page_start(&self) -> usize {
+        let mut height = 0;
+        let count = self
+            .row_heights
+            .iter()
+            .rev()
+            .take_while(|row| {
+                height += **row;
+                height <= self.height
+            })
+            .count()
+            .max(1);
+        self.buttons.len().saturating_sub(count)
+    }
+}
+fn selectable(entry: &Entry) -> bool {
+    entry.enabled && !matches!(entry.action, MenuAction::Separator)
 }
 fn layout_visible(window: HWND, index: usize) -> bool {
     VIEWPORTS.with(|views| {
@@ -42,26 +75,32 @@ fn scroll(window: HWND, delta: i32, reveal: Option<usize>) {
     let view = VIEWPORTS.with(|views| {
         let mut views = views.borrow_mut();
         let view = views.get_mut(&(window as isize))?;
-        let maximum = view.buttons.len().saturating_sub(view.visible);
+        let maximum = view.last_page_start();
         view.first = (view.first as i64 + i64::from(delta)).clamp(0, maximum as i64) as usize;
         if let Some(index) = reveal {
             if index < view.first {
                 view.first = index;
-            } else if index >= view.first + view.visible {
-                view.first = index + 1 - view.visible;
+            }
+            while index >= view.first + view.visible_count(view.first) && view.first < index {
+                view.first += 1;
             }
             view.first = view.first.min(maximum);
         }
+        view.visible = view.visible_count(view.first);
         Some(view.clone())
     });
     if let Some(view) = view {
         // Release thread-local borrows before synchronous window callbacks.
+        let mut next_y = view.margin;
         for (index, button) in view.buttons.iter().enumerate() {
             let visible = index >= view.first && index < view.first + view.visible;
+            let height = view.row_heights[index];
             let y = if visible {
-                view.margin + (index - view.first) as i32 * view.row_height
+                let y = next_y;
+                next_y += height;
+                y
             } else {
-                -view.row_height - view.margin
+                -height - view.margin
             };
             unsafe {
                 SetWindowPos(
@@ -70,7 +109,7 @@ fn scroll(window: HWND, delta: i32, reveal: Option<usize>) {
                     view.margin,
                     y,
                     view.width,
-                    view.row_height,
+                    height,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
@@ -137,6 +176,9 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
             );
         }
         WM_DRAWITEM if l != 0 => {
+            if draw_separator(window, &*(l as *const DRAWITEMSTRUCT)) {
+                return 1;
+            }
             if let Some(result) = chrome::message(window, message, w, l) {
                 draw_move_arrow(window, &*(l as *const DRAWITEMSTRUCT));
                 return result;
@@ -182,6 +224,42 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
     DefWindowProcW(window, message, w, l)
 }
 
+unsafe fn draw_separator(window: HWND, item: &DRAWITEMSTRUCT) -> bool {
+    if item.CtlType != ODT_STATIC {
+        return false;
+    }
+    let separator = VIEWPORTS.with(|views| {
+        views.borrow().get(&(window as isize)).is_some_and(|view| {
+            view.buttons
+                .iter()
+                .position(|button| *button == item.hwndItem)
+                .is_some_and(|index| view.separators[index])
+        })
+    });
+    if !separator {
+        return false;
+    }
+    let saved = SaveDC(item.hDC);
+    if saved == 0 {
+        return false;
+    }
+    let palette = chrome::palette();
+    SetDCBrushColor(item.hDC, palette.background);
+    FillRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
+    SelectObject(item.hDC, GetStockObject(DC_PEN));
+    SetDCPenColor(item.hDC, palette.border);
+    let inset = (6 * GetDpiForWindow(item.hwndItem).max(96) as i32 + 48) / 96;
+    let y = (item.rcItem.top + item.rcItem.bottom) / 2;
+    MoveToEx(item.hDC, item.rcItem.left + inset, y, std::ptr::null_mut());
+    LineTo(
+        item.hDC,
+        (item.rcItem.right - inset).max(item.rcItem.left + inset),
+        y,
+    );
+    RestoreDC(item.hDC, saved);
+    true
+}
+
 unsafe fn draw_move_arrow(window: HWND, item: &DRAWITEMSTRUCT) {
     let is_move = VIEWPORTS.with(|views| {
         views.borrow().get(&(window as isize)).is_some_and(|view| {
@@ -191,7 +269,7 @@ unsafe fn draw_move_arrow(window: HWND, item: &DRAWITEMSTRUCT) {
                 == Some(item.hwndItem)
         })
     });
-    if item.CtlType != ODT_BUTTON || !is_move {
+    if item.CtlType != ODT_BUTTON || !is_move || item.itemState & ODS_DISABLED != 0 {
         return;
     }
     let saved = SaveDC(item.hDC);
@@ -203,9 +281,8 @@ unsafe fn draw_move_arrow(window: HWND, item: &DRAWITEMSTRUCT) {
     let x = item.rcItem.right - px(12);
     let y = (item.rcItem.top + item.rcItem.bottom) / 2;
     let palette = chrome::palette();
-    let color = if item.itemState & ODS_DISABLED != 0 {
-        palette.muted
-    } else if palette.high_contrast && GetPixel(item.hDC, x, y) == GetSysColor(COLOR_HIGHLIGHT) {
+    let color = if palette.high_contrast && GetPixel(item.hDC, x, y) == GetSysColor(COLOR_HIGHLIGHT)
+    {
         GetSysColor(COLOR_HIGHLIGHTTEXT)
     } else {
         palette.foreground
@@ -272,7 +349,7 @@ impl Panel {
                 id: Uuid::new_v4(),
                 window,
                 owner,
-                selected: Rc::new(Cell::new(entries.iter().position(|entry| entry.enabled))),
+                selected: Rc::new(Cell::new(entries.iter().position(selectable))),
                 entries,
                 buttons: Vec::new(),
                 background,
@@ -286,15 +363,20 @@ impl Panel {
         let px = |value: i32| (value * dpi + 48) / 96;
         let mut width = px(220);
         for (index, entry) in self.entries.iter().enumerate() {
+            let separator = matches!(entry.action, MenuAction::Separator);
             let button = CreateWindowExW(
                 0,
-                wide("BUTTON").as_ptr(),
+                wide(if separator { "STATIC" } else { "BUTTON" }).as_ptr(),
                 wide(entry.label.replace('&', "&&")).as_ptr(),
                 WS_CHILD
                     | WS_VISIBLE
-                    | WS_TABSTOP
-                    | BS_OWNERDRAW as u32
-                    | if entry.enabled { 0 } else { WS_DISABLED },
+                    | if separator {
+                        SS_OWNERDRAW | WS_DISABLED
+                    } else {
+                        WS_TABSTOP
+                            | BS_OWNERDRAW as u32
+                            | if entry.enabled { 0 } else { WS_DISABLED }
+                    },
                 0,
                 0,
                 1,
@@ -306,6 +388,10 @@ impl Panel {
             );
             anyhow::ensure!(!button.is_null(), "cannot create tab menu item");
             self.buttons.push(button);
+            if separator {
+                chrome::register_control(button, chrome::ControlRole::Static);
+                continue;
+            }
             chrome::register_button(
                 button,
                 chrome::Role::Workspace {
@@ -328,13 +414,21 @@ impl Panel {
                 ReleaseDC(button, dc);
             }
         }
-        let row_height = px(28);
+        let separators: Vec<_> = self
+            .entries
+            .iter()
+            .map(|entry| matches!(entry.action, MenuAction::Separator))
+            .collect();
+        let row_heights: Vec<_> = separators
+            .iter()
+            .map(|separator| px(if *separator { 9 } else { 28 }))
+            .collect();
         let margin = px(4);
         let mut outer = RECT {
             left: 0,
             top: 0,
             right: width,
-            bottom: margin * 2 + row_height * self.buttons.len() as i32,
+            bottom: margin * 2 + row_heights.iter().sum::<i32>(),
         };
         checked(AdjustWindowRectExForDpi(
             &mut outer,
@@ -394,16 +488,17 @@ impl Panel {
                 Viewport {
                     buttons: self.buttons.clone(),
                     first: 0,
-                    visible: ((client.bottom - margin * 2) / row_height).max(1) as usize,
-                    row_height,
+                    visible: 0,
+                    row_heights,
+                    separators,
+                    height: (client.bottom - margin * 2).max(1),
                     margin,
                     width: (client.right - margin * 2).max(1),
                     selected: self.selected.clone(),
                     background: self.background,
-                    move_index: self
-                        .entries
-                        .iter()
-                        .position(|entry| matches!(entry.action, MenuAction::Move)),
+                    move_index: self.entries.iter().position(|entry| {
+                        entry.enabled && matches!(entry.action, MenuAction::Move)
+                    }),
                 },
             )
         });
@@ -415,7 +510,7 @@ impl Panel {
         Ok(self)
     }
     pub(super) fn select(&self, index: usize) {
-        if self.entries.get(index).is_some_and(|entry| entry.enabled) {
+        if self.entries.get(index).is_some_and(selectable) {
             self.selected.set(Some(index));
             self.focus_selected();
         }
@@ -453,7 +548,7 @@ impl Panel {
             .entries
             .iter()
             .enumerate()
-            .filter_map(|(index, entry)| entry.enabled.then_some(index))
+            .filter_map(|(index, entry)| selectable(entry).then_some(index))
             .collect();
         match message.wParam {
             0x26 | 0x28 | 0x24 | 0x23 => {
@@ -478,7 +573,7 @@ impl Panel {
                 if let Some(index) = self
                     .selected
                     .get()
-                    .filter(|index| self.entries[*index].enabled)
+                    .filter(|index| selectable(&self.entries[*index]))
                 {
                     if message.wParam == 0x0d
                         || matches!(self.entries[index].action, MenuAction::Move)
@@ -500,7 +595,7 @@ impl Panel {
                 unsafe { ScreenToClient(self.window, &mut point); }
                 json!({"x":point.x,"y":point.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top})
             });
-            json!({"window":self.buttons[index] as usize,"label":entry.label,"enabled":entry.enabled,"bounds":bounds,"layout_visible":layout_visible(self.window,index)})
+            json!({"window":self.buttons[index] as usize,"label":entry.label,"enabled":selectable(entry),"separator":matches!(entry.action,MenuAction::Separator),"bounds":bounds,"layout_visible":layout_visible(self.window,index)})
         }).collect::<Vec<_>>();
         let viewport = VIEWPORTS.with(|views| {
             views

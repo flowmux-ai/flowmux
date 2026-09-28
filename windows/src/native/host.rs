@@ -254,11 +254,25 @@ unsafe extern "system" fn window_proc(
             DefWindowProcW(window, message, wparam, lparam)
         }
         WM_CONTEXTMENU => {
-            let action =
+            let mut action =
                 CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(wparam as isize)).cloned());
+            let mut x = lparam as u16 as i16 as i32;
+            let mut y = (lparam >> 16) as u16 as i16 as i32;
+            if action.is_none() && wparam as HWND == window && (x, y) != (-1, -1) {
+                let mut point = POINT { x, y };
+                let mut bounds = RECT::default();
+                ScreenToClient(window, &mut point);
+                GetClientRect(window, &mut bounds);
+                let dpi = GetDpiForWindow(window).max(96) as i32;
+                if point.x >= 0
+                    && point.x < panes::cached_sidebar_width()
+                    && point.y >= 40 * dpi / 96
+                    && point.y < bounds.bottom - 36 * dpi / 96
+                {
+                    action = Some(Action::WorkspaceMenu);
+                }
+            }
             if let Some(action) = action {
-                let mut x = lparam as u16 as i16 as i32;
-                let mut y = (lparam >> 16) as u16 as i16 as i32;
                 if x == -1 && y == -1 {
                     let mut rect = RECT::default();
                     GetWindowRect(wparam as HWND, &mut rect);
