@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Preset rows and effective-color previews; writes stay in the Options worker.
 use super::*;
-use windows_sys::Win32::UI::{
-    Controls::Dialogs::{
-        ChooseColorW, CommDlgExtendedError, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW,
-    },
-    Input::KeyboardAndMouse::IsWindowEnabled,
-};
 
 pub(super) const PRESET: usize = 10;
 pub(super) const FIRST_COLOR: usize = 11;
@@ -278,54 +272,20 @@ impl ThemePanel {
             return Ok(None);
         }
         self.picker_status = None;
-        // The common dialog has its own modal loop. Keep custom storage alive
-        // for the call and restore only owned ancestors that we disabled.
-        struct Disabled(Vec<HWND>);
-        impl Drop for Disabled {
-            fn drop(&mut self) {
-                unsafe {
-                    for hwnd in &self.0 {
-                        if IsWindow(*hwnd) != 0 {
-                            EnableWindow(*hwnd, 1);
-                        }
-                    }
-                }
-            }
-        }
-        let mut disabled = Disabled(Vec::new());
-        unsafe {
-            let mut ancestor = GetWindow(owner, GW_OWNER);
-            for _ in 0..8 {
-                if ancestor.is_null() {
-                    break;
-                }
-                if IsWindowEnabled(ancestor) != 0 {
-                    EnableWindow(ancestor, 0);
-                    disabled.0.push(ancestor);
-                }
-                ancestor = GetWindow(ancestor, GW_OWNER);
-            }
-            let mut spec = CHOOSECOLORW {
-                lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
-                hwndOwner: owner,
-                rgbResult: color(&self.effective[index]),
-                lpCustColors: self.custom.as_mut_ptr(),
-                Flags: CC_FULLOPEN | CC_RGBINIT,
-                ..std::mem::zeroed()
-            };
-            if ChooseColorW(&mut spec) == 0 {
-                let error = CommDlgExtendedError();
-                anyhow::ensure!(error == 0, "native color dialog failed ({error})");
-                return Ok(None);
-            }
-            let value = spec.rgbResult;
-            Ok(Some(format!(
+        Ok(chrome::choose_color(
+            owner,
+            color(&self.effective[index]),
+            &mut self.custom,
+            background,
+        )?
+        .map(|value| {
+            format!(
                 "#{:02x}{:02x}{:02x}",
                 value & 255,
                 (value >> 8) & 255,
                 (value >> 16) & 255
-            )))
-        }
+            )
+        }))
     }
     pub(super) fn diagnostics(&self, panel: &Panel) -> Value {
         json!({"legacy":self.legacy as usize,"reset":self.reset as usize,"picker_available":!panel.background,"picker_status":self.picker_status,

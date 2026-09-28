@@ -108,7 +108,7 @@ enum Event {
     BrowserFindUi(browser::find::UiAction),
     Pointer(panes::Pointer),
     ContextMenu(Action, i32, i32),
-    Metadata(workspaces::EditAction),
+    Metadata(Uuid, workspaces::EditAction),
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
     OptionsUi(appearance::UiAction),
@@ -788,6 +788,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         drop(std::mem::take(&mut app.overview));
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
+        app.metadata.take();
         app.browsers.clear();
         app.editors.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
@@ -1566,7 +1567,7 @@ impl App {
             Event::OptionsUi(action) => self.options_ui(action)?,
             Event::Overview(signal) => self.overview_event(signal)?,
             Event::BrowserFindUi(action) => self.browser_find_ui(action),
-            Event::Metadata(action) => self.metadata_action(action)?,
+            Event::Metadata(id, action) => self.metadata_action(id, action)?,
             Event::ContextMenu(action, x, y) if !self.overview.is_open() => {
                 self.cancel_drag();
                 self.context_menu(action, x, y)?
@@ -2428,6 +2429,7 @@ impl App {
                 browser.parent_changed();
             }
             let window = self.detached.remove(&surface).unwrap();
+            self.metadata_owner_closing(window.window);
             self.download_owner_closing(window.window);
             // A find panel owned by the old frame must move before it is destroyed.
             let find = self.browser_find_reparent(surface);
@@ -2518,6 +2520,7 @@ impl App {
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
         if let Some(owner) = self.detached.get(&surface).map(|window| window.window) {
+            self.metadata_owner_closing(owner);
             self.download_owner_closing(owner);
         }
         self.editor_remove(surface);
@@ -2904,6 +2907,7 @@ impl App {
                         "popup":self.browser_popup_status(),
                         "search_dialog":self.search.diagnostics(),
                         "command_palette":self.command_palette.diagnostics(),
+                        "metadata":self.metadata.as_ref().map(workspaces::Panel::diagnostics),
                         "overview":self.overview_status(),
                         "zoomed_pane":self.zoomed,"layout":self.pane_layout,"chrome":self.chrome_status(),
                         "background_testing":self.background_test,"window_handle":self.window as usize,

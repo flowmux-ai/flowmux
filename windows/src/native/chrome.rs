@@ -6,16 +6,73 @@ use super::*;
 use crate::settings::Theme;
 use windows_sys::Win32::UI::{
     Controls::{
+        Dialogs::{ChooseColorW, CommDlgExtendedError, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW},
         InitCommonControlsEx, DRAWITEMSTRUCT, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, ODS_DISABLED,
         ODS_FOCUS, ODS_HOTLIGHT, ODS_NOACCEL, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_BUTTON,
         TOOLTIPS_CLASSW, TTF_IDISHWND, TTF_SUBCLASS, TTM_ACTIVATE, TTM_ADDTOOLW, TTM_POP,
         TTM_UPDATETIPTEXTW, TTS_NOPREFIX, TTTOOLINFOW, WM_MOUSELEAVE,
     },
-    Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
+    Input::KeyboardAndMouse::{
+        EnableWindow, IsWindowEnabled, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    },
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
 
 const SUBCLASS: usize = 0x464d_4348;
+
+pub(super) fn choose_color(
+    owner: HWND,
+    initial: COLORREF,
+    custom: &mut [COLORREF; 16],
+    background: bool,
+) -> anyhow::Result<Option<COLORREF>> {
+    if background {
+        return Ok(None);
+    }
+    // The common dialog has its own modal loop. Keep custom storage alive
+    // for the call and restore only owned ancestors that we disabled.
+    struct Disabled(Vec<HWND>);
+    impl Drop for Disabled {
+        fn drop(&mut self) {
+            unsafe {
+                for hwnd in &self.0 {
+                    if IsWindow(*hwnd) != 0 {
+                        EnableWindow(*hwnd, 1);
+                    }
+                }
+            }
+        }
+    }
+    let mut disabled = Disabled(Vec::new());
+    unsafe {
+        let mut ancestor = GetWindow(owner, GW_OWNER);
+        for _ in 0..8 {
+            if ancestor.is_null() {
+                break;
+            }
+            if IsWindowEnabled(ancestor) != 0 {
+                EnableWindow(ancestor, 0);
+                disabled.0.push(ancestor);
+            }
+            ancestor = GetWindow(ancestor, GW_OWNER);
+        }
+        let mut spec = CHOOSECOLORW {
+            lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
+            hwndOwner: owner,
+            rgbResult: initial,
+            lpCustColors: custom.as_mut_ptr(),
+            Flags: CC_FULLOPEN | CC_RGBINIT,
+            ..std::mem::zeroed()
+        };
+        if ChooseColorW(&mut spec) == 0 {
+            let error = CommDlgExtendedError();
+            anyhow::ensure!(error == 0, "native color dialog failed ({error})");
+            return Ok(None);
+        }
+        Ok(Some(spec.rgbResult))
+    }
+}
+
 thread_local! {
     static TAB_DROP: RefCell<Option<(isize, bool, bool)>> = const { RefCell::new(None) };
 }

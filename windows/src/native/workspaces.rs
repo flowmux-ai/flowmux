@@ -730,18 +730,34 @@ impl App {
         }
     }
     pub(super) fn edit_metadata(&mut self, target: EditTarget) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.metadata.as_ref().is_none_or(|panel| !panel.is_open()),
+            "another metadata dialog is open"
+        );
+        anyhow::ensure!(
+            self.editor_barrier.is_none() && self.close_request.is_none() && !self.close_accepted,
+            "window is busy"
+        );
         let value = self.metadata_text(target)?;
         let locked = match target {
             EditTarget::TabName(id) => self.title_locked(id)?,
             _ => false,
         };
-        if self.metadata.is_none() {
-            self.metadata = Some(Panel::new(self.window)?);
-        }
-        self.metadata
-            .as_mut()
-            .unwrap()
-            .edit(target, &value, locked, self.background_test);
+        let surface = match target {
+            EditTarget::TabName(id) => id,
+            EditTarget::WorkspaceName(id) | EditTarget::WorkspaceColor(id) => {
+                self.workspaces[self.workspace_index(id)?].active()
+            }
+        };
+        let owner = self.surface_window(surface);
+        anyhow::ensure!(
+            unsafe { IsWindowEnabled(owner) } != 0,
+            "another dialog is open"
+        );
+        let mut panel = Panel::new(owner)?;
+        chrome::window_theme(panel.window, self.settings.terminal.theme);
+        panel.edit(target, &value, locked, self.background_test);
+        self.metadata = Some(panel);
         Ok(())
     }
     fn title_locked(&self, id: SurfaceId) -> anyhow::Result<bool> {
@@ -754,11 +770,31 @@ impl App {
             .map(|t| t.title_locked)
             .context("tab no longer exists")
     }
-    pub(super) fn metadata_action(&mut self, action: EditAction) -> anyhow::Result<()> {
-        let Some(panel) = self.metadata.as_ref() else {
+    pub(super) fn metadata_owner_closing(&mut self, owner: HWND) {
+        if self
+            .metadata
+            .as_ref()
+            .is_some_and(|panel| panel.owner == owner)
+        {
+            self.metadata.take();
+        }
+    }
+    pub(super) fn metadata_action(&mut self, id: Uuid, action: EditAction) -> anyhow::Result<()> {
+        let Some(panel) = self
+            .metadata
+            .as_ref()
+            .filter(|panel| panel.edit_id == id && panel.is_open())
+        else {
             return Ok(());
         };
         match action {
+            EditAction::Changed => panel.preview(),
+            EditAction::Pick => {
+                let panel = self.metadata.as_mut().unwrap();
+                if let Err(error) = panel.choose_color() {
+                    panel.status(&error.to_string());
+                }
+            }
             EditAction::Layout => panel.layout(),
             EditAction::Close => {
                 panel.hide();

@@ -1,22 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Modeless native UTF-16 edit control. A pending edit is attached to a stable ID.
+//! Owned metadata dialog; native UTF-16 input and stable targets preserve edits.
 use super::*;
 use std::cell::Cell;
 use windows_sys::Win32::System::SystemServices::SS_NOPREFIX;
 use windows_sys::Win32::UI::{
     Controls::{EM_LIMITTEXT, EM_SETSEL},
+    Input::KeyboardAndMouse::EnableWindow,
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
 thread_local! { static COMPOSING: Cell<bool> = const { Cell::new(false) }; }
+thread_local! { static EDITS: RefCell<HashMap<isize, Uuid>> = RefCell::new(HashMap::new()); }
 
 #[derive(Clone, Copy)]
 pub(crate) enum EditAction {
     Apply,
     Close,
     Layout,
+    Changed,
+    Pick,
 }
-fn emit(action: EditAction) {
-    post(Event::Metadata(action));
+fn emit(window: HWND, action: EditAction) {
+    if let Some(id) = EDITS.with(|edits| edits.borrow().get(&(window as isize)).copied()) {
+        post(Event::Metadata(id, action));
+    }
 }
 unsafe extern "system" fn procedure(
     window: HWND,
@@ -26,14 +32,14 @@ unsafe extern "system" fn procedure(
 ) -> LRESULT {
     match message {
         WM_CLOSE => {
-            emit(EditAction::Close);
+            emit(window, EditAction::Close);
             0
         }
         WM_SIZE => {
-            emit(EditAction::Layout);
+            emit(window, EditAction::Layout);
             0
         }
-        WM_DPICHANGED => {
+        WM_DPICHANGED if lparam != 0 => {
             let r = &*(lparam as *const RECT);
             SetWindowPos(
                 window,
@@ -44,18 +50,30 @@ unsafe extern "system" fn procedure(
                 r.bottom - r.top,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            emit(EditAction::Layout);
+            emit(window, EditAction::Layout);
             0
         }
         WM_COMMAND if wparam >> 16 == BN_CLICKED as usize => {
+            if lparam == 0
+                || GetParent(lparam as HWND) != window
+                || IsWindowEnabled(lparam as HWND) == 0
+            {
+                return 0;
+            }
             match wparam & 0xffff {
-                1 => emit(EditAction::Apply),
-                2 => emit(EditAction::Close),
+                1 => emit(window, EditAction::Apply),
+                2 => emit(window, EditAction::Close),
+                3 | 4 => emit(window, EditAction::Pick),
                 _ => {}
             }
             0
         }
-        _ => DefWindowProcW(window, message, wparam, lparam),
+        WM_COMMAND if wparam & 0xffff == 11 && wparam >> 16 == EN_CHANGE as usize => {
+            emit(window, EditAction::Changed);
+            0
+        }
+        _ => chrome::message(window, message, wparam, lparam)
+            .unwrap_or_else(|| DefWindowProcW(window, message, wparam, lparam)),
     }
 }
 unsafe extern "system" fn edit_procedure(
@@ -80,18 +98,40 @@ unsafe extern "system" fn edit_procedure(
 
 pub(crate) struct Panel {
     pub(crate) edit_id: Uuid,
-    window: HWND,
+    pub(super) window: HWND,
+    pub(super) owner: HWND,
     input: HWND,
     hint: HWND,
     error: HWND,
     apply: HWND,
     close: HWND,
+    swatch: HWND,
+    picker: HWND,
+    custom: [COLORREF; 16],
+    open: Cell<bool>,
+    owner_disabled: Cell<bool>,
+    background: bool,
     pub(super) target: Option<EditTarget>,
     pub(super) original: String,
     pub(super) original_locked: bool,
 }
 impl Drop for Panel {
     fn drop(&mut self) {
+        self.hide();
+        EDITS.with(|edits| edits.borrow_mut().remove(&(self.window as isize)));
+        for window in [
+            self.input,
+            self.hint,
+            self.error,
+            self.apply,
+            self.close,
+            self.swatch,
+            self.picker,
+        ] {
+            if !window.is_null() {
+                chrome::unregister(window);
+            }
+        }
         unsafe {
             DestroyWindow(self.window);
         }
@@ -106,7 +146,6 @@ impl Panel {
                 lpfnWndProc: Some(procedure),
                 hInstance: instance,
                 hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                hbrBackground: (COLOR_BTNFACE + 1) as HBRUSH,
                 lpszClassName: class.as_ptr(),
                 ..std::mem::zeroed()
             };
@@ -115,14 +154,14 @@ impl Panel {
                 "cannot register name editor"
             );
             let window = CreateWindowExW(
-                WS_EX_CONTROLPARENT,
+                WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME,
                 class.as_ptr(),
                 wide("Edit name").as_ptr(),
-                WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                560,
-                240,
+                460,
+                220,
                 parent,
                 std::ptr::null_mut(),
                 instance,
@@ -132,11 +171,18 @@ impl Panel {
             let mut panel = Self {
                 edit_id: Uuid::nil(),
                 window,
+                owner: parent,
                 input: std::ptr::null_mut(),
                 hint: std::ptr::null_mut(),
                 error: std::ptr::null_mut(),
                 apply: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
+                swatch: std::ptr::null_mut(),
+                picker: std::ptr::null_mut(),
+                custom: [0; 16],
+                open: Cell::new(false),
+                owner_disabled: Cell::new(false),
+                background: true,
                 target: None,
                 original: String::new(),
                 original_locked: false,
@@ -151,9 +197,16 @@ impl Panel {
             SendMessageW(panel.input, EM_LIMITTEXT, 256, 0);
             checked(SetWindowSubclass(panel.input, Some(edit_procedure), 1, 0))?;
             panel.error = panel.child("STATIC", "", 12, SS_NOPREFIX)?;
-            panel.apply =
-                panel.child("BUTTON", "Apply", 1, WS_TABSTOP | BS_DEFPUSHBUTTON as u32)?;
-            panel.close = panel.child("BUTTON", "Cancel", 2, WS_TABSTOP)?;
+            panel.apply = panel.child("BUTTON", "OK", 1, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.close = panel.child("BUTTON", "Cancel", 2, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.swatch = panel.child(
+                "BUTTON",
+                "Color preview",
+                3,
+                WS_TABSTOP | BS_OWNERDRAW as u32,
+            )?;
+            chrome::register_swatch(panel.swatch, chrome::palette().background);
+            panel.picker = panel.child("BUTTON", "Choose…", 4, WS_TABSTOP | BS_OWNERDRAW as u32)?;
             panel.layout();
             Ok(panel)
         }
@@ -175,17 +228,30 @@ impl Panel {
                 std::ptr::null(),
             );
             checked((!hwnd.is_null()) as i32)?;
-            SendMessageW(
-                hwnd,
-                WM_SETFONT,
-                GetStockObject(DEFAULT_GUI_FONT) as WPARAM,
-                1,
-            );
+            if class == "BUTTON" {
+                chrome::register_button(hwnd, chrome::Role::Button);
+            } else {
+                chrome::register_control(
+                    hwnd,
+                    if class == "EDIT" {
+                        chrome::ControlRole::Edit
+                    } else {
+                        chrome::ControlRole::Static
+                    },
+                );
+            }
             Ok(hwnd)
         }
     }
     pub(super) fn edit(&mut self, target: EditTarget, value: &str, locked: bool, background: bool) {
         self.edit_id = Uuid::new_v4();
+        EDITS.with(|edits| {
+            edits
+                .borrow_mut()
+                .insert(self.window as isize, self.edit_id)
+        });
+        COMPOSING.with(|composing| composing.set(false));
+        self.background = background;
         self.target = Some(target);
         self.original = value.to_owned();
         self.original_locked = locked;
@@ -204,7 +270,28 @@ impl Panel {
             SetWindowTextW(self.hint, wide(hint).as_ptr());
             SetWindowTextW(self.input, wide(value).as_ptr());
             SendMessageW(self.input, EM_SETSEL, 0, -1);
+            let dpi = GetDpiForWindow(self.owner).max(96) as i32;
+            let mut owner = RECT::default();
+            GetWindowRect(self.owner, &mut owner);
+            let width = 460 * dpi / 96;
+            let height = 220 * dpi / 96;
+            SetWindowPos(
+                self.window,
+                std::ptr::null_mut(),
+                owner.left + (owner.right - owner.left - width) / 2,
+                owner.top + (owner.bottom - owner.top - height) / 2,
+                width,
+                height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            self.open.set(true);
+            if !self.owner.is_null() && IsWindowEnabled(self.owner) != 0 {
+                EnableWindow(self.owner, 0);
+                self.owner_disabled.set(true);
+            }
             self.status("");
+            self.layout();
+            self.preview();
             if !background {
                 ShowWindow(self.window, SW_SHOW);
                 SetFocus(self.input);
@@ -217,13 +304,16 @@ impl Panel {
             GetClientRect(self.window, &mut r);
             let scale = GetDpiForWindow(self.window).max(96) as f64 / 96.0;
             let px = |v: i32| (v as f64 * scale).round() as i32;
+            let color = matches!(self.target, Some(EditTarget::WorkspaceColor(_)));
+            ShowWindow(self.swatch, if color { SW_SHOWNOACTIVATE } else { SW_HIDE });
+            ShowWindow(self.picker, if color { SW_SHOWNOACTIVATE } else { SW_HIDE });
             for (hwnd, x, y, w, h) in [
                 (self.hint, px(12), px(12), (r.right - px(24)).max(1), px(24)),
                 (
                     self.input,
                     px(12),
                     px(40),
-                    (r.right - px(24)).max(1),
+                    (r.right - px(if color { 156 } else { 24 })).max(1),
                     px(28),
                 ),
                 (
@@ -235,18 +325,20 @@ impl Panel {
                 ),
                 (
                     self.apply,
-                    r.right - px(220),
+                    r.right - px(110),
                     r.bottom - px(36),
                     px(98),
                     px(28),
                 ),
                 (
                     self.close,
-                    r.right - px(110),
+                    r.right - px(220),
                     r.bottom - px(36),
                     px(98),
                     px(28),
                 ),
+                (self.swatch, r.right - px(140), px(40), px(28), px(28)),
+                (self.picker, r.right - px(104), px(40), px(92), px(28)),
             ] {
                 if !hwnd.is_null() {
                     SetWindowPos(
@@ -274,12 +366,75 @@ impl Panel {
             String::from_utf16_lossy(&data[..n.max(0) as usize])
         }
     }
+    pub(super) fn is_open(&self) -> bool {
+        self.open.get()
+    }
+    pub(super) fn preview(&self) {
+        if !matches!(self.target, Some(EditTarget::WorkspaceColor(_))) {
+            return;
+        }
+        if let Ok(color) = model::parse_color(&self.value()) {
+            let color = color
+                .and_then(|value| u32::from_str_radix(&value[1..], 16).ok())
+                .map(|rgb| ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255))
+                .unwrap_or(chrome::palette().background);
+            chrome::set_swatch(self.swatch, color);
+        }
+    }
+    pub(super) fn choose_color(&mut self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            matches!(self.target, Some(EditTarget::WorkspaceColor(_))),
+            "no color target"
+        );
+        if self.background {
+            self.status("The native color dialog is disabled during hidden verification; use the hex field.");
+            return Ok(());
+        }
+        let color = model::parse_color(&self.value())?.unwrap_or_else(|| "#ffffff".into());
+        let rgb = u32::from_str_radix(&color[1..], 16)?;
+        let initial = ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
+        if let Some(color) =
+            chrome::choose_color(self.window, initial, &mut self.custom, self.background)?
+        {
+            let value = format!(
+                "#{:02x}{:02x}{:02x}",
+                color & 255,
+                (color >> 8) & 255,
+                (color >> 16) & 255
+            );
+            unsafe {
+                SetWindowTextW(self.input, wide(value).as_ptr());
+            }
+            self.preview();
+            self.status("");
+        }
+        Ok(())
+    }
+    pub(crate) fn diagnostics(&self) -> Value {
+        let mut text = [0u16; 2048];
+        let len = unsafe { GetWindowTextW(self.error, text.as_mut_ptr(), text.len() as i32) }.max(0)
+            as usize;
+        json!({"open":self.open.get(),"window":self.window as usize,"owner":self.owner as usize,
+            "input":self.input as usize,"apply":self.apply as usize,"cancel":self.close as usize,
+            "swatch":self.swatch as usize,"picker":self.picker as usize,"error":String::from_utf16_lossy(&text[..len]),
+            "edit_id":self.edit_id,"native_visible":unsafe{IsWindowVisible(self.window)!=0},"composing":COMPOSING.with(Cell::get)})
+    }
     pub(crate) fn hide(&self) {
+        self.open.set(false);
+        COMPOSING.with(|composing| composing.set(false));
         unsafe {
             ShowWindow(self.window, SW_HIDE);
+            if self.owner_disabled.replace(false) && IsWindow(self.owner) != 0 {
+                EnableWindow(self.owner, 1);
+            }
         }
     }
     pub(crate) fn handle_message(&self, message: &MSG) -> bool {
+        if !self.open.get()
+            || (message.hwnd != self.window && unsafe { IsChild(self.window, message.hwnd) } == 0)
+        {
+            return false;
+        }
         // Text production belongs to the native EDIT/IME. Enter/Escape inside the
         // edit never applies/closes the panel; Tab to Apply/Cancel also works.
         if COMPOSING.with(Cell::get)
@@ -289,6 +444,25 @@ impl Panel {
                 && matches!(message.wParam, 13 | 27))
         {
             return false;
+        }
+        if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
+            if message.lParam as usize & (1 << 30) == 0 {
+                emit(
+                    self.window,
+                    if message.wParam == 27 || message.hwnd == self.close {
+                        EditAction::Close
+                    } else if message.hwnd == self.picker || message.hwnd == self.swatch {
+                        EditAction::Pick
+                    } else {
+                        EditAction::Apply
+                    },
+                );
+            }
+            return true;
+        }
+        if self.background {
+            return matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
+                && message.wParam == 9;
         }
         unsafe {
             IsWindowVisible(self.window) != 0

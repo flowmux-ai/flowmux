@@ -4,6 +4,7 @@ param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\de
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs') -ReferencedAssemblies System.Drawing
 $base=if($env:FLOWMUX_TEST_ARTIFACT_ROOT){$env:FLOWMUX_TEST_ARTIFACT_ROOT}else{[IO.Path]::GetTempPath()};$directory=Join-Path $base ('palette-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$checks=@();$failure=$null;$last=$null;$commandFailure=$null;$cleanupErrors=@();$cleaning=$false
 function Require([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
@@ -34,6 +35,27 @@ function Open-Palette([string]$Surface){$reply=Request @('test-shortcut',$Surfac
 function Menu-Open{$tree=Tree;$button=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'command_palette'});Require ($button.Count -eq 1) 'Command Palette toolbar entry missing';$handle=[long]$button[0].handle;[OptionsFixture]::Click([OptionsFixture]::Parent($handle,$owned.Id),$handle,$owned.Id);return Await {param($t) $t.command_palette.open}}
 function Execute($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEnter([long]$panel.query_handle,$owned.Id)}
 function Dismiss($Tree){$panel=Palette $Tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);$tree=Await {param($t) -not $t.command_palette -or -not $t.command_palette.open};Require ([OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Enabled) 'Palette dismissal left its main owner disabled';return $tree}
+function Workspace($Tree,[string]$Id){$found=@($Tree.workspaces|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable workspace';return $found[0]}
+function Leaves($Node){if($Node.content){$Node}else{Leaves $Node.first;Leaves $Node.second}}
+function Surface($Tree,[string]$Id){$found=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|ForEach-Object {$_.content.surfaces}|Where-Object {$_.id -ceq $Id});Require ($found.Count -eq 1) 'Metadata lost its stable surface';return $found[0]}
+function Metadata($Tree,[long]$Owner=0){
+    if(-not $Owner){$Owner=[long]$Tree.window_handle}
+    $panel=$Tree.metadata;Require ($panel -and $panel.open -and $panel.edit_id -and $panel.native_visible -eq $false) 'Metadata dialog is not the owned hidden active edit'
+    $native=[OptionsFixture]::Describe([long]$panel.window,$owned.Id)
+    Require ($panel.owner -eq $Owner -and $native.Owner -eq $Owner -and -not $native.OwnerEnabled -and $native.Enabled) 'Metadata dialog is not modal to its exact expected owner'
+    foreach($key in @('input','apply','cancel')){Require ($panel.$key -and [OptionsFixture]::Parent([long]$panel.$key,$owned.Id) -eq $panel.window) ('Metadata control has the wrong parent: '+$key)}
+    $controls=[ChromeFixture]::Read([long]$panel.window,$owned.Id)
+    foreach($key in @('input','apply','cancel')){$control=@($controls|Where-Object {$_.Handle -eq [long]$panel.$key});Require ($control.Count -eq 1 -and $control[0].Font -ne 0 -and $control[0].Shown) ('Metadata native font or shown style is missing: '+$key);if($key -ne 'input'){Require (($control[0].Style -band 0xf) -eq 0xb) 'Metadata action is not painted by native chrome'}}
+    return $panel
+}
+function Open-Metadata([string]$Id,[long]$Owner=0){
+    $tree=Menu-Open;$entry=@($tree.command_palette.entries|Where-Object {$_.id -ceq $Id});Require ($entry.Count -eq 1) ('Metadata palette entry missing: '+$Id)
+    $tree=Query $tree $entry[0].label;$tree=Select-Entry $tree $Id;Execute $tree
+    $tree=Await {param($t) $t.metadata.open -and -not $t.command_palette.open};Metadata $tree $Owner|Out-Null;return $tree
+}
+function Metadata-Text($Panel,[string]$Value){[OptionsFixture]::SetTextAndNotify([long]$Panel.window,[long]$Panel.input,$owned.Id,$Value)}
+function Metadata-Click($Panel,[ValidateSet('apply','cancel','picker')][string]$Action){[OptionsFixture]::Click([long]$Panel.window,[long]$Panel.$Action,$owned.Id)}
+function Metadata-Closed{$tree=Await {param($t) -not $t.metadata -or -not $t.metadata.open};Owner-Restored $tree;Require ((Identities $tree) -ceq $identities) 'Metadata changed a terminal process';return $tree}
 function Passed([string]$Name){$script:checks+=$Name}
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
@@ -104,6 +126,74 @@ try {
     $tree=Menu-Open;Require (@($tree.command_palette.entries|Where-Object {$_.id -ceq 'action:terminal-search'}).Count -eq 0) 'Browser palette offers terminal-only search'
     $tree=Dismiss $tree;Require ((Request @('identify')).surface -ceq $browser.surface) 'Browser palette changed its target';Request @('close-tab',$browser.surface)|Out-Null
     $tree=Await {param($t) @($t.browsers).Count -eq 0};Owner-Restored $tree;Require ((Identities $tree) -ceq $identities) 'Browser palette or cleanup replaced a terminal';Passed 'contextual-action-availability-and-browser-toolbar-entry'
+
+    # Native metadata dialogs reuse the palette, settings theme and original
+    # model IDs. Synthetic composition messages test guards, not physical IME.
+    Request @('focus-tab',$initial.surface)|Out-Null
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
+    Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $workspaceName) 'Workspace editor lost its starting UTF-16 text'
+    $renamed='이름 한 é 😀 & 변경';Metadata-Text $panel $renamed
+    [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id);[OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    $tree=Tree;Metadata $tree|Out-Null;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $renamed) 'Plain EDIT Enter/Escape applied, cancelled or changed raw input'
+    Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName) 'Metadata Cancel changed the workspace'
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
+    [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$true);Metadata-Text $panel $renamed
+    [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id);[OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    $tree=Await {param($t) $t.metadata.open -and $t.metadata.composing};Metadata $tree|Out-Null
+    Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $renamed) 'Composition guard changed the draft or model'
+    [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$false)
+    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.composing};[OptionsFixture]::PostEnter([long]$panel.apply,$owned.Id)
+    $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $renamed) 'Native Apply did not retain the exact Korean/NFD/emoji/ampersand name';Same-Identity $initial
+    Passed 'metadata-owned-themed-name-Cancel-composition-guard-and-explicit-Apply-preserve-Unicode-identity'
+
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree;Metadata-Text $panel '';Metadata-Click $panel 'apply'
+    $tree=Await {param($t) $t.metadata.open -and $t.metadata.error};Metadata $tree|Out-Null
+    Require ((Workspace $tree $initial.workspace).name -ceq $renamed -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq '') 'Invalid name changed the model or replaced the invalid draft'
+    $losing='UI 한 😀 draft';$winner='외부 한글 & winner';Metadata-Text $panel $losing
+    Request @('workspace','rename',$initial.workspace,$winner)|Out-Null;Metadata-Click $panel 'apply'
+    $tree=Await {param($t) $t.metadata.open -and $t.metadata.error -match 'changed elsewhere'};Metadata $tree|Out-Null
+    Require ((Workspace $tree $initial.workspace).name -ceq $winner -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $losing) 'Concurrent IPC rename was overwritten or its pending UI draft was lost'
+    Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $winner) 'Conflict Cancel changed the external winner'
+    Passed 'metadata-invalid-name-and-concurrent-rename-conflict-retain-draft-and-modal-owner'
+
+    $tree=Open-Metadata 'metadata:tab-name';$panel=Metadata $tree;$newTab='탭 한 😀 & 고정';Metadata-Text $panel $newTab;Metadata-Click $panel 'apply'
+    $tree=Metadata-Closed;$tab=Surface $tree $initial.surface
+    Require ($tab.title -ceq $newTab -and $tab.title_locked) 'Native tab rename did not preserve its exact title and manual title lock';Same-Identity $initial
+    Passed 'metadata-tab-name-Apply-locks-title-without-changing-live-surface-identity'
+
+    $tree=Open-Metadata 'metadata:workspace-color';$panel=Metadata $tree;$originalColor=(Workspace $tree $initial.workspace).color
+    foreach($key in @('swatch','picker')){Require ($panel.$key -and [OptionsFixture]::Parent([long]$panel.$key,$owned.Id) -eq $panel.window) ('Color editor omitted its actual owned '+$key);$control=[OptionsFixture]::Describe([long]$panel.$key,$owned.Id);Require (($control.Style -band 0x10000000) -ne 0 -and ($control.Style -band 0xf) -eq 0xb) ('Color control is not shown and painted by native chrome: '+$key)}
+    $colorRaw=[OptionsFixture]::Text([long]$panel.input,$owned.Id);$edit=$panel.edit_id;Metadata-Click $panel 'picker'
+    $tree=Await {param($t) $t.metadata.open -and $t.metadata.error -match 'background|hidden'};$panel=Metadata $tree
+    Require ($panel.edit_id -ceq $edit -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $colorRaw -and (Workspace $tree $initial.workspace).color -ceq $originalColor) 'Blocked hidden color chooser changed the popup, draft or model'
+    Metadata-Text $panel '#12ABEF';Metadata-Click $panel 'apply';$tree=Metadata-Closed
+    Require ((Workspace $tree $initial.workspace).color -ceq '#12abef') 'Color Apply did not store canonical hex'
+    $tree=Open-Metadata 'metadata:workspace-color';$panel=Metadata $tree;Metadata-Text $panel '';Metadata-Click $panel 'apply';$tree=Metadata-Closed
+    Require (-not (Workspace $tree $initial.workspace).color) 'Blank color did not clear the workspace override';Same-Identity $initial
+    Passed 'metadata-color-native-swatch-hidden-chooser-guard-hex-Apply-and-empty-Clear'
+
+    # Closing the owner through IPC must dispose the modal panel before the
+    # detached HWND dies, without disabling the surviving main workbench.
+    Request @('new-tab','--shell=cmd')|Out-Null;$temporary=Request @('identify')
+    $tree=Await {param($t) @($t.surfaces).Count -eq 4 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0}
+    # Capture this tab as the main palette target before it changes windows.
+    # Detached terminal shortcuts intentionally do not open Command Palette.
+    $tree=Menu-Open;$entry=@($tree.command_palette.entries|Where-Object {$_.id -ceq 'metadata:tab-name'});Require ($entry.Count -eq 1) 'Metadata tab rename palette entry missing'
+    $tree=Query $tree $entry[0].label;$tree=Select-Entry $tree 'metadata:tab-name'
+    Request @('detach-tab',$temporary.surface)|Out-Null;$tree=Await {param($t) @($t.detached_windows|Where-Object {$_.surface -ceq $temporary.surface}).Count -eq 1}
+    $frame=@($tree.detached_windows|Where-Object {$_.surface -ceq $temporary.surface})[0]
+    Require ($frame.window_handle -ne $tree.window_handle -and $frame.native_visible -eq $false) 'Owner-destruction check requires its own hidden detached window'
+    Require ($tree.command_palette.open -and $tree.command_palette.selected -ceq 'metadata:tab-name') 'Detaching lost the selected palette target'
+    Execute $tree;$tree=Await {param($t) $t.metadata.open -and -not $t.command_palette.open};$panel=Metadata $tree ([long]$frame.window_handle)
+    Require (-not ([OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id)).Enabled) 'Detached metadata owner was not disabled';Owner-Restored $tree
+    Metadata-Text $panel '닫힐 한 😀 & draft';$oldEdit=$panel.edit_id
+    Request @('close-tab',$temporary.surface)|Out-Null
+    $tree=Await {param($t) $null -eq $t.metadata -and @($t.detached_windows|Where-Object {$_.surface -ceq $temporary.surface}).Count -eq 0 -and @($t.surfaces|Where-Object {$_.id -ceq $temporary.surface}).Count -eq 0}
+    Require (-not $owned.HasExited -and (Identities $tree) -ceq $identities) 'Closing a metadata owner damaged surviving terminal sessions';Owner-Restored $tree
+    Request @('focus-tab',$initial.surface)|Out-Null;$tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
+    Require ($panel.edit_id -cne $oldEdit -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $winner) 'Surviving main metadata reused a stale edit or lost its workspace name'
+    Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Same-Identity $initial
+    Passed 'detached-metadata-owner-IPC-close-disposes-panel-and-main-can-reopen-and-Cancel'
 
 }catch{$failure=$_.Exception.Message}
 finally{

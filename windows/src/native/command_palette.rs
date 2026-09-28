@@ -14,6 +14,7 @@ pub(super) enum Target {
     Workspace(WorkspaceId),
     Pane(WorkspaceId, PaneId),
     Surface(SurfaceId),
+    Metadata(workspaces::EditTarget),
 }
 #[derive(Clone)]
 pub(super) struct Entry {
@@ -45,6 +46,33 @@ impl Controller {
 impl App {
     fn palette_entries(&self) -> anyhow::Result<Vec<Entry>> {
         let mut entries = Vec::new();
+        if let Some((workspace, _, _)) = self.locate(self.active()) {
+            let workspace = self.workspaces[workspace].id;
+            for (id, label, target) in [
+                (
+                    "workspace-name",
+                    "Rename workspace…",
+                    workspaces::EditTarget::WorkspaceName(workspace),
+                ),
+                (
+                    "workspace-color",
+                    "Workspace color…",
+                    workspaces::EditTarget::WorkspaceColor(workspace),
+                ),
+                (
+                    "tab-name",
+                    "Rename tab…",
+                    workspaces::EditTarget::TabName(self.active()),
+                ),
+            ] {
+                entries.push(Entry {
+                    id: format!("metadata:{id}"),
+                    label: label.into(),
+                    shortcut: String::new(),
+                    target: Target::Metadata(target),
+                });
+            }
+        }
         for (id, label, action) in [
             ("settings", "Options", Action::Settings),
             ("open-file", "Open file…", Action::OpenEditor),
@@ -126,6 +154,15 @@ impl App {
             "editor synchronization is in progress"
         );
         match target {
+            Target::Metadata(
+                workspaces::EditTarget::WorkspaceName(id)
+                | workspaces::EditTarget::WorkspaceColor(id),
+            ) => {
+                self.workspace_index(*id)?;
+            }
+            Target::Metadata(workspaces::EditTarget::TabName(id)) => {
+                anyhow::ensure!(self.locate(*id).is_some(), "Tab no longer exists");
+            }
             Target::Keybinding(ActionId::TerminalSearch) => {
                 anyhow::ensure!(
                     self.surfaces
@@ -236,6 +273,7 @@ impl App {
                     .unwrap()
                     .hide(self.background_test);
                 match entry.target {
+                    Target::Metadata(target) => self.edit_metadata(target)?,
                     Target::Native(action) => self.action(action)?,
                     Target::Keybinding(action) => self.keybinding_action(self.active(), action)?,
                     Target::Workspace(id) => self.action(Action::Workspace(id))?,
