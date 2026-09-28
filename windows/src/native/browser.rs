@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(super) mod capture;
 #[path = "browser_chrome.rs"]
 mod chrome;
+#[path = "browser_find.rs"]
+pub(super) mod find;
 #[path = "browser_wait.rs"]
 pub(super) mod wait;
 const MAX_SCRIPT: usize = 128 * 1024;
@@ -26,18 +28,29 @@ pub(super) enum Signal {
 enum Response {
     Eval,
     Action,
+    Find,
+    FindClose,
     Snapshot(Uuid),
     Query {
         snapshot: Option<Uuid>,
         kind: &'static str,
     },
 }
+impl Response {
+    fn is_action(&self) -> bool {
+        matches!(self, Self::Action | Self::Find | Self::FindClose)
+    }
+    fn is_find(&self) -> bool {
+        matches!(self, Self::Find | Self::FindClose)
+    }
+}
 pub(super) struct Pending {
     response: Response,
     limit: usize,
     surface: SurfaceId,
     epoch: u64,
-    reply: ipc::Reply,
+    visibility_revision: u64,
+    reply: Option<ipc::Reply>,
     started: Instant,
 }
 fn action_outcome(mut value: Value, action: bool) -> Value {
@@ -49,11 +62,13 @@ fn action_outcome(mut value: Value, action: bool) -> Value {
     value
 }
 impl Pending {
+    fn send(&self, value: Value) {
+        if let Some(reply) = &self.reply {
+            let _ = reply.try_send(value);
+        }
+    }
     fn error(&self, reason: &str) -> Value {
-        action_outcome(
-            json!({"error":reason}),
-            matches!(self.response, Response::Action),
-        )
+        action_outcome(json!({"error":reason}), self.response.is_action())
     }
 }
 pub(super) struct Browser {
@@ -62,6 +77,7 @@ pub(super) struct Browser {
     chrome: chrome::Chrome,
     epoch: Arc<AtomicU64>,
     pub(super) visible: bool,
+    visibility_revision: u64,
     url: String,
     title: String,
     loading: bool,
@@ -71,6 +87,8 @@ pub(super) struct Browser {
     error: Option<String>,
     refs: dom::Refs,
     dom_key: String,
+    find_key: String,
+    find: find::State,
     viewport_revision: u64,
     viewport: Option<(i32, i32, i32, i32)>,
 }
@@ -166,6 +184,7 @@ impl Browser {
             chrome,
             epoch,
             visible: false,
+            visibility_revision: 0,
             url: "about:blank".into(),
             title: "Browser".into(),
             loading: false,
@@ -176,6 +195,8 @@ impl Browser {
             refs: dom::Refs::new(id.0),
             viewport_revision: 0,
             viewport: None,
+            find_key: format!("__flowmuxFind_{}", Uuid::new_v4().simple()),
+            find: find::State::default(),
             dom_key: format!("__flowmuxDom_{}", Uuid::new_v4().simple()),
         })
     }
@@ -218,6 +239,7 @@ impl Browser {
         }
         let show = area.is_some();
         if self.visible != show {
+            self.visibility_revision = self.visibility_revision.wrapping_add(1);
             self.refs.clear();
             self.view.set_visible(show)?;
             unsafe {
@@ -348,12 +370,13 @@ impl App {
         Ok(())
     }
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
+        self.browser_find_reset(id, reason);
         self.browser_wait_cancel(id, reason);
         self.browser_capture_cancel(id, reason);
         self.download_cancel_surface(id);
         self.pending_browser.retain(|_, pending| {
             if pending.surface == id {
-                let _ = pending.reply.try_send(pending.error(reason));
+                pending.send(pending.error(reason));
                 false
             } else {
                 true
@@ -363,16 +386,34 @@ impl App {
     pub(super) fn browser_tick(&mut self) {
         self.browser_capture_tick();
         self.download_tick();
-        self.pending_browser.retain(|_, p| {
-            if p.started.elapsed() > Duration::from_secs(12) {
-                let _ = p.reply.try_send(
-                    p.error("browser script callback timed out; script may have executed"),
+        let now = Instant::now();
+        let expired_actions: Vec<_> = self
+            .pending_browser
+            .values()
+            .filter(|p| {
+                p.response.is_action() && now.duration_since(p.started) > Duration::from_secs(12)
+            })
+            .map(|p| (p.surface, p.response.is_find()))
+            .collect();
+        for (id, find) in &expired_actions {
+            if *find {
+                self.browser_find_feedback(
+                    *id,
+                    &json!({"error":"Page find timed out; action may have executed (not retried)"}),
                 );
+            }
+        }
+        self.pending_browser.retain(|_, p| {
+            if now.duration_since(p.started) > Duration::from_secs(12) {
+                p.send(p.error("browser script callback timed out; script may have executed"));
                 false
             } else {
                 true
             }
         });
+        for (id, _) in expired_actions {
+            self.browser_find_deferred_close(id);
+        }
         let ids: Vec<_> = self.browsers.keys().copied().collect();
         for id in ids {
             // A failed browser controller must not stop terminal expiry, search
@@ -403,15 +444,14 @@ impl App {
                     .map(|b| b.epoch.load(Ordering::SeqCst));
                 self.pending_browser.retain(|_, p| {
                     if p.surface == id && Some(p.epoch) != epoch {
-                        let _ = p
-                            .reply
-                            .try_send(p.error("browser navigated during script request"));
+                        p.send(p.error("browser navigated during script request"));
                         false
                     } else {
                         true
                     }
                 });
                 if epoch == Some(navigation) {
+                    self.browser_find_reset(id, "Page changed");
                     if let Some(browser) = self.browsers.get_mut(&id) {
                         browser.refs.clear();
                         browser.loading = true;
@@ -438,6 +478,10 @@ impl App {
             }
             Signal::Metadata(id) => self.browser_refresh(id)?,
             Signal::Ui(id, action) => {
+                if action == 10 {
+                    self.browser_find_show(id)?;
+                    return Ok(());
+                }
                 if action == 9 {
                     self.download_ui(downloads::UiAction::Show)?;
                     return Ok(());
@@ -454,7 +498,9 @@ impl App {
             }
             Signal::Eval(request, epoch, result) => {
                 if let Some(p) = self.pending_browser.remove(&request) {
-                    let action = matches!(p.response, Response::Action);
+                    let action = p.response.is_action();
+                    let find = p.response.is_find();
+                    let find_close = matches!(&p.response, Response::FindClose);
                     let reply = if p.started.elapsed() > Duration::from_secs(12) {
                         json!({"error":"browser script callback timed out; script may have executed"})
                     } else if epoch != p.epoch
@@ -464,6 +510,12 @@ impl App {
                             .is_none_or(|b| b.epoch.load(Ordering::SeqCst) != epoch)
                     {
                         json!({"error":"browser document changed during script request"})
+                    } else if find
+                        && self.browsers.get(&p.surface).is_none_or(|b| {
+                            !b.visible || b.visibility_revision != p.visibility_revision
+                        })
+                    {
+                        json!({"error":"browser tab was hidden during page find"})
                     } else if result.len() > p.limit {
                         json!({"error":"browser response exceeds size limit"})
                     } else {
@@ -474,7 +526,15 @@ impl App {
                             _ => json!({"error":"invalid browser script result"}),
                         }
                     };
-                    let _ = p.reply.try_send(action_outcome(reply, action));
+                    if find_close {
+                        self.browser_find_close_feedback(p.surface, &reply);
+                    } else if find {
+                        self.browser_find_feedback(p.surface, &reply);
+                    }
+                    self.browser_find_deferred_close(p.surface);
+                    if let Some(sender) = p.reply {
+                        let _ = sender.try_send(action_outcome(reply, action));
+                    }
                 }
             }
         }
@@ -495,6 +555,13 @@ impl App {
             .clone();
         match response {
             Response::Eval => Ok(value),
+            Response::Find => self.browser_find_result(id, result),
+            Response::FindClose => {
+                let cleared = result["cleared"]
+                    .as_bool()
+                    .context("invalid page find close result")?;
+                Ok(json!({"ok":true,"surface":id,"cleared":cleared}))
+            }
             Response::Action => {
                 anyhow::ensure!(result == "ok", "invalid browser action result");
                 Ok(json!({"ok":true,"surface":id}))
@@ -534,6 +601,16 @@ impl App {
         limit: usize,
         reply: ipc::Reply,
     ) -> anyhow::Result<()> {
+        self.browser_script_optional(id, source, response, limit, Some(reply))
+    }
+    fn browser_script_optional(
+        &mut self,
+        id: SurfaceId,
+        source: String,
+        response: Response,
+        limit: usize,
+        reply: Option<ipc::Reply>,
+    ) -> anyhow::Result<()> {
         let browser = self.browsers.get(&id).context("browser was closed")?;
         anyhow::ensure!(
             !browser.loading,
@@ -566,6 +643,7 @@ impl App {
             request,
             Pending {
                 surface: id,
+                visibility_revision: browser.visibility_revision,
                 epoch,
                 reply,
                 started: Instant::now(),
@@ -621,6 +699,8 @@ impl App {
             | Op::Uncheck(args) => args.pane,
             Op::Fill(args) | Op::Select(args) => args.pane,
             Op::Scroll(args) => args.pane,
+            Op::Find(args) => args.pane,
+            Op::FindShow(args) | Op::FindClose(args) => args.pane,
             Op::Screenshot(args) => args.pane,
             Op::Open { .. } => unreachable!(),
         };
@@ -632,8 +712,13 @@ impl App {
         let action_pending = self
             .pending_browser
             .values()
-            .any(|p| p.surface == id && matches!(p.response, Response::Action));
-        if op.is_action() || matches!(op, Op::Snapshot { .. } | Op::Screenshot(..)) {
+            .any(|p| p.surface == id && p.response.is_action());
+        if op.is_action()
+            || matches!(
+                op,
+                Op::Snapshot { .. } | Op::Screenshot(..) | Op::Find(..) | Op::FindClose(..)
+            )
+        {
             anyhow::ensure!(
                 !action_pending,
                 "wait for the pending browser action before taking a snapshot or another action"
@@ -652,6 +737,21 @@ impl App {
             // repeated actions remain valid while the same snapshot/DOM is current.
             // The transport never retries an action after an uncertain response.
             return Ok(None);
+        }
+        match &op {
+            Op::Find(args) => {
+                self.browser_find_start(id, args.clone(), Some(reply))?;
+                return Ok(None);
+            }
+            Op::FindShow(..) => {
+                self.browser_find_show(id)?;
+                return Ok(Some(json!({"ok":true,"surface":id})));
+            }
+            Op::FindClose(..) => {
+                self.browser_find_close(id, Some(reply))?;
+                return Ok(None);
+            }
+            _ => {}
         }
         let browser = self.browsers.get_mut(&id).unwrap();
         let query_kind = match &op {
@@ -681,6 +781,7 @@ impl App {
             Op::Title { .. } => return Ok(Some(json!({"title":browser.title}))),
             Op::Status { .. } => {
                 let mut status = browser.status(id);
+                status["find"] = self.browser_find_status(id);
                 status["action_pending"] = json!(action_pending);
                 status["captures_pending"] = json!(self.pending_captures.len());
                 return Ok(Some(status));
@@ -738,7 +839,9 @@ impl App {
                 )?;
                 return Ok(None);
             }
-            Op::Open { .. } => unreachable!(),
+            Op::Find(..) | Op::FindShow(..) | Op::FindClose(..) | Op::Open { .. } => {
+                unreachable!()
+            }
             Op::Click(..)
             | Op::Dblclick(..)
             | Op::Hover(..)

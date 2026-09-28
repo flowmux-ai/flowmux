@@ -1,0 +1,13 @@
+{
+    "name":  "page-find-cleanup-identity",
+    "target":  "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\page-find-cleanup.ps1",
+    "deadlineSeconds":  30,
+    "status":  "failed",
+    "started":  "2026-09-28T01:28:00.2768844Z",
+    "pid":  2288,
+    "exitCode":  1,
+    "activeBeforeCleanup":  0,
+    "activeAfterCleanup":  0,
+    "elapsedSeconds":  1.022,
+    "finished":  "2026-09-28T01:28:01.3023442Z"
+}

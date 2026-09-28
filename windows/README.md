@@ -750,9 +750,9 @@ from earlier documents. Snapshot/ref queries and DOM actions are described below
 New-window requests are currently denied; downloads use the manager described
 below. DevTools and browser
 zoom hotkeys are disabled. Site permission requests use WebView2's default UI in
-normal runs and are denied in hidden debug tests. Custom permission UI, page
-find, fullscreen/media/login acceptance and popup-to-tab routing
-remain pending. HTTP error pages are pages, while network navigation failures
+normal runs and are denied in hidden debug tests. Page find is partially supported
+as described below. Custom permission UI, fullscreen/media/login acceptance and
+popup-to-tab routing remain pending. HTTP error pages are pages, while network navigation failures
 report a WebView2 error code in the native status line. Terminal OSC 8 links now
 open an in-app browser; physical link-click behavior is not yet live-tested.
 
@@ -1035,3 +1035,44 @@ quick checks and explicit extended checks.
 See [download evidence](evidence/2026-09-28/browser-downloads.md) and the
 [hidden fixture verifier](scripts/verify-browser-downloads.ps1). This feature does
 not establish real Korean IME behavior.
+
+### Browser page find (partial)
+
+The browser toolbar's **Find** button opens a native query field with **Previous**,
+**Next**, **Match case** and **Close** controls. While editing the query, Enter and
+Escape pass through to the native EDIT/IME path; they do not search or close the
+panel. Use the explicit buttons. Physical Korean IME behavior remains unverified.
+
+```powershell
+flowmuxctl.exe browser find pane:<id> "한글"
+flowmuxctl.exe --json browser find pane:<id> "Example" --backward --case-sensitive --no-wrap
+flowmuxctl.exe browser find-show pane:<id>
+flowmuxctl.exe --json browser find-close pane:<id>
+```
+
+Find uses WebView2's `window.find` engine and selects/scrolls to its next match.
+Plain output is `true` or `false`; JSON also reports the surface, query, options
+and bounded selected text. Queries must be nonempty, contain no NUL, and fit in
+4,096 UTF-8 bytes. Flowmux preserves their codepoints; the engine controls matching.
+Only the target pane's active, logically visible browser tab with completed
+navigation is accepted. Requests serialize with DOM actions; navigation, closure,
+visibility changes and the 12-second callback deadline invalidate results. A
+dispatched action may already have executed and is never automatically retried.
+
+There is no standard DOM equivalent of the full native browser find UI: this
+legacy engine extension provides partial support. Match counts, highlight-all and
+regex are not provided; complete frame/shadow-tree coverage is not guaranteed.
+Close clears only a still-matching owned selection. It preserves later selections and returns
+`cleared:false` when ownership cannot be established, including shadow/text-control
+ranges whose real boundaries Chromium does not expose. Hidden debug hosts keep
+the panel hidden; native engine focus effects and physical UI/DPI/accessibility
+acceptance remain open. See [page-find implementation and verification status](evidence/2026-09-28/browser-find.md).
+
+The final debug hidden native run passed eight page-find groups in 17.443 seconds,
+including owned-selection cleanup, deferred panel close and navigation/tab-close
+cancellation. The separate startup check passed in 3.067 seconds. Query transport
+remained exact while the engine matched decomposed `한` to `한` and combining
+`é` to the plain `e` in `needle`; the full `한글 한 é 😀` match retained all
+codepoints. These observations do not establish physical IME behavior or ordinal
+matching by the engine. Remaining build/regression/artifact results are pending
+in the linked evidence.

@@ -384,8 +384,8 @@ moves preserve view/process identity, and browser-only state can save and restor
 without waiting for nonexistent terminal history callbacks. Terminal-only actions
 reject browser surfaces. Shared Linux/macOS code remains unchanged.
 
-B01/B02/B03/B04/B05/B06/B07/B08/B09/B10 and G09 are partial.
-popups, browser find, DevTools, private/profile controls, bookmarks, cookie import,
+B01/B02/B03/B04/B05/B06/B07/B08/B09/B10/B11 and G09 are partial.
+Popups, full browser find acceptance, DevTools, private/profile controls, bookmarks, cookie import,
 media/login/fullscreen and desktop IME/DPI/accessibility acceptance remain open.
 The hidden loopback fixture checks Unicode DOM/control text, history, network
 failure recovery, isolation, move identity, mixed checkpoints and browser-only
@@ -446,3 +446,17 @@ The runtime can retry internally before exposing an interrupted state.
 B10/G09 remain partial. Save As/destination choice, pause/resume, restart recovery,
 physical UI/security integration and broader lifecycle/network/filesystem coverage
 remain open. See [download evidence](evidence/2026-09-28/browser-downloads.md).
+
+
+Windows browser page find now calls the engine's `window.find` with bounded,
+JSON-encoded Unicode queries, direction/case/wrap controls and a native panel.
+The panel pins its browser surface, preserves native EDIT/IME messages, and
+avoids automatic searches while typing. Deferred panel dismissal clears only
+still-owned exposed selections after pending work completes. Navigation,
+visibility revision and surface closure prevent stale result publication.
+Eight hidden native groups cover engine matching, native query codepoints,
+selection ownership, pending dismissal and navigation/closure. Engine Unicode
+matching can differ from the original query, and shadow/text-control range
+cleanup is deliberately conservative. Physical IME/UI, Find API parity and
+remaining B11 browser controls remain pending. See
+[page-find evidence](evidence/2026-09-28/browser-find.md).

@@ -19,6 +19,7 @@ pub(super) struct Chrome {
     pub(super) window: HWND,
     pub(super) address: HWND,
     status: HWND,
+    find: HWND,
     buttons: Vec<HWND>,
 }
 impl Drop for Chrome {
@@ -67,6 +68,7 @@ impl Chrome {
                 window,
                 address: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
+                find: std::ptr::null_mut(),
                 buttons: vec![],
             };
             OWNERS.with(|map| map.borrow_mut().insert(window as isize, id));
@@ -104,6 +106,7 @@ impl Chrome {
                 0,
             );
             chrome.status = chrome.child("STATIC", "", 0, 21)?;
+            chrome.find = chrome.child("BUTTON", "Find", WS_TABSTOP | BS_PUSHBUTTON as u32, 10)?;
             Ok(chrome)
         }
     }
@@ -182,7 +185,16 @@ impl Chrome {
                 std::ptr::null_mut(),
                 px(2),
                 px(68),
-                (area.width - px(4)).max(1),
+                (area.width - px(68)).max(1),
+                px(26),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            SetWindowPos(
+                self.find,
+                std::ptr::null_mut(),
+                (area.width - px(64)).max(0),
+                px(68),
+                px(62),
                 px(26),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );

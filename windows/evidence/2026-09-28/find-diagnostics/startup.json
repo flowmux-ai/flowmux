@@ -1,0 +1,38 @@
+{
+    "started":  "2026-09-28T10:21:47.7443919+09:00",
+    "mode":  "background",
+    "case":  "startup",
+    "checks":  [
+                   {
+                       "name":  "hidden_debug_doctor_and_owned_host_readiness",
+                       "passed":  true
+                   }
+               ],
+    "deferred":  [
+
+                 ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "unicodeComparison":  "ordinal",
+    "realImeTest":  false,
+    "status":  "passed_background_browser_find_subset",
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  34632
+              ],
+    "shells":  [
+                   12796
+               ],
+    "clientPids":  [
+                       22052,
+                       1648,
+                       20184,
+                       19848,
+                       26320,
+                       27196,
+                       18380
+                   ],
+    "finished":  "2026-09-28T10:21:49.6873635+09:00"
+}

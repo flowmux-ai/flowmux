@@ -79,6 +79,7 @@ enum Event {
     Session(SurfaceId, SessionEvent),
     Command(Request, ipc::Reply),
     SearchUi(search::UiAction),
+    BrowserFindUi(browser::find::UiAction),
     Pointer(panes::Pointer),
     ContextMenu(Action, i32, i32),
     Metadata(workspaces::EditAction),
@@ -333,6 +334,7 @@ struct App {
     pending_selections: HashMap<Uuid, PendingRead>,
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
+    browser_find: browser::find::Controller,
     notifications: notifications::Controller,
     downloads: downloads::Controller,
     closing: bool,
@@ -520,6 +522,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_selections: HashMap::new(),
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
+            browser_find: browser::find::Controller::default(),
             notifications: notifications::Controller::default(),
             downloads: downloads::Controller::default(),
             closing: false,
@@ -543,6 +546,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
 
         // Cancel and release native download operations before their WebView
         // controllers close (older runtimes invalidate these COM objects).
+        drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.browsers.clear();
         app.surfaces.clear(); // Parent HWND must outlive every WebView controller.
@@ -565,6 +569,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             if !app.search.handle_message(&message)
                 && !app.notifications.handle_message(&message)
                 && !app.downloads.handle_message(&message)
+                && !app.browser_find.handle_message(&message)
                 && !app
                     .metadata
                     .as_ref()
@@ -1013,6 +1018,7 @@ impl App {
             Event::ExitAfterReply => self.closing = true,
             Event::Saved(result) => self.finish_save(result),
             Event::SearchUi(action) => self.search_ui(action)?,
+            Event::BrowserFindUi(action) => self.browser_find_ui(action),
             Event::Metadata(action) => self.metadata_action(action)?,
             Event::ContextMenu(action, x, y) => self.context_menu(action, x, y)?,
             Event::Tick => {
@@ -2062,7 +2068,7 @@ impl App {
             }
             Command::Capabilities => {
                 return Ok(Some(json!({"platform":"windows","status":"development",
-                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
+                "terminal_backend":"ConPTY/xterm.js","webview_runtime":"WebView2","browser_automation":false,"browser_automation_status":"partial","browser_commands":["open","navigate","back","forward","reload","stop","url","title","status","zoom","eval","snapshot","text","value","attr","is-visible","is-enabled","is-checked","count","wait","click","dblclick","hover","focus","blur","scroll","fill","select","check","uncheck","screenshot","find","find-show","find-close"],"browser_wait_limits":{"timeout_ms":120000,"poll_ms_max":10000,"pending":8},
                 "named_key_protocol":"send_key_mode",
                 "commands":["browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","save-state","quit","shell-integration","find",

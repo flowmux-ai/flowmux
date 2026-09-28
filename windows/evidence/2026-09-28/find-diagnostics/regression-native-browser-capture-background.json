@@ -1,0 +1,67 @@
+{
+  "started": "2026-09-28T10:23:17.3211665+09:00",
+  "mode": "background",
+  "checks": [
+    {
+      "name": "hidden_viewport_png_decoded_color_and_size_exact_unicode_relative_cli_path",
+      "passed": true
+    },
+    {
+      "name": "current_scroll_plain_output_atomic_overwrite_without_focus_or_scroll_change",
+      "passed": true
+    },
+    {
+      "name": "locked_destination_preserved_temporary_file_removed_missing_parent_rejected",
+      "passed": true
+    },
+    {
+      "name": "invalid_paths_raw_relative_terminal_target_and_loading_capture_rejected",
+      "passed": true
+    },
+    {
+      "name": "zoom_active_browser_tab_restoration_and_source_terminal_identity",
+      "passed": true
+    },
+    {
+      "name": "two_native_captures_bound_viewport_change_discards_images_and_capacity_recovers",
+      "passed": true
+    }
+  ],
+  "clipboardAccess": false,
+  "desktopInput": false,
+  "externalSites": false,
+  "unicodeComparison": "ordinal",
+  "first": {
+    "bytes": 6354,
+    "generation": 3,
+    "height": 587,
+    "path": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\evidence\\browser-capture-0e1ee5d0-b4f2-4fe1-bd58-54a9061e580d\\캡처 한 é 😀.png",
+    "surface": "ec2ec045-c092-470e-a898-920f61acac8a",
+    "width": 493
+  },
+  "firstPixel": {
+    "color": -15982024,
+    "width": 493,
+    "height": 587
+  },
+  "scrolledPixel": {
+    "color": -10837806,
+    "width": 493,
+    "height": 587
+  },
+  "status": "passed_background_browser_capture_subset",
+  "hostStderr": "",
+  "hostExitCode": 0,
+  "clientPids": [
+    27456,
+    27156,
+    32380
+  ],
+  "hosts": [
+    28156
+  ],
+  "shells": [
+    25872
+  ],
+  "finished": "2026-09-28T10:23:31.5154320+09:00"
+}

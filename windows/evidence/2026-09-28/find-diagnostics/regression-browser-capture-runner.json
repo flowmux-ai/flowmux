@@ -1,0 +1,13 @@
+{
+  "name": "page-find-regression-browser-capture",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\scripts\\verify-browser-capture.ps1",
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "started": "2026-09-28T01:23:16.2318818Z",
+  "pid": 33248,
+  "exitCode": 0,
+  "activeBeforeCleanup": 5,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 15.338,
+  "finished": "2026-09-28T01:23:31.5756532Z"
+}

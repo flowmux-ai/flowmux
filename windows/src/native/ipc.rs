@@ -142,6 +142,12 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         ));
     }
     let json = cli.json;
+    let find_output = matches!(
+        &cli.command,
+        Command::Browser {
+            op: crate::browser::Op::Find(..)
+        }
+    );
     let screenshot_output = matches!(
         &cli.command,
         Command::Browser {
@@ -169,6 +175,14 @@ fn response(cli: Cli) -> anyhow::Result<String> {
         }
     );
     let value = request(cli)?;
+    if !json && find_output {
+        return Ok(format!(
+            "{}\n",
+            value["found"]
+                .as_bool()
+                .context("invalid page find response")?
+        ));
+    }
     if !json && screenshot_output {
         return Ok(format!(
             "{}\n",

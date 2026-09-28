@@ -1,0 +1,13 @@
+{
+  "name": "page-find-unicode-assertions",
+  "target": "C:\\Users\\jundu\\Documents\\Codex\\2026-06-10\\jsuya-flowmux-https-github-com-jsuya\\work\\flowmux\\windows\\dist\\find-unicode.ps1",
+  "deadlineSeconds": 60,
+  "status": "passed",
+  "started": "2026-09-28T01:26:09.8159499Z",
+  "pid": 15528,
+  "exitCode": 0,
+  "activeBeforeCleanup": 2,
+  "activeAfterCleanup": 0,
+  "elapsedSeconds": 5.185,
+  "finished": "2026-09-28T01:26:15.0061378Z"
+}

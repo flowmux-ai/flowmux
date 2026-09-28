@@ -80,6 +80,10 @@ pub enum Op {
         #[arg(value_parser = crate::command::parse_id)]
         pane: Uuid,
     },
+    /// Find rendered page text using the browser engine.
+    Find(crate::browser_find::Args),
+    FindShow(crate::browser_find::PaneArgs),
+    FindClose(crate::browser_find::PaneArgs),
     Zoom {
         #[arg(value_parser = crate::command::parse_id)]
         pane: Uuid,

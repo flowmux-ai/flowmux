@@ -1,0 +1,19 @@
+{
+  "name": "page-find-release",
+  "command": [
+    "cargo",
+    "xwin",
+    "build",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--target",
+    "x86_64-pc-windows-msvc",
+    "--release",
+    "--locked"
+  ],
+  "deadlineSeconds": 300,
+  "status": "passed",
+  "pid": 282723,
+  "exitCode": 0,
+  "elapsedSeconds": 87.241
+}

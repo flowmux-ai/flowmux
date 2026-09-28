@@ -1,0 +1,108 @@
+{
+    "started":  "2026-09-28T10:26:10.6762011+09:00",
+    "mode":  "background",
+    "case":  "unicode",
+    "checks":  [
+                   {
+                       "name":  "exact_unicode_query_transport_engine_matching_observation_and_literal_injection_text",
+                       "passed":  true
+                   }
+               ],
+    "deferred":  [
+
+                 ],
+    "clipboardAccess":  false,
+    "desktopInput":  false,
+    "externalSites":  false,
+    "unicodeComparison":  "ordinal",
+    "realImeTest":  false,
+    "unicodeMatches":  [
+                           {
+                               "query":  "한글",
+                               "found":  true,
+                               "selection":  "한글"
+                           },
+                           {
+                               "query":  "한",
+                               "found":  true,
+                               "selection":  "한"
+                           },
+                           {
+                               "query":  "é",
+                               "found":  true,
+                               "selection":  "e"
+                           },
+                           {
+                               "query":  "😀",
+                               "found":  true,
+                               "selection":  "😀"
+                           },
+                           {
+                               "query":  "한글 한 é 😀",
+                               "found":  true,
+                               "selection":  "한글 한 é 😀"
+                           }
+                       ],
+    "canonicalEquivalenceObservation":  {
+                                            "backward":  false,
+                                            "case_sensitive":  false,
+                                            "found":  true,
+                                            "query":  "한 é",
+                                            "selection":  "한 é",
+                                            "surface":  "73ba616a-d26b-429f-9d1e-018899d5a65f",
+                                            "wrap":  true
+                                        },
+    "status":  "passed_background_browser_find_subset",
+    "hostStderr":  "",
+    "hostExitCode":  0,
+    "hosts":  [
+                  9348
+              ],
+    "shells":  [
+                   11336
+               ],
+    "clientPids":  [
+                       2420,
+                       30836,
+                       37004,
+                       36764,
+                       23708,
+                       32796,
+                       30012,
+                       8044,
+                       38016,
+                       34368,
+                       5956,
+                       39632,
+                       31556,
+                       36232,
+                       33008,
+                       39172,
+                       35016,
+                       39720,
+                       30820,
+                       33200,
+                       30112,
+                       29444,
+                       3404,
+                       35996,
+                       32376,
+                       32872,
+                       38092,
+                       37680,
+                       32888,
+                       13532,
+                       37016,
+                       33084,
+                       27256,
+                       15704,
+                       32492,
+                       30052,
+                       35848,
+                       36104,
+                       5284,
+                       12040,
+                       13676
+                   ],
+    "finished":  "2026-09-28T10:26:14.9190833+09:00"
+}

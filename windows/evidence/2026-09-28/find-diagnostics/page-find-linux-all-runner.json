@@ -1,0 +1,15 @@
+{
+  "name": "page-find-linux-all",
+  "command": [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "windows/Cargo.toml",
+    "--locked"
+  ],
+  "deadlineSeconds": 120,
+  "status": "passed",
+  "pid": 283901,
+  "exitCode": 0,
+  "elapsedSeconds": 39.706
+}

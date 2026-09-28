@@ -523,8 +523,12 @@
     {
       "id": "B11",
       "feature": "페이지 찾기·새 창/탭·DevTools·사이트 권한",
-      "status": "pending",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "evidence/2026-09-28/browser-find.md",
+        "evidence/2026-09-28/native-browser-find-background.json"
+      ],
+      "notes": "Page find now uses the actual engine with next/previous, case/wrap options, a native panel and CLI; eight hidden groups cover Unicode transport, owned selection cleanup, queued dismissal, surface pinning, navigation and closure. Native matching equivalence may differ from query codepoints. Full Find API parity, counts/highlight-all/regex, shadow/text-control selection cleanup, physical IME/UI/DPI/accessibility, new-window/tab policy, DevTools and site-permission UI remain pending."
     },
     {
       "id": "B12",
@@ -970,9 +974,10 @@
         "evidence/2026-09-28/native-browser-wait-background.json",
         "evidence/2026-09-28/native-browser-actions-background.json",
         "evidence/2026-09-28/native-browser-capture-background.json",
-        "evidence/2026-09-28/browser-downloads.md"
+        "evidence/2026-09-28/browser-downloads.md",
+        "evidence/2026-09-28/browser-find.md"
       ],
-      "notes": "Thirty-one Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending. Native download manager/list/cancellation now have partial hidden evidence."
+      "notes": "Thirty-four Windows browser operations include extra Windows status/stop/zoom commands; the count is not proof of existing-platform command parity. Ref-based DOM actions and viewport PNG capture have hidden evidence, except actual focus/blur. Type/press, complete browser UI parity, physical IME/DPI/accessibility and exhaustive races remain pending. Native download manager/list/cancellation now have partial hidden evidence. Page find and its hidden native panel now have partial engine/Unicode/lifecycle evidence."
     },
     {
       "id": "G10",
