@@ -301,8 +301,8 @@ impl Panel {
             panel.repository =
                 panel.child(window, "STATIC", "", 2, SS_NOPREFIX | SS_PATHELLIPSIS)?;
             panel.message = panel.child(window, "STATIC", "", 3, SS_NOPREFIX)?;
-            panel.refresh = panel.child(window, "BUTTON", "Refresh", 4, 0)?;
-            panel.close = panel.child(window, "BUTTON", "Close", 5, 0)?;
+            panel.refresh = panel.child(window, "BUTTON", "Refresh worktrees", 4, 0)?;
+            panel.close = panel.child(window, "BUTTON", "Close worktree panel", 5, 0)?;
             panel.viewport = panel.child(
                 window,
                 "flowmux.windows.worktrees",
@@ -323,6 +323,7 @@ impl Panel {
                 actions.insert(panel.refresh as isize, (window, UiAction::Refresh));
                 actions.insert(panel.close as isize, (window, UiAction::Close));
             });
+            panel.refresh_theme()?;
             Ok(panel)
         }
     }
@@ -410,9 +411,16 @@ impl Panel {
         if self
             .selected
             .as_ref()
-            .is_some_and(|path| !rows.iter().any(|row| &row.info.path == path))
+            .is_none_or(|path| !rows.iter().any(|row| &row.info.path == path))
         {
-            self.selected = None;
+            self.selected = rows.first().map(|row| row.info.path.clone());
+            ROUTES.with(|routes| {
+                routes
+                    .borrow_mut()
+                    .get_mut(&(self.window as isize))
+                    .unwrap()
+                    .scroll = 0
+            });
         }
         self.rows = rows;
         self.busy = busy;
@@ -499,30 +507,25 @@ impl Panel {
             let width = area.width.max(1);
             let margin = px(6);
             let inner = (width - margin * 2).max(1);
-            let close_width = px(48).min(inner);
-            let refresh_width = px(64).min((inner - close_width - px(4)).max(1));
+            let close_width = px(28).min(inner);
+            let refresh_width = px(28).min((inner - close_width - px(4)).max(1));
+            let title_width = (inner - close_width - refresh_width - px(12)).max(1);
             place(
                 self.close,
                 width - margin - close_width,
-                px(4),
+                px(12),
                 close_width,
                 px(28),
             );
             place(
                 self.refresh,
                 width - margin - close_width - px(4) - refresh_width,
-                px(4),
+                px(12),
                 refresh_width,
                 px(28),
             );
-            place(
-                self.heading,
-                margin,
-                px(5),
-                (inner - close_width - refresh_width - px(12)).max(1),
-                px(24),
-            );
-            place(self.repository, margin, px(36), inner, px(20));
+            place(self.heading, margin, px(5), title_width, px(22));
+            place(self.repository, margin, px(29), title_width, px(20));
             let top = if self.status_text.is_empty() {
                 px(60)
             } else {
@@ -767,8 +770,17 @@ impl Panel {
             chrome::register_control(window, chrome::ControlRole::Static);
         }
         chrome::register_control(self.heading, chrome::ControlRole::Caption);
-        for window in [self.refresh, self.close] {
-            chrome::register_button(window, chrome::Role::Button);
+        for (window, kind) in [
+            (self.refresh, chrome::ChromeIcon::Reload),
+            (self.close, chrome::ChromeIcon::Close),
+        ] {
+            chrome::register_button(
+                window,
+                chrome::Role::Icon {
+                    kind,
+                    marked: false,
+                },
+            );
         }
         for controls in &self.controls {
             for window in controls.labels {
@@ -798,6 +810,8 @@ impl Panel {
                 "remove_enabled":unsafe{IsWindowEnabled(controls.remove)!=0}})
         }).collect();
         json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"refresh":self.refresh as usize,
+            "heading":self.heading as usize,"repository":self.repository as usize,
+            "refresh_tooltip":chrome::tooltip_text(self.refresh),"close_tooltip":chrome::tooltip_text(self.close),
             "close":self.close as usize,"viewport":self.viewport as usize,"open":self.area.is_some(),"busy":self.busy,
             "title":self.title,"status":self.status_text,"selected_path":self.selected,"rows":rows,"scroll":route.map_or(0,|r|r.scroll),
             "scroll_limit":route.map_or(0,|r|r.limit),"bounds":self.area,"viewport_bounds":geometry(self.viewport,self.window),

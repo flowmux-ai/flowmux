@@ -288,6 +288,7 @@ pub(super) enum ChromeIcon {
     Back,
     Forward,
     Reload,
+    Close,
     Stop,
     More,
     Maximize,
@@ -2425,16 +2426,20 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         y(-6),
                         x(6) + 1,
                         y(6) + 1,
-                        x(6),
-                        y(0),
                         x(0),
                         y(-6),
+                        x(6),
+                        y(0),
                     );
                     line(0, -6, 5, -6);
                     line(5, -6, 5, -1);
                 }
                 ChromeIcon::Stop => {
                     Rectangle(item.hDC, x(-5), y(-5), x(5) + 1, y(5) + 1);
+                }
+                ChromeIcon::Close => {
+                    line(-4, -4, 4, 4);
+                    line(-4, 4, 4, -4);
                 }
                 ChromeIcon::More => {
                     for offset in [-5, 0, 5] {
