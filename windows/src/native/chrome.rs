@@ -512,6 +512,12 @@ struct Entry {
     button: Option<Role>,
     control: ControlRole,
     hot: bool,
+    focused: bool,
+}
+#[derive(Clone, Copy)]
+struct WorkspaceClose {
+    button: isize,
+    available: bool,
 }
 struct State {
     theme: Theme,
@@ -522,6 +528,7 @@ struct State {
     controls: HashMap<isize, Entry>,
     tooltips: HashMap<isize, Tooltip>,
     pane_headers: HashMap<isize, Vec<(model::Rect, bool)>>,
+    workspace_closes: HashMap<isize, WorkspaceClose>,
 }
 impl State {
     fn new() -> Self {
@@ -535,6 +542,7 @@ impl State {
             controls: HashMap::new(),
             tooltips: HashMap::new(),
             pane_headers: HashMap::new(),
+            workspace_closes: HashMap::new(),
         }
     }
 }
@@ -542,6 +550,211 @@ thread_local! { static STATE: RefCell<State> = RefCell::new(State::new()); }
 
 pub(super) fn palette() -> Palette {
     STATE.with(|slot| slot.borrow().palette)
+}
+
+pub(super) fn register_workspace_close(row: HWND, button: HWND) {
+    STATE.with(|slot| {
+        slot.borrow_mut()
+            .workspace_closes
+            .entry(row as isize)
+            .or_insert(WorkspaceClose {
+                button: button as isize,
+                available: false,
+            });
+    });
+}
+
+pub(super) fn layout_workspace_close(button: HWND, available: bool) {
+    let row = STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let row = state.workspace_closes.iter_mut().find_map(|(row, close)| {
+            if close.button != button as isize {
+                return None;
+            }
+            close.available = available;
+            Some(*row)
+        });
+        if !available {
+            for window in row.into_iter().chain(Some(button as isize)) {
+                if let Some(entry) = state.controls.get_mut(&window) {
+                    entry.hot = false;
+                    entry.focused = false;
+                }
+            }
+        }
+        row
+    });
+    if let Some(row) = row {
+        refresh_workspace_close(row);
+    }
+}
+
+pub(super) fn workspace_close_key(message: &MSG) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState};
+    if message.message != WM_KEYDOWN || message.wParam != 9 {
+        return false;
+    }
+    let pair = STATE.with(|slot| {
+        slot.borrow()
+            .workspace_closes
+            .iter()
+            .find_map(|(row, close)| {
+                (close.available
+                    && (*row == message.hwnd as isize || close.button == message.hwnd as isize))
+                    .then_some((*row as HWND, close.button as HWND))
+            })
+    });
+    let Some((row, close)) = pair else {
+        return false;
+    };
+    unsafe {
+        let root = GetAncestor(row, GA_ROOT);
+        if GetFocus() != message.hwnd
+            || IsWindowVisible(root) == 0
+            || IsWindowEnabled(root) == 0
+            || IsWindowEnabled(close) == 0
+            || [0x11, 0x12, 0x5b, 0x5c]
+                .into_iter()
+                .any(|key| GetKeyState(key) < 0)
+        {
+            return false;
+        }
+        let backwards = GetKeyState(0x10) < 0;
+        let next = if message.hwnd == row && !backwards {
+            close
+        } else if message.hwnd == close && backwards {
+            row
+        } else {
+            let next = GetNextDlgTabItem(root, row, i32::from(backwards));
+            if next == close {
+                GetNextDlgTabItem(root, close, i32::from(backwards))
+            } else {
+                next
+            }
+        };
+        if next.is_null() {
+            return false;
+        }
+        SetFocus(next);
+    }
+    true
+}
+
+fn refresh_workspace_close(row: isize) {
+    let pair = STATE.with(|slot| {
+        let state = slot.borrow();
+        let close = state.workspace_closes.get(&row)?;
+        let active = [row, close.button].iter().any(|window| {
+            state
+                .controls
+                .get(window)
+                .is_some_and(|entry| entry.hot || entry.focused)
+        });
+        Some((close.button, close.available && active))
+    });
+    if let Some((button, active)) = pair {
+        unsafe {
+            let show = active && GetWindowLongPtrW(row as HWND, GWL_STYLE) as u32 & WS_VISIBLE != 0;
+            EnableWindow(button as HWND, i32::from(show));
+            if (GetWindowLongPtrW(button as HWND, GWL_STYLE) as u32 & WS_VISIBLE != 0) != show {
+                ShowWindow(button as HWND, if show { SW_SHOWNA } else { SW_HIDE });
+                InvalidateRect(row as HWND, std::ptr::null(), 0);
+            }
+        }
+    }
+}
+
+fn workspace_close_message(window: HWND, message: u32, wparam: WPARAM) {
+    if !matches!(
+        message,
+        WM_MOUSEMOVE | WM_MOUSELEAVE | WM_SETFOCUS | WM_KILLFOCUS | WM_SHOWWINDOW
+    ) {
+        return;
+    }
+    let pair = STATE.with(|slot| {
+        slot.borrow()
+            .workspace_closes
+            .iter()
+            .find_map(|(row, close)| {
+                (*row == window as isize || close.button == window as isize)
+                    .then_some((*row, close.button))
+            })
+    });
+    let Some((row, button)) = pair else {
+        return;
+    };
+    if message == WM_SHOWWINDOW && window as isize == button {
+        if wparam == 0 {
+            STATE.with(|slot| {
+                if let Some(entry) = slot.borrow_mut().controls.get_mut(&button) {
+                    entry.hot = false;
+                    entry.focused = false;
+                }
+            });
+        }
+        // ShowWindow sends this synchronously before its transition completes.
+        return;
+    }
+    let other = if row == window as isize { button } else { row };
+    // The row's leave can precede its overlapping button's move. Use the last
+    // delivered mouse-message position only in a visible window, never the
+    // desktop cursor, to keep the target clickable during that handoff.
+    let entering_other = if message == WM_MOUSELEAVE && unsafe { IsWindowVisible(window) } != 0 {
+        let mut rect = RECT::default();
+        unsafe {
+            let position = GetMessagePos();
+            let x = position as u16 as i16 as i32;
+            let y = (position >> 16) as u16 as i16 as i32;
+            GetWindowRect(other as HWND, &mut rect) != 0
+                && x >= rect.left
+                && x < rect.right
+                && y >= rect.top
+                && y < rect.bottom
+        }
+    } else {
+        false
+    };
+    STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        if let Some(entry) = state.controls.get_mut(&(window as isize)) {
+            match message {
+                WM_SETFOCUS => entry.focused = true,
+                WM_KILLFOCUS => entry.focused = false,
+                WM_SHOWWINDOW if wparam == 0 => {
+                    entry.hot = false;
+                    entry.focused = false;
+                }
+                _ => {}
+            }
+        }
+        if entering_other || (message == WM_KILLFOCUS && wparam as isize == other) {
+            if let Some(entry) = state.controls.get_mut(&other) {
+                if entering_other {
+                    entry.hot = true;
+                } else {
+                    entry.focused = true;
+                }
+            }
+        }
+        if message == WM_SHOWWINDOW && wparam == 0 {
+            if let Some(entry) = state.controls.get_mut(&other) {
+                entry.hot = false;
+                entry.focused = false;
+            }
+        }
+    });
+    if entering_other {
+        unsafe {
+            let mut event = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: other as HWND,
+                dwHoverTime: 0,
+            };
+            TrackMouseEvent(&mut event);
+        }
+    }
+    refresh_workspace_close(row);
 }
 
 pub(super) fn set_pane_headers(window: HWND, headers: Vec<(model::Rect, bool)>) {
@@ -744,6 +957,7 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
                 button,
                 control,
                 hot: false,
+                focused: false,
             },
         );
         if matches!(control, ControlRole::Caption) {
@@ -773,7 +987,11 @@ pub(super) fn unregister(window: HWND) {
     }
     remove_tooltip(window);
     STATE.with(|slot| {
-        slot.borrow_mut().controls.remove(&(window as isize));
+        let mut state = slot.borrow_mut();
+        state.controls.remove(&(window as isize));
+        state
+            .workspace_closes
+            .retain(|row, close| *row != window as isize && close.button != window as isize);
     });
     unsafe {
         if IsWindow(window) != 0 {
@@ -869,7 +1087,7 @@ unsafe extern "system" fn control_proc(
                     })
             });
             if changed {
-                if hot {
+                if hot && IsWindowVisible(window) != 0 {
                     let mut event = TRACKMOUSEEVENT {
                         cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                         dwFlags: TME_LEAVE,
@@ -887,6 +1105,9 @@ unsafe extern "system" fn control_proc(
                 let mut state = slot.borrow_mut();
                 state.controls.remove(&(window as isize));
                 state.pane_headers.remove(&(window as isize));
+                state.workspace_closes.retain(|row, close| {
+                    *row != window as isize && close.button != window as isize
+                });
             });
             RemoveWindowSubclass(window, Some(control_proc), SUBCLASS);
         }
@@ -904,6 +1125,7 @@ unsafe extern "system" fn control_proc(
         }
         _ => {}
     }
+    workspace_close_message(window, message, wparam);
     DefSubclassProc(window, message, wparam, lparam)
 }
 

@@ -5,7 +5,7 @@ if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through win
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs'),(Join-Path $PSScriptRoot 'CliProbe.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs'),(Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('workspaces-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $hosts=New-Object 'System.Collections.Generic.List[System.Diagnostics.Process]';$hostIO=@{};$clientPids=@();$shellPids=@();$descendantPids=@();$cleanupErrors=@();$cleaning=$false;$clock=[Diagnostics.Stopwatch]::StartNew()
 $evidence=[ordered]@{started=(Get-Date).ToString('o');mode='background';checks=@();hosts=@();observations=@();desktopInput=$false;clipboardAccess=$false}
@@ -90,6 +90,33 @@ function Assert-Stopped([int[]]$Ids) {
     $wait=[Diagnostics.Stopwatch]::StartNew()
     do {Budget|Out-Null;$remaining=@($Ids|Where-Object {Get-Process -Id $_ -ErrorAction SilentlyContinue});if(-not $remaining.Count){return};if($wait.ElapsedMilliseconds -ge 5000){throw "Closed workspace processes survived: $remaining"};Start-Sleep -Milliseconds 20}while($true)
 }
+function Open-SidebarClose([string]$Workspace,[bool]$CheckHover=$false) {
+    $tree=Invoke-Flowmux @('tree');$main=[long]$tree.window_handle
+    $row=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $Workspace})
+    $close=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace_close' -and $_.workspace -eq $Workspace})
+    if($row.Count -ne 1 -or $close.Count -ne 1 -or -not $row[0].layout_visible){throw 'Sidebar close target has no unique visible workspace row'}
+    if($CheckHover -and ($close[0].layout_visible -or ([OptionsFixture]::Describe([long]$close[0].handle,$owned.Id)).Enabled)){throw 'Idle workspace close must be hidden and disabled'}
+    [OptionsFixture]::Hover($main,[long]$row[0].handle,$owned.Id,$true)
+    $tree=Wait-Tree {param($t) @($t.chrome.controls|Where-Object {$_.kind -eq 'workspace_close' -and $_.workspace -eq $Workspace -and $_.layout_visible}).Count -eq 1}
+    $close=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace_close' -and $_.workspace -eq $Workspace})[0]
+    $native=[OptionsFixture]::Describe([long]$close.handle,$owned.Id);$scale=[Math]::Max(96,$native.Dpi)/96.0
+    if(-not $native.Enabled -or $close.native_visible -ne $false -or [OptionsFixture]::Parent([long]$close.handle,$owned.Id) -ne $main -or [Math]::Abs($close.rect.width-24*$scale) -gt 1 -or [Math]::Abs($close.rect.height-24*$scale) -gt 1){throw 'Revealed close button escaped its hidden24DIP owned control'}
+    if($CheckHover){
+        [OptionsFixture]::Hover($main,[long]$close.handle,$owned.Id,$true);[OptionsFixture]::Hover($main,[long]$row[0].handle,$owned.Id,$false)
+        $tree=Invoke-Flowmux @('tree')
+        if(@($tree.chrome.controls|Where-Object {$_.handle -eq $close.handle -and $_.layout_visible}).Count -ne 1){throw 'Moving from workspace row onto Close hid the action'}
+        [OptionsFixture]::Hover($main,[long]$close.handle,$owned.Id,$false)
+        $tree=Wait-Tree {param($t) @($t.chrome.controls|Where-Object {$_.handle -eq $close.handle -and $_.layout_visible}).Count -eq 0}
+        if(([OptionsFixture]::Describe([long]$close.handle,$owned.Id)).Enabled){throw 'Leaving workspace Close kept the hidden action enabled'}
+        [OptionsFixture]::Hover($main,[long]$row[0].handle,$owned.Id,$true)
+        $tree=Wait-Tree {param($t) @($t.chrome.controls|Where-Object {$_.handle -eq $close.handle -and $_.layout_visible}).Count -eq 1}
+    }
+    [OptionsFixture]::ClickMenu($main,[long]$close.handle,$owned.Id)
+    $tree=Wait-Tree {param($t) $null -ne $t.workspace_close_dialog};$dialog=$tree.workspace_close_dialog
+    $native=[OptionsFixture]::Describe([long]$dialog.window,$owned.Id);$name=($tree.workspaces|Where-Object {$_.id -eq $Workspace}).name
+    if($dialog.owner -ne $main -or $native.Owner -ne $main -or $native.OwnerEnabled -or $dialog.native_visible -ne $false -or -not ([OptionsFixture]::Text([long]$dialog.body_handle,$owned.Id)).Contains($name)){throw 'Sidebar Close did not confirm its exact owned workspace'}
+    return $dialog
+}
 try {
     $doctor=Invoke-Probe @('doctor');if(-not $doctor.background_testing -or $doctor.status -ne 'ok'){throw 'A working hidden debug build is required; no host launched'}
     $owned=Start-Owned @('--cwd',$directory)
@@ -104,6 +131,7 @@ try {
     Wait-Find $a.surface 'LOCKED-TITLE-READY'
     Invoke-Flowmux @('new-workspace') | Out-Null
     $b=Invoke-Flowmux @('identify')
+    Invoke-Flowmux @('workspace','rename',$b.workspace,'비활성 닫기 한 😀')|Out-Null
     Invoke-Flowmux @('new-tab') | Out-Null
     Invoke-Flowmux @('split','horizontal') | Out-Null
     Invoke-Flowmux @('new-workspace') | Out-Null
@@ -171,7 +199,13 @@ try {
     $script:descendantPids=@($descendants|ForEach-Object {[int]$_})
     $closingPids=@($tree.surfaces | Where-Object { $closingIds -contains $_.id }).pid + @($descendants | ForEach-Object { [int]$_ })
     Invoke-Flowmux @('workspace','focus',$a.workspace) | Out-Null
-    Invoke-Flowmux @('workspace','close',$b.workspace) | Out-Null
+    $dialog=Open-SidebarClose $b.workspace $true
+    if((Invoke-Flowmux @('tree')).active_workspace -ne $a.workspace){throw 'Hover or Close selected the inactive target workspace'}
+    [OptionsFixture]::PostEnter([long]$dialog.window,$owned.Id)
+    $tree=Wait-Tree {param($t) -not $t.workspace_close_dialog -and -not $t.editor_synchronizing}
+    if($tree.active_workspace -ne $a.workspace -or (@($tree.surfaces|Sort-Object id|ForEach-Object {"$($_.id):$($_.pid)"}) -join ',') -ne $initial -or -not ([OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id)).Enabled){throw 'Default Cancel changed workspace selection, terminal identities or owner enablement'}
+    $dialog=Open-SidebarClose $b.workspace
+    [OptionsFixture]::ClickMenu([long]$dialog.window,[long]$dialog.confirm,$owned.Id)
     Assert-Stopped $closingPids
     $tree=Invoke-Flowmux @('tree')
     if ($tree.surfaces.Count -ne 2 -or $tree.active_workspace -ne $a.workspace -or @($tree.surfaces | Where-Object { -not $_.running }).Count) { throw 'Closing inactive workspace damaged survivors' }
@@ -180,7 +214,7 @@ try {
     }
     Reject @('rename-tab',$b.surface,'stale target')
     Wait-Find $a.surface $marker
-    $evidence.checks+=@{ name='inactive_workspace_close_terminates_all_three_terminals_and_three_descendants_only'; stoppedPids=$closingPids; survivorPids=$tree.surfaces.pid }
+    $evidence.checks+=@{ name='hidden_sidebar_hover_leave_cancel_and_exact_inactive_close_stop_only_target_process_tree'; stoppedPids=$closingPids; survivorPids=$tree.surfaces.pid }
     $saved=Invoke-Flowmux @('save-state')
     $before=Invoke-Flowmux @('tree')
     Invoke-Flowmux @('quit') | Out-Null
@@ -215,7 +249,7 @@ try {
     if (-not $restored.WaitForExit((Budget 5000))) { throw 'Restored host did not exit within five seconds' };if($restored.ExitCode -ne 0){throw 'Restored host exited with failure'}
     $evidence.status='passed_background_workspace_subset'
     $evidence.pending='Native menus, edit dialogs, IME composition, color appearance, keyboard/DPI/accessibility, drag reordering and composed empty-window appearance remain pending.'
-} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
+} catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;[Console]::Error.WriteLine($_.ScriptStackTrace);throw}
 finally {
     $script:cleaning=$true
     foreach($ownedHost in $hosts){

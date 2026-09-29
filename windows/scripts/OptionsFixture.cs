@@ -53,6 +53,11 @@ public static class OptionsFixture {
         if(!IsWindowEnabled(root)||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned menu action is disabled");
         Message(root,0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);
     }
+    public static void Hover(long parent,long child,int owner,bool entered) {
+        var hwnd=Child(parent,child,owner);
+        if(!IsWindowEnabled(new IntPtr(parent))||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned hover target is disabled");
+        Message(hwnd,entered?0x200U:0x2A3U,IntPtr.Zero,entered?new IntPtr((1<<16)|1):IntPtr.Zero);
+    }
     public static void SetChecked(long parent,long child,int owner,bool value) {
         var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(new IntPtr(parent))||!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned checkbox is disabled");
         Message(hwnd,0xF1,new IntPtr(value?1:0),IntPtr.Zero);

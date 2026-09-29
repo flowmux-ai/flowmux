@@ -377,6 +377,16 @@ unsafe extern "system" fn window_proc(
             if (wparam >> 16) == 0 {
                 let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&lparam).cloned());
                 if let Some(action) = action {
+                    if matches!(action, Action::WorkspaceClose(_))
+                        && (GetParent(lparam as HWND) != window
+                            || GetDlgCtrlID(lparam as HWND) != (wparam as u16) as i32
+                            || GetWindowLongPtrW(lparam as HWND, GWL_STYLE) as u32 & WS_VISIBLE
+                                == 0
+                            || IsWindowEnabled(lparam as HWND) == 0
+                            || IsWindowEnabled(window) == 0)
+                    {
+                        return 0;
+                    }
                     post(Event::Button(action));
                 }
             }
@@ -475,6 +485,7 @@ enum Action {
     SshAuthentication(WorkspaceId),
     SshPorts(WorkspaceId),
     Workspace(WorkspaceId),
+    WorkspaceClose(WorkspaceId),
     WorkspaceMenu,
     NewTab,
     Vertical,
@@ -985,6 +996,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         unsafe {
             if !app.empty_window_shortcut(&message)
+                && !chrome::workspace_close_key(&message)
                 && !app
                     .tab_menu
                     .as_ref()
@@ -1146,6 +1158,7 @@ impl App {
                 self.workspace_caption(id).unwrap_or_default(),
                 Action::Workspace(id),
             ));
+            desired.push(("Close workspace".into(), Action::WorkspaceClose(id)));
         }
         if self.current_workspace().is_none() {
             desired.push(("flowmux\nNo workspaces yet".into(), Action::EmptyState));
@@ -1214,6 +1227,14 @@ impl App {
                 self.button(&label, action)?;
             }
         }
+        for control in &self.controls {
+            if let Action::Workspace(id) = control.action {
+                if let Some(close) = self.controls.iter().find(|candidate|
+                    matches!(candidate.action, Action::WorkspaceClose(other) if other == id)) {
+                    chrome::register_workspace_close(control.hwnd, close.hwnd);
+                }
+            }
+        }
         self.refresh_notifications();
         self.overview_refresh()?;
         self.layout()
@@ -1229,7 +1250,16 @@ impl App {
                 wide(if empty || label { "STATIC" } else { "BUTTON" }).as_ptr(),
                 wide(name.replace('&', "&&")).as_ptr(),
                 WS_CHILD
-                    | WS_VISIBLE
+                    | if matches!(action, Action::Workspace(_) | Action::WorkspaceClose(_)) {
+                        WS_CLIPSIBLINGS
+                    } else {
+                        0
+                    }
+                    | if matches!(action, Action::WorkspaceClose(_)) {
+                        0
+                    } else {
+                        WS_VISIBLE
+                    }
                     | if empty {
                         windows_sys::Win32::System::SystemServices::SS_CENTER
                             | windows_sys::Win32::System::SystemServices::SS_NOPREFIX
@@ -1629,7 +1659,7 @@ impl App {
                 Action::Notifications => {
                     (sidebar >= px(64)).then_some((sidebar - px(32), px(5), px(28), px(28)))
                 }
-                Action::Workspace(id) => {
+                Action::Workspace(id) | Action::WorkspaceClose(id) => {
                     let i = main_indices
                         .iter()
                         .position(|i| self.workspaces[*i].id == id)
@@ -1640,12 +1670,19 @@ impl App {
                     {
                         None
                     } else {
-                        Some((
-                            px(6),
-                            list_top + (i - self.sidebar_offset) as i32 * row_height,
-                            (sidebar - px(12)).max(1),
-                            row_height - px(2),
-                        ))
+                        let row_y = list_top + (i - self.sidebar_offset) as i32 * row_height;
+                        let row_width = sidebar - px(12);
+                        let row_height = row_height - px(2);
+                        if matches!(control.action, Action::WorkspaceClose(_)) {
+                            (row_width >= px(48)).then_some((
+                                sidebar - px(36),
+                                row_y + (row_height - px(24)) / 2,
+                                px(24),
+                                px(24),
+                            ))
+                        } else {
+                            Some((px(6), row_y, row_width.max(1), row_height))
+                        }
                     }
                 }
                 Action::SidebarScroll(direction) => {
@@ -1775,17 +1812,34 @@ impl App {
                         && x.saturating_add(*width) <= client.right
                         && y.saturating_add(*height) <= client.bottom
                 }) {
+                    let workspace_close = matches!(control.action, Action::WorkspaceClose(_));
                     SetWindowPos(
                         control.hwnd,
-                        std::ptr::null_mut(),
+                        if workspace_close {
+                            HWND_TOP
+                        } else {
+                            std::ptr::null_mut()
+                        },
                         x,
                         y,
                         width.max(1),
                         height.max(1),
-                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                        SWP_NOACTIVATE
+                            | if workspace_close {
+                                0
+                            } else {
+                                SWP_NOZORDER | SWP_SHOWWINDOW
+                            },
                     );
+                    if workspace_close {
+                        chrome::layout_workspace_close(control.hwnd, true);
+                    }
                 } else {
-                    ShowWindow(control.hwnd, SW_HIDE);
+                    if matches!(control.action, Action::WorkspaceClose(_)) {
+                        chrome::layout_workspace_close(control.hwnd, false);
+                    } else {
+                        ShowWindow(control.hwnd, SW_HIDE);
+                    }
                 }
             }
         }
@@ -3279,6 +3333,15 @@ impl App {
                 }
                 self.active_workspace = index;
                 self.detached_focus = None;
+            }
+            Action::WorkspaceClose(id) => {
+                if self.main_closed
+                    || self.is_detached_workspace(id)
+                    || !self.workspaces.iter().any(|workspace| workspace.id == id)
+                {
+                    return Ok(());
+                }
+                return self.confirm_close_workspaces(vec![id]);
             }
             Action::WorkspaceMenu => return self.workspace_creation_menu(None),
             Action::NewTab => {

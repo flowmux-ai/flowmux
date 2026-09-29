@@ -234,7 +234,9 @@ impl App {
                 },
                 marked: false,
             },
-            Action::PaneAdd(..) | Action::NewWorkspace => chrome::Role::Tool,
+            Action::PaneAdd(..) | Action::NewWorkspace | Action::WorkspaceClose(_) => {
+                chrome::Role::Tool
+            }
             _ => chrome::Role::Button,
         }
     }
@@ -359,6 +361,7 @@ impl App {
         let controls=self.controls.iter().map(|control| {
             let (kind,pane,surface,workspace,selected)=match control.action {
                 Action::Workspace(id)=>("workspace",None,None,Some(id),self.current_workspace().is_some_and(|workspace| workspace.id == id)),
+                Action::WorkspaceClose(id)=>("workspace_close",None,None,Some(id),false),
                 Action::Tab(pane,surface)=>("tab",Some(pane),Some(surface),None,self.current_workspace().and_then(|workspace|workspace.root.active_surface_id(pane))==Some(surface)),
                 Action::TabClose(pane,surface)=>("tab_close",Some(pane),Some(surface),None,false),
                 Action::PaneAdd(pane,surface)=>("pane_add",Some(pane),Some(surface),None,false),

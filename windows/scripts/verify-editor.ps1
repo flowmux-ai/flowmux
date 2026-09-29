@@ -261,16 +261,23 @@ function Wait-CloseAll([scriptblock]$Condition) {
         Start-Sleep -Milliseconds 20
     }while($true)
 }
-function Open-CloseAll([string]$Workspace) {
+function Open-CloseAll([string]$Workspace,[bool]$SidebarClose=$false) {
     $tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $Workspace -and $_.layout_visible})
     if($row.Count -ne 1){throw 'Close-all source has no unique visible owned workspace row'}
-    [OptionsFixture]::ContextMenu([long]$tree.window_handle,[long]$row[0].handle,$process.Id)
-    $tree=Wait-CloseAll {param($t) $t.tab_menu.kind -ceq 'workspace' -and $t.tab_menu.workspace -ceq $Workspace}
-    $menu=$tree.tab_menu.menu;$native=[OptionsFixture]::Describe([long]$menu.window,$process.Id)
-    if($menu.native_visible -ne $false -or $native.Owner -ne $tree.window_handle -or -not $native.OwnerEnabled){throw 'Close-all menu escaped its hidden modeless owner'}
-    $row=@($menu.rows|Where-Object {$_.label -ceq 'Close all tabs'})
-    if($row.Count -ne 1 -or -not $row[0].enabled){throw 'Native Close all tabs action is unavailable'}
-    [OptionsFixture]::ClickMenu([long]$menu.window,[long]$row[0].window,$process.Id)
+    if($SidebarClose){
+        [OptionsFixture]::Hover([long]$tree.window_handle,[long]$row[0].handle,$process.Id,$true)
+        $tree=Wait-CloseAll {param($t) @($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace_close' -and $_.workspace -ceq $Workspace -and $_.layout_visible}).Count -eq 1}
+        $close=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace_close' -and $_.workspace -ceq $Workspace})[0]
+        [OptionsFixture]::ClickMenu([long]$tree.window_handle,[long]$close.handle,$process.Id)
+    }else{
+        [OptionsFixture]::ContextMenu([long]$tree.window_handle,[long]$row[0].handle,$process.Id)
+        $tree=Wait-CloseAll {param($t) $t.tab_menu.kind -ceq 'workspace' -and $t.tab_menu.workspace -ceq $Workspace}
+        $menu=$tree.tab_menu.menu;$native=[OptionsFixture]::Describe([long]$menu.window,$process.Id)
+        if($menu.native_visible -ne $false -or $native.Owner -ne $tree.window_handle -or -not $native.OwnerEnabled){throw 'Close-all menu escaped its hidden modeless owner'}
+        $row=@($menu.rows|Where-Object {$_.label -ceq 'Close all tabs'})
+        if($row.Count -ne 1 -or -not $row[0].enabled){throw 'Native Close all tabs action is unavailable'}
+        [OptionsFixture]::ClickMenu([long]$menu.window,[long]$row[0].window,$process.Id)
+    }
     $tree=Wait-CloseAll {param($t) $t.workspace_close_dialog -and -not $t.tab_menu}
     $dialog=$tree.workspace_close_dialog;$native=[OptionsFixture]::Describe([long]$dialog.window,$process.Id)
     if(-not $dialog.id -or $dialog.owner -ne $tree.window_handle -or $native.Owner -ne $tree.window_handle -or -not $native.Enabled -or $native.OwnerEnabled -or $dialog.native_visible -ne $false){throw 'Workspace confirmation is not the exact owned hidden modal'}
@@ -1045,7 +1052,7 @@ try {
                 if(-not ([OptionsFixture]::Describe([long]$tree.window_handle,$process.Id)).Enabled){throw 'Default Cancel left the main owner disabled'}
                 Passed 'Close_all_workspace_confirmation_defaults_Enter_to_Cancel_without_mutation'
 
-                $dialog=Open-CloseAll $source.workspace;Confirm-CloseAll $dialog
+                $dialog=Open-CloseAll $source.workspace $true;Confirm-CloseAll $dialog
                 $dialog=Wait-CloseDialog ([long]$tree.window_handle) @($name);Choose-Close $dialog 'cancel'
                 $retained=Wait-EditorUnsealed $opened.surface;$tree=Tree;$after=Status $opened.surface
                 if($retained.document_id -ne $read.document_id -or $retained.active_version -ne $read.active_version -or -not $retained.dirty -or -not (Same-Text $retained.content ([EditorFixture]::Edited)) -or $after.view_handle -ne $before.view_handle -or $tree.main_empty -or $tree.main_closed){throw 'Close-all dirty Cancel lost the live editor or document'}
@@ -1053,7 +1060,7 @@ try {
                 Editor-Command $opened.surface 'undo'|Out-Null;Flush $opened.surface
                 if(-not (Same-Text (Read-Editor $opened.surface).content ([EditorFixture]::Original))){throw 'Close-all Cancel lost Monaco undo'}
                 Editor-Command $opened.surface 'redo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
-                Passed 'Close_all_dirty_Cancel_preserves_Unicode_document_version_view_undo_and_terminal_PID'
+                Passed 'Sidebar_Close_dirty_Cancel_preserves_Unicode_document_version_view_undo_and_terminal_PID'
 
                 $oldMain=[long]$tree.window_handle;$dialog=Open-CloseAll $source.workspace;Confirm-CloseAll $dialog
                 $dialog=Wait-CloseDialog $oldMain @($name);Choose-Close $dialog 'save'
