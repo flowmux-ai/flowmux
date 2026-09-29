@@ -30,19 +30,19 @@ let windowsDiskRefresh = null;
 const windowsComposingEditors = new Set();
 const windowsObservedEditors = new WeakSet();
 let windowsPendingTheme = null;
+let windowsMinimapSetting = null;
 let windowsThemeFlushQueued = false;
 function windowsFlushTheme() {
   if (windowsPendingTheme === null || windowsComposingEditors.size !== 0) return;
   const colors = windowsPendingTheme;
   windowsPendingTheme = null;
   try {
-    // Shared applyAppearance also refreshes font/minimap options. Keep the
-    // editor's current values, including local minimap toggles and font zoom.
+    // Keep local minimap toggles unless the global option changed; preserve font zoom.
     const targets = [editor, diffEditor?.getModifiedEditor()].filter(Boolean);
     const fonts = targets.map((target) => ({ target,
       fontFamily: target.getOption(monaco.editor.EditorOption.fontFamily),
       fontSize: target.getOption(monaco.editor.EditorOption.fontSize) }));
-    applyAppearance({ ...appliedAppearance, ...colors, minimapEnabled, fontSize: editorFontSize });
+    applyAppearance({ ...appliedAppearance, minimapEnabled, fontSize: editorFontSize, ...colors });
     for (const { target, fontFamily, fontSize } of fonts) {
       if (target.getOption(monaco.editor.EditorOption.fontFamily) !== fontFamily ||
           target.getOption(monaco.editor.EditorOption.fontSize) !== fontSize) {
@@ -179,6 +179,8 @@ function windowsRead() {
       applied: { ...appliedAppearance }, pending: windowsPendingTheme !== null,
       font_family: editor.getOption(monaco.editor.EditorOption.fontFamily),
       font_size: editor.getOption(monaco.editor.EditorOption.fontSize),
+      minimap_enabled: editor.getOption(monaco.editor.EditorOption.minimap).enabled,
+      diff_minimap_enabled: diffEditor?.getModifiedEditor().getOption(monaco.editor.EditorOption.minimap).enabled ?? null,
       background: background === null ? null : window.getComputedStyle(background).backgroundColor,
       css_background: rootStyle.getPropertyValue("--ink").trim(),
       css_foreground: rootStyle.getPropertyValue("--text").trim(),
@@ -600,14 +602,19 @@ openSearchResult = (index) => {
 };
 
 window.flowmuxWindowsEditor = Object.freeze({
-  setTheme(colors) {
+  setTheme(colors, minimap) {
     try {
       const fields = ["background", "foreground", "cursor", "selectionBackground", "selectionForeground"];
       windowsRequire(colors !== null && typeof colors === "object" && !Array.isArray(colors) &&
         Object.keys(colors).length === fields.length + 1 && typeof colors.dark === "boolean" &&
         fields.every((field) => typeof colors[field] === "string" && /^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(colors[field])),
       "Invalid editor theme colors.");
-      windowsPendingTheme = { ...colors };
+      windowsRequire(minimap === undefined || typeof minimap === "boolean", "Invalid editor minimap option.");
+      windowsPendingTheme = { ...windowsPendingTheme, ...colors };
+      if (minimap !== undefined && minimap !== windowsMinimapSetting) {
+        windowsPendingTheme.minimapEnabled = minimap;
+        windowsMinimapSetting = minimap;
+      }
       windowsFlushTheme();
     } catch (error) {
       window.__flowmuxWindowsEditorBridge({ kind: "theme_error", error: String(error.message ?? error).slice(0, 4096) });

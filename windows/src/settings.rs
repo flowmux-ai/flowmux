@@ -27,6 +27,7 @@ pub enum SettingKey {
     MinimapEnabled,
     MinimapWidth,
     MinimapOpacity,
+    EditorMinimapEnabled,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,6 +121,7 @@ pub struct TerminalSettings {
     pub minimap_enabled: bool,
     pub minimap_width: u16,
     pub minimap_opacity: u8,
+    pub editor_minimap_enabled: bool,
 }
 impl Default for TerminalSettings {
     fn default() -> Self {
@@ -138,6 +140,7 @@ impl Default for TerminalSettings {
             minimap_enabled: true,
             minimap_width: 40,
             minimap_opacity: 50,
+            editor_minimap_enabled: true,
         }
     }
 }
@@ -191,6 +194,7 @@ impl TerminalSettings {
             SettingKey::MinimapEnabled => self.minimap_enabled.to_string(),
             SettingKey::MinimapWidth => self.minimap_width.to_string(),
             SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
+            SettingKey::EditorMinimapEnabled => self.editor_minimap_enabled.to_string(),
             SettingKey::ThemePreset => self.theme_preset.clone().unwrap_or_default(),
             SettingKey::ThemeBackground => {
                 self.theme_overrides.background.clone().unwrap_or_default()
@@ -310,6 +314,11 @@ impl TerminalSettings {
                     .trim()
                     .parse()
                     .context("minimap width must be an integer")?
+            }
+            SettingKey::EditorMinimapEnabled => {
+                next.editor_minimap_enabled = value
+                    .parse()
+                    .context("editor minimap enabled must be true or false")?
             }
             SettingKey::MinimapOpacity => {
                 next.minimap_opacity = value
@@ -433,6 +442,11 @@ mod tests {
         )
         .unwrap();
         assert!(old.terminal.minimap_enabled);
+        assert!(old.terminal.editor_minimap_enabled);
+        assert!(old
+            .terminal
+            .changed(SettingKey::EditorMinimapEnabled, "on", None)
+            .is_err());
         assert_eq!(
             (old.terminal.minimap_width, old.terminal.minimap_opacity),
             (40, 50)
@@ -443,6 +457,7 @@ mod tests {
             (SettingKey::MinimapOpacity, "0"),
             (SettingKey::MinimapOpacity, "100"),
             (SettingKey::MinimapEnabled, "false"),
+            (SettingKey::EditorMinimapEnabled, "false"),
         ] {
             let value = old.terminal.changed(key, text, None).unwrap();
             assert_eq!(value.value(key), text);

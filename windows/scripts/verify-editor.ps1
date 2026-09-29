@@ -2,7 +2,7 @@
 # Bounded hidden native Monaco verification. Run through run-check.ps1 (120s).
 param(
     [string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','startup','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
+    [ValidateSet('all','startup','minimap','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')][string]$Case='all'
 )
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
@@ -332,6 +332,17 @@ function Read-Editor([string]$Surface) {
     return $r
 }
 function Flush([string]$Surface) {Request @('editor','flush',$Surface)|Out-Null}
+function Wait-Minimap([string]$Surface,[bool]$Enabled,[bool]$Diff=$false) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $left=5000-$watch.ElapsedMilliseconds;if($left -le 0){throw ('Actual Monaco minimap did not settle within five seconds: '+($read.appearance|ConvertTo-Json -Compress))}
+        $read=(Request @('editor','command',$Surface,'read') 0 ([int]$left)).result
+        if($read.document_focused -ne $false -or $read.content_truncated){throw 'Minimap read focused or truncated the owned document'}
+        # Monaco's diff editor forces its own minimap off, as in the Linux shared frontend.
+        if(-not $read.appearance.pending -and $read.appearance.minimap_enabled -eq $Enabled -and (-not $Diff -or ($read.diff_visible -and $read.appearance.diff_minimap_enabled -eq $false))){return $read}
+        Start-Sleep -Milliseconds 20
+    }while($true)
+}
 function Assert-Text([string]$Surface,[string]$Expected,[bool]$Dirty) {
     Flush $Surface;$r=Read-Editor $Surface;$status=Status $Surface
     if(-not (Same-Text $r.content $Expected) -or $r.dirty -ne $Dirty -or $status.dirty -ne $Dirty) {throw ('Editor content/dirty differs: '+($r|ConvertTo-Json -Compress -Depth 6))}
@@ -461,10 +472,45 @@ try {
     if(-not $doctor.background_testing -or $doctor.status -ne 'ok') {throw 'Working hidden debug build required; no host launched'}
     $tree=Start-Owned ($Case -eq 'close-all');$script:source=Request @('identify');$script:terminal=$tree.surfaces[0]
     if($Case -eq 'startup') {Passed 'hidden_debug_doctor_and_owned_host_readiness'}
-    foreach($group in @('open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
+    foreach($group in @('minimap','open','async-open','picker-blocked','late-open','close-preparing','edit','encoding','encoding-defaults','conflict','save-as','save-all-many','close','close-dialog','close-all','move','restore','restore-errors','missing-root','checkpoint-failure','late-quit','late-quit-empty','recovery','auto-refresh-clean','auto-refresh-inactive','auto-refresh-conflict','auto-refresh-delete-recreate','auto-refresh-stamp','auto-refresh-partial-error','auto-refresh-move-close','auto-refresh-coalescing')) {
         if($Case -ne 'all' -and $Case -ne $group) {continue}
         Clean-Editors;$fixture.ReleaseLocks();Request @('focus-tab',$terminal.id)|Out-Null
         switch($group) {
+            'minimap' {
+                Close-Fixtures
+                Request @('settings','set','editor-minimap-enabled','false')|Out-Null
+                $name='minimap 미저장 한 😀.txt';$path=$fixture.Write($name,[EditorFixture]::Original,$false,$false);$opened=Open-Editor $path
+                $initial=Wait-Minimap $opened.surface $false;$before=Status $opened.surface
+                if(-not (Same-Text $initial.content ([EditorFixture]::Original)) -or $initial.dirty){throw 'Initial minimap option changed document content'}
+                Passed 'new_Monaco_inherits_disabled_global_editor_minimap'
+                Editor-Command $opened.surface 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null;Flush $opened.surface
+                $fixture.Write($name,[EditorFixture]::External,$false,$false)|Out-Null;Request @('editor','check-disk',$opened.surface)|Out-Null
+                Editor-Command $opened.surface 'compare'|Out-Null;$dirty=Read-Editor $opened.surface
+                if(-not $dirty.diff_visible){throw 'Minimap requires a real Monaco comparison view'}
+                $tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'settings'})
+                if($entry.Count -ne 1){throw 'Options entry missing'};[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry[0].handle,$process.Id)
+                $watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;if($left -le 0){throw 'Options did not open within five seconds'};$settings=Request @('settings','show') 0 ([int]$left);if($settings.options.open){break};Start-Sleep -Milliseconds 20}while($true)
+                $row=@($settings.options.controls|Where-Object {$_.key -ceq 'editor_minimap_enabled'})
+                if($row.Count -ne 1 -or (([OptionsFixture]::Describe([long]$row[0].input,$process.Id)).Style -band 0x10000000) -eq 0){throw 'General Editor minimap control is missing or hidden'}
+                foreach($enabled in @($true,$false)){
+                    [OptionsFixture]::Select([long]$row[0].parent,[long]$row[0].input,$process.Id,$(if($enabled){0}else{1}))
+                    $read=Wait-Minimap $opened.surface $enabled $true;$settings=Request @('settings','show');$state=Status $opened.surface
+                    if($settings.document.terminal.editor_minimap_enabled -ne $enabled -or -not $settings.document.terminal.minimap_enabled -or $read.document_id -ne $dirty.document_id -or $read.active_version -ne $dirty.active_version -or -not $read.dirty -or -not (Same-Text $read.content ([EditorFixture]::Edited)) -or $state.view_handle -ne $before.view_handle -or $read.appearance.font_family -cne $initial.appearance.font_family -or $read.appearance.font_size -ne $initial.appearance.font_size){throw 'Editor minimap changed terminal minimap, dirty document identity, text or font'}
+                }
+                Passed 'General_editor_minimap_updates_main_and_preserves_comparison_dirty_Unicode_and_fonts'
+                Request @('settings','set','theme','light')|Out-Null;$read=Wait-Minimap $opened.surface $false $true
+                if(-not $read.dirty -or $read.active_version -ne $dirty.active_version -or -not (Same-Text $read.content ([EditorFixture]::Edited))){throw 'Theme update changed disabled-minimap dirty editor'}
+                [OptionsFixture]::Click([long]$settings.options.window,[long]$settings.options.close,$process.Id)
+                Editor-Command $opened.surface 'keep-mine'|Out-Null
+                Editor-Command $opened.surface 'undo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Original) $true|Out-Null
+                Editor-Command $opened.surface 'redo'|Out-Null;Assert-Text $opened.surface ([EditorFixture]::Edited) $true|Out-Null
+                Assert-Bytes $path ([EditorFixture]::External);Assert-Terminal
+                Passed 'editor_minimap_and_theme_preserve_disk_undo_redo_and_terminal'
+                Clean-Editors;$fresh=Open-Editor $path;$read=Wait-Minimap $fresh.surface $false
+                if($fresh.surface -eq $opened.surface -or $read.dirty -or -not (Same-Text $read.content ([EditorFixture]::External))){throw 'New editor did not retain minimap setting and disk content'}
+                Passed 'subsequent_editor_uses_saved_minimap_option'
+                Request @('settings','set','editor-minimap-enabled','true')|Out-Null
+            }
             'open' {
                 $path=$fixture.Write('open 문서 한 😀.txt',[EditorFixture]::Original,$false,$false)
                 $opened=Open-Editor $path;$read=Assert-Text $opened.surface ([EditorFixture]::Original) $false

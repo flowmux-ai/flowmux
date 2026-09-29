@@ -562,6 +562,38 @@ test("theme keeps only newest colors through composition and preserves Unicode, 
   assert.equal(state.calls.some(([kind]) => kind === "edit" || kind === "undo-stop"), false);
 });
 
+test("global minimap coalesces during composition without resetting local toggles or dirty Unicode", async () => {
+  const text = "미저장 한 é 😀\ncontent", state = harness(text), api = state.context.window.flowmuxWindowsEditor;
+  const colors = { dark: true, background: "#15171b", foreground: "#e6e9ef", cursor: "#58d6c7",
+    selectionBackground: "#365c59a0", selectionForeground: "#e6e9ef" };
+  state.document.payload.dirty = true;
+  api.setTheme(colors, true);
+  state.context.minimapEnabled = false;
+  state.context.editor.updateOptions({ minimap: { enabled: false } });
+  api.setTheme({ ...colors, cursor: "#abcdef" }, true);
+  assert.equal((await state.command("read")).result.appearance.minimap_enabled, false, "unrelated settings keep local toggle");
+  state.context.minimapEnabled = true;
+  state.context.editor.updateOptions({ minimap: { enabled: true } });
+  state.composition.start();
+  api.setTheme(colors, false); api.setTheme(colors, true); api.setTheme(colors, false);
+  let read = (await state.command("read")).result;
+  assert.equal(read.appearance.pending, true);
+  assert.equal(read.appearance.minimap_enabled, true);
+  state.composition.end();
+  assert.equal(state.context.editor.getOption("minimap").enabled, true);
+  await Promise.resolve();
+  read = (await state.command("read")).result;
+  assert.equal(read.appearance.pending, false);
+  assert.equal(read.appearance.minimap_enabled, false);
+  assert.equal(read.content, text); assert.equal(read.dirty, true); assert.equal(read.active_version, 1);
+  assert.equal(state.context.editor.getModel(), state.document.model);
+  api.setTheme(colors, "false");
+  assert.equal(state.sent.at(-1).kind, "theme_error");
+  api.setTheme(colors, true);
+  assert.equal((await state.command("read")).result.appearance.minimap_enabled, true);
+  assert.equal(state.calls.some(([kind]) => kind === "edit" || kind === "undo-stop"), false);
+});
+
 test("bounded read preserves Unicode scalar boundaries and empty document state", async () => {
   const state = harness("가".repeat(50000) + "😀");
   const reply = await state.command("read");

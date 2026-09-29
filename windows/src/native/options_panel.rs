@@ -329,6 +329,7 @@ impl Panel {
                 (0, Some(SettingKey::MinimapEnabled), "Minimap"),
                 (0, None, "Shell"),
                 (0, Some(SettingKey::UsageBarEnabled), "Agents"),
+                (0, Some(SettingKey::EditorMinimapEnabled), "Editor"),
                 (1, Some(SettingKey::Theme), "Colors"),
             ] {
                 let hwnd = p.child_in(
@@ -410,6 +411,12 @@ impl Panel {
                     ("Workspace", "workspace"),
                     ("Both", "both"),
                 ],
+            )?;
+            p.row(
+                Some(SettingKey::EditorMinimapEnabled),
+                0,
+                "Editor minimap",
+                vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
                 Some(SettingKey::Theme),

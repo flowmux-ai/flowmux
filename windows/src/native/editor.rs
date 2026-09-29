@@ -225,7 +225,11 @@ impl Editor {
             })
             .unwrap_or_default()
     }
-    fn apply_theme(&self, colors: &crate::theme::ResolvedTheme) -> anyhow::Result<()> {
+    fn apply_theme(
+        &self,
+        colors: &crate::theme::ResolvedTheme,
+        minimap: bool,
+    ) -> anyhow::Result<()> {
         // The owned editor view permits only its authenticated initial document.
         // Color-only updates never replace documents or the view's font settings.
         let value = json!({
@@ -235,7 +239,7 @@ impl Editor {
             "selectionForeground":colors.selection_foreground.as_ref().unwrap_or(&colors.foreground),
         });
         self.view.view.evaluate_script(&format!(
-            "window.flowmuxWindowsEditor.setTheme({})",
+            "window.flowmuxWindowsEditor.setTheme({},{minimap})",
             serde_json::to_string(&value)?
         ))?;
         Ok(())
@@ -286,7 +290,9 @@ impl App {
             if !editor.frontend_ready {
                 continue;
             }
-            if let Err(error) = editor.apply_theme(&colors) {
+            if let Err(error) =
+                editor.apply_theme(&colors, self.settings.terminal.editor_minimap_enabled)
+            {
                 report(&format!("editor theme delivery: {error:#}"));
             }
             if let Err(error) = editor.view.keybindings(&self.settings) {
@@ -715,7 +721,10 @@ impl App {
                                         "initial editor keybindings delivery: {error:#}"
                                     ));
                                 }
-                                if let Err(error) = editor.apply_theme(&colors) {
+                                if let Err(error) = editor.apply_theme(
+                                    &colors,
+                                    self.settings.terminal.editor_minimap_enabled,
+                                ) {
                                     report(&format!("initial editor theme delivery: {error:#}"));
                                 }
                                 for message in std::mem::take(&mut editor.deferred) {
