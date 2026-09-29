@@ -1,7 +1,9 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close','keys','page-keys','frame-keys')][string]$Case='all')
+    [ValidateSet('all','files-close','keys','page-keys','frame-keys')][string]$Case='all',
+    [switch]$RequireNestedFrames)
+if($RequireNestedFrames -and $Case -ne 'frame-keys'){throw 'RequireNestedFrames applies to the frame-keys verifier.'}
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -369,6 +371,8 @@ function Verify-FrameKeys {
         $evidence.checks+=@{name='cross_origin_frame_shortcuts_preserve_Korean_composition_and_commit_settling';passed=$true}
 
         $nestedTracking=(Request @('browser','status',$first.pane)).shortcut_nested_tracking
+        if($RequireNestedFrames -and -not $nestedTracking){throw 'This runtime does not expose native nested-frame tracking; required coverage cannot run.'}
+        Write-Host ("[check] WebView2 "+$doctor.webview2+"; native nested-frame tracking="+$nestedTracking)
         Frame-Message @{action='nested';url=($origin+'/key-frame?nested')}
         $trackedCount=1;if($nestedTracking){$trackedCount=2};Frame-Ready $trackedCount 2;Frame-Key $nestedTracking
         Frame-Message @{action='compose'} $true;Frame-Key $false
