@@ -54,6 +54,10 @@ impl Controller {
             .filter(|p| p.is_open())
             .map(|p| p.window)
     }
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_bar_window(&self) -> Option<HWND> {
+        self.bar.as_ref().map(|bar| bar.window)
+    }
     pub(super) fn shutdown(&mut self) {
         if let Some(job) = &mut self.job {
             job.retired = true;

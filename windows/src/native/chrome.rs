@@ -297,6 +297,7 @@ pub(super) enum SurfaceIcon {
 pub(super) enum ControlRole {
     Static,
     Caption,
+    UsageBar,
     EmptyState,
     Edit,
     Listbox,
@@ -428,6 +429,7 @@ struct Resources {
     body: HFONT,
     caption: HFONT,
     title: HFONT,
+    agent_icons: [HICON; 2],
     background: HBRUSH,
     surface: HBRUSH,
     owns_body: bool,
@@ -474,12 +476,38 @@ impl Resources {
         let (body, owns_body) = font(11, dpi, FW_NORMAL as i32);
         let (caption, owns_caption) = font(9, dpi, FW_NORMAL as i32);
         let (title, owns_title) = font(20, dpi, FW_EXTRABOLD as i32);
+        // 64px rasterizations of the pinned SVGs in builtin_icons.rs. Lobe Icons
+        // (MIT); attribution and terms ship in assets/editor/THIRD_PARTY_NOTICES.md.
+        // CreateIconFromResourceEx requires DWORD-aligned resource bytes.
+        #[repr(align(4))]
+        struct IconBytes<const N: usize>([u8; N]);
+        let claude = IconBytes(*include_bytes!("../../assets/claude.png"));
+        let codex = IconBytes(*include_bytes!("../../assets/codex.png"));
+        let agent_icons = [claude.0.as_slice(), codex.0.as_slice()].map(|bytes| {
+            let size = (14 * dpi as i32 + 48) / 96;
+            let icon = unsafe {
+                CreateIconFromResourceEx(
+                    bytes.as_ptr(),
+                    bytes.len() as u32,
+                    1,
+                    0x30000,
+                    size,
+                    size,
+                    0,
+                )
+            };
+            if icon.is_null() {
+                eprintln!("native agent icon: {}", std::io::Error::last_os_error());
+            }
+            icon
+        });
         let (background, owns_background) = brush(palette.background);
         let (surface, owns_surface) = brush(palette.surface);
         Self {
             body,
             caption,
             title,
+            agent_icons,
             background,
             surface,
             owns_body,
@@ -493,6 +521,11 @@ impl Resources {
 impl Drop for Resources {
     fn drop(&mut self) {
         unsafe {
+            for icon in self.agent_icons {
+                if !icon.is_null() {
+                    DestroyIcon(icon);
+                }
+            }
             for (object, owned) in [
                 (self.body, self.owns_body),
                 (self.caption, self.owns_caption),
@@ -506,6 +539,31 @@ impl Drop for Resources {
             }
         }
     }
+}
+
+pub(super) fn draw_agent_icon(dc: HDC, agent: &str, area: RECT) -> bool {
+    let index = match agent {
+        "claude" => 0,
+        "codex" => 1,
+        _ => return false,
+    };
+    let icon = STATE.with(|slot| slot.borrow().resources.agent_icons[index]);
+    !icon.is_null()
+        && area.right > area.left
+        && area.bottom > area.top
+        && unsafe {
+            DrawIconEx(
+                dc,
+                area.left,
+                area.top,
+                icon,
+                area.right - area.left,
+                area.bottom - area.top,
+                0,
+                std::ptr::null_mut(),
+                DI_NORMAL,
+            ) != 0
+        }
 }
 
 #[derive(Clone, Copy)]
@@ -914,7 +972,7 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
             .map(|(hwnd, entry)| {
                 (
                     *hwnd,
-                    if matches!(entry.control, ControlRole::Caption) {
+                    if matches!(entry.control, ControlRole::Caption | ControlRole::UsageBar) {
                         resources.caption
                     } else {
                         resources.body
@@ -979,7 +1037,7 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
                 focused: false,
             },
         );
-        if matches!(control, ControlRole::Caption) {
+        if matches!(control, ControlRole::Caption | ControlRole::UsageBar) {
             state.resources.caption
         } else {
             state.resources.body
@@ -1224,7 +1282,10 @@ fn update_tooltip(window: HWND) {
         slot.borrow()
             .controls
             .get(&(window as isize))
-            .is_some_and(|entry| matches!(entry.button, Some(Role::Icon { .. })))
+            .is_some_and(|entry| {
+                matches!(entry.button, Some(Role::Icon { .. }))
+                    || matches!(entry.control, ControlRole::UsageBar)
+            })
     });
     if !icon {
         remove_tooltip(window);

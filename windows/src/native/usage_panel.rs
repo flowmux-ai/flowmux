@@ -35,6 +35,9 @@ struct Card {
 }
 #[derive(Clone)]
 struct Meter {
+    provider: Provider,
+    label: String,
+    display_text: String,
     text: String,
     percent: f64,
     stale: bool,
@@ -235,6 +238,93 @@ unsafe fn meter(dc: HDC, area: RECT, value: f64, fill: COLORREF, track: COLORREF
         FillRect(dc, &RECT { right: end, ..area }, GetStockObject(DC_BRUSH));
     }
 }
+struct MeterLayout {
+    icon: Option<RECT>,
+    track: RECT,
+    text: RECT,
+}
+fn provider_key(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Claude => "claude",
+        Provider::Codex => "codex",
+    }
+}
+unsafe fn bar_layout(dc: HDC, window: HWND, area: RECT, meters: &[Meter]) -> Vec<MeterLayout> {
+    if meters.is_empty() {
+        return vec![];
+    }
+    let p = |n| px(window, n);
+    let left = (area.left + p(6)).min(area.right);
+    let right = (area.right - p(6)).max(left);
+    let top = (area.top + p(1)).min(area.bottom);
+    let cy = (top + area.bottom) / 2;
+    let widths: Vec<_> = meters
+        .iter()
+        .map(|value| {
+            let mut rect = RECT::default();
+            text(
+                dc,
+                &value.display_text,
+                &mut rect,
+                DT_CALCRECT | DT_SINGLELINE,
+            );
+            (rect.right - rect.left).max(1)
+        })
+        .collect();
+    let groups = meters
+        .iter()
+        .enumerate()
+        .filter(|(index, value)| *index == 0 || meters[*index - 1].provider != value.provider)
+        .count() as i32;
+    let count = meters.len() as i32;
+    let fixed = groups * p(22) + (groups - 1) * p(16) + (count - groups) * p(8) + count * p(4);
+    let total_text = widths.iter().sum::<i32>().max(1);
+    let available = (right - left - fixed).max(0);
+    let track_width = ((available - total_text).max(0) / count).min(p(95));
+    let text_budget = (available - count * track_width).max(0).min(total_text);
+    let mut x = left;
+    meters
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let first = index == 0 || meters[index - 1].provider != value.provider;
+            if index > 0 {
+                x = (x + p(if first { 16 } else { 8 })).min(right);
+            }
+            let icon = if first {
+                let size = p(14).min((area.bottom - top).max(0));
+                let rect = (right - x >= size && size > 0).then_some(RECT {
+                    left: x,
+                    top: cy - size / 2,
+                    right: x + size,
+                    bottom: cy - size / 2 + size,
+                });
+                x = (x + p(22)).min(right);
+                rect
+            } else {
+                None
+            };
+            let height = p(4).min((area.bottom - top).max(0));
+            let track = RECT {
+                left: x,
+                top: cy - height / 2,
+                right: (x + track_width).min(right),
+                bottom: cy - height / 2 + height,
+            };
+            x = (track.right + p(4)).min(right);
+            let width =
+                (i64::from(widths[index]) * i64::from(text_budget) / i64::from(total_text)) as i32;
+            let text = RECT {
+                left: x,
+                top,
+                right: (x + width).min(right),
+                bottom: area.bottom,
+            };
+            x = text.right;
+            MeterLayout { icon, track, text }
+        })
+        .collect()
+}
 unsafe fn draw(item: &DRAWITEMSTRUCT) -> bool {
     if !matches!(item.CtlType, ODT_BUTTON | ODT_STATIC) {
         return false;
@@ -256,7 +346,7 @@ unsafe fn draw(item: &DRAWITEMSTRUCT) -> bool {
     );
     SetDCBrushColor(
         item.hDC,
-        if matches!(paint, Paint::Spinner(_)) {
+        if matches!(paint, Paint::Spinner(_) | Paint::Bar(_)) {
             palette.background
         } else {
             palette.surface
@@ -350,46 +440,51 @@ unsafe fn draw(item: &DRAWITEMSTRUCT) -> bool {
             }
         }
         Paint::Bar(meters) => {
-            let count = meters.len().max(1) as i32;
-            let width = (item.rcItem.right - p(16)).max(0);
-            for (index, value) in meters.iter().enumerate() {
-                let left = p(8) + width * index as i32 / count;
-                let right = p(8) + width * (index as i32 + 1) / count - p(8);
-                if right <= left {
-                    continue;
+            IntersectClipRect(
+                item.hDC,
+                item.rcItem.left,
+                item.rcItem.top,
+                item.rcItem.right,
+                item.rcItem.bottom,
+            );
+            SetDCBrushColor(item.hDC, palette.border);
+            FillRect(
+                item.hDC,
+                &RECT {
+                    bottom: (item.rcItem.top + p(1)).min(item.rcItem.bottom),
+                    ..item.rcItem
+                },
+                GetStockObject(DC_BRUSH),
+            );
+            for (value, layout) in
+                meters
+                    .iter()
+                    .zip(bar_layout(item.hDC, item.hwndItem, item.rcItem, &meters))
+            {
+                if let Some(icon) = layout.icon {
+                    chrome::draw_agent_icon(item.hDC, provider_key(value.provider), icon);
                 }
-                SetTextColor(
-                    item.hDC,
-                    if value.stale {
-                        palette.muted
-                    } else {
-                        palette.foreground
-                    },
-                );
-                let mut rect = RECT {
-                    left,
-                    top: p(1),
-                    right,
-                    bottom: p(19),
+                let fill = if palette.high_contrast {
+                    palette.accent
+                } else {
+                    match value.provider {
+                        Provider::Claude => 0x5777d9,
+                        Provider::Codex => 0xff9d7a,
+                    }
                 };
-                text(
-                    item.hDC,
-                    &value.text,
-                    &mut rect,
-                    DT_SINGLELINE | DT_END_ELLIPSIS,
-                );
-                meter(
-                    item.hDC,
-                    RECT {
-                        left,
-                        top: p(21),
-                        right,
-                        bottom: p(24),
-                    },
-                    value.percent,
-                    palette.accent,
-                    palette.border,
-                );
+                if layout.track.right > layout.track.left {
+                    meter(item.hDC, layout.track, value.percent, fill, palette.border);
+                }
+                if layout.text.right > layout.text.left {
+                    SetTextColor(item.hDC, palette.foreground);
+                    let mut rect = layout.text;
+                    text(
+                        item.hDC,
+                        &value.display_text,
+                        &mut rect,
+                        DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                    );
+                }
             }
         }
     }
@@ -987,7 +1082,7 @@ impl Bar {
             enabled: Cell::new(false),
         };
         bar.control = child(bar.window, "BUTTON", "AI usage", 1, BS_OWNERDRAW as u32)?;
-        chrome::register_control(bar.control, chrome::ControlRole::Caption);
+        chrome::register_control(bar.control, chrome::ControlRole::UsageBar);
         Ok(bar)
     }
     pub(super) fn update(&self, state: &UsagePanelState, enabled: bool) {
@@ -1028,6 +1123,9 @@ impl Bar {
             }
             for (label, value) in slots {
                 meters.push(Meter {
+                    provider: provider.provider,
+                    label: label.into(),
+                    display_text: format!("{}({label})", percent(value)),
                     text: format!(
                         "{} {}({label}){}",
                         provider_name(provider.provider),
@@ -1064,7 +1162,7 @@ impl Bar {
     }
     pub(super) fn height(&self, dpi: u32) -> i32 {
         if self.enabled.get() && !self.meters.borrow().is_empty() {
-            (26 * dpi.max(96) as i32 + 48) / 96
+            (20 * dpi.max(96) as i32 + 48) / 96
         } else {
             0
         }
@@ -1099,6 +1197,26 @@ impl Bar {
         }
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"control":self.control as usize,"enabled":self.enabled.get(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":bounds(self.window),"meters":self.meters.borrow().iter().map(|value|json!({"text":value.text,"percent":value.percent,"stale":value.stale})).collect::<Vec<_>>()})
+        let meters = self.meters.borrow();
+        let geometry = unsafe {
+            let dc = GetDC(self.control);
+            if dc.is_null() {
+                Value::Null
+            } else {
+                let font =
+                    SelectObject(dc, SendMessageW(self.control, WM_GETFONT, 0, 0) as HGDIOBJ);
+                let mut area = RECT::default();
+                GetClientRect(self.control, &mut area);
+                let layout = bar_layout(dc, self.control, area, &meters);
+                SelectObject(dc, font);
+                ReleaseDC(self.control, dc);
+                let rect = |r: RECT| json!({"x":r.left,"y":r.top,"width":r.right-r.left,"height":r.bottom-r.top});
+                json!({
+                    "icons":meters.iter().zip(&layout).filter_map(|(value, item)| item.icon.map(|icon|json!({"provider":provider_key(value.provider),"rect":rect(icon)}))).collect::<Vec<_>>(),
+                    "meters":layout.iter().map(|item|json!({"track":rect(item.track),"text":rect(item.text)})).collect::<Vec<_>>()
+                })
+            }
+        };
+        json!({"window":self.window as usize,"control":self.control as usize,"enabled":self.enabled.get(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":bounds(self.window),"geometry":geometry,"tooltip":chrome::tooltip_text(self.control),"meters":meters.iter().map(|value|json!({"provider":provider_key(value.provider),"label":value.label,"display_text":value.display_text,"text":value.text,"percent":value.percent,"stale":value.stale})).collect::<Vec<_>>()})
     }
 }

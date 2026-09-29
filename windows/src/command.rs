@@ -217,6 +217,9 @@ pub enum Command {
     #[command(hide = true)]
     ChromeCapture {
         path: PathBuf,
+        #[arg(long)]
+        #[serde(default)]
+        usage_bar: bool,
     },
     #[cfg(debug_assertions)]
     #[command(hide = true)]

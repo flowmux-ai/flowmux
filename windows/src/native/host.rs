@@ -3580,11 +3580,18 @@ impl App {
             #[cfg(debug_assertions)]
             Command::TestUsage { input } => return self.test_usage(&input).map(Some),
             #[cfg(debug_assertions)]
-            Command::ChromeCapture { path } => {
+            Command::ChromeCapture { path, usage_bar } => {
                 anyhow::ensure!(
                     self.background_test,
                     "chrome capture requires an owned hidden debug host"
                 );
+                if usage_bar {
+                    let window = self
+                        .usage
+                        .capture_bar_window()
+                        .context("usage bar is not available")?;
+                    return chrome::capture_subtree(window, &path).map(Some);
+                }
                 return if let Some(window) = self
                     .tab_menu
                     .as_ref()
