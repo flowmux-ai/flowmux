@@ -157,22 +157,18 @@ fn response(mut cli: Cli) -> anyhow::Result<String> {
             "session hook requires JSON stdin"
         );
         let (send, receive) = mpsc::sync_channel(1);
+        let mut input = args.clone();
         std::thread::Builder::new()
             .name("flowmux-hook-stdin".into())
             .spawn(move || {
-                let mut bytes = Vec::new();
-                let result = std::io::stdin()
-                    .take((crate::agent_activity::MAX_HOOK_BYTES + 1) as u64)
-                    .read_to_end(&mut bytes)
-                    .map(|_| bytes);
+                let result = input.read_input(std::io::stdin().lock()).map(|_| input);
                 let _ = send.send(result);
             })?;
         // Both CLI entrypoints exit the process on return, including a reader
         // whose parent never closes stdin. No hook can wait for EOF forever.
-        let bytes = receive
+        *args = receive
             .recv_timeout(Duration::from_secs(1))
             .context("session hook stdin exceeded one second")??;
-        args.read_payload(&bytes)?;
     }
     if matches!(cli.command, Command::ShellIntegration) {
         return Ok(include_str!("../../shell/powershell.ps1").into());

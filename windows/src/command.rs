@@ -309,37 +309,30 @@ impl HooksOp {
     }
 }
 impl SessionHookArgs {
+    #[cfg(test)]
     pub fn read_payload(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
-        #[derive(Deserialize)]
-        struct Payload {
-            #[serde(
-                alias = "thread-id",
-                alias = "thread_id",
-                alias = "sessionID",
-                alias = "sessionId",
-                alias = "taskId",
-                alias = "conversationId"
-            )]
-            session_id: String,
-            #[serde(default, deserialize_with = "crate::agent_activity::nonempty_array")]
-            background_tasks: bool,
-            #[serde(default, deserialize_with = "crate::agent_activity::nonempty_array")]
-            session_crons: bool,
-            #[serde(flatten)]
-            details: crate::agent_activity::Input,
-        }
-        anyhow::ensure!(
-            bytes.len() <= crate::agent_activity::MAX_HOOK_BYTES,
-            "native hook payload exceeds 1 MiB"
-        );
-        let mut payload: Payload = serde_json::from_slice(bytes)?;
+        self.read_input(bytes)
+    }
+
+    pub fn read_input(&mut self, reader: impl std::io::Read) -> anyhow::Result<()> {
+        // No flatten/Value or whole-input buffer: Serde skips unknown tool
+        // results while reading. The CLI bounds the complete parse by time.
+        let mut input: crate::agent_activity::Input =
+            serde_json::from_reader(std::io::BufReader::new(reader))?;
         let agent = crate::session_history::SessionAgent::from_name(&self.agent)
             .ok_or_else(|| anyhow::anyhow!("unsupported local agent name"))?;
-        self.session_id = Some(agent.canonical_session_id(&payload.session_id)?);
-        payload.details.pending_work |= payload.background_tasks || payload.session_crons;
-        payload.details.normalize();
-        payload.details.validate(self.event, &self.agent)?;
-        *self.details = payload.details;
+        let id = input
+            .session_id
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("native hook requires a conversation ID"))?;
+        let id = agent.canonical_session_id(&id)?;
+        input.pending_work |= input.background_tasks || input.session_crons;
+        input.background_tasks = false;
+        input.session_crons = false;
+        input.normalize();
+        input.validate(self.event, &self.agent)?;
+        self.session_id = Some(id);
+        *self.details = input;
         Ok(())
     }
 }
@@ -714,6 +707,40 @@ pub(crate) fn parse_id(text: &str) -> Result<Uuid, String> {
 mod tests {
     use super::*;
     #[test]
+    fn native_hooks_stream_large_results_and_require_valid_metadata_and_eof() {
+        use std::io::Read;
+        let Command::Hooks { mut op } =
+            Cli::try_parse_from(["flowmuxctl", "hooks", "claude", "tool-batch"])
+                .unwrap()
+                .command
+        else {
+            panic!("wrong command")
+        };
+        let hook = op.runtime_mut().unwrap();
+        let id = "abcdef01-2345-6789-abcd-ef0123456789";
+        let suffix = format!("\"}}],\"session_id\":\"{id}\",\"prompt_id\":\"prompt-a\",\"message\":\"한글 한 é 😀 완료\"}}");
+        // Produce 4 MiB without storing the ignored response in the fixture.
+        let reader = br#"{"tool_calls":[{"tool_response":""#
+            .as_slice()
+            .chain(std::io::repeat(b'x').take(4 * 1024 * 1024))
+            .chain(suffix.as_bytes());
+        hook.read_input(reader).unwrap();
+        assert_eq!(hook.session_id.as_deref(), Some(id));
+        assert_eq!(hook.details.message.as_deref(), Some("한글 한 é 😀 완료"));
+        let before = serde_json::to_string(hook).unwrap();
+        assert!(before.len() < 512 && !before.contains("tool_calls"));
+        for invalid in [
+            format!(r#"{{"session_id":"{id}","prompt_id":"../bad"}}"#),
+            format!(r#"{{"session_id":"{id}","sessionID":"{id}"}}"#),
+            format!(r#"{{"session_id":"{id}","background_tasks":{{}}}}"#),
+            format!(r#"{{"session_id":"{id}"}} {{}}"#),
+            format!(r#"{{"session_id":"{id}","tool_calls":["unterminated"#),
+        ] {
+            assert!(hook.read_input(invalid.as_bytes()).is_err());
+            assert_eq!(serde_json::to_string(hook).unwrap(), before);
+        }
+    }
+    #[test]
     fn native_session_hooks_parse_bounded_provider_ids_without_accepting_cli_ids() {
         let id = "abcdef01-2345-6789-abcd-ef0123456789";
         for event in ["session-start", "session-end"] {
@@ -805,9 +832,6 @@ mod tests {
                 .read_payload(&serde_json::to_vec(&payload).unwrap())
                 .is_err());
         }
-        assert!(hook
-            .read_payload(&vec![b' '; crate::agent_activity::MAX_HOOK_BYTES + 1])
-            .is_err());
         hook.agent = "claude".into();
         hook.event = SessionHookEvent::Stop;
         let payload = serde_json::json!({"session_id":id,"prompt_id":"prompt-a", "background_tasks":[{"command":"PRIVATE_COMMAND"}], "session_crons":[{"prompt":"PRIVATE_PROMPT"}]});

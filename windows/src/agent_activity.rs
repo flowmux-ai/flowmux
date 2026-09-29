@@ -9,12 +9,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const MAX_HOOK_BYTES: usize = 1024 * 1024;
 const GRACE: Duration = Duration::from_millis(250);
 const LIMIT: usize = 256;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Input {
+    #[serde(
+        default,
+        skip_serializing,
+        alias = "thread-id",
+        alias = "thread_id",
+        alias = "sessionID",
+        alias = "sessionId",
+        alias = "taskId",
+        alias = "conversationId"
+    )]
+    pub(crate) session_id: Option<String>,
+    #[serde(default, skip_serializing, deserialize_with = "nonempty_array")]
+    pub(crate) background_tasks: bool,
+    #[serde(default, skip_serializing, deserialize_with = "nonempty_array")]
+    pub(crate) session_crons: bool,
     #[serde(
         default,
         alias = "turn-id",

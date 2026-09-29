@@ -51,9 +51,9 @@ function Query($Tree,[string]$Text){$p=Panel $Tree;[OptionsFixture]::SetTextAndN
 function Select-Session($Tree,[string]$Id){$p=Panel $Tree;$row=@($p.rows|Where-Object {$_.id -ceq $Id});Require ($row.Count -eq 1) 'Expected exact visible session row';[OptionsFixture]::ListSelect([long]$p.window,[long]$p.list,$owned.Id,[int]$row[0].index);return Await {param($t) $t.agent_sessions.selected -ceq $Id -and $t.agent_sessions.panel.resume_enabled -and -not $t.agent_sessions.loading}}
 function Shortcut([string]$Surface){Request @('test-shortcut',$Surface,'{"code":"KeyJ","key":"j","ctrlKey":true,"altKey":true}')|Out-Null}
 function Agent-Tab([string]$HistoryHome,[string]$Cwd,[string]$Current=''){$launch=@('new-tab','--cwd',$Cwd,'--shell',$agentExe,'--shell-arg=--hold','--shell-arg',$HistoryHome);if($Current){$launch+=@('--shell-arg=resume','--shell-arg',$Current)};Request $launch|Out-Null;$id=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $id.surface -and $_.ready -and $_.running}).Count -eq 1};Screen $id.surface {param($s) $s.text.Contains('SESSION_SOURCE_READY')}|Out-Null;return @($tree.surfaces|Where-Object {$_.id -ceq $id.surface})[0]}
-function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$CloseInput=$true,[string]$Provider='codex',[string]$Surface='', [bool]$Shell=$false,[bool]$Nested=$false,[string]$Config=''){
+function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$CloseInput=$true,[string]$Provider='codex',[string]$Surface='', [bool]$Shell=$false,[bool]$Nested=$false,[string]$Config='',[int]$Padding=0){
  $path=Join-Path $homeA ('hook-'+$source.pid+'.json');$result=$path+'.result';if(Test-Path -LiteralPath $result){Remove-Item -LiteralPath $result -Force}
- $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested;config=$Config}|ConvertTo-Json -Compress
+ $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested;config=$Config;padding=$Padding}|ConvertTo-Json -Compress
  [IO.File]::WriteAllText(($path+'.tmp'),$payloadJson,$utf8);[IO.File]::Move(($path+'.tmp'),$path);$timer=[Diagnostics.Stopwatch]::StartNew()
  while(-not (Test-Path -LiteralPath $result)){Budget|Out-Null;Require ($timer.ElapsedMilliseconds -lt 4500) 'Owned hook process exceeded deadline';Start-Sleep -Milliseconds 10}
  $r=Get-Content -Raw -Encoding UTF8 -LiteralPath $result|ConvertFrom-Json;$diagnostic.lastHook=$r;Require (($r.exit -eq 0) -eq $Expected) ('Hook exit mismatch: '+$r.stderr);if($Expected -and -not $Config){return ($r.stdout|ConvertFrom-Json)};return $r
@@ -99,7 +99,10 @@ public static class OwnedCodexSessionFixture {
   var info=(bool)request["shell"] ? new ProcessStartInfo(Environment.GetEnvironmentVariable("COMSPEC"),"/D /S /C \"\""+cli+"\" "+arguments+"\"") : new ProcessStartInfo(cli,arguments);
   info.UseShellExecute=false;info.CreateNoWindow=true;info.WindowStyle=ProcessWindowStyle.Hidden;info.RedirectStandardInput=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;info.StandardOutputEncoding=new UTF8Encoding(false);info.StandardErrorEncoding=new UTF8Encoding(false);
   using(var child=Process.Start(info)) {
-   var stdout=child.StandardOutput.ReadToEndAsync();var stderr=child.StandardError.ReadToEndAsync();byte[] payload=Encoding.UTF8.GetBytes((string)request["payload"]);child.StandardInput.BaseStream.Write(payload,0,payload.Length);child.StandardInput.BaseStream.Flush();if((bool)request["close"])child.StandardInput.Close();
+   var stdout=child.StandardOutput.ReadToEndAsync();var stderr=child.StandardError.ReadToEndAsync();byte[] payload=Encoding.UTF8.GetBytes((string)request["payload"]);int padding=Convert.ToInt32(request["padding"]);
+   if(padding>0){byte[] prefix=Encoding.UTF8.GetBytes("{\"tool_calls\":[{\"tool_response\":\"");child.StandardInput.BaseStream.Write(prefix,0,prefix.Length);byte[] block=Encoding.UTF8.GetBytes(new String('x',4096)+"한 한 é 😀 PRIVATE_LARGE_RESULT");for(int n=0;n<padding;n+=block.Length)child.StandardInput.BaseStream.Write(block,0,block.Length);byte[] tail=Encoding.UTF8.GetBytes("\"}],");child.StandardInput.BaseStream.Write(tail,0,tail.Length);child.StandardInput.BaseStream.Write(payload,1,payload.Length-1);}
+   else child.StandardInput.BaseStream.Write(payload,0,payload.Length);
+   child.StandardInput.BaseStream.Flush();if((bool)request["close"])child.StandardInput.Close();
    if(!child.WaitForExit(4000)){child.Kill();child.WaitForExit(1000);throw new TimeoutException("Hook CLI exceeded4s");}
    if(!stdout.Wait(500)||!stderr.Wait(500))throw new TimeoutException("Hook output did not close");
    File.WriteAllText(path+".result.tmp",json.Serialize(new {exit=child.ExitCode,stdout=stdout.Result,stderr=stderr.Result}),new UTF8Encoding(false));File.Delete(path);File.Move(path+".result.tmp",path+".result");
@@ -161,9 +164,9 @@ public static class OwnedCodexSessionFixture {
    $r=Hook 'session-start' (@{session_id=$idA;cwd='한글 한 é'}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.session_id -ceq $idA}
    if($provider -ceq 'codex'){
-    function Activity-Hook([string]$Name,[string]$Turn,[hashtable]$Extra=@{}){
+    function Activity-Hook([string]$Name,[string]$Turn,[hashtable]$Extra=@{},[int]$Padding=0){
      $payload=$Extra.Clone();$payload.session_id=$idA;$payload.hook_event_name=$Name;if($provider -ceq 'claude'){$payload.prompt_id=$Turn}else{$payload.turn_id=$Turn}
-     $r=Hook 'running' ($payload|ConvertTo-Json -Depth 8 -Compress) -Provider $provider -Config $config
+     $r=Hook 'running' ($payload|ConvertTo-Json -Depth 8 -Compress) -Provider $provider -Config $config -Padding $Padding
      Require (-not $r.stderr -and $(if($provider -ceq 'codex' -and $Name -ceq 'Stop'){$r.stdout.Trim() -ceq '{}'}else{-not $r.stdout})) 'Installed activity hook emitted provider decisions or non-neutral context'
     }
     Require (($cap.agent_activity.native_activity_hooks.codex -join ',') -ceq 'turn-start,running,notification,subagent-start,subagent-stop,stop,interrupt') 'Codex native activity capability is incomplete'
@@ -171,7 +174,7 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'UserPromptSubmit' 'turn-a' @{prompt='PRIVATE_PROMPT_NEVER_RETAIN'}
     $sidebarHandle=Agent-Sidebar 'native-working' 'working' 'Working'
     $waitText='한글 한 é 😀 & 입력 대기';$doneText='한글 한 é 😀 & 작업 완료'
-    Activity-Hook 'PermissionRequest' 'turn-a' @{message=$waitText;tool_input=@{private='PRIVATE_TOOL_NEVER_RETAIN'}}
+    Activity-Hook 'PermissionRequest' 'turn-a' @{message=$waitText;tool_input=@{private='PRIVATE_TOOL_NEVER_RETAIN'}} -Padding (4*1024*1024)
     Activity-Hook 'PostToolUse' 'turn-a' @{tool_response='PRIVATE_RESULT_NEVER_RETAIN'}
     Require ((Agent-Sidebar 'native-blocked' 'blocked' $waitText) -eq $sidebarHandle) 'Native permission status recreated the workspace control'
     Activity-Hook 'SubagentStart' 'child-turn' @{agent_id='child-a'}
@@ -189,7 +192,7 @@ public static class OwnedCodexSessionFixture {
     Require ($presence.status -ceq 'working' -and $presence.message -ceq 'Working' -and $presence.source -ceq 'flowmux:hook') 'Late root/child events changed the active turn'
     Activity-Hook 'Interrupt' 'turn-b'
     $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.status -ceq 'idle' -and $s.agent.seen -and $s.agent.message -ceq 'Turn interrupted'}
-    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_TOOL|PRIVATE_RESULT') 'Native activity retained private provider payloads'
+    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_TOOL|PRIVATE_RESULT|PRIVATE_LARGE_RESULT') 'Native activity retained private provider payloads'
     Stable @($source,$local)|Out-Null
     Passed 'installed-Codex-activity-Korean-native-sidebar-permission-waits-child-aggregation-stale-events-and-interrupt-without-focus-or-PTY-changes'
    }else{
@@ -207,7 +210,7 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'PermissionRequest' 'prompt-a' @{message=$waitText}
     Activity-Hook 'PermissionDenied' 'prompt-a' @{tool_name='Bash';tool_use_id='denied-tool'}
     Require ((Agent-Sidebar 'claude-permission' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'One denial cleared another parallel permission request'
-    Activity-Hook 'PostToolBatch' 'prompt-a'
+    Activity-Hook 'PostToolBatch' 'prompt-a' -Padding (4*1024*1024)
     $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
     Activity-Hook 'SubagentStart' 'prompt-a' @{agent_id='child-a'}
     Activity-Hook 'PermissionRequest' 'prompt-a' @{agent_id='child-a';message=$waitText}
@@ -231,9 +234,13 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'StopFailure' 'prompt-b' @{error='rate_limit'}
     Activity-Hook 'Notification' 'prompt-b' @{notification_type='quota_auto_resume_disabled'}
     $tree=Await {param($t) $a=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;$a.status -ceq 'idle' -and $a.seen -and $a.message -ceq 'Auto-resume disabled'}
-    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_RESPONSE|PRIVATE_COMMAND|PRIVATE_SCHEDULED_PROMPT') 'Claude activity retained private prompt/tool/background details'
+    $hookClock=[Diagnostics.Stopwatch]::StartNew();$r=Hook 'permission-request' (@{session_id=$idA;prompt_id='prompt-b';message=$waitText}|ConvertTo-Json -Compress) -Expected $false -CloseInput $false -Provider 'claude'
+    Require ($r.stderr -match 'stdin exceeded one second' -and $hookClock.ElapsedMilliseconds -lt 3000) 'Streaming native hook waited indefinitely for EOF'
+    $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'idle') 'Unfinished JSON stream changed live agent activity'
+    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_RESPONSE|PRIVATE_COMMAND|PRIVATE_SCHEDULED_PROMPT|PRIVATE_LARGE_RESULT') 'Claude activity retained private prompt/tool/background details'
     Stable @($source,$claudeLocal,$setupSource,$local)|Out-Null
     Passed 'installed-Claude-scoped-questions-permissions-batch-child-background-Korean-sidebar-stale-prompt-and-quota-states'
+    Passed 'native-streaming-4MiB-tool-results-Korean-metadata-after-payload-and-bounded-EOF-without-partial-state'
    }
    $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed end hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and -not $s.agent.session_id}
