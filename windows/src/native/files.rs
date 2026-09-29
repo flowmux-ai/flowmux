@@ -1637,6 +1637,39 @@ impl App {
         }
         Ok(())
     }
+    pub(super) fn files_focus_visible(&self) -> bool {
+        let panel = self
+            .files
+            .active
+            .and_then(|pane| self.files.states.get(&pane))
+            .filter(|state| {
+                state.visible
+                    && self
+                        .current_workspace()
+                        .is_some_and(|ws| ws.id.0 == state.owner.workspace)
+            })
+            .and_then(|state| state.panel.as_ref())
+            .filter(|panel| panel.area.is_some());
+        let Some(panel) = panel else {
+            return false;
+        };
+        if !self.background_test {
+            // Returning to an open operation keeps its destination draft intact.
+            let target = if panel.form.is_some() {
+                panel.destination
+            } else {
+                panel.list
+            };
+            unsafe {
+                SetFocus(if IsWindowEnabled(target) != 0 {
+                    target
+                } else {
+                    panel.window
+                });
+            }
+        }
+        true
+    }
     pub(super) fn files_handle_message(&self, message: &MSG) -> bool {
         if self.background_test {
             return false;

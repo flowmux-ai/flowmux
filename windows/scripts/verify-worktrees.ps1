@@ -4,7 +4,7 @@ param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\de
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'PaneToolsFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'PaneToolsFixture.cs'),(Join-Path $PSScriptRoot 'FilesDockFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('worktrees-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null
 $repo=Join-Path $directory '저장소 한';$paths=[ordered]@{current=(Join-Path $directory '현재 한');clean=(Join-Path $directory '제거 한');dirty=(Join-Path $directory '수정 한');locked=(Join-Path $directory '잠금 한');used=(Join-Path $directory '사용중 한')}
@@ -93,6 +93,34 @@ try{
  $tree=Navigate 35 $rowPaths[-1];$panel=Panel $tree;$row=Row $tree $rowPaths[-1];$paint=Join-Path $directory 'worktree-selection.bmp';$capture=Request @('chrome-capture',$paint);Require ($capture.root_handle -eq $panel.window) 'Capture did not select the owned worktree dock'
  $edgeX=[int]$panel.viewport_bounds.x;$edgeY=[int]($panel.viewport_bounds.y+$row.branch_bounds.y);Require ([ChromeFixture]::Pixel($paint,$edgeX,$edgeY) -cne [ChromeFixture]::Pixel($paint,($edgeX+2),$edgeY)) 'Production viewport painter omitted the selected row outline';Remove-Item -LiteralPath $paint -Force
  $tree=Navigate 36 $rowPaths[0];Stable $before|Out-Null;Passed 'native_arrow_Home_End_wrap_scroll_Unicode_path_selection_refresh_and_production_outline'
+ # Alt navigation follows the source pane and gives an open Files dock priority.
+ function Focus-Source([string]$Surface){Request @('focus-tab',$Surface)|Out-Null;return Await {param($v) $v.worktrees.source.surface -ceq $Surface -and -not $v.worktrees.loading}}
+ function Focus-Key([int]$Key,[bool]$Control=$false,[bool]$Shift=$false,[bool]$Repeat=$false){
+  $p=Panel (Tree)
+  if($Control){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,17,$false,$false)}
+  if($Shift){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,16,$false,$false)}
+  [OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,18,$false,$false,$true);[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,$Key,$false,$Repeat,$true);[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,$Key,$true,$false,$true);[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,18,$true,$false,$true)
+  if($Shift){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,16,$true,$false)}
+  if($Control){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,17,$true,$false)}
+  return Tree
+ }
+ function Focused([string]$Surface){$t=Await {param($v) $v.worktrees.source.surface -ceq $Surface -and -not $v.worktrees.loading};Require ((Request @('identify')).surface -ceq $Surface) 'Directional focus selected another terminal';return $t}
+ Request @('split','vertical','--shell=cmd')|Out-Null;$right=Request @('identify');$tree=Await {param($v) @($v.surfaces).Count -eq 2 -and @($v.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0}
+ $tree=Focus-Source $source.surface;Request @('split','horizontal','--shell=cmd')|Out-Null;$below=Request @('identify');$tree=Await {param($v) @($v.surfaces).Count -eq 3 -and @($v.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0 -and -not $v.worktrees.loading};$focusIdentities=Identities $tree
+ Focus-Key 38|Out-Null;$tree=Focused $source.surface;Focus-Key 40|Out-Null;$tree=Focused $below.surface
+ $tree=Focus-Source $source.surface;Focus-Key 39|Out-Null;$tree=Focused $right.surface
+ Focus-Key 37|Out-Null;$tree=Focused $right.surface
+ $tree=Focus-Source $source.surface;Focus-Key 39 $true|Out-Null;$tree=Focused $source.surface;Focus-Key 40 $false $true|Out-Null;$tree=Focused $source.surface;Focus-Key 39 $false $false $true|Out-Null;$tree=Focused $source.surface
+ Request @('files','show','--pane',$source.pane,'--root',$paths.current)|Out-Null;$files=Request @('files','status','--pane',$source.pane)
+ $file=@($files.rows|Where-Object {Same $_.name '한글 한.txt'})[0];Require ($null -ne $file) 'Files focus fixture lost its Unicode file'
+ Request @('files','select','--pane',$source.pane,'--token',$files.token,'--index',$file.index.ToString(),'--mode','replace')|Out-Null
+ [FilesDockFixture]::Command($owned,[long]$tree.window_handle,[long]$files.panel_handle,7);$files=Request @('files','status','--pane',$source.pane);Require ([bool]$files.operation_form) 'Files operation did not open'
+ $draft='작성 중 한 😀.txt';[FilesDockFixture]::Destination($owned,[long]$tree.window_handle,[long]$files.panel_handle,$draft);$filesBefore=$files
+ Focus-Key 39|Out-Null;$tree=Focused $source.surface;$files=Request @('files','status','--pane',$source.pane)
+ Require ($files.dock_visible -and $files.panel_handle -eq $filesBefore.panel_handle -and $files.destination_handle -eq $filesBefore.destination_handle -and $files.token -ceq $filesBefore.token -and $files.operation_form.index -eq $filesBefore.operation_form.index -and (Same ([OptionsFixture]::Text([long]$files.destination_handle,$owned.Id)) $draft)) 'Files priority focus hid, retargeted or replaced its Unicode destination draft'
+ Request @('files','hide','--pane',$source.pane)|Out-Null;Focus-Key 39|Out-Null;$tree=Focused $right.surface;Stable $focusIdentities|Out-Null
+ Request @('close-tab',$below.surface)|Out-Null;Request @('close-tab',$right.surface)|Out-Null;$tree=Focus-Source $source.surface;Stable $before|Out-Null
+ $tree=Navigate 36 $rowPaths[0];Passed 'Alt_directions_source_return_Ctrl_Shift_repeat_guards_and_Files_Unicode_draft_priority'
  $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$scale=[OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Dpi/96.0;$sidebar=[int]$tree.chrome.sidebar_actual_width
  try{
   foreach($dip in @(200,250,300)){$width=$sidebar+2*[int][Math]::Round(4*$scale)+[int][Math]::Round(160*$scale)+[int][Math]::Round($dip*$scale);[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$width,$originalSize[1]);$tree=Await {param($t) $t.worktrees.panel.open -and [Math]::Abs($t.worktrees.panel.bounds.width-$dip*$scale) -le 1};$panel=Panel $tree;$viewport=[ChromeFixture]::Size([long]$panel.viewport,$owned.Id)

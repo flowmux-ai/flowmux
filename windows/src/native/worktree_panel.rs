@@ -17,6 +17,7 @@ pub(super) enum UiAction {
     Close,
     Select(PathBuf),
     Navigate(usize),
+    FocusOut(FocusDirection),
     Info(PathBuf),
     Remove(PathBuf),
     Layout,
@@ -693,13 +694,33 @@ impl Panel {
                         });
                 }
             }
-            let modified = if self.background {
-                self.modifiers.get() & (3 | 12 | 192) != 0
+            let modifiers = if self.background {
+                self.modifiers.get()
             } else {
-                [0x11, 0x12, 0x5b, 0x5c]
-                    .iter()
-                    .any(|key| GetKeyState(*key) < 0)
+                [(0x11, 1), (0x12, 4), (0x10, 16), (0x5b, 64), (0x5c, 128)]
+                    .into_iter()
+                    .filter(|(key, _)| GetKeyState(*key) < 0)
+                    .fold(0, |bits, (_, bit)| bits | bit)
             };
+            if matches!(message.message, WM_KEYDOWN | WM_SYSKEYDOWN)
+                && modifiers & 12 != 0
+                && modifiers & (3 | 48 | 192) == 0
+            {
+                let direction = match message.wParam {
+                    0x25 => Some(FocusDirection::Left),
+                    0x27 => Some(FocusDirection::Right),
+                    0x26 => Some(FocusDirection::Up),
+                    0x28 => Some(FocusDirection::Down),
+                    _ => None,
+                };
+                if let Some(direction) = direction {
+                    if message.lParam as usize & (1 << 30) == 0 {
+                        emit(self.window, UiAction::FocusOut(direction));
+                    }
+                    return true;
+                }
+            }
+            let modified = modifiers & (3 | 12 | 192) != 0;
             if message.message == WM_KEYDOWN
                 && matches!(message.wParam, 0x23 | 0x24 | 0x26 | 0x28)
                 && !modified

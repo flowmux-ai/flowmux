@@ -173,6 +173,25 @@ impl App {
         }
         self.layout()
     }
+    fn worktree_focus_out(&mut self, direction: FocusDirection) -> anyhow::Result<()> {
+        let source = self
+            .worktrees
+            .source
+            .as_ref()
+            .map(|source| source.surface)
+            .or_else(|| self.current_surface())
+            .context("Worktree source is unavailable")?;
+        if matches!(direction, FocusDirection::Right) && self.files_focus_visible() {
+            return Ok(());
+        }
+        if !matches!(direction, FocusDirection::Left)
+            && self.focus_direction(source, direction)?.is_some()
+        {
+            return Ok(());
+        }
+        self.select(source)?;
+        self.focus_active()
+    }
     fn worktree_guard(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.closing
@@ -434,6 +453,9 @@ impl App {
                             if let Some(panel) = &mut self.worktrees.panel {
                                 panel.navigate(key);
                             }
+                        }
+                        worktree_panel::UiAction::FocusOut(direction) => {
+                            self.worktree_focus_out(direction)?
                         }
                         worktree_panel::UiAction::Close => self.worktrees.shutdown(),
                         worktree_panel::UiAction::Refresh => {
