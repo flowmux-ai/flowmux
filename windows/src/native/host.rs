@@ -639,6 +639,7 @@ struct App {
     agent_scan_after: Option<SurfaceId>,
     agent_bar: Option<agent_bar::Bar>,
     agent_bar_order: Vec<SurfaceId>,
+    activity_height_dip: Option<i32>,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -932,6 +933,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             agent_scan_after: None,
             agent_bar: None,
             agent_bar_order: vec![],
+            activity_height_dip: None,
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -1034,6 +1036,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                     panes::Drag::Tab { .. }
                         | panes::Drag::Workspace { .. }
                         | panes::Drag::Agent { .. }
+                        | panes::Drag::Activity { .. }
                 )
             )
         {
@@ -3028,6 +3031,9 @@ impl App {
             }
         }
         self.refresh_tab_title(id);
+        if self.agent_presence(id).is_some() {
+            post(Event::Layout);
+        }
     }
     fn refresh_tab_title(&self, id: SurfaceId) {
         if let Some((workspace, pane, _)) = self.locate(id) {
@@ -3752,6 +3758,12 @@ impl App {
                 result["agent_bar"] = self
                     .agent_bar
                     .as_ref()
+                    .filter(|bar| !bar.activity)
+                    .map_or(Value::Null, agent_bar::Bar::diagnostics);
+                result["activity_panel"] = self
+                    .agent_bar
+                    .as_ref()
+                    .filter(|bar| bar.activity)
                     .map_or(Value::Null, agent_bar::Bar::diagnostics);
                 result["bookmarks"] = self.browser_bookmarks.diagnostics();
                 return Ok(Some(result));

@@ -118,15 +118,16 @@ impl App {
     pub(super) fn sidebar_layout(&self, height: i32, dpi: u32) -> SidebarLayout {
         let px = |n: i32| (n as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
         let footer_top = (height - px(36)).max(0);
-        let list_top = px(40).min(footer_top);
+        let list_end = footer_top - self.activity_height(height);
+        let list_top = px(40).min(list_end);
         let indices = self.main_workspace_indices();
         let heights: Vec<i32> = indices
             .iter()
             .map(|i| px(38 + 20 * self.workspace_lines(self.workspaces[*i].id).len().max(1) as i32))
             .collect();
-        let metrics = (height, dpi, heights.iter().sum::<i32>());
-        let pager = metrics.2 > footer_top - list_top;
-        let list_bottom = (footer_top - if pager { px(28) } else { 0 }).max(list_top);
+        let metrics = (list_end, dpi, heights.iter().sum::<i32>());
+        let pager = metrics.2 > list_end - list_top;
+        let list_bottom = (list_end - if pager { px(28) } else { 0 }).max(list_top);
         let available = list_bottom - list_top;
         let max_offset = (metrics.2 - available).max(0);
         let mut offset = self.sidebar_offset.clamp(0, max_offset);
@@ -724,7 +725,7 @@ impl App {
             GetClientRect(self.window, &mut client);
         }
         let layout = self.sidebar_layout(client.bottom, dpi);
-        json!({"theme":self.settings.terminal.theme,"dpi":dpi,"sidebar_offset":layout.first_row,"sidebar_offset_px":self.sidebar_offset,"sidebar_max_offset_px":layout.max_offset,"sidebar_width_dip":self.sidebar_width_dip,"sidebar_actual_width":self.sidebar_width(client.right,dpi),"sidebar_dragging":matches!(self.drag,Some(panes::Drag::Sidebar { .. })),"tab_dragging":matches!(self.drag,Some(panes::Drag::Tab { .. })),"workspace_dragging":matches!(self.drag,Some(panes::Drag::Workspace { .. })),"agent_dragging":matches!(self.drag,Some(panes::Drag::Agent { .. })),"tab_drop_preview":self.drop_preview.as_ref().map(chrome::DropPreview::diagnostics),"sidebar_gutter_width":(4.0*dpi as f64/96.0).round() as i32,"sidebar_footer_height_dip":36,"sidebar_list_top":layout.list_top,"sidebar_list_bottom":layout.list_bottom,"sidebar_footer_top":layout.footer_top,"sidebar_capacity":layout.capacity,"sidebar_pager_visible":layout.pager,"workspace_row_height_dip":58,"controls":controls})
+        json!({"theme":self.settings.terminal.theme,"dpi":dpi,"sidebar_offset":layout.first_row,"sidebar_offset_px":self.sidebar_offset,"sidebar_max_offset_px":layout.max_offset,"sidebar_width_dip":self.sidebar_width_dip,"sidebar_actual_width":self.sidebar_width(client.right,dpi),"sidebar_dragging":matches!(self.drag,Some(panes::Drag::Sidebar { .. })),"tab_dragging":matches!(self.drag,Some(panes::Drag::Tab { .. })),"workspace_dragging":matches!(self.drag,Some(panes::Drag::Workspace { .. })),"agent_dragging":matches!(self.drag,Some(panes::Drag::Agent { .. })),"activity_resizing":matches!(self.drag,Some(panes::Drag::Activity { .. })),"tab_drop_preview":self.drop_preview.as_ref().map(chrome::DropPreview::diagnostics),"sidebar_gutter_width":(4.0*dpi as f64/96.0).round() as i32,"sidebar_footer_height_dip":36,"sidebar_list_top":layout.list_top,"sidebar_list_bottom":layout.list_bottom,"sidebar_footer_top":layout.footer_top,"sidebar_capacity":layout.capacity,"sidebar_pager_visible":layout.pager,"workspace_row_height_dip":58,"controls":controls})
     }
     pub(super) fn workspace_index(&self, id: WorkspaceId) -> anyhow::Result<usize> {
         self.workspaces

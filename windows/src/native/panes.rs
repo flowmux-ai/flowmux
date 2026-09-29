@@ -66,6 +66,7 @@ unsafe fn divider_cursor(direction: SplitDirection) {
 
 pub(super) enum Pointer {
     Down(i32, i32),
+    ActivityDown(i32),
     TabDown {
         pane: PaneId,
         surface: SurfaceId,
@@ -90,6 +91,10 @@ pub(super) enum Pointer {
 
 #[derive(Clone, Copy)]
 pub(super) enum Drag {
+    Activity {
+        start_y: i32,
+        start_height: i32,
+    },
     Agent {
         surface: SurfaceId,
         start_x: i32,
@@ -208,6 +213,24 @@ impl App {
             return Ok(());
         }
         match pointer {
+            Pointer::ActivityDown(y) => {
+                self.cancel_drag();
+                if let Some(bar) = self.agent_bar.as_ref().filter(|bar| bar.activity) {
+                    let mut rect = RECT::default();
+                    unsafe {
+                        GetClientRect(bar.window, &mut rect);
+                    }
+                    self.drag = Some(Drag::Activity {
+                        start_y: y,
+                        start_height: rect.bottom,
+                    });
+                    if !self.background_test {
+                        unsafe {
+                            SetCapture(self.window);
+                        }
+                    }
+                }
+            }
             Pointer::AgentDown { .. } => unreachable!("agent pointer handled above"),
             Pointer::WorkspaceDown { workspace, x, y } => {
                 self.cancel_drag();
@@ -467,6 +490,16 @@ impl App {
                 }
                 if let Some(drag) = self.drag {
                     let direction = match drag {
+                        Drag::Activity {
+                            start_y,
+                            start_height,
+                        } => {
+                            let dpi = unsafe { GetDpiForWindow(self.window) }.max(96) as i32;
+                            self.activity_height_dip =
+                                Some(((start_height + start_y - y) * 96 / dpi).max(44));
+                            self.layout()?;
+                            SplitDirection::Horizontal
+                        }
                         Drag::Pane { divider, offset } => {
                             if let Some(ratio) = divider.drag_ratio(x, y, offset) {
                                 self.workspace_mut().resize(divider.split, ratio)?;

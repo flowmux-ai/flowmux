@@ -112,9 +112,20 @@ public static class OwnedCodexSessionFixture {
  $statusText='한글 한 é 😀 상태';$r=Request ($report+@('--seq','2','--status','working','--message',$statusText))
  Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.activity -ceq 'running' -and $r.agent.message -ceq $statusText) 'Working status did not preserve raw Unicode'
  $sidebarHandle=Agent-Sidebar 'agent-working' 'working' $statusText
+ $tabLabel='작업 탭 한 é 😀 & 긴 이름 검증';Request @('rename-tab',$source.id,$tabLabel)|Out-Null
+ $tree=Await {param($t) $t.activity_panel -and $t.activity_panel.items[0].surface_label -ceq $tabLabel};$activity=$tree.activity_panel;$activityWindow=[long]$activity.window;$activityItem=$activity.items[0]
+ $raw="codex`n"+$statusText+' · '+$tabLabel
+ Require (-not $tree.agent_bar -and -not $activity.native_visible -and $activity.layout_visible -and $activity.activity -and [OptionsFixture]::Text([long]$activityItem.handle,$owned.Id) -ceq $raw.Replace('&','&&') -and $activityItem.tooltip -ceq $raw) 'Default Activity panel lost raw Korean tab/status text or tooltip ampersands'
+ $activityBounds=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,$activityWindow,$owned.Id);$activityRow=[OptionsFixture]::RelativeBounds([long]$activity.viewport,[long]$activityItem.handle,$owned.Id);$activitySize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id)
+ Require ($activityBounds.Y -ge $tree.chrome.sidebar_list_bottom -and $activityBounds.Y+$activityBounds.Height -eq $tree.chrome.sidebar_footer_top -and $activityBounds.Height -le ($activitySize[1]-76)/3+1 -and $activityRow.Height -gt 47 -and $activityRow.Height -le 90) 'Activity layout does not fit wrapped content below workspaces and above the footer'
+ $bmp=Join-Path $directory 'activity-korean.bmp';$png=Join-Path $directory 'activity-korean.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::ColorCount($png,40,70,150,15,'#f59e0b') -gt 5) 'Wrapped Korean activity text was not painted below its first line'
+ Click ([long]$activityItem.handle);Require ((Request @('identify')).surface -ceq $source.id) 'Activity card did not activate its live terminal'
+ Stable @($source,$local)|Out-Null;Passed 'default-Activity-panel-raw-Korean-and-tab-label-three-line-wrap-tooltip-geometry-paint-and-click'
  $tree=Tree;Require (-not $tree.agent_bar -and -not (Request @('settings','show')).document.terminal.agent_bar_mode) 'Agents bar default differs from Linux'
  $toggle=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'agent_bar' -and $_.layout_visible})[0];Click ([long]$toggle.handle)
  $tree=Await {param($t) $t.agent_bar.layout_visible -and @($t.agent_bar.items).Count -eq 1};$bar=$tree.agent_bar;$barHandle=[long]$bar.items[0].handle
+ Require (-not $tree.activity_panel -and [OptionsFixture]::WindowDestroyed($activityWindow)) 'Agents bar mode did not replace the Activity panel'
  Require (-not $bar.native_visible -and [OptionsFixture]::Parent([long]$bar.window,$owned.Id) -eq $tree.window_handle -and [OptionsFixture]::Parent($barHandle,$owned.Id) -eq $bar.viewport -and [OptionsFixture]::Text($barHandle,$owned.Id).Contains($statusText)) 'Agents bar lost native ownership or raw Korean status'
  Require ($bar.items[0].tooltip -ceq ("codex`n"+$statusText)) 'Native agent tooltip lost its full Korean status'
  $barBounds=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,[long]$bar.window,$owned.Id)
@@ -208,6 +219,24 @@ public static class OwnedCodexSessionFixture {
  Request @('focus-tab',$local.id)|Out-Null;Click ([long]$lastItem.handle);$tree=Tree;Require ((Request @('identify')).surface -ceq $lastItem.surface) 'Agent card click did not activate its captured terminal'
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$toggle=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'agent_bar'})[0];Click ([long]$toggle.handle)
  $tree=Await {param($t) -not $t.agent_bar};Require ([OptionsFixture]::WindowDestroyed([long]$bar.window)) 'Disabling agents bar retained its native window'
+ $activity=$tree.activity_panel;Require (@($activity.items).Count -eq 5 -and $activity.activity -and -not $activity.native_visible) 'Activity panel omitted an agent when switching from bar mode'
+ $activityOrder=$activity.items.surface -join ',';$activityHandles=$activity.items.handle -join ',';$contentBefore=$tree.layout|ConvertTo-Json -Depth 20 -Compress
+ [OptionsFixture]::Scroll([long]$activity.viewport,$owned.Id,$true);$tree=Await {param($t) $t.activity_panel.offset -gt 0};$last=$tree.activity_panel.items[-1]
+ $lastBounds=[OptionsFixture]::RelativeBounds([long]$activity.viewport,[long]$last.handle,$owned.Id);$viewSize=[ChromeFixture]::Size([long]$activity.viewport,$owned.Id)
+ Require ($lastBounds.Y -ge 0 -and $lastBounds.Y+$lastBounds.Height -le $viewSize[1]) 'Vertical Activity scroll did not expose the final full card'
+ $bmp=Join-Path $directory 'activity-scroll.bmp';$png=Join-Path $directory 'activity-scroll.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Request @('focus-tab',$local.id)|Out-Null;[OptionsFixture]::PostEnter([long]$last.handle,$owned.Id);$tree=Tree;Require ((Request @('identify')).surface -ceq $last.surface) 'Activity keyboard activation targeted another surface'
+ Request @('focus-tab',$source.id)|Out-Null;[OptionsFixture]::PostKey([long]$activity.viewport,$owned.Id,36,$false,$false);$tree=Await {param($t) $t.activity_panel.offset -eq 0}
+ [OptionsFixture]::PostKey([long]$activity.viewport,$owned.Id,34,$false,$false);$tree=Await {param($t) $t.activity_panel.offset -gt 0}
+ [OptionsFixture]::PostKey([long]$activity.viewport,$owned.Id,33,$false,$false);$tree=Await {param($t) $t.activity_panel.offset -eq 0}
+ $before=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,[long]$activity.window,$owned.Id)
+ [OptionsFixture]::TabPointerDown([long]$tree.window_handle,[long]$activity.window,$owned.Id,3,2);$tree=Await {param($t) $t.chrome.activity_resizing}
+ [OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x200,3,($before.Y+2-100));$tree=Tree
+ [OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x202,3,($before.Y+2-100));$tree=Await {param($t) -not $t.chrome.activity_resizing}
+ $after=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,[long]$activity.window,$owned.Id)
+ Require ($after.Height -ge $before.Height+98 -and ($tree.layout|ConvertTo-Json -Depth 20 -Compress) -ceq $contentBefore -and ($tree.activity_panel.items.handle -join ',') -ceq $activityHandles -and ($tree.activity_panel.items.surface -join ',') -ceq $activityOrder) 'Activity divider resized terminal content, rebuilt cards, or lost order'
+ [OptionsFixture]::PostKey([long]$activity.window,$owned.Id,40,$false,$false);$tree=Tree;$smaller=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,[long]$activity.window,$owned.Id);Require ($smaller.Height -eq $after.Height-16) 'Activity divider cannot be adjusted by keyboard'
+ Passed 'Activity-native-vertical-scroll-Page-keys-Enter-and-divider-preserve-card-order-and-terminal-geometry'
  [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$barSize[0],$barSize[1]);Request @('settings','set','agent-bar-mode','true')|Out-Null;$tree=Await {param($t) @($t.agent_bar.items).Count -eq 5};Stable (@($source,$local)+$extras)|Out-Null
  Passed 'agent-bar-all-providers-horizontal-end-scroll-live-target-activation-toggle-and-session-retention'
 
@@ -291,6 +320,7 @@ public static class OwnedCodexSessionFixture {
  foreach($extra in $extras[1..3]){Request @('close-tab',$extra.id)|Out-Null}
  $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and @($t.surfaces).Count -eq 2};Stable @($source,$local)|Out-Null
  Passed 'five-owned-providers-Linux-urgency-and-pane-MRU-four-agent-cap-overflow-native-logos-and-close-shrink'
+ Require ([IO.File]::Exists((Join-Path $homeA 'session_index.jsonl')) -and [IO.Directory]::Exists((Join-Path $homeA 'sessions'))) 'Owned session history fixture disappeared before discovery'
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree
  Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
  $image=[Diagnostics.Process]::GetProcessById([int]$tree.agent_sessions.agent.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'History source image is not actual owned codex.exe'}finally{$image.Dispose()};Stable @($local,$source)|Out-Null;Passed 'actual-owned-codex-process-child-only-CODEX_HOME-and-CtrlAltJ-history-discovery'

@@ -252,6 +252,7 @@ pub(super) enum Role {
         status: flowmux_core::AgentStatus,
         seen: bool,
         attention: bool,
+        activity: bool,
     },
     Tab {
         selected: bool,
@@ -1442,6 +1443,17 @@ fn update_tooltip(window: HWND) {
     let length =
         unsafe { GetWindowTextW(window, text.as_mut_ptr(), text.len() as i32) }.max(0) as usize;
     text.truncate(length);
+    if STATE.with(|slot| {
+        slot.borrow()
+            .controls
+            .get(&(window as isize))
+            .is_some_and(|entry| matches!(entry.button, Some(Role::Agent { .. })))
+    }) {
+        text = String::from_utf16_lossy(&text)
+            .replace("&&", "&")
+            .encode_utf16()
+            .collect();
+    }
     text.push(0);
     let unchanged = STATE.with(|slot| {
         slot.borrow()
@@ -1735,6 +1747,38 @@ unsafe fn draw_agent_status(
     }
 }
 
+pub(super) fn activity_row_height(window: HWND, width: i32, text: &str) -> i32 {
+    let dpi = unsafe { GetDpiForWindow(window) }.max(96) as i32;
+    let px = |n: i32| (n * dpi + 48) / 96;
+    unsafe {
+        let dc = GetDC(window);
+        if dc.is_null() {
+            return px(72);
+        }
+        let font = STATE.with(|slot| slot.borrow().resources.caption);
+        let old = SelectObject(dc, font);
+        let raw: Vec<_> = text.replace('&', "&&").encode_utf16().collect();
+        let text = caption_for_paint(&raw);
+        let mut metrics = TEXTMETRICW::default();
+        GetTextMetricsW(dc, &mut metrics);
+        let line = metrics.tmHeight.max(px(12));
+        let mut rect = RECT {
+            right: (width - px(38)).max(1),
+            ..Default::default()
+        };
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            text.len() as i32,
+            &mut rect,
+            DT_CALCRECT | DT_WORDBREAK | DT_HIDEPREFIX,
+        );
+        SelectObject(dc, old);
+        ReleaseDC(window, dc);
+        (px(30) + rect.bottom.clamp(line, 3 * line)).max(px(47))
+    }
+}
+
 fn agent_ink(status: flowmux_core::AgentStatus, seen: bool, palette: Palette) -> COLORREF {
     use flowmux_core::AgentStatus;
     if palette.high_contrast {
@@ -1942,6 +1986,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             status,
             seen,
             attention,
+            activity,
         } = role
         {
             let working = status == flowmux_core::AgentStatus::Working;
@@ -1983,7 +2028,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     left: pixel(6),
                     right: pixel(10),
                     top: pixel(9),
-                    bottom: pixel(38),
+                    bottom: item.rcItem.bottom - pixel(9),
                 },
                 if palette.high_contrast {
                     palette.foreground
@@ -2019,7 +2064,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     left: pixel(left),
                     right: item.rcItem.right - pixel(6),
                     top: pixel(top),
-                    bottom: pixel(top + 19),
+                    bottom: if activity && top == 24 {
+                        item.rcItem.bottom - pixel(6)
+                    } else {
+                        pixel(top + 19)
+                    },
                 };
                 let value: Vec<_> = value.encode_utf16().collect();
                 SelectObject(item.hDC, font);
@@ -2029,7 +2078,14 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     value.as_ptr(),
                     value.len() as i32,
                     &mut rect,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_HIDEPREFIX,
+                    DT_LEFT
+                        | DT_END_ELLIPSIS
+                        | DT_HIDEPREFIX
+                        | if activity && top == 24 {
+                            DT_WORDBREAK | DT_EDITCONTROL
+                        } else {
+                            DT_SINGLELINE | DT_VCENTER
+                        },
                 );
             }
             if item.itemState & ODS_FOCUS != 0 {
