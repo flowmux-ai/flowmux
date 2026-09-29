@@ -81,6 +81,7 @@ unsafe extern "system" fn address_proc(
     id: usize,
     _: usize,
 ) -> LRESULT {
+    super::super::keybindings::native_key_guard(window, message);
     ADDRESS_KEYS.with(|keys| {
         if let Some(keys) = keys.borrow_mut().get_mut(&(window as isize)) {
             keys.update(message, w, l);
@@ -173,6 +174,74 @@ impl Drop for Chrome {
     }
 }
 impl Chrome {
+    pub(super) fn key_guard(&self, window: HWND) {
+        if unsafe { GetParent(window) } == self.window {
+            self.key_modifiers.set(0);
+        }
+    }
+
+    pub(super) fn shortcut(
+        &self,
+        message: &MSG,
+        background: bool,
+        settings: &crate::settings::Document,
+    ) -> Option<crate::keybindings::Binding> {
+        if !matches!(message.message, WM_KEYDOWN | WM_SYSKEYDOWN)
+            || unsafe { GetParent(message.hwnd) } != self.window
+            || ADDRESS_KEYS.with(|keys| {
+                keys.borrow()
+                    .get(&(message.hwnd as isize))
+                    .is_some_and(|keys| keys.composing || keys.settling || keys.blurred)
+            })
+        {
+            return None;
+        }
+        let modifiers = unsafe {
+            let root = GetAncestor(self.window, GA_ROOT);
+            if IsWindowEnabled(root) == 0
+                || IsWindowEnabled(message.hwnd) == 0
+                || GetWindowLongPtrW(message.hwnd, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                || (!background
+                    && (GetForegroundWindow() != root
+                        || GetFocus() != message.hwnd
+                        || IsWindowVisible(self.window) == 0))
+            {
+                return None;
+            }
+            if background {
+                self.key_modifiers.get()
+            } else {
+                [
+                    (0x11, 1),
+                    (0xa4, 4),
+                    (0xa5, 8),
+                    (0x10, 16),
+                    (0x5b, 64),
+                    (0x5c, 128),
+                ]
+                .into_iter()
+                .filter(|(key, _)| GetKeyState(*key) < 0)
+                .fold(0, |bits, (_, bit)| bits | bit)
+            }
+        };
+        if modifiers & (8 | 64 | 128) != 0 {
+            return None;
+        }
+        let chord = crate::keybindings::captured_key(
+            message.wParam as u32,
+            modifiers & 3 != 0,
+            modifiers & 12 != 0,
+            modifiers & 48 != 0,
+        )
+        .ok()
+        .flatten()
+        .and_then(|value| crate::keybindings::parse(&value).ok())?;
+        crate::keybindings::resolved(&settings.keybindings)
+            .ok()?
+            .into_iter()
+            .find(|binding| binding.chord == chord)
+    }
+
     pub(super) fn new(parent: HWND, id: SurfaceId) -> anyhow::Result<Self> {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());

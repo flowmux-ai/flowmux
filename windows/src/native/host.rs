@@ -1080,10 +1080,9 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.downloads.handle_message(&message)
                 && !app.browser_bookmarks.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
-                && !app
-                    .browsers
-                    .values()
-                    .any(|browser| browser.handle_chrome_message(&message))
+                && !app.browsers.iter().any(|(id, browser)| {
+                    browser.handle_chrome_message(*id, &message, &app.settings)
+                })
                 && !app
                     .metadata
                     .as_ref()

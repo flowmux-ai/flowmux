@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close')][string]$Case='all')
+    [ValidateSet('all','files-close','keys')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -326,7 +326,82 @@ function Verify-FilesClose {
         $files.Dispose()
     }
 }
+function Verify-Keys {
+    $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$terminal=$initial.surfaces[0];$source=Request @('identify')
+    $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+    $before=Wait-Page $first.pane '/one' '첫째 한글 한 é 😀';$address=[long]$before.address_handle;$draft=$origin+'/한글 한 é 😀 & draft'
+    [OptionsFixture]::SetText([long]$before.chrome_handle,$address,$process.Id,$draft)
+    function Chord([long]$Handle,[int]$Key,[int[]]$Modifiers=@(17,16),[bool]$Repeat=$false,[bool]$System=$false) {
+        foreach($modifier in $Modifiers){[OptionsFixture]::PostKey($Handle,$process.Id,$modifier,$false,$false)}
+        [OptionsFixture]::PostKey($Handle,$process.Id,$Key,$false,$Repeat,$System)
+        [OptionsFixture]::PostKey($Handle,$process.Id,$Key,$true,$false,$System)
+        foreach($modifier in $Modifiers){[OptionsFixture]::PostKey($Handle,$process.Id,$modifier,$true,$false)}
+    }
+    function Find-State([bool]$Open) {
+        $browser=Request @('browser','status',$first.pane)
+        if([bool]$browser.find.panel_handle -ne $Open){throw 'Browser shortcut find visibility differs'}
+        if(-not (Same-Text ([BrowserFixture]::ReadText($address)) $draft)){throw 'Browser shortcut altered raw Korean address draft'}
+        return $browser
+    }
+    Request @('focus-tab',$terminal.id)|Out-Null;Chord $address 70
+    Find-State $true|Out-Null
+    if((Request @('identify')).surface -ne $first.surface){throw 'Native browser shortcut used another focused pane'}
+    Request @('browser','find-close',$first.pane)|Out-Null
+    $evidence.checks+=@{name='address_shortcut_routes_to_own_browser_find_and_preserves_raw_Korean_draft';passed=$true}
+
+    Request @('settings','keybindings','set','terminal-search','<Ctrl><Shift>F12')|Out-Null
+    [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$true);Chord $address 123;Find-State $false|Out-Null
+    [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$false);Chord $address 123;Find-State $false|Out-Null
+    Chord $address 123;Find-State $true|Out-Null;Request @('browser','find-close',$first.pane)|Out-Null
+    [OptionsFixture]::PostKey($address,$process.Id,229,$false,$false);Chord $address 123;Find-State $false|Out-Null
+    [OptionsFixture]::PostKey($address,$process.Id,229,$true,$false)
+    foreach($modifiers in @(@(17,16,165),@(17,16,91),@(17,16,92))){Chord $address 123 $modifiers;Find-State $false|Out-Null}
+    Chord $address 123 @(17,16) $true;Find-State $false|Out-Null
+    $evidence.checks+=@{name='IME_composition_settling_PROCESS_AltGraph_Windows_repeat_keys_are_not_app_shortcuts';passed=$true}
+
+    Request @('settings','keybindings','set','terminal-search','<Ctrl><Alt>F11')|Out-Null
+    Chord $address 123;Find-State $false|Out-Null
+    Chord $address 122 @(17,18) $false $true;Find-State $true|Out-Null;Request @('browser','find-close',$first.pane)|Out-Null
+    Request @('settings','keybindings','set','terminal-search')|Out-Null;Chord $address 122 @(17,18);Find-State $false|Out-Null
+    Request @('settings','keybindings','clear','terminal-search')|Out-Null
+    $more=[long]$before.chrome.tools_handle;Chord $more 70;Find-State $true|Out-Null;Request @('browser','find-close',$first.pane)|Out-Null
+    $evidence.checks+=@{name='live_shortcut_override_unbind_reset_and_toolbar_buttons_share_browser_routing';passed=$true}
+
+    Chord $address 80;$t=Tree;$palette=$t.command_palette
+    if(-not $palette.open){throw 'Browser shortcut did not open the command palette'}
+    $count=@($t.surfaces).Count;Chord $address 33;$t=Tree
+    if(-not $t.command_palette.open -or @($t.surfaces).Count -ne $count){throw 'Browser shortcut bypassed an open command palette'}
+    [OptionsFixture]::PostEscape([long]$palette.query_handle,$process.Id);$t=Tree
+    if($t.command_palette.open){throw 'Owned palette did not close'}
+    Chord $address 33;$t=Tree;$split=Request @('identify')
+    if(@($t.surfaces).Count -ne $count+1 -or $split.pane -eq $first.pane){throw 'Browser split shortcut did not add a new pane'}
+    Request @('close-tab',$split.surface)|Out-Null;Request @('focus-tab',$first.surface)|Out-Null
+    $evidence.checks+=@{name='browser_palette_modal_guard_and_split_shortcut_reuse_native_actions';passed=$true}
+
+    $second=(Request @('browser','open',($origin+'/two'),'--pane',$source.pane)).browser_pane_opened
+    Wait-Page $second.pane '/two' '둘째 한글 한 é 😀'|Out-Null
+    Chord $address 70
+    if((Request @('browser','status',$second.pane)).find.panel_handle -or (Request @('identify')).surface -ne $second.surface){throw 'Inactive browser shortcut changed current surface'}
+    Request @('focus-tab',$first.surface)|Out-Null
+    $beforeTabs=@((Tree).browsers).Count;Chord $address 66;$t=Tree
+    if(@($t.browsers).Count -ne $beforeTabs+1){throw 'Browser new-tab shortcut did not create one browser tab'}
+    Request @('close-tab',(Request @('identify')).surface)|Out-Null;Request @('focus-tab',$first.surface)|Out-Null
+    Chord $address 39
+    if((Request @('identify')).surface -ne $second.surface){throw 'Browser next-tab shortcut selected the wrong tab'}
+    $secondStatus=Request @('browser','status',$second.pane);Chord ([long]$secondStatus.address_handle) 37
+    if((Request @('identify')).surface -ne $first.surface){throw 'Browser previous-tab shortcut selected the wrong tab'}
+    $evidence.checks+=@{name='inactive_browser_is_ignored_and_new_next_previous_tab_actions_reuse_existing_layout';passed=$true}
+
+    Request @('detach-tab',$first.surface)|Out-Null;$t=Tree;$pane=Location $t $first.surface;$detached=Request @('browser','status',$pane)
+    Chord ([long]$detached.address_handle) 70
+    Check-Find $pane ([long]$detached.holder.root) ''|Out-Null
+    Check-Stable $before (Request @('browser','status',$pane))
+    $live=@((Tree).surfaces|Where-Object {$_.id -eq $terminal.id})
+    if($live.Count -ne 1 -or $live[0].pid -ne $terminal.pid -or $live[0].session -ne $terminal.session){throw 'Browser shortcuts replaced the retained terminal'}
+    $evidence.checks+=@{name='detached_browser_find_retains_native_owner_WebView_Unicode_and_terminal_session';passed=$true}
+}
 try {
+    if($Case -eq 'keys'){Verify-Keys}
     if($Case -eq 'all') {
     $initial=Start-Owned @('--new-window','--shell=cmd','--cwd',$directory);$source=(Request @('identify'));$terminal=$initial.surfaces[0]
     $script:shells+=$terminal.pid
@@ -644,7 +719,7 @@ try {
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     }
-    Verify-FilesClose
+    if($Case -ne 'keys'){Verify-FilesClose}
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

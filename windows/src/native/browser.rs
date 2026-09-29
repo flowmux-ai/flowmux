@@ -35,6 +35,7 @@ pub(super) enum Signal {
     Metadata(SurfaceId, Uuid),
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
+    Shortcut(SurfaceId, Uuid, Uuid, crate::keybindings::Binding),
     Capture(Uuid, Result<Vec<u8>, String>),
     CaptureSaved(Uuid, Result<(), String>),
     WaitTick,
@@ -390,12 +391,36 @@ impl Browser {
         }
         Ok(())
     }
-    pub(super) fn handle_chrome_message(&self, message: &MSG) -> bool {
-        self.visible
-            && !self.native_closed.get()
-            && self
-                .chrome
-                .handle_message(message, self.background, &self.view)
+    pub(super) fn key_guard(&self, window: HWND) {
+        self.chrome.key_guard(window);
+    }
+    pub(super) fn handle_chrome_message(
+        &self,
+        id: SurfaceId,
+        message: &MSG,
+        settings: &crate::settings::Document,
+    ) -> bool {
+        if !self.visible || self.native_closed.get() {
+            return false;
+        }
+        if self
+            .chrome
+            .handle_message(message, self.background, &self.view)
+        {
+            return true;
+        }
+        let Some(binding) = self.chrome.shortcut(message, self.background, settings) else {
+            return false;
+        };
+        if message.lParam as usize & (1 << 30) == 0 {
+            post(Event::Browser(Signal::Shortcut(
+                id,
+                self.instance,
+                settings.revision,
+                binding,
+            )));
+        }
+        true
     }
     fn navigate(&mut self, url: &str) -> anyhow::Result<()> {
         anyhow::ensure!(!self.preview_blocked.get(), "{PREVIEW_EXPIRED}");
@@ -776,6 +801,25 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Shortcut(id, instance, revision, binding) => {
+                if self
+                    .browsers
+                    .get(&id)
+                    .is_some_and(|b| b.instance == instance && b.visible && !b.native_closed.get())
+                    && revision == self.settings.revision
+                    && !self.closing
+                    && !self.close_accepted
+                    && self.close_request.is_none()
+                    && self.pending_save.is_none()
+                    && self.editor_barrier.is_none()
+                    && !self.overview.is_open()
+                    && !self.command_palette.is_open()
+                    && unsafe { IsWindowEnabled(self.surface_window(id)) } != 0
+                {
+                    self.select(id)?;
+                    self.shortcut(id, &binding.action, &binding.chord, revision)?;
+                }
+            }
             Signal::Bookmarks(generation, action) => {
                 self.browser_bookmarks_ui(generation, action)?
             }

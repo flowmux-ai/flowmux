@@ -30,6 +30,9 @@ impl App {
         let guards = NATIVE_KEY_GUARDS.with(|guards| std::mem::take(&mut *guards.borrow_mut()));
         for (window, message) in guards {
             self.empty_window_key_guard(window, message);
+            for browser in self.browsers.values() {
+                browser.key_guard(window);
+            }
         }
     }
 
@@ -247,7 +250,10 @@ impl App {
             editor.view.visible
                 && editor.can_move()
                 && editor.keybindings_revision == Some(revision)
-        });
+        }) || self
+            .browsers
+            .get(&source)
+            .is_some_and(|browser| browser.visible && !browser.native_closed.get());
         let authentication = self
             .ssh_auth_window
             .as_ref()
@@ -296,6 +302,9 @@ impl App {
         );
         use ActionId::*;
         if action == TerminalSearch {
+            if self.browsers.contains_key(&source) {
+                return self.browser_event(browser::Signal::Ui(source, 10));
+            }
             if let Some(editor) = self.editors.get(&source).filter(|editor| editor.ready) {
                 return editor.send(&flowmux_editor::HostMessage::ShowWorkspaceSearch);
             }

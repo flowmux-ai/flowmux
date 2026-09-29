@@ -113,11 +113,11 @@ public static class OptionsFixture {
     [DllImport("user32.dll",EntryPoint="PostMessageW",SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd,uint message,IntPtr w,IntPtr l);
     // Exact owned queued key events, including held PROCESS/229 and repeat
     // guards; no global key state or desktop input is read or changed.
-    public static void PostKey(long control,int owner,int key,bool up,bool repeat) {
+    public static void PostKey(long control,int owner,int key,bool up,bool repeat,bool system=false) {
         var hwnd=Owned(control,owner);if(key<0||key>255)throw new ArgumentOutOfRangeException("Owned key");
         if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned key target is disabled");
-        long flags=1L;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;
-        if(!PostMessage(hwnd,up?0x101U:0x100U,new IntPtr(key),new IntPtr(flags)))throw new InvalidOperationException("Could not post owned key event");
+        long flags=1L;if(repeat||up)flags|=1L<<30;if(up)flags|=1L<<31;if(system)flags|=1L<<29;
+        if(!PostMessage(hwnd,system?(up?0x105U:0x104U):(up?0x101U:0x100U),new IntPtr(key),new IntPtr(flags)))throw new InvalidOperationException("Could not post owned key event");
     }
     public static void TabPointerDown(long parent,long child,int owner,int x,int y) {TabPointerPress(parent,child,owner,x,y,0x201);}
     public static void TabDoubleClick(long parent,long child,int owner,int x,int y) {TabPointerPress(parent,child,owner,x,y,0x203);}
