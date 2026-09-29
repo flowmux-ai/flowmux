@@ -74,7 +74,14 @@ try {
     Require ($status.document.revision -eq $before -and (Field $status).value -ceq $custom -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled) 'Enter Cancel saved or lost the current raw fallback value'
     $evidence.checks+=@{name='installed_catalog_current_custom_fallbacks_owned_modal_and_Enter_Cancel';passed=$true}
 
-    $status=Open-Picker $status;$installedIndex=Find-Choice $status 'installed';$installed=$status.options.font_picker.choices[$installedIndex];$query=$installed.family.Substring(0,[Math]::Min(3,$installed.family.Length))
+    $status=Open-Picker $status;$currentIndex=Find-Choice $status 'current';$currentLabel=$status.options.font_picker.choices[$currentIndex].label
+    foreach($query in @('한 É','한 é','😀 &')){
+        Search $status $query;$status=Await {param($s) $s.options.font_picker.query -ceq $query}
+        Require (@($status.options.font_picker.filtered) -contains $currentIndex) ('Canonically equivalent font query missed the current custom choice: '+$query)
+        Require ([string]::Equals((Raw-Query $status),$query,[StringComparison]::Ordinal) -and [string]::Equals($status.options.font_picker.choices[$currentIndex].label,$currentLabel,[StringComparison]::Ordinal) -and [string]::Equals($status.options.font_picker.choices[$currentIndex].value,$custom,[StringComparison]::Ordinal) -and [string]::Equals((Field $status).value,$custom,[StringComparison]::Ordinal) -and $status.document.revision -eq $before) 'Font filtering rewrote raw Unicode input, label or settings'
+    }
+    $evidence.checks+=@{name='canonical_Hangul_and_accent_search_preserves_raw_query_label_and_font';passed=$true}
+    $installedIndex=Find-Choice $status 'installed';$installed=$status.options.font_picker.choices[$installedIndex];$query=$installed.family.Substring(0,[Math]::Min(3,$installed.family.Length))
     Search $status $query;$status=Await {param($s) $s.options.font_picker.query -ceq $query -and @($s.options.font_picker.filtered).Count -gt 0}
     foreach($index in @($status.options.font_picker.filtered)){Require ($status.options.font_picker.choices[$index].label.IndexOf($query,[StringComparison]::OrdinalIgnoreCase) -ge 0) 'Font search returned a nonmatching choice'}
     $status=Choose $status $installedIndex;Capture-Picker $status

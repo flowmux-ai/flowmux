@@ -1614,7 +1614,7 @@ fn fill(dc: HDC, rect: &RECT, color: COLORREF) {
     }
 }
 
-/// Canonical equivalence for a transient GDI drawing buffer only. Native probes
+/// Canonical equivalence for transient display and filter copies. Native probes
 /// showed decomposed Hangul rendered as separate Jamo even with font fallback;
 /// painting the equivalent NFC sequence fixes that display without changing the
 /// HWND caption, model/path identity, input, clipboard, or persisted codepoints.
