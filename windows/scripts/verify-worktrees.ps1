@@ -77,6 +77,25 @@ try{
  $reply=Request @('test-shortcut',$source.surface,'{"code":"KeyW","key":"w","ctrlKey":true,"altKey":true}');Require (-not $reply.forwarded) 'Actual Worktrees shortcut was not dispatched'
  $tree=Settled;$panel=Panel $tree;Require (@($tree.worktrees.list.items).Count -eq 6 -and @($panel.rows).Count -eq 6 -and (Path-Same $tree.worktrees.list.current_worktree $paths.current)) 'Native panel omitted actual Git worktrees or selected the wrong cwd'
  Header $tree;Require ((Path-Same $panel.selected_path $panel.rows[0].path)-and $panel.scroll -eq 0) 'Opening Worktrees did not select and reveal its first row'
+ # The same production STATIC painter must shape display copies without changing
+ # HWND text or the exact repository/path bytes used for Git and row actions.
+ $listBefore=$tree.worktrees.list|ConvertTo-Json -Depth 20 -Compress;$captionTargets=@()
+ foreach($handle in @($panel.heading,$panel.repository)+@($panel.rows[0].label_handles)){$captionTargets+=@{handle=[long]$handle;parent=[OptionsFixture]::Parent([long]$handle,$owned.Id);original=[OptionsFixture]::Text([long]$handle,$owned.Id);prefix=if($handle -eq $panel.repository -or $handle -eq $panel.rows[0].label_handles[2]){'C:\긴 경로\아주 긴 작업 폴더\'}else{''}}}
+ function Caption-Image([string]$Name,[string]$Sample){
+  foreach($target in $captionTargets){$value=$target.prefix+$Sample;[OptionsFixture]::SetText($target.parent,$target.handle,$owned.Id,$value);Require (Same ([OptionsFixture]::Text($target.handle,$owned.Id)) $value) 'Painting normalized the actual HWND caption'}
+  $file=Join-Path $directory ($Name+'.bmp');$capture=Request @('chrome-capture',$file);Require ($capture.root_handle -eq $panel.window) 'Caption capture selected another window'
+  foreach($target in $captionTargets){Require (Same ([OptionsFixture]::Text($target.handle,$owned.Id)) ($target.prefix+$Sample)) 'Native paint changed the original caption'}
+  return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+ }
+ try{
+  $nfc=Caption-Image 'caption-nfc' '한 é 😀 & Z';$nfd=Caption-Image 'caption-nfd' '한 é 😀 & Z';$compat=Caption-Image 'caption-compat' 'ㅎㅏㄴ é 😀 & Z';$noAmp=Caption-Image 'caption-no-amp' '한 é 😀 Z'
+  $diagnostic.captionHashes=@{nfc=$nfc;nfd=$nfd;compatibility=$compat;withoutAmpersand=$noAmp}
+  Require ($nfc -ceq $nfd) 'Canonically equivalent Hangul/Latin STATIC captions rendered different pixels'
+  Require ($nfc -cne $compat -and $nfc -cne $noAmp) 'STATIC painter collapsed compatibility Jamo or lost literal ampersands'
+ }finally{foreach($target in $captionTargets){[OptionsFixture]::SetText($target.parent,$target.handle,$owned.Id,$target.original)}}
+ $tree=Stable $before;Require (Same ($tree.worktrees.list|ConvertTo-Json -Depth 20 -Compress) $listBefore) 'Caption rendering changed Git/path identities'
+ foreach($name in @('caption-nfc','caption-nfd','caption-compat','caption-no-amp')){Remove-Item -LiteralPath (Join-Path $directory ($name+'.bmp')) -Force}
+ Passed 'native_STATIC_NFC_NFD_identical_pixels_raw_Hangul_paths_emoji_and_literal_ampersands'
  $head=(Git @('rev-parse','HEAD')).Trim()
  foreach($path in @($repo)+@($paths.Values)){$item=@($tree.worktrees.list.items|Where-Object {Path-Same $_.path $path});Require ($item.Count -eq 1 -and $item[0].head -ceq $head -and (Same $item[0].commit_subject $subject)) 'Git worktree HEAD/Unicode commit subject differs';$row=Row $tree $path;Require ([OptionsFixture]::Describe([long]$row.info,$owned.Id).Enabled) 'Native worktree Info is unavailable';Require (@($row.label_handles).Count -eq 5) 'Native worktree row omitted labels';foreach($handle in @($row.label_handles)+@($row.info,$row.remove)){Require ([OptionsFixture]::Parent([long]$handle,$owned.Id) -eq $panel.viewport) 'Worktree row control escaped its viewport'};Require ((Same ([OptionsFixture]::Text([long]$row.label_handles[0],$owned.Id)) $row.branch)-and (Same ([OptionsFixture]::Text([long]$row.label_handles[1],$owned.Id)) $subject)-and (Path-Same ([OptionsFixture]::Text([long]$row.label_handles[2],$owned.Id)) $path)-and (Same ([OptionsFixture]::Text([long]$row.label_handles[3],$owned.Id)) $row.badges)) 'Native worktree branch/subject/path/badges text differs from actual Git'}
  Require ((Row $tree $paths.current).badges.Contains('Activated')-and (Row $tree $paths.locked).badges.Contains('Locked')-and (Row $tree $paths.dirty).badges.Contains('Modified 1')-and (Row $tree $paths.clean).badges.Contains('Clean')) 'Native worktree state badges differ from fixture facts'

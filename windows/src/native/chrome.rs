@@ -4,6 +4,10 @@
 
 use super::*;
 use crate::settings::Theme;
+use windows_sys::Win32::System::SystemServices::{
+    SS_CENTER, SS_CENTERIMAGE, SS_EDITCONTROL, SS_ENDELLIPSIS, SS_LEFT, SS_LEFTNOWORDWRAP,
+    SS_NOPREFIX, SS_PATHELLIPSIS, SS_RIGHT, SS_SIMPLE, SS_SUNKEN, SS_WORDELLIPSIS,
+};
 use windows_sys::Win32::UI::{
     Controls::{
         Dialogs::{ChooseColorW, CommDlgExtendedError, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW},
@@ -1359,6 +1363,21 @@ unsafe extern "system" fn control_proc(
             _ => {}
         }
     }
+    if matches!(message, WM_PAINT | WM_PRINTCLIENT) {
+        if let Some(format) = static_text_format(window) {
+            let mut paint = PAINTSTRUCT::default();
+            let dc = if message == WM_PAINT {
+                BeginPaint(window, &mut paint)
+            } else {
+                wparam as HDC
+            };
+            draw_static_text(window, dc, format);
+            if message == WM_PAINT {
+                EndPaint(window, &paint);
+            }
+            return 1;
+        }
+    }
     if row_pointer(window, message, lparam) {
         return 0;
     }
@@ -1661,6 +1680,99 @@ pub(super) fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]>
 pub(super) fn search_key(text: &str) -> String {
     let raw: Vec<_> = text.encode_utf16().collect();
     String::from_utf16_lossy(&caption_for_paint(&raw)).to_lowercase()
+}
+
+// Native HWND text stays raw; only ordinary STATIC text uses the shared NFC
+// drawing copy. Image/owner-draw controls and oversized captions stay native.
+unsafe fn static_text_format(window: HWND) -> Option<u32> {
+    let mut class = [0u16; 16];
+    let length = GetClassNameW(window, class.as_mut_ptr(), class.len() as i32).max(0);
+    if !String::from_utf16_lossy(&class[..length as usize]).eq_ignore_ascii_case("static")
+        || GetWindowTextLengthW(window) > 8192
+    {
+        return None;
+    }
+    let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
+    if style & SS_SUNKEN != 0 {
+        return None;
+    }
+    let mut format = match style & 0x1f {
+        SS_LEFT => DT_LEFT | DT_WORDBREAK | DT_EXPANDTABS,
+        SS_CENTER => DT_CENTER | DT_WORDBREAK | DT_EXPANDTABS,
+        SS_RIGHT => DT_RIGHT | DT_WORDBREAK | DT_EXPANDTABS,
+        SS_LEFTNOWORDWRAP => DT_LEFT | DT_EXPANDTABS,
+        SS_SIMPLE => DT_LEFT | DT_SINGLELINE,
+        _ => return None,
+    };
+    let ellipsis = match style & SS_WORDELLIPSIS {
+        SS_ENDELLIPSIS => DT_END_ELLIPSIS,
+        SS_PATHELLIPSIS => DT_PATH_ELLIPSIS,
+        SS_WORDELLIPSIS => DT_WORD_ELLIPSIS,
+        _ => 0,
+    };
+    if ellipsis != 0 || style & SS_CENTERIMAGE != 0 {
+        format = (format & !(DT_WORDBREAK | DT_EXPANDTABS)) | DT_SINGLELINE | ellipsis;
+        if style & SS_CENTERIMAGE != 0 {
+            format |= DT_VCENTER;
+        }
+    }
+    if style & SS_NOPREFIX != 0 {
+        format |= DT_NOPREFIX;
+    } else if SendMessageW(window, WM_QUERYUISTATE, 0, 0) as u32 & UISF_HIDEACCEL != 0 {
+        format |= DT_HIDEPREFIX;
+    }
+    if style & SS_EDITCONTROL != 0 {
+        format |= DT_EDITCONTROL;
+    }
+    if GetWindowLongPtrW(window, GWL_EXSTYLE) as u32 & WS_EX_RTLREADING != 0 {
+        format |= DT_RTLREADING;
+    }
+    Some(format)
+}
+
+unsafe fn draw_static_text(window: HWND, dc: HDC, format: u32) {
+    let saved = if dc.is_null() { 0 } else { SaveDC(dc) };
+    if saved == 0 {
+        return;
+    }
+    let mut rect = RECT::default();
+    GetClientRect(window, &mut rect);
+    let brush = SendMessageW(
+        GetParent(window),
+        WM_CTLCOLORSTATIC,
+        dc as WPARAM,
+        window as LPARAM,
+    );
+    if brush != 0 {
+        FillRect(dc, &rect, brush as HBRUSH);
+    }
+    let font = SendMessageW(window, WM_GETFONT, 0, 0) as HFONT;
+    SelectObject(
+        dc,
+        if font.is_null() {
+            GetStockObject(DEFAULT_GUI_FONT)
+        } else {
+            font
+        },
+    );
+    if IsWindowEnabled(window) == 0
+        && GetWindowLongPtrW(window, GWL_STYLE) as u32 & 0x1f != SS_SIMPLE
+    {
+        SetTextColor(dc, palette().muted);
+    }
+    SetBkMode(dc, TRANSPARENT as i32);
+    let mut text = vec![0u16; GetWindowTextLengthW(window).max(0) as usize + 1];
+    let length = GetWindowTextW(window, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+    text.truncate(length);
+    let drawing = caption_for_paint(&text);
+    DrawTextW(
+        dc,
+        drawing.as_ptr(),
+        drawing.len() as i32,
+        &mut rect,
+        format,
+    );
+    RestoreDC(dc, saved);
 }
 
 // One painter serves both the real STATIC and owned, in-process capture. The
