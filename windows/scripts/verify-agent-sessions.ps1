@@ -12,9 +12,9 @@ $diagnostic=[ordered]@{physicalInput=$false;clipboardAccess=$false;realAccount=$
 function Require([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
 function Path-Same([string]$A,[string]$B){return [string]::Equals($A.Replace('/','\').TrimEnd('\'),$B.Replace('/','\').TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)}
 function Budget([int]$Maximum=5000){if($cleaning){return [Math]::Min($Maximum,2000)};$left=75000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Agent sessions verification exceeded75s';return [int][Math]::Min($Maximum,$left)}
-function Request([string[]]$Arguments,[int]$Maximum=5000){
+function Request([string[]]$Arguments,[int]$Maximum=5000,[bool]$ExpectFailure=$false){
  Require ([bool]$pipeName) 'Explicit owned pipe required';$diagnostic.lastCommand=$Arguments;$p=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$Arguments),$directory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
- try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline';Require ($out.Wait(500)-and $err.Wait(500)) 'Owned CLI pipes did not close';Require ($p.ExitCode -eq 0) ('Owned CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
+ try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline';Require ($out.Wait(500)-and $err.Wait(500)) 'Owned CLI pipes did not close';if($ExpectFailure){Require ($p.ExitCode -ne 0) 'Invalid agent report was accepted';return [CliProbe]::Output($err)};Require ($p.ExitCode -eq 0) ('Owned CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
  catch{$diagnostic.commandFailure=@{arguments=$Arguments;stdout=[CliProbe]::Output($out);stderr=[CliProbe]::Output($err)};throw}
  finally{if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
 }
@@ -78,6 +78,41 @@ public static class OwnedCodexSessionFixture {
  Request @('focus-tab',$local.id)|Out-Null;$agents=@(Request @('agents'));$unchanged=Request @('identify')
  Require ($agents.Count -eq 1 -and $agents[0].tab -ceq $source.id -and $unchanged.surface -ceq $local.id -and -not (Tree).agent_sessions.open) 'Agent listing omitted an inactive tab, changed focus or opened a dock'
  Request @('focus-tab',$source.id)|Out-Null;Passed 'window-agent-list-empty-spoof-rejection-owned-identity-unknown-activity-Unicode-and-inactive-tabs-without-dock'
+
+ $report=@('report-agent','codex','--surface',$source.id,'--pid',[string]$source.pid)
+ $initial=Request ($report+@('--seq','1','--status','idle'));Require ($initial.accepted -and $initial.agent.status -ceq 'idle' -and $initial.agent.seen) 'Initial idle report invented a completion alert'
+ $statusText='한글 한 é 😀 상태';$r=Request ($report+@('--seq','2','--status','working','--message',$statusText))
+ Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.activity -ceq 'running' -and $r.agent.message -ceq $statusText) 'Working status did not preserve raw Unicode'
+ foreach($seq in @('1','2')){$stale=Request ($report+@('--seq',$seq,'--status','blocked','--message','stale'));Require (-not $stale.accepted -and $stale.agent.seq -eq 2 -and $stale.agent.status -ceq 'working' -and $stale.agent.message -ceq $statusText) 'Old/duplicate sequence overwrote current status'}
+ $r=Request ($report+@('--seq','4','--status','blocked','--message',$statusText));Require ($r.accepted -and $r.agent.status -ceq 'blocked' -and $r.agent.activity -ceq 'needs_input' -and -not $r.agent.seen) 'Hidden blocked report lost its unseen state'
+ $stale=Request ($report+@('--seq','3','--status','working'));Require (-not $stale.accepted -and $stale.agent.status -ceq 'blocked') 'Delayed progress cleared a newer input wait'
+ $r=Request ($report+@('--seq','5','--status','idle'));Require ($r.accepted -and $r.agent.status -ceq 'done' -and $r.agent.activity -ceq 'idle' -and -not $r.agent.seen) 'Unseen idle transition did not derive Done'
+ Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
+ Require ($state.status -ceq 'done' -and $state.seq -eq 5) 'Hidden focus falsely acknowledged Done'
+ $agents=@(Request @('agents'));Require ($agents[0].status -ceq 'done' -and -not $agents[0].messaging) 'Agent listing discarded reported activity or advertised fake messaging'
+ $r=Request ($report+@('--seq','6','--status','working'));Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.seen) 'A new turn retained an old completion alert'
+ Stable @($source,$local)|Out-Null;Passed 'ordered-agent-reports-stale-duplicates-Unicode-blocked-unseen-completion-and-hidden-focus'
+ foreach($bad in @(
+  @('report-agent','codex','--surface',$source.id,'--pid',[string]$owned.Id,'--seq','7','--status','idle'),
+  @('report-agent','claude','--surface',$source.id,'--pid',[string]$source.pid,'--seq','7','--status','idle'),
+  @('report-agent','codex','--surface',$local.id,'--pid',[string]$source.pid,'--seq','7','--status','idle'),
+  @('report-agent','codex','--pid',[string]$source.pid,'--seq','7','--status','idle'),
+  ($report+@('--seq','0','--status','idle')),
+  ($report+@('--seq','7','--status','done')),
+  ($report+@('--seq','7','--status','working','--message',"invalid`nline")),
+  ($report+@('--seq','7','--status','working','--message',('한'*342)))
+ )){Request $bad 3000 $true|Out-Null}
+ $state=@((Tree).surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($state.seq -eq 6 -and $state.status -ceq 'working') 'Invalid report mutated an existing state'
+ $savedPipe=$env:FLOWMUX_PIPE_NAME;$savedSurface=$env:FLOWMUX_SURFACE_ID
+ try{$env:FLOWMUX_PIPE_NAME=$pipeName;$env:FLOWMUX_SURFACE_ID=$source.id;$r=Request @('report-agent','CODEX','--pid',[string]$source.pid,'--seq','7','--status','blocked','--message',$statusText);Require ($r.accepted -and $r.surface -ceq $source.id -and $r.agent.name -ceq 'codex') 'Inherited surface or canonical agent identity failed'}finally{$env:FLOWMUX_PIPE_NAME=$savedPipe;$env:FLOWMUX_SURFACE_ID=$savedSurface}
+ Passed 'report-rejects-wrong-process-provider-plain-shell-missing-context-invalid-status-sequence-and-message'
+ $pending=@();try{
+  foreach($seq in @('9','8')){$arguments=$report+@('--seq',$seq,'--status',$(if($seq -eq '9'){'blocked'}else{'idle'}));$process=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$arguments),$directory,$directory);$pending+=,@{process=$process;stdout=$process.StandardOutput.ReadToEndAsync();stderr=$process.StandardError.ReadToEndAsync()}}
+  foreach($request in $pending){Require ($request.process.WaitForExit((Budget 3000)) -and $request.stdout.Wait(500) -and $request.stderr.Wait(500) -and $request.process.ExitCode -eq 0) 'Concurrent cached report failed or exceeded3s'}
+ }finally{foreach($request in $pending){if(-not $request.process.HasExited){$request.process.Kill();[CliProbe]::WaitAfterKill($request.process)};$request.process.Dispose()}}
+ $state=@((Tree).surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($state.seq -eq 9 -and $state.status -ceq 'blocked') 'Concurrent reports lost the newest sequence'
+ Passed 'concurrent-ordered-reports-retain-newest-state-without-discovery-workers-or-waits'
+
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree
  Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
  $image=[Diagnostics.Process]::GetProcessById([int]$tree.agent_sessions.agent.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'History source image is not actual owned codex.exe'}finally{$image.Dispose()};Stable @($local,$source)|Out-Null;Passed 'actual-owned-codex-process-child-only-CODEX_HOME-and-CtrlAltJ-history-discovery'
@@ -112,13 +147,20 @@ public static class OwnedCodexSessionFixture {
  Click ([long]$tree.agent_sessions.panel.refresh);Request @('focus-tab',$local.id)|Out-Null;$tree=Await {param($t) -not $t.agent_sessions.loading -and -not $t.agent_sessions.agent -and @($t.agent_sessions.rows).Count -eq 0};Require (-not $tree.agent_sessions.panel.preview_text -and -not $tree.agent_sessions.panel.resume_enabled) 'Refresh completion crossed the focused-source identity';$panel=Panel $tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);$tree=Await {param($t) -not $t.agent_sessions.open};Require ([OptionsFixture]::WindowDestroyed([long]$panel.window)) 'Closing Sessions retained dock HWND';Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'sessions' -and $_.layout_visible});Require ($entry.Count -eq 1) 'Sessions footer entry missing';Click ([long]$entry[0].handle);$tree=Await {param($t) $t.agent_sessions.open -and $t.agent_sessions.agent.pid -eq $source.pid -and @($t.agent_sessions.rows).Count -eq 2 -and -not $t.agent_sessions.loading};Panel $tree|Out-Null;Stable @($source,$local,$new,$other)|Out-Null;Passed 'long-preview-preserves-scroll-and-refresh-source-switch-Escape-footer-reopen-keeps-live-terminals'
  $agents=@(Request @('agents'));Require ($agents.Count -eq 2 -and @($agents|Where-Object {$_.tab -ceq $source.id -and $_.pid -eq $source.pid}).Count -eq 1 -and @($agents|Where-Object {$_.tab -ceq $other.id -and $_.pid -eq $other.pid -and (Path-Same $_.cwd $projectB)}).Count -eq 1) 'Window agent list missed a Job or inferred an agent from the resumed plain shell'
  Request @('new-workspace','--cwd',$projectB,'--shell=cmd')|Out-Null;$destination=Request @('identify')
+ $movedReport=@('report-agent','codex','--surface',$other.id,'--pid',[string]$other.pid);Request ($movedReport+@('--seq','1','--status','blocked'))|Out-Null
  Request @('move-tab',$other.id,'--to-pane',$destination.pane)|Out-Null
  $agents=@(Request @('agents'));$moved=@($agents|Where-Object {$_.tab -ceq $other.id})
- Require ($moved.Count -eq 1 -and $moved[0].pid -eq $other.pid -and $moved[0].pane -ceq $destination.pane -and $moved[0].workspace_id -ceq $destination.workspace) 'Agent list retained stale pane/workspace ownership after moving a live process'
+ Require ($moved.Count -eq 1 -and $moved[0].pid -eq $other.pid -and $moved[0].pane -ceq $destination.pane -and $moved[0].workspace_id -ceq $destination.workspace -and $moved[0].status -ceq 'blocked') 'Agent list retained stale pane/workspace ownership after moving a live process'
  Request @('close-tab',$other.id)|Out-Null;$agents=@(Request @('agents'))
  Require ($agents.Count -eq 1 -and $agents[0].tab -ceq $source.id -and $agents[0].pid -eq $source.pid) 'Agent list retained a closed/exited process or lost an inactive workspace'
  Request @('workspace','close',$destination.workspace)|Out-Null;Stable @($local,$source,$new)|Out-Null
  Passed 'window-agent-list-all-workspaces-move-and-close-retain-live-process-identities'
+ # Exit only this fixture's known agent image; process death clears presence, never Done.
+ $tree=Tree;$sourceNow=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0];Require ($sourceNow.pid -eq $source.pid -and $sourceNow.agent.status -ceq 'blocked') 'Owned source changed before exit check'
+ $image=[Diagnostics.Process]::GetProcessById([int]$source.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated process';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned agent exit exceeded2s'}finally{$image.Dispose()}
+ $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$null -ne $s.exit_code -and -not $s.agent};Require (@(Request @('agents')).Count -eq 0) 'Exited agent retained a live activity row'
+ Request ($report+@('--seq','10','--status','idle')) 3000 $true|Out-Null;Passed 'reported-state-follows-live-tab-moves-and-clears-on-owned-process-exit-without-false-completion'
+
 }
 catch{$failure=$_.Exception.Message}
 finally{

@@ -221,7 +221,7 @@ fn response(cli: Cli) -> anyhow::Result<String> {
 /// One IPC submission, with no stdout formatting and no retry after dispatch.
 pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     let reply_budget = match &cli.command {
-        Command::Agents => Duration::from_secs(3),
+        Command::Agents | Command::ReportAgent(_) => Duration::from_secs(3),
         Command::Browser {
             op: crate::browser::Op::Wait { options, .. },
         } => options.ipc_budget(Duration::from_secs(25), 10)?,

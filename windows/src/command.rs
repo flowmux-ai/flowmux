@@ -203,6 +203,23 @@ pub struct NotifyCompleteArgs {
     pub surface: Option<Uuid>,
 }
 
+/// A complete status snapshot from one ordered producer, not a raw tool hook.
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct AgentReportArgs {
+    pub agent: String,
+    #[arg(long, value_parser = parse_id)]
+    pub surface: Option<Uuid>,
+    #[arg(long)]
+    pub pid: u32,
+    /// Strictly increasing for the lifetime of this agent process.
+    #[arg(long)]
+    pub seq: u64,
+    #[arg(long, value_parser = ["unknown", "idle", "working", "blocked"])]
+    pub status: String,
+    #[arg(long)]
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
@@ -262,6 +279,8 @@ pub enum Command {
     Tree,
     /// List live local agents in this window's owned terminal processes.
     Agents,
+    /// Report one producer's ordered status snapshot, not individual tool-hook events.
+    ReportAgent(AgentReportArgs),
     /// Control an in-app browser pane, separate from terminal content.
     Browser {
         #[command(subcommand)]

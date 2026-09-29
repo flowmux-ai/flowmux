@@ -19,7 +19,7 @@ impl Controller {
     }
 }
 impl App {
-    fn source_is_focused(&self, source: Option<SurfaceId>) -> bool {
+    pub(super) fn source_is_focused(&self, source: Option<SurfaceId>) -> bool {
         !self.background_test
             && unsafe {
                 GetForegroundWindow() == source.map_or(self.window, |id| self.surface_window(id))
@@ -132,6 +132,7 @@ impl App {
         if !self.source_is_focused(Some(source)) {
             return;
         }
+        self.ack_focused_agent(source);
         let count = self.notifications.store.unread_count();
         self.notifications
             .store

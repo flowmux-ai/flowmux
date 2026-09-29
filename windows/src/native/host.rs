@@ -617,6 +617,7 @@ struct App {
     usage: usage::Controller,
     sessions: sessions::Controller,
     pending_agents: Option<agent_list::Pending>,
+    agent_states: RefCell<HashMap<SurfaceId, agent_list::State>>,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -904,6 +905,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             usage: usage::Controller::default(),
             sessions: sessions::Controller::default(),
             pending_agents: None,
+            agent_states: RefCell::new(HashMap::new()),
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -3160,6 +3162,7 @@ impl App {
         self.focus_active()
     }
     fn remove_surface(&mut self, surface: SurfaceId) {
+        self.agent_states.get_mut().remove(&surface);
         self.tab_menu_surface_closing(surface);
         let owner = self.surface_window(surface);
         if owner != self.window {
@@ -3498,9 +3501,10 @@ impl App {
         );
         match command {
             Command::Agents => {
-                self.agents_request(reply)?;
+                self.agents_request(None, reply)?;
                 return Ok(None);
             }
+            Command::ReportAgent(args) => return self.agent_report_request(args, caller, reply),
             Command::Editor { op } => return self.editor_command(op, caller, reply),
             Command::Files { op } => return self.files_command(op, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),
@@ -3564,7 +3568,8 @@ impl App {
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
                 "files_limits":{"pending":crate::files_service::MAX_ADMITTED,"budget_ms":crate::files_service::BUDGET.as_millis(),"page_rows":crate::files_model::PAGE_SIZE,"entries":crate::files_model::MAX_ENTRIES,"expanded":crate::files_model::MAX_EXPANDED},
-                "commands":["agents","files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "agent_activity":{"ordered_reports":true,"native_hooks":false},
+                "commands":["agents","report-agent","files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","detach-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"Release validation is incomplete; physical Korean IME behavior remains unverified"})))
@@ -3625,6 +3630,7 @@ impl App {
                 let surfaces: Vec<_> = self.surfaces.iter().map(|(id, surface)| json!({"id":id,"ready":surface.ready,
                     "pid":surface.process_pid,"session":surface.session_generation,"running":surface.session.is_some() && surface.exit_code.is_none(),
                     "exit_code":surface.exit_code,"resources_released":surface.ready && surface.session.is_none(),
+                    "agent":self.agent_presence(*id),
                     "output_sequence":surface.output_sequence,"parsed_sequence":surface.acknowledged_sequence,
                     "observed_output_bytes":surface.observed_output_bytes,"last_output_ms":surface.last_output_ms,
                     "cols":surface.cols,"rows":surface.rows,"cwd_reported":surface.cwd_reported,
