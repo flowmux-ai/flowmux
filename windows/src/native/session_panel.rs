@@ -512,7 +512,12 @@ impl Panel {
                 2,
                 WS_TABSTOP | BS_OWNERDRAW as u32,
             )?;
-            panel.close = panel.child("BUTTON", "Close", 3, WS_TABSTOP | BS_OWNERDRAW as u32)?;
+            panel.close = panel.child(
+                "BUTTON",
+                "Close sessions",
+                3,
+                WS_TABSTOP | BS_OWNERDRAW as u32,
+            )?;
             panel.search = panel.child(
                 "EDIT",
                 "",
@@ -733,29 +738,22 @@ impl Panel {
         let margin = p(8).min(width / 4);
         let inner = (width - 2 * margin).max(1);
         let tool = p(28).min(inner / 3);
-        let close_width = p(52).min(inner / 3);
         let gap = p(4);
         place(
             self.heading,
             margin,
             p(6),
-            (inner - tool - close_width - gap * 2).max(1),
+            (inner - tool * 2 - gap * 2).max(1),
             p(28),
         );
         place(
             self.refresh,
-            width - margin - close_width - tool - gap,
+            width - margin - tool * 2 - gap,
             p(6),
             tool,
             p(28),
         );
-        place(
-            self.close,
-            width - margin - close_width,
-            p(6),
-            close_width,
-            p(28),
-        );
+        place(self.close, width - margin - tool, p(6), tool, p(28));
         place(self.message, margin, p(40), inner, p(34));
         place(self.search, margin, p(80), inner, p(28));
         let resume_height = p(30).min(height);
@@ -853,14 +851,18 @@ impl Panel {
         chrome::register_control(self.search, chrome::ControlRole::Edit);
         chrome::register_sidebar_control(self.preview, chrome::ControlRole::Edit);
         chrome::register_sidebar_control(self.list, chrome::ControlRole::Listbox);
-        chrome::register_button(
-            self.refresh,
-            chrome::Role::Icon {
-                kind: chrome::ChromeIcon::Reload,
-                marked: false,
-            },
-        );
-        chrome::register_button(self.close, chrome::Role::Button);
+        for (window, kind) in [
+            (self.refresh, chrome::ChromeIcon::Reload),
+            (self.close, chrome::ChromeIcon::Close),
+        ] {
+            chrome::register_button(
+                window,
+                chrome::Role::Icon {
+                    kind,
+                    marked: false,
+                },
+            );
+        }
         chrome::register_button(self.resume, chrome::Role::Button);
         unsafe {
             InvalidateRect(self.window, std::ptr::null(), 1);
@@ -875,6 +877,6 @@ impl Panel {
     pub(super) fn status(&self) -> Value {
         let r = route(self.window);
         let rows:Vec<_>=r.as_ref().map(|r|r.filtered.iter().enumerate().map(|(index,i)|{let row=&r.rows[*i];json!({"index":index,"id":row.id,"agent":row.agent,"title":row.title,"project":row.project,"updated":row.updated,"text":row.caption,"color":row.color,"selected":r.selected.as_ref()==Some(&row.id)})}).collect()).unwrap_or_default();
-        json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"open":self.area.get().is_some(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":self.area.get(),"query":read(self.search),"filter":r.as_ref().map(|r|&r.query),"query_handle":self.search as usize,"list":self.list as usize,"preview":self.preview as usize,"preview_text":read(self.preview),"preview_bounds":geometry(self.preview,self.window),"refresh":self.refresh as usize,"close":self.close as usize,"resume":self.resume as usize,"resume_enabled":unsafe{IsWindowEnabled(self.resume)!=0},"loading":r.as_ref().is_some_and(|r|r.loading),"selected":r.as_ref().and_then(|r|r.selected.as_ref()),"composing":r.as_ref().is_some_and(|r|r.composing),"status":self.status_text,"rows":rows})
+        json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"open":self.area.get().is_some(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":self.area.get(),"query":read(self.search),"filter":r.as_ref().map(|r|&r.query),"query_handle":self.search as usize,"list":self.list as usize,"preview":self.preview as usize,"preview_text":read(self.preview),"preview_bounds":geometry(self.preview,self.window),"refresh":self.refresh as usize,"close":self.close as usize,"refresh_tooltip":chrome::tooltip_text(self.refresh),"close_tooltip":chrome::tooltip_text(self.close),"resume":self.resume as usize,"resume_enabled":unsafe{IsWindowEnabled(self.resume)!=0},"loading":r.as_ref().is_some_and(|r|r.loading),"selected":r.as_ref().and_then(|r|r.selected.as_ref()),"composing":r.as_ref().is_some_and(|r|r.composing),"status":self.status_text,"rows":rows})
     }
 }

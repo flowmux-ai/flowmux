@@ -564,6 +564,24 @@ public static class OwnedCodexSessionFixture {
   Require ([string]::Equals([OptionsFixture]::Text([long]$filtered.query_handle,$owned.Id),$query,[StringComparison]::Ordinal) -and [string]::Equals($filtered.rows[0].title,$titleA,[StringComparison]::Ordinal) -and [string]::Equals([OptionsFixture]::Text([long]$filtered.preview,$owned.Id),$preview,[StringComparison]::Ordinal)) 'Canonical session filtering changed raw query, title or conversation preview'
  }
  Query $tree '';$tree=Await {param($t) @($t.agent_sessions.panel.rows).Count -eq 2};Passed 'canonical-Hangul-accent-session-search-preserves-raw-query-title-preview-and-selected-ID'
+ # Match the Linux icon header at the smallest supported dock widths.
+ $headerSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$headerScale=$tree.chrome.dpi/96.0;$headerSidebar=[int]$tree.chrome.sidebar_actual_width
+ try{
+  foreach($dip in @(200,250,300)){
+   $width=$headerSidebar+2*[int][Math]::Round(4*$headerScale)+[int][Math]::Round((160+$dip)*$headerScale)
+   [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$width,$headerSize[1]);$tree=Await {param($t) $t.agent_sessions.panel.open -and [Math]::Abs($t.agent_sessions.panel.bounds.width-$dip*$headerScale) -le 1};$p=Panel $tree
+   $heading=@([ChromeFixture]::Read([long]$p.window,$owned.Id)|Where-Object {$_.Class -ceq 'Static' -and $_.Text -ceq 'Agent sessions'})[0]
+   $refresh=[OptionsFixture]::RelativeBounds([long]$p.window,[long]$p.refresh,$owned.Id);$close=[OptionsFixture]::RelativeBounds([long]$p.window,[long]$p.close,$owned.Id)
+   Require ($heading.Width -ge [Math]::Round(120*$headerScale) -and $heading.X+$heading.Width -lt $refresh.X -and $refresh.X+$refresh.Width -lt $close.X -and $close.X+$close.Width -le $p.bounds.width -and $refresh.Y -eq $close.Y) 'Sessions header clips its title or overlaps its icon actions'
+   foreach($button in @(@($p.refresh,$refresh,'Refresh sessions'),@($p.close,$close,'Close sessions'))){Require ($button[1].Width -eq [Math]::Round(28*$headerScale) -and $button[1].Height -eq $button[1].Width -and [OptionsFixture]::Text([long]$button[0],$owned.Id) -ceq $button[2]) 'Sessions icon action lost its compact geometry or accessible caption'}
+   Require ($p.refresh_tooltip -ceq 'Refresh sessions' -and $p.close_tooltip -ceq 'Close sessions') 'Sessions header lost its native action tooltips'
+   Require ($p.window -eq $panel.window -and $p.list -eq $panel.list -and $p.selected -ceq $idA -and [string]::Equals([OptionsFixture]::Text([long]$p.preview,$owned.Id),$preview,[StringComparison]::Ordinal)) 'Narrowing Sessions replaced controls, selection or raw Korean preview'
+  }
+  $headerPaint=Join-Path $directory 'sessions-header.bmp';$capture=Request @('chrome-capture',$headerPaint);Require ($capture.root_handle -eq $p.window) 'Sessions capture targeted another window'
+  foreach($rect in @($refresh,$close)){Require ([ChromeFixture]::ColorCount($headerPaint,$rect.X,$rect.Y,$rect.Width,$rect.Height,'#abb1bc') -gt 6) 'Sessions icon action did not paint its themed strokes'}
+  Remove-Item -LiteralPath $headerPaint -Force
+ }finally{[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$headerSize[0],$headerSize[1])}
+ $tree=Await {param($t) $t.agent_sessions.panel.bounds.width -eq [Math]::Round(360*$headerScale)};Stable @($source,$local)|Out-Null;Passed 'Linux-Sessions-header-icons-tooltips-200-250-300DIP-and-raw-Korean-preview-preserved'
  Request @('settings','set','zoom-percent','200')|Out-Null;$tree=Tree;$zoomed=Panel $tree
  Require ($zoomed.preview -eq $panel.preview -and $zoomed.list -eq $panel.list -and $zoomed.selected -ceq $idA -and [OptionsFixture]::Text([long]$zoomed.preview,$owned.Id) -ceq $preview -and [ChromeFixture]::FontHeight([long]$zoomed.preview,$owned.Id) -eq [Math]::Floor(22*$tree.chrome.dpi/72+0.5) -and [ChromeFixture]::FontHeight([long]$zoomed.list,$owned.Id) -eq [Math]::Floor(22*$tree.chrome.dpi/72+0.5)) 'Session zoom replaced native controls, preview text or selection, or failed to resize actual fonts'
  Request @('settings','set','zoom-percent','100')|Out-Null;Passed 'Sessions-global-zoom-preserves-native-preview-Korean-text-and-selected-history'
