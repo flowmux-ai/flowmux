@@ -147,6 +147,14 @@ impl App {
         match_case: bool,
         offset: usize,
     ) -> anyhow::Result<Uuid> {
+        anyhow::ensure!(
+            !self
+                .search
+                .panel
+                .as_ref()
+                .is_some_and(panel::Panel::composition_pending),
+            "Finish composing text before starting another search"
+        );
         self.begin_search_limited(query, match_case, offset, PAGE_SIZE)
     }
     fn begin_search_limited(
@@ -156,6 +164,14 @@ impl App {
         offset: usize,
         limit: usize,
     ) -> anyhow::Result<Uuid> {
+        anyhow::ensure!(
+            !self
+                .search
+                .panel
+                .as_ref()
+                .is_some_and(panel::Panel::composing),
+            "Finish composing text before searching"
+        );
         anyhow::ensure!(
             (1..=UI_RESULT_LIMIT).contains(&limit),
             "invalid search result limit"
@@ -303,6 +319,14 @@ impl App {
         index: usize,
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self
+                .search
+                .panel
+                .as_ref()
+                .is_some_and(panel::Panel::composition_pending),
+            "Finish composing text before opening a search result"
+        );
         let run = self
             .search
             .run
@@ -372,6 +396,15 @@ impl App {
             "invalid search activation response"
         );
         let mut pending = self.search.opening.remove(&request).unwrap();
+        if result.is_ok()
+            && self
+                .search
+                .panel
+                .as_ref()
+                .is_some_and(panel::Panel::composition_pending)
+        {
+            result = Err("Finish composing text before opening a search result".into());
+        }
         if result.is_ok() && !pending.selected {
             // Verify before changing workspace/focus. Revalidate after activation,
             // since making a hidden view visible may resize/reflow its grid.
@@ -581,7 +614,7 @@ impl App {
             UiAction::Open => {
                 let panel = self.search.panel.as_ref().unwrap();
                 let (query, match_case) = panel.read_query();
-                if panel.composing() {
+                if panel.composition_pending() {
                     return Ok(());
                 }
                 if let (Some(run), Some(index)) = (

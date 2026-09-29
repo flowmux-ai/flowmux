@@ -24,8 +24,9 @@ pub(crate) enum UiAction {
     Tick,
 }
 fn emit(action: UiAction) {
-    if matches!(action, UiAction::Open | UiAction::Refresh | UiAction::More)
-        && COMPOSING.with(Cell::get)
+    if (matches!(action, UiAction::Open | UiAction::Refresh | UiAction::More)
+        && COMPOSING.with(Cell::get))
+        || (matches!(action, UiAction::Open) && SETTLING.with(Cell::get))
     {
         return;
     }
@@ -531,7 +532,7 @@ impl Panel {
             return false;
         }
         // The IME's final Enter/Escape is still guarded until its key release.
-        if self.composing() || SETTLING.with(Cell::get) || message.wParam == 229 {
+        if self.composition_pending() || message.wParam == 229 {
             return false;
         }
         if message.message == WM_KEYDOWN {
@@ -572,8 +573,11 @@ impl Panel {
     pub(super) fn composing(&self) -> bool {
         COMPOSING.with(Cell::get)
     }
+    pub(super) fn composition_pending(&self) -> bool {
+        self.composing() || SETTLING.with(Cell::get)
+    }
     pub(super) fn query(&self, text: &str, case: bool) {
-        if self.composing() {
+        if self.composition_pending() {
             return;
         }
         let current = self.read_query();

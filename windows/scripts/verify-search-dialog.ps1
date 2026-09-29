@@ -16,7 +16,7 @@ $needle='SEARCH_DIALOG_한글_한_😀'
 function Assert-Budget {
     if($budget.Elapsed.TotalSeconds -ge 55){throw 'Search-dialog verification exceeded its 55-second work budget'}
 }
-function Invoke-Owned([string[]]$Arguments) {
+function Invoke-Owned([string[]]$Arguments,[int]$Exit=0) {
     if(-not $script:cleaningUp){Assert-Budget}
     $child=[CliProbe]::Start($cli,$Arguments,$directory,$directory)
     $out=$child.StandardOutput.ReadToEndAsync();$err=$child.StandardError.ReadToEndAsync()
@@ -24,13 +24,14 @@ function Invoke-Owned([string[]]$Arguments) {
         $timeout=if($script:cleaningUp){5000}else{[Math]::Max(1,[Math]::Min(5000,55000-[int]$budget.ElapsedMilliseconds))}
         if(-not $child.WaitForExit($timeout)){throw 'Owned CLI exceeded 5 seconds; no retry'}
         if(-not $out.Wait(1000) -or -not $err.Wait(1000)){throw 'Owned CLI pipes did not close'}
-        if($child.ExitCode -ne 0){throw ('Owned CLI failed: '+[CliProbe]::Output($err))}
+        if($child.ExitCode -ne $Exit){throw ('Owned CLI exit differs: '+$child.ExitCode+' '+[CliProbe]::Output($err)+' '+[CliProbe]::Output($out))}
+        if($Exit -ne 0){return ([CliProbe]::Output($err)|ConvertFrom-Json)}
         return ([CliProbe]::Output($out)|ConvertFrom-Json)
     } finally {if(-not $child.HasExited){$child.Kill();[CliProbe]::WaitAfterKill($child)};$child.Dispose()}
 }
-function Request([string[]]$Arguments) {
+function Request([string[]]$Arguments,[int]$Exit=0) {
     if(-not $script:pipeName){throw 'Explicit owned pipe required'}
-    return (Invoke-Owned (@('--pipe',$script:pipeName,'--json')+$Arguments))
+    return (Invoke-Owned (@('--pipe',$script:pipeName,'--json')+$Arguments) $Exit)
 }
 function Tree {
     $tree=Request @('tree');$owner=[IntPtr]([long]$tree.window_handle)
@@ -53,6 +54,15 @@ function Wait-Search($Result) {
     while($Result.pending){if((Get-Date) -ge $deadline){throw 'Owned search exceeded 8 seconds'};Start-Sleep -Milliseconds 20;$Result=Request @('search-results',$Result.search)}
     if($Result.cancelled -or $Result.unavailable.Count -ne 0){throw 'Owned fixture search cancelled or unavailable'}
     return $Result
+}
+function Reject-ImeCommands($Dialog) {
+    $before=Request @('identify');$selection=(Request @('selection','--surface',$surface,'read')).result.text
+    foreach($arguments in @(@('search-all','외부 검색 한 😀'),@('search-open',$Dialog.search,'0'))){
+        $rejected=Request $arguments 1
+        if(-not $rejected.error.Contains('Finish composing text')){throw ('IME rejection did not identify the composition guard: '+$rejected.error)}
+    }
+    $now=(Tree).search_dialog;$after=Request @('identify')
+    if(-not $now.open -or $now.query -cne $Dialog.query -or $now.search -cne $Dialog.search -or $now.rows -ne $Dialog.rows -or $now.owner_enabled -or $after.surface -cne $before.surface -or (Request @('selection','--surface',$surface,'read')).result.text -cne $selection){throw 'Rejected external search replaced raw input, results, terminal selection or modal ownership'}
 }
 function Open-Dialog {
     $buttons=@((Tree).chrome.controls|Where-Object {$_.kind -eq 'search_all'})
@@ -123,8 +133,12 @@ try {
     [OptionsFixture]::PostEnter([long]$dialog.query_handle,$process.Id);[OptionsFixture]::PostEscape([long]$dialog.query_handle,$process.Id)
     [SearchDialogFixture]::ActivateRow([IntPtr]([long]$dialog.list_handle),0,$process.Id)
     $dialog=Wait-Dialog {param($d)$d.open -and $d.composing -and $d.rows -eq 0 -and -not $d.owner_enabled} 'Composition keys or row activation opened a stale result'
+    Reject-ImeCommands $dialog
     [OptionsFixture]::CompositionGuard([long]$dialog.window,[long]$dialog.query_handle,$process.Id,$false)
     $dialog=Wait-Dialog {param($d)$d.open -and -not $d.composing -and $d.settling -and -not $d.pending -and $d.rows -eq 500} 'Completed composition did not refresh results while guarding its ending key'
+    Reject-ImeCommands $dialog
+    [SearchDialogFixture]::ActivateRow([IntPtr]([long]$dialog.list_handle),0,$process.Id)
+    if(-not (Tree).search_dialog.open){throw 'Native row activation bypassed the pending IME key release'}
     foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,$key,$false,$false)}
     [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,16,$true,$false)
     $dialog=(Tree).search_dialog
@@ -137,11 +151,13 @@ try {
     $dialog=Wait-Dialog {param($d)-not $d.open -and $d.owner_enabled} 'Independent Enter after composition did not open a result'
     if((Request @('selection','--surface',$surface,'read')).result.text -cne $needle){throw 'Post-composition Enter changed the original Unicode selection'}
     $evidence.checks+=@{name='query_Down_IME_start_end_key_release_repeat_and_stale_row_guards';passed=$true}
+    $evidence.checks+=@{name='external_search_commands_and_native_rows_preserve_raw_Unicode_query_results_and_selection_during_IME';passed=$true}
 
     $dialog=Open-Dialog
     [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,229,$false,$false)
     [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,27,$false,$false)
     $dialog=Wait-Dialog {param($d)$d.open -and $d.settling} 'PROCESS key guard closed the search dialog'
+    Reject-ImeCommands $dialog
     [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,229,$true,$false)
     $dialog=Wait-Dialog {param($d)$d.open -and -not $d.settling} 'PROCESS key release did not clear the guard'
     [OptionsFixture]::PostEscape([long]$dialog.query_handle,$process.Id)
