@@ -5,7 +5,7 @@ use std::cell::Cell;
 use windows_sys::Win32::{
     System::SystemServices::SS_NOPREFIX,
     UI::{
-        Controls::{SetScrollInfo, EM_LIMITTEXT},
+        Controls::{SetScrollInfo, SetWindowTheme, EM_LIMITTEXT},
         Input::KeyboardAndMouse::EnableWindow,
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
     },
@@ -127,9 +127,11 @@ unsafe extern "system" fn procedure(
             } else if let Some(signal) = bindings::command(id, code) {
                 emit(UiAction::Bindings(signal));
             } else if (INPUT_BASE..LABEL_BASE).contains(&id) {
-                if !SYNCING.with(Cell::get) && matches!(code, EN_CHANGE | CBN_SELCHANGE) {
+                if !SYNCING.with(Cell::get)
+                    && matches!(code, EN_CHANGE | CBN_SELCHANGE | BN_CLICKED)
+                {
                     emit(UiAction::Changed(id - INPUT_BASE));
-                } else if matches!(code, EN_SETFOCUS | CBN_SETFOCUS) {
+                } else if matches!(code, EN_SETFOCUS | CBN_SETFOCUS | BN_SETFOCUS) {
                     emit(UiAction::Reveal(id - INPUT_BASE));
                 }
             } else if code == BN_CLICKED {
@@ -192,6 +194,11 @@ struct Row {
     due: Option<Instant>,
     choices: Vec<(&'static str, &'static str)>,
     baseline: String,
+}
+impl Row {
+    fn is_toggle(&self) -> bool {
+        matches!(self.choices.as_slice(), [(_, "true"), (_, "false")])
+    }
 }
 pub(crate) struct Panel {
     pub(super) edit_id: Uuid,
@@ -477,7 +484,7 @@ impl Panel {
         id: usize,
         style: u32,
     ) -> anyhow::Result<HWND> {
-        let style = if class == "BUTTON" {
+        let style = if class == "BUTTON" && style & 0xf != BS_AUTOCHECKBOX as u32 {
             (style & !0xf) | BS_OWNERDRAW as u32
         } else {
             style
@@ -498,12 +505,12 @@ impl Panel {
                 std::ptr::null(),
             );
             checked((!hwnd.is_null()) as i32)?;
-            if class == "BUTTON" {
+            if class == "BUTTON" && style & 0xf == BS_OWNERDRAW as u32 {
                 chrome::register_button(hwnd, chrome::Role::Button);
             } else {
                 chrome::register_control(
                     hwnd,
-                    if class == "STATIC" {
+                    if matches!(class, "STATIC" | "BUTTON") {
                         chrome::ControlRole::Static
                     } else if class == "LISTBOX" {
                         chrome::ControlRole::Listbox
@@ -530,7 +537,17 @@ impl Panel {
             LABEL_BASE + index,
             SS_NOPREFIX,
         )?;
-        let input = if choices.is_empty() {
+        let toggle = matches!(choices.as_slice(), [(_, "true"), (_, "false")]);
+        let input = if toggle {
+            // Keep native check state, Space handling and the accessible setting name.
+            self.child_in(
+                self.viewport,
+                "BUTTON",
+                title,
+                INPUT_BASE + index,
+                WS_TABSTOP | (BS_AUTOCHECKBOX | BS_NOTIFY | BS_LEFTTEXT | BS_LEFT) as u32,
+            )?
+        } else if choices.is_empty() {
             self.child_in(
                 self.viewport,
                 "EDIT",
@@ -548,10 +565,13 @@ impl Panel {
             )?
         };
         unsafe {
-            if choices.is_empty() {
+            if toggle {
+                // Native themed checkbox text ignores our dark palette's WM_CTLCOLOR.
+                SetWindowTheme(input, wide("").as_ptr(), wide("").as_ptr());
+            } else if choices.is_empty() {
                 SendMessageW(input, EM_LIMITTEXT, 256, 0);
                 checked(SetWindowSubclass(input, Some(edit_proc), index, 0))?;
-            } else {
+            } else if !toggle {
                 for (label, _) in &choices {
                     SendMessageW(input, CB_ADDSTRING, 0, wide(label).as_ptr() as LPARAM);
                 }
@@ -565,7 +585,11 @@ impl Panel {
             error: None,
             due: None,
             choices,
-            baseline: String::new(),
+            baseline: if toggle {
+                "false".into()
+            } else {
+                String::new()
+            },
         });
         Ok(())
     }
@@ -583,7 +607,9 @@ impl Panel {
         }
     }
     fn value(row: &Row) -> String {
-        if row.choices.is_empty() {
+        if row.is_toggle() {
+            (unsafe { SendMessageW(row.input, BM_GETCHECK, 0, 0) } == 1).to_string()
+        } else if row.choices.is_empty() {
             Self::text(row.input)
         } else {
             let index = unsafe { SendMessageW(row.input, CB_GETCURSEL, 0, 0) };
@@ -596,7 +622,9 @@ impl Panel {
     fn set(row: &Row, value: &str) {
         SYNCING.with(|sync| sync.set(true));
         unsafe {
-            if row.choices.is_empty() {
+            if row.is_toggle() {
+                SendMessageW(row.input, BM_SETCHECK, usize::from(value == "true"), 0);
+            } else if row.choices.is_empty() {
                 SetWindowTextW(row.input, wide(value).as_ptr());
             } else {
                 let index = row
@@ -1433,9 +1461,15 @@ impl Panel {
             for row in &self.rows {
                 let show =
                     row.page == self.page && (row.page == 0 || row.key == Some(SettingKey::Theme));
-                for hwnd in [row.label, row.input] {
-                    ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
-                }
+                ShowWindow(row.input, if show { SW_SHOWNA } else { SW_HIDE });
+                ShowWindow(
+                    row.label,
+                    if show && !row.is_toggle() {
+                        SW_SHOWNA
+                    } else {
+                        SW_HIDE
+                    },
+                );
                 if show {
                     let top = if row.page == 0 {
                         let top = general_y;
@@ -1462,6 +1496,16 @@ impl Panel {
                         44
                     };
                     place(row.label, px(8), px(top) - offset, px(230), px(30));
+                    if row.is_toggle() {
+                        place(
+                            row.input,
+                            px(8),
+                            px(top) - offset,
+                            view.right - px(16),
+                            px(30),
+                        );
+                        continue;
+                    }
                     place(
                         row.input,
                         px(246),
@@ -1617,7 +1661,9 @@ impl Panel {
                 return false;
             }
             let dropdown = self.rows.iter().any(|row| {
-                !row.choices.is_empty() && SendMessageW(row.input, CB_GETDROPPEDSTATE, 0, 0) != 0
+                !row.choices.is_empty()
+                    && !row.is_toggle()
+                    && SendMessageW(row.input, CB_GETDROPPEDSTATE, 0, 0) != 0
             });
             if message.message == WM_KEYDOWN && message.wParam == 27 && !dropdown {
                 emit(UiAction::Close);

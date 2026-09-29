@@ -14,6 +14,7 @@ public static class OptionsFixture {
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd,uint command);
     [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr hwnd);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd,StringBuilder name,int maximum);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out Rect rect);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd,int index);
@@ -78,7 +79,16 @@ public static class OptionsFixture {
     // WM_SETTEXT does not emit EN_CHANGE for multiline EDIT. Notify its exact
     // owned parent explicitly when testing the same draft-change handler.
     public static void SetTextAndNotify(long parent,long child,int owner,string value) {SetText(parent,child,owner,value);var hwnd=Child(parent,child,owner);Message(new IntPtr(parent),0x111,new IntPtr((0x300<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
-    public static void Select(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned combo is disabled");if(Message(hwnd,0x14E,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned combo selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    public static void Select(long parent,long child,int owner,int index) {
+        var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned choice is disabled");
+        var name=new StringBuilder(32);GetClassName(hwnd,name,name.Capacity);
+        // Existing boolean callers use On=0, Off=1; General now uses native checkboxes.
+        if(name.ToString()=="Button"&&(GetWindowLongPtr(hwnd,-16).ToInt64()&15)==3){
+            if(index<0||index>1)throw new ArgumentOutOfRangeException("index");
+            SetChecked(parent,child,owner,index==0);Click(parent,child,owner);return;
+        }
+        if(Message(hwnd,0x14E,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned combo selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);
+    }
     public static void ListSelect(long parent,long child,int owner,int index) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned list is disabled");if(Message(hwnd,0x186,new IntPtr(index),IntPtr.Zero).ToInt64()!=index)throw new InvalidOperationException("Owned list selection failed");Message(new IntPtr(parent),0x111,new IntPtr((1<<16)|GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hwnd,out Rect rect);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint message,IntPtr w,ref Rect l,uint flags,uint timeout,out IntPtr result);
