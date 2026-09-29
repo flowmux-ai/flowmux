@@ -380,6 +380,12 @@ impl Panel {
                 vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
+                Some(SettingKey::AgentBarMode),
+                0,
+                "Agents bar mode",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
                 Some(SettingKey::Theme),
                 1,
                 "Legacy dark/light",

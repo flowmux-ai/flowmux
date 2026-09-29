@@ -237,6 +237,9 @@ pub enum Command {
         #[arg(long)]
         #[serde(default)]
         usage_bar: bool,
+        #[arg(long, conflicts_with = "usage_bar")]
+        #[serde(default)]
+        agent_bar: bool,
     },
     #[cfg(debug_assertions)]
     #[command(hide = true)]

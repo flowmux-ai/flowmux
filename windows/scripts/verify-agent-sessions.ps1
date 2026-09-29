@@ -11,7 +11,7 @@ $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut
 $diagnostic=[ordered]@{physicalInput=$false;clipboardAccess=$false;realAccount=$false;checks=@();lastTree=$null};$utf8=New-Object Text.UTF8Encoding($false)
 function Require([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
 function Path-Same([string]$A,[string]$B){return [string]::Equals($A.Replace('/','\').TrimEnd('\'),$B.Replace('/','\').TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)}
-function Budget([int]$Maximum=5000){if($cleaning){return [Math]::Min($Maximum,2000)};$left=75000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Agent sessions verification exceeded75s';return [int][Math]::Min($Maximum,$left)}
+function Budget([int]$Maximum=5000){if($cleaning){return [Math]::Min($Maximum,2000)};$left=50000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Agent sessions verification exceeded50s';return [int][Math]::Min($Maximum,$left)}
 function Request([string[]]$Arguments,[int]$Maximum=5000,[bool]$ExpectFailure=$false,[string]$WorkingDirectory=$directory){
  Require ([bool]$pipeName) 'Explicit owned pipe required';$diagnostic.lastCommand=$Arguments;$p=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$Arguments),$WorkingDirectory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
  try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline';Require ($out.Wait(500)-and $err.Wait(500)) 'Owned CLI pipes did not close';if($ExpectFailure){Require ($p.ExitCode -ne 0) 'Invalid agent report was accepted';return [CliProbe]::Output($err)};Require ($p.ExitCode -eq 0) ('Owned CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
@@ -105,12 +105,23 @@ public static class OwnedCodexSessionFixture {
  $statusText='한글 한 é 😀 상태';$r=Request ($report+@('--seq','2','--status','working','--message',$statusText))
  Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.activity -ceq 'running' -and $r.agent.message -ceq $statusText) 'Working status did not preserve raw Unicode'
  $sidebarHandle=Agent-Sidebar 'agent-working' 'working' $statusText
+ $tree=Tree;Require (-not $tree.agent_bar -and -not (Request @('settings','show')).document.terminal.agent_bar_mode) 'Agents bar default differs from Linux'
+ $toggle=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'agent_bar' -and $_.layout_visible})[0];Click ([long]$toggle.handle)
+ $tree=Await {param($t) $t.agent_bar.layout_visible -and @($t.agent_bar.items).Count -eq 1};$bar=$tree.agent_bar;$barHandle=[long]$bar.items[0].handle
+ Require (-not $bar.native_visible -and [OptionsFixture]::Parent([long]$bar.window,$owned.Id) -eq $tree.window_handle -and [OptionsFixture]::Parent($barHandle,$owned.Id) -eq $bar.viewport -and [OptionsFixture]::Text($barHandle,$owned.Id).Contains($statusText)) 'Agents bar lost native ownership or raw Korean status'
+ Require ($bar.items[0].tooltip -ceq ("codex`n"+$statusText)) 'Native agent tooltip lost its full Korean status'
+ $barBounds=[OptionsFixture]::RelativeBounds([long]$tree.window_handle,[long]$bar.window,$owned.Id)
+ foreach($pane in $tree.layout.panes){Require ($pane[1].y+$pane[1].height -le $barBounds.Y) 'Agents bar overlaps terminal content'}
+ $bmp=Join-Path $directory 'agent-bar-working.bmp';$png=Join-Path $directory 'agent-bar-working.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::ColorCount($png,64,3,168,47,'#f59e0b') -gt 5) 'Working agent bar status was not painted'
+ Stable @($source,$local)|Out-Null;Passed 'Linux-agent-bar-default-footer-toggle-native-ownership-geometry-working-paint-and-raw-Korean'
  foreach($seq in @('1','2')){$stale=Request ($report+@('--seq',$seq,'--status','blocked','--message','stale'));Require (-not $stale.accepted -and $stale.agent.seq -eq 2 -and $stale.agent.status -ceq 'working' -and $stale.agent.message -ceq $statusText) 'Old/duplicate sequence overwrote current status'}
  $r=Request ($report+@('--seq','4','--status','blocked','--message',$statusText));Require ($r.accepted -and $r.agent.status -ceq 'blocked' -and $r.agent.activity -ceq 'needs_input' -and -not $r.agent.seen) 'Hidden blocked report lost its unseen state'
  Require ((Agent-Sidebar 'agent-blocked' 'blocked' $statusText) -eq $sidebarHandle) 'Status report replaced workspace HWND'
  $stale=Request ($report+@('--seq','3','--status','working'));Require (-not $stale.accepted -and $stale.agent.status -ceq 'blocked') 'Delayed progress cleared a newer input wait'
  $r=Request ($report+@('--seq','5','--status','idle'));Require ($r.accepted -and $r.agent.status -ceq 'done' -and $r.agent.activity -ceq 'idle' -and -not $r.agent.seen) 'Unseen idle transition did not derive Done'
  Require ((Agent-Sidebar 'agent-done' 'done' 'done') -eq $sidebarHandle) 'Done report replaced workspace HWND'
+ $tree=Tree;Require ($tree.agent_bar.items[0].handle -eq $barHandle -and $tree.agent_bar.items[0].status -ceq 'done' -and [OptionsFixture]::Text($barHandle,$owned.Id).Contains('done')) 'Agent bar status changes replaced its native button'
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
  Require ($state.status -ceq 'done' -and $state.seq -eq 5) 'Hidden focus falsely acknowledged Done'
  $agents=@(Request @('agents'));Require ($agents[0].status -ceq 'done' -and -not $agents[0].messaging) 'Agent listing discarded reported activity or advertised fake messaging'
@@ -153,6 +164,18 @@ public static class OwnedCodexSessionFixture {
  Require ($row.rect.y+$row.rect.height -le $tree.chrome.sidebar_list_bottom -and $row.workspace_lines[1].parent -ceq $true -and $row.workspace_lines[10].parent -ceq $false) 'Multiple agent metadata overlaps the footer or loses ancestor continuations'
  $bmp=Join-Path $directory 'agent-providers.bmp';$png=Join-Path $directory 'agent-providers.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png);$diagnostic.agentProvidersCapture=$png
  for($i=0;$i -lt 4;$i++){$x=$row.rect.x+[int][Math]::Round(45*$scale);$y=$row.rect.y+[int][Math]::Round((30+60*$i)*$scale);$side=[int][Math]::Round(14*$scale);Require ([ChromeFixture]::ColorCount($png,$x,$y,$side,$side,'#442b31') -lt $side*$side-5) 'A native provider logo was omitted'}
+
+ Require (@($tree.agent_bar.items).Count -eq 5) 'Agents bar truncated the sidebar overflow agent'
+ $barSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,900,$barSize[1]);$tree=Tree
+ $bar=$tree.agent_bar;[OptionsFixture]::PostKey([long]$bar.viewport,$owned.Id,35,$false,$false);$tree=Await {param($t) $t.agent_bar.offset -gt 0}
+ $lastItem=$tree.agent_bar.items[-1];$lastBounds=[OptionsFixture]::RelativeBounds([long]$bar.viewport,[long]$lastItem.handle,$owned.Id);$viewportSize=[ChromeFixture]::Size([long]$bar.viewport,$owned.Id)
+ Require ($lastBounds.X -ge 0 -and $lastBounds.X+$lastBounds.Width -le $viewportSize[0]) 'Horizontal scroll did not expose the last full agent card'
+ $bmp=Join-Path $directory 'agent-bar-end.bmp';$png=Join-Path $directory 'agent-bar-end.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Request @('focus-tab',$local.id)|Out-Null;Click ([long]$lastItem.handle);$tree=Tree;Require ((Request @('identify')).surface -ceq $lastItem.surface) 'Agent card click did not activate its captured terminal'
+ Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$toggle=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'agent_bar'})[0];Click ([long]$toggle.handle)
+ $tree=Await {param($t) -not $t.agent_bar};Require ([OptionsFixture]::WindowDestroyed([long]$bar.window)) 'Disabling agents bar retained its native window'
+ [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$barSize[0],$barSize[1]);Request @('settings','set','agent-bar-mode','true')|Out-Null;$tree=Await {param($t) @($t.agent_bar.items).Count -eq 5};Stable (@($source,$local)+$extras)|Out-Null
+ Passed 'agent-bar-all-providers-horizontal-end-scroll-live-target-activation-toggle-and-session-retention'
 
 
  $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$beforeTall=@($tree.surfaces);$rowHandle=[long]$row.handle
@@ -240,19 +263,21 @@ public static class OwnedCodexSessionFixture {
  $tree=Tree;$sourceNow=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0];Require ($sourceNow.pid -eq $source.pid -and $sourceNow.agent.status -ceq 'blocked') 'Owned source changed before exit check'
  $image=[Diagnostics.Process]::GetProcessById([int]$source.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated process';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned agent exit exceeded2s'}finally{$image.Dispose()}
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$null -ne $s.exit_code -and -not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0 -and $row.workspace_lines.Count -eq 1};Require (@(Request @('agents')).Count -eq 0) 'Exited agent retained a live activity row'
+ Require (-not $tree.agent_bar) 'Last agent exit retained an empty Agents bar'
  Request ($report+@('--seq','10','--status','idle')) 3000 $true|Out-Null;Passed 'reported-state-follows-live-tab-moves-and-clears-on-owned-process-exit-without-false-completion'
 
  # Run/exit/relaunch a child agent in the same CMD Job, with no agents query.
  Request @('focus-tab',$new.id)|Out-Null;$identity=Request @('identify');$plain=@((Tree).surfaces|Where-Object {$_.id -ceq $new.id})[0]
  foreach($run in @(1,2)){
   Request @('send-keys',$identity.pane,('"'+$agentExe+'" --hold "'+$homeA+'"'))|Out-Null;Request @('send-key','Enter','--surface',$new.id)|Out-Null
-  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$s.agent.source -ceq 'flowmux:proc' -and $s.agent.pid -ne $plain.pid}
+  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$s.agent.source -ceq 'flowmux:proc' -and $s.agent.pid -ne $plain.pid -and @($t.agent_bar.items).Count -eq 1}
   $child=@($tree.surfaces|Where-Object {$_.id -ceq $new.id})[0].agent
   Require ($child.name -ceq 'codex' -and $child.status -ceq 'unknown' -and -not $child.seq -and -not $child.message) 'Child launch inherited a previous process activity or sequence'
+  Require (@($tree.agent_bar.items).Count -eq 1 -and $tree.agent_bar.items[0].surface -ceq $new.id) 'New child agent did not restore its Agents bar'
   $r=Request @('report-agent','codex','--surface',$new.id,'--pid',[string]$child.pid,'--seq','1','--status','blocked','--message','새 실행 한');Require ($r.accepted -and $r.agent.status -ceq 'blocked') 'Newly detected process rejected its first report'
   $image=[Diagnostics.Process]::GetProcessById([int]$child.pid)
   try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated child';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned child exit exceeded2s'}finally{$image.Dispose()}
-  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $identity.workspace})[0];-not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0}
+  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $identity.workspace})[0];-not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0 -and -not $t.agent_bar}
   Stable @($plain,$local)|Out-Null
  }
  Passed 'automatic-owned-child-launch-exit-and-relaunch-clear-activity-with-same-terminal-PID-view-and-session'

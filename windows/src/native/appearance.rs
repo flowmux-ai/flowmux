@@ -54,6 +54,7 @@ impl App {
                     self.worktrees.refresh_theme()?;
                     self.sessions.refresh_theme()?;
                     self.usage_render();
+                    self.refresh_chrome_metadata();
                     if enable_usage {
                         self.usage_refresh(false)?;
                     }

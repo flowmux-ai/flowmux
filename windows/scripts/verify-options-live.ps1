@@ -65,6 +65,13 @@ try {
     Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Default shell cannot be reached in scrolled viewport';Record 'viewport-scrolled-to-shell' $status
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='owned_nonmodal_live_options_no_apply_and_scrolling_keeps_groups_and_footer_reachable';passed=$true}
+    foreach($enabled in @($true,$false)){
+        Select-Field $status 'agent_bar_mode' $(if($enabled){0}else{1})
+        $status=Await {param($s) $s.document.terminal.agent_bar_mode -eq $enabled -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}
+        $tree=Tree;$toggle=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'agent_bar'})
+        Require ($toggle.Count -eq 1 -and $toggle[0].selected -eq $enabled -and -not $tree.agent_bar -and (Identities $tree) -ceq $identities) 'Live Agents bar option failed to update footer or preserved an empty bar'
+    }
+    $evidence.checks+=@{name='native_agents_bar_option_auto_applies_updates_footer_and_preserves_terminal_without_agents';passed=$true}
     $font='Cascadia Mono, "Malgun Gothic", "한글 한 é 😀 &", monospace';Edit $status 'font_family' $font
     $status=Await {param($s) $s.document.terminal.font_family -ceq $font -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}
     Require ([OptionsFixture]::Text([long](Field $status 'font_family').input,$owned.Id) -ceq $font -and (Identities (Tree)) -ceq $identities) 'Immediate Unicode font value or terminal identity changed'

@@ -43,6 +43,8 @@ use windows_sys::Win32::{
     },
 };
 use wry::{WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
+#[path = "agent_bar.rs"]
+mod agent_bar;
 #[path = "agent_list.rs"]
 mod agent_list;
 #[path = "appearance.rs"]
@@ -152,6 +154,7 @@ enum Event {
     Sessions(sessions::Signal),
     AgentsReady,
     AgentChanged,
+    AgentBar(agent_bar::UiAction),
     UsageUi(usage_panel::UiAction),
     UsageResult(Uuid, [crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
@@ -477,6 +480,7 @@ enum Action {
     NewBrowser,
     Notifications,
     Usage,
+    AgentBar,
     Sessions,
     Settings,
     CommandPalette,
@@ -623,6 +627,7 @@ struct App {
     agent_states: RefCell<HashMap<SurfaceId, agent_list::State>>,
     last_agent_scan: Instant,
     agent_scan_after: Option<SurfaceId>,
+    agent_bar: Option<agent_bar::Bar>,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -914,6 +919,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             agent_states: RefCell::new(HashMap::new()),
             last_agent_scan: Instant::now(),
             agent_scan_after: None,
+            agent_bar: None,
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -949,6 +955,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
         app.pending_agents.take();
+        app.agent_bar.take();
         app.sessions.shutdown();
         app.usage.shutdown();
         app.worktrees.shutdown();
@@ -1020,6 +1027,10 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         unsafe {
             if !app.empty_window_shortcut(&message)
                 && !app.sidebar_scroll_key(&message)
+                && !app
+                    .agent_bar
+                    .as_ref()
+                    .is_some_and(|bar| bar.handle_message(&message, app.background_test))
                 && !chrome::workspace_close_key(&message)
                 && !app
                     .tab_menu
@@ -1108,6 +1119,7 @@ impl App {
                 | Action::Notifications
                 | Action::Usage
                 | Action::Sessions
+                | Action::AgentBar
                 | Action::SidebarScroll(_)
                 | Action::EmptyState
         )
@@ -1171,6 +1183,7 @@ impl App {
             ("Open file", Action::OpenEditor),
             ("Notices", Action::Notifications),
             ("AI usage (Ctrl+Alt+U)", Action::Usage),
+            ("Agents bar", Action::AgentBar),
             ("Agent sessions (Ctrl+Alt+J)", Action::Sessions),
             ("Previous", Action::SidebarScroll(-1)),
             ("Next", Action::SidebarScroll(1)),
@@ -1488,6 +1501,7 @@ impl App {
             self.refresh_terminal_menu(surface)?;
         }
         if self.main_closed {
+            self.agent_bar.take();
             chrome::set_zoom_frame(self.window, None);
             return Ok(());
         }
@@ -1500,6 +1514,7 @@ impl App {
         let sidebar = self.sidebar_width(client.right, unsafe { GetDpiForWindow(self.window) });
         panes::cache_sidebar(sidebar, client.bottom, px(4), !self.background_test);
         let bar = px(28);
+        self.agent_bar_sync()?;
         self.files_reconcile();
         self.worktrees_reconcile()?;
         self.sessions_reconcile()?;
@@ -1556,6 +1571,7 @@ impl App {
             scale,
         );
         self.usage_layout(client, sidebar + px(4));
+        self.agent_bar_layout(client, sidebar + px(4));
         self.worktrees_layout(
             (worktrees_width > 0).then_some(model::Rect {
                 x: client.right - px(4) - sessions_width - dock_width - worktrees_width,
@@ -1728,14 +1744,16 @@ impl App {
                 | Action::ShowFiles
                 | Action::Worktrees
                 | Action::Usage
+                | Action::AgentBar
                 | Action::SearchAll
                 | Action::OpenEditor => {
                     let x = match control.action {
                         Action::Settings => px(4),
-                        Action::Overview => px(36),
+                        Action::Overview => sidebar - px(132),
                         Action::CommandPalette => px(68),
                         Action::Usage => sidebar - px(164),
-                        Action::OpenEditor => sidebar - px(132),
+                        Action::AgentBar => sidebar - px(196),
+                        Action::OpenEditor => px(36),
                         Action::Worktrees => sidebar - px(100),
                         Action::ShowFiles => sidebar - px(68),
                         _ => sidebar - px(36),
@@ -1743,8 +1761,10 @@ impl App {
                     (sidebar
                         >= px(match control.action {
                             Action::Usage => 260,
-                            Action::CommandPalette => 200,
-                            Action::OpenEditor => 232,
+                            Action::AgentBar => 232,
+                            Action::CommandPalette => 296,
+                            Action::OpenEditor => 260,
+                            Action::Overview => 168,
                             Action::Worktrees => 168,
                             _ => 136,
                         })
@@ -2010,6 +2030,7 @@ impl App {
                 self.refresh_chrome_metadata();
                 self.layout()?;
             }
+            Event::AgentBar(action) => self.agent_bar_ui(action)?,
             Event::UsageUi(action) => self.usage_ui(action)?,
             Event::UsageResult(id, results) => self.usage_complete(id, results)?,
             Event::Activated => {
@@ -3338,6 +3359,17 @@ impl App {
             Action::NewBrowser => return self.new_browser_tab(self.active()),
             Action::Notifications => return self.notification_ui(notifications::UiAction::Show),
             Action::Usage => return self.toggle_usage(),
+            Action::AgentBar => {
+                return self.settings_submit(
+                    crate::command::SettingsOp::Set {
+                        key: crate::settings::SettingKey::AgentBarMode,
+                        value: (!self.settings.terminal.agent_bar_mode).to_string(),
+                        expected: Some(self.settings.terminal.agent_bar_mode.to_string()),
+                    },
+                    None,
+                    None,
+                )
+            }
             Action::Sessions => return self.toggle_sessions(),
             Action::Settings => return self.settings_menu(),
             Action::CommandPalette => {
@@ -3607,7 +3639,11 @@ impl App {
             #[cfg(debug_assertions)]
             Command::TestUsage { input } => return self.test_usage(&input).map(Some),
             #[cfg(debug_assertions)]
-            Command::ChromeCapture { path, usage_bar } => {
+            Command::ChromeCapture {
+                path,
+                usage_bar,
+                agent_bar,
+            } => {
                 anyhow::ensure!(
                     self.background_test,
                     "chrome capture requires an owned hidden debug host"
@@ -3617,6 +3653,14 @@ impl App {
                         .usage
                         .capture_bar_window()
                         .context("usage bar is not available")?;
+                    return chrome::capture_subtree(window, &path).map(Some);
+                }
+                if agent_bar {
+                    let window = self
+                        .agent_bar
+                        .as_ref()
+                        .context("agents bar is not available")?
+                        .window;
                     return chrome::capture_subtree(window, &path).map(Some);
                 }
                 return if let Some(window) = self
@@ -3689,6 +3733,10 @@ impl App {
                         "detached_windows":self.detached.iter().map(|(id,window)| {let mut value=window.diagnostics(); value["surface"]=json!(id); value}).collect::<Vec<_>>(),
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
                             "saving":self.pending_save.is_some(),"error":self.state_error}});
+                result["agent_bar"] = self
+                    .agent_bar
+                    .as_ref()
+                    .map_or(Value::Null, agent_bar::Bar::diagnostics);
                 result["bookmarks"] = self.browser_bookmarks.diagnostics();
                 return Ok(Some(result));
             }

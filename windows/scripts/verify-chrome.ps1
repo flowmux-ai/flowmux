@@ -117,7 +117,7 @@ function Capture([string]$Name,$Tree) {
     }
     $footerHandles=@($Tree.chrome.controls|Where-Object {$_.kind -in @('settings','files','search_all','open_file')}|ForEach-Object {$_.handle})
     $footer=@($shown|Where-Object {$footerHandles -contains $_.Handle -and $_.X -lt $Tree.chrome.sidebar_actual_width})
-    $footerCount=if($Tree.chrome.sidebar_actual_width -lt 136*$scale){0}elseif($Tree.chrome.sidebar_actual_width -lt 232*$scale){3}else{4}
+    $footerCount=if($Tree.chrome.sidebar_actual_width -lt 136*$scale){0}elseif($Tree.chrome.sidebar_actual_width -lt 260*$scale){3}else{4}
     Require ($footer.Count -eq $footerCount -and @($footer|Where-Object {[Math]::Abs($_.Y-($size[1]-32*$scale)) -gt 2 -or [Math]::Abs($_.Width-28*$scale) -gt 2}).Count -eq 0) 'Footer actions do not follow compact row visibility or geometry'
     foreach($button in $footer){Require ([ChromeFixture]::ColorCount($path,$button.X,$button.Y,$button.Width,$button.Height,$muted) -gt 5) 'Footer glyph was not painted'}
     if($Case -eq 'details'){foreach($button in $footer){

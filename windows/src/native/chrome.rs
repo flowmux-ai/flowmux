@@ -245,6 +245,12 @@ pub(super) enum Role {
     Choice {
         selected: bool,
     },
+    Agent {
+        selected: bool,
+        color: COLORREF,
+        status: flowmux_core::AgentStatus,
+        seen: bool,
+    },
     Tab {
         selected: bool,
         multiple: bool,
@@ -271,6 +277,7 @@ pub(super) enum ChromeIcon {
     Usage,
     UsageBar,
     Sessions,
+    Agents,
     Search,
     CommandPalette,
     OpenFile,
@@ -947,7 +954,7 @@ pub(super) fn configure_settings(settings: &crate::settings::TerminalSettings, d
     STATE.with(|slot| slot.borrow_mut().resolved = custom.then_some(colors));
     configure(mode, dpi);
 }
-fn color_ref(hex: &str) -> COLORREF {
+pub(super) fn color_ref(hex: &str) -> COLORREF {
     let value = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or_default();
     rgb(value >> 16, (value >> 8) & 255, value & 255)
 }
@@ -1399,7 +1406,7 @@ fn update_tooltip(window: HWND) {
             .controls
             .get(&(window as isize))
             .is_some_and(|entry| {
-                matches!(entry.button, Some(Role::Icon { .. }))
+                matches!(entry.button, Some(Role::Icon { .. } | Role::Agent { .. }))
                     || matches!(entry.control, ControlRole::UsageBar)
             })
     });
@@ -1704,6 +1711,19 @@ unsafe fn draw_agent_status(
     }
 }
 
+fn agent_ink(status: flowmux_core::AgentStatus, seen: bool, palette: Palette) -> COLORREF {
+    use flowmux_core::AgentStatus;
+    if palette.high_contrast {
+        return palette.foreground;
+    }
+    match status {
+        AgentStatus::Working => rgb(245, 158, 11),
+        AgentStatus::Blocked if !seen => rgb(239, 68, 68),
+        AgentStatus::Done if !seen => rgb(59, 130, 246),
+        _ => palette.muted,
+    }
+}
+
 unsafe fn draw_tab_background(
     dc: HDC,
     rect: &RECT,
@@ -1881,6 +1901,105 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         let saved = SaveDC(item.hDC);
         if saved == 0 {
             return false;
+        }
+        if let Role::Agent {
+            selected,
+            color: stripe,
+            status,
+            seen,
+        } = role
+        {
+            let working = status == flowmux_core::AgentStatus::Working;
+            let background = if hot || pressed {
+                palette.hover
+            } else if working && !palette.high_contrast {
+                blend(rgb(245, 158, 11), palette.background, 12)
+            } else {
+                palette.background
+            };
+            fill(item.hDC, &item.rcItem, palette.background);
+            SelectObject(item.hDC, GetStockObject(DC_BRUSH));
+            SetDCBrushColor(item.hDC, background);
+            SelectObject(item.hDC, GetStockObject(DC_PEN));
+            SetDCPenColor(
+                item.hDC,
+                if selected && !working {
+                    palette.accent
+                } else if palette.high_contrast {
+                    palette.border
+                } else {
+                    background
+                },
+            );
+            RoundRect(
+                item.hDC,
+                item.rcItem.left,
+                item.rcItem.top,
+                item.rcItem.right,
+                item.rcItem.bottom,
+                pixel(12),
+                pixel(12),
+            );
+            fill(
+                item.hDC,
+                &RECT {
+                    left: pixel(6),
+                    right: pixel(10),
+                    top: pixel(9),
+                    bottom: pixel(38),
+                },
+                if palette.high_contrast {
+                    palette.foreground
+                } else {
+                    stripe
+                },
+            );
+            let ink = agent_ink(status, seen, palette);
+            SelectObject(item.hDC, caption_font);
+            SetBkMode(item.hDC, TRANSPARENT as i32);
+            draw_agent_status(item.hDC, status, seen, pixel(20), pixel(24), pixel(1), ink);
+            let mut raw =
+                vec![0u16; GetWindowTextLengthW(item.hwndItem).clamp(0, 2048) as usize + 1];
+            let length = GetWindowTextW(item.hwndItem, raw.as_mut_ptr(), raw.len() as i32);
+            raw.truncate(length.max(0) as usize);
+            let label = String::from_utf16_lossy(&caption_for_paint(&raw));
+            let (name, status) = label.split_once('\n').unwrap_or((&label, ""));
+            draw_agent_icon(
+                item.hDC,
+                name,
+                RECT {
+                    left: pixel(32),
+                    right: pixel(46),
+                    top: pixel(7),
+                    bottom: pixel(21),
+                },
+            );
+            for (value, left, top, color, font) in [
+                (name, 50, 4, palette.foreground, font),
+                (status, 32, 24, ink, caption_font),
+            ] {
+                let mut rect = RECT {
+                    left: pixel(left),
+                    right: item.rcItem.right - pixel(6),
+                    top: pixel(top),
+                    bottom: pixel(top + 19),
+                };
+                let value: Vec<_> = value.encode_utf16().collect();
+                SelectObject(item.hDC, font);
+                SetTextColor(item.hDC, color);
+                DrawTextW(
+                    item.hDC,
+                    value.as_ptr(),
+                    value.len() as i32,
+                    &mut rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_HIDEPREFIX,
+                );
+            }
+            if item.itemState & ODS_FOCUS != 0 {
+                DrawFocusRect(item.hDC, &item.rcItem);
+            }
+            RestoreDC(item.hDC, saved);
+            return true;
         }
         if let Role::Swatch(swatch) = role {
             fill(item.hDC, &item.rcItem, swatch);
@@ -2159,6 +2278,12 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     line(0, -4, 0, 0);
                     line(0, 0, 4, 2);
                 }
+                ChromeIcon::Agents => {
+                    for dy in [-5, 0, 5] {
+                        line(-7, dy, -5, dy);
+                        line(-2, dy, 7, dy);
+                    }
+                }
                 ChromeIcon::Usage => {
                     line(-6, 6, -6, 0);
                     line(0, 6, 0, -6);
@@ -2417,17 +2542,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 };
                 let mut ink = palette.muted;
                 if let Some(agent) = &line.agent {
-                    use flowmux_core::AgentStatus;
-                    ink = if palette.high_contrast {
-                        palette.foreground
-                    } else {
-                        match agent.status {
-                            AgentStatus::Working => rgb(245, 158, 11),
-                            AgentStatus::Blocked if !agent.seen => rgb(239, 68, 68),
-                            AgentStatus::Done if !agent.seen => rgb(59, 130, 246),
-                            _ => palette.muted,
-                        }
-                    };
+                    ink = agent_ink(agent.status, agent.seen, palette);
                     if line_rect.right - line_rect.left > pixel(32) {
                         draw_agent_status(
                             item.hDC,

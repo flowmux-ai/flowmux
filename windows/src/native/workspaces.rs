@@ -497,6 +497,7 @@ impl App {
             | Action::ShowFiles
             | Action::Worktrees
             | Action::Usage
+            | Action::AgentBar
             | Action::Sessions
             | Action::SearchAll
             | Action::OpenEditor
@@ -508,13 +509,16 @@ impl App {
                     Action::ShowFiles => chrome::ChromeIcon::Files,
                     Action::Worktrees => chrome::ChromeIcon::Worktrees,
                     Action::Usage => chrome::ChromeIcon::Usage,
+                    Action::AgentBar => chrome::ChromeIcon::Agents,
                     Action::Sessions => chrome::ChromeIcon::Sessions,
                     Action::SearchAll => chrome::ChromeIcon::Search,
                     Action::OpenEditor => chrome::ChromeIcon::OpenFile,
                     _ => chrome::ChromeIcon::Notifications,
                 },
-                marked: matches!(action, Action::Notifications)
-                    && self.notifications.store.unread_count() > 0,
+                marked: (matches!(action, Action::Notifications)
+                    && self.notifications.store.unread_count() > 0)
+                    || (matches!(action, Action::AgentBar)
+                        && self.settings.terminal.agent_bar_mode),
             },
             Action::PaneZoom(pane, _) => chrome::Role::Icon {
                 kind: if self.zoomed == Some(pane) {
@@ -691,6 +695,7 @@ impl App {
                 Action::ShowFiles=>("files",None,None,None,false),
                 Action::Worktrees=>("worktrees",None,None,None,false),
                 Action::Usage=>("usage",None,None,None,false),
+                Action::AgentBar=>("agent_bar",None,None,None,self.settings.terminal.agent_bar_mode),
                 Action::Sessions=>("sessions",None,None,None,false),
                 Action::SearchAll=>("search_all",None,None,None,false),
                 Action::OpenEditor=>("open_file",None,None,None,false),
