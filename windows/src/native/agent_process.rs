@@ -239,18 +239,7 @@ pub(super) fn discover(
     found.sort_by_key(|value| (value.started, value.pid));
     for value in found {
         budget.check()?;
-        let raw = unsafe {
-            OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE,
-                0,
-                value.pid,
-            )
-        };
-        if raw.is_null() {
-            continue;
-        }
-        let process = unsafe { OwnedHandle::from_raw_handle(raw) };
-        if started(process.as_raw_handle(), job.as_raw_handle()).ok() == Some(value.started) {
+        if live_handle(job, &value).is_some() {
             return Ok(Some(value));
         }
     }
@@ -259,6 +248,23 @@ pub(super) fn discover(
         "Agent process details are unavailable or unsupported"
     );
     Ok(None)
+}
+
+/// Retain this exact process incarnation so a deferred reply cannot report a
+/// recycled PID or an agent that exited while another terminal was inspected.
+pub(super) fn live_handle(job: &OwnedHandle, value: &AgentProcess) -> Option<OwnedHandle> {
+    let raw = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            value.pid,
+        )
+    };
+    if raw.is_null() {
+        return None;
+    }
+    let process = unsafe { OwnedHandle::from_raw_handle(raw) };
+    (started(raw, job.as_raw_handle()).ok() == Some(value.started)).then_some(process)
 }
 
 struct Snapshot {

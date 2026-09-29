@@ -43,6 +43,8 @@ use windows_sys::Win32::{
     },
 };
 use wry::{WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
+#[path = "agent_list.rs"]
+mod agent_list;
 #[path = "appearance.rs"]
 mod appearance;
 #[path = "browser.rs"]
@@ -148,6 +150,7 @@ enum Event {
     Settings(settings_store::Update),
     NotificationUi(notifications::UiAction),
     Sessions(sessions::Signal),
+    AgentsReady,
     UsageUi(usage_panel::UiAction),
     UsageResult(Uuid, [crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
@@ -613,6 +616,7 @@ struct App {
     notifications: notifications::Controller,
     usage: usage::Controller,
     sessions: sessions::Controller,
+    pending_agents: Option<agent_list::Pending>,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -899,6 +903,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             notifications: notifications::Controller::default(),
             usage: usage::Controller::default(),
             sessions: sessions::Controller::default(),
+            pending_agents: None,
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -933,6 +938,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         app.focus_active()?;
         SetTimer(window, 1, 1000, None);
         let result = message_loop(&mut app, events);
+        app.pending_agents.take();
         app.sessions.shutdown();
         app.usage.shutdown();
         app.worktrees.shutdown();
@@ -1970,6 +1976,7 @@ impl App {
             Event::Download(event) => self.download_event(event),
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Sessions(signal) => self.sessions_event(signal)?,
+            Event::AgentsReady => self.agents_poll(),
             Event::UsageUi(action) => self.usage_ui(action)?,
             Event::UsageResult(id, results) => self.usage_complete(id, results)?,
             Event::Activated => {
@@ -2035,6 +2042,7 @@ impl App {
             }
             Event::ContextMenu(..) => {}
             Event::Tick => {
+                self.agents_poll();
                 self.copy_feedback_tick();
                 self.usage_tick()?;
                 self.sessions_reconcile()?;
@@ -3489,6 +3497,10 @@ impl App {
             "editor synchronization is in progress"
         );
         match command {
+            Command::Agents => {
+                self.agents_request(reply)?;
+                return Ok(None);
+            }
             Command::Editor { op } => return self.editor_command(op, caller, reply),
             Command::Files { op } => return self.files_command(op, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),
@@ -3552,7 +3564,7 @@ impl App {
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
                 "files_limits":{"pending":crate::files_service::MAX_ADMITTED,"budget_ms":crate::files_service::BUDGET.as_millis(),"page_rows":crate::files_model::PAGE_SIZE,"entries":crate::files_model::MAX_ENTRIES,"expanded":crate::files_model::MAX_EXPANDED},
-                "commands":["files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "commands":["agents","files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","detach-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"Release validation is incomplete; physical Korean IME behavior remains unverified"})))

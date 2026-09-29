@@ -260,6 +260,8 @@ pub enum Command {
         op: SettingsOp,
     },
     Tree,
+    /// List live local agents in this window's owned terminal processes.
+    Agents,
     /// Control an in-app browser pane, separate from terminal content.
     Browser {
         #[command(subcommand)]
