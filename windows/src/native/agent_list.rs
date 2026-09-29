@@ -3,7 +3,7 @@
 use super::super::agent_process;
 use super::*;
 use crate::command::AgentReportArgs;
-use flowmux_core::{AgentPresence, AgentStatus, AgentStatusReport};
+use flowmux_core::{AgentPresence, AgentStatus, AgentStatusReport, AGENT_SOURCE_PROC};
 use std::{
     os::windows::io::{AsRawHandle, OwnedHandle},
     sync::atomic::{AtomicBool, Ordering},
@@ -22,6 +22,11 @@ pub(super) struct State {
     entry: Entry,
     presence: AgentPresence,
 }
+type Report = (SurfaceId, AgentReportArgs);
+struct Discovery {
+    entries: Vec<Entry>,
+    last: Option<SurfaceId>,
+}
 impl Entry {
     fn current(&self, app: &App) -> bool {
         app.surfaces.get(&self.surface).is_some_and(|surface| {
@@ -34,15 +39,21 @@ impl Entry {
 }
 pub(super) struct Pending {
     reply: Option<ipc::Reply>,
-    receiver: Receiver<Result<Vec<Entry>, String>>,
+    receiver: Receiver<Result<Discovery, String>>,
     cancel: Arc<AtomicBool>,
     started: Instant,
-    report: Option<(SurfaceId, AgentReportArgs)>,
+    report: Option<Report>,
+    automatic: bool,
+    next: Option<(ipc::Reply, Option<Report>)>,
 }
 impl Drop for Pending {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
         if let Some(reply) = self.reply.take() {
+            let _ =
+                reply.try_send(json!({"error":"Window closed before agent discovery finished"}));
+        }
+        if let Some((reply, _)) = self.next.take() {
             let _ =
                 reply.try_send(json!({"error":"Window closed before agent discovery finished"}));
         }
@@ -149,7 +160,17 @@ impl App {
                         && state.presence.name == args.agent,
                     "report does not match the live agent in this terminal"
                 );
-                state.presence.apply_report(report, visible)
+                if state.presence.source.as_deref() == Some(AGENT_SOURCE_PROC)
+                    && state.presence.seq.is_none()
+                {
+                    // Process identity alone is not a started turn. The first
+                    // idle report establishes presence without inventing Done.
+                    state.presence = AgentPresence::from_report(report, visible)
+                        .context("missing agent status")?;
+                    true
+                } else {
+                    state.presence.apply_report(report, visible)
+                }
             }
         };
         let after = self.agent_presence(surface);
@@ -169,13 +190,50 @@ impl App {
 
     pub(super) fn agents_request(
         &mut self,
-        report: Option<(SurfaceId, AgentReportArgs)>,
+        report: Option<Report>,
         reply: ipc::Reply,
     ) -> anyhow::Result<()> {
         self.agents_poll();
+        if let Some(pending) = &mut self.pending_agents {
+            if pending.automatic && pending.next.is_none() {
+                pending.next = Some((reply, report));
+                pending.cancel.store(true, Ordering::Release);
+                return Ok(());
+            }
+        }
         anyhow::ensure!(
             self.pending_agents.is_none(),
             "Agent discovery is already running; try again"
+        );
+        self.start_agents(report, Some(reply))
+    }
+
+    pub(super) fn agents_tick(&mut self) {
+        self.agents_poll();
+        if self.pending_agents.is_none()
+            && !self.closing
+            && !self.close_accepted
+            && self.last_agent_scan.elapsed() >= Duration::from_secs(1)
+        {
+            self.last_agent_scan = Instant::now();
+            if let Err(error) = self.start_agents(None, None) {
+                eprintln!("Agent discovery could not start: {error:#}");
+            }
+        }
+    }
+
+    fn start_agents(
+        &mut self,
+        report: Option<Report>,
+        reply: Option<ipc::Reply>,
+    ) -> anyhow::Result<()> {
+        let automatic = reply.is_none();
+        let started = reply
+            .as_ref()
+            .map_or_else(Instant::now, ipc::Reply::received_at);
+        anyhow::ensure!(
+            started.elapsed() < Duration::from_secs(2),
+            "Agent discovery expired before starting"
         );
         let mut jobs = Vec::new();
         for workspace in &self.workspaces {
@@ -183,6 +241,7 @@ impl App {
                 for tab in tabs {
                     if !matches!(tab.kind, SurfaceKind::Terminal { .. })
                         || report.as_ref().is_some_and(|(id, _)| *id != tab.id)
+                        || (automatic && self.agent_presence(tab.id).is_some())
                     {
                         continue;
                     }
@@ -200,7 +259,20 @@ impl App {
             report.is_none() || !jobs.is_empty(),
             "report target is not a running local terminal"
         );
-        let started = reply.received_at();
+        if automatic {
+            if jobs.is_empty() {
+                return Ok(());
+            }
+            jobs.sort_by_key(|(id, _, _)| id.0);
+            let first = jobs.partition_point(|(id, _, _)| {
+                self.agent_scan_after.is_some_and(|last| id.0 <= last.0)
+            });
+            let count = jobs.len();
+            jobs.rotate_left(first % count);
+            // ponytail: at most 16 uncached terminals per tick; the cursor keeps
+            // unreadable/busy Jobs from starving later terminals.
+            jobs.truncate(16);
+        }
         let cancel = Arc::new(AtomicBool::new(false));
         let token = cancel.clone();
         let sender = self.sender.clone();
@@ -208,11 +280,23 @@ impl App {
         std::thread::Builder::new()
             .name("flowmux-agents".into())
             .spawn(move || {
-                let result = (|| -> anyhow::Result<Vec<Entry>> {
+                let result = (|| -> anyhow::Result<Discovery> {
                     let deadline = started + Duration::from_secs(2);
                     let mut entries = Vec::new();
+                    let mut last = None;
                     for (surface, generation, job) in jobs {
-                        if let Some(found) = agent_process::discover(&job, &token, deadline)? {
+                        if automatic
+                            && (token.load(Ordering::Acquire) || Instant::now() >= deadline)
+                        {
+                            break;
+                        }
+                        last = Some(surface);
+                        let found = match agent_process::discover(&job, &token, deadline) {
+                            Ok(found) => found,
+                            Err(_) if automatic => continue,
+                            Err(error) => return Err(error),
+                        };
+                        if let Some(found) = found {
                             if let Some(process) = agent_process::live_handle(&job, &found) {
                                 entries.push(Entry {
                                     surface,
@@ -225,18 +309,20 @@ impl App {
                             }
                         }
                     }
-                    Ok(entries)
+                    Ok(Discovery { entries, last })
                 })()
                 .map_err(|error| format!("{error:#}"));
                 let _ = send.send(result);
                 sender.send(Event::AgentsReady);
             })?;
         self.pending_agents = Some(Pending {
-            reply: Some(reply),
+            reply,
             receiver,
             cancel,
             started,
             report,
+            automatic,
+            next: None,
         });
         Ok(())
     }
@@ -263,6 +349,12 @@ impl App {
             Ok(result) => result,
             Err(mpsc::TryRecvError::Disconnected) => Err("Agent discovery worker stopped".into()),
             Err(mpsc::TryRecvError::Empty) => {
+                if pending.next.as_ref().is_some_and(|(reply, _)| {
+                    reply.received_at().elapsed() >= Duration::from_secs(3)
+                }) {
+                    let (reply, _) = pending.next.take().unwrap();
+                    let _ = reply.try_send(json!({"error":"Agent discovery exceeded its three-second response budget"}));
+                }
                 if pending.started.elapsed() >= Duration::from_secs(3) {
                     pending.cancel.store(true, Ordering::Release);
                     if let Some(reply) = pending.reply.take() {
@@ -275,6 +367,21 @@ impl App {
             }
         };
         let mut pending = self.pending_agents.take().unwrap();
+        if pending.automatic {
+            if let Ok(found) = &result {
+                self.agent_scan_after = found.last.or(self.agent_scan_after);
+            }
+            if let Some((reply, report)) = pending.next.take() {
+                if let Err(error) = self.start_agents(report, Some(reply.clone())) {
+                    let _ = reply.try_send(json!({"error":format!("{error:#}")}));
+                }
+            } else if !pending.cancel.load(Ordering::Acquire) {
+                if let Ok(found) = result {
+                    self.record_agents(found.entries);
+                }
+            }
+            return;
+        }
         let Some(reply) = pending.reply.take() else {
             return;
         };
@@ -288,14 +395,18 @@ impl App {
         }
         let result = match result {
             Err(error) => json!({"error":error}),
-            Ok(entries) if pending.report.is_some() => {
+            Ok(found) if pending.report.is_some() => {
                 let (surface, args) = pending.report.take().unwrap();
-                entries.into_iter().find(|entry| entry.surface == surface)
+                found
+                    .entries
+                    .into_iter()
+                    .find(|entry| entry.surface == surface)
                     .context("no supported live agent in this terminal")
                     .and_then(|entry| self.apply_agent_report(surface, &args, Some(entry)))
                     .unwrap_or_else(|error| json!({"error":format!("{error:#}")}))
             }
-            Ok(entries) => Value::Array(entries.into_iter().filter_map(|entry| {
+            Ok(found) => {
+                let result = Value::Array(found.entries.iter().filter_map(|entry| {
                 if !entry.current(self) {
                     return None;
                 }
@@ -305,8 +416,40 @@ impl App {
                 Some(json!({"workspace":workspace.name,"workspace_id":workspace.id,"root":workspace.cwd,
                     "pane":pane,"tab":entry.surface,"agent":entry.agent.name().to_ascii_lowercase(),"pid":entry.pid,"cwd":entry.cwd,
                     "status":presence.as_ref().map_or(AgentStatus::Unknown, |p|p.status),"message":presence.as_ref().and_then(|p|p.message.as_deref()),"session_name":null,"messaging":false}))
-            }).collect()),
+                }).collect());
+                self.record_agents(found.entries);
+                result
+            }
         };
         let _ = reply.try_send(result);
+    }
+
+    fn record_agents(&self, entries: Vec<Entry>) {
+        let mut states = self.agent_states.borrow_mut();
+        let mut changed = false;
+        for entry in entries {
+            if !entry.current(self)
+                || states.get(&entry.surface).is_some_and(|state| {
+                    state.entry.current(self)
+                        && state.entry.pid == entry.pid
+                        && state.entry.agent == entry.agent
+                        && state.entry.generation == entry.generation
+                })
+            {
+                continue;
+            }
+            let mut presence = AgentPresence::new(
+                entry.agent.name().to_ascii_lowercase(),
+                AgentStatus::Unknown.to_activity(),
+                Some(entry.pid),
+            );
+            presence.status = AgentStatus::Unknown;
+            presence.source = Some(AGENT_SOURCE_PROC.into());
+            states.insert(entry.surface, State { entry, presence });
+            changed = true;
+        }
+        if changed {
+            self.sender.send(Event::AgentChanged);
+        }
     }
 }

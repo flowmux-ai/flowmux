@@ -87,6 +87,12 @@ public static class OwnedCodexSessionFixture {
  Request @('rename-tab',$local.id,'Codex')|Out-Null
  Require (@(Request @('agents')).Count -eq 0) 'Plain shell or a Codex-looking title was classified as an agent'
  Request @('settings','shell','cmd','--arg','/d')|Out-Null;$source=Agent-Tab $homeA $projectA;$sourceIdentity=Request @('identify')
+ Request @('focus-tab',$local.id)|Out-Null
+ $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.source -ceq 'flowmux:proc'}
+ $presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
+ Require ($presence.status -ceq 'unknown' -and $presence.seen -and -not $presence.seq -and -not $presence.message -and (Request @('identify')).surface -ceq $local.id -and -not $tree.agent_sessions.open) 'Automatic process detection guessed activity, changed focus or opened a panel'
+ Agent-Sidebar 'agent-process' 'unknown' 'unknown'|Out-Null;Stable @($source,$local)|Out-Null
+ Request @('focus-tab',$source.id)|Out-Null;Passed 'automatic-inactive-agent-process-discovery-and-Unicode-native-sidebar-without-query-or-report'
  $agentClock=[Diagnostics.Stopwatch]::StartNew();$agents=@(Request @('agents'));$diagnostic.agentListMs=$agentClock.ElapsedMilliseconds
  Require ($agents.Count -eq 1 -and $agents[0].agent -ceq 'codex' -and $agents[0].pid -eq $source.pid -and $agents[0].tab -ceq $source.id -and $agents[0].pane -ceq $sourceIdentity.pane -and $agents[0].workspace_id -ceq $sourceIdentity.workspace -and (Path-Same $agents[0].cwd $projectA) -and $agents[0].status -ceq 'unknown' -and -not $agents[0].messaging -and -not $agents[0].session_name -and $agentClock.ElapsedMilliseconds -lt 3000) 'Window agent list lost owned identity/Unicode cwd, guessed activity/messaging, or exceeded its response budget'
  Require (($agents|ConvertTo-Json -Depth 5) -notmatch 'CODEX_HOME|agent-home|PRIVATE_') 'Agent list exposed process environment or session history'
@@ -235,6 +241,21 @@ public static class OwnedCodexSessionFixture {
  $image=[Diagnostics.Process]::GetProcessById([int]$source.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated process';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned agent exit exceeded2s'}finally{$image.Dispose()}
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$null -ne $s.exit_code -and -not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0 -and $row.workspace_lines.Count -eq 1};Require (@(Request @('agents')).Count -eq 0) 'Exited agent retained a live activity row'
  Request ($report+@('--seq','10','--status','idle')) 3000 $true|Out-Null;Passed 'reported-state-follows-live-tab-moves-and-clears-on-owned-process-exit-without-false-completion'
+
+ # Run/exit/relaunch a child agent in the same CMD Job, with no agents query.
+ Request @('focus-tab',$new.id)|Out-Null;$identity=Request @('identify');$plain=@((Tree).surfaces|Where-Object {$_.id -ceq $new.id})[0]
+ foreach($run in @(1,2)){
+  Request @('send-keys',$identity.pane,('"'+$agentExe+'" --hold "'+$homeA+'"'))|Out-Null;Request @('send-key','Enter','--surface',$new.id)|Out-Null
+  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$s.agent.source -ceq 'flowmux:proc' -and $s.agent.pid -ne $plain.pid}
+  $child=@($tree.surfaces|Where-Object {$_.id -ceq $new.id})[0].agent
+  Require ($child.name -ceq 'codex' -and $child.status -ceq 'unknown' -and -not $child.seq -and -not $child.message) 'Child launch inherited a previous process activity or sequence'
+  $r=Request @('report-agent','codex','--surface',$new.id,'--pid',[string]$child.pid,'--seq','1','--status','blocked','--message','새 실행 한');Require ($r.accepted -and $r.agent.status -ceq 'blocked') 'Newly detected process rejected its first report'
+  $image=[Diagnostics.Process]::GetProcessById([int]$child.pid)
+  try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated child';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned child exit exceeded2s'}finally{$image.Dispose()}
+  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $identity.workspace})[0];-not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0}
+  Stable @($plain,$local)|Out-Null
+ }
+ Passed 'automatic-owned-child-launch-exit-and-relaunch-clear-activity-with-same-terminal-PID-view-and-session'
 
 }
 catch{$failure=$_.Exception.Message}
