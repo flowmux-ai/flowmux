@@ -70,6 +70,7 @@ pub enum ClientMessage {
     Ready,
     SettingsApplied {
         revision: Uuid,
+        rendered_font_size: u16,
         terminal: Box<crate::settings::TerminalSettings>,
         bindings: Vec<crate::keybindings::Binding>,
         background: String,

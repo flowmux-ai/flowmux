@@ -357,6 +357,12 @@ impl Panel {
             )?;
             p.row(Some(SettingKey::FontSize), 0, "Font size (6–72 px)", vec![])?;
             p.row(
+                Some(SettingKey::ZoomPercent),
+                0,
+                "Global zoom (50–200%)",
+                vec![],
+            )?;
+            p.row(
                 Some(SettingKey::Scrollback),
                 0,
                 "Scrollback (0–100000 lines)",

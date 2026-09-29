@@ -2350,6 +2350,7 @@ impl App {
             }
             ClientMessage::SettingsApplied {
                 revision,
+                rendered_font_size,
                 terminal,
                 background,
                 foreground,
@@ -2357,6 +2358,7 @@ impl App {
                 colors,
             } => {
                 if revision == self.settings.revision
+                    && rendered_font_size == self.settings.terminal.rendered_font_size()
                     && *terminal == self.settings.terminal
                     && *colors == crate::theme::resolve(&self.settings.terminal)
                     && background == colors.background
@@ -2364,7 +2366,7 @@ impl App {
                     && bindings == crate::keybindings::resolved(&self.settings.keybindings)?
                 {
                     self.surfaces.get_mut(&id).unwrap().applied_settings = Some(
-                        json!({"revision":revision,"terminal":terminal,"background":background,"foreground":foreground,"colors":colors,"bindings":bindings}),
+                        json!({"revision":revision,"rendered_font_size":rendered_font_size,"terminal":terminal,"background":background,"foreground":foreground,"colors":colors,"bindings":bindings}),
                     );
                 }
             }

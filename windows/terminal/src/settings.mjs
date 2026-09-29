@@ -23,7 +23,7 @@ function resolvedOptions(colors) {
     ...Object.fromEntries(paletteKeys.map((key,index) => [key,colors.palette[index]]))};
 }
 export function options(settings, colors) {
-  return { fontFamily:settings.font_family, fontSize:settings.font_size, theme:resolvedOptions(colors) ?? {...themes[settings.theme]},
+  return { fontFamily:settings.font_family, fontSize:Math.round(settings.font_size * (settings.zoom_percent ?? 100) / 100), theme:resolvedOptions(colors) ?? {...themes[settings.theme]},
     scrollback:settings.scrollback, cursorBlink:settings.cursor_blink, cursorStyle:settings.cursor_style };
 }
 // Apply only the newest desired settings after composition/restore has ended.
@@ -51,8 +51,8 @@ export class Settings {
     this.minimap?.configure(settings);
     this.changed(); this.fit();
     const actual=this.terminal.options;
-    this.send({type:'settings_applied',revision:desired.revision,bindings:this.shortcuts?.snapshot() ?? [],
-      terminal:{...settings,font_family:actual.fontFamily,font_size:actual.fontSize,theme:settings.theme,
+    this.send({type:'settings_applied',revision:desired.revision,rendered_font_size:actual.fontSize,bindings:this.shortcuts?.snapshot() ?? [],
+      terminal:{...settings,font_family:actual.fontFamily,font_size:settings.font_size,theme:settings.theme,
         scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle,
         minimap_enabled:settings.minimap_enabled,minimap_width:settings.minimap_width,minimap_opacity:settings.minimap_opacity},
       background:theme.background,foreground:theme.foreground,

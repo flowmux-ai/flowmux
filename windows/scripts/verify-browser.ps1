@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close','keys','page-keys','frame-keys')][string]$Case='all',
+    [ValidateSet('all','files-close','keys','page-keys','frame-keys','zoom')][string]$Case='all',
     [switch]$RequireNestedFrames)
 if($RequireNestedFrames -and $Case -ne 'frame-keys'){throw 'RequireNestedFrames applies to the frame-keys verifier.'}
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
@@ -328,6 +328,55 @@ function Verify-FilesClose {
         $files.Dispose()
     }
 }
+function Verify-Zoom {
+    $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$source=Request @('identify');$terminal=$initial.surfaces[0]
+    $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+    $before=Wait-Page $first.pane '/one' '첫째 한글 한 é 😀'
+    $draft='배율 초안 한 é 😀 &';$raw=$draft|ConvertTo-Json -Compress
+    $page=Eval-Page $first.pane ('const e=document.querySelector("#entry");e.value='+$raw+';e.setSelectionRange(1,3);({load:fixtureLoad,dpr:devicePixelRatio})')
+    function Zoom-State([int]$Zoom) {
+        $clock=[Diagnostics.Stopwatch]::StartNew()
+        do {
+            $s=Request @('settings','show')
+            if($s.document.terminal.zoom_percent -eq $Zoom -and @($s.surfaces|Where-Object {-not $_.applied -or $_.applied.revision -ne $s.document.revision -or $_.applied.rendered_font_size -ne [Math]::Floor(14*$Zoom/100+0.5)}).Count -eq 0){return $s}
+            if($clock.ElapsedMilliseconds -gt 5000){throw 'Global zoom did not reach the actual terminal font within five seconds'}
+            Start-Sleep -Milliseconds 20
+        }while($true)
+    }
+    $tree=Tree;$entry=@($tree.chrome.controls|Where-Object kind -eq 'settings')[0];[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry.handle,$process.Id)
+    $s=Request @('settings','show');$row=@($s.options.controls|Where-Object key -eq 'zoom_percent')[0]
+    if(-not $row -or $row.page -ne 'general'){throw 'General global zoom input is missing'}
+    $button=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.selected})[0]
+    foreach($zoom in @(50,85,125,200,100)){
+        [OptionsFixture]::SetText([long]$row.parent,[long]$row.input,$process.Id,[string]$zoom);$s=Zoom-State $zoom
+        if($s.document.terminal.font_size -ne 14){throw 'Global zoom overwrote configured terminal font size'}
+        $b=Request @('browser','status',$first.pane);$after=Eval-Page $first.pane '({load:fixtureLoad,dpr:devicePixelRatio,value:document.querySelector("#entry").value,start:document.querySelector("#entry").selectionStart,end:document.querySelector("#entry").selectionEnd})'
+        if($b.zoom -ne $zoom/100 -or [Math]::Abs($after.dpr/$page.dpr-$zoom/100) -gt 0.02 -or $after.load -ne $page.load -or -not (Same-Text $after.value $draft) -or $after.start -ne 1 -or $after.end -ne 3 -or $b.view_handle -ne $before.view_handle -or $b.generation -ne $before.generation){throw 'Global browser zoom did not change actual scale or lost the page/Unicode selection'}
+        $tree=Tree;$workspace=@($tree.chrome.controls|Where-Object {$_.handle -eq $button.handle})[0];$height=[ChromeFixture]::FontHeight([long]$button.handle,$process.Id)
+        $expectedFont=[Math]::Floor(11*$tree.chrome.dpi*$zoom/7200+0.5)
+        $lines=[Math]::Max(1,@($workspace.workspace_lines).Count);$natural=16+[Math]::Floor(22*$zoom/100+0.5)+[Math]::Floor(20*$zoom/100+0.5)*$lines
+        if($height -ne $expectedFont -or [Math]::Abs($workspace.rect.height-($natural-2)*$tree.chrome.dpi/96) -gt 1){throw 'Sidebar font or metadata row height did not follow global zoom'}
+        $live=@($tree.surfaces|Where-Object id -eq $terminal.id)[0];if($live.pid -ne $terminal.pid -or $live.session -ne $terminal.session){throw 'Global zoom restarted the terminal'}
+    }
+    $evidence.checks+=@{name='native_General_zoom_updates_actual_terminal_browser_sidebar_sizes_with_stable_Unicode_selection_and_processes';passed=$true}
+    [OptionsFixture]::SetText([long]$row.parent,[long]$row.input,$process.Id,'49')
+    $clock=[Diagnostics.Stopwatch]::StartNew();do{$s=Request @('settings','show');$draftRow=@($s.options.controls|Where-Object key -eq 'zoom_percent')[0];if($draftRow.draft_error){break};if($clock.ElapsedMilliseconds -gt 2000){throw 'Invalid zoom was not rejected'};Start-Sleep -Milliseconds 20}while($true)
+    if($s.document.terminal.zoom_percent -ne 100 -or $draftRow.value -cne '49'){throw 'Invalid zoom changed saved scale or lost its draft'}
+    [OptionsFixture]::CompositionGuard([long]$row.parent,[long]$row.input,$process.Id,$true);[OptionsFixture]::SetText([long]$row.parent,[long]$row.input,$process.Id,'200')
+    $s=Request @('settings','show');if(-not $s.options.composing -or $s.document.terminal.zoom_percent -ne 100){throw 'Zoom committed during an owned composition guard'}
+    [OptionsFixture]::CompositionGuard([long]$row.parent,[long]$row.input,$process.Id,$false);Zoom-State 200|Out-Null
+    [OptionsFixture]::Click([long]$s.options.window,[long]$s.options.close,$process.Id)
+    $evidence.checks+=@{name='invalid_zoom_preserves_draft_and_native_composition_guard_defers_until_commit';passed=$true}
+    Request @('browser','zoom',$first.pane,'1.3')|Out-Null;Request @('settings','set','focus-border-opacity','37')|Out-Null
+    if((Request @('browser','status',$first.pane)).zoom -ne 1.3){throw 'Unrelated setting reset local browser zoom'}
+    Request @('detach-tab',$first.surface)|Out-Null;$pane=Location (Tree) $first.surface
+    Request @('settings','set','zoom-percent','125')|Out-Null;Zoom-State 125|Out-Null
+    $detached=Request @('browser','status',$pane);if($detached.zoom -ne 1.25 -or $detached.view_handle -ne $before.view_handle -or -not (Same-Text (Eval-Page $pane 'document.querySelector("#entry").value') $draft)){throw 'Detached browser lost global zoom or page state'}
+    $second=(Request @('browser','open',($origin+'/two'),'--pane',$source.pane)).browser_pane_opened
+    $new=Wait-Page $second.pane '/two' '둘째 한글 한 é 😀';if($new.zoom -ne 1.25){throw 'New browser ignored persisted global zoom'}
+    Request @('focus-tab',$terminal.id)|Out-Null;Request @('new-tab','--shell=cmd')|Out-Null;Zoom-State 125|Out-Null
+    $evidence.checks+=@{name='local_browser_zoom_survives_unrelated_settings_and_global_zoom_reaches_detached_and_new_surfaces';passed=$true}
+}
 function Verify-FrameKeys {
     $other=New-Object BrowserFixture
     try {
@@ -580,6 +629,7 @@ function Verify-Keys {
     $evidence.checks+=@{name='detached_browser_find_retains_native_owner_WebView_Unicode_and_terminal_session';passed=$true}
 }
 try {
+    if($Case -eq 'zoom'){Verify-Zoom}
     if($Case -eq 'frame-keys'){Verify-FrameKeys}
     if($Case -eq 'page-keys'){Verify-PageKeys}
     if($Case -eq 'keys'){Verify-Keys}
@@ -900,7 +950,7 @@ try {
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     }
-    if($Case -notin @('keys','page-keys','frame-keys')){Verify-FilesClose}
+    if($Case -notin @('keys','page-keys','frame-keys','zoom')){Verify-FilesClose}
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

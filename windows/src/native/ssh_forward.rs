@@ -251,12 +251,14 @@ impl Forward {
             }
             ClientMessage::SettingsApplied {
                 revision,
+                rendered_font_size,
                 terminal,
                 bindings,
                 background,
                 foreground,
                 colors,
             } if revision == settings.revision
+                && rendered_font_size == settings.terminal.rendered_font_size()
                 && *terminal == settings.terminal
                 && bindings.is_empty()
                 && *colors == crate::theme::resolve(&settings.terminal)
@@ -264,7 +266,7 @@ impl Forward {
                 && foreground == colors.foreground =>
             {
                 self.terminal.applied_settings = Some(
-                    json!({"revision":revision,"terminal":terminal,"colors":colors,"bindings":bindings}),
+                    json!({"revision":revision,"rendered_font_size":rendered_font_size,"terminal":terminal,"colors":colors,"bindings":bindings}),
                 );
             }
             ClientMessage::Input { data } => self.input(data.into_bytes())?,

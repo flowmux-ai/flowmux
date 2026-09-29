@@ -81,6 +81,14 @@ public static class ChromeFixture {
         },IntPtr.Zero);
         return found.ToArray();
     }
+    [DllImport("gdi32.dll",EntryPoint="GetObjectW")] private static extern int GetObject(IntPtr value,int bytes,IntPtr output);
+    public static int FontHeight(long handle,int owner) {
+        var hwnd=new IntPtr(handle);Owned(hwnd,owner);var font=Message(hwnd,0x31,IntPtr.Zero,IntPtr.Zero);
+        int size=GetObject(font,0,IntPtr.Zero);if(size<=0)throw new Win32Exception("Cannot inspect owned font");
+        var buffer=Marshal.AllocHGlobal(size);
+        try {if(GetObject(font,size,buffer)!=size)throw new Win32Exception();return Math.Abs(Marshal.ReadInt32(buffer));}
+        finally {Marshal.FreeHGlobal(buffer);}
+    }
     public static int[] Size(long root,int owner) {
         var hwnd=new IntPtr(root);Owned(hwnd,owner);Rect r;
         if(!GetClientRect(hwnd,out r))throw new Win32Exception();return new[]{r.Right,r.Bottom};

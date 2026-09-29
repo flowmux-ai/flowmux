@@ -305,7 +305,8 @@ unsafe fn draw_row(item: &DRAWITEMSTRUCT) -> bool {
     );
     FillRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
     if let Some(row) = r.filtered.get(item.itemID as usize).map(|i| &r.rows[*i]) {
-        let p = |n: i32| n * GetDpiForWindow(item.hwndItem).max(96) as i32 / 96;
+        let p =
+            |n: i32| chrome::sidebar_size(n) * GetDpiForWindow(item.hwndItem).max(96) as i32 / 96;
         SetBkMode(item.hDC, TRANSPARENT as i32);
         SelectObject(
             item.hDC,
@@ -749,7 +750,12 @@ impl Panel {
             preview_height,
         );
         unsafe {
-            SendMessageW(self.list, LB_SETITEMHEIGHT, 0, p(72) as LPARAM);
+            SendMessageW(
+                self.list,
+                LB_SETITEMHEIGHT,
+                0,
+                p(chrome::sidebar_size(72)) as LPARAM,
+            );
             for (window, show) in [
                 (self.list, list_height > 0),
                 (self.preview, preview_height > 0),
@@ -815,14 +821,13 @@ impl Panel {
             unsafe { IsWindow(self.window) } != 0,
             "Session panel is unavailable"
         );
-        for window in [self.window, self.heading, self.message] {
+        for window in [self.window, self.heading] {
             chrome::register_control(window, chrome::ControlRole::Static);
         }
-        chrome::register_control(self.message, chrome::ControlRole::Caption);
-        for window in [self.search, self.preview] {
-            chrome::register_control(window, chrome::ControlRole::Edit);
-        }
-        chrome::register_control(self.list, chrome::ControlRole::Listbox);
+        chrome::register_sidebar_control(self.message, chrome::ControlRole::Caption);
+        chrome::register_control(self.search, chrome::ControlRole::Edit);
+        chrome::register_sidebar_control(self.preview, chrome::ControlRole::Edit);
+        chrome::register_sidebar_control(self.list, chrome::ControlRole::Listbox);
         chrome::register_button(
             self.refresh,
             chrome::Role::Icon {

@@ -450,21 +450,37 @@ struct Resources {
     body: HFONT,
     caption: HFONT,
     title: HFONT,
+    sidebar_body: HFONT,
+    sidebar_caption: HFONT,
+    zoom: u16,
     agent_icons: [HICON; 5],
     background: HBRUSH,
     surface: HBRUSH,
     owns_body: bool,
     owns_caption: bool,
     owns_title: bool,
+    owns_sidebar_body: bool,
+    owns_sidebar_caption: bool,
     owns_background: bool,
     owns_surface: bool,
 }
 impl Resources {
-    fn new(palette: Palette, dpi: u32) -> Self {
-        fn font(points: i32, dpi: u32, weight: i32) -> (HFONT, bool) {
+    fn font(&self, entry: &Entry) -> HFONT {
+        match (
+            entry.sidebar,
+            matches!(entry.control, ControlRole::Caption | ControlRole::UsageBar),
+        ) {
+            (true, true) => self.sidebar_caption,
+            (true, false) => self.sidebar_body,
+            (false, true) => self.caption,
+            (false, false) => self.body,
+        }
+    }
+    fn new(palette: Palette, dpi: u32, zoom: u16) -> Self {
+        fn font(points: i32, dpi: u32, weight: i32, zoom: u16) -> (HFONT, bool) {
             let font = unsafe {
                 CreateFontW(
-                    -((points * dpi as i32 + 36) / 72),
+                    -((points * dpi as i32 * i32::from(zoom) + 3600) / 7200),
                     0,
                     0,
                     0,
@@ -494,9 +510,11 @@ impl Resources {
                 (brush, true)
             }
         }
-        let (body, owns_body) = font(11, dpi, FW_NORMAL as i32);
-        let (caption, owns_caption) = font(9, dpi, FW_NORMAL as i32);
-        let (title, owns_title) = font(20, dpi, FW_EXTRABOLD as i32);
+        let (body, owns_body) = font(11, dpi, FW_NORMAL as i32, 100);
+        let (caption, owns_caption) = font(9, dpi, FW_NORMAL as i32, 100);
+        let (title, owns_title) = font(20, dpi, FW_EXTRABOLD as i32, 100);
+        let (sidebar_body, owns_sidebar_body) = font(11, dpi, FW_NORMAL as i32, zoom);
+        let (sidebar_caption, owns_sidebar_caption) = font(9, dpi, FW_NORMAL as i32, zoom);
         // 64px rasterizations of the pinned SVGs in builtin_icons.rs. Lobe Icons
         // (MIT); attribution and terms ship in assets/editor/THIRD_PARTY_NOTICES.md.
         // CreateIconFromResourceEx requires DWORD-aligned resource bytes.
@@ -538,12 +556,17 @@ impl Resources {
             body,
             caption,
             title,
+            sidebar_body,
+            sidebar_caption,
+            zoom,
             agent_icons,
             background,
             surface,
             owns_body,
             owns_caption,
             owns_title,
+            owns_sidebar_body,
+            owns_sidebar_caption,
             owns_background,
             owns_surface,
         }
@@ -561,6 +584,8 @@ impl Drop for Resources {
                 (self.body, self.owns_body),
                 (self.caption, self.owns_caption),
                 (self.title, self.owns_title),
+                (self.sidebar_body, self.owns_sidebar_body),
+                (self.sidebar_caption, self.owns_sidebar_caption),
                 (self.background, self.owns_background),
                 (self.surface, self.owns_surface),
             ] {
@@ -614,6 +639,7 @@ pub(super) struct WorkspaceLine {
 struct Entry {
     button: Option<Role>,
     control: ControlRole,
+    sidebar: bool,
     hot: bool,
     focused: bool,
     workspace_lines: Vec<WorkspaceLine>,
@@ -627,6 +653,7 @@ struct State {
     theme: Theme,
     resolved: Option<crate::theme::ResolvedTheme>,
     focus: (COLORREF, u8),
+    zoom: u16,
     dpi: u32,
     palette: Palette,
     resources: Resources,
@@ -646,9 +673,10 @@ impl State {
                 color_ref(flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT),
                 flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT,
             ),
+            zoom: flowmux_config::options::ZOOM_DEFAULT,
             dpi: 96,
             palette,
-            resources: Resources::new(palette, 96),
+            resources: Resources::new(palette, 96, flowmux_config::options::ZOOM_DEFAULT),
             controls: HashMap::new(),
             tooltips: HashMap::new(),
             pane_headers: HashMap::new(),
@@ -970,6 +998,7 @@ pub(super) fn configure_settings(settings: &crate::settings::TerminalSettings, d
     STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         state.resolved = custom.then_some(colors);
+        state.zoom = settings.zoom_percent;
         state.focus = (
             color_ref(&settings.focus_border_color),
             settings.focus_border_opacity,
@@ -1014,26 +1043,21 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
     }
     let swap = STATE.with(|slot| {
         let mut state = slot.borrow_mut();
-        if state.theme == theme && state.dpi == dpi && state.palette == palette {
+        if state.theme == theme
+            && state.dpi == dpi
+            && state.palette == palette
+            && state.resources.zoom == state.zoom
+        {
             return None;
         }
-        let resources = Resources::new(palette, dpi);
+        let resources = Resources::new(palette, dpi, state.zoom);
         state.theme = theme;
         state.dpi = dpi;
         state.palette = palette;
         let controls: Vec<_> = state
             .controls
             .iter()
-            .map(|(hwnd, entry)| {
-                (
-                    *hwnd,
-                    if matches!(entry.control, ControlRole::Caption | ControlRole::UsageBar) {
-                        resources.caption
-                    } else {
-                        resources.body
-                    },
-                )
-            })
+            .map(|(hwnd, entry)| (*hwnd, resources.font(entry)))
             .collect();
         let headers: Vec<_> = state.pane_headers.keys().copied().collect();
         let old = std::mem::replace(&mut state.resources, resources);
@@ -1062,7 +1086,15 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
 }
 
 pub(super) fn register_button(window: HWND, role: Role) {
-    register(window, Some(role), ControlRole::Static);
+    register(
+        window,
+        Some(role),
+        ControlRole::Static,
+        matches!(
+            role,
+            Role::Workspace { .. } | Role::Agent { activity: true, .. }
+        ),
+    );
 }
 pub(super) fn register_swatch(window: HWND, color: COLORREF) {
     register_button(window, Role::Swatch(color));
@@ -1078,9 +1110,15 @@ pub(super) fn set_swatch(window: HWND, color: COLORREF) {
     }
 }
 pub(super) fn register_control(window: HWND, role: ControlRole) {
-    register(window, None, role);
+    register(window, None, role, false);
 }
-fn register(window: HWND, button: Option<Role>, control: ControlRole) {
+pub(super) fn register_sidebar_control(window: HWND, role: ControlRole) {
+    register(window, None, role, true);
+}
+pub(super) fn sidebar_size(dip: i32) -> i32 {
+    STATE.with(|slot| (dip * i32::from(slot.borrow().zoom) + 50) / 100)
+}
+fn register(window: HWND, button: Option<Role>, control: ControlRole, sidebar: bool) {
     let font = STATE.with(|slot| {
         let mut state = slot.borrow_mut();
         state.controls.insert(
@@ -1088,16 +1126,13 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
             Entry {
                 button,
                 control,
+                sidebar,
                 hot: false,
                 focused: false,
                 workspace_lines: Vec::new(),
             },
         );
-        if matches!(control, ControlRole::Caption | ControlRole::UsageBar) {
-            state.resources.caption
-        } else {
-            state.resources.body
-        }
+        state.resources.font(&state.controls[&(window as isize)])
     });
     unsafe {
         if SetWindowSubclass(window, Some(control_proc), SUBCLASS, 0) == 0 {
@@ -1141,11 +1176,23 @@ pub(super) fn unregister(window: HWND) {
 
 #[allow(dead_code)]
 pub(super) fn set_role(window: HWND, role: Role) {
-    STATE.with(|slot| {
-        if let Some(entry) = slot.borrow_mut().controls.get_mut(&(window as isize)) {
-            entry.button = Some(role);
-        }
+    let font = STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let entry = state.controls.get_mut(&(window as isize))?;
+        let sidebar = matches!(
+            role,
+            Role::Workspace { .. } | Role::Agent { activity: true, .. }
+        );
+        let changed = entry.sidebar != sidebar;
+        entry.button = Some(role);
+        entry.sidebar = sidebar;
+        changed.then(|| state.resources.font(&state.controls[&(window as isize)]))
     });
+    if let Some(font) = font {
+        unsafe {
+            SendMessageW(window, WM_SETFONT, font as WPARAM, 0);
+        }
+    }
     update_tooltip(window);
     unsafe {
         InvalidateRect(window, std::ptr::null(), 0);
@@ -1776,7 +1823,7 @@ pub(super) fn activity_row_height(window: HWND, width: i32, text: &str) -> i32 {
         if dc.is_null() {
             return px(72);
         }
-        let font = STATE.with(|slot| slot.borrow().resources.caption);
+        let font = STATE.with(|slot| slot.borrow().resources.sidebar_caption);
         let old = SelectObject(dc, font);
         let raw: Vec<_> = text.replace('&', "&&").encode_utf16().collect();
         let text = caption_for_paint(&raw);
@@ -1796,7 +1843,8 @@ pub(super) fn activity_row_height(window: HWND, width: i32, text: &str) -> i32 {
         );
         SelectObject(dc, old);
         ReleaseDC(window, dc);
-        (px(30) + rect.bottom.clamp(line, 3 * line)).max(px(47))
+        (px(10 + sidebar_size(20)) + rect.bottom.clamp(line, 3 * line))
+            .max(px(10 + sidebar_size(37)))
     }
 }
 
@@ -1874,8 +1922,12 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         role,
                         entry.hot,
                         state.palette,
-                        state.resources.body,
-                        state.resources.caption,
+                        state.resources.font(entry),
+                        if entry.sidebar {
+                            state.resources.sidebar_caption
+                        } else {
+                            state.resources.caption
+                        },
                         state.dpi,
                     )
                 })
@@ -2060,7 +2112,18 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             let ink = agent_ink(status, seen, palette);
             SelectObject(item.hDC, caption_font);
             SetBkMode(item.hDC, TRANSPARENT as i32);
-            draw_agent_status(item.hDC, status, seen, pixel(20), pixel(24), pixel(1), ink);
+            let name_height = if activity { sidebar_size(20) } else { 20 };
+            let status_top = 4 + name_height;
+            let icon_size = if activity { sidebar_size(14) } else { 14 };
+            draw_agent_status(
+                item.hDC,
+                status,
+                seen,
+                pixel(20),
+                pixel(status_top),
+                pixel(1),
+                ink,
+            );
             let mut raw =
                 vec![0u16; GetWindowTextLengthW(item.hwndItem).clamp(0, 2048) as usize + 1];
             let length = GetWindowTextW(item.hwndItem, raw.as_mut_ptr(), raw.len() as i32);
@@ -2072,23 +2135,23 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 name,
                 RECT {
                     left: pixel(32),
-                    right: pixel(46),
-                    top: pixel(7),
-                    bottom: pixel(21),
+                    right: pixel(32 + icon_size),
+                    top: pixel(4 + (name_height - icon_size) / 2),
+                    bottom: pixel(4 + (name_height - icon_size) / 2 + icon_size),
                 },
             );
             for (value, left, top, color, font) in [
-                (name, 50, 4, palette.foreground, font),
-                (status, 32, 24, ink, caption_font),
+                (name, 36 + icon_size, 4, palette.foreground, font),
+                (status, 32, status_top, ink, caption_font),
             ] {
                 let mut rect = RECT {
                     left: pixel(left),
                     right: item.rcItem.right - pixel(6),
                     top: pixel(top),
-                    bottom: if activity && top == 24 {
+                    bottom: if activity && top == status_top {
                         item.rcItem.bottom - pixel(6)
                     } else {
-                        pixel(top + 19)
+                        pixel(top + if activity { sidebar_size(19) } else { 19 })
                     },
                 };
                 let value: Vec<_> = value.encode_utf16().collect();
@@ -2102,7 +2165,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                     DT_LEFT
                         | DT_END_ELLIPSIS
                         | DT_HIDEPREFIX
-                        | if activity && top == 24 {
+                        | if activity && top == status_top {
                             DT_WORDBREAK | DT_EDITCONTROL
                         } else {
                             DT_SINGLELINE | DT_VCENTER
@@ -2589,7 +2652,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             let title: Vec<u16> = lines.next().unwrap_or_default().encode_utf16().collect();
             let mut title_rect = RECT {
                 top: rect.top + pixel(5),
-                bottom: (rect.top + pixel(27)).min(rect.bottom),
+                bottom: (rect.top + pixel(5 + sidebar_size(22))).min(rect.bottom),
                 ..rect
             };
             DrawTextW(
@@ -2604,8 +2667,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             SelectObject(item.hDC, GetStockObject(DC_PEN));
             SetDCPenColor(item.hDC, palette.muted);
             for (index, line) in rows.iter().enumerate() {
-                let top = rect.top + pixel(27 + index as i32 * 20);
-                let bottom = (top + pixel(20)).min(rect.bottom - pixel(5));
+                let top = rect.top + pixel(5 + sidebar_size(22) + index as i32 * sidebar_size(20));
+                let bottom = (top + pixel(sidebar_size(20))).min(rect.bottom - pixel(5));
                 if top >= bottom {
                     break;
                 }
@@ -2658,7 +2721,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 let mut ink = palette.muted;
                 if let Some(agent) = &line.agent {
                     ink = agent_ink(agent.status, agent.seen, palette);
-                    if line_rect.right - line_rect.left > pixel(32) {
+                    let icon_size = sidebar_size(14);
+                    if line_rect.right - line_rect.left > pixel(18 + icon_size) {
                         draw_agent_status(
                             item.hDC,
                             agent.status,
@@ -2670,9 +2734,9 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         );
                         let area = RECT {
                             left: line_rect.left + pixel(16),
-                            right: line_rect.left + pixel(30),
-                            top: mid - pixel(7),
-                            bottom: mid + pixel(7),
+                            right: line_rect.left + pixel(16 + icon_size),
+                            top: mid - pixel(icon_size) / 2,
+                            bottom: mid - pixel(icon_size) / 2 + pixel(icon_size),
                         };
                         if !draw_agent_icon(item.hDC, &agent.name, area) {
                             SetDCPenColor(item.hDC, ink);
@@ -2684,7 +2748,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                                 pixel(1),
                             );
                         }
-                        line_rect.left += pixel(34);
+                        line_rect.left += pixel(20 + icon_size);
                     }
                 }
                 SetTextColor(item.hDC, ink);

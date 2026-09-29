@@ -42,7 +42,14 @@ impl App {
                 if self.settings != document {
                     let enable_usage = !self.settings.terminal.usage_bar_enabled
                         && document.terminal.usage_bar_enabled;
+                    let zoom_changed =
+                        self.settings.terminal.zoom_percent != document.terminal.zoom_percent;
                     self.settings = document;
+                    if zoom_changed {
+                        for browser in self.browsers.values_mut() {
+                            browser.zoom(f64::from(self.settings.terminal.zoom_percent) / 100.0)?;
+                        }
+                    }
                     chrome::configure_settings(&self.settings.terminal, unsafe {
                         GetDpiForWindow(self.window)
                     });

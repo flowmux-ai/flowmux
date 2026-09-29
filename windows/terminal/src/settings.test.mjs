@@ -87,3 +87,23 @@ test('resolved palette and overrides apply together after composition and ACK ac
   assert.deepEqual(terminal.options,before);
   assert.equal(state.replies.length,1);
 });
+
+test('global zoom keeps the configured font size and defers actual integral sizing until composition ends', () => {
+  const { state, terminal, controller } = fixture();
+  for (const [zoom, expected] of [[50,7],[85,12],[100,14],[125,18],[200,28]]) {
+    const desired=documentFor('zoom-'+zoom,14); desired.terminal.zoom_percent=zoom;
+    controller.receive(desired,[]);
+    assert.equal(terminal.options.fontSize,expected);
+    assert.equal(state.replies.at(-1).rendered_font_size,expected);
+    assert.equal(state.replies.at(-1).terminal.font_size,14);
+  }
+  state.blocked=true;
+  for (const zoom of [50,125]) {
+    const desired=documentFor('deferred-'+zoom,14); desired.terminal.zoom_percent=zoom;
+    controller.receive(desired,[]);
+  }
+  assert.equal(terminal.options.fontSize,28); assert.equal(state.replies.length,5);
+  state.blocked=false;controller.flush();
+  assert.equal(terminal.options.fontSize,18); assert.equal(state.replies.length,6);
+  assert.equal(state.replies.at(-1).revision,'deferred-125');
+});

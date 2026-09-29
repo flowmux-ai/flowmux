@@ -295,7 +295,7 @@ impl Browser {
                 app.sender.clone(),
             )?;
         }
-        let browser = Self {
+        let mut browser = Self {
             keys: Rc::new(RefCell::new(keys::Keys::default())),
             key_guard,
             view,
@@ -327,6 +327,7 @@ impl Browser {
             find: find::State::default(),
             dom_key: format!("__flowmuxDom_{}", Uuid::new_v4().simple()),
         };
+        browser.zoom(f64::from(app.settings.terminal.zoom_percent) / 100.0)?;
         keys::install(&browser, id)?;
         Ok(browser)
     }
@@ -498,7 +499,7 @@ impl Browser {
         }
         Ok(())
     }
-    fn zoom(&mut self, scale: f64) -> anyhow::Result<()> {
+    pub(super) fn zoom(&mut self, scale: f64) -> anyhow::Result<()> {
         anyhow::ensure!(
             scale.is_finite() && (0.5..=3.0).contains(&scale),
             "browser zoom must be between 0.5 and 3.0"

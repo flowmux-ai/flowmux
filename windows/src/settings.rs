@@ -10,6 +10,7 @@ pub const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 pub enum SettingKey {
     FontFamily,
     FontSize,
+    ZoomPercent,
     Theme,
     ThemePreset,
     ThemeBackground,
@@ -109,6 +110,7 @@ impl ThemeOverrides {
 pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u16,
+    pub zoom_percent: u16,
     pub theme: Theme,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_preset: Option<String>,
@@ -132,6 +134,7 @@ impl Default for TerminalSettings {
         Self {
             font_family: "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace".into(),
             font_size: 14,
+            zoom_percent: flowmux_config::options::ZOOM_DEFAULT,
             theme: Theme::Dark,
             theme_preset: None,
             theme_overrides: ThemeOverrides::default(),
@@ -151,7 +154,15 @@ impl Default for TerminalSettings {
     }
 }
 impl TerminalSettings {
+    pub fn rendered_font_size(&self) -> u16 {
+        ((u32::from(self.font_size) * u32::from(self.zoom_percent) + 50) / 100) as u16
+    }
     pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            (flowmux_config::options::ZOOM_MIN..=flowmux_config::options::ZOOM_MAX)
+                .contains(&self.zoom_percent),
+            "zoom must be between 50 and 200 percent"
+        );
         anyhow::ensure!(
             crate::theme::valid_color(&self.focus_border_color),
             "focus border color must be #RRGGBB"
@@ -195,6 +206,7 @@ impl TerminalSettings {
         match key {
             SettingKey::FontFamily => self.font_family.clone(),
             SettingKey::FontSize => self.font_size.to_string(),
+            SettingKey::ZoomPercent => self.zoom_percent.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
             SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
@@ -293,6 +305,9 @@ impl TerminalSettings {
                     .trim()
                     .parse()
                     .context("focus border opacity must be an integer")?
+            }
+            SettingKey::ZoomPercent => {
+                next.zoom_percent = value.trim().parse().context("zoom must be an integer")?;
             }
             SettingKey::FontSize => {
                 next.font_size = value
@@ -465,6 +480,18 @@ mod tests {
         )
         .unwrap();
         assert!(old.terminal.minimap_enabled);
+        assert_eq!(
+            old.terminal.zoom_percent,
+            flowmux_config::options::ZOOM_DEFAULT
+        );
+        for (zoom, size) in [(50, 7), (85, 12), (100, 14), (125, 18), (200, 28)] {
+            let zoomed = old
+                .terminal
+                .changed(SettingKey::ZoomPercent, &zoom.to_string(), None)
+                .unwrap();
+            assert_eq!(zoomed.rendered_font_size(), size);
+            assert_eq!(zoomed.font_size, 14);
+        }
         assert!(old.terminal.editor_minimap_enabled);
         assert_eq!(
             old.terminal.focus_border_color,
@@ -475,6 +502,9 @@ mod tests {
             flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT
         );
         for (key, value) in [
+            (SettingKey::ZoomPercent, "49"),
+            (SettingKey::ZoomPercent, "201"),
+            (SettingKey::ZoomPercent, "100.5"),
             (SettingKey::FocusBorderColor, "#fff"),
             (SettingKey::FocusBorderColor, "#한글aa"),
             (SettingKey::FocusBorderOpacity, "101"),

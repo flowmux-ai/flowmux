@@ -123,7 +123,12 @@ impl App {
         let indices = self.main_workspace_indices();
         let heights: Vec<i32> = indices
             .iter()
-            .map(|i| px(38 + 20 * self.workspace_lines(self.workspaces[*i].id).len().max(1) as i32))
+            .map(|i| {
+                px(16
+                    + chrome::sidebar_size(22)
+                    + chrome::sidebar_size(20)
+                        * self.workspace_lines(self.workspaces[*i].id).len().max(1) as i32)
+            })
             .collect();
         let metrics = (list_end, dpi, heights.iter().sum::<i32>());
         let pager = metrics.2 > list_end - list_top;

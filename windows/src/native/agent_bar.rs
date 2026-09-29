@@ -209,7 +209,11 @@ impl Bar {
             "Agents",
             WS_VISIBLE | windows_sys::Win32::System::SystemServices::SS_CENTERIMAGE,
         )?;
-        chrome::register_control(bar.label, chrome::ControlRole::Static);
+        if activity {
+            chrome::register_sidebar_control(bar.label, chrome::ControlRole::Static);
+        } else {
+            chrome::register_control(bar.label, chrome::ControlRole::Static);
+        }
         bar.viewport = create(
             bar.window,
             "flowmux.windows.agents",
@@ -287,14 +291,14 @@ impl Bar {
                 px(8),
                 px(8),
                 (rect.right - rect.left - px(16)).max(1),
-                px(20),
+                px(chrome::sidebar_size(20)),
             );
             place(
                 self.viewport,
                 px(8),
-                px(32),
+                px(12 + chrome::sidebar_size(20)),
                 (rect.right - rect.left - px(16)).max(1),
-                (rect.bottom - rect.top - px(42)).max(1),
+                (rect.bottom - rect.top - px(22 + chrome::sidebar_size(20))).max(1),
             );
         } else {
             place(self.label, px(6), px(3), px(52), px(47));
@@ -758,7 +762,7 @@ impl App {
             - px(16)
             - unsafe { GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) })
         .max(1);
-        let natural = px(42)
+        let natural = px(22 + chrome::sidebar_size(20))
             + bar
                 .items
                 .iter()
