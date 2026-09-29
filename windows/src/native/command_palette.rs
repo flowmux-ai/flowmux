@@ -29,6 +29,13 @@ pub(super) struct Controller {
     recent: VecDeque<String>,
 }
 impl Controller {
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.panel
+            .as_ref()
+            .filter(|p| p.is_open())
+            .map(|p| p.window)
+    }
     pub(super) fn is_open(&self) -> bool {
         self.panel.as_ref().is_some_and(panel::Panel::is_open)
     }
@@ -114,7 +121,12 @@ impl App {
             entries.push(Entry {
                 id: format!("action:{}", binding.action),
                 label: binding.label,
-                shortcut: binding.accels.join(", "),
+                shortcut: binding
+                    .accels
+                    .iter()
+                    .map(|accel| crate::keybindings::accelerator_label(accel))
+                    .collect::<anyhow::Result<Vec<_>>>()?
+                    .join(", "),
                 target: Target::Keybinding(action),
             });
         }

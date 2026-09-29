@@ -154,6 +154,45 @@ pub fn parse(accel: &str) -> anyhow::Result<Chord> {
     Ok(chord)
 }
 
+/// Human-readable display only; persisted accelerator spelling stays unchanged.
+pub fn accelerator_label(accel: &str) -> anyhow::Result<String> {
+    let chord = parse(accel)?;
+    let key = chord
+        .code
+        .strip_prefix("Key")
+        .or_else(|| chord.code.strip_prefix("Digit"))
+        .or_else(|| chord.code.strip_prefix("Arrow"))
+        .unwrap_or(&chord.code);
+    let key = match key {
+        "PageUp" => "Page Up",
+        "PageDown" => "Page Down",
+        "Minus" => "-",
+        "Equal" => "=",
+        "BracketLeft" => "[",
+        "BracketRight" => "]",
+        "Backslash" => "\\",
+        "Semicolon" => ";",
+        "Quote" => "'",
+        "Backquote" => "`",
+        "Comma" => ",",
+        "Period" => ".",
+        "Slash" => "/",
+        _ => key,
+    };
+    let mut parts = Vec::new();
+    for (enabled, label) in [
+        (chord.ctrl, "Ctrl"),
+        (chord.alt, "Alt"),
+        (chord.shift, "Shift"),
+    ] {
+        if enabled {
+            parts.push(label);
+        }
+    }
+    parts.push(key);
+    Ok(parts.join("+"))
+}
+
 /// Modifier bits shared by native shortcut capture and window dispatch.
 pub fn native_modifier(key: usize, l: isize) -> Option<u16> {
     let extended = (l as usize & (1 << 24)) != 0;
@@ -424,6 +463,21 @@ fn editable_action(value: &str) -> anyhow::Result<ActionId> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn accelerator_labels_preserve_chords() {
+        for (accel, expected) in [
+            ("<Ctrl><Shift>Page_Up", "Ctrl+Shift+Page Up"),
+            ("Ctrl+Shift+KeyP", "Ctrl+Shift+P"),
+            ("<Alt>Left", "Alt+Left"),
+            ("<Alt>1", "Alt+1"),
+            ("<Ctrl>comma", "Ctrl+,"),
+            ("<Alt>equal", "Alt+="),
+            ("F12", "F12"),
+        ] {
+            assert_eq!(super::accelerator_label(accel).unwrap(), expected);
+        }
+        assert!(super::accelerator_label("<Ctrl><Ctrl>p").is_err());
+    }
     use super::*;
     #[test]
     fn native_capture_ignores_modifiers_ime_and_locks_and_validates_physical_chords() {

@@ -4,7 +4,9 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use windows_sys::Win32::System::SystemServices::SS_NOPREFIX;
 use windows_sys::Win32::UI::{
-    Controls::EM_LIMITTEXT,
+    Controls::{
+        DRAWITEMSTRUCT, EM_LIMITTEXT, ODS_FOCUS, ODS_NOFOCUSRECT, ODS_SELECTED, ODT_LISTBOX,
+    },
     Input::KeyboardAndMouse::{EnableWindow, GetFocus, IsWindowEnabled},
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
@@ -112,12 +114,119 @@ unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LP
             }
             return 0;
         }
+        WM_DRAWITEM if l != 0 && draw_entry(&*(l as *const DRAWITEMSTRUCT)) => return 1,
         _ => {}
     }
     if let Some(result) = chrome::message(window, message, w, l) {
         return result;
     }
     DefWindowProcW(window, message, w, l)
+}
+unsafe fn draw_entry(item: &DRAWITEMSTRUCT) -> bool {
+    if item.CtlType != ODT_LISTBOX {
+        return false;
+    }
+    let saved = SaveDC(item.hDC);
+    if saved == 0 {
+        return false;
+    }
+    let palette = chrome::palette();
+    let disabled = IsWindowEnabled(item.hwndItem) == 0;
+    let selected = !disabled && item.itemState & ODS_SELECTED != 0;
+    SetDCBrushColor(
+        item.hDC,
+        if selected {
+            palette.selected
+        } else {
+            palette.surface
+        },
+    );
+    FillRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
+    SelectObject(
+        item.hDC,
+        SendMessageW(item.hwndItem, WM_GETFONT, 0, 0) as HGDIOBJ,
+    );
+    SetBkMode(item.hDC, TRANSPARENT as i32);
+    let length = SendMessageW(item.hwndItem, LB_GETTEXTLEN, item.itemID as usize, 0);
+    if length >= 0 {
+        // Read the native accessible row; the final tab separates the shortcut.
+        // A title can itself contain tabs. Never rewrite its stored codepoints.
+        let mut text = vec![0u16; length as usize + 1];
+        let count = SendMessageW(
+            item.hwndItem,
+            LB_GETTEXT,
+            item.itemID as usize,
+            text.as_mut_ptr() as LPARAM,
+        );
+        if count >= 0 {
+            let text = &text[..count as usize];
+            let split = text
+                .iter()
+                .rposition(|c| *c == b'\t' as u16)
+                .unwrap_or(text.len());
+            let label = chrome::caption_for_paint(&text[..split]);
+            let shortcut = &text[(split + 1).min(text.len())..];
+            let dpi = GetDpiForWindow(item.hwndItem).max(96) as i32;
+            let px = |n| n * dpi / 96;
+            let mut title = RECT {
+                left: item.rcItem.left + px(10),
+                right: item.rcItem.right - px(10),
+                ..item.rcItem
+            };
+            let foreground = if disabled {
+                palette.muted
+            } else if selected && palette.high_contrast {
+                GetSysColor(COLOR_HIGHLIGHTTEXT)
+            } else {
+                palette.foreground
+            };
+            if !shortcut.is_empty() {
+                let mut measured = RECT::default();
+                DrawTextW(
+                    item.hDC,
+                    shortcut.as_ptr(),
+                    shortcut.len() as i32,
+                    &mut measured,
+                    DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT,
+                );
+                let width =
+                    (measured.right - measured.left).min((title.right - title.left).max(0) / 2);
+                let mut hint = RECT {
+                    left: title.right - width,
+                    ..title
+                };
+                title.right = (hint.left - px(12)).max(title.left);
+                SetTextColor(
+                    item.hDC,
+                    if palette.high_contrast {
+                        foreground
+                    } else {
+                        palette.muted
+                    },
+                );
+                DrawTextW(
+                    item.hDC,
+                    shortcut.as_ptr(),
+                    shortcut.len() as i32,
+                    &mut hint,
+                    DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+                );
+            }
+            SetTextColor(item.hDC, foreground);
+            DrawTextW(
+                item.hDC,
+                label.as_ptr(),
+                label.len() as i32,
+                &mut title,
+                DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
+            );
+        }
+    }
+    if item.itemState & ODS_FOCUS != 0 && item.itemState & ODS_NOFOCUSRECT == 0 {
+        DrawFocusRect(item.hDC, &item.rcItem);
+    }
+    RestoreDC(item.hDC, saved);
+    true
 }
 unsafe extern "system" fn list_proc(
     window: HWND,
@@ -247,7 +356,8 @@ impl Panel {
                     | WS_VSCROLL
                     | LBS_NOTIFY as u32
                     | LBS_NOINTEGRALHEIGHT as u32
-                    | LBS_USETABSTOPS as u32,
+                    | LBS_OWNERDRAWFIXED as u32
+                    | LBS_HASSTRINGS as u32,
             )?;
             p.status = p.child("STATIC", "", 30, SS_NOPREFIX)?;
             SendMessageW(p.query, EM_LIMITTEXT, 1024, 0);
@@ -389,11 +499,7 @@ impl Panel {
             SendMessageW(self.list, LB_RESETCONTENT, 0, 0);
             for index in &self.filtered {
                 let entry = &self.entries[*index];
-                let label = if entry.shortcut.is_empty() {
-                    entry.label.clone()
-                } else {
-                    format!("{}\t{}", entry.label, entry.shortcut)
-                };
+                let label = format!("{}\t{}", entry.label, entry.shortcut);
                 SendMessageW(self.list, LB_ADDSTRING, 0, wide(label).as_ptr() as LPARAM);
             }
             if !self.filtered.is_empty() {
@@ -540,8 +646,6 @@ impl Panel {
                 }
             }
             SendMessageW(self.list, LB_SETITEMHEIGHT, 0, px(32) as LPARAM);
-            let tab = (r.right - px(170)).max(px(80)) * 4 / px(7).max(1);
-            SendMessageW(self.list, LB_SETTABSTOPS, 1, &tab as *const i32 as LPARAM);
         }
     }
     pub(super) fn diagnostics(&self) -> Value {

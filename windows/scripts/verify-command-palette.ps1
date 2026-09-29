@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Exact owned hidden HWNDs only. 50s work + bounded cleanup, outer Job60s.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$Capture)
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs')
@@ -88,6 +88,15 @@ function Double-Metadata($Tree,[string]$Id){
     return $tree
 }
 function Passed([string]$Name){$script:checks+=$Name}
+function Capture-Palette($Tree,[string]$Name,[string]$Foreground,[string]$Muted){
+    $panel=Palette $Tree;$bounds=[OptionsFixture]::RelativeBounds([long]$panel.window,[long]$panel.list_handle,$owned.Id)
+    $bmp=Join-Path $directory ($Name+'.bmp');$result=Request @('chrome-capture',$bmp)
+    Require ($result.root_handle -eq $panel.window -and $result.subtree) 'Capture did not use the real owned palette'
+    $scale=[OptionsFixture]::Describe([long]$panel.window,$owned.Id).Dpi/96.0;$height=[int](32*$scale);$half=[int]($bounds.Width/2)
+    Require ([ChromeFixture]::ColorCount($bmp,$bounds.X,$bounds.Y,$half,$height,$Foreground) -gt 5) 'Palette painter omitted the command title'
+    if($Muted){Require ([ChromeFixture]::ColorCount($bmp,($bounds.X+$half),$bounds.Y,($bounds.Width-$half),$height,$Muted) -gt 5) 'Palette painter omitted the separate right-side shortcut'}
+    [ChromeFixture]::Png($bmp,(Join-Path $directory ($Name+'.png')));Remove-Item -LiteralPath $bmp
+}
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
     $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$terminalDirectory),$terminalDirectory,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();
@@ -107,6 +116,18 @@ try {
     $tree=Open-Palette $split.surface;$panel=Palette $tree;$popup=[OptionsFixture]::Describe([long]$panel.window,$owned.Id)
     Require ($panel.modal -and -not $panel.native_visible -and -not $panel.owner_enabled -and $popup.Owner -eq $tree.window_handle -and -not $popup.OwnerEnabled) 'Palette is not the exact hidden modal owned by this host'
     Require ([OptionsFixture]::Parent([long]$panel.query_handle,$owned.Id) -eq $panel.window -and [OptionsFixture]::Parent([long]$panel.list_handle,$owned.Id) -eq $panel.window) 'Palette controls belong to another window'
+    $listStyle=[OptionsFixture]::Describe([long]$panel.list_handle,$owned.Id).Style
+    Require (($listStyle -band 0x50) -eq 0x50 -and ($listStyle -band 0x80) -eq 0) 'Palette must retain native accessible strings and draw distinct title/shortcut columns'
+    Require (@($panel.entries|Where-Object {$_.id -ceq 'action:split-right' -and $_.shortcut -ceq 'Ctrl+Shift+Page Up'}).Count -eq 1) 'Palette exposes stored GTK syntax instead of readable shortcut labels'
+    if($Capture){
+        $originalSize=[ChromeFixture]::Size([long]$panel.window,$owned.Id);$tree=Query $tree 'split'
+        Capture-Palette $tree 'palette-dark' '#f2f3f5' '#abb1bc'
+        [ChromeFixture]::Resize([long]$panel.window,$owned.Id,400,300);$tree=Tree;Capture-Palette $tree 'palette-narrow-dark' '#f2f3f5' '#abb1bc'
+        Request @('settings','set','theme','light')|Out-Null;$tree=Await {param($t) $t.chrome.theme -eq 'light'};Capture-Palette $tree 'palette-narrow-light' '#28282b' '#5f6269'
+        Request @('settings','set','theme','dark')|Out-Null;$tree=Await {param($t) $t.chrome.theme -eq 'dark'}
+        [ChromeFixture]::Resize([long]$panel.window,$owned.Id,$originalSize[0],$originalSize[1]);$tree=Query $tree ''
+        Passed 'production-palette-title-and-shortcut-paint-at-default-and-narrow-widths-in-both-themes'
+    }
     Require (@($panel.entries|Where-Object {$_.id -match '^action:workspace-[3-8]$'}).Count -eq 0) 'Palette exposes nonexistent numbered workspaces'
     Require (@($panel.entries|Where-Object {$_.id -ceq ('workspace:'+$initial.workspace) -and $_.label -ceq ('Workspace: '+$workspaceName)}).Count -eq 1) 'Korean/NFD workspace label changed'
     $tree=Query $tree '한 작';$tree=Select-Entry $tree ('workspace:'+$initial.workspace);Execute $tree;$tree=Closed;Same-Identity $initial;Owner-Restored $tree
@@ -125,6 +146,7 @@ try {
     [OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.query_handle,$owned.Id,$raw)
     $tree=Await {param($t) $t.command_palette.composing -and $t.command_palette.query -ceq $raw};Execute $tree;[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id)
     $tree=Tree;Require ($tree.command_palette.open -and $tree.command_palette.composing -and $tree.command_palette.query -ceq $raw -and (@($tree.command_palette.filtered)-join ',') -ceq $beforeFiltered -and (Identities $tree) -ceq $identities) 'Composing input ran a command, closed, filtered, or changed Unicode text'
+    if($Capture){Capture-Palette $tree 'palette-composing' '#abb1bc' ''}
     [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.query_handle,$owned.Id,$false)
     $tree=Await {param($t) -not $t.command_palette.composing -and $t.command_palette.settling};[OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,229,$true,$false)
     $tree=Await {param($t) -not $t.command_palette.settling};$tree=Query $tree '';$tree=Select-Entry $tree 'action:new-surface';$panel=Palette $tree
@@ -317,7 +339,7 @@ finally{
         $hostLog=@{pid=$owned.Id;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)};$owned.Dispose()
     }
     if($failure -or $cleanupErrors.Count){$path=Join-Path $directory 'failure.json';@{error=$failure;cleanupErrors=$cleanupErrors;passed=$checks;lastTree=$last;command=$commandFailure;host=$hostLog;scope='Hidden owned HWND messages; physical Korean IME/focus not exercised'}|ConvertTo-Json -Depth 30|Set-Content -Encoding UTF8 $path;Write-Output ('Failure diagnostics: '+$path)}
-    else{Remove-Item -LiteralPath $directory -Recurse -Force}
+    elseif(-not $Capture){Remove-Item -LiteralPath $directory -Recurse -Force}
 }
 if($failure){throw $failure};if($cleanupErrors.Count){throw ($cleanupErrors -join '; ')}
 Write-Output ('Command Palette passed: '+$checks.Count+' groups in '+[Math]::Round($clock.Elapsed.TotalSeconds,3)+'s; hidden guards only, no physical IME/focus acceptance')
