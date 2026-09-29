@@ -20,6 +20,7 @@ use windows_sys::Win32::{
 const SEARCH: usize = 4;
 const LIST: usize = 5;
 const RESUME: usize = 7;
+const SPLITTER: usize = 9;
 const INPUT_SUBCLASS: usize = 0x464d5353;
 #[derive(Clone, Debug)]
 pub(super) enum UiAction {
@@ -29,6 +30,7 @@ pub(super) enum UiAction {
     Select(String),
     Resume(String),
     Layout,
+    Resize(i32),
 }
 #[derive(Clone, PartialEq)]
 struct Row {
@@ -62,6 +64,23 @@ struct Route {
 thread_local! {static ROUTES: RefCell<HashMap<isize,Route>> = RefCell::new(HashMap::new());}
 fn route(window: HWND) -> Option<Route> {
     ROUTES.with(|routes| routes.borrow().get(&(window as isize)).cloned())
+}
+pub(super) fn splitter_target(window: HWND) -> Option<Uuid> {
+    unsafe {
+        if GetDlgCtrlID(window) != SPLITTER as i32
+            || GetWindowLongPtrW(window, GWL_STYLE) as u32 & WS_VISIBLE == 0
+            || !enabled(window)
+        {
+            return None;
+        }
+        ROUTES.with(|routes| {
+            routes
+                .borrow()
+                .get(&(GetParent(window) as isize))
+                .filter(|r| r.open)
+                .map(|r| r.id)
+        })
+    }
 }
 fn read(window: HWND) -> String {
     unsafe {
@@ -424,7 +443,10 @@ pub(super) struct Panel {
     message: HWND,
     search: HWND,
     list: HWND,
+    splitter: HWND,
     preview: HWND,
+    preview_dip: Cell<i32>,
+    preview_limit: Cell<i32>,
     refresh: HWND,
     close: HWND,
     resume: HWND,
@@ -440,6 +462,7 @@ impl Drop for Panel {
             self.message,
             self.search,
             self.list,
+            self.splitter,
             self.preview,
             self.refresh,
             self.close,
@@ -456,7 +479,12 @@ impl Drop for Panel {
     }
 }
 impl Panel {
-    pub(super) fn new(owner: HWND, background: bool, id: Uuid) -> anyhow::Result<Self> {
+    pub(super) fn new(
+        owner: HWND,
+        background: bool,
+        id: Uuid,
+        preview_dip: i32,
+    ) -> anyhow::Result<Self> {
         unsafe {
             anyhow::ensure!(IsWindow(owner) != 0, "Session panel owner is unavailable");
             let class = wide("flowmux.windows.sessions");
@@ -496,6 +524,9 @@ impl Panel {
                 message: std::ptr::null_mut(),
                 search: std::ptr::null_mut(),
                 list: std::ptr::null_mut(),
+                splitter: std::ptr::null_mut(),
+                preview_dip: Cell::new(preview_dip.max(150)),
+                preview_limit: Cell::new(0),
                 preview: std::ptr::null_mut(),
                 refresh: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
@@ -541,6 +572,12 @@ impl Panel {
                     | LBS_NOINTEGRALHEIGHT as u32
                     | LBS_OWNERDRAWFIXED as u32
                     | LBS_HASSTRINGS as u32,
+            )?;
+            panel.splitter = panel.child(
+                "BUTTON",
+                "Resize conversation preview (Up/Down; Home resets)",
+                SPLITTER,
+                WS_TABSTOP | BS_OWNERDRAW as u32,
             )?;
             panel.preview = panel.child(
                 "EDIT",
@@ -713,6 +750,23 @@ impl Panel {
         self.layout(self.area.get());
         Ok(())
     }
+    pub(super) fn preview_height(&self) -> Option<i32> {
+        splitter_target(self.splitter)?;
+        let mut rect = RECT::default();
+        unsafe {
+            GetWindowRect(self.preview, &mut rect);
+        }
+        Some(rect.bottom - rect.top)
+    }
+    pub(super) fn resize_preview(&self, height: i32) -> i32 {
+        let dpi = unsafe { GetDpiForWindow(self.window).max(96) } as i32;
+        self.preview_dip
+            .set((height.saturating_mul(96) / dpi).clamp(
+                150,
+                (self.preview_limit.get().saturating_mul(96) / dpi).max(150),
+            ));
+        self.preview_dip.get()
+    }
     pub(super) fn layout(&self, rect: Option<model::Rect>) {
         self.area.set(rect);
         ROUTES.with(|routes| {
@@ -765,14 +819,30 @@ impl Panel {
         place(self.search, margin, search_y, inner, p(28));
         let content_top = search_y + p(28 + 8);
         let available = (resume_y - gap - content_top).max(0);
-        let preview_height = p(150).min((available - p(80) - gap).max(0));
-        let list_height =
-            (available - preview_height - if preview_height > 0 { gap } else { 0 }).max(0);
+        let splitter_height = p(5);
+        let preview_limit = (available - p(140) - splitter_height).max(0);
+        self.preview_limit.set(preview_limit);
+        let preview_height = p(self.preview_dip.get()).min(preview_limit);
+        let list_height = (available
+            - preview_height
+            - if preview_height > 0 {
+                splitter_height
+            } else {
+                0
+            })
+        .max(0);
         place(self.list, margin, content_top, inner, list_height);
+        place(
+            self.splitter,
+            margin,
+            content_top + list_height,
+            inner,
+            splitter_height,
+        );
         place(
             self.preview,
             margin,
-            content_top + list_height + gap,
+            content_top + list_height + splitter_height,
             inner,
             preview_height,
         );
@@ -786,6 +856,7 @@ impl Panel {
             for (window, show) in [
                 (self.list, list_height > 0),
                 (self.preview, preview_height > 0),
+                (self.splitter, preview_limit > p(150)),
                 (self.message, height >= p(160)),
                 (self.search, height >= p(160)),
                 (self.heading, height >= p(68)),
@@ -818,6 +889,21 @@ impl Panel {
                 || (message.hwnd != self.window && IsChild(self.window, message.hwnd) == 0)
             {
                 return false;
+            }
+            if message.message == WM_KEYDOWN
+                && message.hwnd == self.splitter
+                && splitter_target(self.splitter).is_some()
+                && matches!(message.wParam, 36 | 38 | 40)
+            {
+                emit(
+                    self.window,
+                    UiAction::Resize(match message.wParam {
+                        38 => 20,
+                        40 => -20,
+                        _ => 0,
+                    }),
+                );
+                return true;
             }
             if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
                 if r.composing || r.settling || message.lParam & (1 << 30) != 0 {
@@ -858,6 +944,7 @@ impl Panel {
         for (window, kind) in [
             (self.refresh, chrome::ChromeIcon::Reload),
             (self.close, chrome::ChromeIcon::Close),
+            (self.splitter, chrome::ChromeIcon::More),
         ] {
             chrome::register_button(
                 window,
@@ -881,6 +968,6 @@ impl Panel {
     pub(super) fn status(&self) -> Value {
         let r = route(self.window);
         let rows:Vec<_>=r.as_ref().map(|r|r.filtered.iter().enumerate().map(|(index,i)|{let row=&r.rows[*i];json!({"index":index,"id":row.id,"agent":row.agent,"title":row.title,"project":row.project,"updated":row.updated,"text":row.caption,"color":row.color,"selected":r.selected.as_ref()==Some(&row.id)})}).collect()).unwrap_or_default();
-        json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"open":self.area.get().is_some(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":self.area.get(),"query":read(self.search),"filter":r.as_ref().map(|r|&r.query),"query_handle":self.search as usize,"list":self.list as usize,"preview":self.preview as usize,"preview_text":read(self.preview),"preview_bounds":geometry(self.preview,self.window),"refresh":self.refresh as usize,"close":self.close as usize,"refresh_tooltip":chrome::tooltip_text(self.refresh),"close_tooltip":chrome::tooltip_text(self.close),"resume":self.resume as usize,"resume_enabled":unsafe{IsWindowEnabled(self.resume)!=0},"loading":r.as_ref().is_some_and(|r|r.loading),"selected":r.as_ref().and_then(|r|r.selected.as_ref()),"composing":r.as_ref().is_some_and(|r|r.composing),"status":self.status_text,"rows":rows})
+        json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"open":self.area.get().is_some(),"native_visible":unsafe{IsWindowVisible(self.window)!=0},"bounds":self.area.get(),"query":read(self.search),"filter":r.as_ref().map(|r|&r.query),"query_handle":self.search as usize,"list":self.list as usize,"preview":self.preview as usize,"splitter":self.splitter as usize,"splitter_tooltip":chrome::tooltip_text(self.splitter),"preview_text":read(self.preview),"preview_bounds":geometry(self.preview,self.window),"refresh":self.refresh as usize,"close":self.close as usize,"refresh_tooltip":chrome::tooltip_text(self.refresh),"close_tooltip":chrome::tooltip_text(self.close),"resume":self.resume as usize,"resume_enabled":unsafe{IsWindowEnabled(self.resume)!=0},"loading":r.as_ref().is_some_and(|r|r.loading),"selected":r.as_ref().and_then(|r|r.selected.as_ref()),"composing":r.as_ref().is_some_and(|r|r.composing),"status":self.status_text,"rows":rows})
     }
 }

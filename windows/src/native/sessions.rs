@@ -43,6 +43,7 @@ pub(super) struct Controller {
     preview: String,
     status: String,
     resume_enabled: bool,
+    preview_height_dip: i32,
     pending: Option<Task>,
     job: Option<Job>,
     next_probe: Option<Instant>,
@@ -212,6 +213,7 @@ impl App {
     pub(super) fn toggle_sessions(&mut self) -> anyhow::Result<()> {
         self.sessions_guard()?;
         if self.sessions.open {
+            self.cancel_drag();
             self.sessions.shutdown();
         } else {
             self.sessions.id = Uuid::new_v4();
@@ -219,6 +221,7 @@ impl App {
                 self.window,
                 self.background_test,
                 self.sessions.id,
+                self.sessions.preview_height_dip,
             )?);
             self.sessions.open = true;
             self.sessions.source = None;
@@ -238,9 +241,29 @@ impl App {
             ((360.0 * scale).round() as i32).min(available)
         }
     }
-    pub(super) fn sessions_layout(&self, area: Option<model::Rect>) {
+    pub(super) fn sessions_preview_height(&self, id: Uuid) -> Option<i32> {
+        if !self.sessions.open || self.sessions.id != id {
+            return None;
+        }
+        self.sessions.panel.as_ref()?.preview_height()
+    }
+    pub(super) fn sessions_resize_preview(&mut self, id: Uuid, height: i32) -> anyhow::Result<()> {
+        if self.sessions_preview_height(id).is_none() {
+            self.cancel_drag();
+            return Ok(());
+        }
+        self.sessions.preview_height_dip =
+            self.sessions.panel.as_ref().unwrap().resize_preview(height);
+        self.layout()
+    }
+    pub(super) fn sessions_layout(&mut self, area: Option<model::Rect>) {
         if let Some(panel) = &self.sessions.panel {
             panel.layout(area);
+        }
+        if matches!(self.drag, Some(panes::Drag::Sessions { .. }))
+            && self.sessions_preview_height(self.sessions.id).is_none()
+        {
+            self.cancel_drag();
         }
     }
     fn sessions_render(&mut self) -> anyhow::Result<()> {
@@ -404,11 +427,23 @@ impl App {
                 }
                 match action {
                     UiAction::Close => {
+                        self.cancel_drag();
                         self.sessions.shutdown();
                         self.focus_active()?;
                         return self.layout();
                     }
                     UiAction::Layout => return self.layout(),
+                    UiAction::Resize(delta) => {
+                        if let Some(height) = self.sessions_preview_height(id) {
+                            let dpi = unsafe { GetDpiForWindow(self.window).max(96) } as i32;
+                            let height = if delta == 0 {
+                                150 * dpi / 96
+                            } else {
+                                height + delta * dpi / 96
+                            };
+                            return self.sessions_resize_preview(id, height);
+                        }
+                    }
                     UiAction::Filter(query) => {
                         let selected = self.sessions.panel.as_ref().and_then(|p| p.selected());
                         if selected != self.sessions.selected {

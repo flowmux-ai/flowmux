@@ -189,16 +189,24 @@ fn post(event: Event) {
 unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
     if !matches!(
         message,
-        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEMOVE | WM_LBUTTONUP
+        WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEMOVE | WM_LBUTTONUP | WM_SETCURSOR
     ) {
         return false;
     }
     let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(window as isize)).cloned());
     let agent = agent_bar::target(window);
-    if !matches!(action, Some(Action::Tab(..) | Action::Workspace(_))) && agent.is_none() {
+    let sessions = session_panel::splitter_target(window);
+    if message == WM_SETCURSOR {
+        if sessions.is_some() && IsWindowVisible(window) != 0 {
+            SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_SIZENS));
+            return true;
+        }
         return false;
     }
-    let parent = if agent.is_some() {
+    if !matches!(action, Some(Action::Tab(..) | Action::Workspace(_))) && agent.is_none() && sessions.is_none() {
+        return false;
+    }
+    let parent = if agent.is_some() || sessions.is_some() {
         GetAncestor(window, GA_ROOT)
     } else {
         GetParent(window)
@@ -210,6 +218,7 @@ unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
     MapWindowPoints(window, parent, &mut point, 1);
     if IsWindowEnabled(parent) != 0 {
         post(Event::Pointer(match message {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if sessions.is_some() => panes::Pointer::SessionsDown(sessions.unwrap(), point.y),
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if agent.is_some() => panes::Pointer::AgentDown {
                 surface: agent.unwrap(),
                 x: point.x,
@@ -1046,6 +1055,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                         | panes::Drag::Workspace { .. }
                         | panes::Drag::Agent { .. }
                         | panes::Drag::Activity { .. }
+                        | panes::Drag::Sessions { .. }
                 )
             )
         {

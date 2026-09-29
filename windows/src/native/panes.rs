@@ -67,6 +67,7 @@ unsafe fn divider_cursor(direction: SplitDirection) {
 pub(super) enum Pointer {
     Down(i32, i32),
     ActivityDown(i32),
+    SessionsDown(Uuid, i32),
     TabDown {
         pane: PaneId,
         surface: SurfaceId,
@@ -91,6 +92,11 @@ pub(super) enum Pointer {
 
 #[derive(Clone, Copy)]
 pub(super) enum Drag {
+    Sessions {
+        id: Uuid,
+        start_y: i32,
+        start_height: i32,
+    },
     Activity {
         start_y: i32,
         start_height: i32,
@@ -213,6 +219,21 @@ impl App {
             return Ok(());
         }
         match pointer {
+            Pointer::SessionsDown(id, y) => {
+                self.cancel_drag();
+                if let Some(height) = self.sessions_preview_height(id) {
+                    self.drag = Some(Drag::Sessions {
+                        id,
+                        start_y: y,
+                        start_height: height,
+                    });
+                    if !self.background_test {
+                        unsafe {
+                            SetCapture(self.window);
+                        }
+                    }
+                }
+            }
             Pointer::ActivityDown(y) => {
                 self.cancel_drag();
                 if let Some(bar) = self.agent_bar.as_ref().filter(|bar| bar.activity) {
@@ -490,6 +511,14 @@ impl App {
                 }
                 if let Some(drag) = self.drag {
                     let direction = match drag {
+                        Drag::Sessions {
+                            id,
+                            start_y,
+                            start_height,
+                        } => {
+                            self.sessions_resize_preview(id, start_height + start_y - y)?;
+                            SplitDirection::Horizontal
+                        }
                         Drag::Activity {
                             start_y,
                             start_height,
