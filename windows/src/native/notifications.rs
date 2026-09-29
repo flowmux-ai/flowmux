@@ -170,7 +170,8 @@ impl App {
             && source.is_some_and(|id| {
                 self.current_surface() == Some(id)
                     && (self.surfaces.get(&id).is_some_and(|s| s.visible)
-                        || self.browsers.get(&id).is_some_and(|s| s.visible))
+                        || self.browsers.get(&id).is_some_and(|s| s.visible)
+                        || self.editors.get(&id).is_some_and(|s| s.view.visible))
             })
     }
     pub(super) fn add_notification(

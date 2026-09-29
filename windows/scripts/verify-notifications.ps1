@@ -298,6 +298,27 @@ try {
     if($after.surface -ne $before.surface -or $notes.unread_count -ne 2 -or $notes.desktop.native_calls -ne 0){throw 'Unknown desktop callback changed the active tab, unread state or native delivery'}
     Request @('notifications','clear')|Out-Null
     $evidence.checks+=@{name='system_notifications_toggle_preserves_bell_and_hidden_hosts_never_call_Shell_and_ignore_unknown_callbacks';passed=$true}
+    $editorPath=Join-Path $directory '알림_한_😀.txt'
+    [IO.File]::WriteAllText($editorPath,'한글 알림 원본 é 😀',(New-Object Text.UTF8Encoding($false)))
+    $editor=Request @('editor','open',$editorPath,'--pane',$target.pane,'--root',$directory)
+    $editorSurface=$editor.editor_opened.surface;$deadline=(Get-Date).AddSeconds(5)
+    do {
+        $tree=Tree;$view=@($tree.editors|Where-Object {$_.surface -eq $editorSurface})
+        if($view.Count -eq 1 -and $view[0].ready -and $view[0].visible){break}
+        if((Get-Date) -gt $deadline){throw 'Owned editor notification target exceeded five seconds'}
+        Start-Sleep -Milliseconds 20
+    } while($true)
+    $editorNotice=Request @('notify','--surface',$editorSurface,'--title',$title,$body)
+    Request @('focus-tab',$target.surface)|Out-Null
+    Request @('focus-tab',$editorSurface)|Out-Null
+    $notes=Request @('notifications','list')
+    if(-not $editorNotice.accepted -or $editorNotice.desktop_delivery -ne 'background_suppressed' -or $notes.unread_count -ne 1 -or $notes.entries[0].body -cne $body -or $notes.desktop.native_calls -ne 0){throw 'Hidden editor focus acknowledged an unseen notice, changed Unicode, or called Windows Shell'}
+    Request @('focus-tab',$target.surface)|Out-Null
+    Request @('notifications','open',$editorNotice.id)|Out-Null
+    if((Request @('identify')).surface -ne $editorSurface -or (Request @('notifications','list')).unread_count -ne 0 -or [IO.File]::ReadAllText($editorPath) -cne '한글 알림 원본 é 😀'){throw 'Notification failed to activate its original editor or changed its file'}
+    Request @('close-tab',$editorSurface)|Out-Null
+    Request @('notifications','clear')|Out-Null
+    $evidence.checks+=@{name='hidden_editor_notifications_preserve_unicode_unread_guard_and_reopen_original_tab';passed=$true;scope='Background delivery and routing only; foreground auto-acknowledgement requires a visible window.'}
     $otherDirectory=Join-Path $directory 'other';[IO.Directory]::CreateDirectory($otherDirectory)|Out-Null
     $otherProcess=[CliProbe]::Start($gui,@('--temporary','--shell=cmd'),$otherDirectory,$otherDirectory)
     $otherOut=$otherProcess.StandardOutput.ReadToEndAsync();$otherErr=$otherProcess.StandardError.ReadToEndAsync()
