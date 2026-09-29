@@ -86,6 +86,28 @@ impl SessionAgent {
         }
     }
 
+    /// Only validated native IDs can become terminal input; transcript text never can.
+    pub fn resume_argv(self, session_id: &str) -> io::Result<Vec<String>> {
+        let id = self.canonical_session_id(session_id)?;
+        if self == SessionAgent::OpenCode {
+            return Ok(vec!["opencode".into(), "--session".into(), id]);
+        }
+        Ok(match self {
+            SessionAgent::Claude => vec!["claude".into(), "--resume".into(), id.to_string()],
+            SessionAgent::Codex => vec!["codex".into(), "resume".into(), id.to_string()],
+            SessionAgent::Antigravity => {
+                vec!["agy".into(), "--conversation".into(), id.to_string()]
+            }
+            SessionAgent::Cline => vec![
+                "cline".into(),
+                "--id".into(),
+                id.to_string(),
+                "--tui".into(),
+            ],
+            SessionAgent::OpenCode => unreachable!(),
+        })
+    }
+
     pub fn history_home(self, value: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
         let nonempty = |key: &str| value(key).filter(|p| !p.as_os_str().is_empty());
         let value = nonempty;
@@ -124,26 +146,8 @@ pub struct HistorySession {
 }
 
 impl HistorySession {
-    /// Only validated native IDs can become terminal input; transcript text never can.
     pub fn resume_argv(&self) -> io::Result<Vec<String>> {
-        let id = self.agent.canonical_session_id(&self.id)?;
-        if self.agent == SessionAgent::OpenCode {
-            return Ok(vec!["opencode".into(), "--session".into(), id]);
-        }
-        Ok(match self.agent {
-            SessionAgent::Claude => vec!["claude".into(), "--resume".into(), id.to_string()],
-            SessionAgent::Codex => vec!["codex".into(), "resume".into(), id.to_string()],
-            SessionAgent::Antigravity => {
-                vec!["agy".into(), "--conversation".into(), id.to_string()]
-            }
-            SessionAgent::Cline => vec![
-                "cline".into(),
-                "--id".into(),
-                id.to_string(),
-                "--tui".into(),
-            ],
-            SessionAgent::OpenCode => unreachable!(),
-        })
+        self.agent.resume_argv(&self.id)
     }
 
     pub fn preview(&self, cancel: &AtomicBool, deadline: Instant) -> io::Result<String> {

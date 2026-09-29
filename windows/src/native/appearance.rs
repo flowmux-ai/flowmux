@@ -46,6 +46,9 @@ impl App {
                         self.settings.terminal.zoom_percent != document.terminal.zoom_percent;
                     self.settings = document;
                     self.sync_desktop_notifications();
+                    if !self.settings.terminal.auto_resume_agent_sessions {
+                        self.restore_agents.clear();
+                    }
                     if !self.settings.terminal.restore_terminal_scrollback {
                         self.restore_screens.clear();
                         if let Some(pending) = self

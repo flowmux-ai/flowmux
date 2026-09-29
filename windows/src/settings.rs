@@ -13,6 +13,7 @@ pub enum SettingKey {
     ZoomPercent,
     PersistBrowserSession,
     RestoreTerminalScrollback,
+    AutoResumeAgentSessions,
     Theme,
     ThemePreset,
     ThemeBackground,
@@ -117,6 +118,7 @@ pub struct TerminalSettings {
     pub zoom_percent: u16,
     pub persist_browser_session: bool,
     pub restore_terminal_scrollback: bool,
+    pub auto_resume_agent_sessions: bool,
     pub theme: Theme,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_preset: Option<String>,
@@ -144,6 +146,7 @@ impl Default for TerminalSettings {
             font_size: 14,
             zoom_percent: flowmux_config::options::ZOOM_DEFAULT,
             persist_browser_session: flowmux_config::options::PERSIST_BROWSER_SESSION_DEFAULT,
+            auto_resume_agent_sessions: flowmux_config::options::AUTO_RESUME_AGENT_SESSIONS_DEFAULT,
             restore_terminal_scrollback:
                 flowmux_config::options::RESTORE_TERMINAL_SCROLLBACK_DEFAULT,
             theme: Theme::Dark,
@@ -229,6 +232,7 @@ impl TerminalSettings {
             SettingKey::ZoomPercent => self.zoom_percent.to_string(),
             SettingKey::PersistBrowserSession => self.persist_browser_session.to_string(),
             SettingKey::RestoreTerminalScrollback => self.restore_terminal_scrollback.to_string(),
+            SettingKey::AutoResumeAgentSessions => self.auto_resume_agent_sessions.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
             SettingKey::CursorBlinkIntervalMs => self.cursor_blink_interval_ms.to_string(),
@@ -334,6 +338,11 @@ impl TerminalSettings {
                 next.persist_browser_session = value
                     .parse()
                     .context("browser persistence must be true or false")?;
+            }
+            SettingKey::AutoResumeAgentSessions => {
+                next.auto_resume_agent_sessions = value
+                    .parse()
+                    .context("agent session resume must be true or false")?;
             }
             SettingKey::RestoreTerminalScrollback => {
                 next.restore_terminal_scrollback = value
@@ -486,6 +495,7 @@ mod tests {
             (SettingKey::FontFamily, "bad\nfont"),
             (SettingKey::Theme, "unknown"),
             (SettingKey::CursorBlink, "yes"),
+            (SettingKey::AutoResumeAgentSessions, "yes"),
             (SettingKey::CursorStyle, "none"),
             (SettingKey::MinimapEnabled, "yes"),
             (SettingKey::MinimapWidth, "11"),
@@ -531,6 +541,13 @@ mod tests {
         );
         assert!(old.terminal.persist_browser_session);
         assert!(old.terminal.restore_terminal_scrollback);
+        assert!(old.terminal.auto_resume_agent_sessions);
+        assert!(
+            !old.terminal
+                .changed(SettingKey::AutoResumeAgentSessions, "false", None)
+                .unwrap()
+                .auto_resume_agent_sessions
+        );
         assert!(old.terminal.system_notifications_enabled);
         assert!(
             !old.terminal

@@ -122,9 +122,18 @@ fn resume_shell(
         agent.session_id.as_deref() != Some(&item.id),
         "This session is already active in the focused tab"
     );
-    let mut args = agent.prefix.clone();
-    args.extend(item.resume_argv()?.into_iter().skip(1));
-    args.extend(agent.arguments.iter().cloned());
+    restored_shell(&agent.saved_session(&item.id, &item.cwd)?, normal)
+}
+
+pub(super) fn restored_shell(
+    saved: &crate::state::SavedAgentSession,
+    normal: &crate::shell::Shell,
+) -> anyhow::Result<crate::shell::Shell> {
+    saved.validate()?;
+    anyhow::ensure!(
+        saved.cwd.is_dir(),
+        "The session project directory is unavailable"
+    );
     let normal = super::super::shell::resolve(normal)?;
     let normal_args = normal
         .command
@@ -133,8 +142,8 @@ fn resume_shell(
         ))
         .context("Invalid configured shell command")?
         .trim_start();
-    let payload = json!({"program":agent.executable,"args":args.iter().map(|a|crate::shell::quote_arg(a)).collect::<Vec<_>>().join(" "),
-        "cwd":item.cwd,"environment":agent.environment,"unset":agent.agent.home_variables(),
+    let payload = json!({"program":saved.launch.program,"args":saved.launch.args.iter().map(|a|crate::shell::quote_arg(a)).collect::<Vec<_>>().join(" "),
+        "cwd":saved.cwd,"environment":saved.environment,"unset":saved.agent.home_variables(),
         "shell":normal.executable,"shell_args":normal_args,"cmd_prompt":normal.cmd_prompt});
     let data = base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&payload)?);
     let script = format!(

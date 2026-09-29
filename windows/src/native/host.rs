@@ -664,6 +664,7 @@ struct App {
     last_new_window_pid: Option<u32>,
     store: Option<Arc<Store>>,
     restore_screens: HashMap<SurfaceId, SavedScreen>,
+    restore_agents: HashMap<SurfaceId, crate::state::SavedAgentSession>,
     pending_save: Option<PendingSave>,
     close_request: Option<CloseRequest>,
     last_save_attempt: Instant,
@@ -709,6 +710,10 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         cwd.display()
     );
     let restoring_window = restored.is_some();
+    let restore_agents = restored
+        .as_ref()
+        .map(|state| state.agent_sessions.clone())
+        .unwrap_or_default();
     let restore_detached = restored
         .as_ref()
         .map(|state| state.detached_windows.clone())
@@ -959,6 +964,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             background_test,
             store,
             restore_screens,
+            restore_agents,
             pending_save: None,
             close_request: None,
             last_save_attempt: Instant::now(),
@@ -2353,6 +2359,8 @@ impl App {
                     .restore_screens
                     .remove(&id)
                     .filter(|_| self.settings.terminal.restore_terminal_scrollback)
+                    .filter(|_| !(self.settings.terminal.auto_resume_agent_sessions
+                        && self.restore_agents.contains_key(&id)))
                 {
                     surface.send(&HostMessage::Restore { screen })?;
                     self.surfaces.get_mut(&id).unwrap().restoring = true;
@@ -2758,6 +2766,14 @@ impl App {
             .startup_shells
             .remove(&id)
             .unwrap_or_else(|| self.shells[&id].clone());
+        if let Some(saved) = self.restore_agents.remove(&id)
+            .filter(|_| self.settings.terminal.auto_resume_agent_sessions && !remote)
+        {
+            match sessions::restored_shell(&saved, &shell) {
+                Ok(resume) => shell = resume,
+                Err(error) => report(&format!("Cannot resume saved agent session: {error:#}")),
+            }
+        }
         if remote {
             let command = shell.args.last_mut().context("SSH bootstrap is missing")?;
             *command = format!("printf '\\033]777;flowmux-ssh-ready;{generation}\\007'; {command}");
@@ -2872,6 +2888,7 @@ impl App {
                 waiting.insert(*id, after);
             }
         }
+        let agent_sessions = self.saved_agent_sessions();
         self.pending_save = Some(PendingSave {
             id: request,
             state: WindowState {
@@ -2884,6 +2901,7 @@ impl App {
                     .map(|workspace| workspace.id),
                 screens: HashMap::new(),
                 shells: self.shells.clone(),
+                agent_sessions,
                 sidebar_width_dip: self.sidebar_width_dip,
                 detached_windows,
                 main_closed: self.main_closed,
@@ -3200,6 +3218,7 @@ impl App {
         self.browsers.remove(&surface);
         self.shells.remove(&surface);
         self.startup_shells.remove(&surface);
+        self.restore_agents.remove(&surface);
         self.ssh_attempted.remove(&surface);
         self.surfaces.remove(&surface);
         if self

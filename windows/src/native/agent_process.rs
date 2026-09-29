@@ -33,6 +33,25 @@ pub(super) struct AgentProcess {
     pub arguments: Vec<String>,
     pub session_id: Option<String>,
 }
+impl AgentProcess {
+    pub fn saved_session(&self, id: &str, cwd: &Path) -> Result<crate::state::SavedAgentSession> {
+        let mut args = self.prefix.clone();
+        args.extend(self.agent.resume_argv(id)?.into_iter().skip(1));
+        args.extend(self.arguments.iter().cloned());
+        let saved = crate::state::SavedAgentSession {
+            agent: self.agent,
+            session_id: self.agent.canonical_session_id(id)?,
+            launch: crate::shell::Shell {
+                program: self.executable.to_string_lossy().into_owned(),
+                args,
+            },
+            cwd: cwd.to_owned(),
+            environment: self.environment.clone(),
+        };
+        saved.validate()?;
+        Ok(saved)
+    }
+}
 
 const MAX_PIDS: usize = 256;
 const MAX_ENVIRONMENT: usize = 256 * 1024;

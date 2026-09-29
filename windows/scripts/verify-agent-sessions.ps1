@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Actual owned agent process, child-only home and native history UI; no account access.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$HooksOnly,[switch]$SessionsOnly)
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$HooksOnly,[switch]$SessionsOnly,[switch]$RestoreOnly)
 if(-not $env:FLOWMUX_TEST_ARTIFACT_ROOT){throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.'}
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -77,6 +77,17 @@ function Write-History([string]$HistoryHome,[string]$Id,[string]$Cwd,[string]$Ti
  $records=@(@{type='session_meta';payload=@{id=$Id;cwd=$Cwd;source='cli'}},@{type='response_item';payload=@{type='message';role='developer';content=@(@{type='input_text';text='PRIVATE_SYSTEM_NEVER_PREVIEW'})}},@{type='response_item';payload=@{type='function_call';arguments='PRIVATE_TOOL_NEVER_PREVIEW'}},@{type='response_item';payload=@{type='message';role='user';content=@(@{type='input_text';text=('질문 한 é 😀 '+$Id)})}},@{type='response_item';payload=@{type='message';role='assistant';content=@(@{type='output_text';text="답변 한글`n두 번째 줄"})}},@{type='event_msg';payload=@{type='agent_message';message='PRIVATE_EVENT_NEVER_PREVIEW'}})
  [IO.File]::WriteAllLines($path,[string[]]@($records|ForEach-Object {$_|ConvertTo-Json -Depth 10 -Compress}),$utf8);[IO.File]::AppendAllText((Join-Path $HistoryHome 'session_index.jsonl'),((@{id=$Id;thread_name=$Title}|ConvertTo-Json -Compress)+"`n"),$utf8)
 }
+function Write-Line([string]$Surface,[string]$Text){Request @('focus-tab',$Surface)|Out-Null;$id=Request @('identify');Request @('send-keys',$id.pane,$Text)|Out-Null;Request @('send-key','Enter','--surface',$Surface)|Out-Null}
+function Start-Host([string[]]$Arguments){
+ $script:pipeName=$null
+ $started=[DateTime]::UtcNow;$watch=[Diagnostics.Stopwatch]::StartNew();$script:owned=[CliProbe]::Start($gui,$Arguments,$projectA,$directory);$script:hostOut=$owned.StandardOutput.ReadToEndAsync();$script:hostErr=$owned.StandardError.ReadToEndAsync();$discovery=Join-Path $env:LOCALAPPDATA ('flowmux\windows\instances\'+$owned.Id+'.json')
+ do{Budget|Out-Null;Require (-not $owned.HasExited -and $watch.ElapsedMilliseconds -lt 8000) 'Owned startup exceeded8s';if((Test-Path -LiteralPath $discovery)-and (Get-Item -LiteralPath $discovery).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -Encoding UTF8 -LiteralPath $discovery|ConvertFrom-Json;Require ($record.pid -eq $owned.Id) 'Wrong discovery host';$script:pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
+}
+function Quit-Host([bool]$Save=$false){
+ $args=@('quit');if(-not $Save){$args+='--discard-state'};Request $args|Out-Null
+ Require ($owned.WaitForExit((Budget 4000)) -and $owned.ExitCode -eq 0) 'Owned host did not close cleanly'
+ $owned.Dispose();$script:owned=$null
+}
 try{
  $env:LOCALAPPDATA=Join-Path $directory 'localappdata';[IO.Directory]::CreateDirectory($env:LOCALAPPDATA)|Out-Null
  $homeA=Join-Path $directory 'agent-home 한 A';$homeB=Join-Path $directory 'agent-home 한글 B';$projectA=Join-Path $directory '프로젝트 한 A';$projectB=Join-Path $directory '프로젝트 한글 B';foreach($p in @($homeA,$homeB,$projectA,$projectB)){[IO.Directory]::CreateDirectory($p)|Out-Null}
@@ -143,12 +154,56 @@ public static class OwnedCodexSessionFixture {
 }
 '@
  Add-Type -TypeDefinition $code -Language CSharp -ReferencedAssemblies System.dll,System.Web.Extensions.dll -OutputAssembly $agentExe -OutputType ConsoleApplication
- $started=[DateTime]::UtcNow;$watch=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$projectA),$projectA,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();$discovery=Join-Path $env:LOCALAPPDATA ('flowmux\windows\instances\'+$owned.Id+'.json')
- do{Budget|Out-Null;Require (-not $owned.HasExited -and $watch.ElapsedMilliseconds -lt 8000) 'Owned startup exceeded8s';if((Test-Path -LiteralPath $discovery)-and (Get-Item -LiteralPath $discovery).LastWriteTimeUtc -ge $started){$record=Get-Content -Raw -Encoding UTF8 -LiteralPath $discovery|ConvertFrom-Json;Require ($record.pid -eq $owned.Id) 'Wrong discovery host';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
+ $launch=@('--shell=cmd','--cwd',$projectA);if(-not $RestoreOnly){$launch=@('--temporary')+$launch};Start-Host $launch
  $tree=Await {param($t) @($t.surfaces).Count -eq 1 -and $t.surfaces[0].ready -and $t.surfaces[0].running};$local=$tree.surfaces[0]
  Request @('rename-tab',$local.id,'Codex')|Out-Null
  Require (@(Request @('agents')).Count -eq 0) 'Plain shell or a Codex-looking title was classified as an agent'
  Request @('settings','shell','cmd','--arg','/d')|Out-Null;$source=Agent-Tab $homeA $projectA $idA;$sourceIdentity=Request @('identify')
+ if($RestoreOnly){
+ $r=Hook 'session-start' (@{session_id=$idB}|ConvertTo-Json -Compress);Require ($r.accepted) 'Current conversation hook failed'
+ $marker='RESTORE_RAW_한글_한_é_😀';Write-Line $local.id ('echo '+$marker);Screen $local.id {param($s) $s.text.Contains($marker)}|Out-Null
+ $saved=Request @('save-state');$snapshot=[IO.File]::ReadAllText($saved.path);$state=$snapshot|ConvertFrom-Json;$binding=$state.agent_sessions.($source.id)
+ Require ($state.agent_sessions.PSObject.Properties.Count -eq 1 -and $binding.session_id -ceq $idB -and (@($binding.launch.args)-join '|') -ceq ('resume|'+$idB) -and (Path-Same $binding.launch.program $agentExe) -and (Path-Same $binding.cwd $projectA) -and (Path-Same $binding.environment.CODEX_HOME $homeA) -and $state.shells.($source.id).program -ceq 'cmd') 'Saved session did not capture current ID, executable, raw paths, child home and ordinary fallback shell'
+ Require (@($binding.environment.PSObject.Properties.Name|Where-Object {$_ -cnotin @('PATH','USERPROFILE','HOME','CODEX_HOME')}).Count -eq 0 -and -not $binding.argv -and $state.screens.($source.id).data.Contains('SESSION_SOURCE_READY')) 'Checkpoint retained unrelated environment/argv or missed source history'
+ Passed 'checkpoint-keeps-current-conversation-ID-raw-Korean-paths-sanitized-launch-and-normal-shell'
+ Quit-Host $true;Start-Host @('--restore-window',$saved.window)
+ $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};$restored=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0]
+ Require ($restored.session -cne $source.session -and $restored.pid -ne $source.pid -and $tree.state.window -ceq $saved.window) 'Restore changed identities or reused the old terminal generation'
+ Request @('focus-tab',$source.id)|Out-Null;$identity=Request @('identify');Require ($identity.pane -ceq $sourceIdentity.pane -and $identity.workspace -ceq $sourceIdentity.workspace) 'Restored agent changed pane/workspace identity'
+ $screen=Screen $source.id {param($s) $s.text.Contains('RESUMED_'+$idB)};Require (-not $screen.text.Contains('SESSION_SOURCE_READY')) 'Agent restore duplicated previous terminal screen'
+ $roundtrip=Request @('save-state');$history=[IO.File]::ReadAllText($roundtrip.path)|ConvertFrom-Json;Require ($history.screens.($local.id).data.Contains($marker) -and -not $history.screens.($source.id).data.Contains('SESSION_SOURCE_READY')) 'Restored buffers lost ordinary history or replayed agent history'
+ $proofPath=Join-Path $homeA ('resume-'+$idB+'.json');$proofText=[IO.File]::ReadAllText($proofPath);$proof=$proofText|ConvertFrom-Json
+ Require ((@($proof.argv)-join '|') -ceq ('resume|'+$idB) -and (Path-Same $proof.cwd $projectA) -and (Path-Same $proof.home $homeA) -and (Path-Same $proof.image $agentExe)) 'Actual auto-resume used wrong argv, cwd, home or executable'
+ Screen $source.id {param($s) $s.text.Replace("`r",'').Replace("`n",'').Contains($projectA+'>')}|Out-Null;Write-Line $source.id 'echo RESTORE_SHELL_%FLOWMUX_SURFACE_ID%';Screen $source.id {param($s) $s.text.Replace("`r",'').Replace("`n",'').Contains('RESTORE_SHELL_'+$source.id)}|Out-Null
+ Passed 'hidden-close-relaunch-resumes-exact-agent-once-and-returns-to-normal-shell-with-local-history'
+ Request @('split','vertical')|Out-Null;$splitIdentity=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $splitIdentity.surface -and $_.ready -and $_.running}).Count -eq 1};$split=@($tree.surfaces|Where-Object {$_.id -ceq $splitIdentity.surface})[0]
+ Require ($split.shell.program -ceq 'cmd' -and [IO.File]::ReadAllText($proofPath) -ceq $proofText) 'Split inherited the one-shot resume launcher'
+ Request @('close-tab',$split.id)|Out-Null;Request @('agents')|Out-Null;$again=Request @('save-state');$after=[IO.File]::ReadAllText($again.path)|ConvertFrom-Json;Require (-not $after.agent_sessions) 'Exited resumed agent remained in next checkpoint'
+ Passed 'split-keeps-ordinary-shell-and-exited-agent-is-not-checkpointed-again'
+ $tree=Tree;$entry=@($tree.chrome.controls|Where-Object kind -eq 'settings')[0];Click ([long]$entry.handle);$settings=Request @('settings','show');$row=@($settings.options.controls|Where-Object key -eq 'auto_resume_agent_sessions')[0]
+ Require ($row -and $row.page -ceq 'general' -and $settings.document.terminal.auto_resume_agent_sessions) 'General auto-resume On/Off control is missing or has the wrong default'
+ [OptionsFixture]::Select([long]$row.parent,[long]$row.input,$owned.Id,1);$watch=[Diagnostics.Stopwatch]::StartNew();do{$settings=Request @('settings','show');if(-not $settings.document.terminal.auto_resume_agent_sessions -and -not $settings.options.pending){break};Require ($watch.ElapsedMilliseconds -lt 3000) 'Native auto-resume option did not save';Start-Sleep -Milliseconds 20}while($true)
+ Click ([long]$settings.options.close);Quit-Host
+ [IO.File]::WriteAllText($saved.path,$snapshot,$utf8);Start-Host @('--restore-window',$saved.window)
+ $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};$roundtrip=Request @('save-state');$history=[IO.File]::ReadAllText($roundtrip.path)|ConvertFrom-Json;Require ($history.screens.($source.id).data.Contains('SESSION_SOURCE_READY')) 'Disabled auto-resume lost the original scrollback'
+ Require ([IO.File]::ReadAllText($proofPath) -ceq $proofText -and @($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].shell.program -ceq 'cmd') 'Disabled auto-resume launched an agent or lost normal shell'
+ Request @('settings','set','auto-resume-agent-sessions','true')|Out-Null;$again=Request @('save-state');$after=[IO.File]::ReadAllText($again.path)|ConvertFrom-Json;Require (-not $after.agent_sessions -and [IO.File]::ReadAllText($proofPath) -ceq $proofText) 'Re-enabling auto-resume reused a consumed binding'
+ Passed 'auto-resume-Off-restores-scrollback-only-and-On-does-not-replay-consumed-bindings'
+ $source=Agent-Tab $homeA $projectA $idA;Request @('agents')|Out-Null;$r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted) 'Current session end hook failed'
+ $again=Request @('save-state');$after=[IO.File]::ReadAllText($again.path)|ConvertFrom-Json;Require (-not $after.agent_sessions -and $after.shells.($source.id).program -ceq 'cmd') 'Session end fell back to the stale command-line conversation'
+ $process=Get-Process -Id ([int]$source.pid);try{$process.Kill();Require ($process.WaitForExit((Budget 2000))) 'Owned source termination timed out'}finally{$process.Dispose()}
+ $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id -and -not $_.running}).Count -eq 1};Request @('agents')|Out-Null;$again=Request @('save-state');$after=[IO.File]::ReadAllText($again.path)|ConvertFrom-Json;Require (-not $after.agent_sessions -and $after.shells.($source.id).program -ceq 'cmd') 'Exited direct agent retained its launch command in persisted fallback shell'
+ Passed 'session-end-and-process-exit-clear-resume-without-restarting-the-original-agent-command'
+ Quit-Host
+ $state=$snapshot|ConvertFrom-Json;$savedSurface=@($state.agent_sessions.PSObject.Properties.Name)[0];$state.agent_sessions.($savedSurface).cwd=Join-Path $directory 'deleted-project';[IO.File]::WriteAllText($saved.path,($state|ConvertTo-Json -Depth 60),$utf8);Start-Host @('--restore-window',$saved.window)
+ $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};Require ([IO.File]::ReadAllText($proofPath) -ceq $proofText) 'Missing project still started a resume process'
+ Write-Line $savedSurface 'echo RESTORE_FALLBACK_OK';Screen $savedSurface {param($s) $s.text.Contains('RESTORE_FALLBACK_OK')}|Out-Null
+ Passed 'missing-agent-project-falls-back-to-working-shell-without-blocking-other-tabs'
+ Quit-Host;$state=$snapshot|ConvertFrom-Json;$state.agent_sessions.($savedSurface).launch.program=Join-Path $directory 'removed-codex.exe';[IO.File]::WriteAllText($saved.path,($state|ConvertTo-Json -Depth 60),$utf8);Start-Host @('--restore-window',$saved.window)
+ $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};Screen $savedSurface {param($s) $s.text.Contains('Cannot resume session:') -and $s.text.Replace("`r",'').Replace("`n",'').Contains($projectA+'>')}|Out-Null
+ Write-Line $savedSurface 'echo RESTORE_MISSING_AGENT_OK';Screen $savedSurface {param($s) $s.text.Contains('RESTORE_MISSING_AGENT_OK')}|Out-Null;Require ([IO.File]::ReadAllText($proofPath) -ceq $proofText) 'Missing executable reran the previous agent'
+ Passed 'removed-agent-executable-reports-failure-and-returns-to-the-configured-shell'
+ }else{
  $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Native end could not clear a startup resume ID before a start hook'
  $r=Hook 'session-start' (@{session_id=$idA.ToUpperInvariant();cwd='한글 한 é 😀'}|ConvertTo-Json -Compress);Require ($r.accepted -and $r.surface -ceq $source.id -and $r.session_id -ceq $idA) 'Owned child native hook did not establish its canonical conversation'
  $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Owned child native end did not clear its conversation'
@@ -727,6 +782,7 @@ public static class OwnedCodexSessionFixture {
  Passed 'automatic-owned-child-launch-exit-and-relaunch-clear-activity-with-same-terminal-PID-view-and-session'
  }
 
+ }
 }
 catch{$failure=$_.Exception.Message;$diagnostic.failureAt=$_.InvocationInfo.PositionMessage}
 finally{

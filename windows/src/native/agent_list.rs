@@ -18,6 +18,7 @@ struct Entry {
     agent: crate::session_history::SessionAgent,
     cwd: PathBuf,
     session_id: Option<String>,
+    launch: agent_process::AgentProcess,
 }
 pub(super) struct State {
     entry: Entry,
@@ -99,6 +100,31 @@ impl Drop for Pending {
     }
 }
 impl App {
+    pub(super) fn saved_agent_sessions(
+        &self,
+    ) -> HashMap<SurfaceId, crate::state::SavedAgentSession> {
+        let mut saved = self.restore_agents.clone();
+        for (surface, state) in self.agent_states.borrow().iter() {
+            let entry = &state.entry;
+            if !entry.current(self)
+                || self
+                    .locate(*surface)
+                    .is_none_or(|(workspace, _, _)| self.workspaces[workspace].ssh.is_some())
+            {
+                continue;
+            }
+            if let Some(id) = &state.presence.session_id {
+                match entry.launch.saved_session(id, &entry.cwd) {
+                    Ok(session) => {
+                        saved.insert(*surface, session);
+                    }
+                    Err(_) => report("Cannot save an invalid agent session binding"),
+                }
+            }
+        }
+        saved
+    }
+
     pub(super) fn agent_session_id(
         &self,
         id: SurfaceId,
@@ -549,16 +575,19 @@ impl App {
                             Err(_) if automatic => continue,
                             Err(error) => return Err(error),
                         };
-                        if let Some(found) = found {
+                        if let Some(mut found) = found {
                             if let Some(process) = agent_process::live_handle(&job, &found) {
+                                // Retain only the validated resume prefix and home, never raw prompts.
+                                found.argv.clear();
                                 entries.push(Entry {
                                     surface,
                                     generation,
                                     process,
                                     pid: found.pid,
                                     agent: found.agent,
-                                    cwd: found.cwd,
-                                    session_id: found.session_id,
+                                    cwd: found.cwd.clone(),
+                                    session_id: found.session_id.clone(),
+                                    launch: found,
                                 });
                             }
                         }
@@ -707,7 +736,7 @@ impl App {
         let _ = reply.try_send(result);
     }
 
-    fn record_agents(&self, entries: Vec<Entry>) {
+    fn record_agents(&mut self, entries: Vec<Entry>) {
         let mut states = self.agent_states.borrow_mut();
         let mut changed = false;
         for entry in entries {
@@ -720,6 +749,16 @@ impl App {
                 })
             {
                 continue;
+            }
+            // Direct agent launches are one-shot: a later restore or split
+            // uses the ordinary shell, including after this agent has exited.
+            if self.surfaces[&entry.surface]
+                .session
+                .as_ref()
+                .is_some_and(|s| s.pid == entry.pid)
+            {
+                self.shells
+                    .insert(entry.surface, self.settings.default_shell.clone());
             }
             let mut presence = AgentPresence::new(
                 entry.agent.name().to_ascii_lowercase(),

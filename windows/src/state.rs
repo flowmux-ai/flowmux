@@ -4,7 +4,7 @@ use crate::model::Workspace;
 use anyhow::{ensure, Context};
 use flowmux_core::{Pane, PaneContent, SurfaceId, SurfaceKind, WorkspaceId};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 pub const MAX_STATE_BYTES: usize = 32 * 1024 * 1024;
@@ -87,6 +87,52 @@ impl SavedScreen {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SavedAgentSession {
+    pub agent: crate::session_history::SessionAgent,
+    pub session_id: String,
+    pub launch: crate::shell::Shell,
+    pub cwd: std::path::PathBuf,
+    pub environment: BTreeMap<String, String>,
+}
+impl SavedAgentSession {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.agent.canonical_session_id(&self.session_id)? == self.session_id,
+            "invalid saved agent session ID"
+        );
+        self.launch.validate()?;
+        ensure!(
+            std::path::Path::new(&self.launch.program).is_absolute()
+                && self.cwd.is_absolute()
+                && self.cwd.as_os_str().len() <= 32767,
+            "invalid saved agent launch paths"
+        );
+        let argv = self.agent.resume_argv(&self.session_id)?;
+        ensure!(
+            self.launch
+                .args
+                .windows(argv.len() - 1)
+                .any(|args| args == &argv[1..]),
+            "saved agent command does not resume its session ID"
+        );
+        ensure!(
+            self.environment.iter().all(|(key, value)| (key == "PATH"
+                || self.agent.home_variables().contains(&key.as_str()))
+                && !value.contains('\0'))
+                && self
+                    .environment
+                    .iter()
+                    .map(|(k, v)| k.len() + v.len())
+                    .sum::<usize>()
+                    <= 256 * 1024,
+            "invalid saved agent environment"
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WindowState {
     pub version: u32,
     pub window: Uuid,
@@ -96,6 +142,8 @@ pub struct WindowState {
     pub screens: HashMap<SurfaceId, SavedScreen>,
     #[serde(default)]
     pub shells: HashMap<SurfaceId, crate::shell::Shell>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub agent_sessions: HashMap<SurfaceId, SavedAgentSession>,
     #[serde(
         default = "default_sidebar_width",
         skip_serializing_if = "is_default_sidebar_width"
@@ -136,6 +184,7 @@ impl WindowState {
             ensure!(
                 self.screens.is_empty()
                     && self.shells.is_empty()
+                    && self.agent_sessions.is_empty()
                     && self.detached_windows.is_empty()
                     && self.detached_focus.is_none()
                     && !self.main_closed,
@@ -228,6 +277,22 @@ impl WindowState {
         for (id, shell) in &self.shells {
             ensure!(terminals.contains(id), "orphaned shell specification");
             shell.validate()?;
+        }
+        let local_terminals: HashSet<_> = self
+            .workspaces
+            .iter()
+            .filter(|ws| ws.ssh.is_none())
+            .flat_map(|ws| ws.leaves())
+            .flat_map(|(_, _, tabs)| tabs)
+            .filter(|tab| matches!(tab.kind, SurfaceKind::Terminal { .. }))
+            .map(|tab| tab.id)
+            .collect();
+        for (id, session) in &self.agent_sessions {
+            ensure!(
+                local_terminals.contains(id),
+                "orphaned or remote saved agent session"
+            );
+            session.validate()?;
         }
         Ok(())
     }
@@ -339,6 +404,7 @@ pub(crate) fn sample() -> WindowState {
         )]),
         workspaces: vec![ws],
         shells: HashMap::new(),
+        agent_sessions: HashMap::new(),
         sidebar_width_dip: DEFAULT_SIDEBAR_WIDTH,
         detached_windows: HashMap::new(),
         main_closed: false,
@@ -348,6 +414,64 @@ pub(crate) fn sample() -> WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn agent_restore_bindings_preserve_raw_paths_and_reject_invalid_scope_or_environment() {
+        let mut state = sample();
+        let surface = state.workspaces[0].active();
+        let old = state.encode().unwrap();
+        assert!(WindowState::decode(&old).unwrap().agent_sessions.is_empty());
+        assert!(!String::from_utf8(old).unwrap().contains("agent_sessions"));
+        let root = std::env::current_dir().unwrap().join("한글 한 e\u{301} 😀");
+        let id = Uuid::new_v4().to_string();
+        let session = SavedAgentSession {
+            agent: crate::session_history::SessionAgent::Codex,
+            session_id: id.clone(),
+            launch: crate::shell::Shell {
+                program: root.join("codex.exe").to_string_lossy().into_owned(),
+                args: vec!["resume".into(), id],
+            },
+            cwd: root.clone(),
+            environment: BTreeMap::from([(
+                "CODEX_HOME".into(),
+                root.to_string_lossy().into_owned(),
+            )]),
+        };
+        state.agent_sessions.insert(surface, session.clone());
+        let decoded = WindowState::decode(&state.encode().unwrap()).unwrap();
+        assert_eq!(decoded.agent_sessions[&surface].cwd, root);
+        assert_eq!(decoded.agent_sessions[&surface].launch, session.launch);
+        assert_eq!(
+            decoded.agent_sessions[&surface].environment,
+            session.environment
+        );
+        for change in 0..6 {
+            let mut invalid = state.clone();
+            let saved = invalid.agent_sessions.get_mut(&surface).unwrap();
+            match change {
+                0 => saved.session_id = "untrusted --command".into(),
+                1 => saved.launch.args[1] = Uuid::new_v4().to_string(),
+                2 => {
+                    saved.environment.insert("API_KEY".into(), "secret".into());
+                }
+                3 => saved.cwd = "relative".into(),
+                4 => {
+                    invalid
+                        .agent_sessions
+                        .insert(SurfaceId(Uuid::new_v4()), session.clone());
+                }
+                _ => {
+                    invalid.workspaces[0].ssh = Some(flowmux_core::SshWorkspaceConfig {
+                        target: flowmux_core::SshTarget::parse("user@example.test").unwrap(),
+                        cwd: None,
+                        tmux: true,
+                        forwards: vec![],
+                    })
+                }
+            }
+            assert!(invalid.encode().is_err(), "change {change}");
+        }
+    }
+
     #[test]
     fn ssh_state_roundtrip_keeps_remote_history_and_rejects_mismatched_contexts() {
         let mut state = sample();

@@ -367,6 +367,12 @@ impl Panel {
                 vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
+                Some(SettingKey::AutoResumeAgentSessions),
+                0,
+                "Resume agent sessions",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
                 Some(SettingKey::RestoreTerminalScrollback),
                 0,
                 "Restore terminal scrollback",
