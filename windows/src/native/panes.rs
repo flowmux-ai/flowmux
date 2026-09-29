@@ -527,10 +527,9 @@ impl App {
             {
                 return None;
             }
-            let mut rect = RECT::default();
+            let rect = chrome::visible_control_rect(window)?;
             let mut client = RECT::default();
-            if GetWindowRect(window, &mut rect) == 0 || GetClientRect(self.window, &mut client) == 0
-            {
+            if GetClientRect(self.window, &mut client) == 0 {
                 return None;
             }
             let mut top_left = POINT {

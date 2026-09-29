@@ -46,6 +46,15 @@ public static class OptionsFixture {
         Message(hwnd,0x6,IntPtr.Zero,target);
     }
     public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint action,uint parameter,out uint value,uint flags);
+    public static uint WheelLines() {uint value;if(!SystemParametersInfo(0x68,0,out value,0))throw new System.ComponentModel.Win32Exception();return value;}
+    public static void Wheel(long window,int owner,int x,int y,int delta) {
+        var hwnd=Owned(window,owner);Rect client;
+        if(!IsWindowEnabled(hwnd)||!GetClientRect(hwnd,out client)||x<0||x>=client.Right||y<0||y>=client.Bottom||delta<short.MinValue||delta>short.MaxValue)
+            throw new InvalidOperationException("Owned wheel target is outside its client");
+        var point=new Rect{Left=x,Top=y,Right=x,Bottom=y};MapWindowPoints(hwnd,IntPtr.Zero,ref point,2);
+        Message(hwnd,0x20A,new IntPtr(delta<<16),PointerPoint(point.Left,point.Top));
+    }
     public static void HostTick(long window,int owner) {Message(Owned(window,owner),0x113,new IntPtr(1),IntPtr.Zero);}
     // Selecting a menu item may destroy the popup before this call returns.
     // Verify ownership before dispatch; the caller checks the resulting model.

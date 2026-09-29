@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Workspace metadata/lifecycle and native entry points. IDs survive reordering.
 use super::*;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState};
 #[path = "metadata_panel.rs"]
 mod editor;
 pub(super) use editor::{EditAction, Panel};
@@ -32,14 +33,24 @@ pub(super) enum EditTarget {
     TabName(SurfaceId),
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Scroll {
+    Wheel(i32),
+    Line(i32),
+    Page(i32),
+    Start,
+    End,
+}
+
 pub(super) struct SidebarLayout {
     pub list_top: i32,
     pub list_bottom: i32,
     pub footer_top: i32,
     pub capacity: usize,
     pub pager: bool,
-    pub offset: usize,
-    pub max_offset: usize,
+    pub offset: i32,
+    pub max_offset: i32,
+    pub first_row: usize,
     pub rows: Vec<(WorkspaceId, i32, i32)>,
     pub metrics: (i32, u32, i32),
 }
@@ -117,34 +128,40 @@ impl App {
         let pager = metrics.2 > footer_top - list_top;
         let list_bottom = (footer_top - if pager { px(28) } else { 0 }).max(list_top);
         let available = list_bottom - list_top;
-        let mut occupied = 0;
-        let mut max_offset = heights.len().saturating_sub(1);
-        for (index, height) in heights.iter().enumerate().rev() {
-            if occupied > 0 && occupied + height > available {
-                break;
-            }
-            occupied += height;
-            max_offset = index;
-        }
-        let mut offset = self.sidebar_offset.min(max_offset);
-        if self.sidebar_active != self.current_workspace().map(|w| w.id)
-            || self.sidebar_metrics != metrics
-        {
+        let max_offset = (metrics.2 - available).max(0);
+        let mut offset = self.sidebar_offset.clamp(0, max_offset);
+        let active_changed = self.sidebar_active != self.current_workspace().map(|w| w.id);
+        if active_changed || self.sidebar_metrics != metrics {
             if let Some(active) = indices.iter().position(|i| *i == self.active_workspace) {
-                offset = offset.min(active);
-                while offset < active && heights[offset..=active].iter().sum::<i32>() > available {
-                    offset += 1;
+                let top: i32 = heights[..active].iter().sum();
+                let bottom = top + heights[active];
+                if heights[active] > available {
+                    offset = if active_changed {
+                        top
+                    } else {
+                        offset.clamp(top, bottom - available)
+                    };
+                } else if top < offset {
+                    offset = top;
+                } else if bottom > offset + available {
+                    offset = bottom - available;
                 }
             }
         }
+        offset = offset.clamp(0, max_offset);
         let mut rows = Vec::new();
-        let mut y = list_top;
-        for (index, height) in heights.iter().enumerate().skip(offset) {
-            if y >= list_bottom || (!rows.is_empty() && y + height > list_bottom) {
+        let mut y = list_top - offset;
+        let mut first_row = 0;
+        for (index, height) in heights.iter().enumerate() {
+            if y >= list_bottom {
                 break;
             }
-            let shown = (*height).min(list_bottom - y);
-            rows.push((self.workspaces[indices[index]].id, y, shown));
+            if y + height > list_top {
+                if rows.is_empty() {
+                    first_row = index;
+                }
+                rows.push((self.workspaces[indices[index]].id, y, *height));
+            }
             y += height;
         }
         SidebarLayout {
@@ -155,10 +172,117 @@ impl App {
             pager,
             offset,
             max_offset,
+            first_row,
             rows,
             metrics,
         }
     }
+    pub(super) fn scroll_sidebar(&mut self, scroll: Scroll) -> anyhow::Result<()> {
+        let mut client = RECT::default();
+        checked(unsafe { GetClientRect(self.window, &mut client) })?;
+        let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
+        let layout = self.sidebar_layout(client.bottom, dpi);
+        let line = (20 * dpi as i32 + 48) / 96;
+        let page = (layout.list_bottom - layout.list_top - line).max(line);
+        let offset = match scroll {
+            Scroll::Start => 0,
+            Scroll::End => layout.max_offset,
+            Scroll::Line(delta) => layout.offset.saturating_add(delta.saturating_mul(line)),
+            Scroll::Page(delta) => layout.offset.saturating_add(delta.saturating_mul(page)),
+            Scroll::Wheel(delta) => {
+                let mut lines = 3u32;
+                unsafe {
+                    SystemParametersInfoW(
+                        SPI_GETWHEELSCROLLLINES,
+                        0,
+                        (&mut lines as *mut u32).cast(),
+                        0,
+                    );
+                }
+                let step = if lines == u32::MAX {
+                    page
+                } else {
+                    line.saturating_mul(lines.min(100) as i32)
+                };
+                let amount = self
+                    .sidebar_wheel_remainder
+                    .saturating_add(delta.saturating_mul(step));
+                self.sidebar_wheel_remainder = amount % 120;
+                layout.offset.saturating_add(amount / 120)
+            }
+        };
+        let offset = offset.clamp(0, layout.max_offset);
+        if offset == self.sidebar_offset && layout.metrics == self.sidebar_metrics {
+            return Ok(());
+        }
+        let focused = unsafe { GetFocus() };
+        let retain_keyboard = !self.background_test
+            && unsafe { GetForegroundWindow() } == self.window
+            && self.controls.iter().any(|c| {
+                c.hwnd == focused
+                    && matches!(
+                        c.action,
+                        Action::Workspace(_) | Action::WorkspaceClose(_) | Action::SidebarScroll(_)
+                    )
+            });
+        self.sidebar_offset = offset;
+        self.layout()?;
+        if retain_keyboard
+            && unsafe { GetForegroundWindow() } == self.window
+            && (unsafe { GetWindowLongPtrW(focused, GWL_STYLE) } as u32 & WS_VISIBLE == 0
+                || unsafe { IsWindowEnabled(focused) } == 0)
+        {
+            if let Some(next) = self.controls.iter().find(|c| {
+                matches!(c.action, Action::SidebarScroll(_))
+                    && unsafe { IsWindowEnabled(c.hwnd) } != 0
+                    && unsafe { IsWindowVisible(c.hwnd) } != 0
+            }) {
+                unsafe {
+                    SetFocus(next.hwnd);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn sidebar_scroll_key(&self, message: &MSG) -> bool {
+        if message.message != WM_KEYDOWN || self.overview.is_open() {
+            return false;
+        }
+        let target = self.controls.iter().any(|control| {
+            control.hwnd == message.hwnd
+                && matches!(
+                    control.action,
+                    Action::Workspace(_) | Action::WorkspaceClose(_) | Action::SidebarScroll(_)
+                )
+        });
+        if !target || unsafe { IsWindowEnabled(message.hwnd) } == 0 {
+            return false;
+        }
+        if !self.background_test
+            && unsafe {
+                GetForegroundWindow() != self.window
+                    || GetFocus() != message.hwnd
+                    || [0x10, 0x11, 0x12, 0x5b, 0x5c]
+                        .iter()
+                        .any(|key| GetKeyState(*key) < 0)
+            }
+        {
+            return false;
+        }
+        let scroll = match message.wParam {
+            0x21 => Scroll::Page(-1),
+            0x22 => Scroll::Page(1),
+            0x24 => Scroll::Start,
+            0x23 => Scroll::End,
+            0x26 => Scroll::Line(-1),
+            0x28 => Scroll::Line(1),
+            _ => return false,
+        };
+        self.sender.send(Event::SidebarScroll(scroll));
+        true
+    }
+
     fn workspace_lines(&self, id: WorkspaceId) -> Vec<chrome::WorkspaceLine> {
         let Some(workspace) = self.workspaces.iter().find(|w| w.id == id) else {
             return Vec::new();
@@ -576,9 +700,10 @@ impl App {
             unsafe {
                 let mut rect=RECT::default(); GetWindowRect(control.hwnd,&mut rect);
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
+                let mut clip=RECT::default();let clipped=GetWindowRgnBox(control.hwnd,&mut clip)!=0;
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"workspace_lines":chrome::workspace_lines(control.hwnd),"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"workspace_lines":chrome::workspace_lines(control.hwnd),"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"clip":clipped.then(||json!({"x":clip.left,"y":clip.top,"width":clip.right-clip.left,"height":clip.bottom-clip.top})),"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
         let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
@@ -587,7 +712,7 @@ impl App {
             GetClientRect(self.window, &mut client);
         }
         let layout = self.sidebar_layout(client.bottom, dpi);
-        json!({"theme":self.settings.terminal.theme,"dpi":dpi,"sidebar_offset":self.sidebar_offset,"sidebar_width_dip":self.sidebar_width_dip,"sidebar_actual_width":self.sidebar_width(client.right,dpi),"sidebar_dragging":matches!(self.drag,Some(panes::Drag::Sidebar { .. })),"tab_dragging":matches!(self.drag,Some(panes::Drag::Tab { .. })),"workspace_dragging":matches!(self.drag,Some(panes::Drag::Workspace { .. })),"tab_drop_preview":self.drop_preview.as_ref().map(chrome::DropPreview::diagnostics),"sidebar_gutter_width":(4.0*dpi as f64/96.0).round() as i32,"sidebar_footer_height_dip":36,"sidebar_list_top":layout.list_top,"sidebar_list_bottom":layout.list_bottom,"sidebar_footer_top":layout.footer_top,"sidebar_capacity":layout.capacity,"sidebar_pager_visible":layout.pager,"workspace_row_height_dip":58,"controls":controls})
+        json!({"theme":self.settings.terminal.theme,"dpi":dpi,"sidebar_offset":layout.first_row,"sidebar_offset_px":self.sidebar_offset,"sidebar_max_offset_px":layout.max_offset,"sidebar_width_dip":self.sidebar_width_dip,"sidebar_actual_width":self.sidebar_width(client.right,dpi),"sidebar_dragging":matches!(self.drag,Some(panes::Drag::Sidebar { .. })),"tab_dragging":matches!(self.drag,Some(panes::Drag::Tab { .. })),"workspace_dragging":matches!(self.drag,Some(panes::Drag::Workspace { .. })),"tab_drop_preview":self.drop_preview.as_ref().map(chrome::DropPreview::diagnostics),"sidebar_gutter_width":(4.0*dpi as f64/96.0).round() as i32,"sidebar_footer_height_dip":36,"sidebar_list_top":layout.list_top,"sidebar_list_bottom":layout.list_bottom,"sidebar_footer_top":layout.footer_top,"sidebar_capacity":layout.capacity,"sidebar_pager_visible":layout.pager,"workspace_row_height_dip":58,"controls":controls})
     }
     pub(super) fn workspace_index(&self, id: WorkspaceId) -> anyhow::Result<usize> {
         self.workspaces

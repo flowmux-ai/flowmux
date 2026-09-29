@@ -148,6 +148,39 @@ public static class OwnedCodexSessionFixture {
  $bmp=Join-Path $directory 'agent-providers.bmp';$png=Join-Path $directory 'agent-providers.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png);$diagnostic.agentProvidersCapture=$png
  for($i=0;$i -lt 4;$i++){$x=$row.rect.x+[int][Math]::Round(45*$scale);$y=$row.rect.y+[int][Math]::Round((30+60*$i)*$scale);$side=[int][Math]::Round(14*$scale);Require ([ChromeFixture]::ColorCount($png,$x,$y,$side,$side,'#442b31') -lt $side*$side-5) 'A native provider logo was omitted'}
 
+
+ $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$beforeTall=@($tree.surfaces);$rowHandle=[long]$row.handle
+ [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,900,300)
+ $tree=Await {param($t) $t.chrome.sidebar_max_offset_px -gt 0 -and $t.chrome.sidebar_offset_px -eq 0};$row=@($tree.chrome.controls|Where-Object {$_.handle -eq $rowHandle})[0]
+ Require ($row.layout_visible -and $row.clip.height -lt $row.rect.height -and $row.rect.height -gt $tree.chrome.sidebar_list_bottom-$tree.chrome.sidebar_list_top) 'A tall agent row was hidden or shrunk to discard its final metadata'
+ $bmp=Join-Path $directory 'agent-scroll-top.bmp';$png=Join-Path $directory 'agent-scroll-top.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::Pixel($png,($row.rect.x+3),298) -ceq '#24272e') 'Tall row painted over the footer outside its native region'
+ [OptionsFixture]::TabPointerDown([long]$tree.window_handle,$rowHandle,$owned.Id,100,40);$tree=Await {param($t) $t.chrome.workspace_dragging}
+ [OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x200,106,($tree.chrome.sidebar_list_bottom-3))
+ $bmp=Join-Path $directory 'agent-scroll-drop.bmp';$png=Join-Path $directory 'agent-scroll-drop.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::ColorCount($png,80,($tree.chrome.sidebar_list_bottom-2),100,1,'#78aeed') -eq 100) 'Drop marker was hidden below the clipped workspace viewport'
+ [OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x1f,0,0);$tree=Await {param($t) -not $t.chrome.workspace_dragging}
+ $next=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'sidebar_next'})[0];Click ([long]$next.handle)
+ $tree=Await {param($t) $t.chrome.sidebar_offset_px -eq $t.chrome.sidebar_max_offset_px};$row=@($tree.chrome.controls|Where-Object {$_.handle -eq $rowHandle})[0]
+ Require ($row.clip.y -gt 0 -and $row.rect.y+$row.clip.y -eq $tree.chrome.sidebar_list_top -and $row.rect.y+$row.rect.height -le $tree.chrome.sidebar_list_bottom) 'Next did not expose the bottom of the full-height row'
+ Require (-not [OptionsFixture]::Describe([long]$next.handle,$owned.Id).Enabled) 'Next remained enabled at the pixel scroll boundary'
+ $bmp=Join-Path $directory 'agent-scroll-bottom.bmp';$png=Join-Path $directory 'agent-scroll-bottom.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::Pixel($png,($row.rect.x+3),($tree.chrome.sidebar_list_top-1)) -ceq '#24272e') 'Scrolled row painted over the Workspaces header'
+ $lastY=$row.rect.y+[int][Math]::Round(247*$scale);Require ([ChromeFixture]::ColorCount($png,($row.rect.x+40),$lastY,150,([int](20*$scale)),'#abb1bc') -gt 5) 'Final agent path is not actually painted after scrolling'
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,36,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq 0}
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,34,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -gt 0}
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,33,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq 0}
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,35,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq $t.chrome.sidebar_max_offset_px}
+ $previous=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'sidebar_previous'})[0];Click ([long]$previous.handle);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq 0}
+ [OptionsFixture]::Wheel([long]$tree.window_handle,$owned.Id,20,50,-120);$tree=Tree;$wholeWheel=$tree.chrome.sidebar_offset_px
+ $wheelLines=[OptionsFixture]::WheelLines();$wheelStep=if($wheelLines -eq [uint32]::MaxValue){$tree.chrome.sidebar_list_bottom-$tree.chrome.sidebar_list_top-[int][Math]::Round(20*$scale)}else{[Math]::Min($wheelLines,100)*[int][Math]::Round(20*$scale)}
+ Require ($wholeWheel -eq [Math]::Min($wheelStep,$tree.chrome.sidebar_max_offset_px)) 'Wheel did not scroll according to native Windows line/page settings'
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,36,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq 0}
+ [OptionsFixture]::Wheel([long]$tree.window_handle,$owned.Id,20,50,-60);[OptionsFixture]::Wheel([long]$tree.window_handle,$owned.Id,20,50,-60);$tree=Tree;Require ($tree.chrome.sidebar_offset_px -eq $wholeWheel) 'High-resolution wheel deltas were rounded away or multiplied'
+ [OptionsFixture]::PostKey($rowHandle,$owned.Id,35,$false,$false);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq $t.chrome.sidebar_max_offset_px}
+ [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$originalSize[0],$originalSize[1]);$tree=Await {param($t) $t.chrome.sidebar_offset_px -eq 0 -and $t.chrome.sidebar_max_offset_px -eq 0};$row=@($tree.chrome.controls|Where-Object {$_.handle -eq $rowHandle})[0]
+ Require (-not $row.clip -and @($row.workspace_lines).Count -eq 12) 'Growing the viewport retained a stale clipping region or lost metadata'
+ Stable $beforeTall|Out-Null;Passed 'tall-agent-row-pixel-paging-keyboard-high-resolution-wheel-native-clipping-and-resize-retain-all-terminals'
  Request @('split','vertical','--shell=cmd')|Out-Null;$spare=Request @('identify');Request @('move-tab',$extras[3].id,'--to-pane',$spare.pane)|Out-Null
  Request @('focus-tab',$extras[3].id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'antigravity') 'Focused blocked agent pane did not lead the metadata tree'
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'codex' -and $row.workspace_lines[3].agent.name -ceq 'antigravity') 'Equal-status agent blocks ignored pane MRU'

@@ -22,12 +22,13 @@ public static class ChromeFixture {
         public uint Size,Flags;public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret;public Rect CaretRect;
     }
     public sealed class Control {
-        public long Handle; public string Class,Text; public int X,Y,Width,Height;
+        public long Handle; public string Class,Text; public int X,Y,Width,Height,ClipX,ClipY,ClipWidth,ClipHeight;
         public long Style,Font; public bool Shown,Enabled;
     }
     private delegate bool EnumProc(IntPtr hwnd,IntPtr data);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent,EnumProc callback,IntPtr data);
     [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern int GetWindowRgnBox(IntPtr hwnd,out Rect rect);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
     [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread,ref ThreadInfo info);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
@@ -67,10 +68,15 @@ public static class ChromeFixture {
                 throw new InvalidOperationException("Cannot read owned native label");
             Rect bounds;if(!GetWindowRect(hwnd,out bounds))throw new Win32Exception();
             MapWindowPoints(IntPtr.Zero,parent,ref bounds,2);
+            var clip=bounds;Rect region;
+            if(GetWindowRgnBox(hwnd,out region)!=0) {
+                clip.Left=Math.Max(bounds.Left,bounds.Left+region.Left);clip.Top=Math.Max(bounds.Top,bounds.Top+region.Top);
+                clip.Right=Math.Min(bounds.Right,bounds.Left+region.Right);clip.Bottom=Math.Min(bounds.Bottom,bounds.Top+region.Bottom);
+            }
             long style=GetWindowLongPtr(hwnd,-16).ToInt64();
             found.Add(new Control {Handle=hwnd.ToInt64(),Class=cls.ToString(),Text=text.ToString(),X=bounds.Left,Y=bounds.Top,
-                Width=bounds.Right-bounds.Left,Height=bounds.Bottom-bounds.Top,Style=style,
-                Font=Message(hwnd,0x31,IntPtr.Zero,IntPtr.Zero).ToInt64(),Shown=(style&0x10000000)!=0,Enabled=IsWindowEnabled(hwnd)});
+                Width=bounds.Right-bounds.Left,Height=bounds.Bottom-bounds.Top,ClipX=clip.Left,ClipY=clip.Top,ClipWidth=Math.Max(0,clip.Right-clip.Left),ClipHeight=Math.Max(0,clip.Bottom-clip.Top),Style=style,
+                Font=Message(hwnd,0x31,IntPtr.Zero,IntPtr.Zero).ToInt64(),Shown=(style&0x10000000)!=0 && clip.Right>clip.Left && clip.Bottom>clip.Top,Enabled=IsWindowEnabled(hwnd)});
             return true;
         },IntPtr.Zero);
         return found.ToArray();

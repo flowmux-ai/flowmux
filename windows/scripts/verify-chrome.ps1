@@ -89,14 +89,17 @@ function Capture([string]$Name,$Tree) {
     Require ($Tree.chrome.sidebar_width_dip -ge 160 -and $Tree.chrome.sidebar_width_dip -le 640 -and $Tree.chrome.workspace_row_height_dip -eq 58) 'Sidebar dimensions escaped supported bounds'
     Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its native metadata caption'
     $rowHandles=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.layout_visible}|ForEach-Object {$_.handle})
-    $rows=@($shown|Where-Object {$rowHandles -contains $_.Handle}|Sort-Object Y);$expectedY=$Tree.chrome.sidebar_list_top
+    $rows=@($shown|Where-Object {$rowHandles -contains $_.Handle}|Sort-Object Y);$expectedY=$rows[0].Y
     foreach($item in $rows){
         $lineCount=@($item.Text -split "`n").Count-1
         Require ($lineCount -ge 1 -and $lineCount -le 3) 'Workspace metadata does not contain one to three pane lines'
         $height=[int][Math]::Round((58+20*($lineCount-1))*$scale)
         Require ([Math]::Abs($item.Y-$expectedY) -le 1 -and [Math]::Abs($item.Height-($height-[Math]::Round(2*$scale))) -le 1) 'Variable workspace rows overlap or retain a fixed height'
+        $clipTop=[Math]::Max($item.Y,$Tree.chrome.sidebar_list_top);$clipBottom=[Math]::Min($item.Y+$item.Height,$Tree.chrome.sidebar_list_bottom)
+        Require ($item.ClipY -eq $clipTop -and $item.ClipHeight -eq $clipBottom-$clipTop) 'Native workspace region does not match the sidebar viewport'
         $expectedY+=$height
     }
+    Require ([Math]::Abs($rows[0].ClipY-$Tree.chrome.sidebar_list_top) -le [Math]::Ceiling(2*$scale)) 'Scrolled rows leave unused space above the viewport'
     $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-4),($row[0].Y+$row[0].Height-4))
     Require ($selectionPixel -eq $background) 'Selected workspace does not retain the sidebar background'
     $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
@@ -124,13 +127,13 @@ function Capture([string]$Name,$Tree) {
     $bell=@($shown|Where-Object {$_.Text -match '^Notifications \(\d+\)$'})
     Require ($bell.Count -eq 1 -and [Math]::Abs($bell[0].Y-5*$scale) -le 2 -and [Math]::Abs($bell[0].X+$bell[0].Width-($Tree.chrome.sidebar_actual_width-4*$scale)) -le 2) 'Notification bell is not at the header right edge'
     foreach($control in $shown){
-        Require ($control.X -ge 0 -and $control.Y -ge 0 -and $control.Width -gt 0 -and $control.Height -gt 0 -and $control.X+$control.Width -le $size[0]+1 -and $control.Y+$control.Height -le $size[1]+1) 'Native chrome control escaped client bounds'
+        Require ($control.ClipX -ge 0 -and $control.ClipY -ge 0 -and $control.ClipWidth -gt 0 -and $control.ClipHeight -gt 0 -and $control.ClipX+$control.ClipWidth -le $size[0]+1 -and $control.ClipY+$control.ClipHeight -le $size[1]+1) 'Native chrome control escaped client bounds'
         Require ($control.Text -notmatch '[●○]') 'Legacy circle markers remain in native chrome text'
         if($control.Class -eq 'Button'){Require (($control.Style -band 15) -eq 11 -and $control.Font -ne 0) 'Expected ownerdraw BUTTON with an assigned font'}
     }
     for($i=0;$i -lt $shown.Count;$i++){for($j=$i+1;$j -lt $shown.Count;$j++){
         $a=$shown[$i];$b=$shown[$j]
-        Require (-not ($a.X -lt $b.X+$b.Width -and $b.X -lt $a.X+$a.Width -and $a.Y -lt $b.Y+$b.Height -and $b.Y -lt $a.Y+$a.Height)) ('Native controls overlap: '+$a.Text+' / '+$b.Text)
+        Require (-not ($a.ClipX -lt $b.ClipX+$b.ClipWidth -and $b.ClipX -lt $a.ClipX+$a.ClipWidth -and $a.ClipY -lt $b.ClipY+$b.ClipHeight -and $b.ClipY -lt $a.ClipY+$a.ClipHeight)) ('Native controls overlap: '+$a.Text+' / '+$b.Text)
     }}
     foreach($pane in @($Tree.layout.panes)){
         $area=$pane[1];$tabs=@($shown|Where-Object {$_.X -ge $area.x -and $_.X -lt $area.x+$area.width -and [Math]::Abs($_.Y-($area.y+[Math]::Round(4*$scale))) -le 1})
@@ -311,14 +314,13 @@ try {
         $tree=Ready ($withoutPager+4);$stable=Identities $tree
         $metadata=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $last})[0]
         Require (@($tree.layout.panes).Count -eq 4 -and @($metadata.label -split "`n").Count -eq 4) 'Four panes were not capped to three sidebar metadata lines'
-        $rows=1+[int][Math]::Floor((400-202*$scale)/(58*$scale))
+        $rows=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.layout_visible}).Count
         $lastCapture=Capture 'overflow-last' $tree
-        Require ($tree.chrome.sidebar_offset -eq $withoutPager+1-$rows) 'Last active workspace did not scroll into view'
+        Require ($tree.chrome.sidebar_offset_px -eq $tree.chrome.sidebar_max_offset_px -and $tree.chrome.sidebar_offset_px -gt 0) 'Last active workspace did not scroll into view'
         Require (@($lastCapture.controls|Where-Object {$_.Text -eq 'Next' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'Last-page Next control should be disabled'
         [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,350);$tree=Tree
         Capture 'overflow-shorter' $tree|Out-Null
-        $shortRows=1+[int][Math]::Floor((350-202*$scale)/(58*$scale))
-        Require ($tree.chrome.sidebar_offset -eq $withoutPager+1-$shortRows -and (Identities $tree) -eq $stable) 'Shrinking variable rows hid the active workspace or restarted a terminal'
+        Require ($tree.chrome.sidebar_offset_px -eq $tree.chrome.sidebar_max_offset_px -and $tree.chrome.sidebar_offset_px -gt 0 -and (Identities $tree) -eq $stable) 'Shrinking variable rows hid the active workspace or restarted a terminal'
         [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,400)
         Request @('workspace','focus',$first)|Out-Null;$tree=Tree;$firstCapture=Capture 'overflow-first' $tree
         Require ($tree.chrome.sidebar_offset -eq 0 -and (Identities $tree) -eq $stable) 'First active workspace did not scroll into view or restarted a terminal'

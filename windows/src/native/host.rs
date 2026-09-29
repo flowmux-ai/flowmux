@@ -132,7 +132,7 @@ enum Event {
     Layout,
     WindowMoved,
     Detached(SurfaceId, detached::Signal),
-    SidebarScroll(i32),
+    SidebarScroll(workspaces::Scroll),
     Tick,
     Close,
     ExitAfterReply,
@@ -288,7 +288,7 @@ unsafe extern "system" fn window_proc(
             if point.x >= 0 && point.x < sidebar {
                 let delta = (wparam >> 16) as u16 as i16 as i32;
                 if delta != 0 {
-                    post(Event::SidebarScroll(if delta > 0 { -1 } else { 1 }));
+                    post(Event::SidebarScroll(workspaces::Scroll::Wheel(-delta)));
                 }
                 return 0;
             }
@@ -315,8 +315,9 @@ unsafe extern "system" fn window_proc(
             }
             if let Some(action) = action {
                 if x == -1 && y == -1 {
-                    let mut rect = RECT::default();
-                    GetWindowRect(wparam as HWND, &mut rect);
+                    let Some(rect) = chrome::visible_control_rect(wparam as HWND) else {
+                        return 0;
+                    };
                     x = rect.left;
                     y = rect.bottom;
                 }
@@ -579,7 +580,8 @@ struct App {
     detached_focus: Option<SurfaceId>,
     main_closed: bool,
     controls: Vec<Control>,
-    sidebar_offset: usize,
+    sidebar_offset: i32,
+    sidebar_wheel_remainder: i32,
     sidebar_width_dip: u32,
     sidebar_active: Option<WorkspaceId>,
     sidebar_mru: RefCell<HashMap<WorkspaceId, Vec<PaneId>>>,
@@ -872,6 +874,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             main_closed: false,
             controls: vec![],
             sidebar_offset: 0,
+            sidebar_wheel_remainder: 0,
             sidebar_width_dip,
             sidebar_active: None,
             sidebar_mru: RefCell::new(HashMap::new()),
@@ -1012,6 +1015,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
         }
         unsafe {
             if !app.empty_window_shortcut(&message)
+                && !app.sidebar_scroll_key(&message)
                 && !chrome::workspace_close_key(&message)
                 && !app
                     .tab_menu
@@ -1807,15 +1811,33 @@ impl App {
                     }),
                 _ => None,
             };
+            let workspace_row = matches!(
+                control.action,
+                Action::Workspace(_) | Action::WorkspaceClose(_)
+            );
             unsafe {
                 if let Some((x, y, width, height)) = rect.filter(|(x, y, width, height)| {
                     *x >= 0
-                        && *y >= 0
+                        && (workspace_row || *y >= 0)
                         && *width > 0
                         && *height > 0
                         && x.saturating_add(*width) <= client.right
-                        && y.saturating_add(*height) <= client.bottom
+                        && if workspace_row {
+                            y.saturating_add(*height) > sidebar_layout.list_top
+                                && *y < sidebar_layout.list_bottom
+                        } else {
+                            y.saturating_add(*height) <= client.bottom
+                        }
                 }) {
+                    if workspace_row {
+                        chrome::clip_workspace_row(
+                            control.hwnd,
+                            width,
+                            height,
+                            (sidebar_layout.list_top - y).max(0),
+                            (sidebar_layout.list_bottom - y).min(height),
+                        )?;
+                    }
                     let workspace_close = matches!(control.action, Action::WorkspaceClose(_));
                     SetWindowPos(
                         control.hwnd,
@@ -1995,17 +2017,11 @@ impl App {
                 }
             }
             Event::Detached(surface, signal) => self.detached_event(surface, signal)?,
-            Event::SidebarScroll(delta) if !self.overview.is_open() => {
-                self.sidebar_offset = if delta < 0 {
-                    self.sidebar_offset.saturating_sub(1)
-                } else {
-                    self.sidebar_offset.saturating_add(1)
-                };
-                self.layout()?;
+            Event::SidebarScroll(scroll) if !self.overview.is_open() => {
+                self.scroll_sidebar(scroll)?
             }
             Event::Layout => {
                 self.cancel_drag();
-                self.sidebar_active = None;
                 self.layout()?;
             }
             Event::WindowMoved => {
@@ -3413,12 +3429,7 @@ impl App {
                 return Ok(());
             }
             Action::SidebarScroll(delta) => {
-                self.sidebar_offset = if delta < 0 {
-                    self.sidebar_offset.saturating_sub(1)
-                } else {
-                    self.sidebar_offset.saturating_add(1)
-                };
-                return self.layout();
+                return self.scroll_sidebar(workspaces::Scroll::Page(delta))
             }
             Action::PaneAdd(pane, surface) => {
                 anyhow::ensure!(

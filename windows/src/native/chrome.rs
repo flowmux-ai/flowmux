@@ -788,16 +788,13 @@ fn workspace_close_message(window: HWND, message: u32, wparam: WPARAM) {
     // delivered mouse-message position only in a visible window, never the
     // desktop cursor, to keep the target clickable during that handoff.
     let entering_other = if message == WM_MOUSELEAVE && unsafe { IsWindowVisible(window) } != 0 {
-        let mut rect = RECT::default();
         unsafe {
             let position = GetMessagePos();
             let x = position as u16 as i16 as i32;
             let y = (position >> 16) as u16 as i16 as i32;
-            GetWindowRect(other as HWND, &mut rect) != 0
-                && x >= rect.left
-                && x < rect.right
-                && y >= rect.top
-                && y < rect.bottom
+            visible_control_rect(other as HWND).is_some_and(|rect| {
+                x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+            })
         }
     } else {
         false
@@ -1151,6 +1148,68 @@ pub(super) fn workspace_lines(window: HWND) -> Vec<WorkspaceLine> {
             .map(|entry| entry.workspace_lines.clone())
             .unwrap_or_default()
     })
+}
+
+pub(super) fn visible_control_rect(window: HWND) -> Option<RECT> {
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(window, &mut rect) == 0 {
+            return None;
+        }
+        let mut clip = RECT::default();
+        if GetWindowRgnBox(window, &mut clip) != 0 {
+            let left = rect.left;
+            let top = rect.top;
+            rect.left = rect.left.max(left + clip.left);
+            rect.top = rect.top.max(top + clip.top);
+            rect.right = rect.right.min(left + clip.right);
+            rect.bottom = rect.bottom.min(top + clip.bottom);
+        }
+        (rect.right > rect.left && rect.bottom > rect.top).then_some(rect)
+    }
+}
+
+/// Clip existing buttons to the sidebar viewport without changing their natural
+/// height, parent, accessibility text, or keyboard identity.
+pub(super) fn clip_workspace_row(
+    window: HWND,
+    width: i32,
+    height: i32,
+    top: i32,
+    bottom: i32,
+) -> anyhow::Result<()> {
+    unsafe {
+        let mut current = RECT::default();
+        let has_region = GetWindowRgnBox(window, &mut current) != 0;
+        let full = top == 0 && bottom == height;
+        let desired = RECT {
+            left: 0,
+            top,
+            right: width,
+            bottom,
+        };
+        if (!has_region && full) || (has_region && EqualRect(&current, &desired) != 0) {
+            return Ok(());
+        }
+        let region = if full {
+            std::ptr::null_mut()
+        } else {
+            CreateRectRgn(0, top, width, bottom)
+        };
+        if !full {
+            checked((!region.is_null()) as i32)?;
+        }
+        if SetWindowRgn(window, region, 1) == 0 {
+            let error = std::io::Error::last_os_error();
+            if !region.is_null() {
+                DeleteObject(region);
+            }
+            ShowWindow(window, SW_HIDE);
+            return Err(error.into());
+        }
+        // SetWindowRgn owns a successfully assigned HRGN.
+    }
+    Ok(())
 }
 
 pub(super) fn shutdown() {
@@ -2494,15 +2553,21 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             .filter(|(window, _, _)| *window == item.hwndItem as isize)
         {
             let stripe = if horizontal {
+                let mut bounds = item.rcItem;
+                let mut region = RECT::default();
+                if GetWindowRgnBox(item.hwndItem, &mut region) != 0 {
+                    IntersectRect(&mut bounds, &item.rcItem, &region);
+                }
+                let thickness = pixel(3).min(bounds.bottom - bounds.top);
                 let top = if before {
-                    item.rcItem.top
+                    bounds.top
                 } else {
-                    item.rcItem.bottom - pixel(3)
+                    bounds.bottom - thickness
                 };
                 RECT {
                     top,
-                    bottom: top + pixel(3),
-                    ..item.rcItem
+                    bottom: top + thickness,
+                    ..bounds
                 }
             } else {
                 let left = if before {
@@ -2888,6 +2953,13 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
             continue;
         }
         let mut clip = rect;
+        let mut region = RECT::default();
+        if unsafe { GetWindowRgnBox(child, &mut region) } != 0 {
+            clip.left = clip.left.max(rect.left + region.left);
+            clip.top = clip.top.max(rect.top + region.top);
+            clip.right = clip.right.min(rect.left + region.right);
+            clip.bottom = clip.bottom.min(rect.top + region.bottom);
+        }
         if subtree {
             let mut ancestor = unsafe { GetParent(child) };
             loop {

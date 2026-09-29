@@ -247,7 +247,7 @@ try {
     Terminal-Command $tree $c.surface 'echo DETACHED_%FM_TEAROUT%';Screen-Contains $c.surface ('DETACHED_'+$shellState)
     $beforeRejected=Topology $tree
     foreach($arguments in @(@('detach-tab',$c.surface),@('new-tab','--shell=cmd'),@('split','vertical','--shell=cmd'),@('browser','open','about:blank','--pane',(Location $tree $c.surface)),@('editor','open',(Join-Path $directory 'not-opened.txt'),'--root',$directory,'--pane',(Location $tree $c.surface)))){Rejected-Attached $arguments}
-    $stale=Request @('detach-tab',([guid]::NewGuid().ToString())) 5000 1;Require ($stale.error -like '*wait for the surface*' -or $stale.error -like '*source surface not found*') 'Stale detach-tab did not reject its missing source'
+    $stale=Request @('detach-tab',([guid]::NewGuid().ToString())) 5000 1;Require ($stale.error -ceq 'source tab missing') ('Stale detach-tab did not reject its missing source: '+$stale.error)
     $tree=Tree;Detached $tree $retained|Out-Null;Stable $tree;Require ((Topology $tree) -ceq $beforeRejected -and @($tree.browsers).Count -eq 0 -and @($tree.editors).Count -eq 0 -and $tree.editor_open_pending -eq 0 -and $tree.editor_open_admitted -eq 0) 'Rejected detached actions mutated the model or admitted editor work'
     Passed 'outside-drop-independent-hidden-window-same-PTY-WebView-holder-Unicode-and-detached-action-guards'
 
