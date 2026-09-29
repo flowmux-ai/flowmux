@@ -2,14 +2,146 @@
 use super::*;
 use crate::notifications::{self as domain, store::NotificationStore, Op};
 use flowmux_core::{NotificationId, NotificationLevel};
+use std::collections::VecDeque;
+use windows_sys::Win32::UI::Shell::*;
 #[path = "notification_panel.rs"]
 mod panel;
 pub(super) use panel::UiAction;
+
+pub(super) const DESKTOP_MESSAGE: u32 = WM_APP + 2;
+pub(super) fn restart_message() -> u32 {
+    static MESSAGE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MESSAGE.get_or_init(|| unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) })
+}
+
+#[derive(Default)]
+struct Desktop {
+    owner: isize,
+    serial: u32,
+    active: Option<(u32, NotificationId)>,
+    queue: VecDeque<NotificationId>,
+    error: Option<String>,
+    calls: usize,
+}
+impl Desktop {
+    fn shell(&mut self, action: u32, icon: &NOTIFYICONDATAW) -> bool {
+        self.calls += 1;
+        unsafe { Shell_NotifyIconW(action, icon) != 0 }
+    }
+    fn icon(&self, serial: u32) -> NOTIFYICONDATAW {
+        NOTIFYICONDATAW {
+            cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
+            hWnd: self.owner as HWND,
+            uID: serial,
+            ..Default::default()
+        }
+    }
+    fn remove_active(&mut self) -> Option<NotificationId> {
+        let (serial, id) = self.active.take()?;
+        self.shell(NIM_DELETE, &self.icon(serial));
+        Some(id)
+    }
+    fn sync(&mut self, owner: HWND, store: &NotificationStore, enabled: bool) {
+        if !enabled {
+            self.queue.clear();
+            self.remove_active();
+            return;
+        }
+        self.owner = owner as isize;
+        let unread = |id| store.find(id).is_some_and(|entry| !entry.read);
+        self.queue.retain(|id| unread(*id));
+        if self.active.is_some_and(|(_, id)| !unread(id)) {
+            self.remove_active();
+        }
+        if self.active.is_some() {
+            return;
+        }
+        let Some(id) = self.queue.pop_front() else {
+            return;
+        };
+        let Some(entry) = store.find(id) else {
+            return;
+        };
+        self.error = None;
+        let result = (|| -> anyhow::Result<()> {
+            self.serial = self
+                .serial
+                .checked_add(1)
+                .context("desktop notification IDs exhausted; restart flowmux")?;
+            let mut icon = self.icon(self.serial);
+            icon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+            icon.uCallbackMessage = DESKTOP_MESSAGE;
+            icon.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+            icon.szTip = domain::desktop_text("flowmux");
+            anyhow::ensure!(
+                !icon.hIcon.is_null(),
+                "Windows notification icon is unavailable"
+            );
+            anyhow::ensure!(
+                self.shell(NIM_ADD, &icon),
+                "Windows Shell refused the notification icon"
+            );
+            self.active = Some((self.serial, id));
+            // Version 3 keeps the documented 32-bit callback ID. Each balloon
+            // gets a fresh ID so delayed dismissals cannot affect its successor.
+            icon.Anonymous.uVersion = NOTIFYICON_VERSION;
+            anyhow::ensure!(
+                self.shell(NIM_SETVERSION, &icon),
+                "Windows Shell refused the callback version"
+            );
+            icon.uFlags = NIF_INFO;
+            icon.szInfoTitle = domain::desktop_text(&entry.title);
+            icon.szInfo = domain::desktop_text(if entry.body.is_empty() {
+                &entry.title
+            } else {
+                &entry.body
+            });
+            icon.dwInfoFlags = NIIF_RESPECT_QUIET_TIME
+                | match entry.level {
+                    NotificationLevel::NeedsInput => NIIF_WARNING,
+                    NotificationLevel::Error => NIIF_ERROR,
+                    _ => NIIF_INFO,
+                };
+            anyhow::ensure!(
+                self.shell(NIM_MODIFY, &icon),
+                "Windows Shell refused the notification"
+            );
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.remove_active();
+            self.queue.clear(); // Keep the bell transcript; avoid repeated Shell failures.
+            self.error = Some(error.to_string());
+        }
+    }
+    fn finish(&mut self, serial: u32, event: u32) -> Option<NotificationId> {
+        if self.active.is_none_or(|(active, _)| active != serial)
+            || !matches!(
+                event,
+                NIN_BALLOONHIDE | NIN_BALLOONTIMEOUT | NIN_BALLOONUSERCLICK
+            )
+        {
+            return None;
+        }
+        let id = self.remove_active();
+        if event == NIN_BALLOONUSERCLICK {
+            id
+        } else {
+            None
+        }
+    }
+}
+impl Drop for Desktop {
+    fn drop(&mut self) {
+        self.remove_active();
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Controller {
     pub(super) store: NotificationStore,
     panel: Option<panel::Panel>,
+    desktop: RefCell<Desktop>,
 }
 impl Controller {
     #[cfg(debug_assertions)]
@@ -23,6 +155,13 @@ impl Controller {
     }
 }
 impl App {
+    pub(super) fn sync_desktop_notifications(&self) {
+        self.notifications.desktop.borrow_mut().sync(
+            self.window,
+            &self.notifications.store,
+            self.settings.terminal.system_notifications_enabled && !self.background_test,
+        );
+    }
     pub(super) fn source_is_focused(&self, source: Option<SurfaceId>) -> bool {
         !self.background_test
             && unsafe {
@@ -44,7 +183,7 @@ impl App {
         domain::validate(&title, &body)?;
         if domain::suppress(level, self.source_is_focused(source)) {
             return Ok(
-                json!({"accepted":false,"reason":"source_focused","desktop_delivery":"not_implemented"}),
+                json!({"accepted":false,"reason":"source_focused","desktop_delivery":"suppressed"}),
             );
         }
         let location = source.and_then(|id| self.locate(id));
@@ -61,8 +200,25 @@ impl App {
         if id.is_some() {
             self.refresh_notifications();
         }
+        let delivery = match id {
+            None => "duplicate",
+            Some(_) if !self.settings.terminal.system_notifications_enabled => "disabled",
+            Some(_) if self.background_test => "background_suppressed",
+            Some(id) => {
+                self.notifications.desktop.borrow_mut().queue.push_back(id);
+                self.sync_desktop_notifications();
+                let desktop = self.notifications.desktop.borrow();
+                if desktop.error.is_some() {
+                    "failed"
+                } else if desktop.active.is_some_and(|(_, active)| active == id) {
+                    "requested"
+                } else {
+                    "queued"
+                }
+            }
+        };
         Ok(
-            json!({"accepted":id.is_some(),"id":id,"reason":if id.is_none() {Some("duplicate")} else {None},"desktop_delivery":"not_implemented"}),
+            json!({"accepted":id.is_some(),"id":id,"reason":if id.is_none() {Some("duplicate")} else {None},"desktop_delivery":delivery}),
         )
     }
     pub(super) fn notification_button_text(&self) -> String {
@@ -102,8 +258,10 @@ impl App {
     }
 
     fn notification_status(&self, unread: bool) -> Value {
+        let desktop = self.notifications.desktop.borrow();
         json!({"entries":self.notification_rows(unread),"unread_count":self.notifications.store.unread_count(),
-            "retained_limit":50,"duplicate_window_ms":8000,"desktop_delivery":"not_implemented",
+            "retained_limit":50,"duplicate_window_ms":8000,"desktop_delivery":"shell_balloon",
+            "desktop":{"enabled":self.settings.terminal.system_notifications_enabled,"background_blocked":self.background_test,"active":desktop.active.map(|(_, id)|id),"queued":desktop.queue.len(),"error":desktop.error,"native_calls":desktop.calls},
             "button_text":self.notification_button_text(),
             "panel_handle":self.notifications.panel.as_ref().map(|p|p.window as usize),
             "panel_rows":self.notifications.panel.as_ref().map(|p|p.rows()),
@@ -111,6 +269,7 @@ impl App {
             "panel_snapshot":self.notifications.panel.as_ref().map(|p|p.snapshot())})
     }
     pub(super) fn refresh_notifications(&self) {
+        self.sync_desktop_notifications();
         self.refresh_notification_chrome();
         if let Some(panel) = &self.notifications.panel {
             panel.results(&self.notification_rows(false));
@@ -229,6 +388,32 @@ impl App {
         Ok(self.notification_status(false))
     }
     pub(super) fn notification_ui(&mut self, action: UiAction) -> anyhow::Result<()> {
+        match action {
+            UiAction::Desktop(serial, event) => {
+                let clicked = self
+                    .notifications
+                    .desktop
+                    .borrow_mut()
+                    .finish(serial, event);
+                if let Some(id) = clicked {
+                    if let Err(error) = self.open_notification(id) {
+                        self.notifications.desktop.borrow_mut().error = Some(error.to_string());
+                    }
+                }
+                self.sync_desktop_notifications();
+                return Ok(());
+            }
+            UiAction::DesktopRestarted => {
+                let mut desktop = self.notifications.desktop.borrow_mut();
+                if let Some(id) = desktop.remove_active() {
+                    desktop.queue.push_front(id);
+                }
+                drop(desktop);
+                self.sync_desktop_notifications();
+                return Ok(());
+            }
+            _ => {}
+        }
         if matches!(action, UiAction::Show) {
             if self.notifications.panel.is_none() {
                 self.notifications.panel = Some(panel::Panel::new(self.window)?);
@@ -244,6 +429,7 @@ impl App {
                 .map_or(self.window, |control| control.hwnd);
             panel.show(self.background_test, anchor);
             self.notifications.store.mark_all_unread_read();
+            self.sync_desktop_notifications();
             self.refresh_notification_chrome();
             return Ok(());
         }
@@ -274,7 +460,7 @@ impl App {
             UiAction::Open(id) => Some(Op::Open { id }),
             UiAction::Delete(id) => Some(Op::Delete { id }),
             UiAction::Clear => Some(Op::Clear {}),
-            UiAction::Show => unreachable!(),
+            UiAction::Show | UiAction::Desktop(..) | UiAction::DesktopRestarted => unreachable!(),
         };
         if let Some(op) = op {
             let dismiss = matches!(op, Op::Open { .. } | Op::Clear {});

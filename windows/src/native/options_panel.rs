@@ -398,6 +398,12 @@ impl Panel {
             )?;
             p.row(None, 0, "Default shell (future terminals)", vec![])?;
             p.row(
+                Some(SettingKey::SystemNotificationsEnabled),
+                0,
+                "System notifications",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
                 Some(SettingKey::AgentBarMode),
                 0,
                 "Agents bar mode",

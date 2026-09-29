@@ -431,6 +431,14 @@ unsafe extern "system" fn window_proc(
             0
         }
         WAKE => 0,
+        notifications::DESKTOP_MESSAGE => {
+            post(Event::NotificationUi(notifications::UiAction::Desktop(wparam as u32, lparam as u32)));
+            0
+        }
+        message if message != 0 && message == notifications::restart_message() => {
+            post(Event::NotificationUi(notifications::UiAction::DesktopRestarted));
+            0
+        }
         _ => DefWindowProcW(window, message, wparam, lparam),
     }
 }

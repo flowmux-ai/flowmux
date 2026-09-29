@@ -172,7 +172,7 @@ try {
     if($Case -eq 'cursor'){$status=Verify-Cursor $status}elseif($Case -eq 'about'){$status=Verify-About $status}elseif($Case -eq 'focus'){$status=Verify-Focus $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
     foreach($row in $status.options.controls){Require ($row.value -ceq $row.baseline) ('First open mistook an uninitialized control for an unsaved draft: '+$row.key)}
-    $order=@('zoom_percent','font_family','font_size','focus_border_color','focus_border_opacity','persist_browser_session','restore_terminal_scrollback','scrollback','minimap_enabled','minimap_width','minimap_opacity','default_shell','agent_bar_mode','usage_bar_enabled','agent_notification_target','editor_minimap_enabled','cursor_blink','cursor_blink_interval_ms','cursor_style')
+    $order=@('zoom_percent','font_family','font_size','focus_border_color','focus_border_opacity','persist_browser_session','restore_terminal_scrollback','scrollback','minimap_enabled','minimap_width','minimap_opacity','default_shell','system_notifications_enabled','agent_bar_mode','usage_bar_enabled','agent_notification_target','editor_minimap_enabled','cursor_blink','cursor_blink_interval_ms','cursor_style')
     Require ((@($status.options.controls|Where-Object page -eq 'general'|ForEach-Object key) -join ',') -ceq ($order -join ',')) 'General controls differ from the Linux order'
     $font=Field $status 'font_family';$fontBounds=[OptionsFixture]::RelativeBounds([long]$font.parent,[long]$font.input,$owned.Id);$picker=[OptionsFixture]::RelativeBounds([long]$font.parent,[long]$status.options.font_picker.entrybutton,$owned.Id)
     Require ($picker.Y -eq $fontBounds.Y -and $picker.X -ge $fontBounds.X+$fontBounds.Width) 'Font chooser no longer follows its font row'
@@ -205,7 +205,7 @@ try {
     foreach($key in $order){$status=Reveal-Field $status $key}
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='all_general_fields_distinct_and_shell_agents_editor_browser_session_controls_scroll_into_view';passed=$true}
-    foreach($key in @('persist_browser_session','restore_terminal_scrollback','minimap_enabled','agent_bar_mode','usage_bar_enabled','editor_minimap_enabled','cursor_blink')){
+    foreach($key in @('persist_browser_session','restore_terminal_scrollback','minimap_enabled','system_notifications_enabled','agent_bar_mode','usage_bar_enabled','editor_minimap_enabled','cursor_blink')){
         $status=Reveal-Field $status $key;$row=Field $status $key;$native=[OptionsFixture]::Describe([long]$row.input,$owned.Id)
         Require (($native.Style -band 15) -eq 3 -and ($native.Style -band 0x10000) -ne 0 -and $native.Title -ceq $row.label) ('Boolean setting lacks native checkbox keyboard/accessibility semantics: '+$key)
         $initial=[bool]$status.document.terminal.$key
@@ -220,7 +220,7 @@ try {
     Request @('settings','set','cursor-blink','false')|Out-Null;$status=Await {param($s) -not $s.document.terminal.cursor_blink -and (Field $s 'cursor_blink').value -ceq 'false' -and (Ack $s)}
     $row=Field $status 'cursor_blink';Require (-not [OptionsFixture]::Checked([long]$row.parent,[long]$row.input,$owned.Id)) 'External setting did not refresh native checkbox state'
     Request @('settings','set','cursor-blink','true')|Out-Null;$status=Await {param($s) $s.document.terminal.cursor_blink -and (Field $s 'cursor_blink').value -ceq 'true' -and (Ack $s)}
-    $evidence.checks+=@{name='seven_native_boolean_checkboxes_toggle_with_owned_Space_auto_save_and_external_refresh';passed=$true}
+    $evidence.checks+=@{name='eight_native_boolean_checkboxes_toggle_with_owned_Space_auto_save_and_external_refresh';passed=$true}
     foreach($enabled in @($true,$false)){
         Select-Field $status 'agent_bar_mode' $(if($enabled){0}else{1})
         $status=Await {param($s) $s.document.terminal.agent_bar_mode -eq $enabled -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}

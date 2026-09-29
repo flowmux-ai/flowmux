@@ -27,6 +27,7 @@ pub enum SettingKey {
     CursorStyle,
     UsageBarEnabled,
     AgentBarMode,
+    SystemNotificationsEnabled,
     AgentNotificationTarget,
     MinimapEnabled,
     MinimapWidth,
@@ -127,6 +128,7 @@ pub struct TerminalSettings {
     pub cursor_style: CursorStyle,
     pub usage_bar_enabled: bool,
     pub agent_bar_mode: bool,
+    pub system_notifications_enabled: bool,
     pub agent_notification_target: flowmux_core::AgentNotificationTarget,
     pub minimap_enabled: bool,
     pub minimap_width: u16,
@@ -153,6 +155,8 @@ impl Default for TerminalSettings {
             cursor_style: CursorStyle::Block,
             usage_bar_enabled: true,
             agent_bar_mode: false,
+            system_notifications_enabled:
+                flowmux_config::options::SYSTEM_NOTIFICATIONS_ENABLED_DEFAULT,
             agent_notification_target: flowmux_core::AgentNotificationTarget::default(),
             minimap_enabled: true,
             minimap_width: 40,
@@ -230,6 +234,7 @@ impl TerminalSettings {
             SettingKey::CursorBlinkIntervalMs => self.cursor_blink_interval_ms.to_string(),
             SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
             SettingKey::AgentBarMode => self.agent_bar_mode.to_string(),
+            SettingKey::SystemNotificationsEnabled => self.system_notifications_enabled.to_string(),
             SettingKey::AgentNotificationTarget => match self.agent_notification_target {
                 flowmux_core::AgentNotificationTarget::AgentBar => "agent_bar",
                 flowmux_core::AgentNotificationTarget::Workspace => "workspace",
@@ -370,6 +375,11 @@ impl TerminalSettings {
                 next.agent_bar_mode = value
                     .parse()
                     .context("agents bar mode must be true or false")?;
+            }
+            SettingKey::SystemNotificationsEnabled => {
+                next.system_notifications_enabled = value
+                    .parse()
+                    .context("system notifications enabled must be true or false")?;
             }
             SettingKey::AgentNotificationTarget => {
                 next.agent_notification_target = serde_json::from_value(serde_json::Value::String(
@@ -521,6 +531,13 @@ mod tests {
         );
         assert!(old.terminal.persist_browser_session);
         assert!(old.terminal.restore_terminal_scrollback);
+        assert!(old.terminal.system_notifications_enabled);
+        assert!(
+            !old.terminal
+                .changed(SettingKey::SystemNotificationsEnabled, "false", None)
+                .unwrap()
+                .system_notifications_enabled
+        );
         assert_eq!(
             old.terminal.zoom_percent,
             flowmux_config::options::ZOOM_DEFAULT
@@ -548,6 +565,7 @@ mod tests {
             (SettingKey::CursorBlinkIntervalMs, "530.5"),
             (SettingKey::PersistBrowserSession, "on"),
             (SettingKey::RestoreTerminalScrollback, "yes"),
+            (SettingKey::SystemNotificationsEnabled, "on"),
             (SettingKey::ZoomPercent, "49"),
             (SettingKey::ZoomPercent, "201"),
             (SettingKey::ZoomPercent, "100.5"),

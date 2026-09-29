@@ -45,6 +45,7 @@ impl App {
                     let zoom_changed =
                         self.settings.terminal.zoom_percent != document.terminal.zoom_percent;
                     self.settings = document;
+                    self.sync_desktop_notifications();
                     if !self.settings.terminal.restore_terminal_scrollback {
                         self.restore_screens.clear();
                         if let Some(pending) = self

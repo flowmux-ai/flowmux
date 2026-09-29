@@ -103,6 +103,10 @@ public static class NotificationInspect {
         Owned(popup,expectedPid);IntPtr result;
         if(SendNative(popup,0x0010,IntPtr.Zero,IntPtr.Zero,2,1000,out result)==IntPtr.Zero)throw new Exception("Owned popup close timed out");
     }
+    public static void UnknownDesktopClick(IntPtr window,int expectedPid) {
+        Owned(window,expectedPid);IntPtr result;
+        if(SendNative(window,0x8002,new IntPtr(1),new IntPtr(0x405),2,1000,out result)==IntPtr.Zero)throw new Exception("Owned desktop callback exceeded one second");
+    }
     [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h,uint msg,IntPtr w,StringBuilder text,uint flags,uint timeout,out IntPtr result);
     public static string Text(IntPtr h) {
         var b=new StringBuilder(16384);IntPtr result;
@@ -153,7 +157,7 @@ try {
     Request @('notifications','clear')|Out-Null
     $title='알림_한_😀';$body="완료 한글 é`n두 번째 줄"
     $first=Request @('notify','--surface',$surface,'--title',$title,$body)
-    if (-not $first.accepted) {throw 'Explicit notice rejected'}
+    if (-not $first.accepted -or $first.desktop_delivery -ne 'background_suppressed') {throw 'Explicit notice rejected or background desktop guard bypassed'}
     $duplicate=Request @('notify','--surface',$surface,'different body')
     if ($duplicate.accepted -or $duplicate.reason -ne 'duplicate') {throw 'Duplicate source not suppressed'}
     $attention=Request @('notify','--surface',$surface,'--level','attention','needs input')
@@ -283,6 +287,17 @@ try {
     if ($empty.entries.Count -ne 0 -or $empty.unread_count -ne 0 -or $empty.panel_rows -ne 0 -or (Request @('notifications','jump-to-unread')).opened) {throw 'Clear/empty jump failed'}
     Assert-WorkspaceUnread (Tree) $empty
     $evidence.checks+=@{name='bounded_retention_delete_clear_jump_and_invalid_title';passed=$true}
+    Request @('settings','set','system-notifications-enabled','false')|Out-Null
+    $off=Request @('notify','--global','desktop disabled');$notes=Request @('notifications','list')
+    if(-not $off.accepted -or $off.desktop_delivery -ne 'disabled' -or $notes.unread_count -ne 1 -or $notes.desktop.enabled -or $notes.desktop.native_calls -ne 0){throw 'System notification toggle suppressed the bell entry or called Windows Shell'}
+    Request @('settings','set','system-notifications-enabled','true')|Out-Null
+    $on=Request @('notify','--global','desktop background guard');$notes=Request @('notifications','list')
+    if(-not $on.accepted -or $on.desktop_delivery -ne 'background_suppressed' -or -not $notes.desktop.enabled -or -not $notes.desktop.background_blocked -or $notes.desktop.active -or $notes.desktop.queued -ne 0 -or $notes.desktop.native_calls -ne 0){throw 'Hidden notification reached Windows Shell or left an unbounded desktop queue'}
+    $before=Request @('identify');[NotificationInspect]::UnknownDesktopClick([IntPtr]([long](Tree).window_handle),$process.Id)
+    $after=Request @('identify');$notes=Request @('notifications','list')
+    if($after.surface -ne $before.surface -or $notes.unread_count -ne 2 -or $notes.desktop.native_calls -ne 0){throw 'Unknown desktop callback changed the active tab, unread state or native delivery'}
+    Request @('notifications','clear')|Out-Null
+    $evidence.checks+=@{name='system_notifications_toggle_preserves_bell_and_hidden_hosts_never_call_Shell_and_ignore_unknown_callbacks';passed=$true}
     $otherDirectory=Join-Path $directory 'other';[IO.Directory]::CreateDirectory($otherDirectory)|Out-Null
     $otherProcess=[CliProbe]::Start($gui,@('--temporary','--shell=cmd'),$otherDirectory,$otherDirectory)
     $otherOut=$otherProcess.StandardOutput.ReadToEndAsync();$otherErr=$otherProcess.StandardError.ReadToEndAsync()

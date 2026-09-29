@@ -21,6 +21,8 @@ pub(crate) enum UiAction {
     Scroll(i32),
     ScrollTo(i32),
     Navigate(i32),
+    Desktop(u32, u32),
+    DesktopRestarted,
 }
 fn emit(action: UiAction) {
     post(Event::NotificationUi(action));

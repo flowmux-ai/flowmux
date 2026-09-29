@@ -10,6 +10,23 @@ pub mod stream;
 use flowmux_core::NotificationLevel;
 use std::{cell::RefCell, rc::Rc};
 
+/// Shell balloon fields are fixed UTF-16 arrays. Keep the full text in the bell
+/// store and truncate only this display copy, never splitting a surrogate pair.
+pub fn desktop_text<const N: usize>(text: &str) -> [u16; N] {
+    let mut result = [0; N];
+    let mut length = 0;
+    for ch in text.chars() {
+        let mut units = [0; 2];
+        let units = ch.encode_utf16(&mut units);
+        if length + units.len() >= N {
+            break;
+        }
+        result[length..length + units.len()].copy_from_slice(units);
+        length += units.len();
+    }
+    result
+}
+
 pub fn validate(title: &str, body: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         title.len() <= 1024 && body.len() <= 8192,
@@ -134,6 +151,28 @@ pub enum Op {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn desktop_fields_preserve_raw_unicode_and_complete_surrogates() {
+        let text = "한글 한 é 😀";
+        let field = desktop_text::<64>(text);
+        assert_eq!(
+            String::from_utf16(&field[..text.encode_utf16().count()]).unwrap(),
+            text
+        );
+        for length in 0..300 {
+            let text = format!("{}😀한", "x".repeat(length));
+            for field in [
+                desktop_text::<64>(&text).to_vec(),
+                desktop_text::<256>(&text).to_vec(),
+            ] {
+                assert_eq!(field.last(), Some(&0));
+                let end = field.iter().position(|unit| *unit == 0).unwrap();
+                let shown = String::from_utf16(&field[..end]).unwrap();
+                assert!(text.starts_with(&shown));
+                assert!(text.encode_utf16().count() >= field.len() || shown == text);
+            }
+        }
+    }
     #[test]
     fn split_unicode_and_metadata_filter_keep_osc_contracts_separate() {
         let bytes = "\x1b]9;한글 한 😀\x07\x1b]9;9;C:\\한글\x07\x1b]9;4;1;75\x07\x1b]99;;needs approval\x1b\\\x1b]777;notify;완료;done\x07".as_bytes();
