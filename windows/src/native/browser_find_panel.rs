@@ -7,7 +7,7 @@ use windows_sys::Win32::{
     System::SystemServices::{SS_ENDELLIPSIS, SS_NOPREFIX},
     UI::{
         Controls::{EM_LIMITTEXT, EM_SETCUEBANNER},
-        Input::KeyboardAndMouse::{GetFocus, VK_TAB},
+        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
     },
 };
 
@@ -20,9 +20,45 @@ pub(crate) enum UiAction {
 }
 
 static NEXT_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+thread_local! {
+    static COMPOSING: Cell<bool> = const { Cell::new(false) };
+    static SETTLING: Cell<bool> = const { Cell::new(false) };
+}
 
 fn emit(action: UiAction) {
+    if matches!(action, UiAction::Next(_) | UiAction::Previous(_)) && COMPOSING.with(Cell::get) {
+        return;
+    }
     post(Event::BrowserFindUi(action));
+}
+
+unsafe extern "system" fn query_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    subclass: usize,
+    _: usize,
+) -> LRESULT {
+    match message {
+        WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION => {
+            COMPOSING.with(|v| v.set(message == WM_IME_STARTCOMPOSITION));
+            SETTLING.with(|v| v.set(true));
+        }
+        WM_KEYDOWN if wparam == 229 => SETTLING.with(|v| v.set(true)),
+        WM_KEYUP if !matches!(wparam, 0x10..=0x12 | 0xa0..=0xa5) => {
+            SETTLING.with(|v| v.set(false));
+        }
+        WM_KILLFOCUS | WM_NCDESTROY => {
+            COMPOSING.with(|v| v.set(false));
+            SETTLING.with(|v| v.set(false));
+            if message == WM_NCDESTROY {
+                RemoveWindowSubclass(window, Some(query_proc), subclass);
+            }
+        }
+        _ => {}
+    }
+    DefSubclassProc(window, message, wparam, lparam)
 }
 
 unsafe extern "system" fn procedure(
@@ -203,6 +239,10 @@ impl Panel {
                 10,
                 WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL as u32,
             )?;
+            anyhow::ensure!(
+                SetWindowSubclass(panel.query, Some(query_proc), 1, 0) != 0,
+                "cannot preserve page-find input composition"
+            );
             SendMessageW(
                 panel.query,
                 EM_LIMITTEXT,
@@ -353,22 +393,37 @@ impl Panel {
 
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         unsafe {
-            if IsWindowVisible(self.window) == 0
+            if !self.is_open()
                 || (message.hwnd != self.window && IsChild(self.window, message.hwnd) == 0)
+                || IsWindowEnabled(self.owner()) == 0
             {
                 return false;
             }
-            // IsDialogMessageW interprets Enter/Escape as dialog commands. Keep all
-            // query input except Tab on the native EDIT/IME path, including key-up,
-            // character and composition messages. Enter does not find and Escape
-            // does not close while editing; the explicit buttons remain available.
-            if GetFocus() == self.query
-                && !(message.message == WM_KEYDOWN && message.wParam == VK_TAB as usize)
-            {
+            // Do not reuse the key that commits/cancels an IME composition.
+            if self.composing() || SETTLING.with(Cell::get) || message.wParam == 229 {
                 return false;
             }
-            IsDialogMessageW(self.window, message) != 0
+            if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
+                if message.lParam as usize & (1 << 30) == 0 {
+                    emit(if message.wParam == 27 || message.hwnd == self.close {
+                        UiAction::Close(self.generation)
+                    } else if message.hwnd == self.previous {
+                        UiAction::Previous(self.generation)
+                    } else {
+                        UiAction::Next(self.generation)
+                    });
+                }
+                return true;
+            }
+            if message.message == WM_CHAR && matches!(message.wParam, 13 | 27) {
+                return true;
+            }
+            IsWindowVisible(self.window) != 0 && IsDialogMessageW(self.window, message) != 0
         }
+    }
+
+    pub(super) fn composing(&self) -> bool {
+        COMPOSING.with(Cell::get)
     }
 
     pub(super) fn query(&self) -> String {
@@ -380,6 +435,9 @@ impl Panel {
     }
 
     pub(super) fn set_query(&self, text: &str, case_sensitive: bool) {
+        if self.composing() {
+            return;
+        }
         unsafe {
             SetWindowTextW(self.query, wide(text).as_ptr());
             SendMessageW(self.case, BM_SETCHECK, usize::from(case_sensitive), 0);
@@ -417,7 +475,7 @@ impl Panel {
     }
 
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"query":self.query as usize,"case":self.case as usize,"previous":self.previous as usize,"next":self.next as usize,"close":self.close as usize,"status":self.status as usize})
+        json!({"query":self.query as usize,"case":self.case as usize,"previous":self.previous as usize,"next":self.next as usize,"close":self.close as usize,"status":self.status as usize,"composing":self.composing(),"settling":SETTLING.with(Cell::get)})
     }
 
     fn control_text(&self, handle: HWND) -> String {

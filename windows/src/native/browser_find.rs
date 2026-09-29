@@ -132,6 +132,15 @@ impl App {
         let wrap = !no_wrap;
         self.browser_find_available(id)?;
         self.browser_find_idle(id)?;
+        anyhow::ensure!(
+            self.browser_find.surface != Some(id)
+                || self
+                    .browser_find
+                    .panel
+                    .as_ref()
+                    .is_none_or(|p| !p.composing()),
+            "Finish composing text before searching"
+        );
         let source = crate::browser_find::script(
             &self.browsers[&id].find_key,
             &query,

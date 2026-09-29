@@ -137,6 +137,18 @@ function Assert-Hit($Result,[string]$Id,[string]$Text) {
     $selection=Selection
     if(-not $Result.found -or $selection.id -ne $Id -or -not (Same-Text $selection.text $Text) -or -not (Same-Text $Result.selection $selection.text)) {throw ('Unexpected native find selection: '+($selection|ConvertTo-Json -Compress))}
 }
+function Wait-FindState([scriptblock]$Condition) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $find=(Status).find
+        if(& $Condition $find){return $find}
+        if($watch.ElapsedMilliseconds -ge 5000){throw ('Native page-find state exceeded five seconds: '+($find|ConvertTo-Json -Depth 5 -Compress))}
+        Start-Sleep -Milliseconds 20
+    } while($true)
+}
+function Wait-NativeHit([string]$Id,[string]$Text) {
+    Wait-FindState {param($f) if($f.busy -or -not $f.found){return $false};$s=Selection;return $s.id -ceq $Id -and (Same-Text $s.text $Text)}|Out-Null
+}
 function Assert-Panel([string]$Query) {
     $browser=Status;$find=$browser.find
     if(-not $find.panel_handle -or -not $find.panel_query_handle -or -not (Same-Text $find.query $Query)) {throw 'Find panel/query state missing'}
@@ -267,6 +279,47 @@ try {
     [ChromeFixture]::Resize([long]$main.window_handle,$process.Id,$originalSize[0],$originalSize[1])
     Request @('settings','set','theme',$originalTheme)|Out-Null
     Assert-Panel ([FindFixture]::Unicode)|Out-Null
+    Reset-Selection;Assert-Hit (Find 'needle') 'one' 'needle';$keys=(Status).find
+    [OptionsFixture]::PostEnter([long]$keys.panel_query_handle,$process.Id)
+    Wait-NativeHit 'two' 'needle'
+    [OptionsFixture]::PostEnter([long]$keys.panel_controls.previous,$process.Id)
+    Wait-NativeHit 'one' 'needle'
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,13,$false,$true)
+    if((Selection).id -cne 'one'){throw 'Held Enter advanced the browser match'}
+    Passed 'native_query_Enter_next_previous_button_Enter_and_repeat_guard'
+
+    $draft=[FindFixture]::Unicode
+    [OptionsFixture]::CompositionGuard([long]$keys.panel_handle,[long]$keys.panel_query_handle,$process.Id,$true)
+    [OptionsFixture]::SetTextAndNotify([long]$keys.panel_handle,[long]$keys.panel_query_handle,$process.Id,$draft)
+    [OptionsFixture]::PostEnter([long]$keys.panel_query_handle,$process.Id);[OptionsFixture]::PostEscape([long]$keys.panel_query_handle,$process.Id)
+    [OptionsFixture]::Click([long]$keys.panel_handle,[long]$keys.panel_controls.next,$process.Id)
+    $rejected=Request @('browser','find',$domPane,'casetoken') 1
+    if($rejected.error -notmatch 'composing'){throw 'CLI find did not explain its active composition guard'}
+    Request @('browser','find-show',$domPane)|Out-Null
+    $guarded=(Status).find
+    if($guarded.panel_handle -ne $keys.panel_handle -or -not $guarded.panel_controls.composing -or $guarded.query -cne 'needle' -or (Selection).id -cne 'one' -or -not (Same-Text ([FindFixture]::ReadText([long]$keys.panel_query_handle)) $draft)){throw 'IME keys, button, CLI search or reopen changed the composing query or page selection'}
+    [OptionsFixture]::CompositionGuard([long]$keys.panel_handle,[long]$keys.panel_query_handle,$process.Id,$false)
+    foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,$key,$false,$false)}
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,16,$true,$false)
+    $guarded=Wait-FindState {param($f)$f.panel_handle -and $f.panel_controls.settling -and -not $f.panel_controls.composing}
+    if($guarded.query -cne 'needle' -or (Selection).id -cne 'one'){throw 'Composition-ending keys searched or closed the browser find'}
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,13,$true,$false)
+    Wait-FindState {param($f)$f.panel_handle -and -not $f.panel_controls.settling}|Out-Null
+    [OptionsFixture]::PostEnter([long]$keys.panel_query_handle,$process.Id)
+    Wait-NativeHit 'unicode' $draft;Assert-Panel $draft|Out-Null
+    Passed 'IME_start_end_release_and_native_button_CLI_reopen_guards_preserve_raw_Unicode'
+
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,229,$false,$false)
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,27,$false,$false)
+    Wait-FindState {param($f)$f.panel_handle -and $f.panel_controls.settling}|Out-Null
+    [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,229,$true,$false)
+    Wait-FindState {param($f)$f.panel_handle -and -not $f.panel_controls.settling}|Out-Null
+    [OptionsFixture]::PostEscape([long]$keys.panel_query_handle,$process.Id)
+    Wait-FindState {param($f)-not $f.panel_handle -and -not $f.busy}|Out-Null
+    if(-not (Same-Text (Selection).text '') -or (Eval-Page 'document.hasFocus()')){throw 'Native Escape did not clear the owned match or moved desktop focus'}
+    Same-Viewport $beforePanel (Status)
+    Passed 'PROCESS_key_release_then_Escape_restores_viewport_and_clears_only_owned_selection'
+    Request @('browser','find-show',$domPane)|Out-Null
     Reset-Selection;Assert-Hit (Find 'needle') 'one' 'needle'
     $closed=Request @('browser','find-close',$domPane)
     if(-not $closed.ok -or $closed.surface -ne $opened.surface -or -not $closed.cleared) {throw 'Find close did not report its owned selection cleared'}
