@@ -3294,6 +3294,31 @@ fn detector_handles_variable_action_labels_and_empty_composers() {
 }
 
 #[test]
+fn detector_keeps_claude_working_across_spinner_frames() {
+    let progress = "Tempering… (1h 16m 53s · ↓ 253.1k tokens)";
+    for spinner in ['·', '✢', '✳', '✶', '✻', '✽', '*'] {
+        let screen = format!("{spinner} {progress}\n❯\nOpus 5.5 | bypass permissions on");
+        assert_eq!(
+            detect_agent_status_from_signals(Some(&screen), Some("◑ 프로젝트 구현 검토")),
+            Some(AgentStatus::Working),
+            "spinner {spinner}"
+        );
+        assert_eq!(detect_agent_progress_text(Some(&screen)), Some(progress));
+    }
+    for screen in [
+        "* Review completed\n❯",
+        "· Ready for the next prompt\n❯",
+        "✻ Tempered for 1h 16m 53s\n❯",
+    ] {
+        assert_eq!(
+            detect_agent_status_from_signals(Some(screen), None),
+            Some(AgentStatus::Idle)
+        );
+        assert_eq!(detect_agent_progress_text(Some(screen)), None);
+    }
+}
+
+#[test]
 fn detector_reads_tmux_title_spinner_while_codex_streams() {
     let composer = "› Ask Codex to do anything\n  gpt-6-astra high · /srv/project";
     for spinner in ["⠋ ", "⠹ ", "⠸ ", "⠼ ", ""] {

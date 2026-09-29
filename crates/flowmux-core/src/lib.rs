@@ -2932,7 +2932,7 @@ fn is_agent_usage_limit_status_line(line: &str) -> bool {
 
 fn trim_agent_status_prefix(line: &str) -> &str {
     line.trim()
-        .trim_start_matches(['•', '◦', '●', '◉', '✢', '✳', '✶', '✻', '✽'])
+        .trim_start_matches(['•', '◦', '●', '◉', '·', '*', '✢', '✳', '✶', '✻', '✽'])
         .trim_start()
 }
 
