@@ -161,11 +161,7 @@ impl Bar {
         )?;
         Ok(bar)
     }
-    fn update(
-        &mut self,
-        items: Vec<AgentBarItem>,
-        focused: Option<SurfaceId>,
-    ) -> anyhow::Result<()> {
+    fn update(&mut self, items: Vec<AgentBarItem>) -> anyhow::Result<()> {
         self.items.retain(|(old, window)| {
             if items.iter().any(|item| item.surface == old.surface) {
                 true
@@ -197,15 +193,6 @@ impl Bar {
             workspaces::set_caption(
                 window,
                 &format!("{}\n{}", item.agent_name, item.status_text),
-            );
-            chrome::set_role(
-                window,
-                chrome::Role::Agent {
-                    selected: focused == Some(item.surface),
-                    color: chrome::color_ref(&item.color),
-                    status: item.status,
-                    seen: item.seen,
-                },
             );
         }
         Ok(())
@@ -384,7 +371,7 @@ impl Bar {
         !background && unsafe { IsDialogMessageW(self.window, message) } != 0
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"viewport":self.viewport as usize,"label":self.label as usize,"native_visible":unsafe {IsWindowVisible(self.window)!=0},"layout_visible":unsafe {GetWindowLongPtrW(self.window,GWL_STYLE) as u32&WS_VISIBLE!=0},"offset":self.offset,"items":self.items.iter().map(|(item,window)|json!({"surface":item.surface,"workspace":item.workspace,"pane":item.pane,"agent":item.agent_name,"status":item.status,"message":item.status_text,"color":item.color,"handle":*window as usize,"tooltip":chrome::tooltip_text(*window)})).collect::<Vec<_>>()})
+        json!({"window":self.window as usize,"viewport":self.viewport as usize,"label":self.label as usize,"native_visible":unsafe {IsWindowVisible(self.window)!=0},"layout_visible":unsafe {GetWindowLongPtrW(self.window,GWL_STYLE) as u32&WS_VISIBLE!=0},"offset":self.offset,"items":self.items.iter().map(|(item,window)|json!({"surface":item.surface,"workspace":item.workspace,"pane":item.pane,"agent":item.agent_name,"status":item.status,"message":item.status_text,"color":item.color,"handle":*window as usize,"tooltip":chrome::tooltip_text(*window),"attention":chrome::attention(*window)})).collect::<Vec<_>>()})
     }
 }
 impl Drop for Bar {
@@ -483,6 +470,39 @@ impl App {
         }
         Ok(true)
     }
+    pub(super) fn refresh_agent_bar(&self) {
+        let Some(bar) = &self.agent_bar else {
+            return;
+        };
+        let attention: HashSet<_> = self
+            .notifications
+            .store
+            .entries()
+            .into_iter()
+            .filter(|entry| {
+                !entry.read && entry.level == flowmux_core::NotificationLevel::NeedsInput
+            })
+            .filter_map(|entry| entry.surface)
+            .collect();
+        let enabled = flowmux_core::AgentNotificationVisualFlags::for_unread(
+            self.settings.terminal.agent_notification_target,
+            false,
+        )
+        .agent_bar;
+        let focused = self.current_surface();
+        for (item, window) in &bar.items {
+            chrome::set_role(
+                *window,
+                chrome::Role::Agent {
+                    selected: focused == Some(item.surface),
+                    color: chrome::color_ref(&item.color),
+                    status: item.status,
+                    seen: item.seen,
+                    attention: enabled && attention.contains(&item.surface),
+                },
+            );
+        }
+    }
     pub(super) fn agent_bar_sync(&mut self) -> anyhow::Result<()> {
         let mut items = vec![];
         if self.settings.terminal.agent_bar_mode && !self.main_closed {
@@ -527,9 +547,8 @@ impl App {
         if restore {
             self.agent_bar = Some(Bar::new(self.window)?);
         }
-        let focused = self.current_surface();
         let bar = self.agent_bar.as_mut().unwrap();
-        bar.update(items, focused)?;
+        bar.update(items)?;
         if restore {
             bar.items.sort_by_key(|(item, _)| {
                 self.agent_bar_order
@@ -538,6 +557,7 @@ impl App {
                     .unwrap_or(usize::MAX)
             });
         }
+        self.refresh_agent_bar();
         Ok(())
     }
     pub(super) fn agent_bar_height(&self, width: i32, height: i32) -> i32 {

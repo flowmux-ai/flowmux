@@ -241,6 +241,7 @@ pub(super) enum Role {
         selected: bool,
         color: Option<COLORREF>,
         unread: bool,
+        attention: bool,
     },
     Choice {
         selected: bool,
@@ -250,6 +251,7 @@ pub(super) enum Role {
         color: COLORREF,
         status: flowmux_core::AgentStatus,
         seen: bool,
+        attention: bool,
     },
     Tab {
         selected: bool,
@@ -1128,6 +1130,28 @@ pub(super) fn set_role(window: HWND, role: Role) {
     }
 }
 
+pub(super) fn attention(window: HWND) -> bool {
+    STATE.with(|slot| {
+        slot.borrow()
+            .controls
+            .get(&(window as isize))
+            .is_some_and(|entry| {
+                matches!(
+                    entry.button,
+                    Some(
+                        Role::Agent {
+                            attention: true,
+                            ..
+                        } | Role::Workspace {
+                            attention: true,
+                            ..
+                        }
+                    )
+                )
+            })
+    })
+}
+
 pub(super) fn set_workspace_lines(window: HWND, lines: Vec<WorkspaceLine>) {
     let changed = STATE.with(|slot| {
         let mut state = slot.borrow_mut();
@@ -1853,6 +1877,16 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         let tint = match status {
             Some(AgentStatus::Blocked) => Some((rgb(239, 68, 68), 16u32)),
             Some(AgentStatus::Done) => Some((rgb(59, 130, 246), 14u32)),
+            _ if matches!(
+                role,
+                Role::Workspace {
+                    attention: true,
+                    ..
+                }
+            ) =>
+            {
+                Some((rgb(245, 158, 11), 18u32))
+            }
             _ => None,
         };
         tint.map_or(color, |(ink, alpha)| {
@@ -1907,10 +1941,13 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             color: stripe,
             status,
             seen,
+            attention,
         } = role
         {
             let working = status == flowmux_core::AgentStatus::Working;
-            let background = if hot || pressed {
+            let background = if attention && !palette.high_contrast {
+                blend(rgb(245, 158, 11), palette.background, 18)
+            } else if hot || pressed {
                 palette.hover
             } else if working && !palette.high_contrast {
                 blend(rgb(245, 158, 11), palette.background, 12)
@@ -1923,7 +1960,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             SelectObject(item.hDC, GetStockObject(DC_PEN));
             SetDCPenColor(
                 item.hDC,
-                if selected && !working {
+                if (selected && !working) || (attention && palette.high_contrast) {
                     palette.accent
                 } else if palette.high_contrast {
                     palette.border

@@ -72,6 +72,12 @@ try {
         Require ($toggle.Count -eq 1 -and $toggle[0].selected -eq $enabled -and -not $tree.agent_bar -and (Identities $tree) -ceq $identities) 'Live Agents bar option failed to update footer or preserved an empty bar'
     }
     $evidence.checks+=@{name='native_agents_bar_option_auto_applies_updates_footer_and_preserves_terminal_without_agents';passed=$true}
+    foreach($choice in @(@(2,'both'),@(1,'workspace'),@(0,'agent_bar'))){
+        Select-Field $status 'agent_notification_target' $choice[0]
+        $status=Await {param($s) $s.document.terminal.agent_notification_target -ceq $choice[1] -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}
+        Require ((Identities (Tree)) -ceq $identities) 'Notification target option restarted a terminal'
+    }
+    $evidence.checks+=@{name='native_agent_notification_target_choices_auto_apply_and_preserve_terminals';passed=$true}
     $font='Cascadia Mono, "Malgun Gothic", "한글 한 é 😀 &", monospace';Edit $status 'font_family' $font
     $status=Await {param($s) $s.document.terminal.font_family -ceq $font -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}
     Require ([OptionsFixture]::Text([long](Field $status 'font_family').input,$owned.Id) -ceq $font -and (Identities (Tree)) -ceq $identities) 'Immediate Unicode font value or terminal identity changed'

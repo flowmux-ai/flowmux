@@ -358,6 +358,7 @@ impl Panel {
                     selected: false,
                     color: None,
                     unread: false,
+                    attention: false,
                 },
             );
             let remove = unsafe {

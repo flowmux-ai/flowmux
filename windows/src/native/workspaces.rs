@@ -433,9 +433,10 @@ impl App {
         }
         Some(caption)
     }
-    fn workspace_has_unread(&self, id: WorkspaceId) -> bool {
+    fn workspace_has_unread(&self, id: WorkspaceId, attention: bool) -> bool {
         self.notifications.store.entries().iter().any(|entry| {
             !entry.read
+                && (!attention || entry.level == flowmux_core::NotificationLevel::NeedsInput)
                 && entry
                     .surface
                     .and_then(|surface| self.locate(surface))
@@ -461,7 +462,13 @@ impl App {
                         .is_some_and(|workspace| workspace.id == id)
                         || self.is_detached_workspace(id),
                     color,
-                    unread: self.workspace_has_unread(id),
+                    unread: self.workspace_has_unread(id, false),
+                    attention: flowmux_core::AgentNotificationVisualFlags::for_unread(
+                        self.settings.terminal.agent_notification_target,
+                        false,
+                    )
+                    .workspace
+                        && self.workspace_has_unread(id, true),
                 }
             }
             Action::Tab(pane, surface) | Action::TabClose(pane, surface) => {
@@ -708,7 +715,7 @@ impl App {
                 let mut clip=RECT::default();let clipped=GetWindowRgnBox(control.hwnd,&mut clip)!=0;
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"workspace_lines":chrome::workspace_lines(control.hwnd),"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"clip":clipped.then(||json!({"x":clip.left,"y":clip.top,"width":clip.right-clip.left,"height":clip.bottom-clip.top})),"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"workspace_lines":chrome::workspace_lines(control.hwnd),"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id, false)),"attention":chrome::attention(control.hwnd),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"clip":clipped.then(||json!({"x":clip.left,"y":clip.top,"width":clip.right-clip.left,"height":clip.bottom-clip.top})),"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
         let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);

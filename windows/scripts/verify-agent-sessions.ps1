@@ -28,6 +28,7 @@ function Agent-Point($Tree,[string]$Id,[bool]$Before){$r=Agent-Bounds $Tree $Id 
 function Agent-Begin($Tree,[string]$Id){$item=@($Tree.agent_bar.items|Where-Object {$_.surface -ceq $Id})[0];$r=[OptionsFixture]::RelativeBounds([long]$Tree.agent_bar.viewport,[long]$item.handle,$owned.Id);[OptionsFixture]::TabPointerDown([long]$Tree.agent_bar.viewport,[long]$item.handle,$owned.Id,[int]($r.Width/2),[int]($r.Height/2));return Await {param($t) $t.chrome.agent_dragging}}
 function Agent-Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,$Point.x,$Point.y);return Await {param($t) -not $t.chrome.agent_dragging}}
 function Agent-Drag($Tree,[string]$Source,[string]$Target,[bool]$Before){$p=Agent-Point $Tree $Target $Before;$t=Agent-Begin $Tree $Source;[OptionsFixture]::HostPointer([long]$t.window_handle,$owned.Id,0x200,$p.x,$p.y);return Agent-Release $t $p}
+function Attention($Tree,[bool]$Agent,[bool]$Workspace){$item=@($Tree.agent_bar.items|Where-Object {$_.surface -ceq $source.id});$row=@($Tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace});Require ($item.Count -eq 1 -and $row.Count -eq 1 -and $item[0].attention -eq $Agent -and $row[0].attention -eq $Workspace) 'Notification attention does not match its source and configured target';Require ($item[0].handle -eq $barHandle -and $item[0].message -ceq $statusText -and $item[0].status -ceq 'working') 'Notification attention changed agent status, raw Korean text or native control identity'}
 function Stable($Before){$t=Tree;foreach($s in $Before){$n=@($t.surfaces|Where-Object {$_.id -ceq $s.id});Require ($n.Count -eq 1 -and $n[0].pid -eq $s.pid -and $n[0].session -ceq $s.session -and $n[0].view_handle -eq $s.view_handle -and $n[0].holder.window -eq $s.holder.window -and $n[0].running) 'Sessions changed a retained terminal PID/session/view/holder'};return $t}
 function Passed([string]$Name){$script:checks+=,$Name;$diagnostic.checks=$checks;Require ($env:CODEX_HOME -ceq $originalCodexHome) 'Fixture modified parent CODEX_HOME'}
 function Panel($Tree){$p=$Tree.agent_sessions.panel;Require ($Tree.agent_sessions.open -and $p.open -and -not $p.native_visible -and [OptionsFixture]::Parent([long]$p.window,$owned.Id) -eq $Tree.window_handle) 'Sessions must be an owned hidden child dock';Require ([OptionsFixture]::Describe([long]$Tree.window_handle,$owned.Id).Enabled) 'Sessions dock disabled main';foreach($h in @($p.query_handle,$p.list,$p.preview,$p.refresh,$p.close,$p.resume)){Require ([OptionsFixture]::Parent([long]$h,$owned.Id) -eq $p.window) 'Session control belongs to another owner'};return $p}
@@ -121,6 +122,33 @@ public static class OwnedCodexSessionFixture {
  $bmp=Join-Path $directory 'agent-bar-working.bmp';$png=Join-Path $directory 'agent-bar-working.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
  Require ([ChromeFixture]::ColorCount($png,64,3,168,47,'#f59e0b') -gt 5) 'Working agent bar status was not painted'
  Stable @($source,$local)|Out-Null;Passed 'Linux-agent-bar-default-footer-toggle-native-ownership-geometry-working-paint-and-raw-Korean'
+ Require ((Request @('settings','show')).document.terminal.agent_notification_target -ceq 'agent_bar') 'Notification target default differs from Linux'
+ foreach($level in @('info','completed','error')){Request @('notifications','clear')|Out-Null;Request @('notify','--surface',$source.id,'--level',$level,'ordinary notification')|Out-Null;Attention (Tree) $false $false}
+ Request @('notifications','clear')|Out-Null;$noticeTitle='입력 요청 한';$noticeBody="승인 필요 é 😀`n두 번째 줄"
+ $notice=Request @('notify','--surface',$source.id,'--level','attention','--title',$noticeTitle,$noticeBody);Require ($notice.accepted) 'Owned attention notification was rejected'
+ $tree=Await {param($t) $t.agent_bar.items[0].attention};Attention $tree $true $false
+ $bmp=Join-Path $directory 'agent-bar-attention.bmp';$png=Join-Path $directory 'agent-bar-attention.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::Pixel($png,222,40) -ceq '#493c27') 'Agent attention did not paint the Linux amber18 percent tint'
+ $duplicate=Request @('notify','--surface',$source.id,'--level','attention','duplicate');Require (-not $duplicate.accepted -and $duplicate.reason -ceq 'duplicate') 'Repeated attention bypassed notification deduplication'
+ Request @('focus-tab',$source.id)|Out-Null;Click $barHandle;$notes=Request @('notifications','list');Attention (Tree) $true $false
+ Require ($notes.unread_count -eq 1 -and $notes.entries[0].title -ceq $noticeTitle -and $notes.entries[0].body -ceq $noticeBody) 'Hidden selection acknowledged unread attention or changed Unicode notification fields'
+ Request @('settings','set','agent-notification-target','workspace')|Out-Null;$tree=Tree;Attention $tree $false $true
+ $row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0]
+ $bmp=Join-Path $directory 'workspace-attention.bmp';$png=Join-Path $directory 'workspace-attention.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::Pixel($png,($row.rect.x+$row.rect.width-4),($row.rect.y+$row.rect.height-4)) -ceq '#493c27') 'Workspace attention did not paint the Linux amber18 percent tint'
+ Request @('settings','set','agent-notification-target','both')|Out-Null;Attention (Tree) $true $true
+ Request @('settings','set','agent-notification-target','invalid') 3000 $true|Out-Null;Require ((Request @('settings','show')).document.terminal.agent_notification_target -ceq 'both') 'Invalid notification target replaced the last valid setting'
+ Request @('notifications','mark-read',$notice.id)|Out-Null;Attention (Tree) $false $false
+ foreach($action in @('delete','clear','show','open')){
+  Request @('notifications','clear')|Out-Null;$notice=Request @('notify','--surface',$source.id,'--level','attention',('attention '+$action));Attention (Tree) $true $true
+  if($action -in @('delete','open')){Request @('notifications',$action,$notice.id)|Out-Null}else{$result=Request @('notifications',$action);if($action -ceq 'show'){[OptionsFixture]::PostEscape([long]$result.panel_handle,$owned.Id)}}
+  Attention (Tree) $false $false
+ }
+ Request @('notifications','clear')|Out-Null;$a=Request @('notify','--surface',$source.id,'--level','attention','source');$b=Request @('notify','--surface',$local.id,'--level','attention','other surface')
+ Request @('notifications','delete',$a.id)|Out-Null;Attention (Tree) $false $true
+ Request @('notifications','delete',$b.id)|Out-Null;Attention (Tree) $false $false
+ Request @('settings','set','agent-notification-target','agent_bar')|Out-Null;Stable @($source,$local)|Out-Null
+ Passed 'Linux-attention-targets-native-amber-paint-Unicode-dedup-hidden-focus-read-delete-clear-show-open-and-source-isolation'
  foreach($seq in @('1','2')){$stale=Request ($report+@('--seq',$seq,'--status','blocked','--message','stale'));Require (-not $stale.accepted -and $stale.agent.seq -eq 2 -and $stale.agent.status -ceq 'working' -and $stale.agent.message -ceq $statusText) 'Old/duplicate sequence overwrote current status'}
  $r=Request ($report+@('--seq','4','--status','blocked','--message',$statusText));Require ($r.accepted -and $r.agent.status -ceq 'blocked' -and $r.agent.activity -ceq 'needs_input' -and -not $r.agent.seen) 'Hidden blocked report lost its unseen state'
  Require ((Agent-Sidebar 'agent-blocked' 'blocked' $statusText) -eq $sidebarHandle) 'Status report replaced workspace HWND'

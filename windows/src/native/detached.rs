@@ -131,6 +131,7 @@ impl Window {
                     selected: true,
                     color: None,
                     unread: false,
+                    attention: false,
                 },
                 true,
             )?;

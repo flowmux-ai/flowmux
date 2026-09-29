@@ -386,6 +386,16 @@ impl Panel {
                 vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
+                Some(SettingKey::AgentNotificationTarget),
+                0,
+                "Agent notification target",
+                vec![
+                    ("Agent bar", "agent_bar"),
+                    ("Workspace", "workspace"),
+                    ("Both", "both"),
+                ],
+            )?;
+            p.row(
                 Some(SettingKey::Theme),
                 1,
                 "Legacy dark/light",

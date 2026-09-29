@@ -23,6 +23,7 @@ pub enum SettingKey {
     CursorStyle,
     UsageBarEnabled,
     AgentBarMode,
+    AgentNotificationTarget,
     MinimapEnabled,
     MinimapWidth,
     MinimapOpacity,
@@ -115,6 +116,7 @@ pub struct TerminalSettings {
     pub cursor_style: CursorStyle,
     pub usage_bar_enabled: bool,
     pub agent_bar_mode: bool,
+    pub agent_notification_target: flowmux_core::AgentNotificationTarget,
     pub minimap_enabled: bool,
     pub minimap_width: u16,
     pub minimap_opacity: u8,
@@ -132,6 +134,7 @@ impl Default for TerminalSettings {
             cursor_style: CursorStyle::Block,
             usage_bar_enabled: true,
             agent_bar_mode: false,
+            agent_notification_target: flowmux_core::AgentNotificationTarget::default(),
             minimap_enabled: true,
             minimap_width: 40,
             minimap_opacity: 50,
@@ -179,6 +182,12 @@ impl TerminalSettings {
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
             SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
             SettingKey::AgentBarMode => self.agent_bar_mode.to_string(),
+            SettingKey::AgentNotificationTarget => match self.agent_notification_target {
+                flowmux_core::AgentNotificationTarget::AgentBar => "agent_bar",
+                flowmux_core::AgentNotificationTarget::Workspace => "workspace",
+                flowmux_core::AgentNotificationTarget::Both => "both",
+            }
+            .into(),
             SettingKey::MinimapEnabled => self.minimap_enabled.to_string(),
             SettingKey::MinimapWidth => self.minimap_width.to_string(),
             SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
@@ -284,6 +293,12 @@ impl TerminalSettings {
                 next.agent_bar_mode = value
                     .parse()
                     .context("agents bar mode must be true or false")?;
+            }
+            SettingKey::AgentNotificationTarget => {
+                next.agent_notification_target = serde_json::from_value(serde_json::Value::String(
+                    value.into(),
+                ))
+                .context("agent notification target must be agent_bar, workspace or both")?;
             }
             SettingKey::MinimapEnabled => {
                 next.minimap_enabled = value

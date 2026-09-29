@@ -114,6 +114,7 @@ impl App {
     }
     fn refresh_notification_chrome(&self) {
         self.refresh_chrome_metadata();
+        self.refresh_agent_bar();
         for control in &self.controls {
             if matches!(control.action, Action::Notifications) {
                 workspaces::set_caption(control.hwnd, &self.notification_button_text());
