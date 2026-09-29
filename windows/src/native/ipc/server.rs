@@ -237,14 +237,14 @@ fn serve(
         let command: Request = serde_json::from_slice(&frame)?;
         let budget = match &command.command {
             Command::Browser { op: crate::browser::Op::Wait { options, .. } } => options.ipc_budget(limits.command, 5)?,
-            Command::Hooks(_) => Duration::from_secs(3).min(limits.command),
+            Command::Hooks { .. } => Duration::from_secs(3).min(limits.command),
             _ => limits.command,
         };
         quitting = matches!(command.command, Command::Quit { .. });
         let (send, receive) = mpsc::sync_channel(1);
         let mut reply = Reply::new(send, pending)
             .context("window request queue is full; request was not dispatched")?;
-        if matches!(command.command, Command::Hooks(_)) {
+        if matches!(command.command, Command::Hooks { .. }) {
             reply.client = Some(Arc::new(pipe.client_process()?));
         }
         let receive = ReplyInbox::new(receive, &reply);

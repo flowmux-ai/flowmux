@@ -233,6 +233,8 @@ pub enum SessionHookEvent {
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
 pub struct SessionHookArgs {
+    #[arg(skip)]
+    #[serde(skip)]
     pub agent: String,
     #[arg(value_enum)]
     pub event: SessionHookEvent,
@@ -240,6 +242,51 @@ pub struct SessionHookArgs {
     pub surface: Option<Uuid>,
     #[arg(skip)]
     pub session_id: Option<String>,
+    /// Best-effort native integration; --json retains diagnostic output/errors.
+    #[arg(long)]
+    #[serde(skip)]
+    pub flowmux_hook: bool,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct HookConfigArgs {
+    #[arg(long, value_parser = ["claude", "codex"])]
+    #[serde(rename = "target")]
+    pub agent: String,
+    /// Override the provider's settings.json (Claude) or hooks.json (Codex).
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Native flowmux CLI executable. Defaults to the adjacent flowmuxctl.exe.
+    #[arg(long)]
+    pub flowmux_bin: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
+#[serde(tag = "agent", rename_all = "lowercase")]
+pub enum HooksOp {
+    /// Merge Windows session hooks into one provider's configuration.
+    Setup(HookConfigArgs),
+    /// Remove only the Windows session hooks installed by flowmux.
+    Uninstall(HookConfigArgs),
+    Claude(SessionHookArgs),
+    Codex(SessionHookArgs),
+    Opencode(SessionHookArgs),
+    Antigravity(SessionHookArgs),
+    Cline(SessionHookArgs),
+}
+impl HooksOp {
+    pub fn runtime_mut(&mut self) -> Option<&mut SessionHookArgs> {
+        let (args, agent) = match self {
+            Self::Claude(args) => (args, "claude"),
+            Self::Codex(args) => (args, "codex"),
+            Self::Opencode(args) => (args, "opencode"),
+            Self::Antigravity(args) => (args, "antigravity"),
+            Self::Cline(args) => (args, "cline"),
+            _ => return None,
+        };
+        args.agent = agent.into();
+        Some(args)
+    }
 }
 impl SessionHookArgs {
     pub fn read_payload(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
@@ -329,7 +376,11 @@ pub enum Command {
     /// Report one producer's ordered status snapshot, not individual tool-hook events.
     ReportAgent(AgentReportArgs),
     /// Receive a native session-start/session-end JSON hook from stdin.
-    Hooks(SessionHookArgs),
+    Hooks {
+        #[command(subcommand)]
+        #[serde(flatten)]
+        op: HooksOp,
+    },
     /// Control an in-app browser pane, separate from terminal content.
     Browser {
         #[command(subcommand)]
@@ -643,9 +694,10 @@ mod tests {
                 "conversationId",
             ] {
                 let cli = Cli::try_parse_from(["flowmuxctl", "hooks", "codex", event]).unwrap();
-                let Command::Hooks(mut hook) = cli.command else {
+                let Command::Hooks { mut op } = cli.command else {
                     panic!("wrong command")
                 };
+                let hook = op.runtime_mut().unwrap();
                 hook.read_payload(
                     serde_json::to_string(
                         &serde_json::json!({key:id.to_uppercase(),"cwd":"한글 한 é","ignored":{}}),
@@ -655,7 +707,10 @@ mod tests {
                 )
                 .unwrap();
                 assert_eq!(hook.session_id.as_deref(), Some(id));
-                let wire = serde_json::to_value(Command::Hooks(hook.clone())).unwrap();
+                let wire = serde_json::to_value(Command::Hooks {
+                    op: HooksOp::Codex(hook.clone()),
+                })
+                .unwrap();
                 assert_eq!(wire["event"], event);
                 assert_eq!(wire["session_id"], id);
                 for bad in [
@@ -676,18 +731,37 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).is_err());
         }
-        let Command::Hooks(mut hook) =
+        let Command::Hooks { mut op } =
             Cli::try_parse_from(["flowmuxctl", "hooks", "opencode", "session-start"])
                 .unwrap()
                 .command
         else {
             panic!("wrong command")
         };
+        let hook = op.runtime_mut().unwrap();
         hook.read_payload(b"{\"sessionID\":\"ses_Mixed123\"}")
             .unwrap();
         assert_eq!(hook.session_id.as_deref(), Some("ses_Mixed123"));
         hook.agent = "unsupported".into();
         assert!(hook.read_payload(b"{\"session_id\":\"ses_123\"}").is_err());
+        for operation in ["setup", "uninstall"] {
+            for agent in ["claude", "codex"] {
+                let cli = Cli::try_parse_from([
+                    "flowmuxctl",
+                    "hooks",
+                    operation,
+                    "--agent",
+                    agent,
+                    "--config",
+                    "C:\\한글\\settings.json",
+                ])
+                .unwrap();
+                let value = serde_json::to_value(cli.command).unwrap();
+                assert_eq!(value["agent"], operation);
+                assert_eq!(value["target"], agent);
+                assert!(serde_json::from_value::<Request>(value).is_ok());
+            }
+        }
     }
 
     #[test]

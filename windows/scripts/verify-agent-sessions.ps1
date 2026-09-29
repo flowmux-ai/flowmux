@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Actual owned agent process, child-only home and native history UI; no account access.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$HooksOnly)
 if(-not $env:FLOWMUX_TEST_ARTIFACT_ROOT){throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.'}
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
@@ -51,12 +51,12 @@ function Query($Tree,[string]$Text){$p=Panel $Tree;[OptionsFixture]::SetTextAndN
 function Select-Session($Tree,[string]$Id){$p=Panel $Tree;$row=@($p.rows|Where-Object {$_.id -ceq $Id});Require ($row.Count -eq 1) 'Expected exact visible session row';[OptionsFixture]::ListSelect([long]$p.window,[long]$p.list,$owned.Id,[int]$row[0].index);return Await {param($t) $t.agent_sessions.selected -ceq $Id -and $t.agent_sessions.panel.resume_enabled -and -not $t.agent_sessions.loading}}
 function Shortcut([string]$Surface){Request @('test-shortcut',$Surface,'{"code":"KeyJ","key":"j","ctrlKey":true,"altKey":true}')|Out-Null}
 function Agent-Tab([string]$HistoryHome,[string]$Cwd,[string]$Current=''){$launch=@('new-tab','--cwd',$Cwd,'--shell',$agentExe,'--shell-arg=--hold','--shell-arg',$HistoryHome);if($Current){$launch+=@('--shell-arg=resume','--shell-arg',$Current)};Request $launch|Out-Null;$id=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $id.surface -and $_.ready -and $_.running}).Count -eq 1};Screen $id.surface {param($s) $s.text.Contains('SESSION_SOURCE_READY')}|Out-Null;return @($tree.surfaces|Where-Object {$_.id -ceq $id.surface})[0]}
-function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$CloseInput=$true,[string]$Provider='codex',[string]$Surface='', [bool]$Shell=$false,[bool]$Nested=$false){
+function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$CloseInput=$true,[string]$Provider='codex',[string]$Surface='', [bool]$Shell=$false,[bool]$Nested=$false,[string]$Config=''){
  $path=Join-Path $homeA ('hook-'+$source.pid+'.json');$result=$path+'.result';if(Test-Path -LiteralPath $result){Remove-Item -LiteralPath $result -Force}
- $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested}|ConvertTo-Json -Compress
+ $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested;config=$Config}|ConvertTo-Json -Compress
  [IO.File]::WriteAllText(($path+'.tmp'),$payloadJson,$utf8);[IO.File]::Move(($path+'.tmp'),$path);$timer=[Diagnostics.Stopwatch]::StartNew()
  while(-not (Test-Path -LiteralPath $result)){Budget|Out-Null;Require ($timer.ElapsedMilliseconds -lt 4500) 'Owned hook process exceeded deadline';Start-Sleep -Milliseconds 10}
- $r=Get-Content -Raw -Encoding UTF8 -LiteralPath $result|ConvertFrom-Json;$diagnostic.lastHook=$r;Require (($r.exit -eq 0) -eq $Expected) ('Hook exit mismatch: '+$r.stderr);if($Expected){return ($r.stdout|ConvertFrom-Json)};return $r
+ $r=Get-Content -Raw -Encoding UTF8 -LiteralPath $result|ConvertFrom-Json;$diagnostic.lastHook=$r;Require (($r.exit -eq 0) -eq $Expected) ('Hook exit mismatch: '+$r.stderr);if($Expected -and -not $Config){return ($r.stdout|ConvertFrom-Json)};return $r
 }
 function Outside-Hook($Id){
  $pipe=New-Object IO.Pipes.NamedPipeClientStream('.',($pipeName -replace '^\\\\\.\\pipe\\',''),[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous)
@@ -89,6 +89,12 @@ public static class OwnedCodexSessionFixture {
   }
   string cli=(string)request["cli"];string arguments="--json hooks "+request["provider"]+" "+request["event"];
   if(!String.IsNullOrEmpty((string)request["surface"]))arguments+=" --surface "+request["surface"];
+  if(!String.IsNullOrEmpty((string)request["config"])) {
+   var config=json.Deserialize<System.Collections.Generic.Dictionary<string,object>>(File.ReadAllText((string)request["config"]));var events=(System.Collections.Generic.Dictionary<string,object>)config["hooks"];
+   var groups=(System.Collections.IList)events[(string)request["event"]=="session-start"?"SessionStart":"SessionEnd"];var group=(System.Collections.Generic.Dictionary<string,object>)groups[groups.Count-1];var handlers=(System.Collections.IList)group["hooks"];var handler=(System.Collections.Generic.Dictionary<string,object>)handlers[0];
+   if(handler.ContainsKey("commandWindows")){string command=(string)handler["commandWindows"];if(!command.StartsWith("powershell.exe -NoProfile -NonInteractive -EncodedCommand "))throw new Exception("Unexpected installed command");cli="powershell.exe";arguments=command.Substring("powershell.exe ".Length);}
+   else{cli=(string)handler["command"];arguments="";foreach(string arg in (System.Collections.IList)handler["args"]){if(arg.IndexOfAny(new char[]{' ','\"','\r','\n'})>=0)throw new Exception("Unexpected hook argument");arguments+=(arguments.Length==0?"":" ")+arg;}}
+  }
   var info=(bool)request["shell"] ? new ProcessStartInfo(Environment.GetEnvironmentVariable("COMSPEC"),"/D /S /C \"\""+cli+"\" "+arguments+"\"") : new ProcessStartInfo(cli,arguments);
   info.UseShellExecute=false;info.CreateNoWindow=true;info.WindowStyle=ProcessWindowStyle.Hidden;info.RedirectStandardInput=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;info.StandardOutputEncoding=new UTF8Encoding(false);info.StandardErrorEncoding=new UTF8Encoding(false);
   using(var child=Process.Start(info)) {
@@ -103,6 +109,7 @@ public static class OwnedCodexSessionFixture {
   if(args.Length==2 && args[0]=="--forward"){Hook(args[1],true);return 0;}
   if((args.Length==2 || (args.Length==4 && args[2]=="resume")) && args[0]=="--hold") {
    Environment.SetEnvironmentVariable("CODEX_HOME",Path.GetFullPath(args[1]),EnvironmentVariableTarget.Process);
+   Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR",Path.GetFullPath(args[1]),EnvironmentVariableTarget.Process);
    Console.WriteLine("SESSION_SOURCE_READY");Console.Out.Flush();var watch=Stopwatch.StartNew();string hook=Path.Combine(args[1],"hook-"+Process.GetCurrentProcess().Id+".json");
    while(watch.ElapsedMilliseconds<60000){if(File.Exists(hook))Hook(hook);Thread.Sleep(10);}return 0;
   }
@@ -129,6 +136,43 @@ public static class OwnedCodexSessionFixture {
  $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Owned child native end did not clear its conversation'
  $cap=Request @('capabilities');Require ($cap.commands -contains 'hooks' -and ($cap.agent_activity.session_hooks -join ',') -ceq 'session-start,session-end' -and -not $cap.agent_activity.native_hooks) 'Session hook capability incorrectly advertised full native activity hooks'
  Passed 'native-session-hooks-inherited-context-owned-process-discovery-canonical-ID-and-no-invented-activity'
+ if($HooksOnly){
+ $hookBin=Join-Path $directory ('hook 한 한 é & % '+[char]36+[char]96+[char]39);[IO.Directory]::CreateDirectory($hookBin)|Out-Null;$hookCli=Join-Path $hookBin 'flowmuxctl.exe';[IO.File]::Copy($cli,$hookCli)
+ $info=New-Object Diagnostics.ProcessStartInfo($hookCli,'hooks codex session-start --flowmux-hook');$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.EnvironmentVariables.Remove('FLOWMUX_PIPE_NAME');$probe=[Diagnostics.Process]::Start($info);$probeOut=$probe.StandardOutput.ReadToEndAsync();$probeErr=$probe.StandardError.ReadToEndAsync()
+ try{Require ($probe.WaitForExit((Budget 1000)) -and $probeOut.Wait(500) -and $probeErr.Wait(500) -and $probe.ExitCode -eq 0 -and -not $probeOut.Result -and -not $probeErr.Result) 'Native hook outside flowmux blocked or emitted agent context'}finally{if(-not $probe.HasExited){$probe.Kill();[CliProbe]::WaitAfterKill($probe)};$probe.Dispose()}
+ Passed 'native-integration-is-silent-and-does-not-wait-for-stdin-or-discover-windows-outside-flowmux'
+ $setupSource=$source;$setupAgentExe=$agentExe
+ try{
+  foreach($provider in @('codex','claude')){
+   if($provider -ceq 'claude'){$agentExe=Join-Path $hookBin 'claude.exe';[IO.File]::Copy($setupAgentExe,$agentExe);$source=Agent-Tab $homeA $projectA}
+   $config=Join-Path $directory ($provider+'-hooks.json');$original=@{env=@{KEEP='한 한 é 😀 &'};hooks=@{SessionStart=@(@{matcher='startup';hooks=@(@{type='command';command='echo KEEP'})});Stop=@(@{hooks=@(@{type='command';command='echo STOP_KEEP'})})}}
+   [IO.File]::WriteAllText($config,($original|ConvertTo-Json -Depth 12),$utf8);$acl=Get-Acl -LiteralPath $config;$acl.SetAccessRuleProtection($true,$true);Set-Acl -LiteralPath $config -AclObject $acl;$beforeAcl=(Get-Acl -LiteralPath $config).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
+   $setup=@('hooks','setup','--agent',$provider,'--config',$config,'--flowmux-bin',$hookCli);$remove=@('hooks','uninstall','--agent',$provider,'--config',$config)
+   $r=Request $setup;Require ($r.changed -and $r.operation -ceq 'setup' -and $r.agent -ceq $provider) 'Hook setup did not report the changed provider'
+   $written=[IO.File]::ReadAllText($config);$time=(Get-Item -LiteralPath $config).LastWriteTimeUtc;$configured=$written|ConvertFrom-Json
+   Require ($configured.env.KEEP -ceq $original.env.KEEP -and $configured.hooks.SessionStart[0].hooks[0].command -ceq 'echo KEEP' -and $configured.hooks.Stop[0].hooks[0].command -ceq 'echo STOP_KEEP') 'Hook setup replaced unrelated native settings/hooks'
+   Require ((Get-Acl -LiteralPath $config).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -ceq $beforeAcl) 'Atomic hook update discarded protected ACL'
+   $r=Request $setup;Require (-not $r.changed -and [IO.File]::ReadAllText($config) -ceq $written -and (Get-Item -LiteralPath $config).LastWriteTimeUtc -eq $time) 'Idempotent setup rewrote configuration'
+   $r=Hook 'session-start' (@{session_id=$idA;cwd='한글 한 é'}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed hook leaked output into agent context'
+   $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.session_id -ceq $idA}
+   $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed end hook leaked output into agent context'
+   $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and -not $s.agent.session_id}
+   $r=Request $remove;$remaining=Get-Content -Raw -Encoding UTF8 -LiteralPath $config|ConvertFrom-Json;Require ($r.changed -and @($remaining.hooks.SessionStart).Count -eq 1 -and -not $remaining.hooks.SessionEnd -and $remaining.env.KEEP -ceq $original.env.KEEP -and $remaining.hooks.Stop[0].hooks[0].command -ceq 'echo STOP_KEEP') 'Uninstall removed unrelated settings or retained owned hooks'
+   $written=[IO.File]::ReadAllText($config);$r=Request $remove;Require (-not $r.changed -and [IO.File]::ReadAllText($config) -ceq $written) 'Repeated uninstall rewrote configuration'
+   foreach($bad in @('{bad','{"hooks":{"SessionEnd":{}}}','{"disableAllHooks":true}',('x'*1048577))){[IO.File]::WriteAllText($config,$bad,$utf8);Request $setup 3000 $true|Out-Null;Require ([IO.File]::ReadAllText($config) -ceq $bad) 'Invalid/disabled/oversized configuration was rewritten'}
+   [IO.File]::WriteAllText($config,'{}',$utf8);$locked=[IO.File]::Open($config,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+   try{Request $setup 3000 $true|Out-Null;Require ([IO.File]::ReadAllText($config) -ceq '{}') 'Locked destination lost its original data'}finally{$locked.Dispose()}
+   $lockPath=[IO.Path]::ChangeExtension($config,'flowmux-lock');$locked=[IO.File]::Open($lockPath,[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   try{$bytes=$utf8.GetBytes('LOCK_OWNER_KEEP');$locked.Write($bytes,0,$bytes.Length);$locked.Flush();Request $setup 3000 $true|Out-Null;Require ([IO.File]::ReadAllText($config) -ceq '{}') 'Concurrent hook writer was not rejected'}finally{$locked.Dispose()}
+   Request $setup 3000 $true|Out-Null;Require ([IO.File]::ReadAllText($lockPath) -ceq 'LOCK_OWNER_KEEP' -and [IO.File]::ReadAllText($config) -ceq '{}') 'Installer replaced/deleted an existing unowned lock file';[IO.File]::Delete($lockPath)
+   Require (@(Get-ChildItem -LiteralPath $directory -Filter ($provider+'-hooks.flowmux*')).Count -eq 0) 'Hook setup retained temporary/lock files after success or ordinary failure'
+   [IO.File]::Delete($config);$r=Request $remove;Require (-not $r.changed -and -not (Test-Path -LiteralPath $config)) 'Missing configuration uninstall created a file'
+   $r=Request $setup;Require ($r.changed -and (Test-Path -LiteralPath $config)) 'Setup could not create a missing provider JSON file';Request $remove|Out-Null;Require ((Get-Content -Raw -Encoding UTF8 -LiteralPath $config).Trim() -ceq '{}') 'Removing hooks from a newly created configuration retained owned entries'
+   Passed ('installed-'+$provider+'-native-hooks-Unicode-special-path-quiet-execution-preserved-settings-ACL-idempotence-invalid-and-locked-file-rejection')
+   if($provider -ceq 'claude'){Request @('close-tab',$source.id)|Out-Null}
+  }
+ }finally{$source=$setupSource;$agentExe=$setupAgentExe;Request @('focus-tab',$source.id)|Out-Null}
+ }else{
  Request @('focus-tab',$local.id)|Out-Null
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.source -ceq 'flowmux:proc'}
  $presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
@@ -480,6 +524,7 @@ public static class OwnedCodexSessionFixture {
   Stable @($plain,$local)|Out-Null
  }
  Passed 'automatic-owned-child-launch-exit-and-relaunch-clear-activity-with-same-terminal-PID-view-and-session'
+ }
 
 }
 catch{$failure=$_.Exception.Message}

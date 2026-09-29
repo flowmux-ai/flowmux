@@ -3597,7 +3597,10 @@ impl App {
                 return Ok(None);
             }
             Command::ReportAgent(args) => return self.agent_report_request(args, caller, reply),
-            Command::Hooks(args) => return self.agent_hook_request(args, caller, reply),
+            Command::Hooks { mut op } => {
+                let args = op.runtime_mut().context("Hook configuration is a local CLI operation")?.clone();
+                return self.agent_hook_request(args, caller, reply);
+            }
             Command::Editor { op } => return self.editor_command(op, caller, reply),
             Command::Files { op } => return self.files_command(op, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),

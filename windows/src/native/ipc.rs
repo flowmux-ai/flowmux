@@ -113,8 +113,19 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
-pub fn run(cli: Cli) -> anyhow::Result<()> {
-    let response = response(cli)?;
+pub fn run(mut cli: Cli) -> anyhow::Result<()> {
+    let quiet = !cli.json
+        && match &mut cli.command {
+            Command::Hooks { op } => op.runtime_mut().is_some_and(|args| args.flowmux_hook),
+            _ => false,
+        };
+    let result = response(cli);
+    if quiet {
+        // Session tracking is observational. Native integrations must not add
+        // context, block an agent, or emit warnings outside a flowmux terminal.
+        return Ok(());
+    }
+    let response = result?;
     let mut stdout = std::io::stdout().lock();
     stdout
         .write_all(response.as_bytes())
@@ -124,7 +135,14 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 fn response(mut cli: Cli) -> anyhow::Result<String> {
-    if let Command::Hooks(args) = &mut cli.command {
+    if let Command::Hooks { op } = &mut cli.command {
+        use crate::command::HooksOp;
+        match op {
+            HooksOp::Setup(args) => return crate::hook_install::run(args, false),
+            HooksOp::Uninstall(args) => return crate::hook_install::run(args, true),
+            _ => {}
+        }
+        let args = op.runtime_mut().context("unsupported hook operation")?;
         anyhow::ensure!(
             cli.pipe.is_some() || std::env::var("FLOWMUX_PIPE_NAME").is_ok(),
             "session hooks require an explicit or inherited window pipe"
@@ -248,7 +266,7 @@ fn response(mut cli: Cli) -> anyhow::Result<String> {
 /// One IPC submission, with no stdout formatting and no retry after dispatch.
 pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     let reply_budget = match &cli.command {
-        Command::Agents | Command::ReportAgent(_) | Command::Hooks(_) => Duration::from_secs(3),
+        Command::Agents | Command::ReportAgent(_) | Command::Hooks { .. } => Duration::from_secs(3),
         Command::Browser {
             op: crate::browser::Op::Wait { options, .. },
         } => options.ipc_budget(Duration::from_secs(25), 10)?,
@@ -256,7 +274,7 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     };
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
     anyhow::ensure!(
-        !matches!(cli.command, Command::Hooks(_)) || explicit.is_some(),
+        !matches!(cli.command, Command::Hooks { .. }) || explicit.is_some(),
         "session hooks require an explicit or inherited window pipe"
     );
     let candidates = if let Some(name) = &explicit {

@@ -22,6 +22,7 @@ pub mod files_model;
 pub mod files_operation_fs;
 pub mod files_operations;
 pub mod files_service;
+pub mod hook_install;
 pub mod keybindings;
 pub mod keys;
 pub mod minimap;
