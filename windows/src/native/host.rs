@@ -1032,7 +1032,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app
                     .browsers
                     .values()
-                    .any(|browser| browser.handle_address_message(&message))
+                    .any(|browser| browser.handle_chrome_message(&message))
                 && !app
                     .metadata
                     .as_ref()

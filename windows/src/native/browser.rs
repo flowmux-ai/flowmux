@@ -166,6 +166,7 @@ impl Browser {
         }
         let view = builder.build_as_child(&Parent(holder.window))?;
         install_drag_escape(&view, holder.window)?;
+        chrome.install_focus(&view, background)?;
         unsafe {
             let core = view.controller().CoreWebView2()?;
             app.downloads
@@ -389,11 +390,12 @@ impl Browser {
         }
         Ok(())
     }
-    pub(super) fn handle_address_message(&self, message: &MSG) -> bool {
+    pub(super) fn handle_chrome_message(&self, message: &MSG) -> bool {
         self.visible
             && !self.native_closed.get()
-            && message.hwnd == self.chrome.address
-            && chrome::handle_message(message)
+            && self
+                .chrome
+                .handle_message(message, self.background, &self.view)
     }
     fn navigate(&mut self, url: &str) -> anyhow::Result<()> {
         anyhow::ensure!(!self.preview_blocked.get(), "{PREVIEW_EXPIRED}");

@@ -152,6 +152,26 @@ function Bookmarks-Wait([int]$Count,[bool]$Error=$false,[long]$After=0) {
         if($clock.ElapsedMilliseconds -gt 5000){throw ('Bookmarks exceeded5s: '+($tree.bookmarks|ConvertTo-Json -Depth 6 -Compress))};Start-Sleep -Milliseconds 20
     }while($true)
 }
+function Toolbar-Tab([string]$Pane,[long]$Control,[bool]$Backwards,[long]$Expected) {
+    if($Backwards){[OptionsFixture]::PostKey($Control,$process.Id,16,$false,$false)}
+    [OptionsFixture]::PostKey($Control,$process.Id,9,$false,$false)
+    [OptionsFixture]::PostKey($Control,$process.Id,9,$true,$false)
+    if($Backwards){[OptionsFixture]::PostKey($Control,$process.Id,16,$true,$false)}
+    $status=Request @('browser','status',$Pane)
+    if($status.chrome.tab_target -ne $Expected){throw "Toolbar Tab target differs: $Control reverse=$Backwards expected=$Expected actual=$($status.chrome.tab_target)"}
+}
+function Check-Toolbar-Keys([string]$Pane) {
+    $before=Request @('browser','status',$Pane);$draft=[BrowserFixture]::ReadText($before.address_handle)
+    $ordered=@([ChromeFixture]::Read([long]$before.chrome_handle,$process.Id)|Where-Object {$_.Shown -and $_.Enabled -and ($_.Style -band 0x10000)}|Sort-Object X)
+    if($ordered.Count -lt 2){throw 'Toolbar keyboard fixture has too few visible controls'}
+    for($i=0;$i -lt $ordered.Count;$i++){
+        $next=$before.view_handle;if($i+1 -lt $ordered.Count){$next=$ordered[$i+1].Handle}
+        $previous=$before.view_handle;if($i -gt 0){$previous=$ordered[$i-1].Handle}
+        Toolbar-Tab $Pane $ordered[$i].Handle $false $next
+        Toolbar-Tab $Pane $ordered[$i].Handle $true $previous
+    }
+    Address-Unchanged $before $draft
+}
 function Bookmarks-Open([string]$Pane,[int]$Count,[bool]$Error=$false){
     $browser=Request @('browser','status',$Pane)
     [OptionsFixture]::Click([long]$browser.chrome_handle,[long]$browser.chrome.bookmarks_handle,$process.Id)
@@ -319,13 +339,16 @@ try {
     if ([BrowserFixture]::ReadText($loaded.address_handle) -ne ($origin+'/one')) {throw 'Native address differs'}
     $evidence.checks+=@{name='native_webview_unicode_dom_address_and_no_terminal_bridge';passed=$true;page=$page}
     $evidence.checks+=@{name='single_row_native_browser_geometry_and_tools_entry';passed=$true;controls=(Check-Toolbar $loaded);diagnostics=$loaded.chrome}
+    Check-Toolbar-Keys $first.pane
     Verify-Bookmarks $first.pane
     $root=Tree
     [ChromeFixture]::Resize([long]$root.window_handle,$process.Id,400,500)
     Request @('resize-pane',$first.pane,'--ratio','0.7')|Out-Null
     $narrow=Request @('browser','status',$first.pane);$narrowControls=Check-Toolbar $narrow
+    Check-Toolbar-Keys $first.pane
     Request @('resize-pane',$first.pane,'--ratio','0.4')|Out-Null
     $compact=Request @('browser','status',$first.pane);$compactControls=Check-Toolbar $compact
+    Check-Toolbar-Keys $first.pane
     [ChromeFixture]::Resize([long]$root.window_handle,$process.Id,1184,761)
     Request @('resize-pane',$first.pane,'--ratio','0.5')|Out-Null
     Check-Toolbar (Request @('browser','status',$first.pane))|Out-Null
@@ -335,8 +358,12 @@ try {
     $addressBefore=Request @('browser','status',$first.pane);$address=[long]$addressBefore.address_handle;$addressDraft=$origin+'/한글?q=한#😀'
     [OptionsFixture]::SetText([long]$addressBefore.chrome_handle,$address,$process.Id,$addressDraft)
     [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$true)
+    Toolbar-Tab $first.pane $address $false 0;Address-Unchanged $addressBefore $addressDraft
     [OptionsFixture]::PostKey($address,$process.Id,13,$false,$false);Address-Unchanged $addressBefore $addressDraft
     [OptionsFixture]::PostKey($address,$process.Id,13,$true,$false);Address-Unchanged $addressBefore $addressDraft
+    [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$false)
+    Toolbar-Tab $first.pane $address $false 0;Address-Unchanged $addressBefore $addressDraft
+    # The Tab release settles the synthetic composition; re-arm the Enter guard.
     [OptionsFixture]::WindowCompositionGuard($address,$process.Id,$false)
     # Neither a held Enter nor its repeat bit can mask a missing settling guard;
     # releasing only a modifier must not settle the completed composition.
@@ -351,6 +378,12 @@ try {
         [OptionsFixture]::PostEnter($address,$process.Id);Address-Unchanged $addressBefore $addressDraft
         [OptionsFixture]::PostKey($address,$process.Id,$modifier,$true,$false)
     }
+    foreach($modifier in @(17,18,91,92)){
+        [OptionsFixture]::PostKey($address,$process.Id,$modifier,$false,$false)
+        Toolbar-Tab $first.pane $address $false 0;Address-Unchanged $addressBefore $addressDraft
+        [OptionsFixture]::PostKey($address,$process.Id,$modifier,$true,$false)
+    }
+    $evidence.checks+=@{name='native_toolbar_tab_order_skips_hidden_disabled_controls_and_routes_edges_to_page_with_ime_modifier_guards';passed=$true}
     [OptionsFixture]::PostEnter($address,$process.Id)
     $unicode=Wait-Page $first.pane '/%ED%95%9C%EA%B8%80' $oneTitle
     if ([BrowserFixture]::ReadText($unicode.address_handle) -ne $unicode.url -or -not (Same-Text (Eval-Page $first.pane 'decodeURI(location.href)') ($origin+'/한글?q=한#😀'))) {throw 'Unicode address changed codepoints'}
@@ -433,9 +466,13 @@ try {
     $inactiveDraft=$origin+'/two?inactive-한'
     [OptionsFixture]::SetText([long]$inactiveAddress.chrome_handle,[long]$inactiveAddress.address_handle,$process.Id,$inactiveDraft)
     [OptionsFixture]::PostEnter([long]$inactiveAddress.address_handle,$process.Id)
+    [OptionsFixture]::PostKey([long]$inactiveAddress.address_handle,$process.Id,9,$false,$false)
+    [OptionsFixture]::PostKey([long]$inactiveAddress.address_handle,$process.Id,9,$true,$false)
     [OptionsFixture]::HostTick([long]$addressTree.window_handle,$process.Id)
     Address-Unchanged $inactiveAddress $inactiveDraft
     $addressTreeAfter=Tree;$currentAfter=Request @('identify')
+    $inactiveAfter=@($addressTreeAfter.browsers|Where-Object {$_.id -eq $first.surface})[0]
+    if($inactiveAfter.chrome.tab_target -ne $inactiveAddress.chrome.tab_target){throw 'Inactive browser handled toolbar Tab'}
     if($currentAfter.surface -ne $currentBefore.surface){throw 'Inactive address Enter changed the selected sibling surface'}
     foreach($other in @($addressTree.browsers|Where-Object {$_.id -ne $first.surface})){
         $same=@($addressTreeAfter.browsers|Where-Object {$_.id -eq $other.id})
@@ -459,6 +496,7 @@ try {
     if ($frames.Count -ne 1 -or $frames[0].window_handle -ne $detachedReply.window_handle) {throw 'Browser detachment did not create exactly one frame'}
     $browserFrame=$frames[0];$detachedPane=Location $detachedTree $first.surface
     $detachedStatus=Request @('browser','status',$detachedPane);Check-Stable $afterMove $detachedStatus
+    Check-Toolbar-Keys $detachedPane
     if (-not (Same-Text (Eval-Page $detachedPane 'window.retained') '한글 한 é 😀')) {throw 'Detached browser lost its Korean DOM state'}
     $detachedFind=Check-Find $detachedPane ([long]$browserFrame.window_handle) $draftQuery
     if ($detachedFind.panel_handle -ne $mainFind.panel_handle -or $detachedFind.panel_query_handle -ne $mainFind.panel_query_handle -or -not (Same-Text $detachedFind.query $oneTitle)) {throw 'Detach replaced find controls or changed the executed query independently of the native draft'}

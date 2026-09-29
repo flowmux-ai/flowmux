@@ -2,6 +2,9 @@
 //! Native child controls; address navigation preserves native EDIT composition.
 use super::super::chrome as shell_chrome;
 use super::*;
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT, COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS,
+};
 use windows_sys::Win32::UI::{
     Controls::EM_SETLIMITTEXT,
     Input::KeyboardAndMouse::{EnableWindow, GetFocus, GetKeyState, IsWindowEnabled},
@@ -153,6 +156,8 @@ pub(super) struct Chrome {
     more: HWND,
     bookmarks: HWND,
     displayed_url: String,
+    key_modifiers: Cell<u16>,
+    tab_target: Cell<usize>,
     loading: bool,
     navigation_visible: bool,
     buttons: Vec<HWND>,
@@ -209,6 +214,8 @@ impl Chrome {
                 more: std::ptr::null_mut(),
                 bookmarks: std::ptr::null_mut(),
                 displayed_url: "about:blank".into(),
+                key_modifiers: Cell::new(0),
+                tab_target: Cell::new(0),
                 loading: false,
                 navigation_visible: false,
                 buttons: vec![],
@@ -283,8 +290,164 @@ impl Chrome {
                     },
                 );
             }
+            // Native dialog order follows sibling Z order, not their coordinates.
+            for control in [
+                chrome.buttons[0],
+                chrome.buttons[1],
+                chrome.buttons[2],
+                chrome.buttons[3],
+                chrome.address,
+                chrome.buttons[4],
+                chrome.bookmarks,
+                chrome.more,
+            ] {
+                SetWindowPos(
+                    control,
+                    HWND_BOTTOM,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
             Ok(chrome)
         }
+    }
+    pub(super) fn install_focus(&self, view: &WebView, background: bool) -> anyhow::Result<()> {
+        let window = self.window;
+        let last = self.more;
+        unsafe {
+            view.controller().add_MoveFocusRequested(
+                &webview2_com::MoveFocusRequestedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let mut reason = Default::default();
+                    args.Reason(&mut reason)?;
+                    if !matches!(
+                        reason,
+                        COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT
+                            | COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS
+                    ) {
+                        return Ok(());
+                    }
+                    args.SetHandled(true)?;
+                    if !background
+                        && IsWindowVisible(window) != 0
+                        && GetForegroundWindow() == GetAncestor(window, GA_ROOT)
+                        && IsWindowEnabled(GetAncestor(window, GA_ROOT)) != 0
+                    {
+                        let next = if reason == COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS {
+                            last
+                        } else {
+                            GetNextDlgTabItem(window, last, 0)
+                        };
+                        if !next.is_null() {
+                            SetFocus(next);
+                        }
+                    }
+                    Ok(())
+                })),
+                &mut 0,
+            )?;
+        }
+        Ok(())
+    }
+    pub(super) fn handle_message(&self, message: &MSG, background: bool, view: &WebView) -> bool {
+        if unsafe { GetParent(message.hwnd) } != self.window {
+            return false;
+        }
+        if matches!(
+            message.message,
+            WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
+        ) {
+            if let Some(bit) = crate::keybindings::native_modifier(message.wParam, message.lParam) {
+                let modifiers = self.key_modifiers.get();
+                self.key_modifiers
+                    .set(if matches!(message.message, WM_KEYDOWN | WM_SYSKEYDOWN) {
+                        modifiers | bit
+                    } else {
+                        modifiers & !bit
+                    });
+            }
+        }
+        if message.hwnd == self.address && handle_message(message) {
+            return true;
+        }
+        if message.message != WM_KEYDOWN || message.wParam != 9 {
+            return false;
+        }
+        self.tab_target.set(0);
+        if message.hwnd == self.address
+            && ADDRESS_KEYS.with(|keys| {
+                keys.borrow()
+                    .get(&(self.address as isize))
+                    .is_some_and(|keys| keys.composing || keys.settling || keys.blurred)
+            })
+        {
+            return false;
+        }
+        unsafe {
+            let root = GetAncestor(self.window, GA_ROOT);
+            if IsWindowEnabled(root) == 0
+                || IsWindowEnabled(message.hwnd) == 0
+                || GetWindowLongPtrW(message.hwnd, GWL_STYLE) as u32 & WS_VISIBLE == 0
+                || (!background
+                    && (GetFocus() != message.hwnd || IsWindowVisible(self.window) == 0))
+            {
+                return false;
+            }
+            // Hidden probes use owned queued messages; never consult or change
+            // the user's keyboard state or focus during background verification.
+            let (modified, backwards) = if background {
+                (
+                    self.key_modifiers.get() & !48 != 0,
+                    self.key_modifiers.get() & 48 != 0,
+                )
+            } else {
+                (
+                    [0x11, 0x12, 0x5b, 0x5c]
+                        .into_iter()
+                        .any(|key| GetKeyState(key) < 0),
+                    GetKeyState(0x10) < 0,
+                )
+            };
+            if modified || message.lParam as usize & (1 << 29) != 0 {
+                return false;
+            }
+            let next = GetNextDlgTabItem(self.window, message.hwnd, i32::from(backwards));
+            if next.is_null() {
+                return false;
+            }
+            // More is always the last visible tab stop, including compact panes.
+            let edge = if backwards {
+                GetNextDlgTabItem(self.window, self.more, 0)
+            } else {
+                self.more
+            };
+            let page = message.hwnd == edge;
+            self.tab_target.set(if page {
+                view.hwnd().0 as usize
+            } else {
+                next as usize
+            });
+            if !background {
+                if page {
+                    if let Err(error) = view.controller().MoveFocus(if backwards {
+                        COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS
+                    } else {
+                        COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT
+                    }) {
+                        report(&format!("Browser Tab focus: {error}"));
+                        return false;
+                    }
+                } else {
+                    SetFocus(next);
+                }
+            }
+        }
+        true
     }
     unsafe fn child(&self, class: &str, text: &str, style: u32, id: usize) -> anyhow::Result<HWND> {
         let hwnd = CreateWindowExW(
@@ -466,7 +629,7 @@ impl Chrome {
             GetClientRect(self.window, &mut r);
         }
         json!({"parent":unsafe{GetParent(self.window)} as usize,"height":r.bottom,"rows":1,"tools_handle":self.more as usize,"bookmarks_handle":self.bookmarks as usize,
-            "status_handle":self.status as usize,"controls":self.buttons.iter().map(|h|*h as usize).collect::<Vec<_>>()})
+            "status_handle":self.status as usize,"tab_target":self.tab_target.get(),"controls":self.buttons.iter().map(|h|*h as usize).collect::<Vec<_>>()})
     }
     pub(super) fn address(&self) -> String {
         unsafe {
