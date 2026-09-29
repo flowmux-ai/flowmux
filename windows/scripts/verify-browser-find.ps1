@@ -228,6 +228,7 @@ try {
     Reset-Selection
     foreach($id in @('one','two','three')) {Assert-Hit (Find 'needle' @('--no-wrap')) $id 'needle'}
     if((Find 'needle' @('--no-wrap')).found) {throw 'No-wrap advanced past the last match'}
+    if((Selection).id -cne 'three' -or (Selection).text -cne 'needle'){throw 'End of the same no-wrap search lost its valid current match'}
     Assert-Hit (Find 'needle') 'one' 'needle'
     Assert-Hit (Find 'needle' @('--backward')) 'three' 'needle'
     Reset-Selection
@@ -262,6 +263,27 @@ try {
     Request @('browser','find-show',$domPane)|Out-Null
     if(-not (Find ([FindFixture]::Unicode)).found) {throw 'Known compound Unicode query was not found before native panel inspection'}
     $evidence.panel=Assert-Panel ([FindFixture]::Unicode)
+    $noMatch='없는결과_한_é_😀'
+    [OptionsFixture]::SetTextAndNotify([long]$evidence.panel.panel_handle,[long]$evidence.panel.panel_query_handle,$process.Id,$noMatch)
+    $miss=Wait-FindState {param($f)$f.query -ceq $noMatch -and -not $f.busy -and $f.found -eq $false}
+    $selection=Selection
+    if(-not (Same-Text $selection.text '') -or $miss.panel_status -cne 'No match'){throw ('A changed query with no match retained the previous owned selection: '+($selection|ConvertTo-Json -Compress))}
+    Find 'CASETOKEN'|Out-Null
+    [OptionsFixture]::SetChecked([long]$evidence.panel.panel_handle,[long]$evidence.panel.panel_controls.case,$process.Id,$true)
+    [OptionsFixture]::Click([long]$evidence.panel.panel_handle,[long]$evidence.panel.panel_controls.case,$process.Id)
+    Wait-FindState {param($f)$f.query -ceq 'CASETOKEN' -and -not $f.busy -and $f.found -eq $false}|Out-Null
+    if(-not (Same-Text (Selection).text '')){throw 'Changed case-sensitivity retained a now-invalid owned selection'}
+    foreach($element in @('unicode','manual')){
+        Find ([FindFixture]::Unicode)|Out-Null
+        # A new Range with identical text/bounds also belongs to the page/user.
+        Eval-Page ('(()=>{const r=document.createRange();r.selectNodeContents(document.getElementById("'+$element+'"));const s=getSelection();s.removeAllRanges();s.addRange(r);return true;})()')|Out-Null
+        [OptionsFixture]::SetTextAndNotify([long]$evidence.panel.panel_handle,[long]$evidence.panel.panel_query_handle,$process.Id,$noMatch)
+        Wait-FindState {param($f)$f.query -ceq $noMatch -and -not $f.busy -and $f.found -eq $false}|Out-Null
+        $expected=if($element -eq 'unicode'){[FindFixture]::Unicode}else{'user selection stays'}
+        if(-not (Same-Text (Selection).text $expected)){throw 'Unsuccessful changed query removed a page/user selection'}
+    }
+    Find ([FindFixture]::Unicode)|Out-Null;Assert-Panel ([FindFixture]::Unicode)|Out-Null
+    Passed 'changed_query_or_case_no_match_clears_only_owned_selection_and_keeps_user_ranges'
     $afterPanel=Status;Same-Browser $beforePanel $afterPanel
     if($afterPanel.bounds.y -ne $beforePanel.bounds.y+$afterPanel.find.panel_bounds.height -or $afterPanel.bounds.height -ne $beforePanel.bounds.height-$afterPanel.find.panel_bounds.height) {throw 'Opening inline find did not reserve its exact height from the existing viewport'}
     $originalTheme=(Request @('settings','show')).document.terminal.theme

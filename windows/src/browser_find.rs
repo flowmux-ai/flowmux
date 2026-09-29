@@ -78,7 +78,7 @@ const BRIDGE: &str = r#"function(args) {
             if (current && current.value === saved) delete window[args.key];
         } catch (_) {}
     };
-    if (args.close) {
+    const release = () => {
         const clear = owned && matches(state);
         if (owned) discard(state);
         let cleared = false;
@@ -88,6 +88,10 @@ const BRIDGE: &str = r#"function(args) {
                 cleared = true;
             } catch (_) {}
         }
+        return cleared;
+    };
+    if (args.close) {
+        const cleared = release();
         return {found: false, selection: text(), cleared};
     }
     if (typeof window.find !== 'function') {
@@ -108,6 +112,7 @@ const BRIDGE: &str = r#"function(args) {
             const range = current.getRangeAt(0);
             const saved = {
                 tag, document, range,
+                query: args.query, case_sensitive: args.case_sensitive,
                 startContainer: range.startContainer, startOffset: range.startOffset,
                 endContainer: range.endContainer, endOffset: range.endOffset,
                 anchorNode: current.anchorNode, anchorOffset: current.anchorOffset,
@@ -122,6 +127,9 @@ const BRIDGE: &str = r#"function(args) {
             });
             document.addEventListener('selectionchange', saved.onChange);
         }
+    } else if (owned &&
+        (state.query !== args.query || state.case_sensitive !== args.case_sensitive)) {
+        release();
     } else if (owned && !matches(state)) {
         discard(state);
     }
