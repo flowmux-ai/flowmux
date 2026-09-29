@@ -50,6 +50,7 @@ enum Response {
         revision: Uuid,
         focus_epoch: u64,
         binding: crate::keybindings::Binding,
+        remaining: usize,
     },
     Eval,
     Action,
@@ -538,7 +539,7 @@ impl App {
             && !self.command_palette.is_open()
             && unsafe { IsWindowEnabled(self.surface_window(id)) } != 0
     }
-    pub(super) fn sync_browser_keys(&self) {
+    pub(super) fn sync_browser_keys(&mut self) {
         let enabled = !self.closing
             && !self.close_accepted
             && self.close_request.is_none()
@@ -552,6 +553,31 @@ impl App {
                 &self.settings,
             );
         }
+        self.pending_browser.retain(|_, pending| {
+            let Response::Shortcut {
+                instance,
+                revision,
+                focus_epoch,
+                ..
+            } = &pending.response
+            else {
+                return true;
+            };
+            let valid = self.browsers.get(&pending.surface).is_some_and(|browser| {
+                let keys = browser.keys.borrow();
+                browser.instance == *instance
+                    && keys.ready()
+                    && keys.revision == *revision
+                    && keys.focus_epoch == *focus_epoch
+                    && browser.epoch.load(Ordering::SeqCst) == pending.epoch
+            });
+            if !valid {
+                // A removed/navigated frame may never complete ExecuteScript.
+                // Cancel now instead of occupying the renderer deadline.
+                pending.send(json!({"surface":pending.surface,"forwarded":false,"executed":false}));
+            }
+            valid
+        });
     }
     fn browser_page_shortcut(
         &mut self,
@@ -565,7 +591,7 @@ impl App {
         let allowed = self.browser_shortcut_allowed(id, instance, revision)
             && self.browsers.get(&id).is_some_and(|b| {
                 b.instance == instance
-                    && b.keys.borrow().enabled
+                    && b.keys.borrow().ready()
                     && b.visible
                     && !b.loading
                     && !b.native_closed.get()
@@ -586,12 +612,13 @@ impl App {
         let key = serde_json::to_string(&self.browsers[&id].key_guard)?;
         self.browser_script_optional(
             id,
-            format!("window[{key}]() === true"),
+            format!("window[{key}]"),
             Response::Shortcut {
                 instance,
                 revision,
                 focus_epoch,
                 binding,
+                remaining: 1,
             },
             1024,
             reply,
@@ -1119,6 +1146,17 @@ impl App {
                 self.browser_refresh(id)?;
             }
             Signal::Eval(request, epoch, result) => {
+                if result == "true" {
+                    if let Some(p) = self.pending_browser.get_mut(&request) {
+                        let timely = p.started.elapsed() <= p.response.timeout();
+                        if let Response::Shortcut { remaining, .. } = &mut p.response {
+                            if *remaining > 1 && timely {
+                                *remaining -= 1;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
                 if let Some(p) = self.pending_browser.remove(&request) {
                     let action = p.response.is_action();
                     let find = p.response.is_find();
@@ -1187,11 +1225,12 @@ impl App {
                 revision,
                 focus_epoch,
                 binding,
+                ..
             } => {
                 let allowed = result == true
                     && self.browser_shortcut_allowed(id, instance, revision)
                     && self.browsers.get(&id).is_some_and(|b| {
-                        b.keys.borrow().enabled
+                        b.keys.borrow().ready()
                             && b.keys.borrow().focus_epoch == focus_epoch
                             && (self.background_test
                                 || unsafe { GetForegroundWindow() == self.surface_window(id) })
@@ -1254,7 +1293,7 @@ impl App {
         &mut self,
         id: SurfaceId,
         source: String,
-        response: Response,
+        mut response: Response,
         limit: usize,
         reply: Option<ipc::Reply>,
     ) -> anyhow::Result<()> {
@@ -1273,13 +1312,43 @@ impl App {
         let epoch = browser.epoch.load(Ordering::SeqCst);
         let request = Uuid::new_v4();
         let sender = self.sender.clone();
+        let started = Instant::now();
+        let frames = matches!(response, Response::Shortcut { .. })
+            .then(|| browser.keys.borrow().frames())
+            .flatten();
+        if let Response::Shortcut { remaining, .. } = &mut response {
+            *remaining = 1 + frames.as_ref().map_or(0, Vec::len);
+        }
         let script = if matches!(response, Response::Shortcut { .. }) {
             // Primitive results cannot be spoofed by a page's Object.prototype.toJSON.
-            source
+            format!("{source}({}) === true", u8::from(frames.is_some()))
         } else {
             let source = serde_json::to_string(&source)?;
             format!("(()=>{{try{{const result=(0,eval)({source});if(result&&typeof result.then==='function')throw new Error('asynchronous scripts are not supported');const out={{result:result===undefined?null:result}};if(JSON.stringify(out).length>{limit})throw new Error('browser response exceeds size limit');return out;}}catch(e){{return {{error:String(e).slice(0,4096)}};}}}})()")
         };
+        for (frame, nested_tracking) in frames.into_iter().flatten() {
+            let frame_script =
+                format!("{source}({}) === true", if nested_tracking { 1 } else { 2 });
+            let sender = self.sender.clone();
+            let callback = webview2_com::ExecuteScriptCompletedHandler::create(Box::new(
+                move |status, result| {
+                    sender.send(Event::Browser(Signal::Eval(
+                        request,
+                        epoch,
+                        (status.is_ok() && result == "true").to_string(),
+                    )));
+                    Ok(())
+                },
+            ));
+            if unsafe {
+                frame.ExecuteScript(&windows::core::HSTRING::from(frame_script), &callback)
+            }
+            .is_err()
+            {
+                self.sender
+                    .send(Event::Browser(Signal::Eval(request, epoch, "false".into())));
+            }
+        }
         browser
             .view
             .evaluate_script_with_callback(&script, move |result| {
@@ -1300,7 +1369,7 @@ impl App {
                 visibility_revision: browser.visibility_revision,
                 epoch,
                 reply,
-                started: Instant::now(),
+                started,
                 response,
                 limit,
             },
@@ -1439,6 +1508,9 @@ impl App {
             Op::Title { .. } => return Ok(Some(json!({"title":browser.title}))),
             Op::Status { .. } => {
                 let mut status = browser.status(id);
+                status["shortcut_frames"] =
+                    json!(browser.keys.borrow().frames().map(|frames| frames.len()));
+                status["shortcut_nested_tracking"] = json!(browser.keys.borrow().nested_tracking());
                 status["find"] = self.browser_find_status(id);
                 status["action_pending"] = json!(action_pending);
                 status["shortcut_pending"] = json!(self

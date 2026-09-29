@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close','keys','page-keys')][string]$Case='all')
+    [ValidateSet('all','files-close','keys','page-keys','frame-keys')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -326,6 +326,97 @@ function Verify-FilesClose {
         $files.Dispose()
     }
 }
+function Verify-FrameKeys {
+    $other=New-Object BrowserFixture
+    try {
+        $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$terminal=$initial.surfaces[0];$source=Request @('identify')
+        $first=(Request @('browser','open',($origin+'/key-frame'),'--pane',$source.pane)).browser_pane_opened
+        $before=Wait-Page $first.pane '/key-frame' 'Frame keys';$key=@{keyCode=70;ctrlKey=$true;shiftKey=$true}
+        $frameUrl=$other.Origin.Replace('127.0.0.1','localhost')+'/key-frame';$frameJson=$frameUrl|ConvertTo-Json -Compress
+        function Frame-Key([bool]$Execute) {
+            $r=Request @('test-shortcut',$first.surface,($key|ConvertTo-Json -Compress))
+            if($r.executed -ne $Execute){throw ('Frame shortcut differs: '+($r|ConvertTo-Json -Compress))}
+            $status=Request @('browser','status',$first.pane)
+            if([bool]$status.find.panel_handle -ne $Execute){throw 'Frame shortcut Find state differs'}
+            if($Execute){Request @('browser','find-close',$first.pane)|Out-Null}
+        }
+        function Frame-Ready([int]$Count,[int]$Reports) {
+            $clock=[Diagnostics.Stopwatch]::StartNew()
+            do {
+                $status=Request @('browser','status',$first.pane)
+                if($null -ne $status.shortcut_frames -and $status.shortcut_frames -eq $Count -and (Eval-Page $first.pane 'window.frameReports.filter(r=>r.ready).length') -ge $Reports){return}
+                if($clock.ElapsedMilliseconds -gt 3000){throw ('Native frame tracking/readiness differs: '+($status|ConvertTo-Json -Depth 5 -Compress))}
+                Start-Sleep -Milliseconds 20
+            }while($true)
+        }
+        function Frame-Message([hashtable]$Message,[bool]$Nested=$false) {
+            $token=[guid]::NewGuid().ToString();$Message.fixture='keys';$Message.token=$token
+            $target='document.querySelector("#keyframe").contentWindow';if($Nested){$Message.nested=$true}
+            Eval-Page $first.pane ($target+'.postMessage('+($Message|ConvertTo-Json -Compress)+',"*");true')|Out-Null
+            $clock=[Diagnostics.Stopwatch]::StartNew()
+            do {
+                $report=Eval-Page $first.pane ('window.frameReports.find(r=>r.token==="'+$token+'")||null')
+                if($report){if(-not (Same-Text $report.text '초안 한 é 😀 &')){throw 'Raw frame Korean draft changed'};return}
+                if($clock.ElapsedMilliseconds -gt 2000){throw 'Owned frame message did not complete'}
+                Start-Sleep -Milliseconds 10
+            }while($true)
+        }
+        Eval-Page $first.pane ('window.frameReports=[];addEventListener("message",e=>{if(e.data&&e.data.fixture==="keys"&&!e.data.action)frameReports.push(e.data)});const frame=document.createElement("iframe");frame.id="keyframe";frame.src='+$frameJson+';document.body.append(frame);true')|Out-Null
+        Frame-Ready 1 1;Frame-Key $true
+        Frame-Message @{action='compose'};Frame-Key $false
+        Frame-Message @{action='commit'};Frame-Key $false
+        Frame-Message @{action='release'};Frame-Key $true
+        $evidence.checks+=@{name='cross_origin_frame_shortcuts_preserve_Korean_composition_and_commit_settling';passed=$true}
+
+        $nestedTracking=(Request @('browser','status',$first.pane)).shortcut_nested_tracking
+        Frame-Message @{action='nested';url=($origin+'/key-frame?nested')}
+        $trackedCount=1;if($nestedTracking){$trackedCount=2};Frame-Ready $trackedCount 2;Frame-Key $nestedTracking
+        Frame-Message @{action='compose'} $true;Frame-Key $false
+        Frame-Message @{action='commit'} $true;Frame-Key $false
+        Frame-Message @{action='release'} $true;Frame-Key $nestedTracking
+        Frame-Message @{action='remove-nested'};Frame-Ready 1 2;Frame-Key $nestedTracking
+        $readyReports=2
+        if(-not $nestedTracking){
+            # The old runtime cannot prove removal of an untracked descendant.
+            # Dispose its native owner before testing recovery, without a reload.
+            Eval-Page $first.pane 'document.querySelector("#keyframe").remove();true'|Out-Null;Frame-Ready 0 2;Frame-Key $true
+            Eval-Page $first.pane ('const replacement=document.createElement("iframe");replacement.id="keyframe";replacement.src='+$frameJson+';document.body.append(replacement);true')|Out-Null
+            $readyReports=3;Frame-Ready 1 $readyReports;Frame-Key $true
+        }
+        $name='nested_cross_origin_frame_inside_closed_shadow_root_keeps_composition_guard'
+        if(-not $nestedTracking){$name='old_runtime_rejects_uninspectable_nested_frames_until_native_owner_removed'}
+        $evidence.checks+=@{name=$name;passed=$true};$evidence.nativeNestedTracking=$nestedTracking
+
+        Frame-Message @{action='busy';ms=1200}
+        $clock=[Diagnostics.Stopwatch]::StartNew();$r=Request @('test-shortcut',$first.surface,($key|ConvertTo-Json -Compress)) 1 2500
+        if($r.error -notmatch 'timed out' -or $clock.ElapsedMilliseconds -gt 2000){throw 'Slow frame did not cancel within the existing shortcut deadline'}
+        Frame-Message @{action='release'};Frame-Key $true
+        $evidence.checks+=@{name='slow_cross_origin_frame_cancels_without_late_Find_and_recovers';passed=$true}
+
+        function Change-PendingFrame([string]$Change) {
+            Frame-Message @{action='busy';ms=400}
+            $p=[CliProbe]::Start($cli,@('--pipe',$pipeName,'--json','test-shortcut',$first.surface,($key|ConvertTo-Json -Compress)),$directory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
+            try {
+                $clock=[Diagnostics.Stopwatch]::StartNew()
+                do{$status=Request @('browser','status',$first.pane);if($status.shortcut_pending){break};if($p.HasExited -or $clock.ElapsedMilliseconds -gt 300){throw 'Frame key did not enter a pending native check'};Start-Sleep -Milliseconds 10}while($true)
+                Eval-Page $first.pane ($Change+';true')|Out-Null
+                if(-not $p.WaitForExit(2000) -or -not $out.Wait(500) -or -not $err.Wait(500)){throw 'Frame mutation left a shortcut pending'}
+                if($p.ExitCode -ne 0){throw ('Frame mutation did not reach its tested guard: '+[CliProbe]::Output($err))}
+                if(([CliProbe]::Output($out)|ConvertFrom-Json).executed){throw 'Shortcut survived a changed native frame lifetime'}
+                if((Request @('browser','status',$first.pane)).find.panel_handle){throw 'Frame lifetime change opened Find'}
+            } finally {if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
+        }
+        Change-PendingFrame ('document.querySelector("#keyframe").src='+($frameUrl+'?navigation'|ConvertTo-Json -Compress))
+        $readyReports++;Frame-Ready 1 $readyReports;Frame-Key $true
+        $evidence.checks+=@{name='frame_navigation_cancels_pending_shortcut_without_replacing_WebView';passed=$true}
+        Change-PendingFrame 'document.querySelector("#keyframe").remove()'
+        Frame-Ready 0 $readyReports;Frame-Key $true
+        $after=Request @('browser','status',$first.pane);Check-Stable $before $after
+        $live=@((Tree).surfaces|Where-Object {$_.id -eq $terminal.id})
+        if($live.Count -ne 1 -or $live[0].pid -ne $terminal.pid -or $live[0].session -ne $terminal.session){throw 'Frame shortcuts replaced the terminal'}
+        $evidence.checks+=@{name='frame_removal_cancels_pending_shortcut_releases_tracking_and_retains_terminal';passed=$true}
+    } finally {$other.Dispose()}
+}
 function Verify-PageKeys {
     $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$terminal=$initial.surfaces[0];$source=Request @('identify')
     $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
@@ -485,6 +576,7 @@ function Verify-Keys {
     $evidence.checks+=@{name='detached_browser_find_retains_native_owner_WebView_Unicode_and_terminal_session';passed=$true}
 }
 try {
+    if($Case -eq 'frame-keys'){Verify-FrameKeys}
     if($Case -eq 'page-keys'){Verify-PageKeys}
     if($Case -eq 'keys'){Verify-Keys}
     if($Case -eq 'all') {
@@ -804,7 +896,7 @@ try {
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     }
-    if($Case -notin @('keys','page-keys')){Verify-FilesClose}
+    if($Case -notin @('keys','page-keys','frame-keys')){Verify-FilesClose}
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

@@ -57,8 +57,21 @@ public sealed class BrowserFixture : IDisposable {
                     "<h1 id='label'>"+label+" 한글 한 é 😀</h1><input id='entry'><a href='/two'>다음</a>"+
                     "<script>window.fixtureLoad=Math.random();window.fixtureText='한글 한 é 😀';</script>";
                 if(path.StartsWith("/dom") && documentPath!=null) html=File.ReadAllText(documentPath,Encoding.UTF8);
+                bool keyFrame=path.StartsWith("/key-frame");
+                if(keyFrame) html="<!doctype html><meta charset='utf-8'><title>Frame keys</title><input id='entry' value='초안 한 é 😀 &amp;'><script>"+
+                    "addEventListener('message',e=>{const m=e.data;if(!m||m.fixture!=='keys'||typeof m.action!=='string'||(e.source!==parent&&e.source!==top))return;"+
+                    "if(m.nested){const forwarded={...m};delete forwarded.nested;window.fixtureNested.contentWindow.postMessage(forwarded,'*');return;}"+
+                    "if(m.action==='compose')dispatchEvent(new CompositionEvent('compositionstart',{data:'ㅎ'}));"+
+                    "if(m.action==='commit'){dispatchEvent(new CompositionEvent('compositionend',{data:'한'}));dispatchEvent(new KeyboardEvent('keyup',{key:'Control'}));}"+
+                    "if(m.action==='release')dispatchEvent(new KeyboardEvent('keyup',{key:'F12'}));"+
+                    "if(m.action==='nested'){const holder=document.createElement('div'),frame=document.createElement('iframe');window.fixtureNested=frame;holder.id='nestedhost';frame.src=m.url;document.body.append(holder);holder.attachShadow({mode:'closed'}).append(frame);}"+
+                    "if(m.action==='remove-nested')document.querySelector('#nestedhost').remove();"+
+                    "if(m.action==='busy')setTimeout(()=>{const until=performance.now()+m.ms;while(performance.now()<until){}},0);"+
+                    "top.postMessage({fixture:'keys',token:m.token,text:document.querySelector('#entry').value},'*');});"+
+                    "addEventListener('DOMContentLoaded',()=>top.postMessage({fixture:'keys',ready:location.href},'*'));"+
+                    "</script>";
                 var body=Encoding.UTF8.GetBytes(html);
-                var header=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n");
+                var header=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'"+(keyFrame?"; frame-src http://127.0.0.1:* http://localhost:*":"")+"\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n");
                 stream.Write(header,0,header.Length);stream.Write(body,0,body.Length);
             }
         } catch(IOException) {} catch(ObjectDisposedException) {} }
