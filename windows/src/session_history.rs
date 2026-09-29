@@ -43,6 +43,23 @@ impl SessionAgent {
         }
     }
 
+    pub fn canonical_session_id(self, value: &str) -> io::Result<String> {
+        if self == Self::OpenCode {
+            if value.starts_with("ses_")
+                && (5..=128).contains(&value.len())
+                && value
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            {
+                return Ok(value.into());
+            }
+            return Err(invalid("Invalid OpenCode session ID"));
+        }
+        uuid::Uuid::parse_str(value)
+            .map(|id| id.to_string())
+            .map_err(|_| invalid("Invalid session ID"))
+    }
+
     pub fn home_variables(self) -> &'static [&'static str] {
         match self {
             Self::Claude => &["USERPROFILE", "HOME", "CLAUDE_CONFIG_DIR"],
@@ -109,21 +126,10 @@ pub struct HistorySession {
 impl HistorySession {
     /// Only validated native IDs can become terminal input; transcript text never can.
     pub fn resume_argv(&self) -> io::Result<Vec<String>> {
+        let id = self.agent.canonical_session_id(&self.id)?;
         if self.agent == SessionAgent::OpenCode {
-            if !self.id.starts_with("ses_")
-                || self.id.len() > 128
-                || self.id.len() <= 4
-                || !self
-                    .id
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || c == b'_')
-            {
-                return Err(invalid("Invalid OpenCode session ID"));
-            }
-            return Ok(vec!["opencode".into(), "--session".into(), self.id.clone()]);
+            return Ok(vec!["opencode".into(), "--session".into(), id]);
         }
-        let id = uuid::Uuid::parse_str(&self.id)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid session ID"))?;
         Ok(match self.agent {
             SessionAgent::Claude => vec!["claude".into(), "--resume".into(), id.to_string()],
             SessionAgent::Codex => vec!["codex".into(), "resume".into(), id.to_string()],
@@ -712,6 +718,33 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(path, format!("{text}\n")).unwrap();
+    }
+
+    #[test]
+    fn canonical_session_ids_reject_shell_and_path_input() {
+        for agent in [
+            SessionAgent::Claude,
+            SessionAgent::Codex,
+            SessionAgent::Antigravity,
+            SessionAgent::Cline,
+        ] {
+            assert_eq!(agent.canonical_session_id(&ID.to_uppercase()).unwrap(), ID);
+            for value in ["", "../session", "ses_other", "한글", "id;echo", "id\n"] {
+                assert!(agent.canonical_session_id(value).is_err());
+            }
+        }
+        assert_eq!(
+            SessionAgent::OpenCode
+                .canonical_session_id("ses_Ab12")
+                .unwrap(),
+            "ses_Ab12"
+        );
+        for value in ["ses_", "ses_../x", "ses_a-b", "ses_한글", ID] {
+            assert!(SessionAgent::OpenCode.canonical_session_id(value).is_err());
+        }
+        assert!(SessionAgent::OpenCode
+            .canonical_session_id(&format!("ses_{}", "a".repeat(125)))
+            .is_err());
     }
 
     #[test]

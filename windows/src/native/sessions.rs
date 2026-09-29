@@ -37,6 +37,7 @@ pub(super) struct Controller {
     panel: Option<session_panel::Panel>,
     source: Option<Source>,
     agent: Option<AgentProcess>,
+    current_session: Option<String>,
     rows: Vec<HistorySession>,
     selected: Option<String>,
     preview: String,
@@ -47,6 +48,12 @@ pub(super) struct Controller {
     next_probe: Option<Instant>,
 }
 impl Controller {
+    fn can_resume(&self) -> bool {
+        self.resume_enabled
+            && self.job.is_none()
+            && self.selected.is_some()
+            && self.selected != self.current_session
+    }
     pub(super) fn shutdown(&mut self) {
         if let Some(job) = &self.job {
             job.cancel.store(true, Ordering::Release);
@@ -56,6 +63,7 @@ impl Controller {
         self.pending = None;
         self.source = None;
         self.agent = None;
+        self.current_session = None;
         self.rows.clear();
         self.selected = None;
         self.preview.clear();
@@ -78,13 +86,14 @@ impl Controller {
     }
     pub(super) fn status(&self) -> Value {
         json!({"open":self.open,"id":self.id,"source":self.source,
-            "agent":self.agent.as_ref().map(|a|json!({"name":a.agent.name(),"pid":a.pid,"home":a.home,"session_id":a.session_id})),
+            "agent":self.agent.as_ref().map(|a|json!({"name":a.agent.name(),"pid":a.pid,"home":a.home,"session_id":self.current_session})),
             "loading":self.job.is_some(),"status":self.status,"rows":self.rows,
-            "selected":self.selected,"resume_enabled":self.resume_enabled,
+            "selected":self.selected,"resume_enabled":self.can_resume(),
             "panel":self.panel.as_ref().map(session_panel::Panel::status)})
     }
     fn clear(&mut self) {
         self.agent = None;
+        self.current_session = None;
         self.rows.clear();
         self.selected = None;
         self.preview.clear();
@@ -235,15 +244,34 @@ impl App {
         }
     }
     fn sessions_render(&mut self) -> anyhow::Result<()> {
+        let can_resume = self.sessions.can_resume();
         if let Some(panel) = &mut self.sessions.panel {
             panel.update(
                 &self.sessions.rows,
                 self.sessions.selected.as_deref(),
                 &self.sessions.status,
                 &self.sessions.preview,
-                self.sessions.resume_enabled && self.sessions.job.is_none(),
+                can_resume,
                 self.sessions.job.is_some(),
             )?;
+        }
+        Ok(())
+    }
+    fn sessions_sync_current(&mut self) -> anyhow::Result<()> {
+        let current = self.sessions.agent.as_ref().and_then(|agent| {
+            self.sessions
+                .source
+                .as_ref()
+                .and_then(|source| self.agent_presence(source.surface))
+                .filter(|p| {
+                    p.pid == Some(agent.pid) && p.name.eq_ignore_ascii_case(agent.agent.name())
+                })
+                .and_then(|p| p.session_id)
+                .or_else(|| agent.session_id.clone())
+        });
+        if self.sessions.current_session != current {
+            self.sessions.current_session = current;
+            self.sessions_render()?;
         }
         Ok(())
     }
@@ -262,6 +290,7 @@ impl App {
             self.sessions.pending = Some(Task::Scan(true));
             self.sessions.status = "Loading sessions…".into();
         }
+        self.sessions_sync_current()?;
         if self.sessions.source.is_none() {
             self.sessions.pending = None;
             self.sessions.status="Focus a local Claude, Codex, OpenCode, Antigravity, or Cline terminal tab to browse sessions.".into();
@@ -361,6 +390,7 @@ impl App {
         self.sessions_render()
     }
     pub(super) fn sessions_event(&mut self, event: Signal) -> anyhow::Result<()> {
+        self.sessions_sync_current()?;
         match event {
             Signal::Ui(id, action) => {
                 if id != self.sessions.id || !self.sessions.open {
@@ -419,8 +449,7 @@ impl App {
                     }
                     UiAction::Resume(id) => {
                         self.sessions_guard()?;
-                        if !self.sessions.resume_enabled
-                            || self.sessions.job.is_some()
+                        if !self.sessions.can_resume()
                             || self.sessions.selected.as_deref() != Some(&id)
                         {
                             return Ok(());
@@ -466,12 +495,13 @@ impl App {
                             && self.sessions.agent.as_ref() == Some(&agent)
                         {
                             self.sessions.preview = text;
-                            self.sessions.resume_enabled = agent.session_id.as_deref() != Some(&id);
+                            self.sessions.resume_enabled = true;
                         }
                     }
                     Ok(Reply::Resume(agent, item, shell)) => {
                         if self.sessions.agent.as_ref() == Some(&agent)
                             && self.sessions.selected.as_deref() == Some(&item.id)
+                            && self.sessions.current_session.as_deref() != Some(&item.id)
                         {
                             self.sessions_guard()?;
                             let normal = self.settings.default_shell.clone();

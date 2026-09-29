@@ -98,6 +98,11 @@ impl App {
         let agent = crate::session_history::SessionAgent::from_name(&args.agent)
             .context("unsupported local agent name")?;
         args.agent = agent.name().to_ascii_lowercase();
+        args.session_id = args
+            .session_id
+            .as_deref()
+            .map(|id| agent.canonical_session_id(id))
+            .transpose()?;
         anyhow::ensure!(
             args.pid > 0 && args.seq > 0,
             "agent PID and sequence must be positive"
@@ -136,6 +141,7 @@ impl App {
         report.source = Some("flowmux:report".into());
         report.seq = Some(args.seq);
         report.message = args.message.clone();
+        report.session_id = args.session_id.clone();
         let visible = self.source_is_focused(Some(surface));
         let accepted = {
             let mut states = self.agent_states.borrow_mut();
@@ -180,6 +186,7 @@ impl App {
                 p.status,
                 p.seen,
                 p.status_text().map(str::to_string),
+                p.session_id.clone(),
             )
         };
         if before.as_ref().map(display) != after.as_ref().map(display) {
@@ -415,7 +422,7 @@ impl App {
                 let presence = self.agent_presence(entry.surface).filter(|p| p.pid == Some(entry.pid) && p.name.eq_ignore_ascii_case(entry.agent.name()));
                 Some(json!({"workspace":workspace.name,"workspace_id":workspace.id,"root":workspace.cwd,
                     "pane":pane,"tab":entry.surface,"agent":entry.agent.name().to_ascii_lowercase(),"pid":entry.pid,"cwd":entry.cwd,
-                    "status":presence.as_ref().map_or(AgentStatus::Unknown, |p|p.status),"message":presence.as_ref().and_then(|p|p.message.as_deref()),"session_name":null,"messaging":false}))
+                    "status":presence.as_ref().map_or(AgentStatus::Unknown, |p|p.status),"message":presence.as_ref().and_then(|p|p.message.as_deref()),"session_id":presence.as_ref().and_then(|p|p.session_id.as_deref()),"session_name":null,"messaging":false}))
                 }).collect());
                 self.record_agents(found.entries);
                 result

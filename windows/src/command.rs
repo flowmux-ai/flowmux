@@ -218,6 +218,10 @@ pub struct AgentReportArgs {
     pub status: String,
     #[arg(long)]
     pub message: Option<String>,
+    /// Current native conversation ID; omission retains the last reported ID.
+    #[arg(long)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
@@ -587,6 +591,34 @@ mod tests {
     fn extracted_command_args_preserve_cli_and_flat_tagged_wire() {
         let id = Uuid::new_v4().to_string();
         for (args, expected) in [
+            (
+                vec![
+                    "report-agent",
+                    "codex",
+                    "--pid",
+                    "1",
+                    "--seq",
+                    "1",
+                    "--status",
+                    "idle",
+                ],
+                serde_json::json!({"method":"report_agent","agent":"codex","surface":null,"pid":1,"seq":1,"status":"idle","message":null}),
+            ),
+            (
+                vec![
+                    "report-agent",
+                    "codex",
+                    "--pid",
+                    "1",
+                    "--seq",
+                    "2",
+                    "--status",
+                    "working",
+                    "--session-id",
+                    &id,
+                ],
+                serde_json::json!({"method":"report_agent","agent":"codex","surface":null,"pid":1,"seq":2,"status":"working","message":null,"session_id":id}),
+            ),
             (
                 vec!["detach-tab", &id],
                 serde_json::json!({"method":"detach_tab","surface":id}),

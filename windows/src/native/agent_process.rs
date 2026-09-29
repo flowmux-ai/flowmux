@@ -663,15 +663,7 @@ fn session_id(agent: SessionAgent, argv: &[String]) -> Option<String> {
             continue;
         }
         let value = value?;
-        if agent == SessionAgent::OpenCode {
-            return (value.starts_with("ses_")
-                && (5..=128).contains(&value.len())
-                && value
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || c == b'_'))
-            .then(|| value.to_string());
-        }
-        return uuid::Uuid::parse_str(value).ok().map(|id| id.to_string());
+        return agent.canonical_session_id(value).ok();
     }
     None
 }

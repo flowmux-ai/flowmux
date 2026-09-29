@@ -2055,6 +2055,7 @@ impl App {
             Event::AgentsReady => self.agents_poll(),
             Event::AgentChanged => {
                 self.refresh_chrome_metadata();
+                self.sessions_reconcile()?;
                 self.layout()?;
             }
             Event::AgentBar(action) => self.agent_bar_ui(action)?,
