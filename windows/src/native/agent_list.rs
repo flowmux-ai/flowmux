@@ -206,7 +206,9 @@ impl App {
         } else if state.presence.session_id == args.session_id
             || (!state.session_reported && state.presence.session_id.is_none())
         {
-            let activity = state.native.get_or_insert_with(Default::default);
+            let activity = state
+                .native
+                .get_or_insert_with(|| crate::agent_activity::Activity::new(&args.agent));
             let accepted = activity.apply(args.event, &args.details, reply.received_at());
             if accepted {
                 let snapshot = activity.snapshot();

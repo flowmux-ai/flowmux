@@ -5,9 +5,21 @@ use base64::Engine;
 use serde_json::{json, Value};
 
 const MARKER: &str = "true # flowmux-windows-session-hook-v1";
-const EVENTS: [(&str, &str); 2] = [
+const CLAUDE_EVENTS: [(&str, &str); 14] = [
     ("SessionStart", "session-start"),
     ("SessionEnd", "session-end"),
+    ("UserPromptSubmit", "turn-start"),
+    ("PreToolUse", "tool-start"),
+    ("PostToolUse", "tool-end"),
+    ("PostToolUseFailure", "tool-end"),
+    ("PermissionDenied", "tool-end"),
+    ("PermissionRequest", "permission-request"),
+    ("PostToolBatch", "tool-batch"),
+    ("Notification", "notification"),
+    ("Stop", "stop"),
+    ("StopFailure", "stop-failure"),
+    ("SubagentStop", "subagent-stop"),
+    ("SubagentStart", "subagent-start"),
 ];
 const CODEX_EVENTS: [(&str, &str); 10] = [
     ("SessionStart", "session-start"),
@@ -25,7 +37,7 @@ fn events(agent: &str) -> &[(&str, &str)] {
     if agent == "codex" {
         &CODEX_EVENTS
     } else {
-        &EVENTS
+        &CLAUDE_EVENTS
     }
 }
 
@@ -57,7 +69,7 @@ fn owned(handler: &Value, agent: &str) -> bool {
         && if agent == "codex" {
             handler["command"] == MARKER
         } else {
-            EVENTS.iter().any(|(_, event)| {
+            CLAUDE_EVENTS.iter().any(|(_, event)| {
                 handler["args"] == json!(["hooks", agent, event, "--flowmux-hook"])
             })
         }

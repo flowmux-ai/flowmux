@@ -32,12 +32,12 @@ function Attention($Tree,[bool]$Agent,[bool]$Workspace){$item=@($Tree.agent_bar.
 function Stable($Before){$t=Tree;foreach($s in $Before){$n=@($t.surfaces|Where-Object {$_.id -ceq $s.id});Require ($n.Count -eq 1 -and $n[0].pid -eq $s.pid -and $n[0].session -ceq $s.session -and $n[0].view_handle -eq $s.view_handle -and $n[0].holder.window -eq $s.holder.window -and $n[0].running) 'Sessions changed a retained terminal PID/session/view/holder'};return $t}
 function Passed([string]$Name){$script:checks+=,$Name;$diagnostic.checks=$checks;Require ($env:CODEX_HOME -ceq $originalCodexHome) 'Fixture modified parent CODEX_HOME'}
 function Panel($Tree){$p=$Tree.agent_sessions.panel;Require ($Tree.agent_sessions.open -and $p.open -and -not $p.native_visible -and [OptionsFixture]::Parent([long]$p.window,$owned.Id) -eq $Tree.window_handle) 'Sessions must be an owned hidden child dock';Require ([OptionsFixture]::Describe([long]$Tree.window_handle,$owned.Id).Enabled) 'Sessions dock disabled main';foreach($h in @($p.query_handle,$p.list,$p.preview,$p.refresh,$p.close,$p.resume)){Require ([OptionsFixture]::Parent([long]$h,$owned.Id) -eq $p.window) 'Session control belongs to another owner'};return $p}
-function Agent-Sidebar([string]$Name,[string]$Status,[string]$Text){
+function Agent-Sidebar([string]$Name,[string]$Status,[string]$Text,[string]$Agent='codex'){
  $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and $row.workspace_lines[0].agent.status -ceq $Status -and $row.workspace_lines[1].text -ceq $Text}
  $row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$scale=[Math]::Max(96,$tree.chrome.dpi)/96.0
- Require ($row.workspace_lines[0].text -ceq 'codex' -and $null -eq $row.workspace_lines[0].parent -and -not $row.workspace_lines[0].continues -and $row.workspace_lines[1].parent -ceq $false -and $row.workspace_lines[1].continues -and $row.workspace_lines[2].parent -ceq $false -and -not $row.workspace_lines[2].continues -and (Path-Same $row.workspace_lines[2].text $projectA)) 'Agent metadata is not Linux header/status/path nesting'
+ Require ($row.workspace_lines[0].text -ceq $Agent -and $null -eq $row.workspace_lines[0].parent -and -not $row.workspace_lines[0].continues -and $row.workspace_lines[1].parent -ceq $false -and $row.workspace_lines[1].continues -and $row.workspace_lines[2].parent -ceq $false -and -not $row.workspace_lines[2].continues -and (Path-Same $row.workspace_lines[2].text $projectA)) 'Agent metadata is not Linux header/status/path nesting'
  Require ([Math]::Abs($row.rect.height-96*$scale) -le 2) 'Agent sidebar row did not grow to three metadata lines'
- Require ([OptionsFixture]::Text([long]$row.handle,$owned.Id) -ceq ($row.label) -and $row.label.Contains($Text.Replace('&','&&')) -and $row.label.Contains(('codex ('+$Status+')'))) 'Native accessible caption differs from raw report text'
+ Require ([OptionsFixture]::Text([long]$row.handle,$owned.Id) -ceq ($row.label) -and $row.label.Contains($Text.Replace('&','&&')) -and $row.label.Contains(($Agent+' ('+$Status+')'))) 'Native accessible caption differs from raw report text'
  $bmp=Join-Path $directory ($Name+'.bmp');$png=Join-Path $directory ($Name+'.png');$capture=Request @('chrome-capture',$bmp);Require ($capture.root_handle -eq $tree.window_handle) 'Agent sidebar capture targeted an open popup';[ChromeFixture]::Png($bmp,$png)
  $background=if($Status -eq 'blocked'){'#442b31'}elseif($Status -eq 'done'){'#27334a'}else{'#24272e'}
  $ink=if($Status -eq 'blocked'){'#ef4444'}elseif($Status -eq 'done'){'#3b82f6'}elseif($Status -eq 'working'){'#f59e0b'}else{'#abb1bc'}
@@ -142,10 +142,14 @@ public static class OwnedCodexSessionFixture {
  $info=New-Object Diagnostics.ProcessStartInfo($hookCli,'hooks codex session-start --flowmux-hook');$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.EnvironmentVariables.Remove('FLOWMUX_PIPE_NAME');$probe=[Diagnostics.Process]::Start($info);$probeOut=$probe.StandardOutput.ReadToEndAsync();$probeErr=$probe.StandardError.ReadToEndAsync()
  try{Require ($probe.WaitForExit((Budget 1000)) -and $probeOut.Wait(500) -and $probeErr.Wait(500) -and $probe.ExitCode -eq 0 -and -not $probeOut.Result -and -not $probeErr.Result) 'Native hook outside flowmux blocked or emitted agent context'}finally{if(-not $probe.HasExited){$probe.Kill();[CliProbe]::WaitAfterKill($probe)};$probe.Dispose()}
  Passed 'native-integration-is-silent-and-does-not-wait-for-stdin-or-discover-windows-outside-flowmux'
- $setupSource=$source;$setupAgentExe=$agentExe
+ $setupSource=$source;$setupAgentExe=$agentExe;$setupSourceIdentity=$sourceIdentity
  try{
   foreach($provider in @('codex','claude')){
-   if($provider -ceq 'claude'){$agentExe=Join-Path $hookBin 'claude.exe';[IO.File]::Copy($setupAgentExe,$agentExe);$source=Agent-Tab $homeA $projectA}
+   if($provider -ceq 'claude'){
+    $agentExe=Join-Path $hookBin 'claude.exe';[IO.File]::Copy($setupAgentExe,$agentExe)
+    Request @('new-workspace','--cwd',$projectA,'--shell=cmd')|Out-Null;$identity=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $identity.surface -and $_.ready -and $_.running}).Count -eq 1};$claudeLocal=@($tree.surfaces|Where-Object {$_.id -ceq $identity.surface})[0]
+    $source=Agent-Tab $homeA $projectA;$sourceIdentity=Request @('identify')
+   }
    $config=Join-Path $directory ($provider+'-hooks.json');$original=@{env=@{KEEP='한 한 é 😀 &'};hooks=@{SessionStart=@(@{matcher='startup';hooks=@(@{type='command';command='echo KEEP'})});Stop=@(@{hooks=@(@{type='command';command='echo STOP_KEEP'})})}}
    [IO.File]::WriteAllText($config,($original|ConvertTo-Json -Depth 12),$utf8);$acl=Get-Acl -LiteralPath $config;$acl.SetAccessRuleProtection($true,$true);Set-Acl -LiteralPath $config -AclObject $acl;$beforeAcl=(Get-Acl -LiteralPath $config).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)
    $setup=@('hooks','setup','--agent',$provider,'--config',$config,'--flowmux-bin',$hookCli);$remove=@('hooks','uninstall','--agent',$provider,'--config',$config)
@@ -158,9 +162,9 @@ public static class OwnedCodexSessionFixture {
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.session_id -ceq $idA}
    if($provider -ceq 'codex'){
     function Activity-Hook([string]$Name,[string]$Turn,[hashtable]$Extra=@{}){
-     $payload=$Extra.Clone();$payload.session_id=$idA;$payload.hook_event_name=$Name;$payload.turn_id=$Turn
-     $r=Hook 'running' ($payload|ConvertTo-Json -Compress) -Config $config
-     Require (-not $r.stderr -and $(if($Name -ceq 'Stop'){$r.stdout.Trim() -ceq '{}'}else{-not $r.stdout})) 'Installed activity hook emitted provider decisions or non-neutral context'
+     $payload=$Extra.Clone();$payload.session_id=$idA;$payload.hook_event_name=$Name;if($provider -ceq 'claude'){$payload.prompt_id=$Turn}else{$payload.turn_id=$Turn}
+     $r=Hook 'running' ($payload|ConvertTo-Json -Depth 8 -Compress) -Provider $provider -Config $config
+     Require (-not $r.stderr -and $(if($provider -ceq 'codex' -and $Name -ceq 'Stop'){$r.stdout.Trim() -ceq '{}'}else{-not $r.stdout})) 'Installed activity hook emitted provider decisions or non-neutral context'
     }
     Require (($cap.agent_activity.native_activity_hooks.codex -join ',') -ceq 'turn-start,running,notification,subagent-start,subagent-stop,stop,interrupt') 'Codex native activity capability is incomplete'
     Request @('focus-tab',$local.id)|Out-Null
@@ -188,10 +192,52 @@ public static class OwnedCodexSessionFixture {
     Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_TOOL|PRIVATE_RESULT') 'Native activity retained private provider payloads'
     Stable @($source,$local)|Out-Null
     Passed 'installed-Codex-activity-Korean-native-sidebar-permission-waits-child-aggregation-stale-events-and-interrupt-without-focus-or-PTY-changes'
+   }else{
+    Require ($cap.agent_activity.native_activity_hooks.claude -contains 'tool-batch' -and $cap.agent_activity.native_activity_hooks.claude -contains 'stop-failure') 'Claude activity capabilities missing'
+    Request @('focus-tab',$claudeLocal.id)|Out-Null
+    Activity-Hook 'UserPromptSubmit' 'prompt-a' @{prompt='PRIVATE_PROMPT_NEVER_RETAIN'}
+    $sidebarHandle=Agent-Sidebar 'claude-working' 'working' 'Working' 'claude'
+    Activity-Hook 'PermissionRequest' 'prompt-a' @{message=$waitText}
+    Activity-Hook 'PreToolUse' 'prompt-a' @{tool_name='AskUserQuestion';tool_use_id='question-a';message=$waitText}
+    Activity-Hook 'PostToolUse' 'prompt-a' @{tool_name='Bash';tool_use_id='other-tool'}
+    Activity-Hook 'PostToolBatch' 'prompt-a' @{tool_calls=@(@{tool_use_id='other-tool';tool_response='PRIVATE_RESPONSE'})}
+    Require ((Agent-Sidebar 'claude-question' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'Parallel/batch completion cleared an unresolved question or recreated its workspace'
+    Activity-Hook 'PostToolUseFailure' 'prompt-a' @{tool_name='AskUserQuestion';tool_use_id='question-a'}
+    $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
+    Activity-Hook 'PermissionRequest' 'prompt-a' @{message=$waitText}
+    Activity-Hook 'PermissionDenied' 'prompt-a' @{tool_name='Bash';tool_use_id='denied-tool'}
+    Require ((Agent-Sidebar 'claude-permission' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'One denial cleared another parallel permission request'
+    Activity-Hook 'PostToolBatch' 'prompt-a'
+    $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
+    Activity-Hook 'SubagentStart' 'prompt-a' @{agent_id='child-a'}
+    Activity-Hook 'PermissionRequest' 'prompt-a' @{agent_id='child-a';message=$waitText}
+    Activity-Hook 'Stop' 'prompt-a' @{last_assistant_message=$doneText}
+    Require ((Agent-Sidebar 'claude-child-wait' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'Parent Stop discarded a child permission wait'
+    Activity-Hook 'SubagentStop' 'prompt-a' @{agent_id='child-a';last_assistant_message='CHILD_NOT_PARENT_COMPLETION'}
+    Require ((Agent-Sidebar 'claude-done' 'done' $doneText 'claude') -eq $sidebarHandle) 'Child completion replaced parent completion or its native control'
+    Activity-Hook 'SubagentStop' 'prompt-a' @{agent_id='unknown-internal-agent'}
+    Activity-Hook 'Notification' 'prompt-a' @{notification_type='idle_prompt';message='DO_NOT_BLOCK_COMPLETED_ROOT'}
+    $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'done') 'Unattributed child or informational notification changed completion'
+    Activity-Hook 'UserPromptSubmit' 'prompt-b'
+    Activity-Hook 'Stop' 'prompt-a' @{last_assistant_message='STALE_COMPLETION'}
+    $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working') 'Old prompt Stop completed the current prompt'
+    Activity-Hook 'Stop' 'prompt-b' @{background_tasks=@(@{command='PRIVATE_COMMAND'});session_crons=@(@{prompt='PRIVATE_SCHEDULED_PROMPT'});last_assistant_message=$doneText}
+    Require ((Agent-Sidebar 'claude-background' 'working' 'Background work pending' 'claude') -eq $sidebarHandle) 'Background work was marked complete'
+    Activity-Hook 'StopFailure' 'prompt-b' @{error='rate_limit'}
+    Activity-Hook 'PostToolBatch' 'prompt-b'
+    Require ((Agent-Sidebar 'claude-quota' 'blocked' 'API error: rate_limit' 'claude') -eq $sidebarHandle) 'Batch completion cleared a quota wait'
+    Activity-Hook 'Notification' 'prompt-b' @{notification_type='quota_auto_resume_fired'}
+    $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
+    Activity-Hook 'StopFailure' 'prompt-b' @{error='rate_limit'}
+    Activity-Hook 'Notification' 'prompt-b' @{notification_type='quota_auto_resume_disabled'}
+    $tree=Await {param($t) $a=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;$a.status -ceq 'idle' -and $a.seen -and $a.message -ceq 'Auto-resume disabled'}
+    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_RESPONSE|PRIVATE_COMMAND|PRIVATE_SCHEDULED_PROMPT') 'Claude activity retained private prompt/tool/background details'
+    Stable @($source,$claudeLocal,$setupSource,$local)|Out-Null
+    Passed 'installed-Claude-scoped-questions-permissions-batch-child-background-Korean-sidebar-stale-prompt-and-quota-states'
    }
    $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed end hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and -not $s.agent.session_id}
-   if($provider -ceq 'codex'){
+   if($provider -in @('codex','claude')){
     Activity-Hook 'UserPromptSubmit' 'turn-after-end'
     $tree=Tree;$presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
     Require (-not $presence.session_id -and $presence.status -ceq 'unknown' -and $presence.seen -and $presence.message -ceq 'Session ended') 'Activity resurrected an ended session or retained a false completion'
@@ -210,7 +256,7 @@ public static class OwnedCodexSessionFixture {
    Passed ('installed-'+$provider+'-native-hooks-Unicode-special-path-quiet-execution-preserved-settings-ACL-idempotence-invalid-and-locked-file-rejection')
    if($provider -ceq 'claude'){Request @('close-tab',$source.id)|Out-Null}
   }
- }finally{$source=$setupSource;$agentExe=$setupAgentExe;Request @('focus-tab',$source.id)|Out-Null}
+ }finally{$source=$setupSource;$agentExe=$setupAgentExe;$sourceIdentity=$setupSourceIdentity;Request @('focus-tab',$source.id)|Out-Null}
  }else{
  Request @('focus-tab',$local.id)|Out-Null
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.source -ceq 'flowmux:proc'}

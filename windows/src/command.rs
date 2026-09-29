@@ -236,6 +236,11 @@ pub enum SessionHookEvent {
     SubagentStop,
     Stop,
     Interrupt,
+    ToolStart,
+    ToolEnd,
+    PermissionRequest,
+    ToolBatch,
+    StopFailure,
 }
 impl SessionHookEvent {
     pub fn is_session(self) -> bool {
@@ -256,7 +261,7 @@ pub struct SessionHookArgs {
     pub session_id: Option<String>,
     #[arg(skip)]
     #[serde(default)]
-    pub details: crate::agent_activity::Input,
+    pub details: Box<crate::agent_activity::Input>,
     /// Best-effort native integration; --json retains diagnostic output/errors.
     #[arg(long)]
     #[serde(skip)]
@@ -316,6 +321,10 @@ impl SessionHookArgs {
                 alias = "conversationId"
             )]
             session_id: String,
+            #[serde(default, deserialize_with = "crate::agent_activity::nonempty_array")]
+            background_tasks: bool,
+            #[serde(default, deserialize_with = "crate::agent_activity::nonempty_array")]
+            session_crons: bool,
             #[serde(flatten)]
             details: crate::agent_activity::Input,
         }
@@ -327,9 +336,10 @@ impl SessionHookArgs {
         let agent = crate::session_history::SessionAgent::from_name(&self.agent)
             .ok_or_else(|| anyhow::anyhow!("unsupported local agent name"))?;
         self.session_id = Some(agent.canonical_session_id(&payload.session_id)?);
+        payload.details.pending_work |= payload.background_tasks || payload.session_crons;
         payload.details.normalize();
         payload.details.validate(self.event, &self.agent)?;
-        self.details = payload.details;
+        *self.details = payload.details;
         Ok(())
     }
 }
@@ -798,6 +808,21 @@ mod tests {
         assert!(hook
             .read_payload(&vec![b' '; crate::agent_activity::MAX_HOOK_BYTES + 1])
             .is_err());
+        hook.agent = "claude".into();
+        hook.event = SessionHookEvent::Stop;
+        let payload = serde_json::json!({"session_id":id,"prompt_id":"prompt-a", "background_tasks":[{"command":"PRIVATE_COMMAND"}], "session_crons":[{"prompt":"PRIVATE_PROMPT"}]});
+        hook.read_payload(&serde_json::to_vec(&payload).unwrap())
+            .unwrap();
+        assert!(hook.details.pending_work);
+        assert_eq!(hook.details.turn_id.as_deref(), Some("prompt-a"));
+        let wire = serde_json::to_string(hook).unwrap();
+        assert!(wire.len() < 512 && !wire.contains("PRIVATE_"));
+        assert!(
+            serde_json::from_str::<SessionHookArgs>(&wire)
+                .unwrap()
+                .details
+                .pending_work
+        );
         for operation in ["setup", "uninstall"] {
             for agent in ["claude", "codex"] {
                 let cli = Cli::try_parse_from([
