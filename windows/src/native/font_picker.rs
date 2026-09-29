@@ -456,21 +456,20 @@ impl Popup {
             {
                 return false;
             }
-            if message.message == WM_KEYDOWN {
-                if message.wParam == 27 {
-                    send(Signal::Cancel(self.id));
-                    return true;
-                }
-                if message.wParam == 13 {
-                    if message.hwnd == self.cancel {
+            if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
+                if message.lParam as usize & (1 << 30) == 0 {
+                    if message.wParam == 27 || message.hwnd == self.cancel {
                         send(Signal::Cancel(self.id));
                     } else if IsWindowEnabled(self.choose) != 0 {
                         send(Signal::Choose(self.id));
                     }
-                    return true;
                 }
+                return true;
             }
-            IsDialogMessageW(self.window, message) != 0
+            if message.message == WM_CHAR && matches!(message.wParam, 13 | 27) {
+                return true;
+            }
+            IsWindowVisible(self.window) != 0 && IsDialogMessageW(self.window, message) != 0
         }
     }
 }
@@ -680,6 +679,6 @@ impl Picker {
             "choices":popup.map(|p|p.choices.iter().map(|c|json!({"label":c.label,"value":c.value,"family":c.family,"kind":c.kind})).collect::<Vec<_>>()),
             "filtered":popup.map(|p|&p.filtered),"selected":popup.and_then(Popup::selected),
             "query":popup.map(|p|Panel::text(p.search)),"source_raw":popup.map(|p|&p.source_raw),
-            "composing":popup.is_some_and(Popup::composing),"error":popup.and_then(|p|p.error.as_deref()).or(self.catalog_error.as_deref())})
+            "composing":popup.is_some_and(Popup::composing),"settling":popup.is_some_and(|p|route(p.window).is_some_and(|r|r.settling)),"error":popup.and_then(|p|p.error.as_deref()).or(self.catalog_error.as_deref())})
     }
 }

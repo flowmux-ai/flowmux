@@ -74,6 +74,32 @@ try {
     Require ($status.document.revision -eq $before -and (Field $status).value -ceq $custom -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled) 'Enter Cancel saved or lost the current raw fallback value'
     $evidence.checks+=@{name='installed_catalog_current_custom_fallbacks_owned_modal_and_Enter_Cancel';passed=$true}
 
+    $status=Open-Picker $status;$status=Choose $status (Find-Choice $status 'default');$picker=$status.options.font_picker
+    foreach($control in @($picker.search,$picker.list,$picker.choose,$picker.cancel)){
+        foreach($key in @(13,27)){
+            [OptionsFixture]::PostKey([long]$control,$owned.Id,$key,$false,$true);$status=Request @('settings','show')
+            Require ($status.options.font_picker.open -and $status.document.revision -eq $before -and [string]::Equals($status.document.terminal.font_family,$custom,[StringComparison]::Ordinal)) 'Held Enter/Escape applied a font or closed the picker'
+        }
+    }
+    $rawQuery='한 É';[OptionsFixture]::CompositionGuard([long]$picker.window,[long]$picker.search,$owned.Id,$true);Search $status $rawQuery
+    [OptionsFixture]::PostEnter([long]$picker.search,$owned.Id);[OptionsFixture]::PostEscape([long]$picker.search,$owned.Id);Native-Click ([long]$picker.choose)
+    $status=Request @('settings','show');Require ($status.options.font_picker.open -and $status.options.font_picker.composing -and $status.document.revision -eq $before -and [string]::Equals((Raw-Query $status),$rawQuery,[StringComparison]::Ordinal)) 'Composing keys or Use font changed the draft or saved settings'
+    [OptionsFixture]::CompositionGuard([long]$picker.window,[long]$picker.search,$owned.Id,$false)
+    foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$picker.search,$owned.Id,$key,$false,$false)}
+    [OptionsFixture]::PostKey([long]$picker.search,$owned.Id,16,$true,$false)
+    $status=Request @('settings','show');Require ($status.options.font_picker.open -and -not $status.options.font_picker.composing -and $status.options.font_picker.settling -and $status.document.revision -eq $before) 'Composition-ending keys escaped their guard before release'
+    [OptionsFixture]::PostKey([long]$picker.search,$owned.Id,13,$true,$false);$status=Await {param($s) $s.options.font_picker.open -and -not $s.options.font_picker.settling -and @($s.options.font_picker.filtered) -contains (Find-Choice $s 'current')}
+    [OptionsFixture]::PostEnter([long]$picker.search,$owned.Id);$status=Await {param($s) -not $s.options.font_picker.open}
+    Require ($status.document.revision -eq $before -and [string]::Equals((Field $status).value,$custom,[StringComparison]::Ordinal)) 'Independent Enter did not preserve the selected Current raw value'
+    $evidence.checks+=@{name='repeat_and_IME_end_key_release_guards_then_independent_query_Enter';passed=$true;scope='Owned HWND messages, not physical IME'}
+
+    $status=Open-Picker $status;$picker=$status.options.font_picker
+    [OptionsFixture]::PostKey([long]$picker.search,$owned.Id,229,$false,$false);[OptionsFixture]::PostKey([long]$picker.search,$owned.Id,27,$false,$false)
+    $status=Request @('settings','show');Require ($status.options.font_picker.open -and $status.options.font_picker.settling -and $status.document.revision -eq $before) 'PROCESS/229 allowed Escape to close the picker'
+    [OptionsFixture]::PostKey([long]$picker.search,$owned.Id,229,$true,$false);[OptionsFixture]::PostEscape([long]$picker.search,$owned.Id);$status=Await {param($s) -not $s.options.font_picker.open}
+    Require ($status.document.revision -eq $before -and [OptionsFixture]::Describe([long]$status.options.window,$owned.Id).Enabled) 'Independent Escape saved settings or left the owner disabled'
+    $evidence.checks+=@{name='PROCESS229_release_then_independent_Escape';passed=$true}
+
     $status=Open-Picker $status;$currentIndex=Find-Choice $status 'current';$currentLabel=$status.options.font_picker.choices[$currentIndex].label
     foreach($query in @('한 É','한 é','😀 &')){
         Search $status $query;$status=Await {param($s) $s.options.font_picker.query -ceq $query}
