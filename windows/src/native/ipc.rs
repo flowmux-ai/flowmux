@@ -9,7 +9,7 @@ use anyhow::Context;
 use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Write},
+    io::{IsTerminal, Read, Write},
     os::windows::{
         fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
@@ -123,7 +123,34 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn response(cli: Cli) -> anyhow::Result<String> {
+fn response(mut cli: Cli) -> anyhow::Result<String> {
+    if let Command::Hooks(args) = &mut cli.command {
+        anyhow::ensure!(
+            cli.pipe.is_some() || std::env::var("FLOWMUX_PIPE_NAME").is_ok(),
+            "session hooks require an explicit or inherited window pipe"
+        );
+        anyhow::ensure!(
+            !std::io::stdin().is_terminal(),
+            "session hook requires JSON stdin"
+        );
+        let (send, receive) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("flowmux-hook-stdin".into())
+            .spawn(move || {
+                let mut bytes = Vec::new();
+                let result = std::io::stdin()
+                    .take(65537)
+                    .read_to_end(&mut bytes)
+                    .map(|_| bytes);
+                let _ = send.send(result);
+            })?;
+        // Both CLI entrypoints exit the process on return, including a reader
+        // whose parent never closes stdin. No hook can wait for EOF forever.
+        let bytes = receive
+            .recv_timeout(Duration::from_secs(1))
+            .context("session hook stdin exceeded one second")??;
+        args.read_payload(&bytes)?;
+    }
     if matches!(cli.command, Command::ShellIntegration) {
         return Ok(include_str!("../../shell/powershell.ps1").into());
     }
@@ -221,13 +248,17 @@ fn response(cli: Cli) -> anyhow::Result<String> {
 /// One IPC submission, with no stdout formatting and no retry after dispatch.
 pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
     let reply_budget = match &cli.command {
-        Command::Agents | Command::ReportAgent(_) => Duration::from_secs(3),
+        Command::Agents | Command::ReportAgent(_) | Command::Hooks(_) => Duration::from_secs(3),
         Command::Browser {
             op: crate::browser::Op::Wait { options, .. },
         } => options.ipc_budget(Duration::from_secs(25), 10)?,
         _ => Duration::from_secs(25),
     };
     let explicit = cli.pipe.or_else(|| std::env::var("FLOWMUX_PIPE_NAME").ok());
+    anyhow::ensure!(
+        !matches!(cli.command, Command::Hooks(_)) || explicit.is_some(),
+        "session hooks require an explicit or inherited window pipe"
+    );
     let candidates = if let Some(name) = &explicit {
         // A stale explicit or inherited endpoint must never select another window.
         discovery::pipe_pid(name)?;

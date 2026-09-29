@@ -224,6 +224,46 @@ pub struct AgentReportArgs {
     pub session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionHookEvent {
+    SessionStart,
+    SessionEnd,
+}
+
+#[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
+pub struct SessionHookArgs {
+    pub agent: String,
+    #[arg(value_enum)]
+    pub event: SessionHookEvent,
+    #[arg(long, value_parser = parse_id)]
+    pub surface: Option<Uuid>,
+    #[arg(skip)]
+    pub session_id: Option<String>,
+}
+impl SessionHookArgs {
+    pub fn read_payload(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        #[derive(Deserialize)]
+        struct Payload {
+            #[serde(
+                alias = "thread-id",
+                alias = "thread_id",
+                alias = "sessionID",
+                alias = "sessionId",
+                alias = "taskId",
+                alias = "conversationId"
+            )]
+            session_id: String,
+        }
+        anyhow::ensure!(bytes.len() <= 65536, "session hook payload exceeds 64 KiB");
+        let payload: Payload = serde_json::from_slice(bytes)?;
+        let agent = crate::session_history::SessionAgent::from_name(&self.agent)
+            .ok_or_else(|| anyhow::anyhow!("unsupported local agent name"))?;
+        self.session_id = Some(agent.canonical_session_id(&payload.session_id)?);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
@@ -288,6 +328,8 @@ pub enum Command {
     Agents,
     /// Report one producer's ordered status snapshot, not individual tool-hook events.
     ReportAgent(AgentReportArgs),
+    /// Receive a native session-start/session-end JSON hook from stdin.
+    Hooks(SessionHookArgs),
     /// Control an in-app browser pane, separate from terminal content.
     Browser {
         #[command(subcommand)]
@@ -587,6 +629,67 @@ pub(crate) fn parse_id(text: &str) -> Result<Uuid, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_session_hooks_parse_bounded_provider_ids_without_accepting_cli_ids() {
+        let id = "abcdef01-2345-6789-abcd-ef0123456789";
+        for event in ["session-start", "session-end"] {
+            for key in [
+                "session_id",
+                "thread-id",
+                "thread_id",
+                "sessionID",
+                "sessionId",
+                "taskId",
+                "conversationId",
+            ] {
+                let cli = Cli::try_parse_from(["flowmuxctl", "hooks", "codex", event]).unwrap();
+                let Command::Hooks(mut hook) = cli.command else {
+                    panic!("wrong command")
+                };
+                hook.read_payload(
+                    serde_json::to_string(
+                        &serde_json::json!({key:id.to_uppercase(),"cwd":"한글 한 é","ignored":{}}),
+                    )
+                    .unwrap()
+                    .as_bytes(),
+                )
+                .unwrap();
+                assert_eq!(hook.session_id.as_deref(), Some(id));
+                let wire = serde_json::to_value(Command::Hooks(hook.clone())).unwrap();
+                assert_eq!(wire["event"], event);
+                assert_eq!(wire["session_id"], id);
+                for bad in [
+                    b"{}".as_slice(),
+                    b"null",
+                    b"{\"session_id\":null}",
+                    b"{\"session_id\":\"../bad\"}",
+                    b"{}{}",
+                    &vec![b' '; 65537],
+                ] {
+                    assert!(hook.read_payload(bad).is_err());
+                }
+            }
+        }
+        for args in [
+            vec!["hooks", "codex", "turn-start"],
+            vec!["hooks", "codex", "session-start", "--session-id", id],
+        ] {
+            assert!(Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).is_err());
+        }
+        let Command::Hooks(mut hook) =
+            Cli::try_parse_from(["flowmuxctl", "hooks", "opencode", "session-start"])
+                .unwrap()
+                .command
+        else {
+            panic!("wrong command")
+        };
+        hook.read_payload(b"{\"sessionID\":\"ses_Mixed123\"}")
+            .unwrap();
+        assert_eq!(hook.session_id.as_deref(), Some("ses_Mixed123"));
+        hook.agent = "unsupported".into();
+        assert!(hook.read_payload(b"{\"session_id\":\"ses_123\"}").is_err());
+    }
+
     #[test]
     fn extracted_command_args_preserve_cli_and_flat_tagged_wire() {
         let id = Uuid::new_v4().to_string();

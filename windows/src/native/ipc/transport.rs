@@ -35,6 +35,17 @@ enum Operation<'a> {
     Write(&'a [u8]),
 }
 impl Pipe {
+    pub fn client_process(&self) -> io::Result<OwnedHandle> {
+        let mut pid = 0;
+        if unsafe { GetNamedPipeClientProcessId(self.handle.as_raw_handle(), &mut pid) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid) };
+        if raw.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { OwnedHandle::from_raw_handle(raw) })
+    }
     pub fn new(handle: OwnedHandle) -> io::Result<Self> {
         Ok(Self {
             handle,

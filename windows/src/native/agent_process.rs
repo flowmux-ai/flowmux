@@ -174,7 +174,7 @@ pub(super) fn discover(
     };
     budget.check()?;
     let mut found: Vec<AgentProcess> = Vec::new();
-    let mut unavailable = false;
+    let mut unavailable = Vec::new();
     for pid in job_pids(job.as_raw_handle())? {
         budget.check()?;
         let raw = unsafe {
@@ -231,7 +231,7 @@ pub(super) fn discover(
         match result {
             Ok(Some(value)) => found.push(value),
             Ok(None) => {}
-            Err(_) => unavailable = true,
+            Err(_) => unavailable.push(process),
         }
         budget.check()?;
     }
@@ -244,7 +244,11 @@ pub(super) fn discover(
         }
     }
     anyhow::ensure!(
-        !unavailable,
+        // A short-lived agent may exit while its parameters are being read.
+        // Only a still-live unreadable process represents unsupported details.
+        !unavailable
+            .iter()
+            .any(|process| started(process.as_raw_handle(), job.as_raw_handle()).is_ok()),
         "Agent process details are unavailable or unsupported"
     );
     Ok(None)
@@ -283,6 +287,83 @@ struct BasicInformation {
 }
 type QueryProcess = unsafe extern "system" fn(HANDLE, u32, *mut c_void, u32, *mut u32) -> i32;
 type QueryMachine = unsafe extern "system" fn(HANDLE, *mut u16, *mut u16) -> i32;
+fn query_process() -> Result<QueryProcess> {
+    unsafe {
+        let ntdll = GetModuleHandleW(wide("ntdll.dll").as_ptr());
+        let query = GetProcAddress(ntdll, c"NtQueryInformationProcess".as_ptr().cast())
+            .context("Process query API unavailable")?;
+        Ok(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            QueryProcess,
+        >(query))
+    }
+}
+
+/// Hooks must come from a live descendant of this agent in its terminal Job.
+pub(super) fn verify_hook_caller(
+    job: &OwnedHandle,
+    caller: &OwnedHandle,
+    agent: &OwnedHandle,
+) -> Result<()> {
+    let query = query_process()?;
+    let deadline = Instant::now() + std::time::Duration::from_millis(100);
+    let target = unsafe { GetProcessId(agent.as_raw_handle()) };
+    let target_started = started(agent.as_raw_handle(), job.as_raw_handle())?;
+    let mut child = caller.as_raw_handle();
+    let mut child_started = started(child, job.as_raw_handle())?;
+    let mut parents = Vec::new();
+    // ponytail: synchronous hook launch chains only, capped at 16 live parents;
+    // detached helpers need an explicit authenticated registration protocol.
+    for _ in 0..16 {
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "Hook ancestry inspection expired"
+        );
+        let mut info: BasicInformation = unsafe { std::mem::zeroed() };
+        let status = unsafe {
+            query(
+                child,
+                0,
+                (&mut info as *mut BasicInformation).cast(),
+                std::mem::size_of_val(&info) as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        anyhow::ensure!(status >= 0, "Cannot query hook parent");
+        let pid = u32::try_from(info.parent).context("Invalid hook parent PID")?;
+        if pid == target {
+            anyhow::ensure!(
+                target_started <= child_started,
+                "Hook parent process was replaced"
+            );
+            for process in std::iter::once(caller)
+                .chain(parents.iter())
+                .chain(std::iter::once(agent))
+            {
+                started(process.as_raw_handle(), job.as_raw_handle())?;
+            }
+            return Ok(());
+        }
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SYNCHRONIZE, 0, pid) };
+        anyhow::ensure!(!raw.is_null(), "Hook parent is no longer available");
+        let parent = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let parent_started = started(raw, job.as_raw_handle())?;
+        anyhow::ensure!(
+            parent_started <= child_started,
+            "Hook parent process was replaced"
+        );
+        let image = executable(raw)?;
+        anyhow::ensure!(
+            native_agent(&image).is_none() && !node(&image),
+            "Hook belongs to a nested agent or Node process"
+        );
+        child = raw;
+        child_started = parent_started;
+        parents.push(parent);
+    }
+    anyhow::bail!("Hook caller is not a supported descendant of this agent")
+}
+
 fn parameters(process: HANDLE, budget: &mut Budget<'_>) -> Result<(usize, bool)> {
     // These private layouts are supported only for x64 and WOW64 x86. Resolve
     // ntdll dynamically; a missing API or inconsistent prefix is an error.
@@ -291,14 +372,11 @@ fn parameters(process: HANDLE, budget: &mut Budget<'_>) -> Result<(usize, bool)>
         "Agent memory discovery requires the x64 host"
     );
     let (query, machine): (QueryProcess, QueryMachine) = unsafe {
-        let ntdll = GetModuleHandleW(wide("ntdll.dll").as_ptr());
         let kernel = GetModuleHandleW(wide("kernel32.dll").as_ptr());
-        let query = GetProcAddress(ntdll, c"NtQueryInformationProcess".as_ptr().cast())
-            .context("Process query API unavailable")?;
         let machine = GetProcAddress(kernel, c"IsWow64Process2".as_ptr().cast())
             .context("Process architecture API unavailable")?;
         (
-            std::mem::transmute::<unsafe extern "system" fn() -> isize, QueryProcess>(query),
+            query_process()?,
             std::mem::transmute::<unsafe extern "system" fn() -> isize, QueryMachine>(machine),
         )
     };

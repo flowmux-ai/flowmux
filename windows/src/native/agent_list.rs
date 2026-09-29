@@ -2,7 +2,7 @@
 //! Owned-process discovery and runtime-only, ordered activity snapshots.
 use super::super::agent_process;
 use super::*;
-use crate::command::AgentReportArgs;
+use crate::command::{AgentReportArgs, SessionHookArgs, SessionHookEvent};
 use flowmux_core::{AgentPresence, AgentStatus, AgentStatusReport, AGENT_SOURCE_PROC};
 use std::{
     os::windows::io::{AsRawHandle, OwnedHandle},
@@ -17,12 +17,25 @@ struct Entry {
     pid: u32,
     agent: crate::session_history::SessionAgent,
     cwd: PathBuf,
+    session_id: Option<String>,
 }
 pub(super) struct State {
     entry: Entry,
     presence: AgentPresence,
+    session_reported: bool,
+    last_hook: Option<Instant>,
 }
-type Report = (SurfaceId, AgentReportArgs);
+pub(super) enum Report {
+    Activity(SurfaceId, AgentReportArgs),
+    Session(SurfaceId, SessionHookArgs),
+}
+impl Report {
+    fn surface(&self) -> SurfaceId {
+        match self {
+            Self::Activity(id, _) | Self::Session(id, _) => *id,
+        }
+    }
+}
 struct Discovery {
     entries: Vec<Entry>,
     last: Option<SurfaceId>,
@@ -60,6 +73,123 @@ impl Drop for Pending {
     }
 }
 impl App {
+    pub(super) fn agent_session_id(
+        &self,
+        id: SurfaceId,
+        agent: &agent_process::AgentProcess,
+    ) -> Option<Option<String>> {
+        self.agent_states
+            .borrow()
+            .get(&id)
+            .filter(|state| {
+                state.entry.current(self)
+                    && state.entry.pid == agent.pid
+                    && state.entry.agent == agent.agent
+                    && state.session_reported
+            })
+            .map(|state| state.presence.session_id.clone())
+    }
+
+    pub(super) fn agent_hook_request(
+        &mut self,
+        mut args: SessionHookArgs,
+        caller: Option<SurfaceId>,
+        reply: ipc::Reply,
+    ) -> anyhow::Result<Option<Value>> {
+        anyhow::ensure!(
+            reply.received_at().elapsed() < Duration::from_secs(3),
+            "Session hook expired"
+        );
+        let surface = args
+            .surface
+            .map(SurfaceId)
+            .or(caller)
+            .context("session hook requires --surface or an inherited terminal context")?;
+        let agent = crate::session_history::SessionAgent::from_name(&args.agent)
+            .context("unsupported local agent name")?;
+        args.agent = agent.name().to_ascii_lowercase();
+        args.session_id = Some(
+            agent.canonical_session_id(
+                args.session_id
+                    .as_deref()
+                    .context("session hook requires a conversation ID")?,
+            )?,
+        );
+        self.agents_poll();
+        if self.agent_presence(surface).is_some() {
+            return self
+                .apply_agent_hook(surface, &args, None, &reply)
+                .map(Some);
+        }
+        self.agents_request(Some(Report::Session(surface, args)), reply)?;
+        Ok(None)
+    }
+
+    fn apply_agent_hook(
+        &self,
+        surface: SurfaceId,
+        args: &SessionHookArgs,
+        entry: Option<Entry>,
+        reply: &ipc::Reply,
+    ) -> anyhow::Result<Value> {
+        let job = self
+            .surfaces
+            .get(&surface)
+            .and_then(|s| s.session.as_ref())
+            .context("Hook target is not a running terminal")?
+            .process_job();
+        {
+            let states = self.agent_states.borrow();
+            let entry = entry
+                .as_ref()
+                .or_else(|| states.get(&surface).map(|s| &s.entry))
+                .context("Agent process is no longer available")?;
+            anyhow::ensure!(
+                entry.current(self) && entry.agent.name().eq_ignore_ascii_case(&args.agent),
+                "Hook does not match the live agent in this terminal"
+            );
+            agent_process::verify_hook_caller(
+                &job,
+                reply
+                    .client_process()
+                    .context("Hook has no authenticated pipe caller")?,
+                &entry.process,
+            )?;
+        }
+        anyhow::ensure!(
+            reply.received_at().elapsed() < Duration::from_secs(3),
+            "Session hook expired"
+        );
+        if let Some(entry) = entry {
+            self.record_agents(vec![entry]);
+        }
+        let mut states = self.agent_states.borrow_mut();
+        let state = states
+            .get_mut(&surface)
+            .context("Agent process is no longer available")?;
+        // Native hooks have no producer sequence. Order observed requests only;
+        // an old conversation's end must never clear the current conversation.
+        let accepted = state
+            .last_hook
+            .is_none_or(|last| reply.received_at() > last)
+            && (args.event == SessionHookEvent::SessionStart
+                || state.presence.session_id == args.session_id);
+        if accepted {
+            state.last_hook = Some(reply.received_at());
+            state.session_reported = true;
+            let id = if args.event == SessionHookEvent::SessionStart {
+                args.session_id.clone()
+            } else {
+                None
+            };
+            if state.presence.session_id != id {
+                state.presence.session_id = id;
+                self.sender.send(Event::AgentChanged);
+            }
+        }
+        Ok(json!({"accepted":accepted,"surface":surface,"session_id":state.presence.session_id}))
+    }
+
     pub(super) fn agent_presence(&self, id: SurfaceId) -> Option<AgentPresence> {
         self.agent_states
             .borrow()
@@ -124,7 +254,7 @@ impl App {
         if self.agent_presence(surface).is_some() {
             return self.apply_agent_report(surface, &args, None).map(Some);
         }
-        self.agents_request(Some((surface, args)), reply)?;
+        self.agents_request(Some(Report::Activity(surface, args)), reply)?;
         Ok(None)
     }
 
@@ -152,9 +282,20 @@ impl App {
                         && entry.agent.name().eq_ignore_ascii_case(&args.agent),
                     "report does not match the live agent in this terminal"
                 );
-                let presence =
+                let mut presence =
                     AgentPresence::from_report(report, visible).context("missing agent status")?;
-                states.insert(surface, State { entry, presence });
+                if presence.session_id.is_none() {
+                    presence.session_id = entry.session_id.clone();
+                }
+                states.insert(
+                    surface,
+                    State {
+                        entry,
+                        presence,
+                        session_reported: args.session_id.is_some(),
+                        last_hook: None,
+                    },
+                );
                 true
             } else {
                 let state = states
@@ -166,7 +307,8 @@ impl App {
                         && state.presence.name == args.agent,
                     "report does not match the live agent in this terminal"
                 );
-                if state.presence.source.as_deref() == Some(AGENT_SOURCE_PROC)
+                let current_session = state.presence.session_id.clone();
+                let accepted = if state.presence.source.as_deref() == Some(AGENT_SOURCE_PROC)
                     && state.presence.seq.is_none()
                 {
                     // Process identity alone is not a started turn. The first
@@ -176,7 +318,14 @@ impl App {
                     true
                 } else {
                     state.presence.apply_report(report, visible)
+                };
+                if accepted {
+                    state.session_reported |= args.session_id.is_some();
+                    if args.session_id.is_none() {
+                        state.presence.session_id = current_session;
+                    }
                 }
+                accepted
             }
         };
         let after = self.agent_presence(surface);
@@ -247,7 +396,9 @@ impl App {
             for (_, _, tabs) in workspace.leaves() {
                 for tab in tabs {
                     if !matches!(tab.kind, SurfaceKind::Terminal { .. })
-                        || report.as_ref().is_some_and(|(id, _)| *id != tab.id)
+                        || report
+                            .as_ref()
+                            .is_some_and(|report| report.surface() != tab.id)
                         || (automatic && self.agent_presence(tab.id).is_some())
                     {
                         continue;
@@ -312,6 +463,7 @@ impl App {
                                     pid: found.pid,
                                     agent: found.agent,
                                     cwd: found.cwd,
+                                    session_id: found.session_id,
                                 });
                             }
                         }
@@ -403,13 +555,21 @@ impl App {
         let result = match result {
             Err(error) => json!({"error":error}),
             Ok(found) if pending.report.is_some() => {
-                let (surface, args) = pending.report.take().unwrap();
+                let report = pending.report.take().unwrap();
+                let surface = report.surface();
                 found
                     .entries
                     .into_iter()
                     .find(|entry| entry.surface == surface)
                     .context("no supported live agent in this terminal")
-                    .and_then(|entry| self.apply_agent_report(surface, &args, Some(entry)))
+                    .and_then(|entry| match report {
+                        Report::Activity(_, args) => {
+                            self.apply_agent_report(surface, &args, Some(entry))
+                        }
+                        Report::Session(_, args) => {
+                            self.apply_agent_hook(surface, &args, Some(entry), &reply)
+                        }
+                    })
                     .unwrap_or_else(|error| json!({"error":format!("{error:#}")}))
             }
             Ok(found) => {
@@ -452,7 +612,16 @@ impl App {
             );
             presence.status = AgentStatus::Unknown;
             presence.source = Some(AGENT_SOURCE_PROC.into());
-            states.insert(entry.surface, State { entry, presence });
+            presence.session_id = entry.session_id.clone();
+            states.insert(
+                entry.surface,
+                State {
+                    entry,
+                    presence,
+                    session_reported: false,
+                    last_hook: None,
+                },
+            );
             changed = true;
         }
         if changed {

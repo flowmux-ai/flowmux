@@ -262,12 +262,8 @@ impl App {
             self.sessions
                 .source
                 .as_ref()
-                .and_then(|source| self.agent_presence(source.surface))
-                .filter(|p| {
-                    p.pid == Some(agent.pid) && p.name.eq_ignore_ascii_case(agent.agent.name())
-                })
-                .and_then(|p| p.session_id)
-                .or_else(|| agent.session_id.clone())
+                .and_then(|source| self.agent_session_id(source.surface, agent))
+                .unwrap_or_else(|| agent.session_id.clone())
         });
         if self.sessions.current_session != current {
             self.sessions.current_session = current;

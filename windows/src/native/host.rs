@@ -3597,6 +3597,7 @@ impl App {
                 return Ok(None);
             }
             Command::ReportAgent(args) => return self.agent_report_request(args, caller, reply),
+            Command::Hooks(args) => return self.agent_hook_request(args, caller, reply),
             Command::Editor { op } => return self.editor_command(op, caller, reply),
             Command::Files { op } => return self.files_command(op, reply),
             Command::Browser { op } => return self.browser_command(op, caller, reply),
@@ -3660,8 +3661,8 @@ impl App {
                 "editor_open_limits":{"pending":crate::editor_open::MAX_PENDING,"budget_ms":crate::editor_open::OPEN_BUDGET.as_millis()},
                 "files_status":"partial","files_commands":["show","status","expand","collapse","select","more","refresh","open","hide"],
                 "files_limits":{"pending":crate::files_service::MAX_ADMITTED,"budget_ms":crate::files_service::BUDGET.as_millis(),"page_rows":crate::files_model::PAGE_SIZE,"entries":crate::files_model::MAX_ENTRIES,"expanded":crate::files_model::MAX_EXPANDED},
-                "agent_activity":{"ordered_reports":true,"native_hooks":false,"process_discovery":true},
-                "commands":["agents","report-agent","files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
+                "agent_activity":{"ordered_reports":true,"native_hooks":false,"session_hooks":["session-start","session-end"],"process_discovery":true},
+                "commands":["agents","report-agent","hooks","files","editor","browser","downloads","identify","capabilities","tree","read-screen","capture-pane","minimap","notify","notify-complete","notifications","send-keys","send-key","split","new-tab",
                     "new-workspace","focus-pane","focus-tab","close-tab","move-tab","detach-tab","save-state","quit","shell-integration","find",
                     "search-all","search-results","search-cancel","search-open","resize-pane","focus-direction","toggle-pane-zoom","workspace","rename-tab","settings","shells","retry-shell","paste","selection"],
                 "acceptance":"Release validation is incomplete; physical Korean IME behavior remains unverified"})))

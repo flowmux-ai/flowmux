@@ -50,7 +50,18 @@ function Agent-Sidebar([string]$Name,[string]$Status,[string]$Text){
 function Query($Tree,[string]$Text){$p=Panel $Tree;[OptionsFixture]::SetTextAndNotify([long]$p.window,[long]$p.query_handle,$owned.Id,$Text)}
 function Select-Session($Tree,[string]$Id){$p=Panel $Tree;$row=@($p.rows|Where-Object {$_.id -ceq $Id});Require ($row.Count -eq 1) 'Expected exact visible session row';[OptionsFixture]::ListSelect([long]$p.window,[long]$p.list,$owned.Id,[int]$row[0].index);return Await {param($t) $t.agent_sessions.selected -ceq $Id -and $t.agent_sessions.panel.resume_enabled -and -not $t.agent_sessions.loading}}
 function Shortcut([string]$Surface){Request @('test-shortcut',$Surface,'{"code":"KeyJ","key":"j","ctrlKey":true,"altKey":true}')|Out-Null}
-function Agent-Tab([string]$HistoryHome,[string]$Cwd){Request @('new-tab','--cwd',$Cwd,'--shell',$agentExe,'--shell-arg=--hold','--shell-arg',$HistoryHome)|Out-Null;$id=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $id.surface -and $_.ready -and $_.running}).Count -eq 1};Screen $id.surface {param($s) $s.text.Contains('SESSION_SOURCE_READY')}|Out-Null;return @($tree.surfaces|Where-Object {$_.id -ceq $id.surface})[0]}
+function Agent-Tab([string]$HistoryHome,[string]$Cwd,[string]$Current=''){$launch=@('new-tab','--cwd',$Cwd,'--shell',$agentExe,'--shell-arg=--hold','--shell-arg',$HistoryHome);if($Current){$launch+=@('--shell-arg=resume','--shell-arg',$Current)};Request $launch|Out-Null;$id=Request @('identify');$tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $id.surface -and $_.ready -and $_.running}).Count -eq 1};Screen $id.surface {param($s) $s.text.Contains('SESSION_SOURCE_READY')}|Out-Null;return @($tree.surfaces|Where-Object {$_.id -ceq $id.surface})[0]}
+function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$CloseInput=$true,[string]$Provider='codex',[string]$Surface='', [bool]$Shell=$false,[bool]$Nested=$false){
+ $path=Join-Path $homeA ('hook-'+$source.pid+'.json');$result=$path+'.result';if(Test-Path -LiteralPath $result){Remove-Item -LiteralPath $result -Force}
+ $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested}|ConvertTo-Json -Compress
+ [IO.File]::WriteAllText(($path+'.tmp'),$payloadJson,$utf8);[IO.File]::Move(($path+'.tmp'),$path);$timer=[Diagnostics.Stopwatch]::StartNew()
+ while(-not (Test-Path -LiteralPath $result)){Budget|Out-Null;Require ($timer.ElapsedMilliseconds -lt 4500) 'Owned hook process exceeded deadline';Start-Sleep -Milliseconds 10}
+ $r=Get-Content -Raw -Encoding UTF8 -LiteralPath $result|ConvertFrom-Json;$diagnostic.lastHook=$r;Require (($r.exit -eq 0) -eq $Expected) ('Hook exit mismatch: '+$r.stderr);if($Expected){return ($r.stdout|ConvertFrom-Json)};return $r
+}
+function Outside-Hook($Id){
+ $pipe=New-Object IO.Pipes.NamedPipeClientStream('.',($pipeName -replace '^\\\\\.\\pipe\\',''),[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous)
+ try{$pipe.Connect((Budget 1000));$bytes=$utf8.GetBytes(((@{method='hooks';agent='codex';event='session-start';surface=$source.id;session_id=$Id}|ConvertTo-Json -Compress)+"`n"));$pipe.Write($bytes,0,$bytes.Length);$pipe.Flush();$reader=New-Object IO.StreamReader($pipe,$utf8);$read=$reader.ReadLineAsync();Require ($read.Wait((Budget 3000))) 'Outside hook response timed out';$r=$read.Result|ConvertFrom-Json;Require ($r.error -match 'Owned process is no longer live') ('Unrelated pipe caller was accepted: '+$read.Result)}finally{$pipe.Dispose()}
+}
 function Write-History([string]$HistoryHome,[string]$Id,[string]$Cwd,[string]$Title){
  $path=Join-Path $HistoryHome ('sessions\2026\09\29\rollout-'+$Id+'.jsonl');[IO.Directory]::CreateDirectory((Split-Path $path))|Out-Null
  $records=@(@{type='session_meta';payload=@{id=$Id;cwd=$Cwd;source='cli'}},@{type='response_item';payload=@{type='message';role='developer';content=@(@{type='input_text';text='PRIVATE_SYSTEM_NEVER_PREVIEW'})}},@{type='response_item';payload=@{type='function_call';arguments='PRIVATE_TOOL_NEVER_PREVIEW'}},@{type='response_item';payload=@{type='message';role='user';content=@(@{type='input_text';text=('질문 한 é 😀 '+$Id)})}},@{type='response_item';payload=@{type='message';role='assistant';content=@(@{type='output_text';text="답변 한글`n두 번째 줄"})}},@{type='event_msg';payload=@{type='agent_message';message='PRIVATE_EVENT_NEVER_PREVIEW'}})
@@ -70,11 +81,30 @@ using System.Threading;
 using System.Diagnostics;
 using System.Web.Script.Serialization;
 public static class OwnedCodexSessionFixture {
+ static void Hook(string path, bool forwarding=false) {
+  var json=new JavaScriptSerializer();var request=json.Deserialize<System.Collections.Generic.Dictionary<string,object>>(File.ReadAllText(path));
+  if((bool)request["nested"] && !forwarding) {
+   var nested=new ProcessStartInfo(Process.GetCurrentProcess().MainModule.FileName,"--forward \""+path+"\"");nested.UseShellExecute=false;nested.CreateNoWindow=true;nested.WindowStyle=ProcessWindowStyle.Hidden;
+   using(var child=Process.Start(nested)){if(!child.WaitForExit(4000)){child.Kill();child.WaitForExit(1000);throw new TimeoutException("Nested fixture exceeded4s");}if(child.ExitCode!=0)throw new Exception("Nested fixture failed");}return;
+  }
+  string cli=(string)request["cli"];string arguments="--json hooks "+request["provider"]+" "+request["event"];
+  if(!String.IsNullOrEmpty((string)request["surface"]))arguments+=" --surface "+request["surface"];
+  var info=(bool)request["shell"] ? new ProcessStartInfo(Environment.GetEnvironmentVariable("COMSPEC"),"/D /S /C \"\""+cli+"\" "+arguments+"\"") : new ProcessStartInfo(cli,arguments);
+  info.UseShellExecute=false;info.CreateNoWindow=true;info.WindowStyle=ProcessWindowStyle.Hidden;info.RedirectStandardInput=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;info.StandardOutputEncoding=new UTF8Encoding(false);info.StandardErrorEncoding=new UTF8Encoding(false);
+  using(var child=Process.Start(info)) {
+   var stdout=child.StandardOutput.ReadToEndAsync();var stderr=child.StandardError.ReadToEndAsync();byte[] payload=Encoding.UTF8.GetBytes((string)request["payload"]);child.StandardInput.BaseStream.Write(payload,0,payload.Length);child.StandardInput.BaseStream.Flush();if((bool)request["close"])child.StandardInput.Close();
+   if(!child.WaitForExit(4000)){child.Kill();child.WaitForExit(1000);throw new TimeoutException("Hook CLI exceeded4s");}
+   if(!stdout.Wait(500)||!stderr.Wait(500))throw new TimeoutException("Hook output did not close");
+   File.WriteAllText(path+".result.tmp",json.Serialize(new {exit=child.ExitCode,stdout=stdout.Result,stderr=stderr.Result}),new UTF8Encoding(false));File.Delete(path);File.Move(path+".result.tmp",path+".result");
+  }
+ }
  public static int Main(string[] args) {
   Console.OutputEncoding=new UTF8Encoding(false);
-  if(args.Length==2 && args[0]=="--hold") {
+  if(args.Length==2 && args[0]=="--forward"){Hook(args[1],true);return 0;}
+  if((args.Length==2 || (args.Length==4 && args[2]=="resume")) && args[0]=="--hold") {
    Environment.SetEnvironmentVariable("CODEX_HOME",Path.GetFullPath(args[1]),EnvironmentVariableTarget.Process);
-   Console.WriteLine("SESSION_SOURCE_READY");Console.Out.Flush();Thread.Sleep(60000);return 0;
+   Console.WriteLine("SESSION_SOURCE_READY");Console.Out.Flush();var watch=Stopwatch.StartNew();string hook=Path.Combine(args[1],"hook-"+Process.GetCurrentProcess().Id+".json");
+   while(watch.ElapsedMilliseconds<60000){if(File.Exists(hook))Hook(hook);Thread.Sleep(10);}return 0;
   }
   if(args.Length==2 && args[0]=="resume") {
    Guid id;if(!Guid.TryParse(args[1],out id))return 21;
@@ -93,7 +123,12 @@ public static class OwnedCodexSessionFixture {
  $tree=Await {param($t) @($t.surfaces).Count -eq 1 -and $t.surfaces[0].ready -and $t.surfaces[0].running};$local=$tree.surfaces[0]
  Request @('rename-tab',$local.id,'Codex')|Out-Null
  Require (@(Request @('agents')).Count -eq 0) 'Plain shell or a Codex-looking title was classified as an agent'
- Request @('settings','shell','cmd','--arg','/d')|Out-Null;$source=Agent-Tab $homeA $projectA;$sourceIdentity=Request @('identify')
+ Request @('settings','shell','cmd','--arg','/d')|Out-Null;$source=Agent-Tab $homeA $projectA $idA;$sourceIdentity=Request @('identify')
+ $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Native end could not clear a startup resume ID before a start hook'
+ $r=Hook 'session-start' (@{session_id=$idA.ToUpperInvariant();cwd='한글 한 é 😀'}|ConvertTo-Json -Compress);Require ($r.accepted -and $r.surface -ceq $source.id -and $r.session_id -ceq $idA) 'Owned child native hook did not establish its canonical conversation'
+ $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Owned child native end did not clear its conversation'
+ $cap=Request @('capabilities');Require ($cap.commands -contains 'hooks' -and ($cap.agent_activity.session_hooks -join ',') -ceq 'session-start,session-end' -and -not $cap.agent_activity.native_hooks) 'Session hook capability incorrectly advertised full native activity hooks'
+ Passed 'native-session-hooks-inherited-context-owned-process-discovery-canonical-ID-and-no-invented-activity'
  Request @('focus-tab',$local.id)|Out-Null
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.source -ceq 'flowmux:proc'}
  $presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
@@ -338,7 +373,7 @@ public static class OwnedCodexSessionFixture {
  Passed 'five-owned-providers-Linux-urgency-and-pane-MRU-four-agent-cap-overflow-native-logos-and-close-shrink'
  Require ([IO.File]::Exists((Join-Path $homeA 'session_index.jsonl')) -and [IO.Directory]::Exists((Join-Path $homeA 'sessions'))) 'Owned session history fixture disappeared before discovery'
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree
- Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
+ Require (-not $tree.agent_sessions.agent.session_id) 'Native end resurrected the startup resume ID';Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
  $image=[Diagnostics.Process]::GetProcessById([int]$tree.agent_sessions.agent.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'History source image is not actual owned codex.exe'}finally{$image.Dispose()};Stable @($local,$source)|Out-Null;Passed 'actual-owned-codex-process-child-only-CODEX_HOME-and-CtrlAltJ-history-discovery'
 
  Require (@($panel.rows|Where-Object {$_.title -ceq $titleA -and $_.id -ceq $idA}).Count -eq 1 -and @($panel.rows|Where-Object {$_.title -ceq $titleB -and $_.id -ceq $idB}).Count -eq 1) 'Indexed Unicode/NFD titles or cross-project rows differ';Require (@($panel.rows.color|Select-Object -Unique).Count -eq 2) 'Distinct project row colors missing'
@@ -378,6 +413,23 @@ public static class OwnedCodexSessionFixture {
  $listed=@(Request @('agents')|Where-Object {$_.tab -ceq $source.id});Require ($listed.Count -eq 1 -and $listed[0].session_id -ceq $idB -and $listed[0].pid -eq $source.pid) 'Agent listing lost the process-owned current conversation'
  Request ($report+@('--seq','13','--status','blocked','--session-id',$idA))|Out-Null;$tree=Await {param($t) $t.agent_sessions.agent.session_id -ceq $idA -and -not $t.agent_sessions.panel.resume_enabled};Stable @($source,$local)|Out-Null
  Passed 'ordered-current-session-ID-switch-stale-invalid-omitted-report-and-duplicate-resume-guards-preserve-raw-preview'
+
+ $r=Hook 'session-start' (@{'thread-id'=$idB}|ConvertTo-Json -Compress);Require ($r.accepted -and $r.session_id -ceq $idB) 'Native conversation switch failed'
+ $tree=Await {param($t) $t.agent_sessions.agent.session_id -ceq $idB -and $t.agent_sessions.panel.resume_enabled};Require ([string]::Equals($tree.agent_sessions.panel.preview_text,$currentPreview,[StringComparison]::Ordinal)) 'Native hook replaced the raw Korean preview'
+ $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require (-not $r.accepted -and $r.session_id -ceq $idB) 'Late end from the previous conversation cleared the current one'
+ Outside-Hook $idA
+ $r=Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress) $false $true 'codex' '' $false $true;Require ($r.stderr -match 'nested agent') 'Nested agent hook was attributed to its outer agent'
+ Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress) $false $true 'claude'|Out-Null
+ Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress) $false $true 'codex' $local.id|Out-Null
+ foreach($payload in @('{}','{"session_id":"한글"}',('x'*65537))){Hook 'session-start' $payload $false|Out-Null}
+ $r=Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress) $false $false;Require ($r.stderr -match 'stdin exceeded one second') 'Unclosed hook stdin did not fail within its bounded read budget'
+ $tree=Tree;$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($tree.agent_sessions.agent.session_id -ceq $idB -and $state.seq -eq 13 -and $state.status -ceq 'blocked') 'Rejected hooks mutated current conversation or activity sequence'
+ Passed 'native-hooks-reject-unrelated-pipe-client-nested-agent-wrong-provider-other-terminal-invalid-oversized-JSON-and-unclosed-stdin'
+ $r=Hook 'session-end' (@{session_id=$idB}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Matching session end did not clear current identity'
+ $tree=Await {param($t) -not $t.agent_sessions.agent.session_id -and $t.agent_sessions.panel.resume_enabled};$r=Hook 'session-end' (@{session_id=$idB}|ConvertTo-Json -Compress);Require (-not $r.accepted) 'Duplicate session end was accepted'
+ $r=Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress) $true $true 'codex' '' $true;Require ($r.accepted -and $r.session_id -ceq $idA) 'Owned CMD hook launch chain was rejected'
+ $tree=Await {param($t) $t.agent_sessions.agent.session_id -ceq $idA -and -not $t.agent_sessions.panel.resume_enabled};$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($state.seq -eq 13 -and $state.status -ceq 'blocked' -and [string]::Equals($tree.agent_sessions.panel.preview_text,$currentPreview,[StringComparison]::Ordinal)) 'Lifecycle hooks invented status or modified raw preview';Stable @($source,$local)|Out-Null
+ Passed 'native-session-switch-late-and-duplicate-end-current-ID-clear-owned-shell-chain-and-live-resume-guard'
 
  $tree=Await {param($t) @($t.agent_sessions.panel.rows).Count -eq 2};$tree=Select-Session $tree $idB;$before=@($tree.surfaces);Click ([long]$tree.agent_sessions.panel.resume);$tree=Await {param($t) @($t.surfaces).Count -eq $before.Count+1 -and @($t.surfaces|Where-Object {$_.id -cnotin @($before.id) -and $_.ready -and $_.running}).Count -eq 1};$new=@($tree.surfaces|Where-Object {$_.id -cnotin @($before.id)})[0];$identity=Request @('identify');Require ($identity.surface -ceq $new.id -and $identity.pane -ceq $sourceIdentity.pane -and $identity.workspace -ceq $sourceIdentity.workspace -and (Path-Same $identity.cwd $projectB)) 'Resume did not create one same-pane tab in selected project'
  Screen $new.id {param($s) $s.text.Contains('RESUMED_'+$idB)}|Out-Null;$proofPath=Join-Path $homeA ('resume-'+$idB+'.json');Require (Test-Path -LiteralPath $proofPath) 'Actual resumed agent produced no execution proof';$proof=Get-Content -Raw -Encoding UTF8 -LiteralPath $proofPath|ConvertFrom-Json;$diagnostic.resume=$proof;Require ((@($proof.argv)-join '|') -ceq ('resume|'+$idB) -and (Path-Same $proof.cwd $projectB) -and (Path-Same $proof.home $homeA) -and (Path-Same $proof.image $agentExe) -and $proof.pid -ne $source.pid) 'Resume argv/cwd/child-only home or actual executable differs';Stable $before|Out-Null;Passed 'Resume-actual-agent-argv-project-home-new-tab-and-original-PID-view-preservation'
