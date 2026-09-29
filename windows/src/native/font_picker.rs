@@ -330,17 +330,12 @@ impl Popup {
     }
     fn filter(&mut self) {
         let previous = self.selected();
-        // Reuse caption normalization for comparison copies; keep input and values raw.
-        let search_key = |text: &str| {
-            let raw: Vec<_> = text.encode_utf16().collect();
-            String::from_utf16_lossy(&chrome::caption_for_paint(&raw)).to_lowercase()
-        };
-        let query = search_key(&Panel::text(self.search));
+        let query = chrome::search_key(&Panel::text(self.search));
         self.filtered = self
             .choices
             .iter()
             .enumerate()
-            .filter(|(_, choice)| search_key(&choice.label).contains(&query))
+            .filter(|(_, choice)| chrome::search_key(&choice.label).contains(&query))
             .map(|(index, _)| index)
             .collect();
         unsafe {

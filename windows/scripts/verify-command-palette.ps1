@@ -107,7 +107,7 @@ try {
     $identities=Identities $tree;$initial=Request @('identify');$active=$initial.surface
     Require ($initial.cwd -ceq $terminalDirectory) 'Initial terminal lost its exact Korean/NFD current directory';$copyReply=Request @('test-shortcut',$initial.surface,'{"code":"KeyK","key":"k","ctrlKey":true,"shiftKey":true}');Require ($copyReply.surface -ceq $initial.surface -and -not $copyReply.forwarded) 'Copy path shortcut was not handled by the actual terminal renderer';$tree=Copy-Feedback $initial.surface $terminalDirectory;Require ((Identities $tree) -ceq $identities) 'Copy path shortcut changed terminal IDs or PIDs';Same-Identity $initial;Passed 'terminal-copy-path-shortcut-preserves-Korean-NFD-cwd-with-owned-hidden-clipboard-blocked-feedback'
 
-    $workspaceName='한글 작업공간 한 &';$tabName='원본 터미널 한글'
+    $workspaceName='한글 작업공간 한 é &';$tabName='원본 터미널 한글'
     Request @('workspace','rename',$initial.workspace,$workspaceName)|Out-Null;Request @('rename-tab',$active,$tabName)|Out-Null
     Request @('new-workspace','--cwd',$directory,'--shell=cmd')|Out-Null;$second=Request @('identify');Request @('workspace','rename',$second.workspace,'두번째 작업')|Out-Null;Request @('rename-tab',$second.surface,'한글 둘째 탭')|Out-Null
     Request @('split','horizontal','--shell=cmd')|Out-Null;$split=Request @('identify');Request @('rename-tab',$split.surface,'대상 분할 창')|Out-Null
@@ -130,6 +130,13 @@ try {
     }
     Require (@($panel.entries|Where-Object {$_.id -match '^action:workspace-[3-8]$'}).Count -eq 0) 'Palette exposes nonexistent numbered workspaces'
     Require (@($panel.entries|Where-Object {$_.id -ceq ('workspace:'+$initial.workspace) -and $_.label -ceq ('Workspace: '+$workspaceName)}).Count -eq 1) 'Korean/NFD workspace label changed'
+    foreach($query in @('공간한&','공간한É&','공간한é&')){
+        $tree=Query $tree $query;$panel=Palette $tree
+        Require (@($panel.filtered) -ccontains ('workspace:'+$initial.workspace)) 'Canonical Hangul/accent fuzzy search missed the workspace'
+        $entry=@($panel.entries|Where-Object {$_.id -ceq ('workspace:'+$initial.workspace)})[0]
+        Require ([string]::Equals([OptionsFixture]::Text([long]$panel.query_handle,$owned.Id),$query,[StringComparison]::Ordinal) -and [string]::Equals($entry.label,('Workspace: '+$workspaceName),[StringComparison]::Ordinal) -and [string]::Equals((Workspace $tree $initial.workspace).name,$workspaceName,[StringComparison]::Ordinal)) 'Canonical filtering rewrote the native query, label or workspace name'
+    }
+    Passed 'canonical-Hangul-accent-fuzzy-search-preserves-native-query-label-and-workspace-name'
     $tree=Query $tree '한 작';$tree=Select-Entry $tree ('workspace:'+$initial.workspace);Execute $tree;$tree=Closed;Same-Identity $initial;Owner-Restored $tree
     Require ((Identities $tree) -ceq $identities) 'Workspace selection recreated a terminal';Passed 'terminal-shortcut-owned-modal-Korean-workspace-fuzzy-target'
 

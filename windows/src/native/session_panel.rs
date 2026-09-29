@@ -115,7 +115,7 @@ fn rebuild(window: HWND, notify: bool) {
     } else {
         read(old.search)
     };
-    let needle = query.to_lowercase();
+    let needle = chrome::search_key(&query);
     let filtered: Vec<_> = old
         .rows
         .iter()
@@ -645,7 +645,7 @@ impl Panel {
                     title: session.title.clone(),
                     project,
                     updated,
-                    searchable: caption.to_lowercase(),
+                    searchable: chrome::search_key(&caption),
                     caption,
                     color,
                 }

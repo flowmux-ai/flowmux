@@ -46,7 +46,8 @@ public static class OptionsFixture {
         var hwnd=Owned(popup,owner);var target=newActive==0?IntPtr.Zero:Owned(newActive,owner);
         Message(hwnd,0x6,IntPtr.Zero,target);
     }
-    public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    // Apply/Cancel may destroy their validated popup before the send returns.
+    public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);if(!WindowDestroyed(parent))Owned(parent,owner);}
     [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint action,uint parameter,out uint value,uint flags);
     public static uint WheelLines() {uint value;if(!SystemParametersInfo(0x68,0,out value,0))throw new System.ComponentModel.Win32Exception();return value;}
     public static void Wheel(long window,int owner,int x,int y,int delta) {

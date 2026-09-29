@@ -276,8 +276,8 @@ fn read(window: HWND) -> String {
     }
 }
 fn matches(query: &str, candidate: &str) -> bool {
-    let candidate = candidate.to_lowercase();
-    query.to_lowercase().split_whitespace().all(|token| {
+    let candidate = chrome::search_key(candidate);
+    chrome::search_key(query).split_whitespace().all(|token| {
         let mut chars = candidate.chars();
         token.chars().all(|needle| chars.any(|ch| ch == needle))
     })

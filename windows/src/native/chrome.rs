@@ -1656,6 +1656,12 @@ pub(super) fn caption_for_paint(original: &[u16]) -> std::borrow::Cow<'_, [u16]>
     Cow::Owned(drawing)
 }
 
+/// Comparison copy only; captions, identifiers, paths and input remain raw.
+pub(super) fn search_key(text: &str) -> String {
+    let raw: Vec<_> = text.encode_utf16().collect();
+    String::from_utf16_lossy(&caption_for_paint(&raw)).to_lowercase()
+}
+
 // One painter serves both the real STATIC and owned, in-process capture. The
 // native caption remains the accessible text; only the drawing copy is shaped.
 fn draw_empty_state(window: HWND, dc: HDC) {
