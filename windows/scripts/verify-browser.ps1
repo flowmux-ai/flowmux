@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close','keys','page-keys','frame-keys','zoom')][string]$Case='all',
+    [ValidateSet('all','files-close','keys','page-keys','frame-keys','zoom','persistence')][string]$Case='all',
     [switch]$RequireNestedFrames)
 if($RequireNestedFrames -and $Case -ne 'frame-keys'){throw 'RequireNestedFrames applies to the frame-keys verifier.'}
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
@@ -16,7 +16,8 @@ Add-Type -Path (Join-Path $PSScriptRoot 'BrowserFixture.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('browser-'+[guid]::NewGuid())
+# The runner already provides a unique root; keep WebView2 storage paths short.
+$directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT 'browser'
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object BrowserFixture;$origin=$fixture.Origin
 $pipeName=$null;$process=$null;$hosts=@();$shells=@()
@@ -328,6 +329,45 @@ function Verify-FilesClose {
         $files.Dispose()
     }
 }
+function Verify-Persistence {
+    function Storage([string]$Pane,[string]$Value) {
+        $valueJs=if($PSBoundParameters.ContainsKey('Value')){$Value|ConvertTo-Json -Compress}else{'null'}
+        $evidence.storageAttempt=@{pane=$Pane;writing=$PSBoundParameters.ContainsKey('Value');value=$Value}
+        $started=Eval-Page $Pane ('(()=>{window.storageDone=null;window.storagePhase="opening";const value='+$valueJs+';if(value!==null){localStorage.setItem("keep",value);document.cookie="keep="+encodeURIComponent(value)+";Max-Age=3600;Path=/"}const request=indexedDB.open("keep",1);request.onupgradeneeded=()=>{window.storagePhase="upgrade";request.result.createObjectStore("data")};request.onblocked=()=>window.storageDone={error:"IndexedDB open blocked"};request.onerror=()=>window.storageDone={error:String(request.error)};request.onsuccess=()=>{window.storagePhase="transaction";const db=request.result;const tx=db.transaction("data",value===null?"readonly":"readwrite");const store=tx.objectStore("data");if(value!==null)store.put(value,"keep");const read=store.get("keep");read.onsuccess=()=>window.storagePhase="read";tx.oncomplete=()=>{window.storageDone={idb:read.result??null,local:localStorage.getItem("keep"),cookie:document.cookie};db.close()};tx.onerror=tx.onabort=()=>{window.storageDone={error:String(tx.error)};db.close()}};return true})()')
+        if($started -ne $true){throw 'Owned storage script did not start'}
+        $clock=[Diagnostics.Stopwatch]::StartNew();do{$result=Eval-Page $Pane 'window.storageDone';if($result){if($result.error){throw $result.error};return $result};if($clock.ElapsedMilliseconds -gt 3000){$evidence.storageAttempt.phase=Eval-Page $Pane 'window.storagePhase';throw ('Owned IndexedDB operation exceeded three seconds: '+($evidence.storageAttempt|ConvertTo-Json -Compress))};Start-Sleep -Milliseconds 20}while($true)
+    }
+    function Kept($Value,[string]$Expected) {if(-not (Same-Text $Value.local $Expected) -or -not (Same-Text $Value.idb $Expected) -or $Value.cookie -cne ('keep='+[Uri]::EscapeDataString($Expected))){throw 'Browser cookie, localStorage or IndexedDB lost exact Korean data'}}
+    function Empty($Value) {if($null -ne $Value.local -or $null -ne $Value.idb -or $Value.cookie){throw 'Private browser inherited persisted or previous-launch site data'}}
+    $tree=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$source=Request @('identify');$terminal=$tree.surfaces[0]
+    $regular=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+    $before=Wait-Page $regular.pane '/one' '첫째 한글 한 é 😀';if(-not $before.persist_site_data){throw 'Default browser did not persist site data'}
+    $saved='저장 한 é 😀';Kept (Storage $regular.pane $saved) $saved
+    $tree=Tree;$entry=@($tree.chrome.controls|Where-Object kind -eq 'settings')[0];[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry.handle,$process.Id)
+    $settings=Request @('settings','show');$row=@($settings.options.controls|Where-Object key -eq 'persist_browser_session')[0]
+    if(-not $row -or $row.page -ne 'general'){throw 'General browser persistence option missing'}
+    [OptionsFixture]::Select([long]$row.parent,[long]$row.input,$process.Id,1)
+    $clock=[Diagnostics.Stopwatch]::StartNew();do{$settings=Request @('settings','show');if(-not $settings.document.terminal.persist_browser_session -and -not $settings.options.pending){break};if($clock.ElapsedMilliseconds -gt 3000){throw 'Native persistence option did not save'};Start-Sleep -Milliseconds 20}while($true)
+    [OptionsFixture]::Click([long]$settings.options.window,[long]$settings.options.close,$process.Id)
+    Kept (Storage $regular.pane) $saved;$after=Request @('browser','status',$regular.pane);Check-Stable $before $after
+    if(-not $after.persist_site_data){throw 'Changing persistence replaced the existing profile'}
+    $private=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+    $privateStatus=Wait-Page $private.pane '/one' '첫째 한글 한 é 😀';if($privateStatus.persist_site_data){throw 'New browser ignored private mode'}
+    Empty (Storage $private.pane);$secret='임시 한 é 😀';Kept (Storage $private.pane $secret) $secret
+    Request @('settings','set','persist-browser-session','true')|Out-Null
+    Eval-Page $private.pane ('window.open('+($origin+'/two'|ConvertTo-Json -Compress)+');true')|Out-Null
+    $clock=[Diagnostics.Stopwatch]::StartNew();do{$tree=Tree;$child=@($tree.browsers|Where-Object {$_.popup_opener -eq $private.surface});if($child.Count -eq 1){break};if($clock.ElapsedMilliseconds -gt 5000){throw ('Private popup did not open: '+($tree.popup|ConvertTo-Json -Compress))};Start-Sleep -Milliseconds 20}while($true)
+    $pane=Location $tree $child[0].id;Wait-Page $pane '/two' '둘째 한글 한 é 😀'|Out-Null
+    if($child[0].persist_site_data){throw 'Popup used the new default instead of its private opener profile'};Kept (Storage $pane) $secret
+    Request @('focus-tab',$regular.surface)|Out-Null;Kept (Storage $regular.pane) $saved
+    $evidence.checks+=@{name='native_browser_setting_applies_to_new_tabs_and_private_popup_inherits_opener_without_leaking_Korean_cookie_localStorage_IndexedDB';passed=$true}
+    Request @('quit','--discard-state')|Out-Null;if(-not $process.WaitForExit(5000) -or $process.ExitCode -ne 0){throw 'Owned profile host did not quit'};$process.Dispose();$script:process=$null
+    $tree=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$source=Request @('identify')
+    $regular=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened;Wait-Page $regular.pane '/one' '첫째 한글 한 é 😀'|Out-Null;Kept (Storage $regular.pane) $saved
+    Request @('settings','set','persist-browser-session','false')|Out-Null
+    $private=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened;Wait-Page $private.pane '/one' '첫째 한글 한 é 😀'|Out-Null;Empty (Storage $private.pane)
+    $evidence.checks+=@{name='real_process_restart_retains_persistent_Korean_cookie_localStorage_IndexedDB_and_discards_private_site_data';passed=$true}
+}
 function Verify-Zoom {
     $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$source=Request @('identify');$terminal=$initial.surfaces[0]
     $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
@@ -629,6 +669,7 @@ function Verify-Keys {
     $evidence.checks+=@{name='detached_browser_find_retains_native_owner_WebView_Unicode_and_terminal_session';passed=$true}
 }
 try {
+    if($Case -eq 'persistence'){Verify-Persistence}
     if($Case -eq 'zoom'){Verify-Zoom}
     if($Case -eq 'frame-keys'){Verify-FrameKeys}
     if($Case -eq 'page-keys'){Verify-PageKeys}
@@ -950,7 +991,7 @@ try {
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     }
-    if($Case -notin @('keys','page-keys','frame-keys','zoom')){Verify-FilesClose}
+    if($Case -notin @('keys','page-keys','frame-keys','zoom','persistence')){Verify-FilesClose}
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

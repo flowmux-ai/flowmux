@@ -11,6 +11,8 @@ pub enum SettingKey {
     FontFamily,
     FontSize,
     ZoomPercent,
+    PersistBrowserSession,
+    RestoreTerminalScrollback,
     Theme,
     ThemePreset,
     ThemeBackground,
@@ -111,6 +113,8 @@ pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u16,
     pub zoom_percent: u16,
+    pub persist_browser_session: bool,
+    pub restore_terminal_scrollback: bool,
     pub theme: Theme,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_preset: Option<String>,
@@ -135,6 +139,9 @@ impl Default for TerminalSettings {
             font_family: "Cascadia Mono, Consolas, \"Malgun Gothic\", monospace".into(),
             font_size: 14,
             zoom_percent: flowmux_config::options::ZOOM_DEFAULT,
+            persist_browser_session: flowmux_config::options::PERSIST_BROWSER_SESSION_DEFAULT,
+            restore_terminal_scrollback:
+                flowmux_config::options::RESTORE_TERMINAL_SCROLLBACK_DEFAULT,
             theme: Theme::Dark,
             theme_preset: None,
             theme_overrides: ThemeOverrides::default(),
@@ -207,6 +214,8 @@ impl TerminalSettings {
             SettingKey::FontFamily => self.font_family.clone(),
             SettingKey::FontSize => self.font_size.to_string(),
             SettingKey::ZoomPercent => self.zoom_percent.to_string(),
+            SettingKey::PersistBrowserSession => self.persist_browser_session.to_string(),
+            SettingKey::RestoreTerminalScrollback => self.restore_terminal_scrollback.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
             SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
@@ -305,6 +314,16 @@ impl TerminalSettings {
                     .trim()
                     .parse()
                     .context("focus border opacity must be an integer")?
+            }
+            SettingKey::PersistBrowserSession => {
+                next.persist_browser_session = value
+                    .parse()
+                    .context("browser persistence must be true or false")?;
+            }
+            SettingKey::RestoreTerminalScrollback => {
+                next.restore_terminal_scrollback = value
+                    .parse()
+                    .context("scrollback restore must be true or false")?;
             }
             SettingKey::ZoomPercent => {
                 next.zoom_percent = value.trim().parse().context("zoom must be an integer")?;
@@ -480,6 +499,8 @@ mod tests {
         )
         .unwrap();
         assert!(old.terminal.minimap_enabled);
+        assert!(old.terminal.persist_browser_session);
+        assert!(old.terminal.restore_terminal_scrollback);
         assert_eq!(
             old.terminal.zoom_percent,
             flowmux_config::options::ZOOM_DEFAULT
@@ -502,6 +523,8 @@ mod tests {
             flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT
         );
         for (key, value) in [
+            (SettingKey::PersistBrowserSession, "on"),
+            (SettingKey::RestoreTerminalScrollback, "yes"),
             (SettingKey::ZoomPercent, "49"),
             (SettingKey::ZoomPercent, "201"),
             (SettingKey::ZoomPercent, "100.5"),
@@ -524,6 +547,8 @@ mod tests {
             (SettingKey::MinimapWidth, "12"),
             (SettingKey::MinimapWidth, "96"),
             (SettingKey::MinimapOpacity, "0"),
+            (SettingKey::PersistBrowserSession, "false"),
+            (SettingKey::RestoreTerminalScrollback, "false"),
             (SettingKey::MinimapOpacity, "100"),
             (SettingKey::MinimapEnabled, "false"),
             (SettingKey::EditorMinimapEnabled, "false"),

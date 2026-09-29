@@ -45,6 +45,18 @@ impl App {
                     let zoom_changed =
                         self.settings.terminal.zoom_percent != document.terminal.zoom_percent;
                     self.settings = document;
+                    if !self.settings.terminal.restore_terminal_scrollback {
+                        self.restore_screens.clear();
+                        if let Some(pending) = self
+                            .pending_save
+                            .as_mut()
+                            .filter(|pending| !pending.writing)
+                        {
+                            pending.state.screens.clear();
+                            pending.waiting.clear();
+                            self.write_save()?;
+                        }
+                    }
                     if zoom_changed {
                         for browser in self.browsers.values_mut() {
                             browser.zoom(f64::from(self.settings.terminal.zoom_percent) / 100.0)?;

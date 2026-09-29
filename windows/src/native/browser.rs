@@ -5,7 +5,8 @@ use crate::browser::{self as domain, Op};
 use crate::browser_dom as dom;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{cell::Cell, rc::Rc};
-use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment;
+use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Environment, ICoreWebView2_13};
+use windows::core::Interface;
 use wry::WebViewBuilderExtWindows;
 #[path = "browser_bookmarks.rs"]
 pub(super) mod bookmarks;
@@ -134,6 +135,7 @@ pub(super) struct Browser {
     back: bool,
     forward: bool,
     zoom: f64,
+    persistent: bool,
     pub(super) error: Option<String>,
     pub(super) preview_binding: Option<String>,
     pub(super) preview_generation: Option<SurfaceId>,
@@ -147,12 +149,13 @@ pub(super) struct Browser {
 }
 impl Browser {
     pub(super) fn new(app: &mut App, id: SurfaceId) -> anyhow::Result<Self> {
-        Self::new_in_environment(app, id, None)
+        Self::new_in_environment(app, id, None, app.settings.terminal.persist_browser_session)
     }
     fn new_in_environment(
         app: &mut App,
         id: SurfaceId,
         environment: Option<ICoreWebView2Environment>,
+        persistent: bool,
     ) -> anyhow::Result<Self> {
         let holder = surface_host::Host::new(app.window)?;
         let chrome = chrome::Chrome::new(holder.window, id)?;
@@ -174,6 +177,7 @@ impl Browser {
         }
         let mut builder =
             WebViewBuilder::new_with_web_context(app.browser_context.as_mut().unwrap())
+                .with_incognito(!persistent)
                 .with_visible(false)
                 .with_focused(false)
                 .with_clipboard(false)
@@ -197,6 +201,23 @@ impl Browser {
             builder = builder.with_environment(environment);
         }
         let view = builder.build_as_child(&Parent(holder.window))?;
+        if !persistent {
+            // Older runtimes silently ignore Wry's incognito flag. Never navigate
+            // a requested private tab unless the native profile confirms it.
+            unsafe {
+                let profile = view
+                    .controller()
+                    .CoreWebView2()?
+                    .cast::<ICoreWebView2_13>()?
+                    .Profile()?;
+                let mut private = Default::default();
+                profile.IsInPrivateModeEnabled(&mut private)?;
+                anyhow::ensure!(
+                    private.as_bool(),
+                    "WebView2 did not create a private browser profile"
+                );
+            }
+        }
         install_drag_escape(&view, holder.window)?;
         chrome.install_focus(&view, background)?;
         unsafe {
@@ -316,6 +337,7 @@ impl Browser {
             back: false,
             forward: false,
             zoom: 1.0,
+            persistent,
             error: None,
             preview_binding: None,
             preview_generation: None,
@@ -383,7 +405,7 @@ impl Browser {
     }
     pub(super) fn status(&self, id: SurfaceId) -> Value {
         let viewport = self.holder.view_bounds(&self.view);
-        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"generation":self.epoch.load(Ordering::SeqCst),"instance":self.instance,"preview_binding":self.preview_binding,"preview_generation":self.preview_generation,"preview_expired":self.preview_blocked.get(),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
+        json!({"id":id,"kind":"browser","url":self.url,"title":self.title,"loading":self.loading,"can_go_back":self.back,"can_go_forward":self.forward,"zoom":self.zoom,"persist_site_data":self.persistent,"generation":self.epoch.load(Ordering::SeqCst),"instance":self.instance,"preview_binding":self.preview_binding,"preview_generation":self.preview_generation,"preview_expired":self.preview_blocked.get(),"visible":self.visible,"popup_opener":self.popup_opener,"popup_user_initiated":self.popup_user_initiated,"native_closed":self.native_closed.get(),"navigation_error":self.error,"view_handle":self.view.hwnd().0 as usize,"chrome_handle":self.chrome.window as usize,"chrome":self.chrome.diagnostics(),"address_handle":self.chrome.address as usize,"holder":self.holder.diagnostics(),"bounds":viewport})
     }
     pub(super) fn layout(
         &mut self,

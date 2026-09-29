@@ -2330,7 +2330,11 @@ impl App {
                     colors: Box::new(crate::theme::resolve(&self.settings.terminal)),
                     bindings: crate::keybindings::resolved(&self.settings.keybindings)?,
                 })?;
-                if let Some(screen) = self.restore_screens.remove(&id) {
+                if let Some(screen) = self
+                    .restore_screens
+                    .remove(&id)
+                    .filter(|_| self.settings.terminal.restore_terminal_scrollback)
+                {
                     surface.send(&HostMessage::Restore { screen })?;
                     self.surfaces.get_mut(&id).unwrap().restoring = true;
                 } else {
@@ -2838,13 +2842,15 @@ impl App {
             .collect::<anyhow::Result<_>>()?;
         let request = Uuid::new_v4();
         let mut waiting = HashMap::new();
-        for (id, surface) in &self.surfaces {
-            let after = surface
-                .session
-                .as_ref()
-                .map_or(surface.output_sequence, Session::barrier);
-            surface.send(&HostMessage::Snapshot { request, after })?;
-            waiting.insert(*id, after);
+        if self.settings.terminal.restore_terminal_scrollback {
+            for (id, surface) in &self.surfaces {
+                let after = surface
+                    .session
+                    .as_ref()
+                    .map_or(surface.output_sequence, Session::barrier);
+                surface.send(&HostMessage::Snapshot { request, after })?;
+                waiting.insert(*id, after);
+            }
         }
         self.pending_save = Some(PendingSave {
             id: request,

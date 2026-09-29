@@ -218,8 +218,8 @@ impl WindowState {
             .map(|tab| tab.id)
             .collect();
         ensure!(
-            self.screens.len() == terminals.len(),
-            "history missing from saved layout"
+            self.screens.is_empty() || self.screens.len() == terminals.len(),
+            "incomplete history in saved layout"
         );
         for (id, screen) in &self.screens {
             ensure!(terminals.contains(id), "orphaned history");
@@ -783,7 +783,9 @@ mod tests {
                 0 => invalid.version += 1,
                 1 => invalid.workspaces.push(invalid.workspaces[0].clone()),
                 2 => invalid.workspaces[0].focused = flowmux_core::PaneId::new(),
-                3 => invalid.screens.clear(),
+                3 => {
+                    invalid.workspaces[0].new_tab();
+                }
                 _ => {
                     invalid.screens.values_mut().next().unwrap().data =
                         "x".repeat(MAX_SCREEN_BYTES + 1)
@@ -791,5 +793,11 @@ mod tests {
             }
             assert!(invalid.encode().is_err());
         }
+        let mut without_history = state.clone();
+        without_history.workspaces[0].new_tab();
+        without_history.screens.clear();
+        let restored = WindowState::decode(&without_history.encode().unwrap()).unwrap();
+        assert!(restored.screens.is_empty());
+        assert_eq!(restored.workspaces[0].leaves()[0].2.len(), 2);
     }
 }

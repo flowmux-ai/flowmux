@@ -37,6 +37,15 @@ function Parent-Of($Status,$Row){Require ([bool]$Row.parent) 'Live Options input
 function Edit($Status,[string]$Key,[string]$Value){$row=Field $Status $Key;[OptionsFixture]::SetText((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Value)}
 function Guard($Status,[string]$Key,[bool]$Active){$row=Field $Status $Key;[OptionsFixture]::CompositionGuard((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Active)}
 function Select-Field($Status,[string]$Key,[int]$Index){$row=Field $Status $Key;[OptionsFixture]::Select((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Index)}
+function Reveal-Field($Status,[string]$Key){
+    $wait=[Diagnostics.Stopwatch]::StartNew();$row=Field $Status $Key;$size=[ChromeFixture]::Size([long]$Status.options.viewport,$owned.Id)
+    do {
+        $bounds=[OptionsFixture]::RelativeBounds([long]$row.parent,[long]$row.input,$owned.Id)
+        if($bounds.Y -ge 0 -and $bounds.Y+$bounds.Height -le $size[1]){return $Status}
+        Require ($wait.ElapsedMilliseconds -lt 3000) ('General field cannot be reached: '+$Key)
+        [OptionsFixture]::ScrollLine([long]$Status.options.viewport,$owned.Id,($bounds.Y -ge 0));$Status=Request @('settings','show')
+    }while($true)
+}
 function Verify-Focus($Status){
     $color=Field $Status 'focus_border_color';$opacity=Field $Status 'focus_border_opacity'
     foreach($row in @($color,$opacity)){Require ((([OptionsFixture]::Describe([long]$row.input,$owned.Id)).Style -band 0x10000000) -ne 0) 'General focus field is hidden'}
@@ -135,14 +144,14 @@ try {
     Require ($viewport.X -ge 0 -and $viewport.Y -ge 0 -and $viewport.Width -gt 0 -and $viewport.Height -gt 0 -and $viewport.X+$viewport.Width -le $size[0] -and $viewport.Y+$viewport.Height -le $size[1]) 'Options viewport escapes its client'
     foreach($control in @($status.options.reset,$status.options.reload,$status.options.close)){$bounds=[OptionsFixture]::RelativeBounds([long]$status.options.window,[long]$control,$owned.Id);Require ($bounds.Y -ge $viewport.Y+$viewport.Height -and $bounds.Y+$bounds.Height -le $size[1]) 'Options viewport overlaps or clips its footer'}
     [ChromeFixture]::Resize([long]$status.options.window,$owned.Id,650,600);[OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true)
-    $status=Await {param($s) $s.options.scroll_offset -gt 0};$shell=Field $status 'default_shell';$rowBounds=[OptionsFixture]::RelativeBounds((Parent-Of $status $shell),[long]$shell.input,$owned.Id);$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
-    Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Default shell cannot be reached in scrolled viewport';Record 'viewport-scrolled-to-shell' $status
+    $status=Await {param($s) $s.options.scroll_offset -gt 0};$shell=Field $status 'restore_terminal_scrollback';$rowBounds=[OptionsFixture]::RelativeBounds((Parent-Of $status $shell),[long]$shell.input,$owned.Id);$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
+    Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Last General field cannot be reached at the bottom';Record 'viewport-scrolled-to-session' $status
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='owned_nonmodal_live_options_no_apply_and_scrolling_keeps_groups_and_footer_reachable';passed=$true}
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true);$status=Await {param($s) $s.options.scroll_offset -gt 0};$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
-    foreach($key in @('usage_bar_enabled','agent_bar_mode','agent_notification_target')){$row=Field $status $key;$bounds=[OptionsFixture]::RelativeBounds([long]$row.parent,[long]$row.input,$owned.Id);Require ($bounds.Y -ge 0 -and $bounds.Y+30*$scale -le $viewSize[1]) ('Agents field cannot be reached: '+$key)}
+    foreach($key in @('default_shell','usage_bar_enabled','agent_bar_mode','agent_notification_target','editor_minimap_enabled','persist_browser_session','restore_terminal_scrollback')){$status=Reveal-Field $status $key}
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
-    $evidence.checks+=@{name='all_general_fields_visible_distinct_and_agents_controls_scroll_into_view';passed=$true}
+    $evidence.checks+=@{name='all_general_fields_distinct_and_shell_agents_editor_browser_session_controls_scroll_into_view';passed=$true}
     foreach($enabled in @($true,$false)){
         Select-Field $status 'agent_bar_mode' $(if($enabled){0}else{1})
         $status=Await {param($s) $s.document.terminal.agent_bar_mode -eq $enabled -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}

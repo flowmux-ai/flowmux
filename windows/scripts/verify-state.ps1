@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden debug hosts and a unique state directory only. No desktop input.
 param([string]$BuildDirectory = "$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','detached')][string]$Case='all')
+    [ValidateSet('all','detached','preferences')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
@@ -10,8 +10,8 @@ $cli = Join-Path $BuildDirectory 'flowmuxctl.exe'
 $doctor = (& $cli doctor | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0 -or -not $doctor.background_testing) { throw 'A working debug build is required; no window was launched.' }
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeInput.cs')
-if ($Case -eq 'detached') {
-    Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'BrowserFixture.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs')
+if ($Case -ne 'all') {
+    Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'BrowserFixture.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FindFixture.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
     Add-Type -AssemblyName System.Drawing
     Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 }
@@ -38,7 +38,7 @@ function Start-Owned([string[]]$LaunchArgs = @()) {
     }
 }
 function Invoke-Flowmux([string[]]$Arguments) {
-    if ($Case -eq 'detached') {
+    if ($Case -ne 'all') {
         $probe=[CliProbe]::Start($cli,(@('--pipe',$script:pipeName,'--json')+$Arguments),$directory,$directory)
         try {
             $out=$probe.StandardOutput.ReadToEndAsync();$err=$probe.StandardError.ReadToEndAsync()
@@ -54,15 +54,15 @@ function Invoke-Flowmux([string[]]$Arguments) {
 }
 function Connect-Owned($Process) {
     $discovery = Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($Process.Id).json"
-    $deadline = (Get-Date).AddSeconds($(if ($Case -eq 'detached') {5} else {30}))
+    $deadline = (Get-Date).AddSeconds($(if ($Case -ne 'all') {5} else {30}))
     while (-not (Test-Path $discovery)) {
         if ($Process.HasExited -or (Get-Date) -gt $deadline) { throw 'Test host did not start' }
         Start-Sleep -Milliseconds 100
     }
     $record=Get-Content -Raw $discovery|ConvertFrom-Json
-    if ($Case -eq 'detached' -and $record.pid -ne $Process.Id) {throw 'Detached discovery process owner differs'}
+    if ($Case -ne 'all' -and $record.pid -ne $Process.Id) {throw 'Detached discovery process owner differs'}
     $script:pipeName = $record.pipe
-    if ($Case -eq 'detached' -and (Invoke-Flowmux @('identify')).pid -ne $Process.Id) {throw 'Detached pipe process owner differs'}
+    if ($Case -ne 'all' -and (Invoke-Flowmux @('identify')).pid -ne $Process.Id) {throw 'Detached pipe process owner differs'}
     do {
         $tree = Invoke-Flowmux @('tree')
         if (@($tree.surfaces | Where-Object { -not $_.ready }).Count -eq 0) {
@@ -78,7 +78,7 @@ function Connect-Owned($Process) {
 }
 function Stop-Owned($Process) {
     Invoke-Flowmux @('quit') | Out-Null
-    if (-not $Process.WaitForExit($(if ($Case -eq 'detached') {5000} else {10000})) -or $Process.ExitCode -ne 0) { throw 'Host did not close cleanly' }
+    if (-not $Process.WaitForExit($(if ($Case -ne 'all') {5000} else {10000})) -or $Process.ExitCode -ne 0) { throw 'Host did not close cleanly' }
 }
 function Write-Marker([string]$Surface, [string]$Marker) {
     Invoke-Flowmux @('focus-tab', $Surface) | Out-Null
@@ -86,7 +86,7 @@ function Write-Marker([string]$Surface, [string]$Marker) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("Write-Host '$Marker' -ForegroundColor Green"))
     Invoke-Flowmux @('send-keys', $pane, "Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encoded')))") | Out-Null
     Invoke-Flowmux @('send-key', 'Enter', '--pane', $pane) | Out-Null
-    $deadline = (Get-Date).AddSeconds($(if ($Case -eq 'detached') {5} else {12}))
+    $deadline = (Get-Date).AddSeconds($(if ($Case -ne 'all') {5} else {12}))
     do {
         $screen = Invoke-Flowmux @('read-screen', '--surface', $Surface)
         if ($screen.text.Replace("`n", '').Contains($Marker)) { return }
@@ -163,6 +163,37 @@ function Detached-Name($Tree,[string]$Surface,[string]$Expected,[bool]$Locked) {
     State-Name $Tree $frames[0].workspace $Expected $Locked
     $rows=@([ChromeFixture]::Read([long]$frames[0].window_handle,$script:detachedProcess.Id)|Where-Object {$_.Handle -eq [long]$frames[0].sidebar.workspace_row})
     if ($rows.Count -ne 1 -or -not $rows[0].Shown -or -not [string]::Equals($rows[0].Text,$Expected.Replace('&','&&'),[StringComparison]::Ordinal)) {throw 'Restored native detached row lost its Unicode name or ampersand escaping'}
+}
+function Restore-Preference {
+    $tree=Detached-Start @('--new-window','--cwd',$directory);$terminal=$tree.surfaces[0];$topology=State-Topology $tree
+    $marker='BEFORE-RESTORE-한글-한-é-😀';Write-Marker $terminal.id $marker
+    $saved=Invoke-Flowmux @('save-state');$original=Load-State $saved.path
+    if(-not $original.screens.($terminal.id).data.Contains($marker)){throw 'Default scrollback persistence lost Korean history'}
+    $entry=@($tree.chrome.controls|Where-Object kind -eq 'settings')[0];[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry.handle,$script:detachedProcess.Id)
+    $settings=Invoke-Flowmux @('settings','show');$row=@($settings.options.controls|Where-Object key -eq 'restore_terminal_scrollback')[0]
+    if(-not $row -or $row.page -ne 'general'){throw 'General scrollback restore control missing'}
+    [OptionsFixture]::Select([long]$row.parent,[long]$row.input,$script:detachedProcess.Id,1)
+    $clock=[Diagnostics.Stopwatch]::StartNew();do{$settings=Invoke-Flowmux @('settings','show');if(-not $settings.document.terminal.restore_terminal_scrollback -and -not $settings.options.pending){break};if($clock.ElapsedMilliseconds -gt 3000){throw 'Native scrollback option did not save'};Start-Sleep -Milliseconds 20}while($true)
+    [OptionsFixture]::Click([long]$settings.options.window,[long]$settings.options.close,$script:detachedProcess.Id)
+    $clock=[Diagnostics.Stopwatch]::StartNew();$without=Invoke-Flowmux @('save-state');$state=Load-State $without.path
+    $live=Detached-Tree;$screen=Invoke-Flowmux @('read-screen','--surface',$terminal.id)
+    if($clock.ElapsedMilliseconds -gt 3000 -or $without.surfaces -ne 0 -or @($state.screens.psobject.Properties).Count -ne 0 -or (State-Topology $live) -cne $topology -or $live.surfaces[0].pid -ne $terminal.pid -or -not $screen.text.Replace("`n",'').Contains($marker)){throw 'Disabling restore cleared live history, lost layout/process identity or still captured history'}
+    Stop-Owned $script:detachedProcess
+    if(@((Load-State $saved.path).screens.psobject.Properties).Count -ne 0){throw 'Quit saved scrollback despite disabled restore'}
+    $evidence.checks+='Native Off preserves current Korean display and live shell, checkpoints layout immediately without terminal snapshots'
+    # An older checkpoint must not replay history when the current setting is Off.
+    Save-Json $saved.path $original;$tree=Detached-Start @('--restore-window',$saved.window)
+    $screen=Invoke-Flowmux @('read-screen','--surface',$terminal.id)
+    if((State-Topology $tree) -cne $topology -or $tree.surfaces[0].pid -eq $terminal.pid -or $screen.text.Replace("`n",'').Contains($marker)){throw 'Disabled restore replayed old history or failed to restore layout with a fresh shell'}
+    $evidence.checks+='Restart honors Off even when a previous checkpoint contains terminal history'
+    Invoke-Flowmux @('settings','set','restore-terminal-scrollback','true')|Out-Null
+    $latest='AFTER-RESTORE-한글-한-é-😀';Write-Marker $terminal.id $latest;$saved=Invoke-Flowmux @('save-state');$on=Load-State $saved.path
+    if(-not $on.screens.($terminal.id).data.Contains($latest) -or $on.screens.($terminal.id).data.Contains($marker)){throw 'Re-enabled persistence failed to capture only current Korean history'}
+    Stop-Owned $script:detachedProcess;$tree=Detached-Start @('--restore-window',$saved.window)
+    # Restored history is deliberately above the viewport before the fresh shell starts.
+    $roundtrip=Invoke-Flowmux @('save-state');$history=(Load-State $roundtrip.path).screens.($terminal.id).data
+    if(-not $history.Contains($latest) -or -not $history.Contains(([string][char]27)+'[92m') -or $history.Contains($marker) -or (State-Topology $tree) -cne $topology){throw 'Re-enabled scrollback did not survive a real restart'}
+    Stop-Owned $script:detachedProcess;$evidence.checks+='Re-enabling captures current styled Korean history and restores it with the same layout on the next launch'
 }
 function Detached-State {
     $tree=Detached-Start @('--new-window','--cwd',$directory);$anchor=Invoke-Flowmux @('identify')
@@ -269,7 +300,9 @@ function Detached-State {
     $evidence.checks+='Reattachment preserves original surface IDs and removes detached map/focus from the saved main-window state'
 }
 try {
-    if ($Case -eq 'detached') {
+    if ($Case -eq 'preferences') {
+        $script:detachedOutput=@{};Restore-Preference
+    } elseif ($Case -eq 'detached') {
         $script:detachedOutput=@{};$script:stateBrowser=New-Object BrowserFixture;$script:stateEditor=New-Object EditorFixture($directory)
         Detached-State
     } else {
@@ -384,13 +417,13 @@ try {
     $evidence.finished = (Get-Date).ToString('o')
 } catch {
     $evidence.status='failed';$evidence.error=$_.Exception.Message
-    if ($Case -eq 'detached' -and $script:detachedOutput) {
+    if ($Case -ne 'all' -and $script:detachedOutput) {
         $evidence.hostOutput=@($hosts|ForEach-Object {$output=$script:detachedOutput[$_.Id];@{pid=$_.Id;stdout=[CliProbe]::Output($output.out);stderr=[CliProbe]::Output($output.err)}})
     }
     Save-Json (Join-Path $directory 'native-state-background.json') $evidence
     throw
 } finally {
-    foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); if ($Case -eq 'detached') {[CliProbe]::WaitAfterKill($owned)} else {$owned.WaitForExit()} } }
-    if ($Case -eq 'detached') {if ($script:stateBrowser) {$script:stateBrowser.Dispose()};if ($script:stateEditor) {$script:stateEditor.Dispose()}}
+    foreach ($owned in $hosts) { if (-not $owned.HasExited) { $owned.Kill(); if ($Case -ne 'all') {[CliProbe]::WaitAfterKill($owned)} else {$owned.WaitForExit()} } }
+    if ($Case -ne 'all') {if ($script:stateBrowser) {$script:stateBrowser.Dispose()};if ($script:stateEditor) {$script:stateEditor.Dispose()}}
 }
 [ordered]@{status='passed';case=$Case;checks=$evidence.checks.Count}|ConvertTo-Json -Compress

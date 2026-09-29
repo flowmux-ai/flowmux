@@ -58,6 +58,7 @@ impl App {
             opener.preview_binding.is_none() || opener.preview_generation.is_some(),
             "SSH preview has expired"
         );
+        let persistent = opener.persistent;
         let preview = opener
             .preview_binding
             .clone()
@@ -90,7 +91,12 @@ impl App {
         } else {
             None
         };
-        let child = Browser::new_in_environment(self, opened.surface, Some(request.environment()));
+        let child = Browser::new_in_environment(
+            self,
+            opened.surface,
+            Some(request.environment()),
+            persistent,
+        );
         let mut child = match child {
             Ok(child) => child,
             Err(error) => {
