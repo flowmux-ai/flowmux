@@ -515,6 +515,9 @@ impl App {
             UiAction::Changed => {
                 if self.search.panel.as_ref().unwrap().composing() {
                     self.search.debounce = None;
+                    if let Some(run) = self.search.run.as_ref().filter(|run| !run.cancelled) {
+                        self.cancel_search(run.id)?;
+                    }
                     return Ok(());
                 }
                 let (query, match_case) = self.search.panel.as_ref().unwrap().read_query();
@@ -576,9 +579,16 @@ impl App {
                 }
             }
             UiAction::Open => {
+                let panel = self.search.panel.as_ref().unwrap();
+                let (query, match_case) = panel.read_query();
+                if panel.composing() {
+                    return Ok(());
+                }
                 if let (Some(run), Some(index)) = (
-                    &self.search.run,
-                    self.search.panel.as_ref().unwrap().selected(),
+                    self.search.run.as_ref().filter(|run| {
+                        run.query == query && run.match_case == match_case && !run.cancelled
+                    }),
+                    panel.selected().or_else(|| (panel.rows() > 0).then_some(0)),
                 ) {
                     let id = run.id;
                     if let Err(error) = self.open_search(id, index, None) {

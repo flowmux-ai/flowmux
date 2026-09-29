@@ -7,7 +7,7 @@ $budget=[Diagnostics.Stopwatch]::StartNew()
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('search-dialog-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $evidence=[ordered]@{started=(Get-Date).ToUniversalTime().ToString('o');mode='hidden-native-search-dialog';checks=@();observations=@();desktopInput=$false;clipboardAccess=$false;physicalIme=$false}
@@ -54,6 +54,12 @@ function Wait-Search($Result) {
     if($Result.cancelled -or $Result.unavailable.Count -ne 0){throw 'Owned fixture search cancelled or unavailable'}
     return $Result
 }
+function Open-Dialog {
+    $buttons=@((Tree).chrome.controls|Where-Object {$_.kind -eq 'search_all'})
+    if($buttons.Count -ne 1){throw 'Expected exactly one native search entry'}
+    [SearchDialogFixture]::Click([IntPtr]([long]$buttons[0].handle),$process.Id)
+    return Wait-Dialog {param($d)$d.open -and -not $d.owner_enabled} 'Search did not restore modality'
+}
 try {
     $doctor=Invoke-Owned @('doctor')
     if(-not $doctor.background_testing){throw 'Debug background host required'}
@@ -82,12 +88,7 @@ try {
     if($page.offset -ne 500 -or $page.hits.Count -ne 205 -or $page.total -ne 705 -or $page.page_size -ne 500){throw 'Existing CLI paging contract changed'}
     $page=Wait-Search (Request @('search-all',$needle,'--match-case'))
     if($page.hits.Count -ne 500 -or $page.total -ne 705 -or $page.panel_rows -ne 500 -or -not [SearchDialogFixture]::IsWindowEnabled($owner)){throw 'CLI search changed modality or initial page'}
-    $tree=Tree
-    $searchButtons=@($tree.chrome.controls|Where-Object {$_.kind -eq 'search_all'})
-    if($searchButtons.Count -ne 1){throw 'Expected exactly one native search entry'}
-    $button=[IntPtr]([long]$searchButtons[0].handle)
-    [SearchDialogFixture]::Click($button,$process.Id)
-    $dialog=Wait-Dialog {param($d)$d.open -and -not $d.owner_enabled} 'Native Show did not disable only its owner'
+    $dialog=Open-Dialog
     $hwnd=[IntPtr]([long]$dialog.window);$dpi=[SearchDialogFixture]::GetDpiForWindow($hwnd)
     $evidence.observations+=@{kind='modal-open';dialog=$dialog;owner=[SearchDialogFixture]::GetWindow($hwnd,4).ToInt64();nativeOwnerEnabled=[SearchDialogFixture]::IsWindowEnabled($owner);dpi=$dpi}
     if(-not $dialog.modal -or [SearchDialogFixture]::GetWindow($hwnd,4) -ne $owner -or [SearchDialogFixture]::IsWindowEnabled($owner) -or $dialog.rect.width -ne [Math]::Round(760*$dpi/96) -or $dialog.rect.height -ne [Math]::Round(520*$dpi/96)){throw 'Search is not the intended 760x520 modal owned dialog'}
@@ -106,19 +107,57 @@ try {
     $selected=Request @('selection','--surface',$surface,'read')
     if($selected.result.text -cne $needle -or -not [SearchDialogFixture]::IsWindowEnabled($owner)){throw 'Expanded result selected stale/wrong terminal cells or kept owner disabled'}
     $evidence.checks+=@{name='actual_native_result_activation_selects_same_original_unicode_and_reenables_owner';passed=$true;selection=$selected.result}
-    $tree=Tree
-    $searchButtons=@($tree.chrome.controls|Where-Object {$_.kind -eq 'search_all'})
-    if($searchButtons.Count -ne 1){throw 'Expected exactly one native search entry'}
-    $button=[IntPtr]([long]$searchButtons[0].handle)
-    [SearchDialogFixture]::Click($button,$process.Id)
-    $dialog=Wait-Dialog {param($d)$d.open -and -not $d.owner_enabled} 'Reopening search did not restore modality'
+    foreach($control in @('query_handle','list_handle')){
+        $dialog=Open-Dialog
+        [OptionsFixture]::PostEnter([long]$dialog.$control,$process.Id)
+        $dialog=Wait-Dialog {param($d)-not $d.open -and $d.owner_enabled} ('Native Enter did not open a result from '+$control)
+        if((Request @('selection','--surface',$surface,'read')).result.text -cne $needle){throw 'Enter selected the wrong original Unicode text'}
+    }
+    $evidence.checks+=@{name='native_input_and_list_Enter_open_selected_result_and_release_modal_owner';passed=$true}
+
+    $dialog=Open-Dialog
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,40,$false,$false)
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,40,$true,$false)
+    $dialog=Wait-Dialog {param($d)$d.open -and $d.selected_index -eq 0} 'Input Down did not select the first result'
+    [OptionsFixture]::CompositionGuard([long]$dialog.window,[long]$dialog.query_handle,$process.Id,$true)
+    [OptionsFixture]::PostEnter([long]$dialog.query_handle,$process.Id);[OptionsFixture]::PostEscape([long]$dialog.query_handle,$process.Id)
+    [SearchDialogFixture]::ActivateRow([IntPtr]([long]$dialog.list_handle),0,$process.Id)
+    $dialog=Wait-Dialog {param($d)$d.open -and $d.composing -and $d.rows -eq 0 -and -not $d.owner_enabled} 'Composition keys or row activation opened a stale result'
+    [OptionsFixture]::CompositionGuard([long]$dialog.window,[long]$dialog.query_handle,$process.Id,$false)
+    $dialog=Wait-Dialog {param($d)$d.open -and -not $d.composing -and $d.settling -and -not $d.pending -and $d.rows -eq 500} 'Completed composition did not refresh results while guarding its ending key'
+    foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,$key,$false,$false)}
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,16,$true,$false)
+    $dialog=(Tree).search_dialog
+    if(-not $dialog.open -or -not $dialog.settling -or $dialog.query -cne $needle){throw 'IME-ending Enter/Escape or modifier release activated the dialog or changed original text'}
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,13,$true,$false)
+    $dialog=Wait-Dialog {param($d)$d.open -and -not $d.settling} 'Key release did not clear the composition guard'
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,13,$false,$true)
+    if(-not (Tree).search_dialog.open){throw 'Held Enter activated a result'}
+    [OptionsFixture]::PostEnter([long]$dialog.query_handle,$process.Id)
+    $dialog=Wait-Dialog {param($d)-not $d.open -and $d.owner_enabled} 'Independent Enter after composition did not open a result'
+    if((Request @('selection','--surface',$surface,'read')).result.text -cne $needle){throw 'Post-composition Enter changed the original Unicode selection'}
+    $evidence.checks+=@{name='query_Down_IME_start_end_key_release_repeat_and_stale_row_guards';passed=$true}
+
+    $dialog=Open-Dialog
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,229,$false,$false)
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,27,$false,$false)
+    $dialog=Wait-Dialog {param($d)$d.open -and $d.settling} 'PROCESS key guard closed the search dialog'
+    [OptionsFixture]::PostKey([long]$dialog.query_handle,$process.Id,229,$true,$false)
+    $dialog=Wait-Dialog {param($d)$d.open -and -not $d.settling} 'PROCESS key release did not clear the guard'
+    [OptionsFixture]::PostEscape([long]$dialog.query_handle,$process.Id)
+    $dialog=Wait-Dialog {param($d)-not $d.open -and $d.owner_enabled} 'Input Escape did not close and release its owner'
+    $evidence.checks+=@{name='PROCESS_key_release_then_input_Escape_closes_without_desktop_focus';passed=$true}
+
+    $dialog=Open-Dialog
     $missing='없는결과_한_😀'
     [SearchDialogFixture]::SetText([IntPtr]([long]$dialog.query_handle),$missing,$process.Id)
     $dialog=Wait-Dialog {param($d)$d.query -ceq $missing -and -not $d.pending -and $d.rows -eq 0 -and $d.status.Contains('0 of 0')} 'Live native query change did not show empty results'
     if([SearchDialogFixture]::Text([IntPtr]([long]$dialog.query_handle),$process.Id) -cne $missing){throw 'Native query normalization changed original text'}
+    [OptionsFixture]::PostEnter([long]$dialog.query_handle,$process.Id)
+    if(-not (Tree).search_dialog.open){throw 'Empty results Enter opened an older search result'}
     [SearchDialogFixture]::SetText([IntPtr]([long]$dialog.query_handle),('x'*1100),$process.Id)
     $dialog=Wait-Dialog {param($d)$d.status.Contains('at most 1024')} 'Invalid query did not report bounded validation error'
-    [SearchDialogFixture]::Close([IntPtr]([long]$dialog.window),$process.Id)
+    [OptionsFixture]::PostEscape([long]$dialog.query_handle,$process.Id)
     $dialog=Wait-Dialog {param($d)-not $d.open -and $d.owner_enabled} 'Closing error state failed to release modal owner'
     $evidence.checks+=@{name='native_query_empty_error_and_close_preserve_text_and_release_owner';passed=$true;dialog=$dialog}
     Tree|Out-Null

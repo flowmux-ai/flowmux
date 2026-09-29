@@ -24,6 +24,11 @@ pub(crate) enum UiAction {
     Tick,
 }
 fn emit(action: UiAction) {
+    if matches!(action, UiAction::Open | UiAction::Refresh | UiAction::More)
+        && COMPOSING.with(Cell::get)
+    {
+        return;
+    }
     post(Event::SearchUi(action));
 }
 #[derive(Clone)]
@@ -33,6 +38,7 @@ struct ResultPaint {
 }
 thread_local! {
     static COMPOSING: Cell<bool> = const { Cell::new(false) };
+    static SETTLING: Cell<bool> = const { Cell::new(false) };
     static SETTING_QUERY: Cell<bool> = const { Cell::new(false) };
     static PAINT: RefCell<HashMap<isize, ResultPaint>> = RefCell::new(HashMap::new());
 }
@@ -47,14 +53,25 @@ unsafe extern "system" fn query_proc(
     match message {
         WM_IME_STARTCOMPOSITION => {
             COMPOSING.with(|v| v.set(true));
+            SETTLING.with(|v| v.set(true));
             emit(UiAction::Changed);
         }
         WM_IME_ENDCOMPOSITION => {
             COMPOSING.with(|v| v.set(false));
+            SETTLING.with(|v| v.set(true));
             emit(UiAction::Changed);
+        }
+        WM_KEYDOWN if wparam == 229 => SETTLING.with(|v| v.set(true)),
+        WM_KEYUP if !matches!(wparam, 0x10..=0x12 | 0xa0..=0xa5) => {
+            SETTLING.with(|v| v.set(false));
+        }
+        WM_KILLFOCUS => {
+            COMPOSING.with(|v| v.set(false));
+            SETTLING.with(|v| v.set(false));
         }
         WM_NCDESTROY => {
             COMPOSING.with(|v| v.set(false));
+            SETTLING.with(|v| v.set(false));
             RemoveWindowSubclass(window, Some(query_proc), QUERY_SUBCLASS);
         }
         _ => {}
@@ -228,7 +245,7 @@ pub(super) struct Panel {
 }
 impl Drop for Panel {
     fn drop(&mut self) {
-        self.release_owner();
+        self.hide();
         PAINT.with(|paint| {
             paint.borrow_mut().remove(&(self.list as isize));
         });
@@ -456,6 +473,8 @@ impl Panel {
     }
     pub(super) fn show(&self, background: bool) {
         if !self.opened.replace(true) {
+            COMPOSING.with(|v| v.set(false));
+            SETTLING.with(|v| v.set(false));
             unsafe {
                 if IsWindowEnabled(self.owner) != 0 {
                     self.disabled_owner.set(true);
@@ -497,6 +516,8 @@ impl Panel {
     }
     pub(super) fn hide(&self) {
         self.opened.set(false);
+        COMPOSING.with(|v| v.set(false));
+        SETTLING.with(|v| v.set(false));
         self.release_owner();
         unsafe {
             KillTimer(self.window, 2);
@@ -504,13 +525,43 @@ impl Panel {
         }
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
-        // Preserve native composition commit/cancel; never translate EDIT Enter
-        // through IsDialogMessage into the Refresh/default button action.
-        if message.hwnd == self.query
-            && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
-            && matches!(message.wParam, 13 | 27)
+        if !self.opened.get()
+            || (message.hwnd != self.window && unsafe { IsChild(self.window, message.hwnd) } == 0)
         {
             return false;
+        }
+        // The IME's final Enter/Escape is still guarded until its key release.
+        if self.composing() || SETTLING.with(Cell::get) || message.wParam == 229 {
+            return false;
+        }
+        if message.message == WM_KEYDOWN {
+            if message.wParam == 27
+                || (message.wParam == 13
+                    && (message.hwnd == self.query || message.hwnd == self.list))
+            {
+                if message.lParam as usize & (1 << 30) == 0 {
+                    emit(if message.wParam == 27 {
+                        UiAction::Close
+                    } else {
+                        UiAction::Open
+                    });
+                }
+                return true;
+            }
+            if message.wParam == 40 && message.hwnd == self.query {
+                unsafe {
+                    if IsWindowEnabled(self.list) != 0 && self.rows() > 0 {
+                        SendMessageW(self.list, LB_SETCURSEL, 0, 0);
+                        if IsWindowVisible(self.window) != 0 {
+                            SetFocus(self.list);
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        if message.message == WM_CHAR && matches!(message.wParam, 13 | 27) {
+            return true;
         }
         unsafe {
             IsWindowVisible(self.window) != 0
@@ -625,6 +676,6 @@ impl Panel {
             GetWindowRect(self.window, &mut rect);
         }
         json!({"window":self.window as usize,"owner":self.owner as usize,"modal":true,"open":self.opened.get(),"owner_enabled":unsafe{IsWindowEnabled(self.owner)}!=0,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,
-            "query":query,"match_case":match_case,"composing":self.composing(),"query_handle":self.query as usize,"case_handle":self.case as usize,"refresh_handle":self.refresh as usize,"list_handle":self.list as usize,"more_handle":self.more as usize,"more_visible":self.has_more.get(),"rows":self.rows(),"status":self.status_text.borrow().clone(),"rect":{"x":rect.left,"y":rect.top,"width":rect.right-rect.left,"height":rect.bottom-rect.top},"labels":self.labels.borrow().clone()})
+            "query":query,"match_case":match_case,"composing":self.composing(),"settling":SETTLING.with(Cell::get),"selected_index":self.selected(),"query_handle":self.query as usize,"case_handle":self.case as usize,"refresh_handle":self.refresh as usize,"list_handle":self.list as usize,"more_handle":self.more as usize,"more_visible":self.has_more.get(),"rows":self.rows(),"status":self.status_text.borrow().clone(),"rect":{"x":rect.left,"y":rect.top,"width":rect.right-rect.left,"height":rect.bottom-rect.top},"labels":self.labels.borrow().clone()})
     }
 }
