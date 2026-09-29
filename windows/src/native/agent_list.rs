@@ -63,7 +63,9 @@ impl App {
 
     pub(super) fn ack_focused_agent(&self, id: SurfaceId) {
         if let Some(state) = self.agent_states.borrow_mut().get_mut(&id) {
-            state.presence.mark_seen();
+            if state.presence.mark_seen() {
+                self.sender.send(Event::AgentChanged);
+            }
         }
     }
 
@@ -116,6 +118,7 @@ impl App {
         args: &AgentReportArgs,
         entry: Option<Entry>,
     ) -> anyhow::Result<Value> {
+        let before = self.agent_presence(surface);
         let status: AgentStatus = serde_json::from_value(json!(args.status))?;
         let mut report = AgentStatusReport::from_activity(&args.agent, None, Some(args.pid));
         report.status = Some(status);
@@ -149,7 +152,19 @@ impl App {
                 state.presence.apply_report(report, visible)
             }
         };
-        Ok(json!({"accepted":accepted,"surface":surface,"agent":self.agent_presence(surface)}))
+        let after = self.agent_presence(surface);
+        let display = |p: &AgentPresence| {
+            (
+                p.name.clone(),
+                p.status,
+                p.seen,
+                p.status_text().map(str::to_string),
+            )
+        };
+        if before.as_ref().map(display) != after.as_ref().map(display) {
+            self.sender.send(Event::AgentChanged);
+        }
+        Ok(json!({"accepted":accepted,"surface":surface,"agent":after}))
     }
 
     pub(super) fn agents_request(
@@ -229,11 +244,16 @@ impl App {
     pub(super) fn agents_poll(&mut self) {
         {
             let mut states = self.agent_states.borrow_mut();
+            let before = states.len();
             states.retain(|_, state| state.entry.current(self));
+            let mut changed = before != states.len();
             for (id, state) in states.iter_mut() {
                 if self.source_is_focused(Some(*id)) {
-                    state.presence.mark_seen();
+                    changed |= state.presence.mark_seen();
                 }
+            }
+            if changed {
+                self.sender.send(Event::AgentChanged);
             }
         }
         let Some(pending) = &mut self.pending_agents else {

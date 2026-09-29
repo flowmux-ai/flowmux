@@ -432,7 +432,7 @@ struct Resources {
     body: HFONT,
     caption: HFONT,
     title: HFONT,
-    agent_icons: [HICON; 2],
+    agent_icons: [HICON; 5],
     background: HBRUSH,
     surface: HBRUSH,
     owns_body: bool,
@@ -486,7 +486,17 @@ impl Resources {
         struct IconBytes<const N: usize>([u8; N]);
         let claude = IconBytes(*include_bytes!("../../assets/claude.png"));
         let codex = IconBytes(*include_bytes!("../../assets/codex.png"));
-        let agent_icons = [claude.0.as_slice(), codex.0.as_slice()].map(|bytes| {
+        let opencode = IconBytes(*include_bytes!("../../assets/opencode.png"));
+        let cline = IconBytes(*include_bytes!("../../assets/cline.png"));
+        let antigravity = IconBytes(*include_bytes!("../../assets/antigravity.png"));
+        let agent_icons = [
+            claude.0.as_slice(),
+            codex.0.as_slice(),
+            opencode.0.as_slice(),
+            cline.0.as_slice(),
+            antigravity.0.as_slice(),
+        ]
+        .map(|bytes| {
             let size = (14 * dpi as i32 + 48) / 96;
             let icon = unsafe {
                 CreateIconFromResourceEx(
@@ -548,6 +558,9 @@ pub(super) fn draw_agent_icon(dc: HDC, agent: &str, area: RECT) -> bool {
     let index = match agent {
         "claude" => 0,
         "codex" => 1,
+        "opencode" => 2,
+        "cline" => 3,
+        "antigravity" => 4,
         _ => return false,
     };
     let icon = STATE.with(|slot| slot.borrow().resources.agent_icons[index]);
@@ -569,12 +582,23 @@ pub(super) fn draw_agent_icon(dc: HDC, agent: &str, area: RECT) -> bool {
         }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, PartialEq, Eq, serde::Serialize)]
+pub(super) struct WorkspaceLine {
+    pub text: String,
+    pub path: bool,
+    pub agent: Option<flowmux_core::AgentPresence>,
+    /// None is a top-level row; Some records the outer branch continuation.
+    pub parent: Option<bool>,
+    pub continues: bool,
+}
+
+#[derive(Clone)]
 struct Entry {
     button: Option<Role>,
     control: ControlRole,
     hot: bool,
     focused: bool,
+    workspace_lines: Vec<WorkspaceLine>,
 }
 #[derive(Clone, Copy)]
 struct WorkspaceClose {
@@ -932,7 +956,7 @@ fn color_ref(hex: &str) -> COLORREF {
 }
 fn blend(a: COLORREF, b: COLORREF, percent: u32) -> COLORREF {
     let channel = |shift: u32| {
-        (((a >> shift) & 255u32) * percent + ((b >> shift) & 255u32) * (100 - percent)) / 100
+        (((a >> shift) & 255u32) * percent + ((b >> shift) & 255u32) * (100 - percent)) / 100u32
     };
     rgb(channel(0), channel(8), channel(16))
 }
@@ -1038,6 +1062,7 @@ fn register(window: HWND, button: Option<Role>, control: ControlRole) {
                 control,
                 hot: false,
                 focused: false,
+                workspace_lines: Vec::new(),
             },
         );
         if matches!(control, ControlRole::Caption | ControlRole::UsageBar) {
@@ -1097,6 +1122,35 @@ pub(super) fn set_role(window: HWND, role: Role) {
     unsafe {
         InvalidateRect(window, std::ptr::null(), 0);
     }
+}
+
+pub(super) fn set_workspace_lines(window: HWND, lines: Vec<WorkspaceLine>) {
+    let changed = STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let Some(entry) = state.controls.get_mut(&(window as isize)) else {
+            return false;
+        };
+        if entry.workspace_lines == lines {
+            return false;
+        }
+        entry.workspace_lines = lines;
+        true
+    });
+    if changed {
+        unsafe {
+            InvalidateRect(window, std::ptr::null(), 0);
+        }
+    }
+}
+
+pub(super) fn workspace_lines(window: HWND) -> Vec<WorkspaceLine> {
+    STATE.with(|slot| {
+        slot.borrow()
+            .controls
+            .get(&(window as isize))
+            .map(|entry| entry.workspace_lines.clone())
+            .unwrap_or_default()
+    })
 }
 
 pub(super) fn shutdown() {
@@ -1525,6 +1579,72 @@ unsafe fn draw_terminal_glyph(dc: HDC, cx: i32, cy: i32, radius: i32, unit: i32)
     LineTo(dc, cx + radius + 1, cy + radius - unit);
 }
 
+unsafe fn draw_agent_status(
+    dc: HDC,
+    status: flowmux_core::AgentStatus,
+    seen: bool,
+    cx: i32,
+    cy: i32,
+    unit: i32,
+    color: COLORREF,
+) {
+    use flowmux_core::AgentStatus;
+    SelectObject(dc, GetStockObject(DC_PEN));
+    SelectObject(dc, GetStockObject(NULL_BRUSH));
+    SetDCPenColor(dc, color);
+    let line = |x1, y1, x2, y2| {
+        MoveToEx(dc, cx + x1 * unit, cy + y1 * unit, std::ptr::null_mut());
+        LineTo(dc, cx + x2 * unit, cy + y2 * unit);
+    };
+    match status {
+        AgentStatus::Blocked => {
+            line(0, -5, 5, 4);
+            line(5, 4, -5, 4);
+            line(-5, 4, 0, -5);
+            line(0, -2, 0, 1);
+            line(0, 2, 0, 3);
+        }
+        AgentStatus::Working => {
+            for (x, y) in [
+                (1, 0),
+                (1, 1),
+                (0, 1),
+                (-1, 1),
+                (-1, 0),
+                (-1, -1),
+                (0, -1),
+                (1, -1),
+            ] {
+                line(x * 3, y * 3, x * 5, y * 5);
+            }
+        }
+        AgentStatus::Done if !seen => {
+            line(-5, 0, -1, 4);
+            line(-1, 4, 5, -4);
+        }
+        AgentStatus::Done | AgentStatus::Idle => {
+            line(-2, -4, -2, 5);
+            line(2, -4, 2, 5);
+        }
+        AgentStatus::Unknown => {
+            SetTextColor(dc, color);
+            let mut area = RECT {
+                left: cx - unit * 6,
+                right: cx + unit * 6,
+                top: cy - unit * 8,
+                bottom: cy + unit * 8,
+            };
+            DrawTextW(
+                dc,
+                [b'?' as u16].as_ptr(),
+                1,
+                &mut area,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
+            );
+        }
+    }
+}
+
 unsafe fn draw_tab_background(
     dc: HDC,
     rect: &RECT,
@@ -1614,6 +1734,11 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     let disabled = item.itemState & ODS_DISABLED != 0;
     let suggested = matches!(role, Role::Suggested) && !disabled;
     let workspace = matches!(role, Role::Workspace { .. });
+    let rows = workspace_lines(item.hwndItem);
+    let status = rows
+        .iter()
+        .filter_map(|line| line.agent.as_ref().map(|agent| agent.status))
+        .max_by_key(|status| status.rollup_rank());
     let highlighted = (!workspace && selected) || pressed || hot;
     let color = if suggested {
         palette.accent
@@ -1643,6 +1768,24 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         palette.surface
     } else {
         palette.background
+    };
+    let color = if workspace && !palette.high_contrast {
+        use flowmux_core::AgentStatus;
+        let tint = match status {
+            Some(AgentStatus::Blocked) => Some((rgb(239, 68, 68), 16u32)),
+            Some(AgentStatus::Done) => Some((rgb(59, 130, 246), 14u32)),
+            _ => None,
+        };
+        tint.map_or(color, |(ink, alpha)| {
+            let channel = |shift| {
+                (((ink >> shift) & 255u32) * alpha
+                    + ((palette.background >> shift) & 255u32) * (100 - alpha))
+                    / 100u32
+            };
+            rgb(channel(0), channel(8), channel(16))
+        })
+    } else {
+        color
     };
     let text = if disabled {
         palette.muted
@@ -1809,7 +1952,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         SetBkMode(item.hDC, TRANSPARENT as i32);
         SelectObject(item.hDC, font);
         let mut original =
-            vec![0u16; GetWindowTextLengthW(item.hwndItem).clamp(0, 256_000) as usize + 1];
+            vec![0u16; GetWindowTextLengthW(item.hwndItem).clamp(0, 524_288) as usize + 1];
         let length = GetWindowTextW(item.hwndItem, original.as_mut_ptr(), original.len() as i32);
         original.truncate(length.max(0) as usize);
         let label = caption_for_paint(&original);
@@ -2161,35 +2304,31 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             SetTextColor(item.hDC, palette.muted);
             SelectObject(item.hDC, GetStockObject(DC_PEN));
             SetDCPenColor(item.hDC, palette.muted);
-            let lines: Vec<&str> = lines.take(3).collect();
-            for (index, line) in lines.iter().enumerate() {
+            for (index, line) in rows.iter().enumerate() {
                 let top = rect.top + pixel(27 + index as i32 * 20);
                 let bottom = (top + pixel(20)).min(rect.bottom - pixel(5));
                 if top >= bottom {
                     break;
                 }
                 let mid = (top + bottom) / 2;
-                let x = rect.left + pixel(6);
-                if rect.right - rect.left > pixel(14) {
+                let depth = i32::from(line.parent.is_some());
+                let gutter = pixel(14 * (depth + 1));
+                let x = rect.left + pixel(6 + depth * 14);
+                SetDCPenColor(item.hDC, palette.muted);
+                if rect.right - rect.left > gutter {
+                    if line.parent == Some(true) {
+                        MoveToEx(item.hDC, rect.left + pixel(6), top, std::ptr::null_mut());
+                        LineTo(item.hDC, rect.left + pixel(6), bottom);
+                    }
                     MoveToEx(item.hDC, x, top, std::ptr::null_mut());
-                    LineTo(
-                        item.hDC,
-                        x,
-                        if index + 1 == lines.len() {
-                            mid + 1
-                        } else {
-                            bottom
-                        },
-                    );
+                    LineTo(item.hDC, x, if line.continues { bottom } else { mid + 1 });
                     MoveToEx(item.hDC, x, mid, std::ptr::null_mut());
-                    LineTo(item.hDC, rect.left + pixel(14), mid);
+                    LineTo(item.hDC, rect.left + gutter, mid);
                 }
-                // Keep full Unicode paths in HWND captions/accessibility; only
-                // display their last three components, as the Linux sidebar does.
-                let shortened = if line.starts_with("Browser-") || line.starts_with("Editor-") {
-                    line.to_string()
-                } else {
-                    let names: Vec<_> = std::path::Path::new(line)
+                // Native text/accessibility retains full Unicode; only paths
+                // are shortened in the painted metadata tree.
+                let shortened = if line.path {
+                    let names: Vec<_> = std::path::Path::new(&line.text)
                         .components()
                         .filter_map(|part| {
                             if let std::path::Component::Normal(name) = part {
@@ -2206,23 +2345,77 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                             names[names.len() - 3..].join(std::path::MAIN_SEPARATOR_STR)
                         )
                     } else {
-                        line.to_string()
+                        line.text.clone()
                     }
+                } else {
+                    line.text.clone()
                 };
-                let text: Vec<u16> = shortened.encode_utf16().collect();
                 let mut line_rect = RECT {
-                    left: rect.left + pixel(14),
+                    left: rect.left + gutter,
                     top,
                     bottom,
                     ..rect
                 };
+                let mut ink = palette.muted;
+                if let Some(agent) = &line.agent {
+                    use flowmux_core::AgentStatus;
+                    ink = if palette.high_contrast {
+                        palette.foreground
+                    } else {
+                        match agent.status {
+                            AgentStatus::Working => rgb(245, 158, 11),
+                            AgentStatus::Blocked if !agent.seen => rgb(239, 68, 68),
+                            AgentStatus::Done if !agent.seen => rgb(59, 130, 246),
+                            _ => palette.muted,
+                        }
+                    };
+                    if line_rect.right - line_rect.left > pixel(32) {
+                        draw_agent_status(
+                            item.hDC,
+                            agent.status,
+                            agent.seen,
+                            line_rect.left + pixel(6),
+                            mid,
+                            pixel(1),
+                            ink,
+                        );
+                        let area = RECT {
+                            left: line_rect.left + pixel(16),
+                            right: line_rect.left + pixel(30),
+                            top: mid - pixel(7),
+                            bottom: mid + pixel(7),
+                        };
+                        if !draw_agent_icon(item.hDC, &agent.name, area) {
+                            SetDCPenColor(item.hDC, ink);
+                            draw_terminal_glyph(
+                                item.hDC,
+                                area.left + pixel(7),
+                                mid,
+                                pixel(5),
+                                pixel(1),
+                            );
+                        }
+                        line_rect.left += pixel(34);
+                    }
+                }
+                SetTextColor(item.hDC, ink);
                 if line_rect.left < line_rect.right {
+                    let text: Vec<u16> = shortened.encode_utf16().collect();
+                    let text = caption_for_paint(&text);
                     DrawTextW(
                         item.hDC,
                         text.as_ptr(),
                         text.len() as i32,
                         &mut line_rect,
-                        DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS | accelerator,
+                        DT_LEFT
+                            | DT_SINGLELINE
+                            | DT_VCENTER
+                            | DT_NOPREFIX
+                            | if line.path {
+                                DT_PATH_ELLIPSIS
+                            } else {
+                                DT_END_ELLIPSIS
+                            },
                     );
                 }
             }
@@ -2655,7 +2848,11 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
         descendants(window, 0, &mut 4096, &mut ordered)?;
         ordered
             .into_iter()
-            .filter_map(|hwnd| registered.get(&(hwnd as isize)).map(|entry| (hwnd, *entry)))
+            .filter_map(|hwnd| {
+                registered
+                    .get(&(hwnd as isize))
+                    .map(|entry| (hwnd, entry.clone()))
+            })
             .collect()
     } else {
         registered

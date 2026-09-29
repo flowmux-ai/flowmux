@@ -12,8 +12,8 @@ $diagnostic=[ordered]@{physicalInput=$false;clipboardAccess=$false;realAccount=$
 function Require([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
 function Path-Same([string]$A,[string]$B){return [string]::Equals($A.Replace('/','\').TrimEnd('\'),$B.Replace('/','\').TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)}
 function Budget([int]$Maximum=5000){if($cleaning){return [Math]::Min($Maximum,2000)};$left=75000-$clock.ElapsedMilliseconds;Require ($left -gt 0) 'Agent sessions verification exceeded75s';return [int][Math]::Min($Maximum,$left)}
-function Request([string[]]$Arguments,[int]$Maximum=5000,[bool]$ExpectFailure=$false){
- Require ([bool]$pipeName) 'Explicit owned pipe required';$diagnostic.lastCommand=$Arguments;$p=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$Arguments),$directory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
+function Request([string[]]$Arguments,[int]$Maximum=5000,[bool]$ExpectFailure=$false,[string]$WorkingDirectory=$directory){
+ Require ([bool]$pipeName) 'Explicit owned pipe required';$diagnostic.lastCommand=$Arguments;$p=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$Arguments),$WorkingDirectory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
  try{Require ($p.WaitForExit((Budget $Maximum))) 'Owned CLI exceeded deadline';Require ($out.Wait(500)-and $err.Wait(500)) 'Owned CLI pipes did not close';if($ExpectFailure){Require ($p.ExitCode -ne 0) 'Invalid agent report was accepted';return [CliProbe]::Output($err)};Require ($p.ExitCode -eq 0) ('Owned CLI failed: '+[CliProbe]::Output($err));return ([CliProbe]::Output($out)|ConvertFrom-Json)}
  catch{$diagnostic.commandFailure=@{arguments=$Arguments;stdout=[CliProbe]::Output($out);stderr=[CliProbe]::Output($err)};throw}
  finally{if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
@@ -25,6 +25,21 @@ function Click([long]$Handle){[OptionsFixture]::Click([OptionsFixture]::Parent($
 function Stable($Before){$t=Tree;foreach($s in $Before){$n=@($t.surfaces|Where-Object {$_.id -ceq $s.id});Require ($n.Count -eq 1 -and $n[0].pid -eq $s.pid -and $n[0].session -ceq $s.session -and $n[0].view_handle -eq $s.view_handle -and $n[0].holder.window -eq $s.holder.window -and $n[0].running) 'Sessions changed a retained terminal PID/session/view/holder'};return $t}
 function Passed([string]$Name){$script:checks+=,$Name;$diagnostic.checks=$checks;Require ($env:CODEX_HOME -ceq $originalCodexHome) 'Fixture modified parent CODEX_HOME'}
 function Panel($Tree){$p=$Tree.agent_sessions.panel;Require ($Tree.agent_sessions.open -and $p.open -and -not $p.native_visible -and [OptionsFixture]::Parent([long]$p.window,$owned.Id) -eq $Tree.window_handle) 'Sessions must be an owned hidden child dock';Require ([OptionsFixture]::Describe([long]$Tree.window_handle,$owned.Id).Enabled) 'Sessions dock disabled main';foreach($h in @($p.query_handle,$p.list,$p.preview,$p.refresh,$p.close,$p.resume)){Require ([OptionsFixture]::Parent([long]$h,$owned.Id) -eq $p.window) 'Session control belongs to another owner'};return $p}
+function Agent-Sidebar([string]$Name,[string]$Status,[string]$Text){
+ $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and $row.workspace_lines[0].agent.status -ceq $Status -and $row.workspace_lines[1].text -ceq $Text}
+ $row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$scale=[Math]::Max(96,$tree.chrome.dpi)/96.0
+ Require ($row.workspace_lines[0].text -ceq 'codex' -and $null -eq $row.workspace_lines[0].parent -and -not $row.workspace_lines[0].continues -and $row.workspace_lines[1].parent -ceq $false -and $row.workspace_lines[1].continues -and $row.workspace_lines[2].parent -ceq $false -and -not $row.workspace_lines[2].continues -and (Path-Same $row.workspace_lines[2].text $projectA)) 'Agent metadata is not Linux header/status/path nesting'
+ Require ([Math]::Abs($row.rect.height-96*$scale) -le 2) 'Agent sidebar row did not grow to three metadata lines'
+ Require ([OptionsFixture]::Text([long]$row.handle,$owned.Id) -ceq ($row.label) -and $row.label.Contains($Text.Replace('&','&&')) -and $row.label.Contains(('codex ('+$Status+')'))) 'Native accessible caption differs from raw report text'
+ $bmp=Join-Path $directory ($Name+'.bmp');$png=Join-Path $directory ($Name+'.png');Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ $background=if($Status -eq 'blocked'){'#442b31'}elseif($Status -eq 'done'){'#27334a'}else{'#24272e'}
+ $ink=if($Status -eq 'blocked'){'#ef4444'}elseif($Status -eq 'done'){'#3b82f6'}elseif($Status -eq 'working'){'#f59e0b'}else{'#abb1bc'}
+ $x=$row.rect.x;$y=$row.rect.y;$gutter=$x+[int][Math]::Round(21*$scale);$nested=$gutter+[int][Math]::Round(14*$scale)
+ Require ([ChromeFixture]::Pixel($png,($x+$row.rect.width-4),($y+$row.rect.height-4)) -ceq $background) 'Agent workspace tint differs from Linux rgba16/14 percent'
+ Require ([ChromeFixture]::ColorCount($png,($gutter+8),($y+[int](27*$scale)),([int](46*$scale)),([int](20*$scale)),$ink) -gt 2) 'Native agent header status icon/color missing'
+ Require ([ChromeFixture]::Pixel($png,$gutter,($y+[int](39*$scale))) -ceq $background -and [ChromeFixture]::Pixel($png,$nested,($y+[int](48*$scale))) -ceq '#abb1bc' -and [ChromeFixture]::Pixel($png,$nested,($y+[int](80*$scale))) -ceq $background) 'Nested native tree connectors continue through the wrong branch'
+ $diagnostic.agentCapture=@{path=$png;row=$row};return $row.handle
+}
 function Query($Tree,[string]$Text){$p=Panel $Tree;[OptionsFixture]::SetTextAndNotify([long]$p.window,[long]$p.query_handle,$owned.Id,$Text)}
 function Select-Session($Tree,[string]$Id){$p=Panel $Tree;$row=@($p.rows|Where-Object {$_.id -ceq $Id});Require ($row.Count -eq 1) 'Expected exact visible session row';[OptionsFixture]::ListSelect([long]$p.window,[long]$p.list,$owned.Id,[int]$row[0].index);return Await {param($t) $t.agent_sessions.selected -ceq $Id -and $t.agent_sessions.panel.resume_enabled -and -not $t.agent_sessions.loading}}
 function Shortcut([string]$Surface){Request @('test-shortcut',$Surface,'{"code":"KeyJ","key":"j","ctrlKey":true,"altKey":true}')|Out-Null}
@@ -83,14 +98,18 @@ public static class OwnedCodexSessionFixture {
  $initial=Request ($report+@('--seq','1','--status','idle'));Require ($initial.accepted -and $initial.agent.status -ceq 'idle' -and $initial.agent.seen) 'Initial idle report invented a completion alert'
  $statusText='한글 한 é 😀 상태';$r=Request ($report+@('--seq','2','--status','working','--message',$statusText))
  Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.activity -ceq 'running' -and $r.agent.message -ceq $statusText) 'Working status did not preserve raw Unicode'
+ $sidebarHandle=Agent-Sidebar 'agent-working' 'working' $statusText
  foreach($seq in @('1','2')){$stale=Request ($report+@('--seq',$seq,'--status','blocked','--message','stale'));Require (-not $stale.accepted -and $stale.agent.seq -eq 2 -and $stale.agent.status -ceq 'working' -and $stale.agent.message -ceq $statusText) 'Old/duplicate sequence overwrote current status'}
  $r=Request ($report+@('--seq','4','--status','blocked','--message',$statusText));Require ($r.accepted -and $r.agent.status -ceq 'blocked' -and $r.agent.activity -ceq 'needs_input' -and -not $r.agent.seen) 'Hidden blocked report lost its unseen state'
+ Require ((Agent-Sidebar 'agent-blocked' 'blocked' $statusText) -eq $sidebarHandle) 'Status report replaced workspace HWND'
  $stale=Request ($report+@('--seq','3','--status','working'));Require (-not $stale.accepted -and $stale.agent.status -ceq 'blocked') 'Delayed progress cleared a newer input wait'
  $r=Request ($report+@('--seq','5','--status','idle'));Require ($r.accepted -and $r.agent.status -ceq 'done' -and $r.agent.activity -ceq 'idle' -and -not $r.agent.seen) 'Unseen idle transition did not derive Done'
+ Require ((Agent-Sidebar 'agent-done' 'done' 'done') -eq $sidebarHandle) 'Done report replaced workspace HWND'
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
  Require ($state.status -ceq 'done' -and $state.seq -eq 5) 'Hidden focus falsely acknowledged Done'
  $agents=@(Request @('agents'));Require ($agents[0].status -ceq 'done' -and -not $agents[0].messaging) 'Agent listing discarded reported activity or advertised fake messaging'
  $r=Request ($report+@('--seq','6','--status','working'));Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.seen) 'A new turn retained an old completion alert'
+ Passed 'Linux-agent-header-status-path-native-tree-tints-Unicode-and-stable-workspace-HWND'
  Stable @($source,$local)|Out-Null;Passed 'ordered-agent-reports-stale-duplicates-Unicode-blocked-unseen-completion-and-hidden-focus'
  foreach($bad in @(
   @('report-agent','codex','--surface',$source.id,'--pid',[string]$owned.Id,'--seq','7','--status','idle'),
@@ -104,7 +123,7 @@ public static class OwnedCodexSessionFixture {
  )){Request $bad 3000 $true|Out-Null}
  $state=@((Tree).surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($state.seq -eq 6 -and $state.status -ceq 'working') 'Invalid report mutated an existing state'
  $savedPipe=$env:FLOWMUX_PIPE_NAME;$savedSurface=$env:FLOWMUX_SURFACE_ID
- try{$env:FLOWMUX_PIPE_NAME=$pipeName;$env:FLOWMUX_SURFACE_ID=$source.id;$r=Request @('report-agent','CODEX','--pid',[string]$source.pid,'--seq','7','--status','blocked','--message',$statusText);Require ($r.accepted -and $r.surface -ceq $source.id -and $r.agent.name -ceq 'codex') 'Inherited surface or canonical agent identity failed'}finally{$env:FLOWMUX_PIPE_NAME=$savedPipe;$env:FLOWMUX_SURFACE_ID=$savedSurface}
+ try{$env:FLOWMUX_PIPE_NAME=$pipeName;$env:FLOWMUX_SURFACE_ID=$source.id;$r=Request @('report-agent','CODEX','--pid',[string]$source.pid,'--seq','7','--status','blocked','--message',$statusText) 3000 $false $projectA;Require ($r.accepted -and $r.surface -ceq $source.id -and $r.agent.name -ceq 'codex') 'Inherited surface or canonical agent identity failed'}finally{$env:FLOWMUX_PIPE_NAME=$savedPipe;$env:FLOWMUX_SURFACE_ID=$savedSurface}
  Passed 'report-rejects-wrong-process-provider-plain-shell-missing-context-invalid-status-sequence-and-message'
  $pending=@();try{
   foreach($seq in @('9','8')){$arguments=$report+@('--seq',$seq,'--status',$(if($seq -eq '9'){'blocked'}else{'idle'}));$process=[CliProbe]::Start($cli,(@('--pipe',$pipeName,'--json')+$arguments),$directory,$directory);$pending+=,@{process=$process;stdout=$process.StandardOutput.ReadToEndAsync();stderr=$process.StandardError.ReadToEndAsync()}}
@@ -113,6 +132,29 @@ public static class OwnedCodexSessionFixture {
  $state=@((Tree).surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;Require ($state.seq -eq 9 -and $state.status -ceq 'blocked') 'Concurrent reports lost the newest sequence'
  Passed 'concurrent-ordered-reports-retain-newest-state-without-discovery-workers-or-waits'
 
+
+ $extras=@();$originalAgentExe=$agentExe
+ try{
+  foreach($provider in @('claude','opencode','cline','antigravity')){
+   $agentExe=Join-Path $directory ($provider+'.exe');[IO.File]::Copy($originalAgentExe,$agentExe);$extra=Agent-Tab $homeA $projectA;$extras+=,$extra
+   $status=switch($provider){'claude'{'working'} 'opencode'{'idle'} 'cline'{'unknown'} 'antigravity'{'blocked'}}
+   Request @('report-agent',$provider,'--surface',$extra.id,'--pid',[string]$extra.pid,'--seq','1','--status',$status)|Out-Null
+  }
+ }finally{$agentExe=$originalAgentExe}
+ $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];@($row.workspace_lines|Where-Object {$_.agent}).Count -eq 4 -and @($row.workspace_lines).Count -eq 12}
+ $row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$headers=@($row.workspace_lines|Where-Object {$_.agent});$scale=[Math]::Max(96,$tree.chrome.dpi)/96.0
+ Require (($headers.agent.name -join ',') -ceq 'antigravity,codex,claude,opencode' -and $headers[3].text -ceq 'opencode +1 agent' -and [Math]::Abs($row.rect.height-276*$scale) -le 2) 'Sidebar agent urgency/name ordering, four-agent cap, overflow suffix or row height differs from Linux'
+ Require ($row.rect.y+$row.rect.height -le $tree.chrome.sidebar_list_bottom -and $row.workspace_lines[1].parent -ceq $true -and $row.workspace_lines[10].parent -ceq $false) 'Multiple agent metadata overlaps the footer or loses ancestor continuations'
+ $bmp=Join-Path $directory 'agent-providers.bmp';$png=Join-Path $directory 'agent-providers.png';Request @('chrome-capture',$bmp)|Out-Null;[ChromeFixture]::Png($bmp,$png);$diagnostic.agentProvidersCapture=$png
+ for($i=0;$i -lt 4;$i++){$x=$row.rect.x+[int][Math]::Round(45*$scale);$y=$row.rect.y+[int][Math]::Round((30+60*$i)*$scale);$side=[int][Math]::Round(14*$scale);Require ([ChromeFixture]::ColorCount($png,$x,$y,$side,$side,'#442b31') -lt $side*$side-5) 'A native provider logo was omitted'}
+
+ Request @('split','vertical','--shell=cmd')|Out-Null;$spare=Request @('identify');Request @('move-tab',$extras[3].id,'--to-pane',$spare.pane)|Out-Null
+ Request @('focus-tab',$extras[3].id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'antigravity') 'Focused blocked agent pane did not lead the metadata tree'
+ Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'codex' -and $row.workspace_lines[3].agent.name -ceq 'antigravity') 'Equal-status agent blocks ignored pane MRU'
+ Request @('close-tab',$spare.surface)|Out-Null;Stable (@($source,$local)+$extras)|Out-Null
+ foreach($extra in $extras){Request @('close-tab',$extra.id)|Out-Null}
+ $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and @($t.surfaces).Count -eq 2};Stable @($source,$local)|Out-Null
+ Passed 'five-owned-providers-Linux-urgency-and-pane-MRU-four-agent-cap-overflow-native-logos-and-close-shrink'
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree
  Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
  $image=[Diagnostics.Process]::GetProcessById([int]$tree.agent_sessions.agent.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'History source image is not actual owned codex.exe'}finally{$image.Dispose()};Stable @($local,$source)|Out-Null;Passed 'actual-owned-codex-process-child-only-CODEX_HOME-and-CtrlAltJ-history-discovery'
@@ -158,7 +200,7 @@ public static class OwnedCodexSessionFixture {
  # Exit only this fixture's known agent image; process death clears presence, never Done.
  $tree=Tree;$sourceNow=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0];Require ($sourceNow.pid -eq $source.pid -and $sourceNow.agent.status -ceq 'blocked') 'Owned source changed before exit check'
  $image=[Diagnostics.Process]::GetProcessById([int]$source.pid);try{Require (Path-Same $image.MainModule.FileName $agentExe) 'Refusing to stop an unrelated process';$image.Kill();Require ($image.WaitForExit(2000)) 'Owned agent exit exceeded2s'}finally{$image.Dispose()}
- $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$null -ne $s.exit_code -and -not $s.agent};Require (@(Request @('agents')).Count -eq 0) 'Exited agent retained a live activity row'
+ $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$null -ne $s.exit_code -and -not $s.agent -and @($row.workspace_lines|Where-Object {$_.agent}).Count -eq 0 -and $row.workspace_lines.Count -eq 1};Require (@(Request @('agents')).Count -eq 0) 'Exited agent retained a live activity row'
  Request ($report+@('--seq','10','--status','idle')) 3000 $true|Out-Null;Passed 'reported-state-follows-live-tab-moves-and-clears-on-owned-process-exit-without-false-completion'
 
 }

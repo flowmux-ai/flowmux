@@ -111,7 +111,7 @@ impl App {
         let indices = self.main_workspace_indices();
         let heights: Vec<i32> = indices
             .iter()
-            .map(|i| px(58 + 20 * (self.workspaces[*i].leaves().len().clamp(1, 3) as i32 - 1)))
+            .map(|i| px(38 + 20 * self.workspace_lines(self.workspaces[*i].id).len().max(1) as i32))
             .collect();
         let metrics = (height, dpi, heights.iter().sum::<i32>());
         let pager = metrics.2 > footer_top - list_top;
@@ -159,8 +159,10 @@ impl App {
             metrics,
         }
     }
-    pub(super) fn workspace_caption(&self, id: WorkspaceId) -> Option<String> {
-        let workspace = self.workspaces.iter().find(|w| w.id == id)?;
+    fn workspace_lines(&self, id: WorkspaceId) -> Vec<chrome::WorkspaceLine> {
+        let Some(workspace) = self.workspaces.iter().find(|w| w.id == id) else {
+            return Vec::new();
+        };
         let leaves = workspace.leaves();
         let mut histories = self.sidebar_mru.borrow_mut();
         let history = histories.entry(id).or_default();
@@ -169,34 +171,141 @@ impl App {
             history.retain(|pane| *pane != workspace.focused);
             history.insert(0, workspace.focused);
         }
-        let mut order = history.clone();
+        let mru = history.clone();
+        let mut order = mru.clone();
+        drop(histories);
         for (pane, _, _) in &leaves {
             if !order.contains(pane) {
                 order.push(*pane);
             }
         }
-        let mut caption = workspace.name.clone();
-        for pane in order.into_iter().take(3) {
-            let (_, active, tabs) = leaves.iter().find(|(id, _, _)| *id == pane)?;
-            let tab = tabs.iter().find(|tab| tab.id == *active)?;
-            let line = match &tab.kind {
-                SurfaceKind::Terminal { cwd, .. } => {
-                    cwd.as_ref().unwrap_or(&workspace.cwd).display().to_string()
+        let mut agents = Vec::new();
+        for (pane, _, tabs) in &leaves {
+            for tab in tabs {
+                if let Some(agent) = self.agent_presence(tab.id) {
+                    let path = match &tab.kind {
+                        SurfaceKind::Terminal { cwd, .. } => {
+                            cwd.as_ref().map(|p| p.display().to_string())
+                        }
+                        _ => None,
+                    };
+                    agents.push((*pane, tab.id, agent, path));
                 }
-                SurfaceKind::Browser { .. } => format!("Browser-{}", tab.title),
-                SurfaceKind::Editor { .. } => format!("Editor-{}", tab.title),
-                SurfaceKind::SshTerminal { cwd, .. } => format!(
-                    "{}:{}",
-                    workspace
-                        .ssh
-                        .as_ref()
-                        .map(|config| config.target.destination())
-                        .unwrap_or_else(|| "SSH".into()),
-                    cwd.as_deref().unwrap_or("~")
+            }
+        }
+        // Match Linux: urgency, pane MRU, provider, then stable surface identity.
+        agents.sort_by(|a, b| {
+            b.2.status
+                .rollup_rank()
+                .cmp(&a.2.status.rollup_rank())
+                .then_with(|| {
+                    mru.iter()
+                        .position(|id| *id == a.0)
+                        .unwrap_or(usize::MAX)
+                        .cmp(&mru.iter().position(|id| *id == b.0).unwrap_or(usize::MAX))
+                })
+                .then_with(|| a.2.name.cmp(&b.2.name))
+                .then_with(|| a.1 .0.cmp(&b.1 .0))
+        });
+        let overflow = agents.len().saturating_sub(4);
+        agents.truncate(4);
+        let mut paths = Vec::new();
+        for pane in order
+            .into_iter()
+            .filter(|id| !agents.iter().any(|(pane, _, _, _)| pane == id))
+            .take(3)
+        {
+            let Some((_, active, tabs)) = leaves.iter().find(|(id, _, _)| *id == pane) else {
+                continue;
+            };
+            let Some(tab) = tabs.iter().find(|tab| tab.id == *active) else {
+                continue;
+            };
+            let (text, path) = match &tab.kind {
+                SurfaceKind::Terminal { cwd, .. } => (
+                    cwd.as_ref().unwrap_or(&workspace.cwd).display().to_string(),
+                    true,
+                ),
+                SurfaceKind::Browser { .. } => (format!("Browser-{}", tab.title), false),
+                SurfaceKind::Editor { .. } => (format!("Editor-{}", tab.title), false),
+                SurfaceKind::SshTerminal { cwd, .. } => (
+                    format!(
+                        "{}:{}",
+                        workspace
+                            .ssh
+                            .as_ref()
+                            .map(|config| config.target.destination())
+                            .unwrap_or_else(|| "SSH".into()),
+                        cwd.as_deref().unwrap_or("~")
+                    ),
+                    true,
                 ),
             };
+            paths.push((text, path));
+        }
+        let count = agents.len();
+        let mut lines = Vec::new();
+        for (index, (_, _, agent, path)) in agents.into_iter().enumerate() {
+            let parent_continues = index + 1 < count || !paths.is_empty();
+            let mut name = agent.name.clone();
+            if index + 1 == count && overflow > 0 {
+                name.push_str(&format!(
+                    " +{overflow} agent{}",
+                    if overflow == 1 { "" } else { "s" }
+                ));
+            }
+            let text = agent
+                .status_text()
+                .unwrap_or(agent.status.as_str())
+                .to_string();
+            lines.push(chrome::WorkspaceLine {
+                text: name,
+                path: false,
+                agent: Some(agent),
+                parent: None,
+                continues: parent_continues,
+            });
+            lines.push(chrome::WorkspaceLine {
+                text,
+                path: false,
+                agent: None,
+                parent: Some(parent_continues),
+                continues: path.is_some(),
+            });
+            if let Some(text) = path {
+                lines.push(chrome::WorkspaceLine {
+                    text,
+                    path: true,
+                    agent: None,
+                    parent: Some(parent_continues),
+                    continues: false,
+                });
+            }
+        }
+        let count = paths.len();
+        for (index, (text, path)) in paths.into_iter().enumerate() {
+            lines.push(chrome::WorkspaceLine {
+                text,
+                path,
+                agent: None,
+                parent: None,
+                continues: index + 1 < count,
+            });
+        }
+        for line in &mut lines {
+            line.text = line.text.replace(['\r', '\n'], " ");
+        }
+        lines
+    }
+    pub(super) fn workspace_caption(&self, id: WorkspaceId) -> Option<String> {
+        let mut caption = self.workspaces.iter().find(|w| w.id == id)?.name.clone();
+        for line in self.workspace_lines(id) {
             caption.push('\n');
-            caption.push_str(&line.replace(['\r', '\n'], " "));
+            caption.push_str(&line.text);
+            if let Some(agent) = line.agent {
+                // Owner-drawn glyphs have no accessible name of their own.
+                caption.push_str(&format!(" ({})", agent.status.as_str()));
+            }
         }
         Some(caption)
     }
@@ -327,6 +436,7 @@ impl App {
             if let Action::Workspace(id) = control.action {
                 if let Some(label) = self.workspace_caption(id) {
                     set_caption(control.hwnd, &label);
+                    chrome::set_workspace_lines(control.hwnd, self.workspace_lines(id));
                 }
             } else if let Action::PaneZoom(pane, _) = control.action {
                 set_caption(
@@ -468,7 +578,7 @@ impl App {
                 let mut top=POINT{x:rect.left,y:rect.top};ScreenToClient(self.window,&mut top);
                 let length=GetWindowTextLengthW(control.hwnd).clamp(0,1024) as usize;
                 let mut label=vec![0u16;length+1];let read=GetWindowTextW(control.hwnd,label.as_mut_ptr(),label.len() as i32).max(0) as usize;
-                json!({"handle":control.hwnd as usize,"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
+                json!({"handle":control.hwnd as usize,"workspace_lines":chrome::workspace_lines(control.hwnd),"tooltip":chrome::tooltip_text(control.hwnd),"kind":kind,"pane":pane,"surface":surface,"workspace":workspace,"selected":selected,"unread":workspace.is_some_and(|id|self.workspace_has_unread(id)),"focused":pane.is_some_and(|p|self.current_workspace().is_some_and(|workspace|p==workspace.focused)),"label":String::from_utf16_lossy(&label[..read]),"layout_visible":GetWindowLongPtrW(control.hwnd,GWL_STYLE) as u32&WS_VISIBLE!=0,"native_visible":IsWindowVisible(control.hwnd)!=0,"rect":{"x":top.x,"y":top.y,"width":rect.right-rect.left,"height":rect.bottom-rect.top}})
             }
         }).collect::<Vec<_>>();
         let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);

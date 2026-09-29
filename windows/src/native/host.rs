@@ -151,6 +151,7 @@ enum Event {
     NotificationUi(notifications::UiAction),
     Sessions(sessions::Signal),
     AgentsReady,
+    AgentChanged,
     UsageUi(usage_panel::UiAction),
     UsageResult(Uuid, [crate::usage::ProviderRefresh; 2]),
     OptionsUi(appearance::UiAction),
@@ -1979,6 +1980,10 @@ impl App {
             Event::NotificationUi(action) => self.notification_ui(action)?,
             Event::Sessions(signal) => self.sessions_event(signal)?,
             Event::AgentsReady => self.agents_poll(),
+            Event::AgentChanged => {
+                self.refresh_chrome_metadata();
+                self.layout()?;
+            }
             Event::UsageUi(action) => self.usage_ui(action)?,
             Event::UsageResult(id, results) => self.usage_complete(id, results)?,
             Event::Activated => {
