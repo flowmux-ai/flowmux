@@ -17,6 +17,8 @@ enum MenuAction {
     Copy,
     Move,
     Destination(WorkspaceId),
+    PaneDestination(PaneId),
+    ShiftTab(isize),
     NewWorkspace,
     NewWindow,
     NewSshWorkspace,
@@ -30,6 +32,7 @@ enum MenuAction {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Tab,
+    TabMove,
     Workspace,
     Creation,
     Pane,
@@ -75,6 +78,7 @@ impl Menu {
     pub(super) fn diagnostics(&self) -> Value {
         let kind = match self.kind {
             Kind::Tab => "tab",
+            Kind::TabMove => "tab-move",
             Kind::Workspace => "workspace",
             Kind::Creation => "creation",
             Kind::Pane => "pane",
@@ -391,6 +395,66 @@ impl App {
                 Ok((url, None, "URL"))
             }
         }
+    }
+    pub(super) fn move_menu(&mut self) -> anyhow::Result<()> {
+        let surface = self.target(None, None)?;
+        let (source, pane, _) = self.locate(surface).context("Tab no longer exists")?;
+        let workspace = &self.workspaces[source];
+        let tabs = workspace
+            .leaves()
+            .into_iter()
+            .find(|(id, _, _)| *id == pane)
+            .unwrap()
+            .2;
+        let at = tabs.iter().position(|tab| tab.id == surface).unwrap();
+        let mut entries = Vec::new();
+        for (label, delta) in [("Move left", -1), ("Move right", 1)] {
+            if at
+                .checked_add_signed(delta)
+                .is_some_and(|index| index < tabs.len())
+            {
+                entries.push(Entry {
+                    label: label.into(),
+                    enabled: true,
+                    action: MenuAction::ShiftTab(delta),
+                });
+            }
+        }
+        for index in self.main_workspace_indices() {
+            let destination = &self.workspaces[index];
+            if index != source && (workspace.ssh.is_some() || destination.ssh.is_some()) {
+                continue;
+            }
+            for (i, (target, _, _)) in destination.leaves().into_iter().enumerate() {
+                if target != pane {
+                    entries.push(Entry {
+                        label: format!("{} — pane {}", destination.name, i + 1),
+                        enabled: true,
+                        action: MenuAction::PaneDestination(target),
+                    });
+                }
+            }
+        }
+        if entries.is_empty() {
+            entries.push(Entry {
+                label: "Create another pane or workspace first".into(),
+                enabled: false,
+                action: MenuAction::PaneDestination(pane),
+            });
+        }
+        // Keyboard/palette commands anchor to their source, never the desktop pointer.
+        let mut rect = RECT::default();
+        anyhow::ensure!(
+            unsafe { GetWindowRect(self.surface_holder(surface)?.window, &mut rect) } != 0,
+            "Cannot locate tab move menu source"
+        );
+        self.show_context_menu(
+            Kind::TabMove,
+            Some(surface),
+            entries,
+            Vec::new(),
+            (rect.left, rect.top),
+        )
     }
     pub(super) fn show_tab_menu(
         &mut self,
@@ -777,6 +841,31 @@ impl App {
                     );
                 }
             }
+            MenuAction::ShiftTab(delta) => {
+                let surface = surface.context("No tab to move")?;
+                let (workspace, pane, _) = self.locate(surface).context("Tab no longer exists")?;
+                let tabs = self.workspaces[workspace]
+                    .leaves()
+                    .into_iter()
+                    .find(|(id, _, _)| *id == pane)
+                    .unwrap()
+                    .2;
+                let at = tabs.iter().position(|tab| tab.id == surface).unwrap();
+                if let Some(index) = at
+                    .checked_add_signed(delta)
+                    .filter(|index| *index < tabs.len())
+                {
+                    self.move_tab(surface, pane, index)?;
+                }
+            }
+            MenuAction::PaneDestination(pane) => {
+                if self.workspaces.iter().any(|workspace| {
+                    !self.is_detached_workspace(workspace.id)
+                        && workspace.root.find_leaf_content(pane).is_some()
+                }) {
+                    self.move_tab(surface.context("No tab to move")?, pane, usize::MAX)?;
+                }
+            }
             MenuAction::Destination(workspace) => {
                 let index = self.workspace_index(workspace)?;
                 anyhow::ensure!(
@@ -821,6 +910,9 @@ impl App {
                 }
             }
             MenuAction::Move | MenuAction::Separator => unreachable!(),
+        }
+        if kind == Kind::TabMove {
+            self.focus_active()?;
         }
         Ok(())
     }

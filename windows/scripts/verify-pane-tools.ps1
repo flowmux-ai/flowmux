@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Own hidden host only. Run under run-check.ps1 -TimeoutSeconds 60.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('pane-tools','terminal-menu','application-menus')][string]$Case='pane-tools')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('pane-tools','terminal-menu','application-menus','tab-move')][string]$Case='pane-tools')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -108,7 +108,52 @@ try {
  $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($hostProcess.Id).json"
  do {Budget|Out-Null;Require (-not $hostProcess.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Startup exceeded eight seconds';if((Test-Path $discovery)-and(Get-Item $discovery).LastWriteTimeUtc -ge $utc){$record=Get-Content -Raw $discovery|ConvertFrom-Json;Require ($record.pid -eq $hostProcess.Id) 'Wrong discovery PID';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
  $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left);$a=Request @('identify');$original=@($tree.surfaces)
- if($Case -eq 'application-menus'){
+ if($Case -eq 'tab-move'){
+  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850)
+  function Leaves($Node){if($Node.content){$Node}else{Leaves $Node.first;Leaves $Node.second}}
+  function Tab-Order($Tree,[string]$Pane){$leaf=@($Tree.workspaces|ForEach-Object {Leaves $_.root}|Where-Object {$_.id -ceq $Pane});Require ($leaf.Count -eq 1) 'Move lost a pane';return (@($leaf[0].content.surfaces.id)-join ',')}
+  function Move-Menu([string]$Surface){
+   Request @('focus-tab',$Surface)|Out-Null;$t=Tree;$button=@($t.chrome.controls|Where-Object {$_.kind -ceq 'command_palette'});Require ($button.Count -eq 1) 'Palette toolbar entry missing'
+   [OptionsFixture]::Click([long]$t.window_handle,[long]$button[0].handle,$hostProcess.Id);$t=Await {param($v) $v.command_palette.open};$panel=$t.command_palette
+   [OptionsFixture]::SetTextAndNotify([long]$panel.window,[long]$panel.query_handle,$hostProcess.Id,'Move tab')
+   $t=Await {param($v) $v.command_palette.query -ceq 'Move tab' -and @($v.command_palette.filtered) -ccontains 'native:move-tab'};$panel=$t.command_palette
+   [OptionsFixture]::ListSelect([long]$panel.window,[long]$panel.list_handle,$hostProcess.Id,[Array]::IndexOf(@($panel.filtered),'native:move-tab'));[OptionsFixture]::PostEnter([long]$panel.query_handle,$hostProcess.Id)
+   $t=Await {param($v) -not $v.command_palette.open -and $v.tab_menu.kind -ceq 'tab-move'};Require ($t.tab_menu.surface -ceq $Surface) 'Palette opened move for the wrong source'
+   $frames=@($t.detached_windows|Where-Object {$_.surface -ceq $Surface});$owner=if($frames.Count){[long]$frames[0].window_handle}else{[long]$t.window_handle};Menu-Panel $t.tab_menu.menu $owner|Out-Null;return $t
+  }
+  $tree=Move-Menu $a.surface;Require (@($tree.tab_menu.menu.rows).Count -eq 1 -and -not $tree.tab_menu.menu.rows[0].enabled -and $null -eq $tree.tab_menu.menu.selected) 'Single tab move menu is not disabled'
+  [OptionsFixture]::PostEnter([long]$tree.tab_menu.menu.window,$hostProcess.Id);$tree=Tree;Require ($tree.tab_menu.kind -ceq 'tab-move' -and @($tree.surfaces).Count -eq 1) 'Enter activated an unavailable move';$tree=Menu-Dismiss $tree
+  Request @('workspace','rename',$a.workspace,'원본 한 & 한글')|Out-Null
+  Request @('new-tab','--shell=cmd')|Out-Null;$tree=Ready 2;$b=Request @('identify');Request @('new-tab','--shell=cmd')|Out-Null;$tree=Ready 3;$c=Request @('identify');$stable=@($tree.surfaces)
+  $tree=Move-Menu $b.surface;Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'Move left|Move right') 'Same-pane directions differ'
+  Request @('focus-tab',$c.surface)|Out-Null;Menu-Click $tree.tab_menu.menu 'Move left';$tree=Await {param($v) -not $v.tab_menu};Require ((Tab-Order $tree $a.pane) -ceq (@($b.surface,$a.surface,$c.surface)-join ',')) 'Left followed later active tab instead of captured source'
+  $tree=Move-Menu $b.surface;Menu-Click $tree.tab_menu.menu 'Move right';$tree=Await {param($v) -not $v.tab_menu};Require ((Tab-Order $tree $a.pane) -ceq (@($a.surface,$b.surface,$c.surface)-join ',')) 'Right did not restore tab order'
+  $tree=Move-Menu $b.surface;$menu=$tree.tab_menu.menu;Request @('move-tab',$a.surface,'--to-pane',$a.pane,'--index','2')|Out-Null;Menu-Click $menu 'Move left';$tree=Await {param($v) -not $v.tab_menu};Require ((Tab-Order $tree $a.pane) -ceq (@($b.surface,$c.surface,$a.surface)-join ',')) 'Stale left moved a tab past the current edge'
+  $tree=Move-Menu $b.surface;$menu=$tree.tab_menu.menu;Request @('move-tab',$c.surface,'--to-pane',$a.pane,'--index','0')|Out-Null;Menu-Click $menu 'Move right';$tree=Await {param($v) -not $v.tab_menu};Require ((Tab-Order $tree $a.pane) -ceq (@($c.surface,$a.surface,$b.surface)-join ',')) 'Right reused an old index after a sibling moved';Stable $tree $stable
+  $evidence.checks+=@{name='palette_themed_move_disabled_Enter_Escape_captured_source_and_live_relative_order';passed=$true}
+
+  Request @('new-workspace','--cwd',$fixture.Root,'--shell=cmd')|Out-Null;$tree=Ready 4;$d=Request @('identify');Request @('workspace','rename',$d.workspace,'목적 한 & 두')|Out-Null
+  Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 5;$e=Request @('identify');$stable=@($tree.surfaces)
+  $tree=Move-Menu $b.surface;$menu=$tree.tab_menu.menu;$label='목적 한 & 두 — pane 2';$row=@($menu.rows|Where-Object {$_.label -ceq $label});Require ($row.Count -eq 1 -and [OptionsFixture]::Text([long]$row[0].window,$hostProcess.Id) -ceq $label.Replace('&','&&')) 'Move menu lost Unicode or escaped ampersands twice'
+  $bitmap=Join-Path $directory 'tab-move.bmp';$capture=Request @('chrome-capture',$bitmap);Require ($capture.root_handle -eq $menu.window) 'Move capture selected the wrong popup';$foreground=if($tree.chrome.theme -eq 'light'){'#28282b'}else{'#f2f3f5'};$r=$row[0].bounds;Require ([ChromeFixture]::ColorCount($bitmap,$r.x,$r.y,$r.width,$r.height,$foreground) -gt 5) 'Themed destination label was not painted';Remove-Item -LiteralPath $bitmap -Force
+  Request @('workspace','rename',$d.workspace,'이름 변경 한 & 목적')|Out-Null;Request @('workspace','reorder',$d.workspace,'0')|Out-Null;Request @('focus-tab',$d.surface)|Out-Null
+  Menu-Click $menu $label;$tree=Await {param($v) -not $v.tab_menu};$moved=Request @('identify');Require ($moved.surface -ceq $b.surface -and $moved.workspace -ceq $d.workspace -and $moved.pane -ceq $e.pane) 'Move retargeted a renamed/reordered destination pane';Stable $tree $stable
+  $tree=Move-Menu $b.surface;$labels=@($tree.tab_menu.menu.rows.label)-join '|';$tree=Menu-Dismiss $tree
+  Request @('detach-tab',$c.surface)|Out-Null;$tree=Await {param($v) @($v.detached_windows|Where-Object {$_.surface -ceq $c.surface}).Count -eq 1};$frame=@($tree.detached_windows|Where-Object {$_.surface -ceq $c.surface})[0]
+  $tree=Move-Menu $b.surface;Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq $labels) 'Move offered a detached window as a destination';$tree=Menu-Dismiss $tree
+  # Detached windows expose Move through their tab context, while their palette is disabled.
+  $tree=Menu-Open $c.surface;Require ($tree.tab_menu.menu.owner -eq $frame.window_handle) 'Detached tab menu belongs to main frame';$tree=Menu-Move $tree
+  $destination=@((Request @('workspace','list')).workspaces|Where-Object {$_.id -ceq $d.workspace})[0];Menu-Click $tree.tab_menu.submenu (([int]$destination.index+1).ToString()+'. '+$destination.name)
+  $tree=Await {param($v) -not $v.tab_menu -and @($v.detached_windows|Where-Object {$_.surface -ceq $c.surface}).Count -eq 0};$moved=Request @('identify');$retained=@($tree.surfaces|Where-Object {$_.id -ceq $c.surface})[0];$previous=@($stable|Where-Object {$_.id -ceq $c.surface})[0]
+  Require ($moved.pane -ceq $d.pane -and $moved.surface -ceq $c.surface -and $retained.view_handle -eq $previous.view_handle -and $retained.holder.window -eq $previous.holder.window -and [OptionsFixture]::WindowDestroyed([long]$frame.window_handle)) 'Detached move recreated the WebView/holder or retained the old frame';Stable $tree $stable
+  $evidence.checks+=@{name='Unicode_destination_paint_UUID_after_rename_reorder_and_detached_owner_reattach';passed=$true}
+
+  Request @('focus-tab',$b.surface)|Out-Null;Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 6;$f=Request @('identify')
+  $tree=Move-Menu $b.surface;$menu=$tree.tab_menu.menu;$label='이름 변경 한 & 목적 — pane 3';Require (@($menu.rows|Where-Object {$_.label -ceq $label}).Count -eq 1) 'Temporary pane was not offered'
+  Request @('close-tab',$f.surface)|Out-Null;$beforeClick=Request @('identify');$sourceOrder=Tab-Order (Tree) $e.pane;Menu-Click $menu $label;$tree=Await {param($v) -not $v.tab_menu};$moved=Request @('identify');Require ($moved.surface -ceq $beforeClick.surface -and $moved.pane -ceq $beforeClick.pane -and (Tab-Order $tree $e.pane) -ceq $sourceOrder -and $sourceOrder.Split(',') -ccontains $b.surface -and @($tree.surfaces).Count -eq 5) 'Removed destination retargeted or lost the source';Stable $tree $stable
+  foreach($previous in $stable){$retained=@($tree.surfaces|Where-Object {$_.id -ceq $previous.id})[0];Require ($retained.view_handle -eq $previous.view_handle -and $retained.holder.window -eq $previous.holder.window) 'Tab move replaced a live WebView or IME holder'}
+  $evidence.checks+=@{name='removed_destination_menu_noop_keeps_original_PIDs_and_source';passed=$true}
+ }elseif($Case -eq 'application-menus'){
   [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850)
   function Shell-Menu([string]$Pane){
    $t=Tree;$button=Tool $t $Pane 'pane_add';[OptionsFixture]::ContextMenu([long]$t.window_handle,[long]$button.handle,$hostProcess.Id)
