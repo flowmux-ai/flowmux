@@ -5,6 +5,9 @@ use flowmux_core::{AgentBarItem, AGENT_BAR_ITEM_MAX_WIDTH_PX};
 use windows_sys::Win32::UI::{Controls::SetScrollInfo, Input::KeyboardAndMouse::GetKeyState};
 
 thread_local! { static TARGETS: RefCell<HashMap<isize,SurfaceId>> = RefCell::new(HashMap::new()); }
+pub(super) fn target(window: HWND) -> Option<SurfaceId> {
+    TARGETS.with(|targets| targets.borrow().get(&(window as isize)).copied())
+}
 pub(super) enum UiAction {
     Open(SurfaceId),
     Reveal(SurfaceId),
@@ -249,14 +252,21 @@ impl Bar {
         unsafe {
             SetScrollInfo(self.viewport, SB_HORZ, &info, 1);
         }
+        let mut previous = HWND_TOP;
         for (index, (_, window)) in self.items.iter().enumerate() {
-            place(
-                *window,
-                index as i32 * step - self.offset,
-                0,
-                px(AGENT_BAR_ITEM_MAX_WIDTH_PX as i32),
-                px(47),
-            );
+            // Native keyboard traversal follows the same order as the cards.
+            unsafe {
+                SetWindowPos(
+                    *window,
+                    previous,
+                    index as i32 * step - self.offset,
+                    0,
+                    px(AGENT_BAR_ITEM_MAX_WIDTH_PX as i32),
+                    px(47),
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+            previous = *window;
         }
         unsafe {
             InvalidateRect(self.window, std::ptr::null(), 1);
@@ -282,6 +292,50 @@ impl Bar {
         } else {
             self.offset
         });
+    }
+    fn hit(&self, root: HWND, x: i32, y: i32) -> Option<(usize, HWND, bool)> {
+        unsafe {
+            let mut bounds = RECT::default();
+            if GetClientRect(root, &mut bounds) == 0
+                || x < 0
+                || y < 0
+                || x >= bounds.right
+                || y >= bounds.bottom
+            {
+                return None;
+            }
+            let mut point = POINT { x, y };
+            MapWindowPoints(root, self.viewport, &mut point, 1);
+            if GetClientRect(self.viewport, &mut bounds) == 0
+                || point.x < 0
+                || point.y < 0
+                || point.x >= bounds.right
+                || point.y >= bounds.bottom
+            {
+                return None;
+            }
+            self.items
+                .iter()
+                .enumerate()
+                .find_map(|(index, (_, window))| {
+                    let mut rect = chrome::visible_control_rect(*window)?;
+                    MapWindowPoints(
+                        std::ptr::null_mut(),
+                        self.viewport,
+                        (&mut rect as *mut RECT).cast(),
+                        2,
+                    );
+                    (point.x >= rect.left
+                        && point.x < rect.right
+                        && point.y >= rect.top
+                        && point.y < rect.bottom)
+                        .then_some((
+                            index,
+                            *window,
+                            point.x < rect.left + (rect.right - rect.left) / 2,
+                        ))
+                })
+        }
     }
     pub(super) fn handle_message(&self, message: &MSG, background: bool) -> bool {
         if unsafe { IsChild(self.window, message.hwnd) } == 0 {
@@ -346,6 +400,89 @@ impl Drop for Bar {
     }
 }
 impl App {
+    pub(super) fn agent_bar_pointer(&mut self, pointer: &panes::Pointer) -> anyhow::Result<bool> {
+        use panes::{Drag, Pointer};
+        if let Pointer::AgentDown { surface, x, y } = *pointer {
+            self.cancel_drag();
+            if self.agent_presence(surface).is_some()
+                && self.agent_bar.as_ref().is_some_and(|bar| {
+                    bar.hit(self.window, x, y)
+                        .is_some_and(|(index, _, _)| bar.items[index].0.surface == surface)
+                })
+            {
+                self.drag = Some(Drag::Agent {
+                    surface,
+                    start_x: x,
+                    start_y: y,
+                    moved: false,
+                });
+                if !self.background_test {
+                    unsafe {
+                        SetCapture(self.window);
+                    }
+                }
+            }
+            return Ok(true);
+        }
+        let (Pointer::Move(x, y) | Pointer::Up(x, y)) = *pointer else {
+            return Ok(false);
+        };
+        let Some(Drag::Agent {
+            surface,
+            start_x,
+            start_y,
+            moved,
+        }) = self.drag
+        else {
+            return Ok(false);
+        };
+        if self.agent_presence(surface).is_none() || self.agent_bar.is_none() {
+            self.cancel_drag();
+            return Ok(true);
+        }
+        let moved = moved || panes::drag_moved(self.window, start_x, start_y, x, y);
+        self.drag = Some(Drag::Agent {
+            surface,
+            start_x,
+            start_y,
+            moved,
+        });
+        let target = self
+            .agent_bar
+            .as_ref()
+            .and_then(|bar| bar.hit(self.window, x, y));
+        chrome::set_tab_drop(
+            target
+                .filter(|_| moved)
+                .map(|(_, window, before)| (window, before)),
+        );
+        if matches!(pointer, Pointer::Up(..)) {
+            self.cancel_drag();
+            if let Some((index, window, before)) = target {
+                if self::target(window).is_some_and(|id| self.agent_presence(id).is_some()) {
+                    let bar = self.agent_bar.as_mut().unwrap();
+                    if moved {
+                        if let Some(source) = bar
+                            .items
+                            .iter()
+                            .position(|(item, _)| item.surface == surface)
+                        {
+                            let boundary = index + usize::from(!before);
+                            let destination = boundary - usize::from(source < boundary);
+                            if source != destination {
+                                let item = bar.items.remove(source);
+                                bar.items.insert(destination, item);
+                                bar.scroll(bar.offset);
+                            }
+                        }
+                    } else if bar.items[index].0.surface == surface {
+                        self.agent_bar_ui(UiAction::Open(surface))?;
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
     pub(super) fn agent_bar_sync(&mut self) -> anyhow::Result<()> {
         let mut items = vec![];
         if self.settings.terminal.agent_bar_mode && !self.main_closed {
@@ -376,15 +513,32 @@ impl App {
                 }
             }
         }
+        if matches!(self.drag, Some(panes::Drag::Agent { surface, .. }) if !items.iter().any(|item| item.surface == surface))
+        {
+            self.cancel_drag();
+        }
         if items.is_empty() {
-            self.agent_bar.take();
+            if let Some(bar) = self.agent_bar.take() {
+                self.agent_bar_order = bar.items.iter().map(|(item, _)| item.surface).collect();
+            }
             return Ok(());
         }
-        if self.agent_bar.is_none() {
+        let restore = self.agent_bar.is_none();
+        if restore {
             self.agent_bar = Some(Bar::new(self.window)?);
         }
         let focused = self.current_surface();
-        self.agent_bar.as_mut().unwrap().update(items, focused)
+        let bar = self.agent_bar.as_mut().unwrap();
+        bar.update(items, focused)?;
+        if restore {
+            bar.items.sort_by_key(|(item, _)| {
+                self.agent_bar_order
+                    .iter()
+                    .position(|id| *id == item.surface)
+                    .unwrap_or(usize::MAX)
+            });
+        }
+        Ok(())
     }
     pub(super) fn agent_bar_height(&self, width: i32, height: i32) -> i32 {
         let Some(bar) = &self.agent_bar else {

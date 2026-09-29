@@ -22,6 +22,12 @@ function Tree([int]$Maximum=5000){$t=Request @('tree') $Maximum;Require ($t.back
 function Await([scriptblock]$Condition){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Agent sessions condition exceeded5s';$t=Tree ([int]$left);if(& $Condition $t){return $t};Start-Sleep -Milliseconds 20}while($true)}
 function Screen([string]$Surface,[scriptblock]$Condition){$watch=[Diagnostics.Stopwatch]::StartNew();do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Agent screen condition exceeded5s';$s=Request @('read-screen','--surface',$Surface,'--recent') ([int]$left);$diagnostic.lastScreen=$s;if(& $Condition $s){return $s};Start-Sleep -Milliseconds 20}while($true)}
 function Click([long]$Handle){[OptionsFixture]::Click([OptionsFixture]::Parent($Handle,$owned.Id),$Handle,$owned.Id)}
+function Agent-Order($Tree){return ($Tree.agent_bar.items.surface -join ',')}
+function Agent-Bounds($Tree,[string]$Id,[bool]$Main){$item=@($Tree.agent_bar.items|Where-Object {$_.surface -ceq $Id})[0];$r=[OptionsFixture]::RelativeBounds([long]$Tree.agent_bar.viewport,[long]$item.handle,$owned.Id);$v=[OptionsFixture]::RelativeBounds([long]$Tree.agent_bar.window,[long]$Tree.agent_bar.viewport,$owned.Id);$r.X+=$v.X;$r.Y+=$v.Y;if($Main){$b=[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$Tree.agent_bar.window,$owned.Id);$r.X+=$b.X;$r.Y+=$b.Y};return $r}
+function Agent-Point($Tree,[string]$Id,[bool]$Before){$r=Agent-Bounds $Tree $Id $true;return @{x=[int]($r.X+$r.Width*$(if($Before){0.25}else{0.75}));y=[int]($r.Y+$r.Height/2)}}
+function Agent-Begin($Tree,[string]$Id){$item=@($Tree.agent_bar.items|Where-Object {$_.surface -ceq $Id})[0];$r=[OptionsFixture]::RelativeBounds([long]$Tree.agent_bar.viewport,[long]$item.handle,$owned.Id);[OptionsFixture]::TabPointerDown([long]$Tree.agent_bar.viewport,[long]$item.handle,$owned.Id,[int]($r.Width/2),[int]($r.Height/2));return Await {param($t) $t.chrome.agent_dragging}}
+function Agent-Release($Tree,$Point){[OptionsFixture]::HostPointer([long]$Tree.window_handle,$owned.Id,0x202,$Point.x,$Point.y);return Await {param($t) -not $t.chrome.agent_dragging}}
+function Agent-Drag($Tree,[string]$Source,[string]$Target,[bool]$Before){$p=Agent-Point $Tree $Target $Before;$t=Agent-Begin $Tree $Source;[OptionsFixture]::HostPointer([long]$t.window_handle,$owned.Id,0x200,$p.x,$p.y);return Agent-Release $t $p}
 function Stable($Before){$t=Tree;foreach($s in $Before){$n=@($t.surfaces|Where-Object {$_.id -ceq $s.id});Require ($n.Count -eq 1 -and $n[0].pid -eq $s.pid -and $n[0].session -ceq $s.session -and $n[0].view_handle -eq $s.view_handle -and $n[0].holder.window -eq $s.holder.window -and $n[0].running) 'Sessions changed a retained terminal PID/session/view/holder'};return $t}
 function Passed([string]$Name){$script:checks+=,$Name;$diagnostic.checks=$checks;Require ($env:CODEX_HOME -ceq $originalCodexHome) 'Fixture modified parent CODEX_HOME'}
 function Panel($Tree){$p=$Tree.agent_sessions.panel;Require ($Tree.agent_sessions.open -and $p.open -and -not $p.native_visible -and [OptionsFixture]::Parent([long]$p.window,$owned.Id) -eq $Tree.window_handle) 'Sessions must be an owned hidden child dock';Require ([OptionsFixture]::Describe([long]$Tree.window_handle,$owned.Id).Enabled) 'Sessions dock disabled main';foreach($h in @($p.query_handle,$p.list,$p.preview,$p.refresh,$p.close,$p.resume)){Require ([OptionsFixture]::Parent([long]$h,$owned.Id) -eq $p.window) 'Session control belongs to another owner'};return $p}
@@ -177,6 +183,43 @@ public static class OwnedCodexSessionFixture {
  [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$barSize[0],$barSize[1]);Request @('settings','set','agent-bar-mode','true')|Out-Null;$tree=Await {param($t) @($t.agent_bar.items).Count -eq 5};Stable (@($source,$local)+$extras)|Out-Null
  Passed 'agent-bar-all-providers-horizontal-end-scroll-live-target-activation-toggle-and-session-retention'
 
+ $size=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,1400,$size[1]);$tree=Tree
+ $originalAgents=@($tree.agent_bar.items.surface);$originalOrder=Agent-Order $tree;$handles=@($tree.agent_bar.items.handle);$active=(Request @('identify')).surface;$workspaceBefore=$tree.workspaces|ConvertTo-Json -Depth 30 -Compress
+ $p=Agent-Point $tree $originalAgents[1] $true;$tree=Agent-Begin $tree $originalAgents[4];[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x200,$p.x,$p.y);$tree=Tree
+ $r=Agent-Bounds $tree $originalAgents[1] $false
+ $bmp=Join-Path $directory 'agent-bar-drop.bmp';$png=Join-Path $directory 'agent-bar-drop.png';Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+ Require ([ChromeFixture]::ColorCount($png,$r.X,($r.Y+3),3,($r.Height-6),'#78aeed') -gt 30) 'Native agent insertion marker was not painted'
+ $tree=Agent-Release $tree $p;$reordered=@($originalAgents[0],$originalAgents[4],$originalAgents[1],$originalAgents[2],$originalAgents[3]) -join ','
+ Require ((Agent-Order $tree) -ceq $reordered -and (Request @('identify')).surface -ceq $active -and ($tree.workspaces|ConvertTo-Json -Depth 30 -Compress) -ceq $workspaceBefore) 'Agent drag changed tabs/focus or inserted at the wrong side'
+ Require ((@([ChromeFixture]::Read([long]$tree.agent_bar.viewport,$owned.Id)|Where-Object {$_.Class -ceq 'Button'}).Handle -join ',') -ceq ($tree.agent_bar.items.handle -join ',')) 'Agent native keyboard order differs from the visible cards'
+ $tree=Agent-Drag $tree $originalAgents[4] $originalAgents[3] $false;Require ((Agent-Order $tree) -ceq $originalOrder) 'Agent after insertion did not account for source removal'
+ foreach($before in @($true,$false)){$tree=Agent-Drag $tree $originalAgents[2] $originalAgents[2] $before;Require ((Agent-Order $tree) -ceq $originalOrder) 'Agent self drop changed order'}
+ $tree=Agent-Drag $tree $originalAgents[4] $originalAgents[1] $true
+ $message='순서 유지 한 é 상태';$extra=$extras[1];Request @('report-agent','opencode','--surface',$extra.id,'--pid',[string]$extra.pid,'--seq','2','--status','working','--message',$message)|Out-Null
+ $tree=Await {param($t) @($t.agent_bar.items|Where-Object {$_.surface -ceq $extra.id -and $_.message -ceq $message}).Count -eq 1}
+ Require ((Agent-Order $tree) -ceq $reordered -and (@($tree.agent_bar.items.handle|Sort-Object) -join ',') -ceq (@($handles|Sort-Object) -join ',')) 'Status update discarded agent order or native control identity'
+ Passed 'agent-drag-before-after-self-drop-native-marker-keyboard-order-and-raw-Korean-status-retain-sessions'
+ foreach($cancel in @('escape','cancelmode','capture','outside')){
+  $p=Agent-Point $tree $originalAgents[1] $false;$tree=Agent-Begin $tree $originalAgents[0];[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,0x200,$p.x,$p.y)
+  if($cancel -ceq 'escape'){[OptionsFixture]::PostEscape([long]$tree.window_handle,$owned.Id)}elseif($cancel -ceq 'outside'){$p=@{x=-100;y=-100}}else{[OptionsFixture]::HostPointer([long]$tree.window_handle,$owned.Id,$(if($cancel -ceq 'cancelmode'){0x1f}else{0x215}),0,0)}
+  $tree=Agent-Release $tree $p;Require ((Agent-Order $tree) -ceq $reordered -and (Request @('identify')).surface -ceq $active -and @($tree.detached_windows).Count -eq 0) ('Cancelled agent drag changed order/focus or detached a terminal: '+$cancel)
+ }
+ $p=Agent-Point $tree $originalAgents[1] $false;$tree=Agent-Begin $tree $originalAgents[0];Request @('settings','set','agent-bar-mode','false')|Out-Null;$tree=Await {param($t) -not $t.agent_bar -and -not $t.chrome.agent_dragging}
+ Request @('settings','set','agent-bar-mode','true')|Out-Null;$tree=Await {param($t) @($t.agent_bar.items).Count -eq 5};$tree=Agent-Release $tree $p
+ Require ((Agent-Order $tree) -ceq $reordered) 'Toggle lost agent order or stale release committed a cancelled gesture'
+ [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$size[0],$size[1]);$tree=Stable (@($source,$local)+$extras)
+ Passed 'agent-drag-Escape-capture-loss-outside-and-toggle-cancel-with-runtime-order-retention'
+ Request @('focus-tab',$local.id)|Out-Null;$tree=Tree;$tree=Agent-Begin $tree $originalAgents[1];$r=Agent-Bounds $tree $originalAgents[1] $true
+ $tree=Agent-Release $tree @{x=[int]($r.X+$r.Width/2);y=[int]($r.Y+$r.Height/2)}
+ Require ((Request @('identify')).surface -ceq $originalAgents[1] -and (Agent-Order $tree) -ceq $reordered) 'A stationary agent click was swallowed as a drag or reordered a card'
+ Request @('focus-tab',$active)|Out-Null;[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,900,$size[1]);$tree=Tree
+ [OptionsFixture]::PostKey([long]$tree.agent_bar.viewport,$owned.Id,35,$false,$false);$tree=Await {param($t) $t.agent_bar.offset -gt 0}
+ $hidden=$tree.agent_bar.items[0];$hiddenBounds=[OptionsFixture]::RelativeBounds([long]$tree.agent_bar.viewport,[long]$hidden.handle,$owned.Id);Require ($hiddenBounds.X+$hiddenBounds.Width -lt 0) 'Expected fully clipped agent card for pointer guard'
+ [OptionsFixture]::TabPointerDown([long]$tree.agent_bar.viewport,[long]$hidden.handle,$owned.Id,20,20);$tree=Tree
+ Require (-not $tree.chrome.agent_dragging -and (Request @('identify')).surface -ceq $active) 'Clipped agent card accepted a pointer gesture outside the viewport'
+ [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$size[0],$size[1]);$tree=Tree
+ Passed 'agent-pointer-click-selects-without-reordering-and-clipped-card-cannot-start-drag'
+
 
  $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$beforeTall=@($tree.surfaces);$rowHandle=[long]$row.handle
  [ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,900,300)
@@ -214,7 +257,10 @@ public static class OwnedCodexSessionFixture {
  Request @('focus-tab',$extras[3].id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'antigravity') 'Focused blocked agent pane did not lead the metadata tree'
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$row=@($tree.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];Require ($row.workspace_lines[0].agent.name -ceq 'codex' -and $row.workspace_lines[3].agent.name -ceq 'antigravity') 'Equal-status agent blocks ignored pane MRU'
  Request @('close-tab',$spare.surface)|Out-Null;Stable (@($source,$local)+$extras)|Out-Null
- foreach($extra in $extras){Request @('close-tab',$extra.id)|Out-Null}
+ $tree=Tree;$p=Agent-Point $tree $source.id $true;$tree=Agent-Begin $tree $extras[0].id;Request @('close-tab',$extras[0].id)|Out-Null
+ $tree=Await {param($t) -not $t.chrome.agent_dragging -and @($t.agent_bar.items).Count -eq 4};$remaining=Agent-Order $tree;$tree=Agent-Release $tree $p
+ Require ((Agent-Order $tree) -ceq $remaining -and $tree.agent_bar.items.surface -cnotcontains $extras[0].id) 'Closing the dragged agent retained its card or a stale release changed the surviving order'
+ foreach($extra in $extras[1..3]){Request @('close-tab',$extra.id)|Out-Null}
  $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and @($t.surfaces).Count -eq 2};Stable @($source,$local)|Out-Null
  Passed 'five-owned-providers-Linux-urgency-and-pane-MRU-four-agent-cap-overflow-native-logos-and-close-shrink'
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree

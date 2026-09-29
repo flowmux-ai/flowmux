@@ -1998,6 +1998,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             if item.itemState & ODS_FOCUS != 0 {
                 DrawFocusRect(item.hDC, &item.rcItem);
             }
+            draw_drop_marker(item, palette.accent, pixel(3));
             RestoreDC(item.hDC, saved);
             return true;
         }
@@ -2663,44 +2664,48 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             };
             DrawFocusRect(item.hDC, &focus);
         }
-        if let Some((_, before, horizontal)) = TAB_DROP
-            .with(|slot| *slot.borrow())
-            .filter(|(window, _, _)| *window == item.hwndItem as isize)
-        {
-            let stripe = if horizontal {
-                let mut bounds = item.rcItem;
-                let mut region = RECT::default();
-                if GetWindowRgnBox(item.hwndItem, &mut region) != 0 {
-                    IntersectRect(&mut bounds, &item.rcItem, &region);
-                }
-                let thickness = pixel(3).min(bounds.bottom - bounds.top);
-                let top = if before {
-                    bounds.top
-                } else {
-                    bounds.bottom - thickness
-                };
-                RECT {
-                    top,
-                    bottom: top + thickness,
-                    ..bounds
-                }
-            } else {
-                let left = if before {
-                    item.rcItem.left
-                } else {
-                    item.rcItem.right - pixel(3)
-                };
-                RECT {
-                    left,
-                    right: left + pixel(3),
-                    ..item.rcItem
-                }
-            };
-            fill(item.hDC, &stripe, palette.accent);
-        }
+        draw_drop_marker(item, palette.accent, pixel(3));
         RestoreDC(item.hDC, saved);
     }
     true
+}
+
+unsafe fn draw_drop_marker(item: &DRAWITEMSTRUCT, accent: COLORREF, thickness: i32) {
+    if let Some((_, before, horizontal)) = TAB_DROP
+        .with(|slot| *slot.borrow())
+        .filter(|(window, _, _)| *window == item.hwndItem as isize)
+    {
+        let stripe = if horizontal {
+            let mut bounds = item.rcItem;
+            let mut region = RECT::default();
+            if GetWindowRgnBox(item.hwndItem, &mut region) != 0 {
+                IntersectRect(&mut bounds, &item.rcItem, &region);
+            }
+            let thickness = thickness.min(bounds.bottom - bounds.top);
+            let top = if before {
+                bounds.top
+            } else {
+                bounds.bottom - thickness
+            };
+            RECT {
+                top,
+                bottom: top + thickness,
+                ..bounds
+            }
+        } else {
+            let left = if before {
+                item.rcItem.left
+            } else {
+                item.rcItem.right - thickness
+            };
+            RECT {
+                left,
+                right: left + thickness,
+                ..item.rcItem
+            }
+        };
+        fill(item.hDC, &stripe, accent);
+    }
 }
 
 pub(super) fn message(

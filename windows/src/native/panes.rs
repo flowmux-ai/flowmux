@@ -78,6 +78,11 @@ pub(super) enum Pointer {
         x: i32,
         y: i32,
     },
+    AgentDown {
+        surface: SurfaceId,
+        x: i32,
+        y: i32,
+    },
     Move(i32, i32),
     Up(i32, i32),
     Cancel,
@@ -85,6 +90,12 @@ pub(super) enum Pointer {
 
 #[derive(Clone, Copy)]
 pub(super) enum Drag {
+    Agent {
+        surface: SurfaceId,
+        start_x: i32,
+        start_y: i32,
+        moved: bool,
+    },
     Pane {
         divider: model::Divider,
         offset: i32,
@@ -115,6 +126,14 @@ struct TabDrop {
     index: usize,
     marker: Option<(HWND, bool)>,
     split: Option<(SplitDirection, model::Rect)>,
+}
+
+pub(super) fn drag_moved(window: HWND, start_x: i32, start_y: i32, x: i32, y: i32) -> bool {
+    let dpi = unsafe { GetDpiForWindow(window) }.max(96);
+    (i64::from(x) - i64::from(start_x)).abs()
+        >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) }.max(1))
+        || (i64::from(y) - i64::from(start_y)).abs()
+            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) }.max(1))
 }
 
 impl App {
@@ -185,7 +204,11 @@ impl App {
             self.cancel_drag();
             return Ok(());
         }
+        if self.agent_bar_pointer(&pointer)? {
+            return Ok(());
+        }
         match pointer {
+            Pointer::AgentDown { .. } => unreachable!("agent pointer handled above"),
             Pointer::WorkspaceDown { workspace, x, y } => {
                 self.cancel_drag();
                 if !self
@@ -308,12 +331,7 @@ impl App {
                         self.cancel_drag();
                         return Ok(());
                     };
-                    let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
-                    let moved = moved
-                        || (i64::from(x) - i64::from(start_x)).abs()
-                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) }.max(1))
-                        || (i64::from(y) - i64::from(start_y)).abs()
-                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) }.max(1));
+                    let moved = moved || drag_moved(self.window, start_x, start_y, x, y);
                     self.drag = Some(Drag::Workspace {
                         workspace,
                         start_x,
@@ -366,12 +384,7 @@ impl App {
                         self.cancel_drag();
                         return Ok(());
                     }
-                    let dpi = unsafe { GetDpiForWindow(self.window) }.max(96);
-                    let moved = moved
-                        || (i64::from(x) - i64::from(start_x)).abs()
-                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) }.max(1))
-                        || (i64::from(y) - i64::from(start_y)).abs()
-                            >= i64::from(unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) }.max(1));
+                    let moved = moved || drag_moved(self.window, start_x, start_y, x, y);
                     self.drag = Some(Drag::Tab {
                         workspace,
                         pane,
@@ -486,7 +499,7 @@ impl App {
                             }
                             SplitDirection::Vertical
                         }
-                        Drag::Tab { .. } | Drag::Workspace { .. } => {
+                        Drag::Tab { .. } | Drag::Workspace { .. } | Drag::Agent { .. } => {
                             unreachable!("item drag handled above")
                         }
                     };

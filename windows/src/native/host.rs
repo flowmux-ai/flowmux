@@ -194,10 +194,15 @@ unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
         return false;
     }
     let action = CONTROL_ACTIONS.with(|actions| actions.borrow().get(&(window as isize)).cloned());
-    let Some(action @ (Action::Tab(..) | Action::Workspace(_))) = action else {
+    let agent = agent_bar::target(window);
+    if !matches!(action, Some(Action::Tab(..) | Action::Workspace(_))) && agent.is_none() {
         return false;
+    }
+    let parent = if agent.is_some() {
+        GetAncestor(window, GA_ROOT)
+    } else {
+        GetParent(window)
     };
-    let parent = GetParent(window);
     let mut point = POINT {
         x: lparam as u16 as i16 as i32,
         y: (lparam >> 16) as u16 as i16 as i32,
@@ -205,15 +210,20 @@ unsafe fn row_pointer(window: HWND, message: u32, lparam: LPARAM) -> bool {
     MapWindowPoints(window, parent, &mut point, 1);
     if IsWindowEnabled(parent) != 0 {
         post(Event::Pointer(match message {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if agent.is_some() => panes::Pointer::AgentDown {
+                surface: agent.unwrap(),
+                x: point.x,
+                y: point.y,
+            },
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => match action {
-                Action::Tab(pane, surface) => panes::Pointer::TabDown {
+                Some(Action::Tab(pane, surface)) => panes::Pointer::TabDown {
                     pane,
                     surface,
                     x: point.x,
                     y: point.y,
                     double_click: message == WM_LBUTTONDBLCLK,
                 },
-                Action::Workspace(workspace) => panes::Pointer::WorkspaceDown {
+                Some(Action::Workspace(workspace)) => panes::Pointer::WorkspaceDown {
                     workspace,
                     x: point.x,
                     y: point.y,
@@ -628,6 +638,7 @@ struct App {
     last_agent_scan: Instant,
     agent_scan_after: Option<SurfaceId>,
     agent_bar: Option<agent_bar::Bar>,
+    agent_bar_order: Vec<SurfaceId>,
     closing: bool,
     close_accepted: bool,
     background_test: bool,
@@ -920,6 +931,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             last_agent_scan: Instant::now(),
             agent_scan_after: None,
             agent_bar: None,
+            agent_bar_order: vec![],
             downloads: downloads::Controller::default(),
             closing: false,
             close_accepted: false,
@@ -1018,7 +1030,11 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
             && message.wParam == 0x1b
             && matches!(
                 app.drag,
-                Some(panes::Drag::Tab { .. } | panes::Drag::Workspace { .. })
+                Some(
+                    panes::Drag::Tab { .. }
+                        | panes::Drag::Workspace { .. }
+                        | panes::Drag::Agent { .. }
+                )
             )
         {
             app.cancel_drag();
