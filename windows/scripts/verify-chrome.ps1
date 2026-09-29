@@ -87,9 +87,16 @@ function Capture([string]$Name,$Tree) {
     $rowInfo=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $workspace.id})[0]
     $row=@($shown|Where-Object {$_.Handle -eq $rowInfo.handle})
     Require ($Tree.chrome.sidebar_width_dip -ge 160 -and $Tree.chrome.sidebar_width_dip -le 640 -and $Tree.chrome.workspace_row_height_dip -eq 58) 'Sidebar dimensions escaped supported bounds'
-    Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its two-line native caption'
-    $workspaceIndex=[Array]::IndexOf(@($Tree.workspaces.id),$workspace.id)
-    Require ([Math]::Abs($row[0].Y-(40+58*($workspaceIndex-$Tree.chrome.sidebar_offset))*$scale) -le 2) 'Workspace row position differs from visible sidebar order'
+    Require ($row.Count -eq 1 -and $row[0].Text.StartsWith($workspace.name.Replace('&','&&')+"`n")) 'Active workspace is hidden or lost its native metadata caption'
+    $rowHandles=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.layout_visible}|ForEach-Object {$_.handle})
+    $rows=@($shown|Where-Object {$rowHandles -contains $_.Handle}|Sort-Object Y);$expectedY=$Tree.chrome.sidebar_list_top
+    foreach($item in $rows){
+        $lineCount=@($item.Text -split "`n").Count-1
+        Require ($lineCount -ge 1 -and $lineCount -le 3) 'Workspace metadata does not contain one to three pane lines'
+        $height=[int][Math]::Round((58+20*($lineCount-1))*$scale)
+        Require ([Math]::Abs($item.Y-$expectedY) -le 1 -and [Math]::Abs($item.Height-($height-[Math]::Round(2*$scale))) -le 1) 'Variable workspace rows overlap or retain a fixed height'
+        $expectedY+=$height
+    }
     $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-4),($row[0].Y+$row[0].Height-4))
     Require ($selectionPixel -eq $background) 'Selected workspace does not retain the sidebar background'
     $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
@@ -97,9 +104,18 @@ function Capture([string]$Name,$Tree) {
     Require ([ChromeFixture]::ColorCount($path,$row[0].X,$row[0].Y,$stripe,$row[0].Height,$accent) -eq $stripe*$row[0].Height) 'Selected workspace lacks its full-height accent stripe independent of workspace color'
     $muted=if($Tree.chrome.theme -eq 'light'){'#5f6269'}else{'#abb1bc'}
     Require ([ChromeFixture]::ColorCount($path,($row[0].X+12),($row[0].Y+[int](27*$scale)),($row[0].Width-24),([int](20*$scale)),$muted) -gt 5) 'Native second-line path text was not painted'
+    $textLeft=$row[0].X+[int][Math]::Round((15+$(if($workspace.color){10}else{0}))*$scale)
+    $gutterX=$textLeft+[int][Math]::Round(6*$scale);$lineCount=@($row[0].Text -split "`n").Count-1
+    for($line=0;$line -lt $lineCount;$line++){
+        $top=$row[0].Y+[int][Math]::Round((27+20*$line)*$scale);$middle=$top+[int][Math]::Floor([Math]::Round(20*$scale)/2)
+        Require ([ChromeFixture]::Pixel($path,$gutterX,($top+1)) -eq $muted -and [ChromeFixture]::Pixel($path,($gutterX+2),$middle) -eq $muted) 'Workspace metadata tree connector missing'
+        if($line+1 -eq $lineCount){Require ([ChromeFixture]::Pixel($path,$gutterX,($middle+3)) -eq $background) 'Last metadata branch continues below its leaf'}
+        else{Require ([ChromeFixture]::Pixel($path,$gutterX,($middle+3)) -eq $muted) 'Intermediate metadata branch is disconnected'}
+    }
     $footerHandles=@($Tree.chrome.controls|Where-Object {$_.kind -in @('settings','files','search_all','open_file')}|ForEach-Object {$_.handle})
     $footer=@($shown|Where-Object {$footerHandles -contains $_.Handle -and $_.X -lt $Tree.chrome.sidebar_actual_width})
-    Require ($footer.Count -eq 4 -and @($footer|Where-Object {[Math]::Abs($_.Y-($size[1]-32*$scale)) -gt 2 -or [Math]::Abs($_.Width-28*$scale) -gt 2}).Count -eq 0) 'Footer actions are not one compact icon row'
+    $footerCount=if($Tree.chrome.sidebar_actual_width -lt 136*$scale){0}elseif($Tree.chrome.sidebar_actual_width -lt 232*$scale){3}else{4}
+    Require ($footer.Count -eq $footerCount -and @($footer|Where-Object {[Math]::Abs($_.Y-($size[1]-32*$scale)) -gt 2 -or [Math]::Abs($_.Width-28*$scale) -gt 2}).Count -eq 0) 'Footer actions do not follow compact row visibility or geometry'
     foreach($button in $footer){Require ([ChromeFixture]::ColorCount($path,$button.X,$button.Y,$button.Width,$button.Height,$muted) -gt 5) 'Footer glyph was not painted'}
     if($Case -eq 'details'){foreach($button in $footer){
         $info=@($Tree.chrome.controls|Where-Object {$_.handle -eq $button.Handle})[0]
@@ -271,6 +287,18 @@ try {
         Request @('editor','open',$file,'--root',$changed,'--pane',$source.pane)|Out-Null
         $tree=Tree;Require (@($tree.browsers).Count -eq 1 -and @($tree.editors).Count -eq 1 -and (Identities $tree) -eq $stable) 'Mixed surface chrome changed terminal identities or lost a surface'
         $mixed=Capture 'terminal-browser-editor' $tree;FocusPaint $tree $mixed
+        $row=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $source.workspace})[0];$rowHandle=$row.handle
+        $lines=@($row.label -split "`n")
+        Require ($lines.Count -eq 4 -and $lines[1].StartsWith('Editor-') -and $lines[2].StartsWith('Browser-') -and $lines[3] -ceq $changed.Replace('&','&&')) 'Mixed pane metadata does not follow most-recent focus or include all three active surfaces'
+        Request @('focus-pane',$browser.pane)|Out-Null;$tree=Tree
+        $row=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $source.workspace})[0]
+        Require ($row.handle -eq $rowHandle -and @($row.label -split "`n")[1].StartsWith('Browser-') -and @($row.label -split "`n")[2].StartsWith('Editor-') -and (Identities $tree) -eq $stable) 'Focusing a pane recreated the row or lost metadata MRU order'
+        Capture 'metadata-mru' $tree|Out-Null
+        Request @('close-pane',$browser.pane)|Out-Null;$tree=Tree
+        $shrunk=Capture 'metadata-close-pane' $tree
+        $row=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $source.workspace})[0]
+        Require (@($row.label -split "`n").Count -eq 3 -and $row.label -notmatch 'Browser-' -and (Identities $tree) -eq $stable) 'Closed pane metadata or its row height was retained'
+        $evidence.checks+=@{name='three_native_metadata_lines_tree_connectors_focus_mru_and_close_resize_preserve_processes';passed=$true}
         $evidence.checks+=@{name='terminal_browser_editor_native_chrome_capture_and_terminal_identity_preservation';passed=$true}
     } elseif($Case -eq 'overflow') {
         [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,400);$tree=Tree
@@ -278,11 +306,20 @@ try {
         $withoutPager=[int][Math]::Floor((400-76*$scale)/(58*$scale));Require ($withoutPager -ge 1 -and $withoutPager -le 6) 'Owned resize did not produce a bounded sidebar overflow case'
         $first=$tree.active_workspace
         for($i=0;$i -lt $withoutPager;$i++){Request @('new-workspace','--cwd',$cwd,'--shell=cmd')|Out-Null}
-        $tree=Ready ($withoutPager+1);$last=$tree.active_workspace;$stable=Identities $tree
-        $rows=[int][Math]::Floor((400-104*$scale)/(58*$scale))
+        $tree=Ready ($withoutPager+1);$last=$tree.active_workspace
+        Request @('split','vertical','--shell=cmd')|Out-Null;Request @('split','horizontal','--shell=cmd')|Out-Null;Request @('split','vertical','--shell=cmd')|Out-Null
+        $tree=Ready ($withoutPager+4);$stable=Identities $tree
+        $metadata=@($tree.chrome.controls|Where-Object {$_.kind -eq 'workspace' -and $_.workspace -eq $last})[0]
+        Require (@($tree.layout.panes).Count -eq 4 -and @($metadata.label -split "`n").Count -eq 4) 'Four panes were not capped to three sidebar metadata lines'
+        $rows=1+[int][Math]::Floor((400-202*$scale)/(58*$scale))
         $lastCapture=Capture 'overflow-last' $tree
         Require ($tree.chrome.sidebar_offset -eq $withoutPager+1-$rows) 'Last active workspace did not scroll into view'
         Require (@($lastCapture.controls|Where-Object {$_.Text -eq 'Next' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'Last-page Next control should be disabled'
+        [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,350);$tree=Tree
+        Capture 'overflow-shorter' $tree|Out-Null
+        $shortRows=1+[int][Math]::Floor((350-202*$scale)/(58*$scale))
+        Require ($tree.chrome.sidebar_offset -eq $withoutPager+1-$shortRows -and (Identities $tree) -eq $stable) 'Shrinking variable rows hid the active workspace or restarted a terminal'
+        [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,900,400)
         Request @('workspace','focus',$first)|Out-Null;$tree=Tree;$firstCapture=Capture 'overflow-first' $tree
         Require ($tree.chrome.sidebar_offset -eq 0 -and (Identities $tree) -eq $stable) 'First active workspace did not scroll into view or restarted a terminal'
         Require (@($firstCapture.controls|Where-Object {$_.Text -eq 'Previous' -and $_.Shown -and -not $_.Enabled}).Count -eq 1) 'First-page Previous control should be disabled'

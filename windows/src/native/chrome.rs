@@ -237,6 +237,7 @@ pub(super) enum Role {
     Destructive,
     Swatch(COLORREF),
     Workspace {
+        tree: bool,
         selected: bool,
         color: Option<COLORREF>,
         unread: bool,
@@ -1807,7 +1808,8 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         SetTextColor(item.hDC, text);
         SetBkMode(item.hDC, TRANSPARENT as i32);
         SelectObject(item.hDC, font);
-        let mut original = vec![0u16; 2048];
+        let mut original =
+            vec![0u16; GetWindowTextLengthW(item.hwndItem).clamp(0, 256_000) as usize + 1];
         let length = GetWindowTextW(item.hwndItem, original.as_mut_ptr(), original.len() as i32);
         original.truncate(length.max(0) as usize);
         let label = caption_for_paint(&original);
@@ -2140,7 +2142,94 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
         } else {
             0
         };
-        if matches!(role, Role::Workspace { .. } | Role::Choice { .. }) && rect.right > rect.left {
+        if matches!(role, Role::Workspace { tree: true, .. }) && rect.right > rect.left {
+            let mut lines = label_text.split('\n');
+            let title: Vec<u16> = lines.next().unwrap_or_default().encode_utf16().collect();
+            let mut title_rect = RECT {
+                top: rect.top + pixel(5),
+                bottom: (rect.top + pixel(27)).min(rect.bottom),
+                ..rect
+            };
+            DrawTextW(
+                item.hDC,
+                title.as_ptr(),
+                title.len() as i32,
+                &mut title_rect,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | accelerator,
+            );
+            SelectObject(item.hDC, caption_font);
+            SetTextColor(item.hDC, palette.muted);
+            SelectObject(item.hDC, GetStockObject(DC_PEN));
+            SetDCPenColor(item.hDC, palette.muted);
+            let lines: Vec<&str> = lines.take(3).collect();
+            for (index, line) in lines.iter().enumerate() {
+                let top = rect.top + pixel(27 + index as i32 * 20);
+                let bottom = (top + pixel(20)).min(rect.bottom - pixel(5));
+                if top >= bottom {
+                    break;
+                }
+                let mid = (top + bottom) / 2;
+                let x = rect.left + pixel(6);
+                if rect.right - rect.left > pixel(14) {
+                    MoveToEx(item.hDC, x, top, std::ptr::null_mut());
+                    LineTo(
+                        item.hDC,
+                        x,
+                        if index + 1 == lines.len() {
+                            mid + 1
+                        } else {
+                            bottom
+                        },
+                    );
+                    MoveToEx(item.hDC, x, mid, std::ptr::null_mut());
+                    LineTo(item.hDC, rect.left + pixel(14), mid);
+                }
+                // Keep full Unicode paths in HWND captions/accessibility; only
+                // display their last three components, as the Linux sidebar does.
+                let shortened = if line.starts_with("Browser-") || line.starts_with("Editor-") {
+                    line.to_string()
+                } else {
+                    let names: Vec<_> = std::path::Path::new(line)
+                        .components()
+                        .filter_map(|part| {
+                            if let std::path::Component::Normal(name) = part {
+                                Some(name.to_string_lossy())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if names.len() > 3 {
+                        format!(
+                            "...{}{}",
+                            std::path::MAIN_SEPARATOR,
+                            names[names.len() - 3..].join(std::path::MAIN_SEPARATOR_STR)
+                        )
+                    } else {
+                        line.to_string()
+                    }
+                };
+                let text: Vec<u16> = shortened.encode_utf16().collect();
+                let mut line_rect = RECT {
+                    left: rect.left + pixel(14),
+                    top,
+                    bottom,
+                    ..rect
+                };
+                if line_rect.left < line_rect.right {
+                    DrawTextW(
+                        item.hDC,
+                        text.as_ptr(),
+                        text.len() as i32,
+                        &mut line_rect,
+                        DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_PATH_ELLIPSIS | accelerator,
+                    );
+                }
+            }
+            SelectObject(item.hDC, font);
+        } else if matches!(role, Role::Workspace { .. } | Role::Choice { .. })
+            && rect.right > rect.left
+        {
             let (title, path) = label_text.split_once('\n').unwrap_or((&label_text, ""));
             let title: Vec<u16> = title.encode_utf16().collect();
             let path: Vec<u16> = path.trim_end_matches('\r').encode_utf16().collect();

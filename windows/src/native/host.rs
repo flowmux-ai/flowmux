@@ -578,6 +578,8 @@ struct App {
     sidebar_offset: usize,
     sidebar_width_dip: u32,
     sidebar_active: Option<WorkspaceId>,
+    sidebar_mru: RefCell<HashMap<WorkspaceId, Vec<PaneId>>>,
+    sidebar_metrics: (i32, u32, i32),
     pane_layout: model::Layout,
     zoomed: Option<PaneId>,
     drag: Option<panes::Drag>,
@@ -866,6 +868,8 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             sidebar_offset: 0,
             sidebar_width_dip,
             sidebar_active: None,
+            sidebar_mru: RefCell::new(HashMap::new()),
+            sidebar_metrics: (0, 0, 0),
             pane_layout: model::Layout::default(),
             zoomed: None,
             drag: None,
@@ -1616,29 +1620,13 @@ impl App {
             browser.layout(area, scale, find_height)?;
         }
         self.browser_bookmarks_layout();
-        let row_height = px(58).max(1);
         let sidebar_layout =
             self.sidebar_layout(client.bottom, unsafe { GetDpiForWindow(self.window) });
-        let list_top = sidebar_layout.list_top;
         let footer_top = sidebar_layout.footer_top;
-        let visible_rows = sidebar_layout.capacity;
-        let main_indices = self.main_workspace_indices();
-        let main_active = main_indices
-            .iter()
-            .position(|i| *i == self.active_workspace)
-            .unwrap_or(0);
-        let max_offset = main_indices.len().saturating_sub(visible_rows.max(1));
-        self.sidebar_offset = self.sidebar_offset.min(max_offset);
-        let active_workspace = self.current_workspace().map(|workspace| workspace.id);
-        if self.sidebar_active != active_workspace {
-            self.sidebar_active = active_workspace;
-            if main_active < self.sidebar_offset {
-                self.sidebar_offset = main_active;
-            }
-            if main_active >= self.sidebar_offset + visible_rows.max(1) {
-                self.sidebar_offset = main_active + 1 - visible_rows.max(1);
-            }
-        }
+        let max_offset = sidebar_layout.max_offset;
+        self.sidebar_offset = sidebar_layout.offset;
+        self.sidebar_metrics = sidebar_layout.metrics;
+        self.sidebar_active = self.current_workspace().map(|workspace| workspace.id);
         for control in &self.controls {
             unsafe {
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(
@@ -1671,21 +1659,15 @@ impl App {
                     (sidebar >= px(64)).then_some((sidebar - px(32), px(5), px(28), px(28)))
                 }
                 Action::Workspace(id) | Action::WorkspaceClose(id) => {
-                    let i = main_indices
+                    let row = sidebar_layout
+                        .rows
                         .iter()
-                        .position(|i| self.workspaces[*i].id == id)
-                        .unwrap();
-                    if sidebar <= px(12)
-                        || i < self.sidebar_offset
-                        || i >= self.sidebar_offset + visible_rows
-                    {
-                        None
-                    } else {
-                        let row_y = list_top + (i - self.sidebar_offset) as i32 * row_height;
+                        .find(|(workspace, _, _)| *workspace == id);
+                    if let Some(&(_, row_y, row_height)) = row.filter(|_| sidebar > px(12)) {
                         let row_width = sidebar - px(12);
-                        let row_height = row_height - px(2);
+                        let row_height = (row_height - px(2)).max(1);
                         if matches!(control.action, Action::WorkspaceClose(_)) {
-                            (row_width >= px(48)).then_some((
+                            (row_width >= px(48) && row_height >= px(24)).then_some((
                                 sidebar - px(36),
                                 row_y + (row_height - px(24)) / 2,
                                 px(24),
@@ -1694,6 +1676,8 @@ impl App {
                         } else {
                             Some((px(6), row_y, row_width.max(1), row_height))
                         }
+                    } else {
+                        None
                     }
                 }
                 Action::SidebarScroll(direction) => {

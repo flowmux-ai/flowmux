@@ -38,6 +38,10 @@ pub(super) struct SidebarLayout {
     pub footer_top: i32,
     pub capacity: usize,
     pub pager: bool,
+    pub offset: usize,
+    pub max_offset: usize,
+    pub rows: Vec<(WorkspaceId, i32, i32)>,
+    pub metrics: (i32, u32, i32),
 }
 
 pub(super) struct PaneHeaderLayout {
@@ -104,33 +108,97 @@ impl App {
         let px = |n: i32| (n as f64 * dpi.max(96) as f64 / 96.0).round() as i32;
         let footer_top = (height - px(36)).max(0);
         let list_top = px(40).min(footer_top);
-        let without_pager = ((footer_top - list_top) / px(58).max(1)).max(0) as usize;
-        let pager = self.main_workspace_indices().len() > without_pager;
+        let indices = self.main_workspace_indices();
+        let heights: Vec<i32> = indices
+            .iter()
+            .map(|i| px(58 + 20 * (self.workspaces[*i].leaves().len().clamp(1, 3) as i32 - 1)))
+            .collect();
+        let metrics = (height, dpi, heights.iter().sum::<i32>());
+        let pager = metrics.2 > footer_top - list_top;
         let list_bottom = (footer_top - if pager { px(28) } else { 0 }).max(list_top);
+        let available = list_bottom - list_top;
+        let mut occupied = 0;
+        let mut max_offset = heights.len().saturating_sub(1);
+        for (index, height) in heights.iter().enumerate().rev() {
+            if occupied > 0 && occupied + height > available {
+                break;
+            }
+            occupied += height;
+            max_offset = index;
+        }
+        let mut offset = self.sidebar_offset.min(max_offset);
+        if self.sidebar_active != self.current_workspace().map(|w| w.id)
+            || self.sidebar_metrics != metrics
+        {
+            if let Some(active) = indices.iter().position(|i| *i == self.active_workspace) {
+                offset = offset.min(active);
+                while offset < active && heights[offset..=active].iter().sum::<i32>() > available {
+                    offset += 1;
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        let mut y = list_top;
+        for (index, height) in heights.iter().enumerate().skip(offset) {
+            if y >= list_bottom || (!rows.is_empty() && y + height > list_bottom) {
+                break;
+            }
+            let shown = (*height).min(list_bottom - y);
+            rows.push((self.workspaces[indices[index]].id, y, shown));
+            y += height;
+        }
         SidebarLayout {
             list_top,
             list_bottom,
             footer_top,
-            capacity: ((list_bottom - list_top) / px(58).max(1)).max(0) as usize,
+            capacity: rows.len(),
             pager,
+            offset,
+            max_offset,
+            rows,
+            metrics,
         }
     }
     pub(super) fn workspace_caption(&self, id: WorkspaceId) -> Option<String> {
         let workspace = self.workspaces.iter().find(|w| w.id == id)?;
-        let cwd = self
-            .locate(workspace.active())
-            .map(|(_, _, cwd)| cwd)
-            .unwrap_or_else(|| workspace.cwd.clone());
-        let directory = if let Some(config) = &workspace.ssh {
-            format!(
-                "{}:{}",
-                config.target.destination(),
-                crate::ssh::display_cwd(workspace).unwrap_or("~")
-            )
-        } else {
-            cwd.display().to_string()
-        };
-        Some(format!("{}\n{}", workspace.name, directory))
+        let leaves = workspace.leaves();
+        let mut histories = self.sidebar_mru.borrow_mut();
+        let history = histories.entry(id).or_default();
+        history.retain(|pane| leaves.iter().any(|(id, _, _)| id == pane));
+        if history.first() != Some(&workspace.focused) {
+            history.retain(|pane| *pane != workspace.focused);
+            history.insert(0, workspace.focused);
+        }
+        let mut order = history.clone();
+        for (pane, _, _) in &leaves {
+            if !order.contains(pane) {
+                order.push(*pane);
+            }
+        }
+        let mut caption = workspace.name.clone();
+        for pane in order.into_iter().take(3) {
+            let (_, active, tabs) = leaves.iter().find(|(id, _, _)| *id == pane)?;
+            let tab = tabs.iter().find(|tab| tab.id == *active)?;
+            let line = match &tab.kind {
+                SurfaceKind::Terminal { cwd, .. } => {
+                    cwd.as_ref().unwrap_or(&workspace.cwd).display().to_string()
+                }
+                SurfaceKind::Browser { .. } => format!("Browser-{}", tab.title),
+                SurfaceKind::Editor { .. } => format!("Editor-{}", tab.title),
+                SurfaceKind::SshTerminal { cwd, .. } => format!(
+                    "{}:{}",
+                    workspace
+                        .ssh
+                        .as_ref()
+                        .map(|config| config.target.destination())
+                        .unwrap_or_else(|| "SSH".into()),
+                    cwd.as_deref().unwrap_or("~")
+                ),
+            };
+            caption.push('\n');
+            caption.push_str(&line.replace(['\r', '\n'], " "));
+        }
+        Some(caption)
     }
     fn workspace_has_unread(&self, id: WorkspaceId) -> bool {
         self.notifications.store.entries().iter().any(|entry| {
@@ -154,6 +222,7 @@ impl App {
                     .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
                     .map(|rgb| ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff));
                 chrome::Role::Workspace {
+                    tree: !self.is_detached_workspace(id),
                     selected: self
                         .current_workspace()
                         .is_some_and(|workspace| workspace.id == id)
@@ -241,6 +310,9 @@ impl App {
         }
     }
     pub(super) fn refresh_chrome_metadata(&self) {
+        self.sidebar_mru
+            .borrow_mut()
+            .retain(|id, _| self.workspaces.iter().any(|w| w.id == *id));
         self.refresh_pane_headers(&self.pane_layout.panes);
         self.refresh_ssh_toolbar();
         for window in self.detached.values() {

@@ -127,6 +127,7 @@ impl Window {
                 title,
                 WORKSPACE,
                 chrome::Role::Workspace {
+                    tree: false,
                     selected: true,
                     color: None,
                     unread: false,

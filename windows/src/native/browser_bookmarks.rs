@@ -354,6 +354,7 @@ impl Panel {
             shell::register_button(
                 open,
                 shell::Role::Workspace {
+                    tree: false,
                     selected: false,
                     color: None,
                     unread: false,
