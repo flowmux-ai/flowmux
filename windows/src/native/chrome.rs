@@ -262,6 +262,8 @@ pub(super) enum Role {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum ChromeIcon {
+    Bookmarks,
+    Delete,
     Settings,
     Files,
     Worktrees,
@@ -1854,6 +1856,19 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 LineTo(item.hDC, x(c), y(d));
             };
             match kind {
+                ChromeIcon::Bookmarks => {
+                    MoveToEx(item.hDC, x(-5), y(-7), std::ptr::null_mut());
+                    for (a, b) in [(5, -7), (5, 7), (0, 3), (-5, 7), (-5, -7)] {
+                        LineTo(item.hDC, x(a), y(b));
+                    }
+                }
+                ChromeIcon::Delete => {
+                    Rectangle(item.hDC, x(-5), y(-4), x(5) + 1, y(7) + 1);
+                    line(-7, -6, 7, -6);
+                    line(-2, -8, 2, -8);
+                    line(-2, -2, -2, 5);
+                    line(2, -2, 2, 5);
+                }
                 ChromeIcon::UsageBar => {
                     Rectangle(item.hDC, x(-7), y(-6), x(7) + 1, y(6) + 1);
                     line(-7, 2, 7, 2);

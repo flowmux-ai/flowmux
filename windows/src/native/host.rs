@@ -607,6 +607,7 @@ struct App {
     pending_minimaps: HashMap<Uuid, PendingRead>,
     search: search::Controller,
     browser_find: browser::find::Controller,
+    browser_bookmarks: browser::bookmarks::Controller,
     notifications: notifications::Controller,
     usage: usage::Controller,
     sessions: sessions::Controller,
@@ -890,6 +891,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
             pending_minimaps: HashMap::new(),
             search: search::Controller::default(),
             browser_find: browser::find::Controller::default(),
+            browser_bookmarks: browser::bookmarks::Controller::default(),
             notifications: notifications::Controller::default(),
             usage: usage::Controller::default(),
             sessions: sessions::Controller::default(),
@@ -940,6 +942,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
         // controllers close (older runtimes invalidate these COM objects).
         app.browser_popups.shutdown();
         drop(std::mem::take(&mut app.overview));
+        drop(std::mem::take(&mut app.browser_bookmarks));
         drop(std::mem::take(&mut app.browser_find));
         drop(std::mem::take(&mut app.downloads));
         app.ssh_dialog.take();
@@ -1024,6 +1027,7 @@ fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
                 && !app.usage.handle_message(&message)
                 && !app.sessions.handle_message(&message)
                 && !app.downloads.handle_message(&message)
+                && !app.browser_bookmarks.handle_message(&message)
                 && !app.browser_find.handle_message(&message)
                 && !app
                     .browsers
@@ -1611,6 +1615,7 @@ impl App {
                 .layout(*id, area, scale, self.background_test);
             browser.layout(area, scale, find_height)?;
         }
+        self.browser_bookmarks_layout();
         let row_height = px(58).max(1);
         let sidebar_layout =
             self.sidebar_layout(client.bottom, unsafe { GetDpiForWindow(self.window) });
@@ -2007,6 +2012,7 @@ impl App {
             }
             Event::WindowMoved => {
                 self.usage.reposition();
+                self.browser_bookmarks_layout();
                 self.cancel_drag();
                 // Child WebViews do not receive Wry's top-level WM_MOVE hook.
                 for view in self
@@ -3604,6 +3610,7 @@ impl App {
                             .as_ref()
                             .and_then(appearance::Panel::capture_window)
                     })
+                    .or_else(|| self.browser_bookmarks.capture_window())
                     .or_else(|| self.overview_capture_window())
                     .or_else(|| self.usage.capture_window())
                     .or_else(|| self.sessions.capture_window())
@@ -3631,8 +3638,7 @@ impl App {
                     "bounds":surface.holder.view_bounds(&surface.view),"holder":surface.holder.diagnostics(),
                     "view_handle":surface.view.hwnd().0 as usize,
                     "cwd":self.locate(*id).map(|(_,_,cwd)|cwd),"remote_cwd":self.remote_directory(*id)})).collect();
-                return Ok(Some(
-                    json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
+                let mut result = json!({"workspaces":self.workspaces,"active_workspace":self.workspaces.get(self.active_workspace).map(|workspace|workspace.id),"main_empty":self.current_workspace().is_none(),"surfaces":surfaces,
                         "last_new_window_pid":last_new_window_pid,"worktrees":self.worktrees.status(),"usage":self.usage.status(),"agent_sessions":self.sessions.status(),
                         "browsers":self.browsers.iter().map(|(id,b)|b.status(*id)).collect::<Vec<_>>(),
                         "editors":self.editors.iter().map(|(id,e)|e.status(*id)).collect::<Vec<_>>(),
@@ -3660,8 +3666,9 @@ impl App {
                         "main_closed":self.main_closed,
                         "detached_windows":self.detached.iter().map(|(id,window)| {let mut value=window.diagnostics(); value["surface"]=json!(id); value}).collect::<Vec<_>>(),
                         "state":{"window":self.store.as_ref().map(|s| s.id),"path":self.store.as_ref().map(|s| &s.path),
-                            "saving":self.pending_save.is_some(),"error":self.state_error}}),
-                ));
+                            "saving":self.pending_save.is_some(),"error":self.state_error}});
+                result["bookmarks"] = self.browser_bookmarks.diagnostics();
+                return Ok(Some(result));
             }
             Command::ReadScreen {
                 pane,

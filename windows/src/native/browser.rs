@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{cell::Cell, rc::Rc};
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment;
 use wry::WebViewBuilderExtWindows;
+#[path = "browser_bookmarks.rs"]
+pub(super) mod bookmarks;
 #[path = "browser_capture.rs"]
 pub(super) mod capture;
 #[path = "browser_chrome.rs"]
@@ -25,6 +27,7 @@ const PREVIEW_EXPIRED: &str =
 const EXPIRED_HTML: &str = "<!doctype html><meta charset=utf-8><meta http-equiv=Content-Security-Policy content=\"default-src 'none'; style-src 'unsafe-inline'\"><title>SSH preview expired</title><style>body{font:16px system-ui;margin:3em;color:#777}</style><h1>SSH preview expired</h1><p>Connect its port forward and reopen the preview.</p>";
 pub(super) enum Signal {
     Popup,
+    Bookmarks(u64, bookmarks::UiAction),
     PopupClose(SurfaceId, Uuid),
     Navigation(SurfaceId, Uuid, u64),
     Loaded(SurfaceId, Uuid, u64, Option<i32>),
@@ -704,6 +707,7 @@ impl App {
         Ok(())
     }
     pub(super) fn browser_cancel(&mut self, id: SurfaceId, reason: &str) {
+        self.browser_bookmarks.close_surface(id);
         self.browser_popups.cancel_surface(id);
         self.browser_find_reset(id, reason);
         self.browser_wait_cancel(id, reason);
@@ -722,6 +726,7 @@ impl App {
         if let Err(error) = self.refresh_ssh_previews() {
             report(&format!("SSH preview refresh: {error:#}"));
         }
+        self.browser_bookmarks_tick();
         self.browser_capture_tick();
         self.download_tick();
         let now = Instant::now();
@@ -769,6 +774,9 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::Bookmarks(generation, action) => {
+                self.browser_bookmarks_ui(generation, action)?
+            }
             Signal::Popup => self.browser_popup_dispatch(),
             Signal::PopupClose(id, instance) => self.browser_popup_close(id, instance)?,
             Signal::Capture(id, result) => self.browser_capture_result(id, result),
@@ -871,6 +879,7 @@ impl App {
                         "Reset zoom",
                         "Downloads…",
                         "Find in page…",
+                        "Bookmarks",
                     ];
                     let disabled = [
                         (!browser.back).then_some(1),
@@ -885,9 +894,16 @@ impl App {
                         &disabled,
                         browser.chrome.tools_anchor(),
                     )? as u16;
+                    if action == 11 {
+                        action = 12;
+                    }
                     if action == 0 {
                         return Ok(());
                     }
+                }
+                if action == 12 {
+                    self.browser_bookmarks_show(id)?;
+                    return Ok(());
                 }
                 if action == 10 {
                     self.browser_find_show(id)?;

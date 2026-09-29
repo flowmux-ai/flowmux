@@ -151,6 +151,8 @@ pub(super) struct Chrome {
     pub(super) address: HWND,
     status: HWND,
     more: HWND,
+    bookmarks: HWND,
+    displayed_url: String,
     loading: bool,
     navigation_visible: bool,
     buttons: Vec<HWND>,
@@ -205,6 +207,8 @@ impl Chrome {
                 address: std::ptr::null_mut(),
                 status: std::ptr::null_mut(),
                 more: std::ptr::null_mut(),
+                bookmarks: std::ptr::null_mut(),
+                displayed_url: "about:blank".into(),
                 loading: false,
                 navigation_visible: false,
                 buttons: vec![],
@@ -260,7 +264,10 @@ impl Chrome {
                 WS_TABSTOP | BS_PUSHBUTTON as u32,
                 11,
             )?;
+            chrome.bookmarks =
+                chrome.child("BUTTON", "Bookmarks", WS_TABSTOP | BS_OWNERDRAW as u32, 12)?;
             for (button, kind) in [
+                (chrome.bookmarks, shell_chrome::ChromeIcon::Bookmarks),
                 (chrome.buttons[0], shell_chrome::ChromeIcon::Back),
                 (chrome.buttons[1], shell_chrome::ChromeIcon::Forward),
                 (chrome.buttons[2], shell_chrome::ChromeIcon::Reload),
@@ -342,6 +349,7 @@ impl Chrome {
             let full = area.width >= px(250);
             self.navigation_visible = area.width >= px(104);
             let go = area.width >= px(168);
+            let bookmarks = area.width >= px(232);
             for (i, button) in self.buttons.iter().enumerate() {
                 let shown = match i {
                     0 | 1 => full,
@@ -350,7 +358,11 @@ impl Chrome {
                     4 => go,
                     _ => false,
                 };
-                let x = if i == 4 { area.width - px(68) } else { left };
+                let x = if i == 4 {
+                    area.width - px(if bookmarks { 100 } else { 68 })
+                } else {
+                    left
+                };
                 // Both Reload and Stop keep current bounds while hidden. Metadata
                 // only switches visibility, so a stale slot cannot shrink a button.
                 if shown || matches!(i, 2 | 3) {
@@ -382,8 +394,27 @@ impl Chrome {
                 std::ptr::null_mut(),
                 left,
                 px(5),
-                (area.width - left - px(if go { 72 } else { 38 })).max(1),
+                (area.width
+                    - left
+                    - px(if bookmarks {
+                        104
+                    } else if go {
+                        72
+                    } else {
+                        38
+                    }))
+                .max(1),
                 px(28),
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+            ShowWindow(self.bookmarks, if bookmarks { SW_SHOWNA } else { SW_HIDE });
+            SetWindowPos(
+                self.bookmarks,
+                std::ptr::null_mut(),
+                (area.width - px(68)).max(0),
+                px(4),
+                px(30),
+                px(30),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
             let tool_width = px(30).min((area.width - px(8)).max(1));
@@ -408,6 +439,20 @@ impl Chrome {
             ShowWindow(self.status, SW_HIDE);
         }
     }
+    pub(super) fn bookmarks_anchor(&self) -> (i32, i32) {
+        let mut r = RECT::default();
+        unsafe {
+            GetWindowRect(
+                if GetWindowLongPtrW(self.bookmarks, GWL_STYLE) as u32 & WS_VISIBLE != 0 {
+                    self.bookmarks
+                } else {
+                    self.more
+                },
+                &mut r,
+            );
+        }
+        (r.left, r.bottom)
+    }
     pub(super) fn tools_anchor(&self) -> (i32, i32) {
         let mut r = RECT::default();
         unsafe {
@@ -420,7 +465,7 @@ impl Chrome {
         unsafe {
             GetClientRect(self.window, &mut r);
         }
-        json!({"parent":unsafe{GetParent(self.window)} as usize,"height":r.bottom,"rows":1,"tools_handle":self.more as usize,
+        json!({"parent":unsafe{GetParent(self.window)} as usize,"height":r.bottom,"rows":1,"tools_handle":self.more as usize,"bookmarks_handle":self.bookmarks as usize,
             "status_handle":self.status as usize,"controls":self.buttons.iter().map(|h|*h as usize).collect::<Vec<_>>()})
     }
     pub(super) fn address(&self) -> String {
@@ -466,8 +511,14 @@ impl Chrome {
                     .get(&(self.address as isize))
                     .is_some_and(|keys| keys.composing || keys.settling)
             });
-            if GetFocus() != self.address && !guarded && self.address() != url {
-                SetWindowTextW(self.address, wide(url).as_ptr());
+            // Metadata ticks must not erase a draft when its tab loses focus.
+            // Only a changed page URL replaces it, after composition has settled.
+            if GetFocus() != self.address
+                && !guarded
+                && self.displayed_url != url
+                && SetWindowTextW(self.address, wide(url).as_ptr()) != 0
+            {
+                self.displayed_url = url.to_string();
             }
             EnableWindow(self.buttons[0], back as i32);
             EnableWindow(self.buttons[1], forward as i32);

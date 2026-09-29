@@ -46,6 +46,7 @@ public static class OptionsFixture {
         Message(hwnd,0x6,IntPtr.Zero,target);
     }
     public static void Click(long parent,long child,int owner) {var hwnd=Child(parent,child,owner);if(!IsWindowEnabled(hwnd))throw new InvalidOperationException("Owned action is disabled");Message(new IntPtr(parent),0x111,new IntPtr(GetDlgCtrlID(hwnd)),hwnd);Owned(parent,owner);}
+    public static void HostTick(long window,int owner) {Message(Owned(window,owner),0x113,new IntPtr(1),IntPtr.Zero);}
     // Selecting a menu item may destroy the popup before this call returns.
     // Verify ownership before dispatch; the caller checks the resulting model.
     public static void ClickMenu(long parent,long child,int owner) {

@@ -119,7 +119,7 @@ function Address-Unchanged($Before,[string]$Draft) {
     # Queued owned HWND messages precede this IPC roundtrip. This tests the
     # native guard/dispatch path, not physical Korean IME or desktop focus.
     $tree=Tree;$after=@($tree.browsers|Where-Object {$_.id -eq $Before.id})
-    if($after.Count -ne 1 -or $after[0].url -cne $Before.url -or $after[0].generation -ne $Before.generation -or $after[0].view_handle -ne $Before.view_handle -or -not (Same-Text ([BrowserFixture]::ReadText($Before.address_handle)) $Draft)){throw 'Guarded address input navigated, replaced its view or changed raw Unicode draft'}
+    if($after.Count -ne 1 -or $after[0].url -cne $Before.url -or $after[0].generation -ne $Before.generation -or $after[0].view_handle -ne $Before.view_handle -or -not (Same-Text ([BrowserFixture]::ReadText($Before.address_handle)) $Draft)){$evidence.addressFailure=@{beforeUrl=$Before.url;afterUrl=$after[0].url;beforeGeneration=$Before.generation;afterGeneration=$after[0].generation;beforeView=$Before.view_handle;afterView=$after[0].view_handle;expectedDraft=$Draft;actualDraft=[BrowserFixture]::ReadText($Before.address_handle)};throw 'Guarded address input navigated, replaced its view or changed raw Unicode draft'}
     $running=@($tree.surfaces|Where-Object {$_.id -eq $terminal.id})
     if($running.Count -ne 1 -or $running[0].pid -ne $terminal.pid -or -not $running[0].running){throw 'Address input changed the sibling terminal process'}
 }
@@ -140,6 +140,74 @@ function Check-Toolbar($Status) {
     $reload=@($chrome|Where-Object Text -ceq 'Reload')[0];$stop=@($chrome|Where-Object Text -ceq 'Stop')[0]
     if($reload.Width -ne [Math]::Round(30*$dpi/96) -or $reload.X -ne $stop.X -or $reload.Y -ne $stop.Y -or $reload.Width -ne $stop.Width -or $reload.Height -ne $stop.Height){throw 'Reload/Stop geometry changed during metadata refresh'}
     return $chrome
+}
+function Bookmarks-Wait([int]$Count,[bool]$Error=$false,[long]$After=0) {
+    $clock=[Diagnostics.Stopwatch]::StartNew()
+    do {$tree=Tree;$panel=$tree.bookmarks.panel
+        if($panel -and -not $tree.bookmarks.busy -and @($panel.rows).Count -eq $Count -and $panel.error -eq $Error -and $panel.generation -gt $After){
+            $native=[OptionsFixture]::Describe([long]$panel.window,$process.Id)
+            if($panel.native_visible -or $native.Owner -ne $panel.owner -or [Math]::Abs($native.Width-336*$native.Dpi/96) -gt 2){throw 'Bookmarks lost hidden popup ownership or Linux width'}
+            return $panel
+        }
+        if($clock.ElapsedMilliseconds -gt 5000){throw ('Bookmarks exceeded5s: '+($tree.bookmarks|ConvertTo-Json -Depth 6 -Compress))};Start-Sleep -Milliseconds 20
+    }while($true)
+}
+function Bookmarks-Open([string]$Pane,[int]$Count,[bool]$Error=$false){
+    $browser=Request @('browser','status',$Pane)
+    [OptionsFixture]::Click([long]$browser.chrome_handle,[long]$browser.chrome.bookmarks_handle,$process.Id)
+    return Bookmarks-Wait $Count $Error
+}
+function Bookmarks-Click([long]$Handle){[OptionsFixture]::Click([OptionsFixture]::Parent($Handle,$process.Id),$Handle,$process.Id)}
+function Bookmarks-Close($Panel){
+    [OptionsFixture]::PostEscape([long]$Panel.window,$process.Id);$clock=[Diagnostics.Stopwatch]::StartNew()
+    do{if(-not (Tree).bookmarks.panel){return};if($clock.ElapsedMilliseconds -gt 5000){throw 'Bookmark popup did not close'};Start-Sleep -Milliseconds 20}while($true)
+}
+function Verify-Bookmarks([string]$Pane){
+    $before=Request @('browser','status',$Pane);$panel=Bookmarks-Open $Pane 0
+    if($panel.message -cne 'No bookmarks yet'){throw 'Bookmark empty state missing'}
+    Bookmarks-Click ([long]$panel.add);$panel=Bookmarks-Wait 1 $false $panel.generation
+    if(-not (Same-Text $panel.rows[0].title $oneTitle) -or $panel.rows[0].url -cne $origin+'/one'){throw 'Bookmark changed Korean title or URL'}
+    $caption=[OptionsFixture]::Text([long]$panel.rows[0].open,$process.Id)
+    if(-not (Same-Text $caption ($oneTitle+"`n"+$origin+'/one'))){throw 'Bookmark native two-line caption lost Unicode'}
+    $image=Join-Path $directory 'bookmarks.bmp';$capture=Request @('chrome-capture',$image)
+    if($capture.root_handle -ne $panel.window -or @($capture.controls|Where-Object {$_.handle -eq $panel.rows[0].open}).Count -ne 1 -or @($capture.controls|Where-Object {$_.handle -eq $panel.rows[0].remove}).Count -ne 1){throw 'Bookmark production paint omitted row or delete button'}
+    $background=[ChromeFixture]::Pixel($image,1,1)
+    foreach($handle in @($panel.rows[0].open,$panel.rows[0].remove)){$paint=@($capture.controls|Where-Object {$_.handle -eq $handle})[0].clip;if($paint.width*$paint.height-[ChromeFixture]::ColorCount($image,$paint.x,$paint.y,$paint.width,$paint.height,$background) -lt 8){throw 'Bookmark row or delete glyph was blank'}}
+    Remove-Item -LiteralPath $image -Force
+    Bookmarks-Click ([long]$panel.add);$panel=Bookmarks-Wait 1 $false $panel.generation
+    Request @('browser','navigate',$Pane,($origin+'/two'))|Out-Null;Wait-Page $Pane '/two' $twoTitle|Out-Null
+    Bookmarks-Click ([long]$panel.add);$panel=Bookmarks-Wait 2 $false $panel.generation
+    if(-not (Same-Text $panel.rows[0].title $twoTitle)){throw 'Bookmark this page used stale metadata'}
+    Bookmarks-Click ([long]$panel.rows[1].open);Wait-Page $Pane '/one' $oneTitle|Out-Null
+    if((Tree).bookmarks.panel){throw 'Opening bookmark did not dismiss popup'}
+    $panel=Bookmarks-Open $Pane 2;Bookmarks-Click ([long]$panel.rows[0].remove);$panel=Bookmarks-Wait 1 $false $panel.generation
+    $path=Join-Path $directory 'state\browser-profile\bookmarks.json';$saved=[IO.File]::ReadAllBytes($path);$values=Get-Content -Raw -Encoding UTF8 -LiteralPath $path|ConvertFrom-Json
+    if(@($values).Count -ne 1 -or -not (Same-Text $values[0].title $oneTitle)){throw 'Bookmark delete or persistence differs'}
+    Bookmarks-Close $panel
+    try{
+        $invalid='{ broken bookmarks';[IO.File]::WriteAllText($path,$invalid,(New-Object Text.UTF8Encoding($false)))
+        $panel=Bookmarks-Open $Pane 0 $true
+        if([OptionsFixture]::Describe([long]$panel.add,$process.Id).Enabled -or [IO.File]::ReadAllText($path) -cne $invalid){throw 'Corrupt bookmarks enabled replacement or were overwritten'}
+        Bookmarks-Close $panel
+    }finally{[IO.File]::WriteAllBytes($path,$saved)}
+    $panel=Bookmarks-Open $Pane 1;$lock=[IO.File]::Open([IO.Path]::ChangeExtension($path,'lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    try{Bookmarks-Click ([long]$panel.add);$panel=Bookmarks-Wait 0 $true $panel.generation;if($panel.message -notlike '*Another window*' -or [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -cne [Convert]::ToBase64String($saved)){throw 'Bookmark writer lock waited or changed committed bytes'}}finally{$lock.Dispose()}
+    Bookmarks-Close $panel
+    try{
+        $rows=@(@{title='위험 링크';url='javascript:alert(1)'})+@(1..12|ForEach-Object {@{title=($oneTitle+' '+$_);url=($origin+'/one#'+$_)}})
+        [IO.File]::WriteAllText($path,($rows|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
+        $panel=Bookmarks-Open $Pane 13
+        if([OptionsFixture]::Describe([long]$panel.rows[0].open,$process.Id).Enabled -or -not [OptionsFixture]::Describe([long]$panel.rows[0].remove,$process.Id).Enabled){throw 'Unsafe stored bookmark was navigable or could not be removed'}
+        [OptionsFixture]::Scroll([long]$panel.viewport,$process.Id,$true);$clock=[Diagnostics.Stopwatch]::StartNew()
+        do{$panel=(Tree).bookmarks.panel;if($panel.first -gt 0){break};if($clock.ElapsedMilliseconds -gt 5000){throw 'Bookmark list did not scroll'};Start-Sleep -Milliseconds 20}while($true)
+        Bookmarks-Click ([long]$panel.rows[12].remove);$panel=Bookmarks-Wait 12 $false $panel.generation
+        if(@($panel.rows|Where-Object {$_.url -ceq ($origin+'/one#12')}).Count){throw 'Scrolled bookmark delete used the wrong row identity'}
+        Bookmarks-Close $panel
+    }finally{[IO.File]::WriteAllBytes($path,$saved)}
+    $panel=Bookmarks-Open $Pane 1;Bookmarks-Close $panel
+    $after=Request @('browser','status',$Pane)
+    if($after.view_handle -ne $before.view_handle -or $after.holder.window -ne $before.holder.window -or (Tree).surfaces[0].pid -ne $terminal.pid){throw 'Bookmarks replaced browser or terminal'}
+    $evidence.checks+=@{name='native_bookmarks_unicode_add_deduplicate_open_delete_scroll_corruption_writer_lock_and_safe_urls';passed=$true}
 }
 function Files-CloseRemaining([Diagnostics.Stopwatch]$Clock,[int]$Limit=3000) {
     $left=$Limit-$Clock.ElapsedMilliseconds;if($left -le 0){throw 'Files-close phase exceeded its bounded budget'};return [int][Math]::Min(5000,$left)
@@ -251,6 +319,7 @@ try {
     if ([BrowserFixture]::ReadText($loaded.address_handle) -ne ($origin+'/one')) {throw 'Native address differs'}
     $evidence.checks+=@{name='native_webview_unicode_dom_address_and_no_terminal_bridge';passed=$true;page=$page}
     $evidence.checks+=@{name='single_row_native_browser_geometry_and_tools_entry';passed=$true;controls=(Check-Toolbar $loaded);diagnostics=$loaded.chrome}
+    Verify-Bookmarks $first.pane
     $root=Tree
     [ChromeFixture]::Resize([long]$root.window_handle,$process.Id,400,500)
     Request @('resize-pane',$first.pane,'--ratio','0.7')|Out-Null
@@ -363,7 +432,9 @@ try {
     if($inactiveAddress.visible){throw 'Inactive address fixture still has a visible browser surface'}
     $inactiveDraft=$origin+'/two?inactive-한'
     [OptionsFixture]::SetText([long]$inactiveAddress.chrome_handle,[long]$inactiveAddress.address_handle,$process.Id,$inactiveDraft)
-    [OptionsFixture]::PostEnter([long]$inactiveAddress.address_handle,$process.Id);Address-Unchanged $inactiveAddress $inactiveDraft
+    [OptionsFixture]::PostEnter([long]$inactiveAddress.address_handle,$process.Id)
+    [OptionsFixture]::HostTick([long]$addressTree.window_handle,$process.Id)
+    Address-Unchanged $inactiveAddress $inactiveDraft
     $addressTreeAfter=Tree;$currentAfter=Request @('identify')
     if($currentAfter.surface -ne $currentBefore.surface){throw 'Inactive address Enter changed the selected sibling surface'}
     foreach($other in @($addressTree.browsers|Where-Object {$_.id -ne $first.surface})){
@@ -484,6 +555,7 @@ try {
     if (@($restored.surfaces).Count -ne 0 -or @($restored.browsers).Count -ne 1 -or $restored.browsers[0].id -ne $first.surface) {throw 'Browser-only restore lost identity'}
     $restoredPane=(Request @('identify')).pane
     Wait-Page $restoredPane '/one' $oneTitle|Out-Null
+    $bookmarks=Bookmarks-Open $restoredPane 1;if(-not (Same-Text $bookmarks.rows[0].title $oneTitle)){throw 'Bookmarks did not persist across process restart'};Bookmarks-Close $bookmarks
     if (-not (Same-Text (Eval-Page $restoredPane 'localStorage.getItem("browser-persist")') '한글 한 é 😀')) {throw 'Isolated browser profile did not persist'}
     $evidence.checks+=@{name='browser_only_checkpoint_restart_and_separate_profile_persistence';passed=$true;window=$saved.window;surface=$first.surface}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
