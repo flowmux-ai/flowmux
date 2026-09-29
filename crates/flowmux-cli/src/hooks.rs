@@ -12,8 +12,7 @@ use flowmux_ipc::{
     client::Client,
     protocol::{AgentLifecycleEvent, Request, Response},
 };
-use serde::de::{IgnoredAny, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -91,47 +90,6 @@ pub struct ClaudeHookInput {
     /// blocked completion and forced the same turn to continue.
     #[serde(default)]
     pub stop_hook_active: bool,
-    /// Claude Stop includes tasks that can wake the same turn again. Consume
-    /// these arrays without materializing their potentially sensitive values;
-    /// FlowMux retains only whether each array was empty.
-    #[serde(default, deserialize_with = "deserialize_nonempty_array")]
-    pub background_tasks: bool,
-    #[serde(default, deserialize_with = "deserialize_nonempty_array")]
-    pub session_crons: bool,
-}
-
-impl ClaudeHookInput {
-    pub fn has_pending_work(&self) -> bool {
-        self.background_tasks || self.session_crons
-    }
-}
-
-fn deserialize_nonempty_array<'de, D>(deserializer: D) -> Result<bool, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct NonEmptyArrayVisitor;
-
-    impl<'de> Visitor<'de> for NonEmptyArrayVisitor {
-        type Value = bool;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("an array")
-        }
-
-        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut nonempty = false;
-            while sequence.next_element::<IgnoredAny>()?.is_some() {
-                nonempty = true;
-            }
-            Ok(nonempty)
-        }
-    }
-
-    deserializer.deserialize_seq(NonEmptyArrayVisitor)
 }
 
 /// Stream JSON from stdin and retain only the small fields FlowMux uses.
@@ -686,17 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_stop_pending_work_and_input_tools_are_distinguished() {
-        let pending: ClaudeHookInput = parse_hook_payload(
-            r#"{
-                "background_tasks":[{"id":"task-1"}],
-                "session_crons":[]
-            }"#,
-        )
-        .unwrap();
-        assert!(pending.has_pending_work());
-        assert!(!ClaudeHookInput::default().has_pending_work());
-
+    fn claude_input_tools_are_distinguished() {
         assert!(claude_tool_needs_input(Some("AskUserQuestion")));
         assert!(claude_tool_needs_input(Some("ExitPlanMode")));
         assert!(!claude_tool_needs_input(Some("Bash")));

@@ -355,63 +355,39 @@ pub(crate) async fn run_claude_hook_event(
     let mut reqs: Vec<_> = Vec::new();
     match event {
         ClaudeHookEvent::Stop => {
-            if input.has_pending_work() {
-                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                    reqs.push(build_agent_lifecycle_update(
-                        &agent,
-                        pid,
-                        pane,
-                        surface,
-                        session_id,
-                        AgentLifecycleEvent::ProgressObserved {
-                            status_text: "Background work pending".into(),
-                        },
-                    ));
-                } else {
-                    reqs.push(build_activity_update_with_metadata(
-                        &agent,
-                        Some(Running),
-                        pid,
-                        pane,
-                        surface,
-                        None,
-                        Some("Background work pending"),
-                        input.session_id.as_deref(),
-                    ));
-                }
+            // Stop ends the response even when shells or scheduled jobs remain.
+            // Later prompt/tool events report any resumed work independently.
+            let body = normalized_activity_text(input.last_assistant_message.as_deref());
+            let status_text = completed_activity_text(body.as_deref());
+            if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
+                reqs.push(build_agent_lifecycle_update(
+                    &agent,
+                    pid,
+                    pane,
+                    surface,
+                    session_id,
+                    AgentLifecycleEvent::TurnStopped {
+                        message: body,
+                        status_text,
+                    },
+                ));
             } else {
-                let body = normalized_activity_text(input.last_assistant_message.as_deref());
-                let status_text = completed_activity_text(body.as_deref());
-                if let (Some(surface), Some(session_id)) = (surface, input.session_id.as_deref()) {
-                    reqs.push(build_agent_lifecycle_update(
-                        &agent,
-                        pid,
-                        pane,
-                        surface,
-                        session_id,
-                        AgentLifecycleEvent::TurnStopped {
-                            message: body,
-                            status_text,
-                        },
-                    ));
-                } else {
-                    reqs.push(build_activity_update_with_metadata(
-                        &agent,
-                        Some(Idle),
-                        pid,
-                        pane,
-                        surface,
-                        body.as_deref(),
-                        Some(&status_text),
-                        input.session_id.as_deref(),
-                    ));
-                    reqs.push(build_stop_notify(
-                        agent_display_name,
-                        body.as_deref(),
-                        pane,
-                        surface,
-                    ));
-                }
+                reqs.push(build_activity_update_with_metadata(
+                    &agent,
+                    Some(Idle),
+                    pid,
+                    pane,
+                    surface,
+                    body.as_deref(),
+                    Some(&status_text),
+                    input.session_id.as_deref(),
+                ));
+                reqs.push(build_stop_notify(
+                    agent_display_name,
+                    body.as_deref(),
+                    pane,
+                    surface,
+                ));
             }
         }
         ClaudeHookEvent::StopFailure => {

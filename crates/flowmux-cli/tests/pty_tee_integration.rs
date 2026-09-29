@@ -80,6 +80,76 @@ fn spawn_fake_daemon(socket: PathBuf) -> mpsc::Receiver<String> {
     rx
 }
 
+#[test]
+fn claude_stop_completes_with_background_shells_or_scheduled_jobs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let socket = tmp.path().join("flowmux.sock");
+    let rx = spawn_fake_daemon(socket.clone());
+    let pane = "11111111-1111-1111-1111-111111111111";
+    let surface = "22222222-2222-2222-2222-222222222222";
+    for session in [Some("claude-session"), None] {
+        for (tasks, crons) in [
+            (serde_json::json!([]), serde_json::json!([])),
+            (
+                serde_json::json!([{"id":"shell", "status":"running"}]),
+                serde_json::json!([]),
+            ),
+            (
+                serde_json::json!([]),
+                serde_json::json!([{"id":"scheduled"}]),
+            ),
+        ] {
+            let mut child = Command::new(flowmuxctl_path())
+                .args([
+                    "--socket",
+                    socket.to_str().unwrap(),
+                    "hooks",
+                    "claude",
+                    "stop",
+                ])
+                .env("FLOWMUX_PANE_ID", pane)
+                .env("FLOWMUX_SURFACE_ID", surface)
+                .env_remove("FLOWMUX_AGENT_PID")
+                .env_remove("FLOWMUX_AGENT_NAME")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let input = serde_json::json!({
+                "session_id": session,
+                "last_assistant_message": "Review completed",
+                "background_tasks": tasks,
+                "session_crons": crons,
+            });
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.to_string().as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success());
+            let request: serde_json::Value =
+                serde_json::from_str(&rx.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+            assert_eq!(request["agent"], "claude");
+            assert_eq!(request["pane"], pane);
+            assert_eq!(request["surface"], surface);
+            if let Some(session) = session {
+                assert_eq!(request["session_id"], session);
+                assert_eq!(request["verb"], "agent_lifecycle_update");
+                assert_eq!(request["lifecycle"]["event"], "turn_stopped", "{input}");
+                assert_eq!(request["lifecycle"]["message"], "Review completed");
+            } else {
+                assert_eq!(request["verb"], "agent_activity_update");
+                assert_eq!(request["activity"], "idle", "{input}");
+                let notify: serde_json::Value =
+                    serde_json::from_str(&rx.recv_timeout(Duration::from_secs(2)).unwrap())
+                        .unwrap();
+                assert_eq!(notify["verb"], "notify");
+            }
+        }
+    }
+}
+
 /// Run the tee with a child that emits `osc_payload` (between BEL
 /// terminators) and return all envelopes the fake daemon recorded
 /// before the child exited.
