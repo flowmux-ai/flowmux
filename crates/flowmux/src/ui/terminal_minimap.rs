@@ -103,13 +103,6 @@ impl TerminalMinimap {
             return;
         }
         self.state.preview_offset.set(0);
-        if active {
-            if let Some(source) = self.state.refresh_source.borrow_mut().take() {
-                source.remove();
-            }
-            self.area.set_visible(false);
-            return;
-        }
         if let Some(term) = self.terminal.upgrade() {
             sync_visibility(&self.area, &self.state, term.vadjustment().as_ref());
             if self.area.is_mapped() {
@@ -212,7 +205,9 @@ fn install_drawing(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Mini
         let Some(adj) = term.vadjustment() else {
             return;
         };
-        if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
+        if state.alternate_screen.get()
+            || !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
+        {
             return;
         }
         let Some((top, viewport_height, out_of_bounds)) = viewport_geometry(
@@ -418,12 +413,12 @@ fn sync_visibility(
     state: &MinimapState,
     adjustment: Option<&gtk::Adjustment>,
 ) {
-    let visible = state.enabled.get() && !state.alternate_screen.get() && adjustment.is_some();
+    let visible = state.enabled.get() && adjustment.is_some();
     area.set_visible(visible);
 }
 
 fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<MinimapState>) {
-    if !state.enabled.get() || state.alternate_screen.get() || !area.is_mapped() {
+    if !state.enabled.get() || !area.is_mapped() {
         return;
     }
     // A split can shrink and return to the cached width before the refresh.
@@ -450,7 +445,7 @@ fn schedule_refresh(term: &vte::Terminal, area: &gtk::DrawingArea, state: Rc<Min
 }
 
 fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapState) {
-    if !state.enabled.get() || state.alternate_screen.get() {
+    if !state.enabled.get() {
         return;
     }
     let Some(adj) = term.vadjustment() else {
@@ -461,7 +456,10 @@ fn refresh_now(term: &vte::Terminal, area: &gtk::DrawingArea, state: &MinimapSta
         // VTE reflows absolute text rows when a split changes the width.
         state.text_row_offset.set(0);
     }
-    if !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size()) {
+    // Alternate-screen TUIs own their history; preview only VTE's current screen.
+    if state.alternate_screen.get()
+        || !has_scrollable_range(adj.lower(), adj.upper(), adj.page_size())
+    {
         refresh_visible_screen(term, area, state, columns);
         return;
     }
@@ -1021,12 +1019,13 @@ mod tests {
     }
 
     #[gtk::test]
-    async fn alternate_screen_hides_minimap_and_blocks_navigation() {
+    async fn alternate_screen_previews_live_content_and_restores_scrollback() {
         let term = vte::Terminal::new();
         term.set_scrollback_lines(5_000);
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&term));
         let minimap = TerminalMinimap::new(&term);
+        minimap.set_width(48);
         overlay.add_overlay(minimap.widget());
         minimap.set_enabled(true);
         let window = gtk::Window::new();
@@ -1036,17 +1035,43 @@ mod tests {
         gtk::glib::timeout_future(Duration::from_millis(50)).await;
 
         term.feed("history\r\n".repeat(600).as_bytes());
-        gtk::glib::timeout_future(Duration::from_millis(50)).await;
-        let adjustment = term.vadjustment().unwrap();
-        adjustment.set_value(adjustment.lower());
-        let before = adjustment.value();
-
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        term.feed(b"\x1b[?1049h\x1b[H\x1b[2JCODEX\x1b[10;1HFOOTER\x1b[H");
         minimap.set_alternate_screen(true);
-        assert!(!minimap.widget().is_visible());
-        scroll_to_pointer(&term, &minimap.state, 600.0, 600.0);
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert!(minimap.widget().is_mapped());
+        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 5);
+        assert_eq!(minimap.state.pixel_rows.borrow()[9][0].len, 6);
+
+        let adjustment = term.vadjustment().unwrap();
+        let before = adjustment.value();
+        assert!(!scroll_to_pointer(&term, &minimap.state, 600.0, 600.0));
+        assert!(!scroll_preview(
+            &term,
+            minimap.widget(),
+            &minimap.state,
+            1.0
+        ));
         assert_eq!(adjustment.value(), before);
+
+        term.feed(b"\x1b[HUPDATED");
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 7);
+        minimap.set_enabled(false);
+        assert!(!minimap.widget().is_visible());
+        minimap.set_enabled(true);
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert!(minimap.widget().is_mapped());
+        assert_eq!(minimap.state.pixel_rows.borrow()[0][0].len, 7);
+
+        term.feed(b"\x1b[?1049l");
         minimap.set_alternate_screen(false);
-        assert!(minimap.widget().is_visible());
+        gtk::glib::timeout_future(Duration::from_millis(200)).await;
+        assert!(minimap.widget().is_mapped());
+        assert!(minimap.state.pixel_rows.borrow().len() > term.row_count() as usize);
+        let bottom = adjustment.value();
+        assert!(scroll_to_pointer(&term, &minimap.state, 0.0, 600.0));
+        assert!(adjustment.value() < bottom);
         window.close();
     }
 

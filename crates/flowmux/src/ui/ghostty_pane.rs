@@ -402,7 +402,7 @@ impl GhosttyPane {
         self.terminal_minimap
             .set_opacity(flowmux_config::options::Options::clamp_terminal_minimap_opacity(opacity));
         // Keep PTY geometry independent of normal/alternate screen mode.
-        // The minimap and scrollbar swap overlays without resizing the TUI.
+        // Switching screen modes must not resize the TUI.
         self.widget
             .set_margin_end(if enabled { i32::from(width) } else { 0 });
         self.terminal_minimap.set_enabled(enabled);
@@ -710,8 +710,8 @@ impl GhosttyPane {
         scrollbar.set_halign(gtk::Align::End);
         scrollbar.set_valign(gtk::Align::Fill);
         // Keep a real standalone scrollbar for the 22.04 path. Normal shells
-        // show it only for scrollback; alternate-screen TUIs use it instead of
-        // the minimap even when VTE reports a one-page adjustment.
+        // show it only for scrollback; with the minimap disabled, alternate-screen
+        // TUIs show it even when VTE reports a one-page adjustment.
         scrollbar.set_visible(false);
         scrollbar.set_can_focus(false);
         scrollbar.set_width_request(12);
@@ -2100,7 +2100,7 @@ fn sync_terminal_scrollbar_visibility(
     force_visible: bool,
 ) {
     let adj = scrollbar.adjustment();
-    scrollbar.set_visible(force_visible || (enabled && terminal_adjustment_has_scrollback(&adj)));
+    scrollbar.set_visible(enabled && (force_visible || terminal_adjustment_has_scrollback(&adj)));
 }
 
 fn sync_terminal_scrollbar_adjustment(
@@ -3678,10 +3678,15 @@ mod tests {
         assert_eq!(pane.widget.margin_end(), 0);
         pane.set_minimap(true, 24, 20);
         pane.set_alternate_screen(true);
+        assert!(pane.terminal_minimap.widget().is_visible());
+        assert!(!pane.terminal_scrollbar.is_visible());
+        assert_eq!(pane.widget.margin_end(), 24);
+        pane.set_minimap(false, 24, 20);
         assert!(!pane.terminal_minimap.widget().is_visible());
         assert!(pane.terminal_scrollbar.is_visible());
-        assert_eq!(pane.widget.margin_end(), 24);
         pane.set_minimap(true, 24, 20);
+        assert!(pane.terminal_minimap.widget().is_visible());
+        assert!(!pane.terminal_scrollbar.is_visible());
         assert_eq!(pane.widget.margin_end(), 24);
         pane.set_alternate_screen(false);
         assert!(pane.terminal_minimap.widget().is_visible());
