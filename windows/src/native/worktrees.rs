@@ -43,6 +43,13 @@ pub(super) struct Controller {
     decision: Option<Decision>,
 }
 impl Controller {
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.panel
+            .as_ref()
+            .filter(|_| self.open && self.decision.is_none())
+            .and_then(worktree_panel::Panel::capture_window)
+    }
     pub(super) fn status(&self) -> Value {
         json!({"open":self.open,"id":self.id,"source":self.source,"list":self.list,
             "error":self.error,"loading":self.job.is_some() || self.refresh,
@@ -418,6 +425,16 @@ impl App {
                 let result = (|| -> anyhow::Result<()> {
                     self.worktree_guard()?;
                     match action {
+                        worktree_panel::UiAction::Select(path) => {
+                            if let Some(panel) = &mut self.worktrees.panel {
+                                panel.select(&path);
+                            }
+                        }
+                        worktree_panel::UiAction::Navigate(key) => {
+                            if let Some(panel) = &mut self.worktrees.panel {
+                                panel.navigate(key);
+                            }
+                        }
                         worktree_panel::UiAction::Close => self.worktrees.shutdown(),
                         worktree_panel::UiAction::Refresh => {
                             self.worktrees.refresh = true;

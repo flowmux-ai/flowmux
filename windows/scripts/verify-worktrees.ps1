@@ -75,6 +75,24 @@ try{
  foreach($key in $paths.Keys){$item=@($tree.worktrees.list.items|Where-Object {Path-Same $_.path $paths[$key]})[0];Require ($item.branch -ceq ('fixture-'+$key)) 'Native branch differs from real Git'}
  Click ([long](Row $tree $paths.clean).info);$info=Dialog 'info';Require (-not $info.confirm -and $info.body.Replace('/','\').Contains($paths.clean) -and $info.body.Contains('fixture-clean') -and $info.body.Contains($subject)) 'Info lacks actual path/branch/Unicode commit or offers a destructive action';$tree=Dismiss $info;Stable $before|Out-Null
  Passed 'actual-six-worktree-Git-branches-Unicode-subjects-and-owned-modeless-Info'
+ # Row navigation stays within this dock; it never starts a Git operation.
+ $rowPaths=@($panel.rows.path)
+ function Navigate([int]$Key,[string]$Expected){
+  $p=Panel (Tree);[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,$Key,$false,$false);[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,$Key,$true,$false)
+  $t=Await {param($v) (Path-Same $v.worktrees.panel.selected_path $Expected)};$p=Panel $t;$row=Row $t $Expected;$size=[ChromeFixture]::Size([long]$p.viewport,$owned.Id)
+  Require ($row.branch_bounds.y -ge 0 -and $row.remove_bounds.y+$row.remove_bounds.height -le $size[1]) 'Keyboard selection did not reveal the full native worktree row'
+  Require (-not $t.worktrees.dialog -and -not $t.worktrees.loading) 'Navigation activated a worktree operation'
+  return $t
+ }
+ $tree=Navigate 40 $rowPaths[0];$tree=Navigate 38 $rowPaths[-1];$tree=Navigate 40 $rowPaths[0];$tree=Navigate 35 $rowPaths[-1];$tree=Navigate 36 $rowPaths[0]
+ $panel=Panel $tree;[OptionsFixture]::PostKey([long]$panel.viewport,$owned.Id,17,$false,$false);[OptionsFixture]::PostKey([long]$panel.viewport,$owned.Id,35,$false,$false);[OptionsFixture]::PostKey([long]$panel.viewport,$owned.Id,17,$true,$false)
+ $tree=Tree;Require (Path-Same $tree.worktrees.panel.selected_path $rowPaths[0]) 'Ctrl navigation was consumed as plain row selection'
+ # Select by a real native STATIC notification and retain that path over Refresh.
+ $row=Row $tree $rowPaths[2];Click ([long]$row.label_handles[2]);$tree=Await {param($v) (Path-Same $v.worktrees.panel.selected_path $rowPaths[2])};$infoHandle=(Row $tree $rowPaths[2]).info
+ $tree=Refresh;Require ((Path-Same $tree.worktrees.panel.selected_path $rowPaths[2])-and (Row $tree $rowPaths[2]).info -eq $infoHandle) 'Refresh changed the selected path or rebuilt its native actions'
+ $tree=Navigate 35 $rowPaths[-1];$panel=Panel $tree;$row=Row $tree $rowPaths[-1];$paint=Join-Path $directory 'worktree-selection.bmp';$capture=Request @('chrome-capture',$paint);Require ($capture.root_handle -eq $panel.window) 'Capture did not select the owned worktree dock'
+ $edgeX=[int]$panel.viewport_bounds.x;$edgeY=[int]($panel.viewport_bounds.y+$row.branch_bounds.y);Require ([ChromeFixture]::Pixel($paint,$edgeX,$edgeY) -cne [ChromeFixture]::Pixel($paint,($edgeX+2),$edgeY)) 'Production viewport painter omitted the selected row outline';Remove-Item -LiteralPath $paint -Force
+ $tree=Navigate 36 $rowPaths[0];Stable $before|Out-Null;Passed 'native_arrow_Home_End_wrap_scroll_Unicode_path_selection_refresh_and_production_outline'
  $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$scale=[OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Dpi/96.0;$sidebar=[int]$tree.chrome.sidebar_actual_width
  try{
   foreach($dip in @(200,250,300)){$width=$sidebar+2*[int][Math]::Round(4*$scale)+[int][Math]::Round(160*$scale)+[int][Math]::Round($dip*$scale);[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$width,$originalSize[1]);$tree=Await {param($t) $t.worktrees.panel.open -and [Math]::Abs($t.worktrees.panel.bounds.width-$dip*$scale) -le 1};$panel=Panel $tree;$viewport=[ChromeFixture]::Size([long]$panel.viewport,$owned.Id)

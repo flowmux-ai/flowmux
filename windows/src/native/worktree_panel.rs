@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Native right-hand worktree dock; repository operations belong to the host.
 use super::*;
-use windows_sys::Win32::System::SystemServices::{SS_ENDELLIPSIS, SS_NOPREFIX, SS_PATHELLIPSIS};
-use windows_sys::Win32::UI::{Controls::SetScrollInfo, Input::KeyboardAndMouse::EnableWindow};
+use windows_sys::Win32::System::SystemServices::{
+    SS_ENDELLIPSIS, SS_NOPREFIX, SS_NOTIFY, SS_PATHELLIPSIS,
+};
+use windows_sys::Win32::UI::{
+    Controls::SetScrollInfo,
+    Input::KeyboardAndMouse::{EnableWindow, GetKeyState},
+};
 
 const MAX_ROWS: usize = 256;
 const ROW_HEIGHT: i32 = 146;
@@ -10,6 +15,8 @@ const ROW_HEIGHT: i32 = 146;
 pub(super) enum UiAction {
     Refresh,
     Close,
+    Select(PathBuf),
+    Navigate(usize),
     Info(PathBuf),
     Remove(PathBuf),
     Layout,
@@ -28,6 +35,7 @@ struct Route {
     step: i32,
     open: bool,
     busy: bool,
+    selection: Option<model::Rect>,
 }
 thread_local! {
     static ROUTES: RefCell<HashMap<isize, Route>> = RefCell::new(HashMap::new());
@@ -68,6 +76,29 @@ fn scroll(window: HWND, next: impl FnOnce(Route) -> i32) {
 unsafe extern "system" fn procedure(window: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     let root = owner(window);
     match message {
+        WM_ERASEBKGND | WM_PRINTCLIENT if window != root => {
+            chrome::message(window, WM_ERASEBKGND, w, l);
+            if let Some(rect) = ROUTES.with(|routes| {
+                routes
+                    .borrow()
+                    .get(&(root as isize))
+                    .and_then(|route| route.selection)
+            }) {
+                let color = SetDCBrushColor(w as HDC, chrome::palette().accent);
+                FrameRect(
+                    w as HDC,
+                    &RECT {
+                        left: rect.x,
+                        top: rect.y,
+                        right: rect.x + rect.width,
+                        bottom: rect.y + rect.height,
+                    },
+                    GetStockObject(DC_BRUSH),
+                );
+                SetDCBrushColor(w as HDC, color);
+            }
+            return 1;
+        }
         WM_COMMAND if l != 0 => {
             let child = l as HWND;
             if GetParent(child) != window
@@ -185,6 +216,8 @@ pub(super) struct Panel {
     scale: f64,
     background: bool,
     shown: bool,
+    selected: Option<PathBuf>,
+    modifiers: std::cell::Cell<u16>,
 }
 impl Panel {
     pub(super) fn new(owner: HWND, background: bool, id: Uuid) -> anyhow::Result<Self> {
@@ -237,6 +270,8 @@ impl Panel {
                 scale: 1.0,
                 background,
                 shown: false,
+                selected: None,
+                modifiers: std::cell::Cell::new(0),
             };
             ROUTES.with(|routes| {
                 routes.borrow_mut().insert(
@@ -249,12 +284,18 @@ impl Panel {
                         step: 26,
                         open: false,
                         busy: false,
+                        selection: None,
                     },
                 )
             });
             chrome::register_control(window, chrome::ControlRole::Static);
-            panel.heading =
-                panel.child(window, "STATIC", "Worktrees", 1, SS_NOPREFIX | SS_ENDELLIPSIS)?;
+            panel.heading = panel.child(
+                window,
+                "STATIC",
+                "Worktrees",
+                1,
+                SS_NOPREFIX | SS_ENDELLIPSIS,
+            )?;
             chrome::register_control(panel.heading, chrome::ControlRole::Caption);
             panel.repository =
                 panel.child(window, "STATIC", "", 2, SS_NOPREFIX | SS_PATHELLIPSIS)?;
@@ -350,6 +391,7 @@ impl Panel {
                     "",
                     base + index,
                     SS_NOPREFIX
+                        | SS_NOTIFY
                         | if index == 2 {
                             SS_PATHELLIPSIS
                         } else {
@@ -364,6 +406,13 @@ impl Panel {
         }
         self.title = title.into();
         self.status_text = status.into();
+        if self
+            .selected
+            .as_ref()
+            .is_some_and(|path| !rows.iter().any(|row| &row.info.path == path))
+        {
+            self.selected = None;
+        }
         self.rows = rows;
         self.busy = busy;
         ROUTES.with(|routes| {
@@ -381,9 +430,18 @@ impl Panel {
         for (index, controls) in self.controls.iter().enumerate() {
             ACTIONS.with(|actions| {
                 let mut actions = actions.borrow_mut();
+                for label in controls.labels {
+                    actions.remove(&(label as isize));
+                }
                 actions.remove(&(controls.info as isize));
                 actions.remove(&(controls.remove as isize));
                 if let Some(row) = self.rows.get(index) {
+                    for label in controls.labels {
+                        actions.insert(
+                            label as isize,
+                            (self.window, UiAction::Select(row.info.path.clone())),
+                        );
+                    }
                     actions.insert(
                         controls.info as isize,
                         (self.window, UiAction::Info(row.info.path.clone())),
@@ -412,6 +470,9 @@ impl Panel {
     }
     pub(super) fn layout(&mut self, area: Option<model::Rect>, scale: f64, background: bool) {
         self.area = area;
+        if area.is_none() {
+            self.modifiers.set(0);
+        }
         self.scale = if scale.is_finite() && scale > 0.0 {
             scale
         } else {
@@ -506,6 +567,24 @@ impl Panel {
             SetScrollInfo(self.viewport, SB_VERT, &info, 1);
             GetClientRect(self.viewport, &mut view);
             let row_width = view.right.max(1);
+            let selection = self
+                .rows
+                .iter()
+                .position(|row| self.selected.as_ref() == Some(&row.info.path))
+                .map(|index| model::Rect {
+                    x: 0,
+                    y: px(index as i32 * ROW_HEIGHT) - offset,
+                    width: row_width,
+                    height: px(ROW_HEIGHT),
+                });
+            ROUTES.with(|routes| {
+                routes
+                    .borrow_mut()
+                    .get_mut(&(self.window as isize))
+                    .unwrap()
+                    .selection = selection
+            });
+            InvalidateRect(self.viewport, std::ptr::null(), 1);
             for (index, controls) in self.controls.iter().enumerate() {
                 let visible = index < self.rows.len();
                 for window in controls
@@ -545,6 +624,51 @@ impl Panel {
             }
         }
     }
+    pub(super) fn select(&mut self, path: &PathBuf) {
+        let Some(index) = self.rows.iter().position(|row| &row.info.path == path) else {
+            return;
+        };
+        self.selected = Some(path.clone());
+        let top = (index as f64 * f64::from(ROW_HEIGHT) * self.scale).round() as i32;
+        let height = (f64::from(ROW_HEIGHT) * self.scale).round() as i32;
+        unsafe {
+            let mut view = RECT::default();
+            GetClientRect(self.viewport, &mut view);
+            scroll(self.window, |route| {
+                if top < route.scroll {
+                    top
+                } else if top + height > route.scroll + view.bottom {
+                    top + height - view.bottom
+                } else {
+                    route.scroll
+                }
+            });
+        }
+        self.layout(self.area, self.scale, self.background);
+        if !self.background {
+            unsafe {
+                SetFocus(self.controls[index].info);
+            }
+        }
+    }
+    pub(super) fn navigate(&mut self, key: usize) {
+        let count = self.rows.len();
+        if count == 0 {
+            return;
+        }
+        let current = self
+            .rows
+            .iter()
+            .position(|row| self.selected.as_ref() == Some(&row.info.path));
+        let index = match key {
+            0x24 => 0,
+            0x23 => count - 1,
+            0x26 => current.map_or(count - 1, |at| (at + count - 1) % count),
+            0x28 => current.map_or(0, |at| (at + 1) % count),
+            _ => return,
+        };
+        self.select(&self.rows[index].info.path.clone());
+    }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         unsafe {
             if self.area.is_none()
@@ -553,6 +677,35 @@ impl Panel {
                 || IsWindowEnabled(self.window) == 0
             {
                 return false;
+            }
+            if matches!(
+                message.message,
+                WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP
+            ) {
+                if let Some(bit) =
+                    crate::keybindings::native_modifier(message.wParam, message.lParam)
+                {
+                    self.modifiers
+                        .set(if matches!(message.message, WM_KEYUP | WM_SYSKEYUP) {
+                            self.modifiers.get() & !bit
+                        } else {
+                            self.modifiers.get() | bit
+                        });
+                }
+            }
+            let modified = if self.background {
+                self.modifiers.get() & (3 | 12 | 192) != 0
+            } else {
+                [0x11, 0x12, 0x5b, 0x5c]
+                    .iter()
+                    .any(|key| GetKeyState(*key) < 0)
+            };
+            if message.message == WM_KEYDOWN
+                && matches!(message.wParam, 0x23 | 0x24 | 0x26 | 0x28)
+                && !modified
+            {
+                emit(self.window, UiAction::Navigate(message.wParam));
+                return true;
             }
             if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
                 if message.lParam as usize & (1 << 30) == 0 {
@@ -608,6 +761,10 @@ impl Panel {
         unsafe { InvalidateRect(self.window, std::ptr::null(), 1) };
         Ok(())
     }
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.area.map(|_| self.window)
+    }
     pub(super) fn status(&self) -> Value {
         let route = ROUTES.with(|routes| routes.borrow().get(&(self.window as isize)).copied());
         let rows: Vec<_> = self.rows.iter().zip(&self.controls).map(|(row, controls)| {
@@ -621,7 +778,7 @@ impl Panel {
         }).collect();
         json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"refresh":self.refresh as usize,
             "close":self.close as usize,"viewport":self.viewport as usize,"open":self.area.is_some(),"busy":self.busy,
-            "title":self.title,"status":self.status_text,"rows":rows,"scroll":route.map_or(0,|r|r.scroll),
+            "title":self.title,"status":self.status_text,"selected_path":self.selected,"rows":rows,"scroll":route.map_or(0,|r|r.scroll),
             "scroll_limit":route.map_or(0,|r|r.limit),"bounds":self.area,"viewport_bounds":geometry(self.viewport,self.window),
             "native_visible":unsafe{IsWindowVisible(self.window)!=0}})
     }
