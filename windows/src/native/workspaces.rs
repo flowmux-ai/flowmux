@@ -1167,6 +1167,9 @@ impl App {
         else {
             return Ok(());
         };
+        if matches!(action, EditAction::Apply | EditAction::Pick) && panel.composing() {
+            return Ok(());
+        }
         match action {
             EditAction::Changed => panel.preview(),
             EditAction::Pick => {

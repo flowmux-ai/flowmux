@@ -9,6 +9,7 @@ use windows_sys::Win32::UI::{
     Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
 };
 thread_local! { static COMPOSING: Cell<bool> = const { Cell::new(false) }; }
+thread_local! { static SETTLING: Cell<bool> = const { Cell::new(false) }; }
 thread_local! { static EDITS: RefCell<HashMap<isize, Uuid>> = RefCell::new(HashMap::new()); }
 
 #[derive(Clone, Copy)]
@@ -20,6 +21,9 @@ pub(crate) enum EditAction {
     Pick,
 }
 fn emit(window: HWND, action: EditAction) {
+    if matches!(action, EditAction::Apply | EditAction::Pick) && COMPOSING.with(Cell::get) {
+        return;
+    }
     if let Some(id) = EDITS.with(|edits| edits.borrow().get(&(window as isize)).copied()) {
         post(Event::Metadata(id, action));
     }
@@ -85,10 +89,21 @@ unsafe extern "system" fn edit_procedure(
     _: usize,
 ) -> LRESULT {
     match message {
-        WM_IME_STARTCOMPOSITION => COMPOSING.with(|c| c.set(true)),
-        WM_IME_ENDCOMPOSITION | WM_KILLFOCUS => COMPOSING.with(|c| c.set(false)),
+        WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION => {
+            COMPOSING.with(|c| c.set(message == WM_IME_STARTCOMPOSITION));
+            SETTLING.with(|c| c.set(true));
+        }
+        WM_KEYDOWN if wparam == 229 => SETTLING.with(|c| c.set(true)),
+        WM_KEYUP if !matches!(wparam, 0x10..=0x12 | 0xa0..=0xa5) => {
+            SETTLING.with(|c| c.set(false));
+        }
+        WM_KILLFOCUS => {
+            COMPOSING.with(|c| c.set(false));
+            SETTLING.with(|c| c.set(false));
+        }
         WM_NCDESTROY => {
             COMPOSING.with(|c| c.set(false));
+            SETTLING.with(|c| c.set(false));
             RemoveWindowSubclass(window, Some(edit_procedure), subclass);
         }
         _ => {}
@@ -251,6 +266,7 @@ impl Panel {
                 .insert(self.window as isize, self.edit_id)
         });
         COMPOSING.with(|composing| composing.set(false));
+        SETTLING.with(|settling| settling.set(false));
         self.background = background;
         self.target = Some(target);
         self.original = value.to_owned();
@@ -372,6 +388,9 @@ impl Panel {
     pub(super) fn is_open(&self) -> bool {
         self.open.get()
     }
+    pub(super) fn composing(&self) -> bool {
+        COMPOSING.with(Cell::get)
+    }
     pub(super) fn preview(&self) {
         if !matches!(self.target, Some(EditTarget::WorkspaceColor(_))) {
             return;
@@ -420,11 +439,12 @@ impl Panel {
         json!({"open":self.open.get(),"window":self.window as usize,"owner":self.owner as usize,
             "input":self.input as usize,"apply":self.apply as usize,"cancel":self.close as usize,
             "swatch":self.swatch as usize,"picker":self.picker as usize,"error":String::from_utf16_lossy(&text[..len]),
-            "edit_id":self.edit_id,"native_visible":unsafe{IsWindowVisible(self.window)!=0},"composing":COMPOSING.with(Cell::get)})
+            "edit_id":self.edit_id,"native_visible":unsafe{IsWindowVisible(self.window)!=0},"composing":self.composing(),"settling":SETTLING.with(Cell::get)})
     }
     pub(crate) fn hide(&self) {
         self.open.set(false);
         COMPOSING.with(|composing| composing.set(false));
+        SETTLING.with(|settling| settling.set(false));
         unsafe {
             ShowWindow(self.window, SW_HIDE);
             if self.owner_disabled.replace(false) && IsWindow(self.owner) != 0 {
@@ -438,14 +458,9 @@ impl Panel {
         {
             return false;
         }
-        // Text production belongs to the native EDIT/IME. Enter/Escape inside the
-        // edit never applies/closes the panel; Tab to Apply/Cancel also works.
-        if COMPOSING.with(Cell::get)
-            || message.wParam == 229
-            || (message.hwnd == self.input
-                && matches!(message.message, WM_KEYDOWN | WM_KEYUP | WM_CHAR)
-                && matches!(message.wParam, 13 | 27))
-        {
+        // The commit/cancel key still belongs to the IME after composition ends.
+        // Once released, ordinary Enter/Escape apply/cancel as on Linux.
+        if self.composing() || SETTLING.with(Cell::get) || message.wParam == 229 {
             return false;
         }
         if message.message == WM_KEYDOWN && matches!(message.wParam, 13 | 27) {
@@ -461,6 +476,9 @@ impl Panel {
                     },
                 );
             }
+            return true;
+        }
+        if message.message == WM_CHAR && matches!(message.wParam, 13 | 27) {
             return true;
         }
         if self.background {
@@ -490,14 +508,22 @@ mod tests {
         unsafe {
             assert_eq!(IsWindowVisible(panel.window), 0);
             assert_ne!(GetForegroundWindow(), panel.window);
-            // A literal Enter in the EDIT is left with its IME/text handler.
+            // Only the composition-ending key is left with the native EDIT.
             let message = MSG {
                 hwnd: panel.input,
                 message: WM_KEYDOWN,
                 wParam: 13,
                 ..MSG::default()
             };
+            assert!(panel.handle_message(&message));
+            SendMessageW(panel.input, WM_IME_STARTCOMPOSITION, 0, 0);
             assert!(!panel.handle_message(&message));
+            SendMessageW(panel.input, WM_IME_ENDCOMPOSITION, 0, 0);
+            assert!(!panel.handle_message(&message));
+            SendMessageW(panel.input, WM_KEYUP, 0x10, 0);
+            assert!(!panel.handle_message(&message));
+            SendMessageW(panel.input, WM_KEYUP, 13, 0);
+            assert!(panel.handle_message(&message));
         }
         panel.edit(EditTarget::WorkspaceColor(id), "#12abef", false, true);
         assert_eq!(panel.value(), "#12abef");

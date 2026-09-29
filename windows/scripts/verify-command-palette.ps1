@@ -229,18 +229,35 @@ try {
     $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
     Require ([OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $workspaceName) 'Workspace editor lost its starting UTF-16 text'
     $renamed='이름 한 é 😀 & 변경';Metadata-Text $panel $renamed
-    [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id);[OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
-    $tree=Tree;Metadata $tree|Out-Null;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $renamed) 'Plain EDIT Enter/Escape applied, cancelled or changed raw input'
-    Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName) 'Metadata Cancel changed the workspace'
+    [OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName) 'Input Escape did not cancel without changing the workspace'
     $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
     [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$true);Metadata-Text $panel $renamed
     [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id);[OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    Metadata-Click $panel 'apply'
     $tree=Await {param($t) $t.metadata.open -and $t.metadata.composing};Metadata $tree|Out-Null
     Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $renamed) 'Composition guard changed the draft or model'
     [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$false)
-    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.composing};[OptionsFixture]::PostEnter([long]$panel.apply,$owned.Id)
-    $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $renamed) 'Native Apply did not retain the exact Korean/NFD/emoji/ampersand name';Same-Identity $initial
-    Passed 'metadata-owned-themed-name-Cancel-composition-guard-and-explicit-Apply-preserve-Unicode-identity'
+    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.composing -and $t.metadata.settling}
+    foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$panel.input,$owned.Id,$key,$false,$false)}
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,16,$true,$false)
+    $tree=Tree;Metadata $tree|Out-Null;Require ($tree.metadata.settling -and (Workspace $tree $initial.workspace).name -ceq $workspaceName -and [OptionsFixture]::Text([long]$panel.input,$owned.Id) -ceq $renamed) 'Composition-ending Enter/Escape or modifier release applied, cancelled or changed the draft'
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,13,$true,$false)
+    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.settling}
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,13,$false,$true)
+    $tree=Tree;Metadata $tree|Out-Null;Require ((Workspace $tree $initial.workspace).name -ceq $workspaceName) 'Held Enter submitted the rename'
+    [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id)
+    $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $renamed) 'Input Enter did not retain the exact Korean/NFD/emoji/ampersand name';Same-Identity $initial;Workspace-Caption $tree $initial.workspace $renamed
+    Passed 'metadata-input-Enter-Escape-IME-end-key-release-repeat-and-button-guard-preserve-Unicode-identity'
+
+    $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree;Metadata-Text $panel '취소할 조합'
+    [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$true)
+    [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.input,$owned.Id,$false)
+    [OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.settling};Metadata $tree|Out-Null
+    [OptionsFixture]::PostEscape([long]$panel.input,$owned.Id)
+    $tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $renamed) 'Post-composition Escape failed to cancel without changing the name'
+    Passed 'metadata-IME-cancel-Escape-keeps-dialog-until-next-independent-Escape'
 
     $tree=Open-Metadata 'metadata:workspace-name';$panel=Metadata $tree
     $losing='UI 한 😀 draft';$winner='외부 한글 & winner';Metadata-Text $panel $losing
@@ -250,10 +267,16 @@ try {
     Metadata-Click $panel 'cancel';$tree=Metadata-Closed;Require ((Workspace $tree $initial.workspace).name -ceq $winner) 'Conflict Cancel changed the external winner'
     Passed 'metadata-concurrent-rename-conflict-retains-draft-and-modal-owner'
 
-    $tree=Open-Metadata 'metadata:tab-name';$panel=Metadata $tree;$newTab='탭 한 😀 & 고정';Metadata-Text $panel $newTab;Metadata-Click $panel 'apply'
+    $tree=Open-Metadata 'metadata:tab-name';$panel=Metadata $tree;$newTab='탭 한 😀 & 고정';Metadata-Text $panel $newTab
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,229,$false,$false)
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,13,$false,$false)
+    $tree=Await {param($t) $t.metadata.open -and $t.metadata.settling};Metadata $tree|Out-Null
+    [OptionsFixture]::PostKey([long]$panel.input,$owned.Id,229,$true,$false)
+    $tree=Await {param($t) $t.metadata.open -and -not $t.metadata.settling}
+    [OptionsFixture]::PostEnter([long]$panel.input,$owned.Id)
     $tree=Metadata-Closed;$tab=Surface $tree $initial.surface
     Require ($tab.title -ceq $newTab -and $tab.title_locked) 'Native tab rename did not preserve its exact title and manual title lock';Same-Identity $initial
-    Passed 'metadata-tab-name-Apply-locks-title-without-changing-live-surface-identity'
+    Passed 'metadata-tab-name-PROCESS-key-release-then-Enter-locks-title-without-changing-live-surface-identity'
 
     Require ((Workspace $tree $initial.workspace).name_locked -eq $true -and (Workspace $tree $initial.workspace).name -ceq $winner) 'Manual workspace name followed a tab rename'
     Workspace-Caption $tree $initial.workspace $winner
