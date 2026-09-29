@@ -11,12 +11,17 @@ pub(super) enum Signal {
     Removed(Uuid, PathBuf, Result<(), RemoveError>),
     Choice(Uuid, bool),
 }
-#[derive(Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct Source {
     surface: SurfaceId,
     workspace: WorkspaceId,
     cwd: PathBuf,
     ssh: bool,
+}
+impl Source {
+    fn listing_key(&self) -> (WorkspaceId, &Path, bool) {
+        (self.workspace, &self.cwd, self.ssh)
+    }
 }
 struct Job {
     id: Uuid,
@@ -211,16 +216,18 @@ impl App {
             return Ok(());
         }
         let source = self.worktree_source();
-        if self.worktrees.source != source {
+        if self.worktrees.source.as_ref().map(Source::listing_key)
+            != source.as_ref().map(Source::listing_key)
+        {
             if let Some(job) = &self.worktrees.job {
                 job.cancel.store(true, Ordering::Release);
             }
-            self.worktrees.source = source;
             self.worktrees.list = None;
             self.worktrees.decision.take();
             self.worktrees.refresh = true;
             self.worktrees.error = String::new();
         }
+        self.worktrees.source = source;
         if self.worktrees.refresh && self.worktrees.job.is_none() {
             self.worktrees.refresh = false;
             match self.worktrees.source.clone() {
@@ -499,7 +506,8 @@ impl App {
                 }
                 let job = self.worktrees.job.take().unwrap();
                 if self.worktrees.open
-                    && self.worktrees.source.as_ref() == Some(&job.source)
+                    && self.worktrees.source.as_ref().map(Source::listing_key)
+                        == Some(job.source.listing_key())
                     && !job.cancel.load(Ordering::Acquire)
                 {
                     match result {
@@ -521,7 +529,8 @@ impl App {
                 }
                 let job = self.worktrees.job.take().unwrap();
                 if self.worktrees.open
-                    && self.worktrees.source.as_ref() == Some(&job.source)
+                    && self.worktrees.source.as_ref().map(Source::listing_key)
+                        == Some(job.source.listing_key())
                     && !job.cancel.load(Ordering::Acquire)
                 {
                     match result {

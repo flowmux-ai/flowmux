@@ -94,7 +94,8 @@ try{
  $edgeX=[int]$panel.viewport_bounds.x;$edgeY=[int]($panel.viewport_bounds.y+$row.branch_bounds.y);Require ([ChromeFixture]::Pixel($paint,$edgeX,$edgeY) -cne [ChromeFixture]::Pixel($paint,($edgeX+2),$edgeY)) 'Production viewport painter omitted the selected row outline';Remove-Item -LiteralPath $paint -Force
  $tree=Navigate 36 $rowPaths[0];Stable $before|Out-Null;Passed 'native_arrow_Home_End_wrap_scroll_Unicode_path_selection_refresh_and_production_outline'
  # Alt navigation follows the source pane and gives an open Files dock priority.
- function Focus-Source([string]$Surface){Request @('focus-tab',$Surface)|Out-Null;return Await {param($v) $v.worktrees.source.surface -ceq $Surface -and -not $v.worktrees.loading}}
+ $focusPath=$rowPaths[0];$focusHandle=(Row $tree $focusPath).info
+ function Focus-Source([string]$Surface){Request @('focus-tab',$Surface)|Out-Null;return Focused $Surface}
  function Focus-Key([int]$Key,[bool]$Control=$false,[bool]$Shift=$false,[bool]$Repeat=$false){
   $p=Panel (Tree)
   if($Control){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,17,$false,$false)}
@@ -104,7 +105,11 @@ try{
   if($Control){[OptionsFixture]::PostKey([long]$p.viewport,$owned.Id,17,$true,$false)}
   return Tree
  }
- function Focused([string]$Surface){$t=Await {param($v) $v.worktrees.source.surface -ceq $Surface -and -not $v.worktrees.loading};Require ((Request @('identify')).surface -ceq $Surface) 'Directional focus selected another terminal';return $t}
+ function Focused([string]$Surface){
+  $t=Await {param($v) $v.worktrees.source.surface -ceq $Surface};Require ((Request @('identify')).surface -ceq $Surface) 'Directional focus selected another terminal'
+  Require (-not $t.worktrees.loading -and (Path-Same $t.worktrees.panel.selected_path $focusPath)-and (Row $t $focusPath).info -eq $focusHandle) 'Same-directory focus restarted Git or reset the selected native row'
+  return $t
+ }
  Request @('split','vertical','--shell=cmd')|Out-Null;$right=Request @('identify');$tree=Await {param($v) @($v.surfaces).Count -eq 2 -and @($v.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0}
  $tree=Focus-Source $source.surface;Request @('split','horizontal','--shell=cmd')|Out-Null;$below=Request @('identify');$tree=Await {param($v) @($v.surfaces).Count -eq 3 -and @($v.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0 -and -not $v.worktrees.loading};$focusIdentities=Identities $tree
  Focus-Key 38|Out-Null;$tree=Focused $source.surface;Focus-Key 40|Out-Null;$tree=Focused $below.surface
@@ -119,8 +124,10 @@ try{
  Focus-Key 39|Out-Null;$tree=Focused $source.surface;$files=Request @('files','status','--pane',$source.pane)
  Require ($files.dock_visible -and $files.panel_handle -eq $filesBefore.panel_handle -and $files.destination_handle -eq $filesBefore.destination_handle -and $files.token -ceq $filesBefore.token -and $files.operation_form.index -eq $filesBefore.operation_form.index -and (Same ([OptionsFixture]::Text([long]$files.destination_handle,$owned.Id)) $draft)) 'Files priority focus hid, retargeted or replaced its Unicode destination draft'
  Request @('files','hide','--pane',$source.pane)|Out-Null;Focus-Key 39|Out-Null;$tree=Focused $right.surface;Stable $focusIdentities|Out-Null
+ Click ([long]$tree.worktrees.panel.refresh);Request @('focus-tab',$source.surface)|Out-Null;$tree=Settled
+ Require ($tree.worktrees.source.surface -ceq $source.surface -and (Path-Same $tree.worktrees.list.current_worktree $paths.current)-and (Path-Same $tree.worktrees.panel.selected_path $focusPath)-and (Row $tree $focusPath).info -eq $focusHandle) 'Refresh lost its result or selection after same-directory focus changed'
  Request @('close-tab',$below.surface)|Out-Null;Request @('close-tab',$right.surface)|Out-Null;$tree=Focus-Source $source.surface;Stable $before|Out-Null
- $tree=Navigate 36 $rowPaths[0];Passed 'Alt_directions_source_return_Ctrl_Shift_repeat_guards_and_Files_Unicode_draft_priority'
+ $tree=Navigate 36 $rowPaths[0];Passed 'Alt_directions_cached_same_cwd_Refresh_source_return_guards_and_Files_Unicode_draft_priority'
  $originalSize=[ChromeFixture]::Size([long]$tree.window_handle,$owned.Id);$scale=[OptionsFixture]::Describe([long]$tree.window_handle,$owned.Id).Dpi/96.0;$sidebar=[int]$tree.chrome.sidebar_actual_width
  try{
   foreach($dip in @(200,250,300)){$width=$sidebar+2*[int][Math]::Round(4*$scale)+[int][Math]::Round(160*$scale)+[int][Math]::Round($dip*$scale);[ChromeFixture]::Resize([long]$tree.window_handle,$owned.Id,$width,$originalSize[1]);$tree=Await {param($t) $t.worktrees.panel.open -and [Math]::Abs($t.worktrees.panel.bounds.width-$dip*$scale) -le 1};$panel=Panel $tree;$viewport=[ChromeFixture]::Size([long]$panel.viewport,$owned.Id)
@@ -131,7 +138,8 @@ try{
  }finally{[ChromeFixture]::Resize([long](Tree).window_handle,$owned.Id,$originalSize[0],$originalSize[1])}
  $tree=Await {param($t) $t.worktrees.panel.open};Stable $before|Out-Null;Passed '200-250-300-DIP-dock-keeps-native-actions-apart-and-narrower-dock-hides-then-restores'
  foreach($path in @($repo,$paths.current,$paths.locked)){$tree=Protected $tree $path}
- Request @('new-tab','--cwd',$paths.used,'--shell=cmd')|Out-Null;$used=Request @('identify');$tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0};Request @('focus-tab',$source.surface)|Out-Null;$tree=Refresh;$before=Identities $tree;$tree=Protected $tree $paths.used
+ Request @('new-tab','--cwd',$paths.used,'--shell=cmd')|Out-Null;$used=Request @('identify');$tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {-not $_.ready -or -not $_.running}).Count -eq 0 -and -not $t.worktrees.loading -and (Path-Same $t.worktrees.list.current_worktree $paths.used)}
+ Require (-not $tree.worktrees.panel.selected_path) 'Changed directory retained the old row selection';Request @('focus-tab',$source.surface)|Out-Null;$tree=Settled;Require (Path-Same $tree.worktrees.list.current_worktree $paths.current) 'Returning to the original directory retained another worktree result';$before=Identities $tree;$tree=Protected $tree $paths.used
  Request @('detach-tab',$used.surface)|Out-Null;$tree=Await {param($t) @($t.detached_windows|Where-Object {$_.surface -ceq $used.surface -and -not $_.native_visible}).Count -eq 1};Request @('focus-tab',$source.surface)|Out-Null;$tree=Refresh;$tree=Protected $tree $paths.used;Stable $before|Out-Null
  Passed 'main-current-locked-and-live-main-or-detached-worktrees-reject-native-stale-Remove'
  # Remove the direct-path user first: only the junction-backed session may
