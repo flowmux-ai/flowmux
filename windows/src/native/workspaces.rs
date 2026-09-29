@@ -838,53 +838,6 @@ impl App {
             _ => Ok(()),
         }
     }
-    pub(super) fn popup(
-        &self,
-        items: &[&str],
-        disabled: &[usize],
-        point: (i32, i32),
-    ) -> anyhow::Result<usize> {
-        self.popup_for(self.window, items, disabled, point)
-    }
-    pub(super) fn popup_for(
-        &self,
-        owner: HWND,
-        items: &[&str],
-        disabled: &[usize],
-        point: (i32, i32),
-    ) -> anyhow::Result<usize> {
-        if self.background_test {
-            return Ok(0);
-        }
-        unsafe {
-            let menu = CreatePopupMenu();
-            anyhow::ensure!(!menu.is_null(), "cannot create workspace menu");
-            for (i, label) in items.iter().enumerate() {
-                let flags = MF_STRING
-                    | if disabled.contains(&(i + 1)) {
-                        MF_GRAYED
-                    } else {
-                        0
-                    };
-                if AppendMenuW(menu, flags, i + 1, wide(label).as_ptr()) == 0 {
-                    DestroyMenu(menu);
-                    anyhow::bail!("cannot add workspace menu item");
-                }
-            }
-            // Route menu keyboard navigation away from the embedded terminal.
-            SetFocus(owner);
-            let result = TrackPopupMenuEx(
-                menu,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON,
-                point.0,
-                point.1,
-                owner,
-                std::ptr::null(),
-            ) as usize;
-            DestroyMenu(menu);
-            Ok(result)
-        }
-    }
     pub(super) fn workspace_menu(
         &mut self,
         id: WorkspaceId,

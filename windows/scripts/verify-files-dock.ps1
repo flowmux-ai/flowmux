@@ -6,7 +6,7 @@ $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FilesFixture.cs'),(Join-Path $PSScriptRoot 'FilesActionsFixture.cs'),(Join-Path $PSScriptRoot 'FilesDockFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'EditorFixture.cs'),(Join-Path $PSScriptRoot 'FilesFixture.cs'),(Join-Path $PSScriptRoot 'FilesActionsFixture.cs'),(Join-Path $PSScriptRoot 'FilesDockFixture.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('files-dock-'+[guid]::NewGuid());[IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $fixture=New-Object FilesFixture($directory);$rootA=$fixture.Directory('source A');$rootB=$fixture.Directory('source B')
 $fileA=$fixture.Write('source A/원본.txt','source A original', $false,$false);$fileA2=$fixture.Write('source A/다른 파일.txt','source A second',$false,$false);$fileB=$fixture.Write('source B/대상.txt','source B',$false,$false)
@@ -48,7 +48,7 @@ try {
  $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left);$a=Request @('identify')
  Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 2;$b=Request @('identify');$stable=@($tree.surfaces)
  $fa=Show-Files $a.pane $rootA;$fa=Select-File $fa '원본.txt';$tree=Tree;Check-Dock 'source-a' $tree $fa $null;$panelA=$fa.panel_handle
- Native-Command $tree $fa 13;$fa=Files $a.pane;Require (-not $fa.operation_form) 'Hidden Actions request opened desktop menu/form'
+ Native-Command $tree $fa 13;$fa=Files $a.pane;$tree=Tree;Require (-not $fa.operation_form -and $tree.tab_menu.kind -ceq 'files' -and $tree.tab_menu.menu.native_visible -eq $false) 'Actions did not open the hidden themed Files menu';[OptionsFixture]::PostEscape([long]$tree.tab_menu.menu.window,$hostProcess.Id);$tree=Tree;Require (-not $tree.tab_menu) 'Files menu did not dismiss'
  Native-Command $tree $fa 7;$form=Await-Form $a.pane $true;$originalIndex=$form.operation_form.index
  $fa=Select-File $form '다른 파일.txt';Require ($fa.operation_form.index -eq $originalIndex) 'Form target followed a later row selection'
  $copy=$fixture.File('source A/복사.txt');[FilesDockFixture]::Destination($hostProcess,[long]$tree.window_handle,[long]$fa.panel_handle,'복사.txt');Native-Command $tree $fa 14

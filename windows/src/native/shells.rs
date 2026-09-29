@@ -282,15 +282,12 @@ impl App {
             "New Command Prompt tab",
             "New PowerShell 7 tab",
         ];
-        let choice = self.popup(&labels, &[], point)?;
-        if let Some(name) = ["powershell", "cmd", "pwsh"].get(choice.wrapping_sub(1)) {
-            self.new_terminal(
-                self.active(),
-                None,
-                Some(Shell::profile(name)),
-                NewTerminal::Tab,
-            )?;
-        }
-        self.focus_active()
+        self.show_selection_menu(
+            self.active(),
+            tab_menu::Selection::Shell,
+            &labels,
+            &[],
+            point,
+        )
     }
 }

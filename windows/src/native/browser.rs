@@ -1011,6 +1011,24 @@ impl App {
             }
         }
     }
+    pub(super) fn browser_menu_choice(
+        &mut self,
+        id: SurfaceId,
+        instance: Uuid,
+        choice: usize,
+    ) -> anyhow::Result<()> {
+        if self
+            .browsers
+            .get(&id)
+            .is_some_and(|browser| browser.instance == instance)
+        {
+            self.browser_event(Signal::Ui(
+                id,
+                if choice == 11 { 12 } else { choice as u16 },
+            ))?;
+        }
+        Ok(())
+    }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
             Signal::PageShortcut(id, instance, revision, focus_epoch, binding) => {
@@ -1102,7 +1120,7 @@ impl App {
                     self.browser_refresh(id)?;
                 }
             }
-            Signal::Ui(id, mut action) => {
+            Signal::Ui(id, action) => {
                 if self.close_request.is_some()
                     || self
                         .browsers
@@ -1136,18 +1154,13 @@ impl App {
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>();
-                    action = self.popup_for(
-                        self.surface_window(id),
+                    return self.show_selection_menu(
+                        id,
+                        tab_menu::Selection::Browser(browser.instance),
                         &labels,
                         &disabled,
                         browser.chrome.tools_anchor(),
-                    )? as u16;
-                    if action == 11 {
-                        action = 12;
-                    }
-                    if action == 0 {
-                        return Ok(());
-                    }
+                    );
                 }
                 if action == 12 {
                     self.browser_bookmarks_show(id)?;

@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Own hidden host only. Run under run-check.ps1 -TimeoutSeconds 60.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('pane-tools','terminal-menu')][string]$Case='pane-tools')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('pane-tools','terminal-menu','application-menus')][string]$Case='pane-tools')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -108,7 +108,58 @@ try {
  $discovery=Join-Path $env:LOCALAPPDATA "flowmux\windows\instances\$($hostProcess.Id).json"
  do {Budget|Out-Null;Require (-not $hostProcess.HasExited -and $startup.ElapsedMilliseconds -lt 8000) 'Startup exceeded eight seconds';if((Test-Path $discovery)-and(Get-Item $discovery).LastWriteTimeUtc -ge $utc){$record=Get-Content -Raw $discovery|ConvertFrom-Json;Require ($record.pid -eq $hostProcess.Id) 'Wrong discovery PID';$pipeName=$record.pipe;break};Start-Sleep -Milliseconds 20}while($true)
  $left=8000-$startup.ElapsedMilliseconds;Require ($left -gt 0) 'Startup budget exhausted';$tree=Ready 1 ([int]$left);$a=Request @('identify');$original=@($tree.surfaces)
- if($Case -eq 'terminal-menu'){
+ if($Case -eq 'application-menus'){
+  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850)
+  function Shell-Menu([string]$Pane){
+   $t=Tree;$button=Tool $t $Pane 'pane_add';[OptionsFixture]::ContextMenu([long]$t.window_handle,[long]$button.handle,$hostProcess.Id)
+   $t=Await {param($v) $v.tab_menu.kind -ceq 'shell' -and $v.tab_menu.pane -ceq $Pane};Menu-Panel $t.tab_menu.menu ([long]$t.window_handle)|Out-Null;return $t
+  }
+  function Browser-Menu([string]$Surface){
+   $t=Tree;$view=@($t.browsers|Where-Object {$_.id -ceq $Surface})[0];[OptionsFixture]::Click([long]$view.chrome_handle,[long]$view.chrome.tools_handle,$hostProcess.Id)
+   $t=Await {param($v) $v.tab_menu.kind -ceq 'browser' -and $v.tab_menu.surface -ceq $Surface};Menu-Panel $t.tab_menu.menu ([long]$t.window_handle)|Out-Null;return $t
+  }
+  function Files-Menu($State){
+   [OptionsFixture]::ContextMenu([long]$State.panel_handle,[long]$State.list_handle,$hostProcess.Id)
+   $t=Await {param($v) $v.tab_menu.kind -ceq 'files'};Menu-Panel $t.tab_menu.menu ([long]$t.window_handle)|Out-Null;return $t
+  }
+  Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 2;$b=Request @('identify');$before=@($tree.surfaces)
+  $tree=Shell-Menu $a.pane;$menu=$tree.tab_menu.menu
+  Require ((@($menu.rows.label)-join '|') -ceq 'New Windows PowerShell tab|New Command Prompt tab|New PowerShell 7 tab') 'Shell menu labels changed'
+  $bitmap=Join-Path $directory 'application-menu.bmp';$capture=Request @('chrome-capture',$bitmap);Require ($capture.root_handle -eq $menu.window) 'Capture missed the themed shell menu'
+  $foreground=if($tree.chrome.theme -eq 'light'){'#28282b'}else{'#f2f3f5'}
+  foreach($row in $menu.rows){$r=$row.bounds;Require ([ChromeFixture]::ColorCount($bitmap,$r.x,$r.y,$r.width,$r.height,$foreground) -gt 5) 'Themed shell menu did not paint its text'};Remove-Item -LiteralPath $bitmap -Force
+  Request @('focus-tab',$b.surface)|Out-Null;$tree=Tree;Require ($tree.tab_menu.surface -ceq $a.surface -and $tree.tab_menu.menu.id -ceq $menu.id) 'Shell menu followed later focus'
+  Menu-Click $menu 'New Command Prompt tab';$tree=Ready 3;$created=Request @('identify');$createdView=@($tree.surfaces|Where-Object {$_.id -ceq $created.surface})[0]
+  Require ($created.pane -ceq $a.pane -and $created.surface -cne $a.surface -and $createdView.shell.program -ceq 'cmd' -and $createdView.cwd -ceq $fixture.Root -and -not $tree.tab_menu) 'Shell menu used the wrong source, profile or Unicode CWD';Stable $tree $before
+  $tree=Shell-Menu $a.pane;$retired=$tree.tab_menu.menu.window;Request @('close-tab',$created.surface)|Out-Null;$tree=Await {param($v) -not $v.tab_menu};Require ([OptionsFixture]::WindowDestroyed([long]$retired)) 'Closing shell source retained its popup';Stable $tree $before
+  $evidence.checks+=@{name='themed_shell_geometry_paint_captured_source_CWD_and_source_close';passed=$true}
+
+  $opened=(Request @('browser','open','about:blank','--pane',$a.pane)).browser_pane_opened
+  $tree=Await {param($v) @($v.browsers|Where-Object {$_.id -ceq $opened.surface -and -not $_.loading}).Count -eq 1};$view=@($tree.browsers|Where-Object {$_.id -ceq $opened.surface})[0]
+  $tree=Browser-Menu $opened.surface;$menu=$tree.tab_menu.menu
+  Require ((@($menu.rows.label)-join '|') -ceq 'Back|Forward|Reload|Stop|Go|Zoom out|Zoom in|Reset zoom|Downloads…|Find in page…|Bookmarks') 'Browser menu order changed'
+  Require ($menu.rows[0].enabled -eq [bool]$view.can_go_back -and $menu.rows[1].enabled -eq [bool]$view.can_go_forward) 'Browser history enablement differs'
+  [OptionsFixture]::PostKey([long]$menu.window,$hostProcess.Id,36,$false,$false);$tree=Await {param($v) $v.tab_menu.menu.selected -eq 2}
+  [OptionsFixture]::PostKey([long]$menu.window,$hostProcess.Id,229,$false,$false);$tree=Tree;Require ($tree.tab_menu.menu.selected -eq 2) 'IME process key changed menu selection'
+  Menu-Click $tree.tab_menu.menu 'Zoom in';$tree=Await {param($v) -not $v.tab_menu -and @($v.browsers|Where-Object {$_.id -ceq $opened.surface -and [Math]::Abs($_.zoom-$view.zoom-0.1) -lt 0.001}).Count -eq 1}
+  $tree=Browser-Menu $opened.surface;Menu-Click $tree.tab_menu.menu 'Find in page…';$tree=Await {param($v) -not $v.tab_menu};$status=Request @('browser','status',$opened.pane);Require ($status.find.panel_handle -and $status.find.panel_owner -eq $tree.window_handle) 'Browser menu did not open the existing find panel';Request @('browser','find-close',$opened.pane)|Out-Null
+  $tree=Browser-Menu $opened.surface;Menu-Click $tree.tab_menu.menu 'Bookmarks';$tree=Await {param($v) $v.bookmarks.panel -and -not $v.tab_menu};Require ($tree.bookmarks.panel.surface -ceq $opened.surface -and $tree.bookmarks.panel.native_visible -eq $false) 'Browser menu remapped Bookmarks to the wrong action';[OptionsFixture]::PostEscape([long]$tree.bookmarks.panel.window,$hostProcess.Id);$tree=Await {param($v) -not $v.bookmarks.panel}
+  $tree=Browser-Menu $opened.surface;$retired=$tree.tab_menu.menu.window;Request @('close-tab',$opened.surface)|Out-Null;$tree=Await {param($v) -not $v.tab_menu};Require ([OptionsFixture]::WindowDestroyed([long]$retired)) 'Closing browser retained its tools popup';Stable $tree $before
+  $evidence.checks+=@{name='browser_themed_history_keyboard_IME_guard_zoom_find_bookmarks_and_close';passed=$true}
+
+  $second=$fixture.Write('다른 파일 한.txt','second',$false,$false)
+  Request @('files','show','--pane',$a.pane,'--root',$fixture.Root)|Out-Null;$files=Request @('files','status','--pane',$a.pane)
+  $row=@($files.rows|Where-Object {$_.name -ceq [IO.Path]::GetFileName($path)})[0];$other=@($files.rows|Where-Object {$_.name -ceq [IO.Path]::GetFileName($second)})[0];Require ($null -ne $row -and $null -ne $other) 'Unicode Files fixture is missing'
+  Request @('files','select','--pane',$a.pane,'--token',$files.token,'--index',$row.index.ToString(),'--mode','replace')|Out-Null
+  $tree=Files-Menu $files;Require ((@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'Open|Expand|Collapse|Copy to…|Rename…|Move to…|Refresh|Load more|Hide Files') 'Files menu order changed'
+  Request @('files','select','--pane',$a.pane,'--token',$files.token,'--index',$other.index.ToString(),'--mode','replace')|Out-Null
+  Menu-Click $tree.tab_menu.menu 'Rename…';$tree=Await {param($v) -not $v.tab_menu};$files=Request @('files','status','--pane',$a.pane)
+  Require ($files.operation_form.kind -ceq 'Rename to' -and $files.operation_form.index -eq $row.index -and $files.operation_form.source_label -ceq $row.name) 'Files menu followed later selection instead of captured Unicode row'
+  Request @('files','refresh','--pane',$a.pane)|Out-Null;$files=Request @('files','status','--pane',$a.pane);Require (-not $files.operation_form) 'Refresh retained the old form'
+  $tree=Files-Menu $files;Request @('files','refresh','--pane',$a.pane)|Out-Null;Menu-Click $tree.tab_menu.menu 'Rename…';$tree=Await {param($v) -not $v.tab_menu};$files=Request @('files','status','--pane',$a.pane);Require (-not $files.operation_form -and -not $files.last_error) 'Stale Files listing menu affected the refreshed listing'
+  $tree=Files-Menu $files;$tree=Menu-Dismiss $tree;$tree=Files-Menu $files;Menu-Click $tree.tab_menu.menu 'Hide Files';$tree=Await {param($v) -not $v.tab_menu};$files=Request @('files','status','--pane',$a.pane);Require (-not $files.visible -and -not $files.dock_visible) 'Themed Files Hide did not remove the dock';Stable $tree $before
+  $evidence.checks+=@{name='files_themed_captured_Unicode_selection_stale_token_Escape_and_Hide';passed=$true}
+ }elseif($Case -eq 'terminal-menu'){
   [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850)
   $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $a.surface -and $_.cwd_reported}).Count -eq 1}
   Require (@($tree.surfaces|Where-Object {$_.id -ceq $a.surface})[0].cwd -ceq $fixture.Root) 'Terminal body menu fixture lost its live Unicode/NFD CWD'

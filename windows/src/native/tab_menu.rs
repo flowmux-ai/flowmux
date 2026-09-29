@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Themed Linux menus, captured by surface/workspace identity rather than row index.
 use super::*;
+use crate::shell::Shell;
+use shells::NewTerminal;
 use windows_sys::Win32::System::SystemServices::{
     SS_CENTER, SS_CENTERIMAGE, SS_ENDELLIPSIS, SS_NOPREFIX,
 };
@@ -10,6 +12,7 @@ pub(super) use panel::UiAction;
 
 #[derive(Clone, Copy)]
 enum MenuAction {
+    Select(usize),
     Folder,
     Copy,
     Move,
@@ -30,6 +33,14 @@ enum Kind {
     Workspace,
     Creation,
     Pane,
+    Shell,
+    Browser,
+    Files,
+}
+pub(super) enum Selection {
+    Shell,
+    Browser(Uuid),
+    Files(files::UiRequest),
 }
 #[derive(Clone)]
 struct Entry {
@@ -48,6 +59,7 @@ pub(super) struct Menu {
     menu: panel::Panel,
     submenu: Option<panel::Panel>,
     destinations: Vec<Entry>,
+    selection: Option<Selection>,
 }
 impl Menu {
     #[cfg(debug_assertions)]
@@ -66,6 +78,9 @@ impl Menu {
             Kind::Workspace => "workspace",
             Kind::Creation => "creation",
             Kind::Pane => "pane",
+            Kind::Shell => "shell",
+            Kind::Browser => "browser",
+            Kind::Files => "files",
         };
         json!({"kind":kind,"surface":self.surface,"pane":self.pane,"workspace":self.workspace,
             "copy_text":self.copy_text,"folder":self.folder,"menu":self.menu.diagnostics(),
@@ -518,6 +533,32 @@ impl App {
         ];
         self.show_context_menu(Kind::Creation, None, entries, Vec::new(), point)
     }
+    pub(super) fn show_selection_menu(
+        &mut self,
+        surface: SurfaceId,
+        selection: Selection,
+        labels: &[&str],
+        disabled: &[usize],
+        point: (i32, i32),
+    ) -> anyhow::Result<()> {
+        let kind = match &selection {
+            Selection::Shell => Kind::Shell,
+            Selection::Browser(_) => Kind::Browser,
+            Selection::Files(_) => Kind::Files,
+        };
+        let entries = labels
+            .iter()
+            .enumerate()
+            .map(|(i, label)| Entry {
+                label: (*label).into(),
+                enabled: !disabled.contains(&(i + 1)),
+                action: MenuAction::Select(i + 1),
+            })
+            .collect();
+        self.show_context_menu(kind, Some(surface), entries, Vec::new(), point)?;
+        self.tab_menu.as_mut().unwrap().selection = Some(selection);
+        Ok(())
+    }
     fn show_context_menu(
         &mut self,
         kind: Kind,
@@ -564,6 +605,7 @@ impl App {
             menu,
             submenu: None,
             destinations,
+            selection: None,
         });
         Ok(())
     }
@@ -601,7 +643,14 @@ impl App {
             return Ok(());
         }
         if matches!(action, UiAction::Close) || (matches!(action, UiAction::Back) && !submenu) {
-            self.tab_menu.take();
+            let selection = self
+                .tab_menu
+                .take()
+                .and_then(|mut menu| menu.selection.take());
+            if let Some(Selection::Files(request)) = selection {
+                self.files_menu_choice(request, 0);
+                return Ok(());
+            }
             return self.focus_active();
         }
         if matches!(action, UiAction::Back) {
@@ -667,8 +716,33 @@ impl App {
             return Ok(());
         }
         // Resolve live content and destinations again; menu labels are only a snapshot.
-        self.tab_menu.take();
+        let selection = self
+            .tab_menu
+            .take()
+            .and_then(|mut menu| menu.selection.take());
         match action {
+            MenuAction::Select(choice) => match selection {
+                Some(Selection::Shell) => {
+                    if let Some(name) = ["powershell", "cmd", "pwsh"].get(choice.wrapping_sub(1)) {
+                        self.new_terminal(
+                            surface.context("No shell menu source")?,
+                            None,
+                            Some(Shell::profile(name)),
+                            NewTerminal::Tab,
+                        )?;
+                        self.focus_active()?;
+                    }
+                }
+                Some(Selection::Browser(instance)) => {
+                    self.browser_menu_choice(
+                        surface.context("No browser menu source")?,
+                        instance,
+                        choice,
+                    )?;
+                }
+                Some(Selection::Files(request)) => self.files_menu_choice(request, choice),
+                None => unreachable!(),
+            },
             MenuAction::Copy => {
                 self.copy_surface_text(surface.context("No tab to copy")?, false)?;
                 self.focus_active()?;

@@ -1230,6 +1230,35 @@ impl App {
         }
         Ok(())
     }
+    pub(super) fn files_menu_choice(&mut self, mut request: UiRequest, choice: usize) {
+        request.action = match choice {
+            1 => Action::Open,
+            2 => Action::Expand,
+            3 => Action::Collapse,
+            4 => Action::Begin(FormKind::Copy),
+            5 => Action::Begin(FormKind::Rename),
+            6 => Action::Begin(FormKind::Move),
+            7 => Action::Refresh,
+            8 => Action::More,
+            9 => Action::Hide,
+            _ => {
+                if !self.background_test && self.files_owner_current(&request.owner) {
+                    if let Some(panel) = self.files.states[&PaneId(request.owner.pane)]
+                        .panel
+                        .as_ref()
+                        .filter(|panel| panel.shown)
+                    {
+                        unsafe {
+                            SetFocus(panel.list);
+                        }
+                    }
+                }
+                return;
+            }
+        };
+        // Keep the menu's owner, listing token and row; never re-read selection.
+        self.files_ui(request);
+    }
     fn files_ui(&mut self, request: UiRequest) {
         let pane = PaneId(request.owner.pane);
         let cancelling = matches!(&request.action, Action::CancelOperation(_));
@@ -1267,38 +1296,13 @@ impl App {
                     } else {
                         vec![1, 2, 3, 4, 5, 6]
                     };
-                    let choice = self.popup(&labels, &disabled, (x, y))?;
-                    let action = match choice {
-                        1 => Action::Open,
-                        2 => Action::Expand,
-                        3 => Action::Collapse,
-                        4 => Action::Begin(FormKind::Copy),
-                        5 => Action::Begin(FormKind::Rename),
-                        6 => Action::Begin(FormKind::Move),
-                        7 => Action::Refresh,
-                        8 => Action::More,
-                        9 => Action::Hide,
-                        _ => {
-                            if !self.background_test {
-                                if let Some(panel) = self.files.states[&pane]
-                                    .panel
-                                    .as_ref()
-                                    .filter(|panel| panel.shown)
-                                {
-                                    unsafe {
-                                        SetFocus(panel.list);
-                                    }
-                                }
-                            }
-                            return Ok(());
-                        }
-                    };
-                    self.files_ui(UiRequest {
-                        owner: request.owner.clone(),
-                        token: request.token,
-                        index: request.index,
-                        action,
-                    });
+                    self.show_selection_menu(
+                        self.files.states[&pane].source,
+                        tab_menu::Selection::Files(request),
+                        &labels,
+                        &disabled,
+                        (x, y),
+                    )?;
                     return Ok(());
                 }
                 Action::Begin(kind) => {
