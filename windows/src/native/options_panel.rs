@@ -377,6 +377,12 @@ impl Panel {
                 vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
+                Some(SettingKey::CursorBlinkIntervalMs),
+                0,
+                "Cursor blink interval (ms)",
+                vec![],
+            )?;
+            p.row(
                 Some(SettingKey::CursorStyle),
                 0,
                 "Cursor shape",

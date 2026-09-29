@@ -48,10 +48,12 @@ export class Settings {
       selection:theme.selectionBackground ?? theme.brightBlack,accent:theme.cursor,error:theme.red})) {
       this.document.body.style.setProperty('--theme-'+name,value);
     }
+    this.document.body.style.setProperty('--cursor-blink-duration', `${2 * (settings.cursor_blink_interval_ms ?? 530)}ms`);
     this.minimap?.configure(settings);
     this.changed(); this.fit();
-    const actual=this.terminal.options;
-    this.send({type:'settings_applied',revision:desired.revision,rendered_font_size:actual.fontSize,bindings:this.shortcuts?.snapshot() ?? [],
+    const actual=this.terminal.options, cursor=this.terminal.element?.querySelector('.xterm-cursor');
+    const cursorAnimation=cursor ? Math.round(parseFloat(this.document.defaultView.getComputedStyle(cursor).animationDuration)*1000) : null;
+    this.send({type:'settings_applied',revision:desired.revision,rendered_font_size:actual.fontSize,cursor_animation_duration_ms:cursorAnimation,bindings:this.shortcuts?.snapshot() ?? [],
       terminal:{...settings,font_family:actual.fontFamily,font_size:settings.font_size,theme:settings.theme,
         scrollback:actual.scrollback,cursor_blink:actual.cursorBlink,cursor_style:actual.cursorStyle,
         minimap_enabled:settings.minimap_enabled,minimap_width:settings.minimap_width,minimap_opacity:settings.minimap_opacity},

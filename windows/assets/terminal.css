@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--theme-background, #282c34); color: var(--theme-foreground, #ffffff); }
 #terminal { position: absolute; inset: 5px; right: calc(5px + var(--minimap-width, 0px)); }
+/* Pinned xterm 6 DOM renderer: change only the cycle, preserving its focus and blink rules. */
+#terminal .xterm-cursor { animation-duration: var(--cursor-blink-duration, 1060ms) !important; }
 #minimap { position: absolute; top: 5px; bottom: 5px; right: 5px; width: var(--minimap-width, 0px); cursor: pointer; touch-action: none; }
 #minimap[hidden] { display: none; }
 #minimap canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

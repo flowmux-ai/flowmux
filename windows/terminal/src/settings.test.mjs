@@ -107,3 +107,25 @@ test('global zoom keeps the configured font size and defers actual integral sizi
   assert.equal(terminal.options.fontSize,18); assert.equal(state.replies.length,6);
   assert.equal(state.replies.at(-1).revision,'deferred-125');
 });
+
+
+test('cursor interval updates the existing CSS cycle and coalesces across composition without input', () => {
+  const { state, terminal, document, controller } = fixture();
+  terminal.element={querySelector:selector=>selector === '.xterm-cursor' ? {} : null};
+  document.defaultView={getComputedStyle:()=>({animationDuration: parseFloat(document.body.style['--cursor-blink-duration'])/1000+'s'})};
+  controller.receive(documentFor('default',14),[]);
+  assert.equal(document.body.style['--cursor-blink-duration'],'1060ms');
+  assert.equal(state.replies.at(-1).cursor_animation_duration_ms,1060);
+  state.blocked=true;
+  for(const ms of [100,2000]){
+    const desired=documentFor('interval-'+ms,14);desired.terminal.cursor_blink_interval_ms=ms;
+    controller.receive(desired,[]);
+  }
+  assert.equal(document.body.style['--cursor-blink-duration'],'1060ms');
+  assert.equal(state.replies.length,1);
+  state.blocked=false;controller.flush();
+  assert.equal(document.body.style['--cursor-blink-duration'],'4000ms');
+  assert.equal(state.replies.at(-1).cursor_animation_duration_ms,4000);
+  assert.equal(terminal.options.cursorBlink,false);
+  assert.equal(terminal.options.cursorStyle,'bar');
+});

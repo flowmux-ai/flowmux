@@ -71,6 +71,7 @@ pub enum ClientMessage {
     SettingsApplied {
         revision: Uuid,
         rendered_font_size: u16,
+        cursor_animation_duration_ms: Option<u32>,
         terminal: Box<crate::settings::TerminalSettings>,
         bindings: Vec<crate::keybindings::Binding>,
         background: String,

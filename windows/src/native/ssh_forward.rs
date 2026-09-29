@@ -252,6 +252,7 @@ impl Forward {
             ClientMessage::SettingsApplied {
                 revision,
                 rendered_font_size,
+                cursor_animation_duration_ms,
                 terminal,
                 bindings,
                 background,
@@ -266,7 +267,7 @@ impl Forward {
                 && foreground == colors.foreground =>
             {
                 self.terminal.applied_settings = Some(
-                    json!({"revision":revision,"rendered_font_size":rendered_font_size,"terminal":terminal,"colors":colors,"bindings":bindings}),
+                    json!({"revision":revision,"rendered_font_size":rendered_font_size,"cursor_animation_duration_ms":cursor_animation_duration_ms,"terminal":terminal,"colors":colors,"bindings":bindings}),
                 );
             }
             ClientMessage::Input { data } => self.input(data.into_bytes())?,

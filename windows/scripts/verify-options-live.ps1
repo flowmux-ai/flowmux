@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned live Options; 50s work + bounded cleanup, outer Job60s.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about','focus')][string]$Case='all')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about','focus','cursor')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
@@ -45,6 +45,34 @@ function Reveal-Field($Status,[string]$Key){
         Require ($wait.ElapsedMilliseconds -lt 3000) ('General field cannot be reached: '+$Key)
         [OptionsFixture]::ScrollLine([long]$Status.options.viewport,$owned.Id,($bounds.Y -ge 0));$Status=Request @('settings','show')
     }while($true)
+}
+function Verify-Cursor($Status){
+    $Status=Reveal-Field $Status 'cursor_blink_interval_ms';$key='cursor_blink_interval_ms'
+    foreach($ms in @(100,2000,530)){
+        Edit $Status $key ([string]$ms)
+        $Status=Await {param($s) $s.document.terminal.cursor_blink_interval_ms -eq $ms -and -not $s.options.pending -and (Ack $s)}
+        Require (@($Status.surfaces|Where-Object {$_.applied.cursor_animation_duration_ms -ne 2*$ms}).Count -eq 0) 'Actual cursor CSS duration did not follow the interval'
+    }
+    $evidence.checks+=@{name='native_cursor_interval_boundaries_update_actual_WebView_cursor_CSS_duration';passed=$true}
+    foreach($value in @('99','2001','530.5','한글 한 é 😀')){
+        Edit $Status $key $value;$Status=Await {param($s) (Field $s $key).draft_error -and -not $s.options.pending}
+        Require ($Status.document.terminal.cursor_blink_interval_ms -eq 530 -and (Field $Status $key).value -ceq $value) 'Invalid cursor interval changed settings or lost its Unicode draft'
+    }
+    Guard $Status $key $true;Edit $Status $key '250';$Status=Request @('settings','show')
+    Require ($Status.options.composing -and $Status.document.terminal.cursor_blink_interval_ms -eq 530 -and (Field $Status $key).value -ceq '250') 'Cursor interval committed during composition guard'
+    Guard $Status $key $false;$Status=Await {param($s) -not $s.options.composing -and -not $s.options.pending -and $s.document.terminal.cursor_blink_interval_ms -eq 250 -and (Ack $s)}
+    $evidence.checks+=@{name='cursor_interval_rejects_out_of_range_and_Unicode_drafts_and_defers_during_owned_IME_guard';passed=$true}
+    foreach($shape in @('block','underline','bar')){
+        Request @('settings','set','cursor-style',$shape)|Out-Null
+        foreach($blink in @($false,$true)){
+            Request @('settings','set','cursor-blink',([string]$blink).ToLowerInvariant())|Out-Null
+            $Status=Await {param($s) (Ack $s) -and $s.document.terminal.cursor_style -eq $shape -and $s.document.terminal.cursor_blink -eq $blink}
+            Require (@($Status.surfaces|Where-Object {$_.applied.cursor_animation_duration_ms -ne 500}).Count -eq 0) 'Cursor shape or blink toggle reset its CSS duration'
+        }
+    }
+    Require ((Identities (Tree)) -ceq $identities) 'Cursor setting restarted the terminal'
+    $evidence.checks+=@{name='cursor_shapes_and_blink_toggle_keep_interval_and_original_shell_identity';passed=$true;scope='computed duration on hidden cursor; physical focus and animation cadence not established'}
+    return $Status
 }
 function Verify-Focus($Status){
     $color=Field $Status 'focus_border_color';$opacity=Field $Status 'focus_border_opacity'
@@ -131,7 +159,7 @@ try {
     $controls=@([ChromeFixture]::Read([long]$status.options.window,$owned.Id));Require (@($controls|Where-Object {$_.Shown -and $_.Class -eq 'Button' -and (($_.Style -band 15) -ne 11 -or $_.Font -eq 0)}).Count -eq 0) 'Options buttons are not themed native controls'
 
 
-    if($Case -eq 'about'){$status=Verify-About $status}elseif($Case -eq 'focus'){$status=Verify-Focus $status}else{
+    if($Case -eq 'cursor'){$status=Verify-Cursor $status}elseif($Case -eq 'about'){$status=Verify-About $status}elseif($Case -eq 'focus'){$status=Verify-Focus $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
     $previousBottom=0;$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
     foreach($row in @($status.options.controls|Where-Object {$_.page -eq 'general'})){

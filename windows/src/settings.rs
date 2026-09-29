@@ -23,6 +23,7 @@ pub enum SettingKey {
     ThemeOverrides,
     Scrollback,
     CursorBlink,
+    CursorBlinkIntervalMs,
     CursorStyle,
     UsageBarEnabled,
     AgentBarMode,
@@ -122,6 +123,7 @@ pub struct TerminalSettings {
     pub theme_overrides: ThemeOverrides,
     pub scrollback: u32,
     pub cursor_blink: bool,
+    pub cursor_blink_interval_ms: u32,
     pub cursor_style: CursorStyle,
     pub usage_bar_enabled: bool,
     pub agent_bar_mode: bool,
@@ -146,7 +148,8 @@ impl Default for TerminalSettings {
             theme_preset: None,
             theme_overrides: ThemeOverrides::default(),
             scrollback: 10000,
-            cursor_blink: true,
+            cursor_blink: flowmux_config::options::CURSOR_BLINK_DEFAULT,
+            cursor_blink_interval_ms: flowmux_config::options::CURSOR_BLINK_INTERVAL_DEFAULT,
             cursor_style: CursorStyle::Block,
             usage_bar_enabled: true,
             agent_bar_mode: false,
@@ -186,6 +189,12 @@ impl TerminalSettings {
         );
         self.theme_overrides.validate()?;
         anyhow::ensure!(
+            (flowmux_config::options::CURSOR_BLINK_INTERVAL_MIN
+                ..=flowmux_config::options::CURSOR_BLINK_INTERVAL_MAX)
+                .contains(&self.cursor_blink_interval_ms),
+            "cursor blink interval must be between 100 and 2000 ms"
+        );
+        anyhow::ensure!(
             !self.font_family.trim().is_empty()
                 && self.font_family.encode_utf16().count() <= 256
                 && !self.font_family.chars().any(char::is_control),
@@ -218,6 +227,7 @@ impl TerminalSettings {
             SettingKey::RestoreTerminalScrollback => self.restore_terminal_scrollback.to_string(),
             SettingKey::Scrollback => self.scrollback.to_string(),
             SettingKey::CursorBlink => self.cursor_blink.to_string(),
+            SettingKey::CursorBlinkIntervalMs => self.cursor_blink_interval_ms.to_string(),
             SettingKey::UsageBarEnabled => self.usage_bar_enabled.to_string(),
             SettingKey::AgentBarMode => self.agent_bar_mode.to_string(),
             SettingKey::AgentNotificationTarget => match self.agent_notification_target {
@@ -339,6 +349,12 @@ impl TerminalSettings {
                     .trim()
                     .parse()
                     .context("scrollback must be an integer")?
+            }
+            SettingKey::CursorBlinkIntervalMs => {
+                next.cursor_blink_interval_ms = value
+                    .trim()
+                    .parse()
+                    .context("cursor blink interval must be an integer")?;
             }
             SettingKey::CursorBlink => {
                 next.cursor_blink = value
@@ -499,6 +515,10 @@ mod tests {
         )
         .unwrap();
         assert!(old.terminal.minimap_enabled);
+        assert_eq!(
+            old.terminal.cursor_blink_interval_ms,
+            flowmux_config::options::CURSOR_BLINK_INTERVAL_DEFAULT
+        );
         assert!(old.terminal.persist_browser_session);
         assert!(old.terminal.restore_terminal_scrollback);
         assert_eq!(
@@ -523,6 +543,9 @@ mod tests {
             flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT
         );
         for (key, value) in [
+            (SettingKey::CursorBlinkIntervalMs, "99"),
+            (SettingKey::CursorBlinkIntervalMs, "2001"),
+            (SettingKey::CursorBlinkIntervalMs, "530.5"),
             (SettingKey::PersistBrowserSession, "on"),
             (SettingKey::RestoreTerminalScrollback, "yes"),
             (SettingKey::ZoomPercent, "49"),
@@ -544,6 +567,8 @@ mod tests {
             (40, 50)
         );
         for (key, text) in [
+            (SettingKey::CursorBlinkIntervalMs, "100"),
+            (SettingKey::CursorBlinkIntervalMs, "2000"),
             (SettingKey::MinimapWidth, "12"),
             (SettingKey::MinimapWidth, "96"),
             (SettingKey::MinimapOpacity, "0"),
