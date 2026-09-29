@@ -12,6 +12,10 @@ pub(super) struct Controller {
     panel: Option<panel::Panel>,
 }
 impl Controller {
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.panel.as_ref().and_then(panel::Panel::capture_window)
+    }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         self.panel
             .as_ref()

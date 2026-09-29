@@ -122,6 +122,9 @@ unsafe fn draw_row(item: &DRAWITEMSTRUCT) -> bool {
     let Some(row) = ROWS.with(|rows| rows.borrow().get(&(item.hwndItem as isize)).cloned()) else {
         return false;
     };
+    if row.delete {
+        return false; // Use the shared trash icon painter.
+    }
     let saved = SaveDC(item.hDC);
     if saved == 0 {
         return false;
@@ -148,68 +151,57 @@ unsafe fn draw_row(item: &DRAWITEMSTRUCT) -> bool {
     SetTextColor(item.hDC, fg);
     let body_font = SendMessageW(item.hwndItem, WM_GETFONT, 0, 0) as HGDIOBJ;
     SelectObject(item.hDC, body_font);
-    if row.delete {
-        SelectObject(item.hDC, GetStockObject(DC_PEN));
-        SetDCPenColor(item.hDC, fg);
-        let cx = (item.rcItem.left + item.rcItem.right) / 2;
-        let cy = (item.rcItem.top + item.rcItem.bottom) / 2;
-        MoveToEx(item.hDC, cx - px(4), cy - px(4), std::ptr::null_mut());
-        LineTo(item.hDC, cx + px(4) + 1, cy + px(4) + 1);
-        MoveToEx(item.hDC, cx + px(4), cy - px(4), std::ptr::null_mut());
-        LineTo(item.hDC, cx - px(4) - 1, cy + px(4) + 1);
-    } else {
-        let mut title = RECT {
-            left: item.rcItem.left + px(10),
-            top: item.rcItem.top + px(8),
-            right: item.rcItem.right - px(8),
-            bottom: item.rcItem.top + px(32),
-        };
-        if row.attention && !row.read && !palette.high_contrast {
-            SetTextColor(item.hDC, palette.accent);
-        }
-        let text = drawing(&row.title);
-        DrawTextW(
-            item.hDC,
-            text.as_ptr(),
-            text.len() as i32,
-            &mut title,
-            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-        );
-        SetTextColor(item.hDC, fg);
-        let mut body = RECT {
-            top: item.rcItem.top + px(34),
-            bottom: item.rcItem.bottom - px(29),
-            ..title
-        };
-        let text = drawing(&row.body);
-        DrawTextW(
-            item.hDC,
-            text.as_ptr(),
-            text.len() as i32,
-            &mut body,
-            DT_WORDBREAK | DT_NOPREFIX,
-        );
-        SelectObject(
-            item.hDC,
-            SendMessageW(row.caption, WM_GETFONT, 0, 0) as HGDIOBJ,
-        );
-        if !palette.high_contrast {
-            SetTextColor(item.hDC, palette.muted);
-        }
-        let mut time = RECT {
-            top: item.rcItem.bottom - px(25),
-            bottom: item.rcItem.bottom - px(5),
-            ..title
-        };
-        let text = drawing(&row.time);
-        DrawTextW(
-            item.hDC,
-            text.as_ptr(),
-            text.len() as i32,
-            &mut time,
-            DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-        );
+    let mut title = RECT {
+        left: item.rcItem.left + px(10),
+        top: item.rcItem.top + px(8),
+        right: item.rcItem.right - px(8),
+        bottom: item.rcItem.top + px(32),
+    };
+    if row.attention && !row.read && !palette.high_contrast {
+        SetTextColor(item.hDC, palette.accent);
     }
+    let text = drawing(&row.title);
+    DrawTextW(
+        item.hDC,
+        text.as_ptr(),
+        text.len() as i32,
+        &mut title,
+        DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
+    SetTextColor(item.hDC, fg);
+    let mut body = RECT {
+        top: item.rcItem.top + px(34),
+        bottom: item.rcItem.bottom - px(29),
+        ..title
+    };
+    let text = drawing(&row.body);
+    DrawTextW(
+        item.hDC,
+        text.as_ptr(),
+        text.len() as i32,
+        &mut body,
+        DT_WORDBREAK | DT_NOPREFIX,
+    );
+    SelectObject(
+        item.hDC,
+        SendMessageW(row.caption, WM_GETFONT, 0, 0) as HGDIOBJ,
+    );
+    if !palette.high_contrast {
+        SetTextColor(item.hDC, palette.muted);
+    }
+    let mut time = RECT {
+        top: item.rcItem.bottom - px(25),
+        bottom: item.rcItem.bottom - px(5),
+        ..title
+    };
+    let text = drawing(&row.time);
+    DrawTextW(
+        item.hDC,
+        text.as_ptr(),
+        text.len() as i32,
+        &mut time,
+        DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
     if focused && item.itemState & ODS_NOFOCUSRECT == 0 {
         let mut focus = item.rcItem;
         InflateRect(&mut focus, -px(2), -px(2));
@@ -327,7 +319,7 @@ impl Panel {
                 !panel.viewport.is_null(),
                 "cannot create notification viewport"
             );
-            panel.status = panel.child(window, "STATIC", "Notifications", 11, SS_LEFT)?;
+            panel.status = panel.child(window, "STATIC", "", 11, SS_LEFT)?;
             panel.clear = panel.child(
                 window,
                 "BUTTON",
@@ -511,7 +503,7 @@ impl Panel {
                         row.delete,
                         std::ptr::null_mut(),
                         area.right - self.px(30),
-                        y + self.px(5),
+                        y + (row.height - self.px(32)) / 2,
                         self.px(28),
                         self.px(28),
                         SWP_NOZORDER | SWP_NOACTIVATE,
@@ -640,7 +632,7 @@ impl Panel {
                 return;
             }
         }
-        self.status("Notifications");
+        self.status("");
         if self.opened.get() {
             self.position();
         } else {
@@ -683,7 +675,13 @@ impl Panel {
             }
         };
         chrome::register_button(open, chrome::Role::Button);
-        chrome::register_button(delete, chrome::Role::Tool);
+        chrome::register_button(
+            delete,
+            chrome::Role::Icon {
+                kind: chrome::ChromeIcon::Delete,
+                marked: false,
+            },
+        );
         let paint = RowPaint {
             id,
             title,
@@ -735,6 +733,10 @@ impl Panel {
             height,
         });
         Ok(())
+    }
+    #[cfg(debug_assertions)]
+    pub(super) fn capture_window(&self) -> Option<HWND> {
+        self.opened.get().then_some(self.window)
     }
     pub(super) fn snapshot(&self) -> Value {
         unsafe {

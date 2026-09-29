@@ -3711,6 +3711,7 @@ impl App {
                     .or_else(|| self.usage.capture_window())
                     .or_else(|| self.sessions.capture_window())
                     .or_else(|| self.command_palette.capture_window())
+                    .or_else(|| self.notifications.capture_window())
                 {
                     chrome::capture_subtree(window, &path)
                 } else {

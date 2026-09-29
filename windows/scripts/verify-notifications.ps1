@@ -1,12 +1,13 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned hosts only. Read parsed screens through IPC; never touch desktop input or clipboard.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$Capture)
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path
 $gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
 Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs')
+if($Capture){Add-Type -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs') -ReferencedAssemblies System.Drawing}
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT ('notifications-'+[guid]::NewGuid())
 [IO.Directory]::CreateDirectory($directory)|Out-Null;$directory=(Resolve-Path $directory).Path
 $doctorProcess=[CliProbe]::Start($cli,@('doctor'),$directory,$directory)
@@ -199,6 +200,24 @@ try {
         [NotificationInspect]::Text([IntPtr]([long]$unicodeRow.open_handle)) -cne ($title+"`n"+$body+"`n"+$unicodeRow.time) -or
         [NotificationInspect]::Text([IntPtr]([long]$unicodeRow.delete_handle)) -cne ('Delete notification: '+$title)) {throw 'Notification row changed original Unicode HWND/model text or omitted time/delete controls'}
     $evidence.checks+=@{name='owned_bell_popover_geometry_newest_rows_original_unicode_and_snapshot_before_ack';passed=$true;popup=$snapshot;style=$popupStyle;dpi=$dpi}
+    if([NotificationInspect]::Text([NotificationInspect]::GetDlgItem($panel,11)) -cne ''){throw 'Linux notification popover has no duplicate Notifications heading'}
+    foreach($row in $snapshot.rows){
+        if(-not $row.visible){continue}
+        $openBounds=[NotificationInspect]::Bounds([IntPtr]([long]$row.open_handle));$deleteBounds=[NotificationInspect]::Bounds([IntPtr]([long]$row.delete_handle))
+        if([Math]::Abs(($openBounds.Top+$openBounds.Bottom)-($deleteBounds.Top+$deleteBounds.Bottom)) -gt 2){throw 'Notification delete control is not vertically centered beside its row'}
+    }
+    if($Capture){
+        $bmp=Join-Path $directory 'notification-popover.bmp';$paint=Request @('chrome-capture',$bmp)
+        if($paint.root_handle -ne $panel.ToInt64() -or -not $paint.subtree){throw 'Notification capture did not use the exact owned popup'}
+        $buttons=@($paint.controls|Where-Object {$_.handle -eq $snapshot.rows[0].delete_handle})
+        if($buttons.Count -ne 1){throw 'Owned capture omitted the first notification delete button'}
+        $delete=$buttons[0]
+        $scale=$dpi/96.0;$cx=[int]($delete.X+$delete.Width/2);$cy=[int]($delete.Y+$delete.Height/2)
+        # The shared trash icon's lid is a horizontal line; the old X cannot pass.
+        if([ChromeFixture]::ColorCount($bmp,($cx-[int][Math]::Round(7*$scale)),($cy-[int][Math]::Round(6*$scale)),[int][Math]::Round(14*$scale),1,'#abb1bc') -lt 10){throw 'Production notification painter did not draw the shared trash icon'}
+        [ChromeFixture]::Png($bmp,(Join-Path $directory 'notification-popover.png'));Remove-Item -LiteralPath $bmp
+    }
+    $evidence.checks+=@{name='Linux_popover_header_and_centered_shared_trash_controls';passed=$true}
     [NotificationInspect]::Close($panel,$process.Id)
     $closedPanel=Request @('notifications','list')
     if ($closedPanel.panel_snapshot.open -or [CliProbe]::IsWindowVisible($panel)) {throw 'Owned native close did not dismiss the hidden popup'}
