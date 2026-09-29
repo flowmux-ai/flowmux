@@ -72,7 +72,7 @@ pub(super) struct Bindings {
 }
 impl Bindings {
     pub(super) fn new(panel: &Panel) -> anyhow::Result<Self> {
-        let hint = panel.child_in(panel.viewport, "STATIC", "Changes take effect after OK. App shortcuts apply in terminals and editors. Clipboard Copy/Paste keep fixed defaults.", 610, SS_NOPREFIX)?;
+        let hint = panel.child_in(panel.viewport, "STATIC", "Changes take effect after OK. App shortcuts apply in terminals, editors and browsers. Clipboard Copy/Paste keep fixed defaults.", 610, SS_NOPREFIX)?;
         let reset = panel.child(
             "BUTTON",
             "Reset all keybindings to defaults",
@@ -497,7 +497,7 @@ impl Bindings {
                 json!(self.selected.map(|index| &self.rows[index].action)),
             );
         }
-        json!({"scope":"terminal_and_editor","auto_apply":false,"parent":self.viewport as usize,"reset":self.reset as usize,
+        json!({"scope":"terminal_editor_and_browser","auto_apply":false,"parent":self.viewport as usize,"reset":self.reset as usize,
             "reset_parent":self.owner as usize,"editor":editor,"pending":self.pending.is_some(),"queued":self.request.is_some(),"error":self.error,
             "fixed_clipboard":["copy","paste"],"actions":self.rows.iter().map(|row|json!({"action":row.action,"label":row.label,"supported":row.supported,"accels":row.accels,"edit":row.edit as usize,"accel_handle":row.accel as usize,"chip_text":if row.accels.is_empty(){"(unbound)".to_owned()}else{row.accels.join(", ")}})).collect::<Vec<_>>()})
     }

@@ -479,6 +479,28 @@ impl App {
             };
             anyhow::ensure!(valid, "invalid shortcut test event field: {key}");
         }
+        if self.browsers.contains_key(&source) {
+            anyhow::ensure!(
+                fields.keys().all(|k| matches!(
+                    k.as_str(),
+                    "type"
+                        | "keyCode"
+                        | "ctrlKey"
+                        | "altKey"
+                        | "shiftKey"
+                        | "metaKey"
+                        | "altGraph"
+                        | "repeat"
+                )),
+                "browser tests accept native key metadata; composition belongs to the page"
+            );
+            anyhow::ensure!(
+                event.get("type").is_none()
+                    || matches!(event["type"].as_str(), Some("keydown" | "keyup" | "blur")),
+                "browser shortcut tests require native key events"
+            );
+            return self.test_browser_shortcut(source, &event, reply);
+        }
         anyhow::ensure!(
             self.pending_terminal_ui_tests.len() < 2,
             "shortcut test already pending"

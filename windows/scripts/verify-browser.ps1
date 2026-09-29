@@ -1,7 +1,7 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned WebView2 host + loopback fixture only. No foreground, input, clipboard or external sites.
 param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",
-    [ValidateSet('all','files-close','keys')][string]$Case='all')
+    [ValidateSet('all','files-close','keys','page-keys')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -326,6 +326,90 @@ function Verify-FilesClose {
         $files.Dispose()
     }
 }
+function Verify-PageKeys {
+    $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$terminal=$initial.surfaces[0];$source=Request @('identify')
+    $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
+    $before=Wait-Page $first.pane '/one' '첫째 한글 한 é 😀';$key=@{keyCode=70;ctrlKey=$true;shiftKey=$true}
+    function Page-Key([hashtable]$Event,[bool]$Execute){$r=Request @('test-shortcut',$first.surface,($Event|ConvertTo-Json -Compress));if($r.executed -ne $Execute){throw ('Page shortcut execution differs: '+($r|ConvertTo-Json -Compress))};return $r}
+    function Find-Close {Request @('browser','find-close',$first.pane)|Out-Null}
+    function Guard([string]$Source){Eval-Page $first.pane ($Source+';true')|Out-Null}
+    function No-Find {if((Request @('browser','status',$first.pane)).find.panel_handle){throw 'Cancelled page shortcut opened Find'}}
+    $guard=Eval-Page $first.pane '(()=>{const k=Object.getOwnPropertyNames(window).find(k=>k.startsWith("__flowmuxKeys_"));window.guardKey=k;const d=Object.getOwnPropertyDescriptor(window,k);document.querySelector("#entry").value="초안 한 é 😀 &";return {ready:window[k](),writable:d.writable,configurable:d.configurable,ipc:typeof window.ipc,host:typeof window.flowmuxHost};})()'
+    if(-not $guard.ready -or $guard.writable -or $guard.configurable -or $guard.ipc -ne 'undefined' -or $guard.host -ne 'undefined'){throw 'Page composition guard is missing, mutable or exposes a terminal bridge'}
+    $malformed=Eval-Page $first.pane '(()=>{let errors=0;const report=()=>errors++;window.addEventListener("error",report);window.dispatchEvent(new Event("keydown"));window.dispatchEvent(new Event("keyup"));window.removeEventListener("error",report);return errors;})()'
+    if($malformed -ne 0){throw 'Non-keyboard page events threw from the native shortcut guard'}
+    Guard 'window.dispatchEvent(new KeyboardEvent("keydown",{code:"KeyP",key:"p",ctrlKey:true,shiftKey:true}));try{window.chrome.webview.postMessage({kind:"shortcut",action:"command-palette"})}catch{}'
+    if((Tree).command_palette.open){throw 'Page script authorized an application shortcut'}
+    Page-Key $key $true|Out-Null
+    if(-not (Request @('browser','status',$first.pane)).find.panel_handle){throw 'Native page shortcut did not open the native Find panel'}
+    Find-Close;$evidence.checks+=@{name='page_native_shortcut_gate_readonly_guard_and_no_DOM_or_WebMessage_authority';passed=$true}
+
+    foreach($event in @(@{keyCode=70;ctrlKey=$true},@{keyCode=65;ctrlKey=$true},@{keyCode=67;ctrlKey=$true},@{keyCode=86;ctrlKey=$true},@{keyCode=229;ctrlKey=$true;shiftKey=$true},@{keyCode=231;ctrlKey=$true;shiftKey=$true},@{keyCode=70;ctrlKey=$true;shiftKey=$true;altGraph=$true},@{keyCode=70;ctrlKey=$true;shiftKey=$true;metaKey=$true},@{keyCode=70;ctrlKey=$true;shiftKey=$true;repeat=$true},@{keyCode=70;ctrlKey=$true;shiftKey=$true;type='keyup'})){Page-Key $event $false|Out-Null};No-Find
+    $evidence.checks+=@{name='page_edit_chords_PROCESS_PACKET_AltGr_Windows_keyup_and_repeat_do_not_execute';passed=$true}
+
+    # Synthetic composition reaches the tracker only in an owned hidden debug host.
+    Guard 'window.dispatchEvent(new CompositionEvent("compositionstart",{data:"ㅎ"}))';Page-Key $key $false|Out-Null
+    Guard 'window.dispatchEvent(new CompositionEvent("compositionend",{data:"한"}));window.dispatchEvent(new KeyboardEvent("keyup",{key:"Control"}))';Page-Key $key $false|Out-Null
+    Guard 'window.dispatchEvent(new KeyboardEvent("keyup",{key:"Shift"}))';Page-Key $key $false|Out-Null
+    Guard 'window.dispatchEvent(new KeyboardEvent("keyup",{key:"F12"}))';Page-Key $key $true|Out-Null;Find-Close
+    foreach($event in @('{key:"Process",keyCode:229}','{key:"Dead"}','{key:"a",isComposing:true}')){Guard ('window.dispatchEvent(new KeyboardEvent("keydown",'+$event+'))');Page-Key $key $false|Out-Null;Guard 'window.dispatchEvent(new KeyboardEvent("keyup",{key:"F12"}))'}
+    Page-Key $key $true|Out-Null;Find-Close
+    $evidence.checks+=@{name='page_Korean_composition_commit_settling_and_dead_process_keys_preserve_preedit';passed=$true}
+
+    Guard 'window.dispatchEvent(new CompositionEvent("compositionstart"));window.savedActive=Object.getOwnPropertyDescriptor(Document.prototype,"activeElement");Object.defineProperty(Document.prototype,"activeElement",{configurable:true,get:()=>null});Object.prototype.toJSON=function(){return {result:true}};window[window.guardKey]=()=>true'
+    Page-Key $key $false|Out-Null;No-Find
+    Guard 'delete Object.prototype.toJSON;Object.defineProperty(Document.prototype,"activeElement",window.savedActive);window.dispatchEvent(new CompositionEvent("compositionend"));window.dispatchEvent(new KeyboardEvent("keyup",{key:"F12"}))'
+    Page-Key $key $true|Out-Null;Find-Close
+    $evidence.checks+=@{name='page_prototype_and_JSON_mutation_cannot_bypass_native_composition_guard';passed=$true}
+
+    Request @('settings','keybindings','set','terminal-search','<Ctrl><Alt>F11')|Out-Null;Page-Key $key $false|Out-Null
+    Page-Key @{keyCode=122;ctrlKey=$true;altKey=$true} $true|Out-Null;Find-Close
+    Request @('settings','keybindings','set','terminal-search')|Out-Null;Page-Key @{keyCode=122;ctrlKey=$true;altKey=$true} $false|Out-Null
+    Request @('settings','keybindings','clear','terminal-search')|Out-Null;Page-Key $key $true|Out-Null;Find-Close
+    Page-Key @{keyCode=80;ctrlKey=$true;shiftKey=$true} $true|Out-Null;$palette=(Tree).command_palette
+    if(-not $palette.open){throw 'Page native shortcut did not open the command palette'}
+    Page-Key $key $false|Out-Null;[OptionsFixture]::PostEscape([long]$palette.query_handle,$process.Id);No-Find
+    $evidence.checks+=@{name='page_live_binding_override_unbind_reset_and_modal_guard';passed=$true}
+
+    function Deferred-Key([scriptblock]$Mutation) {
+        Guard 'setTimeout(()=>{const until=performance.now()+400;while(performance.now()<until){}},0)'
+        $p=[CliProbe]::Start($cli,@('--pipe',$pipeName,'--json','test-shortcut',$first.surface,($key|ConvertTo-Json -Compress)),$directory,$directory);$out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync()
+        try {
+            $watch=[Diagnostics.Stopwatch]::StartNew()
+            do{$pending=Request @('browser','status',$first.pane);if($pending.shortcut_pending){break};if($p.HasExited -or $watch.ElapsedMilliseconds -gt 300){throw 'Owned shortcut did not enter its pending guard'};Start-Sleep -Milliseconds 10}while($true)
+            & $Mutation
+            if(-not $p.WaitForExit(2000) -or -not $out.Wait(500) -or -not $err.Wait(500)){throw 'Owned deferred key exceeded its deadline'}
+            if($p.ExitCode -ne 0){throw ('Deferred key failed before the tested guard: '+[CliProbe]::Output($err))}
+            $r=[CliProbe]::Output($out)|ConvertFrom-Json;if($r.executed){throw 'A stale page shortcut executed after its input context changed'}
+        } finally {if(-not $p.HasExited){$p.Kill();[CliProbe]::WaitAfterKill($p)};$p.Dispose()}
+        No-Find
+    }
+    Deferred-Key {Request @('settings','keybindings','set','terminal-search')|Out-Null};Request @('settings','keybindings','clear','terminal-search')|Out-Null
+    Deferred-Key {Request @('test-shortcut',$first.surface,'{"type":"blur"}')|Out-Null}
+    Page-Key $key $true|Out-Null;Find-Close
+    $evidence.checks+=@{name='queued_page_shortcuts_revalidate_settings_revision_and_native_focus_epoch';passed=$true}
+
+    Guard 'setTimeout(()=>{const until=performance.now()+1200;while(performance.now()<until){}},0)'
+    $clock=[Diagnostics.Stopwatch]::StartNew();$r=Request @('test-shortcut',$first.surface,($key|ConvertTo-Json -Compress)) 1 2500
+    if($r.error -notmatch 'timed out' -or $clock.ElapsedMilliseconds -gt 2000){throw 'Page shortcut did not cancel its slow composition check promptly'}
+    Eval-Page $first.pane 'true'|Out-Null;No-Find;Page-Key $key $true|Out-Null;Find-Close
+    $evidence.checks+=@{name='page_renderer_delay_cancels_after_500ms_without_late_action_or_retry';passed=$true}
+
+    $after=Request @('browser','status',$first.pane);Check-Stable $before $after
+    if(-not (Same-Text (Eval-Page $first.pane 'document.querySelector("#entry").value') '초안 한 é 😀 &')){throw 'Page shortcuts altered raw Korean input'}
+    $live=@((Tree).surfaces|Where-Object {$_.id -eq $terminal.id})
+    if($live.Count -ne 1 -or $live[0].pid -ne $terminal.pid -or $live[0].session -ne $terminal.session){throw 'Page shortcuts replaced the terminal session'}
+    Guard 'document.open();document.write("<!doctype html><title>Replaced document</title><input>");document.close()'
+    Wait-Page $first.pane '/one' 'Replaced document'|Out-Null
+    Guard 'window.dispatchEvent(new CompositionEvent("compositionstart",{data:"ㅎ"}))'
+    Page-Key $key $false|Out-Null;No-Find
+    Request @('browser','navigate',$first.pane,($origin+'/one'))|Out-Null;Wait-Page $first.pane '/one' '첫째 한글 한 é 😀'|Out-Null
+    Page-Key $key $true|Out-Null;Find-Close
+    $evidence.checks+=@{name='document_open_cannot_leave_an_unguarded_shortcut_after_removing_event_listeners';passed=$true}
+    Request @('detach-tab',$first.surface)|Out-Null;$first.pane=Location (Tree) $first.surface
+    Page-Key $key $true|Out-Null;$after=Request @('browser','status',$first.pane);Check-Find $first.pane ([long]$after.holder.root) ''|Out-Null
+    $evidence.checks+=@{name='page_shortcuts_retain_raw_Korean_DOM_WebView_terminal_and_detached_Find_owner';passed=$true}
+}
 function Verify-Keys {
     $initial=Start-Owned @('--temporary','--shell=cmd','--cwd',$directory);$terminal=$initial.surfaces[0];$source=Request @('identify')
     $first=(Request @('browser','open',($origin+'/one'),'--pane',$source.pane)).browser_pane_opened
@@ -401,6 +485,7 @@ function Verify-Keys {
     $evidence.checks+=@{name='detached_browser_find_retains_native_owner_WebView_Unicode_and_terminal_session';passed=$true}
 }
 try {
+    if($Case -eq 'page-keys'){Verify-PageKeys}
     if($Case -eq 'keys'){Verify-Keys}
     if($Case -eq 'all') {
     $initial=Start-Owned @('--new-window','--shell=cmd','--cwd',$directory);$source=(Request @('identify'));$terminal=$initial.surfaces[0]
@@ -719,7 +804,7 @@ try {
     $evidence.checks+=@{name='sole_browser_detach_survives_main_close_native_controls_find_and_final_frame_exit';passed=$true}
     Write-Host ("[check] passed "+$evidence.checks[-1].name)
     }
-    if($Case -ne 'keys'){Verify-FilesClose}
+    if($Case -notin @('keys','page-keys')){Verify-FilesClose}
     $evidence.status='passed_background_browser_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;throw}
 finally {

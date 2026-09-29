@@ -1009,6 +1009,7 @@ pub fn run(launch: Launch) -> anyhow::Result<()> {
 fn message_loop(app: &mut App, events: Receiver<Event>) -> anyhow::Result<()> {
     let mut message: MSG = unsafe { std::mem::zeroed() };
     loop {
+        app.sync_browser_keys();
         let result = unsafe { GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) };
         if result == 0 {
             return Ok(());
@@ -3614,7 +3615,7 @@ impl App {
                     }
                 ) {
                     return Ok(Some(
-                        json!({"revision":self.settings.revision,"scope":"terminal_and_editor","catalog":crate::keybindings::catalog(&self.settings.keybindings)?,"bindings":crate::keybindings::resolved(&self.settings.keybindings)?}),
+                        json!({"revision":self.settings.revision,"scope":"terminal_editor_and_browser","catalog":crate::keybindings::catalog(&self.settings.keybindings)?,"bindings":crate::keybindings::resolved(&self.settings.keybindings)?}),
                     ));
                 }
                 if matches!(op, crate::command::SettingsOp::Show) {

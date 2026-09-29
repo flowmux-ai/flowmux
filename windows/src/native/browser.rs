@@ -15,6 +15,8 @@ pub(super) mod capture;
 mod chrome;
 #[path = "browser_find.rs"]
 pub(super) mod find;
+#[path = "browser_keys.rs"]
+mod keys;
 #[path = "browser_popup.rs"]
 pub(super) mod popup;
 #[path = "browser_popup_host.rs"]
@@ -36,12 +38,19 @@ pub(super) enum Signal {
     Eval(Uuid, u64, String),
     Ui(SurfaceId, u16),
     Shortcut(SurfaceId, Uuid, Uuid, crate::keybindings::Binding),
+    PageShortcut(SurfaceId, Uuid, Uuid, u64, crate::keybindings::Binding),
     Capture(Uuid, Result<Vec<u8>, String>),
     CaptureSaved(Uuid, Result<(), String>),
     WaitTick,
     WaitResult(Uuid, Uuid, u64, String),
 }
 enum Response {
+    Shortcut {
+        instance: Uuid,
+        revision: Uuid,
+        focus_epoch: u64,
+        binding: crate::keybindings::Binding,
+    },
     Eval,
     Action,
     Find,
@@ -53,6 +62,20 @@ enum Response {
     },
 }
 impl Response {
+    fn timeout_message(&self) -> &'static str {
+        if matches!(self, Self::Shortcut { .. }) {
+            "browser shortcut check timed out; shortcut cancelled"
+        } else {
+            "browser script callback timed out; script may have executed"
+        }
+    }
+    fn timeout(&self) -> Duration {
+        if matches!(self, Self::Shortcut { .. }) {
+            Duration::from_millis(500)
+        } else {
+            Duration::from_secs(12)
+        }
+    }
     fn is_action(&self) -> bool {
         matches!(self, Self::Action | Self::Find | Self::FindClose)
     }
@@ -88,6 +111,8 @@ impl Pending {
     }
 }
 pub(super) struct Browser {
+    keys: Rc<RefCell<keys::Keys>>,
+    key_guard: String,
     // Drop children before their stable holder; reparenting the holder retains
     // the WebView controller, address EDIT, and their existing document state.
     pub(super) view: WebView,
@@ -142,6 +167,7 @@ impl Browser {
         let load_sender = app.sender.clone();
         let title_sender = app.sender.clone();
         let background = app.background_test;
+        let key_guard = format!("__flowmuxKeys_{}", Uuid::new_v4().simple());
         if app.browser_context.is_none() {
             app.browser_context = Some(WebContext::new(Some(profile(background)?)));
         }
@@ -152,6 +178,10 @@ impl Browser {
                 .with_clipboard(false)
                 .with_devtools(false)
                 .with_hotkeys_zoom(false)
+                .with_initialization_script(keys::script(
+                    &key_guard,
+                    cfg!(debug_assertions) && background,
+                ))
                 .with_document_title_changed_handler(move |_| {
                     title_sender.send(Event::Browser(Signal::Metadata(id, instance)))
                 })
@@ -264,7 +294,9 @@ impl Browser {
                 app.sender.clone(),
             )?;
         }
-        Ok(Self {
+        let browser = Self {
+            keys: Rc::new(RefCell::new(keys::Keys::default())),
+            key_guard,
             view,
             popup_visibility,
             popup_opener: None,
@@ -293,7 +325,9 @@ impl Browser {
             find_key: format!("__flowmuxFind_{}", Uuid::new_v4().simple()),
             find: find::State::default(),
             dom_key: format!("__flowmuxDom_{}", Uuid::new_v4().simple()),
-        })
+        };
+        keys::install(&browser, id)?;
+        Ok(browser)
     }
     fn refresh(&mut self) -> anyhow::Result<()> {
         self.url = self.view.url()?;
@@ -490,6 +524,134 @@ pub(super) fn profile(background: bool) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 impl App {
+    fn browser_shortcut_allowed(&self, id: SurfaceId, instance: Uuid, revision: Uuid) -> bool {
+        self.browsers
+            .get(&id)
+            .is_some_and(|b| b.instance == instance && b.visible && !b.native_closed.get())
+            && revision == self.settings.revision
+            && !self.closing
+            && !self.close_accepted
+            && self.close_request.is_none()
+            && self.pending_save.is_none()
+            && self.editor_barrier.is_none()
+            && !self.overview.is_open()
+            && !self.command_palette.is_open()
+            && unsafe { IsWindowEnabled(self.surface_window(id)) } != 0
+    }
+    pub(super) fn sync_browser_keys(&self) {
+        let enabled = !self.closing
+            && !self.close_accepted
+            && self.close_request.is_none()
+            && self.pending_save.is_none()
+            && self.editor_barrier.is_none()
+            && !self.overview.is_open()
+            && !self.command_palette.is_open();
+        for browser in self.browsers.values() {
+            browser.keys.borrow_mut().sync(
+                enabled && browser.visible && !browser.native_closed.get(),
+                &self.settings,
+            );
+        }
+    }
+    fn browser_page_shortcut(
+        &mut self,
+        id: SurfaceId,
+        instance: Uuid,
+        revision: Uuid,
+        focus_epoch: u64,
+        binding: crate::keybindings::Binding,
+        reply: Option<ipc::Reply>,
+    ) -> anyhow::Result<()> {
+        let allowed = self.browser_shortcut_allowed(id, instance, revision)
+            && self.browsers.get(&id).is_some_and(|b| {
+                b.instance == instance
+                    && b.keys.borrow().enabled
+                    && b.visible
+                    && !b.loading
+                    && !b.native_closed.get()
+                    && b.keys.borrow().focus_epoch == focus_epoch
+                    && unsafe { IsWindowEnabled(self.surface_window(id)) } != 0
+            })
+            && revision == self.settings.revision
+            && !self
+                .pending_browser
+                .values()
+                .any(|p| p.surface == id && matches!(p.response, Response::Shortcut { .. }));
+        if !allowed {
+            if let Some(reply) = reply {
+                let _ = reply.try_send(json!({"surface":id,"forwarded":false,"executed":false}));
+            }
+            return Ok(());
+        }
+        let key = serde_json::to_string(&self.browsers[&id].key_guard)?;
+        self.browser_script_optional(
+            id,
+            format!("window[{key}]() === true"),
+            Response::Shortcut {
+                instance,
+                revision,
+                focus_epoch,
+                binding,
+            },
+            1024,
+            reply,
+        )
+    }
+
+    #[cfg(debug_assertions)]
+    pub(super) fn test_browser_shortcut(
+        &mut self,
+        id: SurfaceId,
+        event: &Value,
+        reply: ipc::Reply,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.background_test,
+            "browser key tests require an owned hidden host"
+        );
+        if event["type"] == "blur" {
+            self.browsers
+                .get(&id)
+                .context("browser was closed")?
+                .keys
+                .borrow_mut()
+                .lost_focus();
+            let _ = reply.try_send(json!({"surface":id,"forwarded":true,"executed":false}));
+            return Ok(());
+        }
+        let key = event["keyCode"]
+            .as_u64()
+            .context("browser key test requires native keyCode")? as u32;
+        let browser = self.browsers.get(&id).context("browser was closed")?;
+        let state = browser.keys.borrow();
+        let chord =
+            if event["metaKey"] == true || event["altGraph"] == true || event["type"] == "keyup" {
+                None
+            } else {
+                crate::keybindings::captured_key(
+                    key,
+                    event["ctrlKey"] == true,
+                    event["altKey"] == true,
+                    event["shiftKey"] == true,
+                )
+                .ok()
+                .flatten()
+                .and_then(|s| crate::keybindings::parse(&s).ok())
+            };
+        let binding = chord.and_then(|c| state.binding(&c));
+        let instance = browser.instance;
+        let revision = state.revision;
+        let focus_epoch = state.focus_epoch;
+        drop(state);
+        let forwarded = binding.is_none();
+        if let Some(binding) = binding.filter(|_| event["repeat"] != true) {
+            self.browser_page_shortcut(id, instance, revision, focus_epoch, binding, Some(reply))?;
+        } else {
+            let _ = reply.try_send(json!({"surface":id,"forwarded":forwarded,"executed":false}));
+        }
+        Ok(())
+    }
+
     pub(super) fn new_browser_tab(&mut self, source: SurfaceId) -> anyhow::Result<()> {
         self.ensure_attached(source)?;
         let (index, pane, _) = self.locate(source).context("source pane not found")?;
@@ -774,8 +936,8 @@ impl App {
             }
         }
         self.pending_browser.retain(|_, p| {
-            if now.duration_since(p.started) > Duration::from_secs(12) {
-                p.send(p.error("browser script callback timed out; script may have executed"));
+            if now.duration_since(p.started) > p.response.timeout() {
+                p.send(p.error(p.response.timeout_message()));
                 false
             } else {
                 true
@@ -801,21 +963,11 @@ impl App {
     }
     pub(super) fn browser_event(&mut self, event: Signal) -> anyhow::Result<()> {
         match event {
+            Signal::PageShortcut(id, instance, revision, focus_epoch, binding) => {
+                self.browser_page_shortcut(id, instance, revision, focus_epoch, binding, None)?;
+            }
             Signal::Shortcut(id, instance, revision, binding) => {
-                if self
-                    .browsers
-                    .get(&id)
-                    .is_some_and(|b| b.instance == instance && b.visible && !b.native_closed.get())
-                    && revision == self.settings.revision
-                    && !self.closing
-                    && !self.close_accepted
-                    && self.close_request.is_none()
-                    && self.pending_save.is_none()
-                    && self.editor_barrier.is_none()
-                    && !self.overview.is_open()
-                    && !self.command_palette.is_open()
-                    && unsafe { IsWindowEnabled(self.surface_window(id)) } != 0
-                {
+                if self.browser_shortcut_allowed(id, instance, revision) {
                     self.select(id)?;
                     self.shortcut(id, &binding.action, &binding.chord, revision)?;
                 }
@@ -971,15 +1123,15 @@ impl App {
                     let action = p.response.is_action();
                     let find = p.response.is_find();
                     let find_close = matches!(&p.response, Response::FindClose);
-                    let reply = if p.started.elapsed() > Duration::from_secs(12) {
-                        json!({"error":"browser script callback timed out; script may have executed"})
+                    let reply = if p.started.elapsed() > p.response.timeout() {
+                        json!({"error":p.response.timeout_message()})
                     } else if epoch != p.epoch
                         || self.browsers.get(&p.surface).is_none_or(|b| {
                             b.native_closed.get() || b.epoch.load(Ordering::SeqCst) != epoch
                         })
                     {
                         json!({"error":"browser document changed during script request"})
-                    } else if find
+                    } else if (find || matches!(p.response, Response::Shortcut { .. }))
                         && self.browsers.get(&p.surface).is_none_or(|b| {
                             !b.visible || b.visibility_revision != p.visibility_revision
                         })
@@ -989,6 +1141,13 @@ impl App {
                         json!({"error":"browser response exceeds size limit"})
                     } else {
                         match serde_json::from_str::<Value>(&result) {
+                            Ok(value)
+                                if value.is_boolean()
+                                    && matches!(p.response, Response::Shortcut { .. }) =>
+                            {
+                                self.browser_result(p.surface, p.response, json!({"result":value}))
+                                    .unwrap_or_else(|error| json!({"error":error.to_string()}))
+                            }
                             Ok(value) if value.is_object() => self
                                 .browser_result(p.surface, p.response, value)
                                 .unwrap_or_else(|error| json!({"error":error.to_string()})),
@@ -1023,6 +1182,25 @@ impl App {
             .context("browser response missing result")?
             .clone();
         match response {
+            Response::Shortcut {
+                instance,
+                revision,
+                focus_epoch,
+                binding,
+            } => {
+                let allowed = result == true
+                    && self.browser_shortcut_allowed(id, instance, revision)
+                    && self.browsers.get(&id).is_some_and(|b| {
+                        b.keys.borrow().enabled
+                            && b.keys.borrow().focus_epoch == focus_epoch
+                            && (self.background_test
+                                || unsafe { GetForegroundWindow() == self.surface_window(id) })
+                    });
+                if allowed {
+                    self.browser_event(Signal::Shortcut(id, instance, revision, binding))?;
+                }
+                Ok(json!({"surface":id,"forwarded":false,"executed":allowed}))
+            }
             Response::Eval => Ok(value),
             Response::Find => self.browser_find_result(id, result),
             Response::FindClose => {
@@ -1095,8 +1273,13 @@ impl App {
         let epoch = browser.epoch.load(Ordering::SeqCst);
         let request = Uuid::new_v4();
         let sender = self.sender.clone();
-        let source = serde_json::to_string(&source)?;
-        let script=format!("(()=>{{try{{const result=(0,eval)({source});if(result&&typeof result.then==='function')throw new Error('asynchronous scripts are not supported');const out={{result:result===undefined?null:result}};if(JSON.stringify(out).length>{limit})throw new Error('browser response exceeds size limit');return out;}}catch(e){{return {{error:String(e).slice(0,4096)}};}}}})()");
+        let script = if matches!(response, Response::Shortcut { .. }) {
+            // Primitive results cannot be spoofed by a page's Object.prototype.toJSON.
+            source
+        } else {
+            let source = serde_json::to_string(&source)?;
+            format!("(()=>{{try{{const result=(0,eval)({source});if(result&&typeof result.then==='function')throw new Error('asynchronous scripts are not supported');const out={{result:result===undefined?null:result}};if(JSON.stringify(out).length>{limit})throw new Error('browser response exceeds size limit');return out;}}catch(e){{return {{error:String(e).slice(0,4096)}};}}}})()")
+        };
         browser
             .view
             .evaluate_script_with_callback(&script, move |result| {
@@ -1258,6 +1441,10 @@ impl App {
                 let mut status = browser.status(id);
                 status["find"] = self.browser_find_status(id);
                 status["action_pending"] = json!(action_pending);
+                status["shortcut_pending"] = json!(self
+                    .pending_browser
+                    .values()
+                    .any(|p| p.surface == id && matches!(p.response, Response::Shortcut { .. })));
                 status["captures_pending"] = json!(self.pending_captures.len());
                 return Ok(Some(status));
             }
