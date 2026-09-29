@@ -34,6 +34,8 @@ pub(crate) enum UiAction {
     Reset,
     Reload,
     Close,
+    About,
+    AboutClosed(Uuid),
     Layout,
     Bindings(bindings::Signal),
     FontPicker(fonts::Signal),
@@ -137,6 +139,7 @@ unsafe extern "system" fn procedure(
                     3 => emit(UiAction::Reset),
                     4 => emit(UiAction::Close),
                     5 => emit(UiAction::Reload),
+                    8 => emit(UiAction::About),
                     _ => {}
                 }
             }
@@ -205,6 +208,8 @@ pub(crate) struct Panel {
     reset: HWND,
     close: HWND,
     reload: HWND,
+    about_button: HWND,
+    about: Option<(Uuid, editor::ClosePanel)>,
     rows: Vec<Row>,
     page: usize,
     open: bool,
@@ -213,6 +218,7 @@ pub(crate) struct Panel {
 }
 impl Drop for Panel {
     fn drop(&mut self) {
+        self.about.take();
         self.font_picker.take();
         if let Some(bindings) = self.bindings.as_mut() {
             bindings.dismiss();
@@ -273,6 +279,8 @@ impl Panel {
                 reset: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
                 reload: std::ptr::null_mut(),
+                about_button: std::ptr::null_mut(),
+                about: None,
                 rows: Vec::new(),
                 page: 0,
                 open: false,
@@ -299,6 +307,7 @@ impl Panel {
             p.reset = p.child("BUTTON", "Reset to defaults", 3, WS_TABSTOP)?;
             p.close = p.child("BUTTON", "Close", 4, WS_TABSTOP)?;
             p.reload = p.child("BUTTON", "Reload values", 5, WS_TABSTOP)?;
+            p.about_button = p.child("BUTTON", "About", 8, WS_TABSTOP)?;
             p.viewport = CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 class.as_ptr(),
@@ -601,6 +610,15 @@ impl Panel {
             self.bindings.as_ref().unwrap().focus();
             return;
         }
+        if let Some((_, about)) = &self.about {
+            chrome::window_theme(about.window(), self.theme);
+            if !background {
+                unsafe {
+                    SetForegroundWindow(about.window());
+                }
+            }
+            return;
+        }
         if !background {
             unsafe {
                 ShowWindow(self.window, SW_SHOW);
@@ -651,6 +669,7 @@ impl Panel {
     }
     pub(super) fn select(&mut self, page: usize) {
         if page < 3
+            && self.about.is_none()
             && !self
                 .font_picker
                 .as_ref()
@@ -1003,6 +1022,12 @@ impl Panel {
             bindings.environment(self.background, self.theme);
         }
         chrome::window_theme(self.window, self.theme);
+        if let Some((_, about)) = &self.about {
+            chrome::window_theme(about.window(), self.theme);
+            unsafe {
+                InvalidateRect(about.window(), std::ptr::null(), 1);
+            }
+        }
         unsafe {
             InvalidateRect(self.window, std::ptr::null(), 1);
         }
@@ -1124,6 +1149,7 @@ impl Panel {
     }
     pub(super) fn reset_ready(&self) -> bool {
         self.open
+            && self.about.is_none()
             && !self
                 .font_picker
                 .as_ref()
@@ -1136,6 +1162,7 @@ impl Panel {
                 .is_some_and(bindings::Bindings::modal)
     }
     pub(super) fn hide(&mut self) {
+        self.about.take();
         if let Some(picker) = self.font_picker.as_mut() {
             picker.close();
         }
@@ -1152,6 +1179,24 @@ impl Panel {
             ShowWindow(self.window, SW_HIDE);
         }
         self.schedule();
+    }
+    pub(super) fn show_about(&mut self) -> anyhow::Result<()> {
+        if self.reset_ready() {
+            let id = Uuid::new_v4();
+            let panel = editor::ClosePanel::about(self.window, id, self.background)?;
+            chrome::window_theme(panel.window(), self.theme);
+            self.about = Some((id, panel));
+        }
+        Ok(())
+    }
+    pub(super) fn close_about(&mut self, id: Uuid) {
+        if self
+            .about
+            .as_ref()
+            .is_some_and(|(current, _)| *current == id)
+        {
+            self.about.take();
+        }
     }
     pub(super) fn scroll_by(&self, delta: i32) {
         self.scroll.set(self.scroll.get().saturating_add(delta));
@@ -1333,7 +1378,14 @@ impl Panel {
                 self.reload,
                 px(if self.page == 2 { 302 } else { 184 }),
                 client.bottom - px(40),
-                px(125),
+                px(if self.page == 2 { 110 } else { 125 }),
+                px(28),
+            );
+            place(
+                self.about_button,
+                client.right - px(184),
+                client.bottom - px(40),
+                px(64),
                 px(28),
             );
             place(
@@ -1359,6 +1411,9 @@ impl Panel {
     #[cfg(debug_assertions)]
     pub(in super::super) fn capture_window(&self) -> Option<HWND> {
         self.open.then(|| {
+            if let Some((_, about)) = &self.about {
+                return about.window();
+            }
             self.font_picker
                 .as_ref()
                 .and_then(fonts::Picker::capture_window)
@@ -1371,9 +1426,16 @@ impl Panel {
         })
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"about_button":self.about_button as usize,"about":self.about.as_ref().map(|(_, panel)|panel.diagnostics()),"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
+        if self
+            .about
+            .as_ref()
+            .is_some_and(|(_, about)| about.handle_message(message))
+        {
+            return true;
+        }
         if self
             .font_picker
             .as_ref()

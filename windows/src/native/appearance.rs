@@ -153,6 +153,11 @@ impl App {
             return Ok(());
         };
         let index = match action {
+            UiAction::About => return panel.show_about(),
+            UiAction::AboutClosed(id) => {
+                panel.close_about(id);
+                return Ok(());
+            }
             UiAction::Layout => {
                 panel.layout();
                 return Ok(());

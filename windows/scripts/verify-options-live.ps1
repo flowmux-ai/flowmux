@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned live Options; 50s work + bounded cleanup, outer Job60s.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug")
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
@@ -37,6 +37,52 @@ function Parent-Of($Status,$Row){Require ([bool]$Row.parent) 'Live Options input
 function Edit($Status,[string]$Key,[string]$Value){$row=Field $Status $Key;[OptionsFixture]::SetText((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Value)}
 function Guard($Status,[string]$Key,[bool]$Active){$row=Field $Status $Key;[OptionsFixture]::CompositionGuard((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Active)}
 function Select-Field($Status,[string]$Key,[int]$Index){$row=Field $Status $Key;[OptionsFixture]::Select((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Index)}
+function Verify-About($Status){
+    $window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);$client=[ChromeFixture]::Size([long]$Status.options.window,$owned.Id)
+    [ChromeFixture]::Resize([long]$Status.options.window,$owned.Id,[int](620*$scale-$window.Width+$client[0]),[int](400*$scale-$window.Height+$client[1]))
+    foreach($page in 0..2){
+        $name=@('general','theme','keybindings')[$page];Click $Status ([long]$Status.options.tabs[$page].handle);$Status=Await {param($s) $s.options.page -eq $name}
+        $reset=if($page -eq 2){$Status.options.keybindings.reset}else{$Status.options.reset};$right=0;$size=[ChromeFixture]::Size([long]$Status.options.window,$owned.Id)
+        foreach($control in @($reset,$Status.options.reload,$Status.options.about_button,$Status.options.close)){
+            $bounds=[OptionsFixture]::RelativeBounds([long]$Status.options.window,[long]$control,$owned.Id)
+            Require ($bounds.X -ge $right -and $bounds.Width -gt 0 -and $bounds.X+$bounds.Width -le $size[0] -and $bounds.Y -ge 0 -and $bounds.Y+$bounds.Height -le $size[1]) ('Overlapping or clipped Options footer on '+$name);$right=$bounds.X+$bounds.Width
+        }
+    }
+    Click $Status ([long]$Status.options.tabs[0].handle);$Status=Await {param($s) $s.options.page -eq 'general'}
+    $evidence.checks+=@{name='about_footer_fits_all_pages_at_minimum_window_size';passed=$true}
+    $revision=$Status.document.revision;Click $Status ([long]$Status.options.about_button);$Status=Await {param($s) [bool]$s.options.about};$about=$Status.options.about
+    $native=[OptionsFixture]::Describe([long]$about.window,$owned.Id)
+    Require ($native.Title -ceq 'About' -and $native.Owner -eq $Status.options.window -and -not $native.OwnerEnabled -and $native.Enabled -and -not $about.native_visible -and $Status.document.revision -eq $revision) 'About ownership, hidden state or settings revision changed'
+    $version=[regex]::Match((Get-Content -Raw (Join-Path $PSScriptRoot '..\Cargo.toml')),'(?m)^version = "([^"]+)"').Groups[1].Value
+    $body=[OptionsFixture]::Text([long]$about.body_handle,$owned.Id)
+    foreach($text in @('flowmux - Agent Workflow Multiplexer Terminal','flowmux was inspired by the cmux (macOS) project.','Maintained by JSUYA (Junsu Choi).','https://github.com/flowmux-ai/flowmux',('Version: v'+$version),'License: GPL-3.0-or-later')){Require ($body.Contains($text)) ('About text missing: '+$text)}
+    $controls=@([ChromeFixture]::Read([long]$about.window,$owned.Id));$buttons=@($controls|Where-Object {$_.Shown -and $_.Class -eq 'Button'});$edit=@($controls|Where-Object {$_.Handle -eq $about.body_handle})
+    Require ($edit.Count -eq 1 -and ($edit[0].Style -band 0x800) -ne 0 -and $buttons.Count -eq 1 -and $buttons[0].Text -ceq 'OK') 'About body must be read-only with one OK button'
+    [OptionsFixture]::Click([long]$tree.window_handle,[long]$entry[0].handle,$owned.Id);$Status=Await {param($s) $s.options.about.id -eq $about.id};Require ($Status.options.about.window -eq $about.window) 'Settings entry duplicated About'
+    foreach($color in @('light','dark')){
+        Request @('settings','set','theme',$color)|Out-Null;$Status=Await {param($s) $s.document.terminal.theme -eq $color -and (Ack $s)}
+        Require ($Status.options.about.id -eq $about.id -and -not ([OptionsFixture]::Describe([long]$about.window,$owned.Id)).OwnerEnabled) 'Theme update dismissed About or enabled its owner'
+        $bitmap=Join-Path $directory ('about-'+$color+'.bmp');$capture=Request @('chrome-capture',$bitmap);Require ($capture.root_handle -eq $about.window) 'Capture did not target owned About popup'
+        [ChromeFixture]::Png($bitmap,(Join-Path $directory ('about-'+$color+'.png')));Remove-Item -LiteralPath $bitmap
+    }
+    $evidence.checks+=@{name='about_linux_text_version_readonly_body_single_popup_and_live_themes';passed=$true}
+    foreach($key in @('OK','Enter','Escape')){
+        if($key -ne 'OK'){Click $Status ([long]$Status.options.about_button);$Status=Await {param($s) [bool]$s.options.about};$about=$Status.options.about}
+        switch($key){'OK'{[OptionsFixture]::Click([long]$about.window,[long]$about.cancel,$owned.Id)}'Enter'{[OptionsFixture]::PostEnter([long]$about.cancel,$owned.Id)}'Escape'{[OptionsFixture]::PostEscape([long]$about.body_handle,$owned.Id)}}
+        $Status=Await {param($s) -not $s.options.about};Require ($Status.options.open -and ([OptionsFixture]::Describe([long]$Status.options.window,$owned.Id)).Enabled -and [OptionsFixture]::WindowDestroyed([long]$about.window)) ('About '+$key+' did not restore Options')
+    }
+    $evidence.checks+=@{name='about_ok_enter_escape_destroy_popup_and_restore_options';passed=$true}
+    $font=$Status.document.terminal.font_family;$composed='조합중 한 é 😀 &, monospace';Guard $Status 'font_family' $true;Edit $Status 'font_family' $composed;Click $Status ([long]$Status.options.about_button)
+    $Status=Await {param($s) $s.options.composing -and (Field $s 'font_family').value -ceq $composed}
+    Require (-not $Status.options.about -and $Status.document.terminal.font_family -ceq $font -and ([OptionsFixture]::Describe([long]$Status.options.window,$owned.Id)).Enabled) 'About interrupted guarded composition or committed its draft'
+    Guard $Status 'font_family' $false;$Status=Await {param($s) -not $s.options.composing -and $s.document.terminal.font_family -ceq $composed -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}
+    $evidence.checks+=@{name='about_defers_during_owned_ime_guard_and_preserves_raw_unicode';passed=$true;scope='application message guard only, not OS Korean IME/TSF'}
+    Edit $Status 'font_size' '2';$Status=Await {param($s) (Field $s 'font_size').draft_error -and -not $s.options.pending};$revision=$Status.document.revision
+    Click $Status ([long]$Status.options.about_button);$Status=Await {param($s) [bool]$s.options.about};[OptionsFixture]::PostEscape([long]$Status.options.about.window,$owned.Id);$Status=Await {param($s) -not $s.options.about}
+    Require ((Field $Status 'font_size').value -ceq '2' -and (Field $Status 'font_size').draft_error -and (Field $Status 'font_family').value -ceq $composed -and $Status.document.revision -eq $revision -and (Identities (Tree)) -ceq $identities) 'About changed invalid/Unicode drafts, settings revision or terminal identity'
+    $evidence.checks+=@{name='about_preserves_invalid_draft_unicode_revision_and_terminal_identity';passed=$true}
+    return $Status
+}
 try {
     $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Working hidden debug build required'
     $started=[DateTime]::UtcNow;$startup=[Diagnostics.Stopwatch]::StartNew();$owned=[CliProbe]::Start($gui,@('--temporary','--shell=cmd','--cwd',$directory),$directory,$directory);$hostOut=$owned.StandardOutput.ReadToEndAsync();$hostErr=$owned.StandardError.ReadToEndAsync();$evidence.hosts+=,$owned.Id
@@ -54,6 +100,7 @@ try {
     $controls=@([ChromeFixture]::Read([long]$status.options.window,$owned.Id));Require (@($controls|Where-Object {$_.Shown -and $_.Class -eq 'Button' -and (($_.Style -band 15) -ne 11 -or $_.Font -eq 0)}).Count -eq 0) 'Options buttons are not themed native controls'
 
 
+    if($Case -eq 'about'){$status=Verify-About $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
     Require (@($status.options.controls|Where-Object {$_.apply}).Count -eq 0) 'Live Options still exposes row Apply controls'
     $children=@([ChromeFixture]::Read([long]$status.options.viewport,$owned.Id));$evidence.observations+=@{name='actual-viewport-groups';captions=@($children|Where-Object {$_.Class -eq 'Static'}|ForEach-Object {$_.Text})};Require (@($children|Where-Object {$_.Text -ceq 'Apply'}).Count -eq 0) 'Apply button remains in native viewport'
@@ -124,6 +171,7 @@ try {
     Click $status ([long]$status.options.close);$status=Await {param($s) -not $s.options.open};$tree=Tree;$entry=@($tree.chrome.controls|Where-Object {$_.kind -eq 'settings'});[OptionsFixture]::Click([long]$tree.window_handle,[long]$entry[0].handle,$owned.Id)
     $status=Await {param($s) $s.options.open};Require (($status.document.terminal|ConvertTo-Json -Compress) -ceq $defaults -and (Field $status 'font_size').value -ceq '14' -and (Identities (Tree)) -ceq $identities -and (Request @('identify')).surface -eq $active) 'Reset/close/reopen lost persisted values or terminal identity'
     Record 'reset-close-reopen' $status;$evidence.checks+=@{name='theme_reset_and_options_reopen_preserve_defaults_terminal_pids_and_active_surface';passed=$true}
+    }
     Click $status ([long]$status.options.close);Await {param($s) -not $s.options.open}|Out-Null
     Request @('quit','--discard-state')|Out-Null;Require ($owned.WaitForExit((Budget 5000)) -and $owned.ExitCode -eq 0) 'Owned host did not quit cleanly';$evidence.status='passed_hidden_options_live_subset'
 } catch {$evidence.status='failed';$evidence.error=$_.Exception.Message;$evidence.failureSettings=$status;throw}

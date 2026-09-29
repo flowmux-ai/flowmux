@@ -21,6 +21,7 @@ enum Target {
     Editor(u64),
     Workspace(Uuid),
     Worktree(Uuid, bool), // The boolean selects a read-only information dialog.
+    About(Uuid),
 }
 
 #[derive(Clone)]
@@ -52,6 +53,9 @@ fn choose(window: HWND, choice: Choice) {
         Some(Target::Workspace(id)) => post(Event::WorkspaceClose(id, choice == Choice::Save)),
         Some(Target::Worktree(id, _)) => post(Event::Worktrees(
             super::super::worktrees::Signal::Choice(id, choice == Choice::Save),
+        )),
+        Some(Target::About(id)) => post(Event::OptionsUi(
+            super::super::appearance::UiAction::AboutClosed(id),
         )),
         None => {}
     }
@@ -88,7 +92,7 @@ fn layout(window: HWND) {
         let status_y = (button_y - px(40)).max(px(60));
         let count = match route.target {
             Target::Editor(_) => 3,
-            Target::Worktree(_, true) => 1,
+            Target::Worktree(_, true) | Target::About(_) => 1,
             _ => 2,
         };
         let gap = px(10);
@@ -195,6 +199,26 @@ pub(crate) struct Panel {
 }
 
 impl Panel {
+    pub(crate) fn about(owner: HWND, id: Uuid, background: bool) -> anyhow::Result<Self> {
+        let body = format!(
+            "flowmux - Agent Workflow Multiplexer Terminal\r\n\r\n\
+             flowmux was inspired by the cmux (macOS) project.\r\n\r\n\
+             Maintained by JSUYA (Junsu Choi).\r\n\
+             https://github.com/flowmux-ai/flowmux\r\n\r\n\
+             Version: v{}\r\nLicense: GPL-3.0-or-later",
+            env!("CARGO_PKG_VERSION")
+        );
+        let panel = Self::create(owner, Target::About(id), "About", &body, 7, background)?;
+        unsafe {
+            SetWindowTextW(panel.controls[3], wide("OK").as_ptr());
+        }
+        Ok(panel)
+    }
+
+    pub(crate) fn window(&self) -> HWND {
+        self.window
+    }
+
     pub(super) fn new(
         owner: HWND,
         id: u64,
@@ -273,7 +297,7 @@ impl Panel {
         background: bool,
     ) -> anyhow::Result<Self> {
         let workspace = !matches!(target, Target::Editor(_));
-        let information = matches!(target, Target::Worktree(_, true));
+        let information = matches!(target, Target::Worktree(_, true) | Target::About(_));
         unsafe {
             anyhow::ensure!(IsWindow(owner) != 0, "editor close owner no longer exists");
             let instance = GetModuleHandleW(std::ptr::null());
@@ -504,9 +528,10 @@ impl Panel {
             Target::Editor(id) => (json!(id), false),
             Target::Workspace(id) => (json!(id), true),
             Target::Worktree(id, _) => (json!(id), true),
+            Target::About(id) => (json!(id), true),
         };
         json!({"window":self.window as usize,"owner":unsafe { GetWindow(self.window,GW_OWNER) } as usize,
-            "id":id,"kind":if matches!(self.target,Target::Worktree(..)) { "worktree" } else if workspace { "workspace" } else { "editor" },"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
+            "id":id,"kind":if matches!(self.target,Target::About(_)) { "about" } else if matches!(self.target,Target::Worktree(..)) { "worktree" } else if workspace { "workspace" } else { "editor" },"body":self.text(self.controls[1]),"body_handle":self.controls[1] as usize,
             "save":if workspace { 0 } else { self.controls[5] as usize },
             "confirm":if workspace { self.controls[5] as usize } else { 0 },
             "close":if workspace { self.controls[5] as usize } else { 0 },"discard":self.controls[4] as usize,"cancel":self.controls[3] as usize,
