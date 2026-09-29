@@ -2,10 +2,13 @@
 //! Preset rows and effective-color previews; writes stay in the Options worker.
 use super::*;
 
-pub(super) const PRESET: usize = 10;
-pub(super) const FIRST_COLOR: usize = 11;
-pub(super) const OVERRIDES: usize = 16;
-pub(super) const ROW_COUNT: usize = 17;
+pub(super) const COLORS: [SettingKey; 5] = [
+    SettingKey::ThemeBackground,
+    SettingKey::ThemeForeground,
+    SettingKey::ThemeCursor,
+    SettingKey::ThemeSelectionBackground,
+    SettingKey::ThemeSelectionForeground,
+];
 const PRESET_BUTTON: usize = 7000;
 const PICK_BUTTON: usize = 7100;
 const SWATCH_BUTTON: usize = 7200;
@@ -215,9 +218,9 @@ impl ThemePanel {
             }
             place(self.heading, px(8), px(544), width - px(16), px(24));
             place(self.hint, px(8), px(570), width - px(16), px(36));
-            for index in 0..5 {
+            for (index, key) in COLORS.iter().enumerate() {
                 let y = 612 + index as i32 * 46;
-                let row = &panel.rows[FIRST_COLOR + index];
+                let row = &panel.rows[panel.index(*key)];
                 place(row.label, px(8), px(y), px(200), px(30));
                 place(row.input, px(214), px(y), width - px(354), px(30));
                 place(self.swatches[index], width - px(128), px(y), px(28), px(28));
@@ -287,8 +290,8 @@ impl ThemePanel {
     }
     pub(super) fn diagnostics(&self, panel: &Panel) -> Value {
         json!({"legacy":self.legacy as usize,"reset":self.reset as usize,"picker_available":!panel.background,"picker_status":self.picker_status,
-            "preset_input":panel.rows[PRESET].input as usize,"overrides_input":panel.rows[OVERRIDES].input as usize,
-            "presets":self.presets.iter().map(|p|json!({"id":p.id,"name":p.name,"button":p.button as usize,"selected":Panel::value(&panel.rows[PRESET])==p.id,"swatches":p.swatches.iter().map(|(hwnd,color)|json!({"handle":*hwnd as usize,"color":color})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
-            "fields":(0..5).map(|index|{let row=&panel.rows[FIRST_COLOR+index];json!({"key":row.key,"input":row.input as usize,"picker":self.pickers[index] as usize,"swatch":self.swatches[index] as usize,"effective":self.effective[index],"raw":Panel::value(row),"baseline":row.baseline,"error":row.error})}).collect::<Vec<_>>()})
+            "preset_input":panel.rows[panel.index(SettingKey::ThemePreset)].input as usize,"overrides_input":panel.rows[panel.index(SettingKey::ThemeOverrides)].input as usize,
+            "presets":self.presets.iter().map(|p|json!({"id":p.id,"name":p.name,"button":p.button as usize,"selected":Panel::value(&panel.rows[panel.index(SettingKey::ThemePreset)])==p.id,"swatches":p.swatches.iter().map(|(hwnd,color)|json!({"handle":*hwnd as usize,"color":color})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+            "fields":COLORS.iter().enumerate().map(|(index,key)|{let row=&panel.rows[panel.index(*key)];json!({"key":row.key,"input":row.input as usize,"picker":self.pickers[index] as usize,"swatch":self.swatches[index] as usize,"effective":self.effective[index],"raw":Panel::value(row),"baseline":row.baseline,"error":row.error})}).collect::<Vec<_>>()})
     }
 }

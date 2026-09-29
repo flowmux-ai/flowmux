@@ -102,6 +102,11 @@ try {
 
     if($Case -eq 'about'){$status=Verify-About $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
+    $previousBottom=0;$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
+    foreach($row in @($status.options.controls|Where-Object {$_.page -eq 'general'})){
+        $native=[OptionsFixture]::Describe([long]$row.input,$owned.Id);$bounds=[OptionsFixture]::RelativeBounds([long]$row.parent,[long]$row.input,$owned.Id)
+        Require (($native.Style -band 0x10000000) -ne 0 -and $bounds.Y -ge $previousBottom -and $bounds.X -ge 0 -and $bounds.Width -gt 0 -and $bounds.X+$bounds.Width -le $viewSize[0]) ('Hidden, overlapping or clipped General field: '+$row.key);$previousBottom=$bounds.Y+30*$scale
+    }
     Require (@($status.options.controls|Where-Object {$_.apply}).Count -eq 0) 'Live Options still exposes row Apply controls'
     $children=@([ChromeFixture]::Read([long]$status.options.viewport,$owned.Id));$evidence.observations+=@{name='actual-viewport-groups';captions=@($children|Where-Object {$_.Class -eq 'Static'}|ForEach-Object {$_.Text})};Require (@($children|Where-Object {$_.Text -ceq 'Apply'}).Count -eq 0) 'Apply button remains in native viewport'
     $viewport=[OptionsFixture]::RelativeBounds([long]$status.options.window,[long]$status.options.viewport,$owned.Id);$size=[ChromeFixture]::Size([long]$status.options.window,$owned.Id)
@@ -112,6 +117,10 @@ try {
     Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Default shell cannot be reached in scrolled viewport';Record 'viewport-scrolled-to-shell' $status
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='owned_nonmodal_live_options_no_apply_and_scrolling_keeps_groups_and_footer_reachable';passed=$true}
+    [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true);$status=Await {param($s) $s.options.scroll_offset -gt 0};$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
+    foreach($key in @('usage_bar_enabled','agent_bar_mode','agent_notification_target')){$row=Field $status $key;$bounds=[OptionsFixture]::RelativeBounds([long]$row.parent,[long]$row.input,$owned.Id);Require ($bounds.Y -ge 0 -and $bounds.Y+30*$scale -le $viewSize[1]) ('Agents field cannot be reached: '+$key)}
+    [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
+    $evidence.checks+=@{name='all_general_fields_visible_distinct_and_agents_controls_scroll_into_view';passed=$true}
     foreach($enabled in @($true,$false)){
         Select-Field $status 'agent_bar_mode' $(if($enabled){0}else{1})
         $status=Await {param($s) $s.document.terminal.agent_bar_mode -eq $enabled -and -not $s.options.pending -and $s.options.queued -eq 0 -and (Ack $s)}

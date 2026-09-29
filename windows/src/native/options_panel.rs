@@ -16,6 +16,7 @@ thread_local! {
 }
 const SAVE_TIMER: usize = 7;
 const INPUT_BASE: usize = 200;
+const LABEL_BASE: usize = 300;
 #[path = "keybindings_panel.rs"]
 mod bindings;
 #[path = "font_picker.rs"]
@@ -124,7 +125,7 @@ unsafe extern "system" fn procedure(
                 emit(UiAction::Theme(signal));
             } else if let Some(signal) = bindings::command(id, code) {
                 emit(UiAction::Bindings(signal));
-            } else if (INPUT_BASE..INPUT_BASE + themes::ROW_COUNT).contains(&id) {
+            } else if (INPUT_BASE..LABEL_BASE).contains(&id) {
                 if !SYNCING.with(Cell::get) && matches!(code, EN_CHANGE | CBN_SELCHANGE) {
                     emit(UiAction::Changed(id - INPUT_BASE));
                 } else if matches!(code, EN_SETFOCUS | CBN_SETFOCUS) {
@@ -201,7 +202,7 @@ pub(crate) struct Panel {
     theme: crate::settings::Theme,
     heading: HWND,
     viewport: HWND,
-    groups: Vec<(usize, HWND)>,
+    groups: Vec<(usize, Option<SettingKey>, HWND)>,
     scroll: Cell<i32>,
     status: HWND,
     status_is_help: Cell<bool>,
@@ -323,7 +324,13 @@ impl Panel {
                 std::ptr::null(),
             );
             checked((!p.viewport.is_null()) as i32)?;
-            for (page, label) in [(0, "Terminal"), (0, "Minimap"), (0, "Shell"), (1, "Colors")] {
+            for (page, first, label) in [
+                (0, Some(SettingKey::FontFamily), "Terminal"),
+                (0, Some(SettingKey::MinimapEnabled), "Minimap"),
+                (0, None, "Shell"),
+                (0, Some(SettingKey::UsageBarEnabled), "Agents"),
+                (1, Some(SettingKey::Theme), "Colors"),
+            ] {
                 let hwnd = p.child_in(
                     p.viewport,
                     "STATIC",
@@ -332,7 +339,7 @@ impl Panel {
                     SS_NOPREFIX,
                 )?;
                 chrome::register_control(hwnd, chrome::ControlRole::Caption);
-                p.groups.push((page, hwnd));
+                p.groups.push((page, first, hwnd));
             }
             p.row(
                 Some(SettingKey::FontFamily),
@@ -486,7 +493,13 @@ impl Panel {
         choices: Vec<(&'static str, &'static str)>,
     ) -> anyhow::Result<()> {
         let index = self.rows.len();
-        let label = self.child_in(self.viewport, "STATIC", title, 300 + index, SS_NOPREFIX)?;
+        let label = self.child_in(
+            self.viewport,
+            "STATIC",
+            title,
+            LABEL_BASE + index,
+            SS_NOPREFIX,
+        )?;
         let input = if choices.is_empty() {
             self.child_in(
                 self.viewport,
@@ -525,6 +538,12 @@ impl Panel {
             baseline: String::new(),
         });
         Ok(())
+    }
+    fn index(&self, key: SettingKey) -> usize {
+        self.rows
+            .iter()
+            .position(|row| row.key == Some(key))
+            .expect("Options setting exists")
     }
     fn text(hwnd: HWND) -> String {
         unsafe {
@@ -854,25 +873,29 @@ impl Panel {
                     .and_then(|theme| theme.preset(index))
                     .map(str::to_owned);
                 if let Some(value) = value {
-                    Self::set(&self.rows[themes::PRESET], &value);
-                    self.changed(themes::PRESET);
-                    self.rows[themes::PRESET].due = Some(Instant::now());
+                    let row = self.index(SettingKey::ThemePreset);
+                    Self::set(&self.rows[row], &value);
+                    self.changed(row);
+                    self.rows[row].due = Some(Instant::now());
                 }
             }
             themes::Signal::Legacy => {
-                Self::set(&self.rows[themes::PRESET], "");
-                self.changed(themes::PRESET);
-                self.rows[themes::PRESET].due = Some(Instant::now());
+                let row = self.index(SettingKey::ThemePreset);
+                Self::set(&self.rows[row], "");
+                self.changed(row);
+                self.rows[row].due = Some(Instant::now());
             }
             themes::Signal::Reset => {
-                let snapshot = std::array::from_fn(|index| {
-                    Self::value(&self.rows[themes::FIRST_COLOR + index])
-                });
-                for row in &mut self.rows[themes::FIRST_COLOR..themes::OVERRIDES] {
-                    row.due = None;
+                let snapshot = themes::COLORS.map(|key| Self::value(&self.rows[self.index(key)]));
+                for key in themes::COLORS {
+                    let index = self.index(key);
+                    self.rows[index].due = None;
                 }
-                if self.rows[themes::OVERRIDES].baseline == "{}" {
-                    for row in &mut self.rows[themes::FIRST_COLOR..themes::OVERRIDES] {
+                let overrides = self.index(SettingKey::ThemeOverrides);
+                if self.rows[overrides].baseline == "{}" {
+                    for key in themes::COLORS {
+                        let index = self.index(key);
+                        let row = &mut self.rows[index];
                         Self::set(row, "");
                         row.baseline.clear();
                         row.error = None;
@@ -883,12 +906,12 @@ impl Panel {
                 if let Some(theme) = self.theme_panel.as_mut() {
                     theme.reset_snapshot = Some(snapshot);
                 }
-                Self::set(&self.rows[themes::OVERRIDES], "{}");
-                self.changed(themes::OVERRIDES);
-                self.rows[themes::OVERRIDES].due = Some(Instant::now());
+                Self::set(&self.rows[overrides], "{}");
+                self.changed(overrides);
+                self.rows[overrides].due = Some(Instant::now());
             }
             themes::Signal::Pick(index) if index < 5 => {
-                let row_index = themes::FIRST_COLOR + index;
+                let row_index = self.index(themes::COLORS[index]);
                 let raw = Self::value(&self.rows[row_index]);
                 let baseline = self.rows[row_index].baseline.clone();
                 let result =
@@ -988,7 +1011,11 @@ impl Panel {
         self.enable();
     }
     pub(super) fn failed(&mut self, index: usize, error: &str) {
-        if index == themes::OVERRIDES {
+        if self
+            .rows
+            .get(index)
+            .is_some_and(|row| row.key == Some(SettingKey::ThemeOverrides))
+        {
             if let Some(theme) = self.theme_panel.as_mut() {
                 theme.reset_snapshot = None;
             }
@@ -1032,9 +1059,11 @@ impl Panel {
             InvalidateRect(self.window, std::ptr::null(), 1);
         }
         let applied = if completed { self.pending.take() } else { None };
-        let reset_colors = applied
-            .as_ref()
-            .is_some_and(|(index, _)| *index == themes::OVERRIDES);
+        let reset_colors = applied.as_ref().is_some_and(|(index, _)| {
+            self.rows
+                .get(*index)
+                .is_some_and(|row| row.key == Some(SettingKey::ThemeOverrides))
+        });
         let reset_snapshot = self.theme_panel.as_mut().and_then(|theme| {
             theme.sync(&document.terminal);
             if reset_colors {
@@ -1067,12 +1096,16 @@ impl Panel {
                 .unwrap_or_else(|| document.default_shell.program.clone());
             let current = Self::value(row);
             let composing = COMPOSING.with(Cell::get) == row.input as isize;
-            if reset_colors && (themes::FIRST_COLOR..themes::OVERRIDES).contains(&index) {
+            if let Some(color) = themes::COLORS
+                .iter()
+                .position(|key| Some(*key) == row.key)
+                .filter(|_| reset_colors)
+            {
                 if error.is_none() {
                     if !composing
-                        && reset_snapshot.as_ref().is_some_and(|snapshot| {
-                            snapshot[index - themes::FIRST_COLOR] == current
-                        })
+                        && reset_snapshot
+                            .as_ref()
+                            .is_some_and(|snapshot| snapshot[color] == current)
                     {
                         Self::set(row, &value);
                         row.due = None;
@@ -1274,7 +1307,9 @@ impl Panel {
                 2 => self.bindings.as_ref().map_or(px(562), |bindings| {
                     bindings.content_height(GetDpiForWindow(self.window))
                 }),
-                _ => px(562),
+                _ => px(8
+                    + 46 * self.rows.iter().filter(|row| row.page == 0).count() as i32
+                    + 36 * self.groups.iter().filter(|(page, _, _)| *page == 0).count() as i32),
             };
             let offset = self
                 .scroll
@@ -1293,7 +1328,7 @@ impl Panel {
             SetScrollInfo(self.viewport, SB_VERT, &info, 1);
             let mut view = RECT::default();
             GetClientRect(self.viewport, &mut view);
-            for (index, (page, group)) in self.groups.iter().enumerate() {
+            for (page, _, group) in &self.groups {
                 ShowWindow(
                     *group,
                     if *page == self.page {
@@ -1302,26 +1337,38 @@ impl Panel {
                         SW_HIDE
                     },
                 );
-                let top = match index {
-                    0 | 3 => 8,
-                    1 => 286,
-                    _ => 468,
-                };
-                place(*group, px(8), px(top) - offset, view.right - px(16), px(26));
+                if *page == 1 {
+                    place(*group, px(8), px(8) - offset, view.right - px(16), px(26));
+                }
             }
-            for (index, row) in self.rows.iter().enumerate() {
-                let show = row.page == self.page
-                    && !matches!(index, themes::PRESET | themes::OVERRIDES)
-                    && !(themes::FIRST_COLOR..themes::OVERRIDES).contains(&index);
+            let mut general_y = 8;
+            for row in &self.rows {
+                let show =
+                    row.page == self.page && (row.page == 0 || row.key == Some(SettingKey::Theme));
                 for hwnd in [row.label, row.input] {
                     ShowWindow(hwnd, if show { SW_SHOWNA } else { SW_HIDE });
                 }
                 if show {
-                    let top = match index {
-                        0..=4 => 44 + index as i32 * 46,
-                        5..=7 => 322 + (index as i32 - 5) * 46,
-                        8 => 504,
-                        _ => 44,
+                    let top = if row.page == 0 {
+                        if let Some((_, _, group)) = self
+                            .groups
+                            .iter()
+                            .find(|(page, first, _)| *page == 0 && *first == row.key)
+                        {
+                            place(
+                                *group,
+                                px(8),
+                                px(general_y) - offset,
+                                view.right - px(16),
+                                px(26),
+                            );
+                            general_y += 36;
+                        }
+                        let top = general_y;
+                        general_y += 46;
+                        top
+                    } else {
+                        44
                     };
                     place(row.label, px(8), px(top) - offset, px(230), px(30));
                     place(
@@ -1329,9 +1376,9 @@ impl Panel {
                         px(246),
                         px(top) - offset,
                         view.right
-                            - px(if index == 0 {
+                            - px(if row.key == Some(SettingKey::FontFamily) {
                                 342
-                            } else if index == 9 {
+                            } else if row.key == Some(SettingKey::Theme) {
                                 438
                             } else {
                                 254
