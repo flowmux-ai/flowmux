@@ -204,7 +204,8 @@ pub(crate) struct Panel {
     theme: crate::settings::Theme,
     heading: HWND,
     viewport: HWND,
-    groups: Vec<(usize, Option<SettingKey>, HWND)>,
+    theme_heading: HWND,
+    browser_engine: [HWND; 2],
     scroll: Cell<i32>,
     status: HWND,
     status_is_help: Cell<bool>,
@@ -277,7 +278,8 @@ impl Panel {
                 theme: crate::settings::Theme::Dark,
                 heading: std::ptr::null_mut(),
                 viewport: std::ptr::null_mut(),
-                groups: vec![],
+                theme_heading: std::ptr::null_mut(),
+                browser_engine: [std::ptr::null_mut(); 2],
                 scroll: Cell::new(0),
                 status: std::ptr::null_mut(),
                 status_is_help: Cell::new(false),
@@ -330,45 +332,91 @@ impl Panel {
                 std::ptr::null(),
             );
             checked((!p.viewport.is_null()) as i32)?;
-            for (page, first, label) in [
-                (0, Some(SettingKey::FontFamily), "Terminal"),
-                (0, Some(SettingKey::FocusBorderColor), "Focus"),
-                (0, Some(SettingKey::MinimapEnabled), "Minimap"),
-                (0, None, "Shell"),
-                (0, Some(SettingKey::UsageBarEnabled), "Agents"),
-                (0, Some(SettingKey::EditorMinimapEnabled), "Editor"),
-                (0, Some(SettingKey::PersistBrowserSession), "Browser"),
-                (0, Some(SettingKey::RestoreTerminalScrollback), "Session"),
-                (1, Some(SettingKey::Theme), "Colors"),
-            ] {
-                let hwnd = p.child_in(
-                    p.viewport,
-                    "STATIC",
-                    label,
-                    400 + p.groups.len(),
-                    SS_NOPREFIX,
-                )?;
-                chrome::register_control(hwnd, chrome::ControlRole::Caption);
-                p.groups.push((page, first, hwnd));
-            }
+            p.theme_heading = p.child_in(p.viewport, "STATIC", "Colors", 400, SS_NOPREFIX)?;
+            chrome::register_control(p.theme_heading, chrome::ControlRole::Caption);
+            p.row(Some(SettingKey::ZoomPercent), 0, "Global zoom (%)", vec![])?;
+            p.row(Some(SettingKey::FontFamily), 0, "Terminal font", vec![])?;
+            p.row(Some(SettingKey::FontSize), 0, "Font size (px)", vec![])?;
+            p.browser_engine = [
+                p.child_in(p.viewport, "STATIC", "Browser web view", 401, SS_NOPREFIX)?,
+                p.child_in(p.viewport, "STATIC", "WebView2", 402, SS_NOPREFIX)?,
+            ];
             p.row(
-                Some(SettingKey::FontFamily),
+                Some(SettingKey::FocusBorderColor),
                 0,
-                "Font family / fallbacks",
+                "Focus border color",
                 vec![],
             )?;
-            p.row(Some(SettingKey::FontSize), 0, "Font size (6–72 px)", vec![])?;
             p.row(
-                Some(SettingKey::ZoomPercent),
+                Some(SettingKey::FocusBorderOpacity),
                 0,
-                "Global zoom (50–200%)",
+                "Focus border opacity (%)",
                 vec![],
+            )?;
+            p.row(
+                Some(SettingKey::PersistBrowserSession),
+                0,
+                "Keep browser session data",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
+                Some(SettingKey::RestoreTerminalScrollback),
+                0,
+                "Restore terminal scrollback",
+                vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
                 Some(SettingKey::Scrollback),
                 0,
-                "Scrollback (0–100000 lines)",
+                "Terminal scrollback lines",
                 vec![],
+            )?;
+            p.row(
+                Some(SettingKey::MinimapEnabled),
+                0,
+                "Terminal minimap",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
+                Some(SettingKey::MinimapWidth),
+                0,
+                "Terminal minimap width (px)",
+                vec![],
+            )?;
+            p.row(
+                Some(SettingKey::MinimapOpacity),
+                0,
+                "Terminal minimap opacity (%)",
+                vec![],
+            )?;
+            p.row(None, 0, "Default shell (future terminals)", vec![])?;
+            p.row(
+                Some(SettingKey::AgentBarMode),
+                0,
+                "Agents bar mode",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
+                Some(SettingKey::UsageBarEnabled),
+                0,
+                "AI Usage bar",
+                vec![("On", "true"), ("Off", "false")],
+            )?;
+            p.row(
+                Some(SettingKey::AgentNotificationTarget),
+                0,
+                "Agent notification target",
+                vec![
+                    ("Agent bar", "agent_bar"),
+                    ("Workspace", "workspace"),
+                    ("Both", "both"),
+                ],
+            )?;
+            p.row(
+                Some(SettingKey::EditorMinimapEnabled),
+                0,
+                "Editor minimap",
+                vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
                 Some(SettingKey::CursorBlink),
@@ -391,77 +439,6 @@ impl Panel {
                     ("Underline", "underline"),
                     ("Bar", "bar"),
                 ],
-            )?;
-            p.row(
-                Some(SettingKey::FocusBorderColor),
-                0,
-                "Focus border color (#RRGGBB)",
-                vec![],
-            )?;
-            p.row(
-                Some(SettingKey::FocusBorderOpacity),
-                0,
-                "Focus border opacity (0–100%)",
-                vec![],
-            )?;
-            p.row(
-                Some(SettingKey::MinimapEnabled),
-                0,
-                "Minimap",
-                vec![("On", "true"), ("Off", "false")],
-            )?;
-            p.row(
-                Some(SettingKey::MinimapWidth),
-                0,
-                "Minimap width (12–96 px)",
-                vec![],
-            )?;
-            p.row(
-                Some(SettingKey::MinimapOpacity),
-                0,
-                "Minimap opacity (0–100%)",
-                vec![],
-            )?;
-            p.row(None, 0, "Default shell (future terminals)", vec![])?;
-            p.row(
-                Some(SettingKey::UsageBarEnabled),
-                0,
-                "AI Usage bar",
-                vec![("On", "true"), ("Off", "false")],
-            )?;
-            p.row(
-                Some(SettingKey::AgentBarMode),
-                0,
-                "Agents bar mode",
-                vec![("On", "true"), ("Off", "false")],
-            )?;
-            p.row(
-                Some(SettingKey::AgentNotificationTarget),
-                0,
-                "Agent notification target",
-                vec![
-                    ("Agent bar", "agent_bar"),
-                    ("Workspace", "workspace"),
-                    ("Both", "both"),
-                ],
-            )?;
-            p.row(
-                Some(SettingKey::EditorMinimapEnabled),
-                0,
-                "Editor minimap",
-                vec![("On", "true"), ("Off", "false")],
-            )?;
-            p.row(
-                Some(SettingKey::PersistBrowserSession),
-                0,
-                "Keep site data (new tabs)",
-                vec![("On", "true"), ("Off", "false")],
-            )?;
-            p.row(
-                Some(SettingKey::RestoreTerminalScrollback),
-                0,
-                "Restore terminal scrollback",
-                vec![("On", "true"), ("Off", "false")],
             )?;
             p.row(
                 Some(SettingKey::Theme),
@@ -1396,12 +1373,17 @@ impl Panel {
                 })
                 .as_ptr(),
             );
+            ShowWindow(
+                self.heading,
+                if self.page == 0 { SW_HIDE } else { SW_SHOWNA },
+            );
             place(self.heading, px(20), px(60), client.right - px(40), px(26));
-            let viewport_height = (client.bottom - px(190)).max(px(80));
+            let viewport_top = px(if self.page == 0 { 64 } else { 92 });
+            let viewport_height = (client.bottom - viewport_top - px(98)).max(px(80));
             place(
                 self.viewport,
                 px(20),
-                px(92),
+                viewport_top,
                 client.right - px(40),
                 viewport_height,
             );
@@ -1410,9 +1392,7 @@ impl Panel {
                 2 => self.bindings.as_ref().map_or(px(562), |bindings| {
                     bindings.content_height(GetDpiForWindow(self.window))
                 }),
-                _ => px(8
-                    + 46 * self.rows.iter().filter(|row| row.page == 0).count() as i32
-                    + 36 * self.groups.iter().filter(|(page, _, _)| *page == 0).count() as i32),
+                _ => px(8 + 46 * (1 + self.rows.iter().filter(|row| row.page == 0).count() as i32)),
             };
             let offset = self
                 .scroll
@@ -1431,18 +1411,19 @@ impl Panel {
             SetScrollInfo(self.viewport, SB_VERT, &info, 1);
             let mut view = RECT::default();
             GetClientRect(self.viewport, &mut view);
-            for (page, _, group) in &self.groups {
-                ShowWindow(
-                    *group,
-                    if *page == self.page {
-                        SW_SHOWNA
-                    } else {
-                        SW_HIDE
-                    },
-                );
-                if *page == 1 {
-                    place(*group, px(8), px(8) - offset, view.right - px(16), px(26));
-                }
+            ShowWindow(
+                self.theme_heading,
+                if self.page == 1 { SW_SHOWNA } else { SW_HIDE },
+            );
+            place(
+                self.theme_heading,
+                px(8),
+                px(8) - offset,
+                view.right - px(16),
+                px(26),
+            );
+            for field in self.browser_engine {
+                ShowWindow(field, if self.page == 0 { SW_SHOWNA } else { SW_HIDE });
             }
             let mut general_y = 8;
             ShowWindow(
@@ -1457,22 +1438,25 @@ impl Panel {
                 }
                 if show {
                     let top = if row.page == 0 {
-                        if let Some((_, _, group)) = self
-                            .groups
-                            .iter()
-                            .find(|(page, first, _)| *page == 0 && *first == row.key)
-                        {
-                            place(
-                                *group,
-                                px(8),
-                                px(general_y) - offset,
-                                view.right - px(16),
-                                px(26),
-                            );
-                            general_y += 36;
-                        }
                         let top = general_y;
                         general_y += 46;
+                        if row.key == Some(SettingKey::FontSize) {
+                            place(
+                                self.browser_engine[0],
+                                px(8),
+                                px(general_y) - offset,
+                                px(230),
+                                px(30),
+                            );
+                            place(
+                                self.browser_engine[1],
+                                px(246),
+                                px(general_y) - offset,
+                                view.right - px(254),
+                                px(30),
+                            );
+                            general_y += 46;
+                        }
                         top
                     } else {
                         44
@@ -1501,6 +1485,17 @@ impl Panel {
                             px(160)
                         },
                     );
+                    if row.key == Some(SettingKey::FontFamily) {
+                        if let Some(picker) = &self.font_picker {
+                            place(
+                                picker.entry,
+                                view.right - px(88),
+                                px(top) - offset,
+                                px(80),
+                                px(30),
+                            );
+                        }
+                    }
                     if row.key == Some(SettingKey::FocusBorderColor) {
                         place(
                             self.focus_color_button,
@@ -1516,13 +1511,6 @@ impl Panel {
                 ShowWindow(
                     picker.entry,
                     if self.page == 0 { SW_SHOWNA } else { SW_HIDE },
-                );
-                place(
-                    picker.entry,
-                    view.right - px(88),
-                    px(44) - offset,
-                    px(80),
-                    px(30),
                 );
             }
             if let Some(theme) = self.theme_panel.as_ref() {
@@ -1594,7 +1582,7 @@ impl Panel {
         })
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"focus_color_picker":self.focus_color_button as usize,"about_button":self.about_button as usize,"about":self.about.as_ref().map(|(_, panel)|panel.diagnostics()),"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"browser_engine":{"name":"WebView2","label":self.browser_engine[0] as usize,"value":self.browser_engine[1] as usize},"focus_color_picker":self.focus_color_button as usize,"about_button":self.about_button as usize,"about":self.about.as_ref().map(|(_, panel)|panel.diagnostics()),"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         if self

@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned live Options; 50s work + bounded cleanup, outer Job60s.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about','focus','cursor')][string]$Case='all')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about','focus','cursor')][string]$Case='all',[switch]$Capture)
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
@@ -45,6 +45,16 @@ function Reveal-Field($Status,[string]$Key){
         Require ($wait.ElapsedMilliseconds -lt 3000) ('General field cannot be reached: '+$Key)
         [OptionsFixture]::ScrollLine([long]$Status.options.viewport,$owned.Id,($bounds.Y -ge 0));$Status=Request @('settings','show')
     }while($true)
+}
+function Capture-Options($Status,[string]$Name){
+    if(-not $Capture){return}
+    $bitmap=Join-Path $directory ($Name+'.bmp');$result=Request @('chrome-capture',$bitmap)
+    Require ($result.root_handle -eq $Status.options.window) 'Capture did not target the owned Options window'
+    # Hidden native combo captures omit selected text; verify its real HWND text separately.
+    $choice=Field $Status $(if($Name -match 'bottom'){'cursor_style'}else{'persist_browser_session'})
+    $selected=[OptionsFixture]::Text([long]$choice.input,$owned.Id)
+    Require ($selected -ceq $(if($Name -match 'bottom'){'Block'}else{'On'})) ('Native choice display text differs: '+$selected)
+    [ChromeFixture]::Png($bitmap,(Join-Path $directory ($Name+'.png')));Remove-Item -LiteralPath $bitmap
 }
 function Verify-Cursor($Status){
     $Status=Reveal-Field $Status 'cursor_blink_interval_ms';$key='cursor_blink_interval_ms'
@@ -161,6 +171,18 @@ try {
 
     if($Case -eq 'cursor'){$status=Verify-Cursor $status}elseif($Case -eq 'about'){$status=Verify-About $status}elseif($Case -eq 'focus'){$status=Verify-Focus $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
+    $order=@('zoom_percent','font_family','font_size','focus_border_color','focus_border_opacity','persist_browser_session','restore_terminal_scrollback','scrollback','minimap_enabled','minimap_width','minimap_opacity','default_shell','agent_bar_mode','usage_bar_enabled','agent_notification_target','editor_minimap_enabled','cursor_blink','cursor_blink_interval_ms','cursor_style')
+    Require ((@($status.options.controls|Where-Object page -eq 'general'|ForEach-Object key) -join ',') -ceq ($order -join ',')) 'General controls differ from the Linux order'
+    $font=Field $status 'font_family';$fontBounds=[OptionsFixture]::RelativeBounds([long]$font.parent,[long]$font.input,$owned.Id);$picker=[OptionsFixture]::RelativeBounds([long]$font.parent,[long]$status.options.font_picker.entrybutton,$owned.Id)
+    Require ($picker.Y -eq $fontBounds.Y -and $picker.X -ge $fontBounds.X+$fontBounds.Width) 'Font chooser no longer follows its font row'
+    $sizeRow=Field $status 'font_size';$sizeBounds=[OptionsFixture]::RelativeBounds([long]$sizeRow.parent,[long]$sizeRow.input,$owned.Id);$focus=Field $status 'focus_border_color';$focusBounds=[OptionsFixture]::RelativeBounds([long]$focus.parent,[long]$focus.input,$owned.Id)
+    $engine=$status.options.browser_engine;$engineBounds=[OptionsFixture]::RelativeBounds([long]$status.options.viewport,[long]$engine.value,$owned.Id)
+    Require ($engine.name -ceq 'WebView2' -and [OptionsFixture]::Text([long]$engine.value,$owned.Id) -ceq 'WebView2' -and $engineBounds.X -eq $sizeBounds.X -and $engineBounds.Y -ge $sizeBounds.Y+$sizeBounds.Height -and $engineBounds.Y+$engineBounds.Height -le $focusBounds.Y) 'Actual browser engine is not a read-only row between font and focus settings'
+    Capture-Options $status 'general-top'
+    if($Capture){
+        Request @('settings','set','theme','light')|Out-Null;$status=Await {param($s) $s.document.terminal.theme -eq 'light' -and (Ack $s)};Capture-Options $status 'general-top-light'
+        Request @('settings','set','theme','dark')|Out-Null;$status=Await {param($s) $s.document.terminal.theme -eq 'dark' -and (Ack $s)}
+    }
     $previousBottom=0;$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
     foreach($row in @($status.options.controls|Where-Object {$_.page -eq 'general'})){
         $native=[OptionsFixture]::Describe([long]$row.input,$owned.Id);$bounds=[OptionsFixture]::RelativeBounds([long]$row.parent,[long]$row.input,$owned.Id)
@@ -168,16 +190,18 @@ try {
     }
     Require (@($status.options.controls|Where-Object {$_.apply}).Count -eq 0) 'Live Options still exposes row Apply controls'
     $children=@([ChromeFixture]::Read([long]$status.options.viewport,$owned.Id));$evidence.observations+=@{name='actual-viewport-groups';captions=@($children|Where-Object {$_.Class -eq 'Static'}|ForEach-Object {$_.Text})};Require (@($children|Where-Object {$_.Text -ceq 'Apply'}).Count -eq 0) 'Apply button remains in native viewport'
+    Require (@($children|Where-Object {$_.Shown -and $_.Text -cin @('Terminal','Focus','Minimap','Shell','Agents','Editor','Browser','Session')}).Count -eq 0) 'Windows-only General section headers remain'
+    $evidence.checks+=@{name='General_matches_Linux_order_without_extra_sections_and_font_chooser_and_readonly_engine_follow_their_rows';passed=$true}
     $viewport=[OptionsFixture]::RelativeBounds([long]$status.options.window,[long]$status.options.viewport,$owned.Id);$size=[ChromeFixture]::Size([long]$status.options.window,$owned.Id)
     Require ($viewport.X -ge 0 -and $viewport.Y -ge 0 -and $viewport.Width -gt 0 -and $viewport.Height -gt 0 -and $viewport.X+$viewport.Width -le $size[0] -and $viewport.Y+$viewport.Height -le $size[1]) 'Options viewport escapes its client'
     foreach($control in @($status.options.reset,$status.options.reload,$status.options.close)){$bounds=[OptionsFixture]::RelativeBounds([long]$status.options.window,[long]$control,$owned.Id);Require ($bounds.Y -ge $viewport.Y+$viewport.Height -and $bounds.Y+$bounds.Height -le $size[1]) 'Options viewport overlaps or clips its footer'}
     [ChromeFixture]::Resize([long]$status.options.window,$owned.Id,650,600);[OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true)
-    $status=Await {param($s) $s.options.scroll_offset -gt 0};$shell=Field $status 'restore_terminal_scrollback';$rowBounds=[OptionsFixture]::RelativeBounds((Parent-Of $status $shell),[long]$shell.input,$owned.Id);$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
-    Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Last General field cannot be reached at the bottom';Record 'viewport-scrolled-to-session' $status
+    $status=Await {param($s) $s.options.scroll_offset -gt 0};$shell=Field $status 'cursor_style';$rowBounds=[OptionsFixture]::RelativeBounds((Parent-Of $status $shell),[long]$shell.input,$owned.Id);$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
+    Require ($rowBounds.Y -lt $viewSize[1] -and $rowBounds.Y+$rowBounds.Height -gt 0) 'Last General field cannot be reached at the bottom';Record 'viewport-scrolled-to-cursor' $status;Capture-Options $status 'general-bottom-small'
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='owned_nonmodal_live_options_no_apply_and_scrolling_keeps_groups_and_footer_reachable';passed=$true}
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$true);$status=Await {param($s) $s.options.scroll_offset -gt 0};$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
-    foreach($key in @('default_shell','usage_bar_enabled','agent_bar_mode','agent_notification_target','editor_minimap_enabled','persist_browser_session','restore_terminal_scrollback')){$status=Reveal-Field $status $key}
+    foreach($key in $order){$status=Reveal-Field $status $key}
     [OptionsFixture]::Scroll([long]$status.options.viewport,$owned.Id,$false);$status=Await {param($s) $s.options.scroll_offset -eq 0}
     $evidence.checks+=@{name='all_general_fields_distinct_and_shell_agents_editor_browser_session_controls_scroll_into_view';passed=$true}
     foreach($enabled in @($true,$false)){
