@@ -279,6 +279,41 @@ try {
     [ChromeFixture]::Resize([long]$main.window_handle,$process.Id,$originalSize[0],$originalSize[1])
     Request @('settings','set','theme',$originalTheme)|Out-Null
     Assert-Panel ([FindFixture]::Unicode)|Out-Null
+    $live=(Status).find
+    Eval-Page '(()=>{const native=window.find;window.findCalls=[];window.find=function(...args){window.findCalls.push(args[0]);return Reflect.apply(native,window,args);};return true;})()'|Out-Null
+    Reset-Selection
+    foreach($text in @('nee','need','needle')){[OptionsFixture]::SetTextAndNotify([long]$live.panel_handle,[long]$live.panel_query_handle,$process.Id,$text)}
+    Wait-NativeHit 'one' 'needle'
+    Start-Sleep -Milliseconds 300
+    if((Eval-Page 'window.findCalls.length') -ne 1 -or (Eval-Page 'window.findCalls[0]') -cne 'needle'){throw 'Rapid native query edits were not coalesced to one final native find'}
+    [OptionsFixture]::SetTextAndNotify([long]$live.panel_handle,[long]$live.panel_query_handle,$process.Id,'casetoken')
+    Wait-NativeHit 'upper' 'CASEtoken'
+    [OptionsFixture]::SetChecked([long]$live.panel_handle,[long]$live.panel_controls.case,$process.Id,$true)
+    [OptionsFixture]::Click([long]$live.panel_handle,[long]$live.panel_controls.case,$process.Id)
+    Wait-NativeHit 'lower' 'casetoken'
+    [OptionsFixture]::SetTextAndNotify([long]$live.panel_handle,[long]$live.panel_query_handle,$process.Id,'')
+    $cleared=Wait-FindState {param($f)$f.query -ceq '' -and -not $f.busy}
+    if($cleared.panel_handle -ne $live.panel_handle -or -not (Same-Text (Selection).text '')){throw 'Empty live query closed the bar or retained its owned match'}
+    Passed 'debounced_native_query_burst_case_toggle_and_empty_query_clear_without_closing'
+
+    Find 'needle'|Out-Null
+    Eval-Page '(()=>{window.findCalls=[];return true;})()'|Out-Null
+    $pending=Begin-PendingFind
+    foreach($text in @('not the final query',[FindFixture]::Unicode)){[OptionsFixture]::SetTextAndNotify([long]$live.panel_handle,[long]$live.panel_query_handle,$process.Id,$text)}
+    Request @('browser','find-show',$domPane)|Out-Null
+    if(-not (Same-Text ([FindFixture]::ReadText([long]$live.panel_query_handle)) ([FindFixture]::Unicode))){throw 'Reopening find replaced the unsubmitted native draft'}
+    Wait-FindState {param($f)$f.pending_input -and $f.busy}|Out-Null
+    End-Command $pending.busy|Out-Null;End-Command $pending.find|Out-Null
+    Wait-NativeHit 'unicode' ([FindFixture]::Unicode)
+    Start-Sleep -Milliseconds 300
+    if((Eval-Page 'window.findCalls.length') -ne 2 -or (Eval-Page 'window.findCalls[1]') -cne [FindFixture]::Unicode -or (Status).find.pending_input){throw 'Busy renderer did not run exactly the last queued input after its current find'}
+    Passed 'busy_renderer_keeps_only_latest_query_and_reopen_preserves_unsubmitted_draft'
+
+    Eval-Page '(()=>{const r=document.createRange();r.selectNodeContents(document.getElementById("manual"));const s=getSelection();s.removeAllRanges();s.addRange(r);return true;})()'|Out-Null
+    [OptionsFixture]::SetTextAndNotify([long]$live.panel_handle,[long]$live.panel_query_handle,$process.Id,'')
+    Wait-FindState {param($f)$f.query -ceq '' -and -not $f.busy}|Out-Null
+    if(-not (Same-Text (Selection).text 'user selection stays') -or -not (Status).find.panel_handle){throw 'Empty live query cleared an unrelated selection or closed the panel'}
+    Passed 'empty_live_query_preserves_user_selection'
     Reset-Selection;Assert-Hit (Find 'needle') 'one' 'needle';$keys=(Status).find
     [OptionsFixture]::PostEnter([long]$keys.panel_query_handle,$process.Id)
     Wait-NativeHit 'two' 'needle'
@@ -302,7 +337,8 @@ try {
     foreach($key in @(13,27)){[OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,$key,$false,$false)}
     [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,16,$true,$false)
     $guarded=Wait-FindState {param($f)$f.panel_handle -and $f.panel_controls.settling -and -not $f.panel_controls.composing}
-    if($guarded.query -cne 'needle' -or (Selection).id -cne 'one'){throw 'Composition-ending keys searched or closed the browser find'}
+    Wait-NativeHit 'unicode' $draft
+    if((Status).find.panel_handle -ne $keys.panel_handle -or -not (Status).find.panel_controls.settling){throw 'Composition-ending keys closed the browser find or lost its held-key guard'}
     [OptionsFixture]::PostKey([long]$keys.panel_query_handle,$process.Id,13,$true,$false)
     Wait-FindState {param($f)$f.panel_handle -and -not $f.panel_controls.settling}|Out-Null
     [OptionsFixture]::PostEnter([long]$keys.panel_query_handle,$process.Id)

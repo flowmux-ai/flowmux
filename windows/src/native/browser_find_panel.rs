@@ -17,12 +17,15 @@ pub(crate) enum UiAction {
     Previous(usize),
     Close(usize),
     Layout(usize),
+    Changed(usize),
+    Refresh(usize),
 }
 
 static NEXT_PANEL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 thread_local! {
     static COMPOSING: Cell<bool> = const { Cell::new(false) };
     static SETTLING: Cell<bool> = const { Cell::new(false) };
+    static SETTING_QUERY: Cell<bool> = const { Cell::new(false) };
 }
 
 fn emit(action: UiAction) {
@@ -58,7 +61,12 @@ unsafe extern "system" fn query_proc(
         }
         _ => {}
     }
-    DefSubclassProc(window, message, wparam, lparam)
+    let result = DefSubclassProc(window, message, wparam, lparam);
+    if matches!(message, WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION) {
+        let generation = GetWindowLongPtrW(GetParent(window), GWLP_USERDATA) as usize;
+        emit(UiAction::Changed(generation));
+    }
+    result
 }
 
 unsafe extern "system" fn procedure(
@@ -77,6 +85,11 @@ unsafe extern "system" fn procedure(
             emit(UiAction::Layout(generation));
             0
         }
+        WM_TIMER if wparam == 1 => {
+            KillTimer(window, 1);
+            emit(UiAction::Refresh(generation));
+            0
+        }
         WM_COMMAND => {
             let control = lparam as HWND;
             if control.is_null()
@@ -90,7 +103,9 @@ unsafe extern "system" fn procedure(
                 (30, BN_CLICKED) => Some(UiAction::Previous(generation)),
                 (31, BN_CLICKED) => Some(UiAction::Next(generation)),
                 (2, BN_CLICKED) => Some(UiAction::Close(generation)),
-                // Query and checkbox edits are applied only by explicit find actions.
+                (10, EN_CHANGE) | (11, BN_CLICKED) if !SETTING_QUERY.with(Cell::get) => {
+                    Some(UiAction::Changed(generation))
+                }
                 _ => None,
             };
             if let Some(action) = action {
@@ -426,6 +441,18 @@ impl Panel {
         COMPOSING.with(Cell::get)
     }
 
+    pub(super) fn schedule(&self) {
+        unsafe {
+            SetTimer(self.window, 1, 200, None);
+        }
+    }
+
+    pub(super) fn cancel_scheduled(&self) {
+        unsafe {
+            KillTimer(self.window, 1);
+        }
+    }
+
     pub(super) fn query(&self) -> String {
         self.control_text(self.query)
     }
@@ -438,10 +465,12 @@ impl Panel {
         if self.composing() {
             return;
         }
+        SETTING_QUERY.with(|v| v.set(true));
         unsafe {
             SetWindowTextW(self.query, wide(text).as_ptr());
             SendMessageW(self.case, BM_SETCHECK, usize::from(case_sensitive), 0);
         }
+        SETTING_QUERY.with(|v| v.set(false));
     }
 
     pub(super) fn status(&self, text: &str) {

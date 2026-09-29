@@ -994,7 +994,7 @@ impl App {
             }
         });
         for (id, _) in expired_actions {
-            self.browser_find_deferred_close(id);
+            self.browser_find_deferred(id);
         }
         let ids: Vec<_> = self.browsers.keys().copied().collect();
         for id in ids {
@@ -1220,7 +1220,7 @@ impl App {
                     } else if find {
                         self.browser_find_feedback(p.surface, &reply);
                     }
-                    self.browser_find_deferred_close(p.surface);
+                    self.browser_find_deferred(p.surface);
                     if let Some(sender) = p.reply {
                         let _ = sender.try_send(action_outcome(reply, action));
                     }
