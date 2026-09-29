@@ -222,6 +222,17 @@ impl App {
             json!({"accepted":id.is_some(),"id":id,"reason":if id.is_none() {Some("duplicate")} else {None},"desktop_delivery":delivery}),
         )
     }
+    pub(super) fn add_agent_notification(
+        &mut self,
+        source: SurfaceId,
+        notice: domain::osc::OscNotification,
+    ) {
+        if let Err(error) =
+            self.add_notification(Some(source), notice.title, notice.body, notice.level)
+        {
+            self.notifications.desktop.borrow_mut().error = Some(error.to_string());
+        }
+    }
     pub(super) fn notification_button_text(&self) -> String {
         format!(
             "Notifications ({})",

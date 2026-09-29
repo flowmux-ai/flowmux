@@ -56,6 +56,8 @@ pub struct Input {
     pub notification_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
     #[serde(default)]
     pub pending_work: bool,
 }
@@ -86,6 +88,7 @@ impl Input {
             &self.tool_use_id,
             &self.notification_type,
             &self.error,
+            &self.permission_mode,
         ]
         .into_iter()
         .flatten()
@@ -194,6 +197,12 @@ impl Activity {
             Self::Claude(s) => s.snapshot(),
         }
     }
+    pub fn take_completion(&mut self) -> Option<String> {
+        match self {
+            Self::Codex(s) => s.take_completion(),
+            Self::Claude(s) => s.take_completion(),
+        }
+    }
 }
 
 struct Turn {
@@ -219,6 +228,7 @@ pub struct Codex {
     settled: bool,
     interrupted: bool,
     completion: Option<String>,
+    completion_sent: bool,
     overflow: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -311,6 +321,7 @@ impl Codex {
             self.settled = false;
             self.interrupted = false;
             self.completion = None;
+            self.completion_sent = false;
             return true;
         }
         if self.root.is_none() && matches!(event, Event::Running | Event::Notification) {
@@ -398,6 +409,17 @@ impl Codex {
             interrupted: self.interrupted && self.settled,
         }
     }
+    fn take_completion(&mut self) -> Option<String> {
+        if !self.settled || std::mem::replace(&mut self.completion_sent, true) {
+            return None;
+        }
+        (!self.interrupted).then(|| {
+            self.completion
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "task complete".into())
+        })
+    }
 }
 
 #[derive(Default)]
@@ -433,7 +455,8 @@ pub struct Claude {
     children: BTreeMap<String, ClaudeScope>,
     closed: VecDeque<(Option<String>, Option<String>)>,
     pending: Option<Instant>,
-    completion: String,
+    completion: Option<String>,
+    completion_sent: bool,
     overflow: bool,
 }
 impl Claude {
@@ -657,8 +680,7 @@ impl Claude {
                 self.completion = input
                     .last_assistant_message
                     .clone()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "Done".into());
+                    .filter(|s| !s.is_empty());
                 true
             }
             _ => false,
@@ -671,6 +693,9 @@ impl Claude {
         scope.idle = idle;
         scope.acknowledged = acknowledged;
         if input.agent_id.is_none() {
+            if event == Event::TurnStart {
+                self.completion_sent = false;
+            }
             self.pending = (event == Event::Stop && !input.pending_work).then_some(at + GRACE);
             if let Some(previous) = previous.filter(|id| Some(id) != input.turn_id.as_ref()) {
                 self.close((None, Some(previous)));
@@ -687,7 +712,7 @@ impl Claude {
                     return false;
                 }
                 root.idle = true;
-                root.text = self.completion.clone();
+                root.text = self.completion.clone().unwrap_or_else(|| "Done".into());
                 return true;
             }
         }
@@ -727,11 +752,54 @@ impl Claude {
                 && self.root.as_ref().is_some_and(|root| root.acknowledged),
         }
     }
+    fn take_completion(&mut self) -> Option<String> {
+        if !self
+            .root
+            .as_ref()
+            .is_some_and(|root| root.idle && !root.acknowledged)
+            || std::mem::replace(&mut self.completion_sent, true)
+        {
+            return None;
+        }
+        Some(
+            self.completion
+                .clone()
+                .unwrap_or_else(|| "task complete".into()),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completion_is_emitted_once_per_root_turn_even_after_stop_hook_continuation() {
+        let now = Instant::now();
+        for agent in ["codex", "claude"] {
+            let mut state = Activity::new(agent);
+            let mut input = Input {
+                turn_id: Some("a".into()),
+                last_assistant_message: Some("한 한 é 😀 완료".into()),
+                ..Default::default()
+            };
+            assert!(state.apply(Event::TurnStart, &input, now));
+            assert!(state.apply(Event::Stop, &input, now + Duration::from_millis(1)));
+            assert!(state.take_completion().is_none());
+            assert!(state.settle(now + Duration::from_secs(1)));
+            assert_eq!(state.take_completion().as_deref(), Some("한 한 é 😀 완료"));
+            assert!(state.take_completion().is_none());
+            input.stop_hook_active = true;
+            assert!(state.apply(Event::Stop, &input, now + Duration::from_secs(10)));
+            assert!(state.settle(now + Duration::from_secs(11)));
+            assert!(state.take_completion().is_none());
+            input.turn_id = Some("b".into());
+            input.last_assistant_message = None;
+            state.apply(Event::TurnStart, &input, now + Duration::from_secs(12));
+            state.apply(Event::Stop, &input, now + Duration::from_secs(13));
+            state.settle(now + Duration::from_secs(14));
+            assert_eq!(state.take_completion().as_deref(), Some("task complete"));
+        }
+    }
     #[test]
     fn claude_waits_are_scoped_and_background_or_failed_turns_do_not_complete() {
         let now = Instant::now();
@@ -785,6 +853,7 @@ mod tests {
         send(&mut state, Event::Stop, &input);
         assert!(!state.settle(now + Duration::from_secs(1)));
         assert_eq!(state.snapshot().text, "Background work pending");
+        assert!(state.take_completion().is_none());
         input.last_assistant_message = None;
         input.error = Some("rate_limit".into());
         send(&mut state, Event::StopFailure, &input);
@@ -794,6 +863,7 @@ mod tests {
         send(&mut state, Event::Notification, &input);
         assert_eq!(state.snapshot().status, AgentStatus::Idle);
         assert!(state.snapshot().interrupted);
+        assert!(state.take_completion().is_none());
         input.notification_type = Some("agent_completed".into());
         assert!(!send(&mut state, Event::Notification, &input));
         // A delayed earlier call cannot reopen a wait already resolved by its ID.
@@ -859,6 +929,7 @@ mod tests {
         send(&mut state, Event::Interrupt, "b", None);
         state.settle(start + Duration::from_secs(1));
         assert!(state.snapshot().interrupted);
+        assert!(state.take_completion().is_none());
         send(&mut state, Event::TurnStart, "c", None);
         send(&mut state, Event::Stop, "c", None);
         send(&mut state, Event::Running, "c", None);

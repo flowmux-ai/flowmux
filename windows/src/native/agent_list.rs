@@ -153,7 +153,7 @@ impl App {
     }
 
     fn apply_agent_hook(
-        &self,
+        &mut self,
         surface: SurfaceId,
         args: &SessionHookArgs,
         entry: Option<Entry>,
@@ -197,6 +197,7 @@ impl App {
         // Native hooks have no producer sequence. Order observed requests only;
         // an old conversation's end must never clear the current conversation.
         let visible = self.source_is_focused(Some(surface));
+        let mut notice = None;
         let accepted = if args.event.is_session() {
             state
                 .last_hook
@@ -218,7 +219,23 @@ impl App {
                     self.sender.send(Event::AgentChanged);
                 }
             }
-            accepted
+            // These Claude notices describe an unattributed background session.
+            // Retain their attention without changing the pane's root activity.
+            let notify_only = args.agent == "claude"
+                && args.event == SessionHookEvent::Notification
+                && state.presence.session_id == args.session_id
+                && matches!(
+                    args.details.notification_type.as_deref(),
+                    Some("agent_completed" | "agent_needs_input")
+                );
+            if accepted || notify_only {
+                notice = crate::notifications::hook_notice(
+                    state.entry.agent.name(),
+                    args.event,
+                    &args.details,
+                );
+            }
+            accepted || notify_only
         } else {
             false
         };
@@ -256,9 +273,12 @@ impl App {
         }
         let mut presence = state.presence.clone();
         presence.status = presence.public_status();
-        Ok(
-            json!({"accepted":accepted,"surface":surface,"session_id":state.presence.session_id,"agent":presence}),
-        )
+        let result = json!({"accepted":accepted,"surface":surface,"session_id":state.presence.session_id,"agent":presence});
+        drop(states);
+        if let Some(notice) = notice {
+            self.add_agent_notification(surface, notice);
+        }
+        Ok(result)
     }
 
     pub(super) fn agent_presence(&self, id: SurfaceId) -> Option<AgentPresence> {
@@ -562,6 +582,7 @@ impl App {
     }
 
     pub(super) fn agents_poll(&mut self) {
+        let mut completions = Vec::new();
         {
             let mut states = self.agent_states.borrow_mut();
             let before = states.len();
@@ -571,6 +592,9 @@ impl App {
                 if let Some(activity) = &mut state.native {
                     if activity.settle(Instant::now()) {
                         let snapshot = activity.snapshot();
+                        if let Some(body) = activity.take_completion() {
+                            completions.push((*id, state.entry.agent.name(), body));
+                        }
                         changed |= state.native_status(snapshot, self.source_is_focused(Some(*id)));
                     }
                 }
@@ -581,6 +605,17 @@ impl App {
             if changed {
                 self.sender.send(Event::AgentChanged);
             }
+        }
+        for (surface, agent, body) in completions {
+            self.add_agent_notification(
+                surface,
+                crate::notifications::agent_notice(
+                    agent,
+                    "ready",
+                    &body,
+                    flowmux_core::NotificationLevel::TurnCompleted,
+                ),
+            );
         }
         let Some(pending) = &mut self.pending_agents else {
             return;

@@ -47,6 +47,15 @@ function Agent-Sidebar([string]$Name,[string]$Status,[string]$Text,[string]$Agen
  Require ([ChromeFixture]::Pixel($png,$gutter,($y+[int](39*$scale))) -ceq $background -and [ChromeFixture]::Pixel($png,$nested,($y+[int](48*$scale))) -ceq '#abb1bc' -and [ChromeFixture]::Pixel($png,$nested,($y+[int](80*$scale))) -ceq $background) 'Nested native tree connectors continue through the wrong branch'
  $diagnostic.agentCapture=@{path=$png;row=$row};return $row.handle
 }
+function Native-Notice([string]$Name,[string]$Level,[string]$Title,[string]$Body){
+ $notes=Request @('notifications','list');$entry=@($notes.entries|Where-Object {$_.surface -ceq $source.id})
+ Require ($entry.Count -eq 1 -and $entry[0].level -ceq $Level -and $entry[0].title -ceq $Title -and $entry[0].body -ceq $Body -and $entry[0].pane -ceq $sourceIdentity.pane -and $entry[0].workspace -ceq $sourceIdentity.workspace) 'Native hook notification lost its level, raw Korean text, identity, or deduplication'
+ Require ($notes.desktop.background_blocked -and $notes.desktop.native_calls -eq 0 -and -not $notes.desktop.error) 'Hook verification attempted desktop notification delivery'
+ $shown=Request @('notifications','show');$popup=$shown.panel_snapshot;$row=@($popup.rows|Where-Object {$_.id -ceq $entry[0].id})[0]
+ Require ($popup.open -and $popup.kind -ceq 'bell-popover' -and -not $popup.visible -and [OptionsFixture]::Text([long]$row.open_handle,$owned.Id) -ceq ($Title+"`n"+$Body+"`n"+$row.time)) 'Native hook popup lost its captionless layout or original Unicode HWND text'
+ $bmp=Join-Path $directory ($Name+'.bmp');$paint=Request @('chrome-capture',$bmp);Require ($paint.root_handle -eq $shown.panel_handle -and $paint.subtree -and @($paint.controls|Where-Object {$_.handle -eq $row.open_handle}).Count -eq 1) 'Notification capture did not target its exact owned row';[ChromeFixture]::Png($bmp,(Join-Path $directory ($Name+'.png')))
+ [SearchDialogFixture]::Close([IntPtr][long]$shown.panel_handle,$owned.Id);Require (-not (Request @('notifications','list')).panel_snapshot.open) 'Hook notification popup did not close'
+}
 function Query($Tree,[string]$Text){$p=Panel $Tree;[OptionsFixture]::SetTextAndNotify([long]$p.window,[long]$p.query_handle,$owned.Id,$Text)}
 function Select-Session($Tree,[string]$Id){$p=Panel $Tree;$row=@($p.rows|Where-Object {$_.id -ceq $Id});Require ($row.Count -eq 1) 'Expected exact visible session row';[OptionsFixture]::ListSelect([long]$p.window,[long]$p.list,$owned.Id,[int]$row[0].index);return Await {param($t) $t.agent_sessions.selected -ceq $Id -and $t.agent_sessions.panel.resume_enabled -and -not $t.agent_sessions.loading}}
 function Shortcut([string]$Surface){Request @('test-shortcut',$Surface,'{"code":"KeyJ","key":"j","ctrlKey":true,"altKey":true}')|Out-Null}
@@ -177,14 +186,24 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'PermissionRequest' 'turn-a' @{message=$waitText;tool_input=@{private='PRIVATE_TOOL_NEVER_RETAIN'}} -Padding (4*1024*1024)
     Activity-Hook 'PostToolUse' 'turn-a' @{tool_response='PRIVATE_RESULT_NEVER_RETAIN'}
     Require ((Agent-Sidebar 'native-blocked' 'blocked' $waitText) -eq $sidebarHandle) 'Native permission status recreated the workspace control'
+    Activity-Hook 'PermissionRequest' 'turn-a' @{message=$waitText}
+    Native-Notice 'codex-input-popup' 'needs_input' 'Codex needs your input' $waitText
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'SubagentStart' 'child-turn' @{agent_id='child-a'}
     Activity-Hook 'Stop' 'turn-a' @{last_assistant_message=$doneText}
     $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.status -ceq 'working' -and $s.agent.message -ceq '1 active Codex subagent(s)'}
+    Require (@((Request @('notifications','list')).entries).Count -eq 0) 'Parent Stop notified completion while a child was active'
     Activity-Hook 'PermissionRequest' 'child-turn' @{agent_id='child-a';message=$waitText}
     Activity-Hook 'PreToolUse' 'child-turn' @{agent_id='child-a'}
     Require ((Agent-Sidebar 'native-child-blocked' 'blocked' $waitText) -eq $sidebarHandle) 'Child progress cleared an unresolved permission or recreated its workspace'
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'SubagentStop' 'child-turn' @{agent_id='child-a'}
     Require ((Agent-Sidebar 'native-done' 'done' $doneText) -eq $sidebarHandle) 'Native completion lost raw Korean text or its retained workspace'
+    Native-Notice 'codex-completed-popup' 'turn_completed' 'Codex ready' $doneText
+    Request @('notifications','clear')|Out-Null
+    Activity-Hook 'Stop' 'turn-a' @{stop_hook_active=$true;last_assistant_message='CONTINUED_STOP'}
+    $tree=Await {param($t) $a=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;$a.status -ceq 'done' -and $a.message -ceq 'CONTINUED_STOP'}
+    Require (@((Request @('notifications','list')).entries).Count -eq 0) 'Continuing the same Stop hook generated a second completion notification'
     Activity-Hook 'SubagentStart' 'child-turn' @{agent_id='child-a'}
     Activity-Hook 'UserPromptSubmit' 'turn-b'
     Activity-Hook 'Stop' 'turn-a' @{last_assistant_message='STALE_COMPLETION'}
@@ -192,6 +211,7 @@ public static class OwnedCodexSessionFixture {
     Require ($presence.status -ceq 'working' -and $presence.message -ceq 'Working' -and $presence.source -ceq 'flowmux:hook') 'Late root/child events changed the active turn'
     Activity-Hook 'Interrupt' 'turn-b'
     $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.status -ceq 'idle' -and $s.agent.seen -and $s.agent.message -ceq 'Turn interrupted'}
+    Require (@((Request @('notifications','list')).entries).Count -eq 0) 'Interrupted or stale Codex events notified completion'
     Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_TOOL|PRIVATE_RESULT|PRIVATE_LARGE_RESULT') 'Native activity retained private provider payloads'
     Stable @($source,$local)|Out-Null
     Passed 'installed-Codex-activity-Korean-native-sidebar-permission-waits-child-aggregation-stale-events-and-interrupt-without-focus-or-PTY-changes'
@@ -205,6 +225,7 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'PostToolUse' 'prompt-a' @{tool_name='Bash';tool_use_id='other-tool'}
     Activity-Hook 'PostToolBatch' 'prompt-a' @{tool_calls=@(@{tool_use_id='other-tool';tool_response='PRIVATE_RESPONSE'})}
     Require ((Agent-Sidebar 'claude-question' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'Parallel/batch completion cleared an unresolved question or recreated its workspace'
+    Native-Notice 'claude-input-popup' 'needs_input' 'Claude needs your input' $waitText
     Activity-Hook 'PostToolUseFailure' 'prompt-a' @{tool_name='AskUserQuestion';tool_use_id='question-a'}
     $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
     Activity-Hook 'PermissionRequest' 'prompt-a' @{message=$waitText}
@@ -216,21 +237,33 @@ public static class OwnedCodexSessionFixture {
     Activity-Hook 'PermissionRequest' 'prompt-a' @{agent_id='child-a';message=$waitText}
     Activity-Hook 'Stop' 'prompt-a' @{last_assistant_message=$doneText}
     Require ((Agent-Sidebar 'claude-child-wait' 'blocked' $waitText 'claude') -eq $sidebarHandle) 'Parent Stop discarded a child permission wait'
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'SubagentStop' 'prompt-a' @{agent_id='child-a';last_assistant_message='CHILD_NOT_PARENT_COMPLETION'}
     Require ((Agent-Sidebar 'claude-done' 'done' $doneText 'claude') -eq $sidebarHandle) 'Child completion replaced parent completion or its native control'
+    Native-Notice 'claude-completed-popup' 'turn_completed' 'Claude ready' $doneText
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'SubagentStop' 'prompt-a' @{agent_id='unknown-internal-agent'}
     Activity-Hook 'Notification' 'prompt-a' @{notification_type='idle_prompt';message='DO_NOT_BLOCK_COMPLETED_ROOT'}
     $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'done') 'Unattributed child or informational notification changed completion'
+    Activity-Hook 'Notification' 'prompt-a' @{notification_type='agent_completed';message=$doneText}
+    Native-Notice 'claude-background-popup' 'info' 'Claude background agent finished' $doneText
+    $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'done') 'Background notification changed the root turn'
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'UserPromptSubmit' 'prompt-b'
     Activity-Hook 'Stop' 'prompt-a' @{last_assistant_message='STALE_COMPLETION'}
     $tree=Tree;Require (@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working') 'Old prompt Stop completed the current prompt'
     Activity-Hook 'Stop' 'prompt-b' @{background_tasks=@(@{command='PRIVATE_COMMAND'});session_crons=@(@{prompt='PRIVATE_SCHEDULED_PROMPT'});last_assistant_message=$doneText}
     Require ((Agent-Sidebar 'claude-background' 'working' 'Background work pending' 'claude') -eq $sidebarHandle) 'Background work was marked complete'
+    Require (@((Request @('notifications','list')).entries).Count -eq 0) 'Background or stale Claude Stop notified completion'
     Activity-Hook 'StopFailure' 'prompt-b' @{error='rate_limit'}
     Activity-Hook 'PostToolBatch' 'prompt-b'
     Require ((Agent-Sidebar 'claude-quota' 'blocked' 'API error: rate_limit' 'claude') -eq $sidebarHandle) 'Batch completion cleared a quota wait'
+    Native-Notice 'claude-error-popup' 'error' 'Claude stopped' 'API error: rate_limit'
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'Notification' 'prompt-b' @{notification_type='quota_auto_resume_fired'}
     $tree=Await {param($t) @($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent.status -ceq 'working'}
+    Native-Notice 'claude-resumed-popup' 'info' 'Claude resumed' 'status changed'
+    Request @('notifications','clear')|Out-Null
     Activity-Hook 'StopFailure' 'prompt-b' @{error='rate_limit'}
     Activity-Hook 'Notification' 'prompt-b' @{notification_type='quota_auto_resume_disabled'}
     $tree=Await {param($t) $a=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent;$a.status -ceq 'idle' -and $a.seen -and $a.message -ceq 'Auto-resume disabled'}
@@ -241,6 +274,7 @@ public static class OwnedCodexSessionFixture {
     Stable @($source,$claudeLocal,$setupSource,$local)|Out-Null
     Passed 'installed-Claude-scoped-questions-permissions-batch-child-background-Korean-sidebar-stale-prompt-and-quota-states'
     Passed 'native-streaming-4MiB-tool-results-Korean-metadata-after-payload-and-bounded-EOF-without-partial-state'
+    Passed 'native-hooks-Linux-notification-titles-levels-Unicode-popovers-ownership-dedup-and-no-false-completion-or-desktop-calls'
    }
    $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed end hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and -not $s.agent.session_id}
