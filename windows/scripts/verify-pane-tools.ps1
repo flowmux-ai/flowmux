@@ -73,6 +73,34 @@ function Body-Open([string]$Surface,[scriptblock]$Condition){
  do{$left=5000-$watch.ElapsedMilliseconds;Require ($left -ge 100) 'Terminal menu configuration exceeded five seconds';$state=Body-Menu $Surface @{action='open';x=99999;y=99999} ([int]$left);if(& $Condition $state){return $state};Start-Sleep -Milliseconds 20}while($true)
 }
 function Pane-Area($Tree,[string]$Id){$bounds=$null;$count=0;foreach($entry in $Tree.layout.panes){if($entry[0] -ceq $Id){$bounds=$entry[1];$count++}};Require ($count -eq 1) 'Terminal menu lost its pane geometry';return $bounds}
+function Check-ZoomFrame($Tree,[string]$Pane,[string]$Surface,$Outer,[bool]$Zoomed){
+ $bitmap=Join-Path $directory 'zoom-frame.bmp';$capture=Request @('chrome-capture',$bitmap)
+ Require ($capture.root_handle -eq $Tree.window_handle) 'Zoom frame capture selected another owned window'
+ $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'};$edge=[int][Math]::Round(2*$Tree.chrome.dpi/96.0);$bar=[int][Math]::Round(28*$Tree.chrome.dpi/96.0)
+ $x=[int]$Outer.x;$y=[int]$Outer.y;$w=[int]$Outer.width;$h=[int]$Outer.height
+ Require ($w -gt 2*$edge -and $h -gt $bar+2*$edge) 'Zoom pixel fixture has no usable interior'
+ if($Zoomed){
+  $inner=Pane-Area $Tree $Pane
+  Require ($Tree.zoomed_pane -ceq $Pane -and @($Tree.layout.panes).Count -eq 1 -and $inner.x -eq $x+$edge -and $inner.y -eq $y+$edge -and $inner.width -eq $w-2*$edge -and $inner.height -eq $h-2*$edge) 'Zoom layout did not inset the same pane by two DIP'
+  foreach($strip in @(@($x,$y,$w,$edge),@($x,($y+$h-$edge),$w,$edge),@($x,$y,$edge,$h),@(($x+$w-$edge),$y,$edge,$h))){Require ([ChromeFixture]::ColorCount($bitmap,$strip[0],$strip[1],$strip[2],$strip[3],$accent) -eq $strip[2]*$strip[3]) 'Zoom accent does not fill all four edges at full two-DIP thickness'}
+  # The focused header has its own accent inside the top edge; body-side and
+  # bottom samples establish that the outer frame does not fill the interior.
+  $middleY=[int]($inner.y+$bar+[Math]::Floor(($inner.height-$bar)/2));$middleX=[int]($inner.x+[Math]::Floor($inner.width/2))
+  foreach($point in @(@($inner.x,$middleY),@(($inner.x+$inner.width-1),$middleY),@($middleX,($inner.y+$inner.height-1)))){Require ([ChromeFixture]::Pixel($bitmap,$point[0],$point[1]) -cne $accent) 'Zoom accent leaked immediately inside the body frame'}
+  $views=@(@($Tree.surfaces)+@($Tree.browsers)+@($Tree.editors)|Where-Object {$_.id -ceq $Surface});Require ($views.Count -eq 1) 'Zoom lost the active surface identity';$view=$views[0]
+  $actual=[OptionsFixture]::RelativeBounds([long]$Tree.window_handle,[long]$view.holder.window,$hostProcess.Id);$reported=$view.holder.bounds
+  Require ($actual.X -eq $inner.x -and $actual.Y -eq $inner.y+$bar -and $actual.Width -eq $inner.width -and $actual.Height -eq $inner.height-$bar -and $reported.x -eq $actual.X -and $reported.y -eq $actual.Y -and $reported.width -eq $actual.Width -and $reported.height -eq $actual.Height) 'Actual surface holder covers the zoom frame or differs from diagnostics'
+  $child=[OptionsFixture]::RelativeBounds([long]$view.holder.window,[long]$view.view_handle,$hostProcess.Id)
+  Require ($child.X -ge 0 -and $child.Y -ge 0 -and $child.Width -gt 0 -and $child.Height -gt 0 -and $child.X+$child.Width -le $actual.Width -and $child.Y+$child.Height -le $actual.Height) 'Actual WebView escapes its inset holder'
+ }else{
+  Require (-not $Tree.zoomed_pane) 'Restore retained zoom state'
+  # Split headers retain their own focus accent; sample below every header.
+  $bodyTop=[int](($Tree.layout.panes|ForEach-Object {$_[1].y+$bar}|Measure-Object -Maximum).Maximum)
+  Require ($bodyTop -lt $y+$h-$edge) 'Restored split fixture has no body below its headers'
+  foreach($strip in @(@($x,$bodyTop,$edge,($y+$h-$bodyTop)),@(($x+$w-$edge),$bodyTop,$edge,($y+$h-$bodyTop)),@($x,($y+$h-$edge),$w,$edge))){Require ([ChromeFixture]::ColorCount($bitmap,$strip[0],$strip[1],$strip[2],$strip[3],$accent) -eq 0) 'Restore left the outer zoom accent on a side or bottom edge'}
+ }
+ Remove-Item -LiteralPath $bitmap -Force
+}
 function Editor-Command([string]$Action,[string[]]$Options=@()){$r=Request (@('editor','command',$editor.surface,$Action)+$Options);if($r.psobject.Properties.Name -contains 'result'){return $r.result};return $r}
 try {
  $doctor=Probe @('doctor');Require ($doctor.background_testing -and $doctor.status -eq 'ok') 'Debug background build required'
@@ -136,16 +164,27 @@ try {
  Require (($order -join ',') -eq 'pane_zoom,pane_split_right,pane_split_down,pane_add,pane_browser,pane_menu') 'Direct tool order differs from Linux'
  Click $a.pane 'pane_split_right';$tree=Ready 2;$b=Request @('identify');Require ($b.pane -ne $a.pane) 'Split right did not create a pane';Stable $tree $original;Check-Geometry $tree
  Click $b.pane 'pane_split_down';$tree=Ready 3;$c=Request @('identify');Require ($c.pane -ne $b.pane) 'Split down did not create a pane';$beforeZoom=@($tree.surfaces);$layout=($tree.layout|ConvertTo-Json -Depth 15 -Compress)
+ $paneRects=@($tree.layout.panes|ForEach-Object {$_[1]});$zoomX=($paneRects|Measure-Object x -Minimum).Minimum;$zoomY=($paneRects|Measure-Object y -Minimum).Minimum
+ $zoomOuter=@{x=$zoomX;y=$zoomY;width=($paneRects|ForEach-Object {$_.x+$_.width}|Measure-Object -Maximum).Maximum-$zoomX;height=($paneRects|ForEach-Object {$_.y+$_.height}|Measure-Object -Maximum).Maximum-$zoomY}
  Click $c.pane 'pane_zoom';$tree=Tree;Require ($tree.zoomed_pane -eq $c.pane) 'Native maximize did not zoom target';Require ((Tool $tree $c.pane 'pane_zoom').label -eq 'Restore pane') 'Zoom button caption did not change';Stable $tree $beforeZoom
+ Check-ZoomFrame $tree $c.pane $c.surface $zoomOuter $true
  Click $c.pane 'pane_zoom';$tree=Tree;Require (-not $tree.zoomed_pane -and ($tree.layout|ConvertTo-Json -Depth 15 -Compress) -ceq $layout) 'Restore changed split geometry';Stable $tree $beforeZoom
+ Check-ZoomFrame $tree $c.pane $c.surface $zoomOuter $false
  Click $c.pane 'pane_add';$tree=Ready 4;$newTab=Request @('identify');Require ($newTab.pane -eq $c.pane) 'Add tab split or retargeted source';$stable=@($tree.surfaces)
  Click $c.pane 'pane_browser';$watch=[Diagnostics.Stopwatch]::StartNew();do{$tree=Tree;Require ($watch.ElapsedMilliseconds -lt 5000) 'Browser creation exceeded five seconds';if(@($tree.browsers).Count -eq 1){break};Start-Sleep -Milliseconds 20}while($true)
  $browser=Request @('identify');Require ($browser.pane -eq $c.pane) 'Browser tool opened in the wrong pane';Stable $tree $stable;Check-Geometry $tree
+ $browserView=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];Click $c.pane 'pane_zoom';$tree=Tree;Check-ZoomFrame $tree $c.pane $browser.surface $zoomOuter $true
+ Click $c.pane 'pane_zoom';$tree=Tree;Check-ZoomFrame $tree $c.pane $browser.surface $zoomOuter $false;Stable $tree $stable
+ $restoredBrowser=@($tree.browsers|Where-Object {$_.id -ceq $browser.surface})[0];Require ($restoredBrowser.view_handle -eq $browserView.view_handle -and $restoredBrowser.holder.window -eq $browserView.holder.window -and ($tree.layout|ConvertTo-Json -Depth 15 -Compress) -ceq $layout) 'Browser zoom recreated its WebView/holder or changed split geometry'
  Click $c.pane 'pane_menu';$tree=Await {param($t) $t.tab_menu.kind -ceq 'pane'};Menu-Panel $tree.tab_menu.menu ([long]$tree.window_handle)|Out-Null;Require ($tree.tab_menu.pane -ceq $c.pane -and (@($tree.tab_menu.menu.rows.label)-join '|') -ceq 'Close Pane' -and $tree.tab_menu.menu.rows[0].enabled) 'Pane tool did not expose its captured Close Pane action';$tree=Menu-Dismiss $tree;Stable $tree $stable;Require (@($tree.layout.panes).Count -eq 3) 'Pane menu Escape changed layout'
  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,420,400);$tree=Tree;Check-Geometry $tree;Stable $tree $stable
  [ChromeFixture]::Resize([long]$tree.window_handle,$hostProcess.Id,1500,850);$tree=Tree;Check-Geometry $tree
  $evidence.checks+=@{name='native_direct_tools_preserve_existing_terminal_pids_zoom_layout_and_bounded_header_geometry';passed=$true}
  $editor=(Request @('editor','open',$path,'--pane',$c.pane,'--root',$fixture.Root)).editor_opened;Require ([bool]$editor.surface) 'Editor open omitted identity';$watch=[Diagnostics.Stopwatch]::StartNew();do{$status=Request @('editor','status',$editor.surface);Require ($watch.ElapsedMilliseconds -lt 5000) 'Editor readiness exceeded five seconds';if($status.ready){break};Start-Sleep -Milliseconds 20}while($true)
+ $editorView=$status;Click $c.pane 'pane_zoom';$tree=Tree;Check-ZoomFrame $tree $c.pane $editor.surface $zoomOuter $true
+ Click $c.pane 'pane_zoom';$tree=Tree;Check-ZoomFrame $tree $c.pane $editor.surface $zoomOuter $false;Stable $tree $stable
+ $restoredEditor=@($tree.editors|Where-Object {$_.id -ceq $editor.surface})[0];Require ($restoredEditor.view_handle -eq $editorView.view_handle -and $restoredEditor.holder.window -eq $editorView.holder.window -and ($tree.layout|ConvertTo-Json -Depth 15 -Compress) -ceq $layout) 'Editor zoom recreated its WebView/holder or changed split geometry'
+ $evidence.checks+=@{name='native_zoom_frame_pixels_and_actual_terminal_browser_editor_holder_bounds_restore_without_recreation';passed=$true}
  Editor-Command 'replace-text' @('--text',[EditorFixture]::Edited)|Out-Null;Request @('focus-pane',$a.pane)|Out-Null;$before=Tree;$identity=Request @('identify')
  $rejected=Request @('close-pane',$c.pane) 1;$evidence.observations+=@{name='dirty-close-response';response=$rejected};Require ($rejected.error -like '*unsaved changes*') 'Dirty close did not reject through editor barrier';$after=Tree;$afterIdentity=Request @('identify');Stable $after $stable
  Require (($before.workspaces|ConvertTo-Json -Depth 30 -Compress) -ceq ($after.workspaces|ConvertTo-Json -Depth 30 -Compress) -and $identity.surface -eq $afterIdentity.surface) 'Rejected whole-pane close changed tabs or logical focus'

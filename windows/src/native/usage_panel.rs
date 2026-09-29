@@ -4,9 +4,14 @@ use super::*;
 use crate::usage::{format_token_count, Provider, ProviderState, UsagePanelState};
 use std::cell::Cell;
 use windows_sys::Win32::UI::{
-    Controls::{SetScrollInfo, DRAWITEMSTRUCT, ODT_BUTTON},
+    Controls::{
+        SetScrollInfo, CDDS_PREPAINT, CDIS_DISABLED, CDIS_FOCUS, CDIS_HOT, CDRF_SKIPDEFAULT,
+        DRAWITEMSTRUCT, NMCUSTOMDRAW, NM_CUSTOMDRAW, ODS_DISABLED, ODS_FOCUS, ODS_HOTLIGHT,
+        ODS_NOFOCUSRECT, ODT_BUTTON, ODT_STATIC,
+    },
     Input::KeyboardAndMouse::{EnableWindow, GetFocus},
 };
+const SPINNER_TIMER: usize = 0x4655;
 
 #[derive(Clone, Copy)]
 pub(super) enum UiAction {
@@ -38,10 +43,10 @@ struct Meter {
 enum Paint {
     Card(Card),
     Bar(Vec<Meter>),
+    Spinner(u8),
 }
 thread_local! {
     static PAINT: RefCell<HashMap<isize, Paint>> = RefCell::new(HashMap::new());
-    static TOGGLES: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
 }
 fn emit(action: UiAction) {
     post(Event::UsageUi(action));
@@ -53,6 +58,59 @@ unsafe extern "system" fn procedure(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
+        WM_TIMER if wparam == SPINNER_TIMER => {
+            let spinner = GetDlgItem(window, 4);
+            if spinner.is_null() {
+                return 0;
+            }
+            PAINT.with(|values| {
+                if let Some(Paint::Spinner(phase)) =
+                    values.borrow_mut().get_mut(&(spinner as isize))
+                {
+                    *phase = (*phase + 1) % 8;
+                }
+            });
+            InvalidateRect(spinner, std::ptr::null(), 0);
+            return 0;
+        }
+        WM_NOTIFY if lparam != 0 => {
+            let header = &*(lparam as *const windows_sys::Win32::UI::Controls::NMHDR);
+            if header.code == NM_CUSTOMDRAW && header.hwndFrom == GetDlgItem(window, 3) {
+                let draw = &*(lparam as *const NMCUSTOMDRAW);
+                if draw.dwDrawStage == CDDS_PREPAINT {
+                    let item = DRAWITEMSTRUCT {
+                        CtlType: ODT_BUTTON,
+                        hwndItem: header.hwndFrom,
+                        hDC: draw.hdc,
+                        rcItem: draw.rc,
+                        itemState: if draw.uItemState & CDIS_DISABLED != 0 {
+                            ODS_DISABLED
+                        } else {
+                            0
+                        } | if draw.uItemState & CDIS_FOCUS != 0 {
+                            ODS_FOCUS
+                        } else {
+                            ODS_NOFOCUSRECT
+                        } | if draw.uItemState & CDIS_HOT != 0 {
+                            ODS_HOTLIGHT
+                        } else {
+                            0
+                        },
+                        ..Default::default()
+                    };
+                    if chrome::message(
+                        window,
+                        WM_DRAWITEM,
+                        0,
+                        (&item as *const DRAWITEMSTRUCT) as LPARAM,
+                    )
+                    .is_some()
+                    {
+                        return CDRF_SKIPDEFAULT as LRESULT;
+                    }
+                }
+            }
+        }
         WM_CLOSE => {
             emit(UiAction::Close);
             return 0;
@@ -92,13 +150,9 @@ unsafe extern "system" fn procedure(
             if !control.is_null() && GetParent(control) == window && IsWindowEnabled(control) != 0 {
                 match wparam & 0xffff {
                     2 => emit(UiAction::Refresh),
-                    3 => {
-                        if let Some(enabled) =
-                            TOGGLES.with(|values| values.borrow().get(&(window as isize)).copied())
-                        {
-                            emit(UiAction::ToggleBar(!enabled));
-                        }
-                    }
+                    3 => emit(UiAction::ToggleBar(
+                        SendMessageW(control, BM_GETCHECK, 0, 0) == 1,
+                    )),
                     _ => {}
                 }
             }
@@ -182,7 +236,7 @@ unsafe fn meter(dc: HDC, area: RECT, value: f64, fill: COLORREF, track: COLORREF
     }
 }
 unsafe fn draw(item: &DRAWITEMSTRUCT) -> bool {
-    if item.CtlType != ODT_BUTTON {
+    if !matches!(item.CtlType, ODT_BUTTON | ODT_STATIC) {
         return false;
     }
     let Some(paint) = PAINT.with(|values| values.borrow().get(&(item.hwndItem as isize)).cloned())
@@ -200,9 +254,51 @@ unsafe fn draw(item: &DRAWITEMSTRUCT) -> bool {
         item.hDC,
         SendMessageW(item.hwndItem, WM_GETFONT, 0, 0) as HGDIOBJ,
     );
-    SetDCBrushColor(item.hDC, palette.surface);
+    SetDCBrushColor(
+        item.hDC,
+        if matches!(paint, Paint::Spinner(_)) {
+            palette.background
+        } else {
+            palette.surface
+        },
+    );
     FillRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
     match paint {
+        Paint::Spinner(phase) => {
+            let cx = (item.rcItem.left + item.rcItem.right) / 2;
+            let cy = (item.rcItem.top + item.rcItem.bottom) / 2;
+            let offset = |n: i32| p(n.abs()) * n.signum();
+            SelectObject(item.hDC, GetStockObject(DC_PEN));
+            for (index, (x, y)) in [
+                (0, -6),
+                (4, -4),
+                (6, 0),
+                (4, 4),
+                (0, 6),
+                (-4, 4),
+                (-6, 0),
+                (-4, -4),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                SetDCPenColor(
+                    item.hDC,
+                    if index == phase as usize {
+                        palette.foreground
+                    } else {
+                        palette.muted
+                    },
+                );
+                MoveToEx(
+                    item.hDC,
+                    cx + offset(x) / 2,
+                    cy + offset(y) / 2,
+                    std::ptr::null_mut(),
+                );
+                LineTo(item.hDC, cx + offset(x), cy + offset(y));
+            }
+        }
         Paint::Card(card) => {
             SetDCBrushColor(item.hDC, palette.border);
             FrameRect(item.hDC, &item.rcItem, GetStockObject(DC_BRUSH));
@@ -517,6 +613,7 @@ pub(super) struct Panel {
     title: HWND,
     refresh: HWND,
     toggle: HWND,
+    spinner: HWND,
     cards: [HWND; 2],
     values: RefCell<[Card; 2]>,
     opened: Cell<bool>,
@@ -529,11 +626,11 @@ pub(super) struct Panel {
 impl Drop for Panel {
     fn drop(&mut self) {
         self.hide();
-        TOGGLES.with(|values| values.borrow_mut().remove(&(self.window as isize)));
         for window in [
             self.title,
             self.refresh,
             self.toggle,
+            self.spinner,
             self.cards[0],
             self.cards[1],
         ] {
@@ -553,6 +650,7 @@ impl Panel {
             title: std::ptr::null_mut(),
             refresh: std::ptr::null_mut(),
             toggle: std::ptr::null_mut(),
+            spinner: std::ptr::null_mut(),
             cards: [std::ptr::null_mut(); 2],
             values: RefCell::new([Card::default(), Card::default()]),
             opened: Cell::new(false),
@@ -575,7 +673,7 @@ impl Panel {
         panel.refresh = child(
             panel.window,
             "BUTTON",
-            "Refresh",
+            "Refresh usage",
             2,
             WS_TABSTOP | BS_OWNERDRAW as u32,
         )?;
@@ -584,10 +682,34 @@ impl Panel {
             "BUTTON",
             "Show bar",
             3,
-            WS_TABSTOP | BS_OWNERDRAW as u32,
+            WS_TABSTOP | BS_PUSHLIKE as u32 | BS_AUTOCHECKBOX as u32,
         )?;
-        chrome::register_button(panel.refresh, chrome::Role::Button);
-        chrome::register_button(panel.toggle, chrome::Role::Button);
+        chrome::register_button(
+            panel.refresh,
+            chrome::Role::Icon {
+                kind: chrome::ChromeIcon::Reload,
+                marked: false,
+            },
+        );
+        chrome::register_button(
+            panel.toggle,
+            chrome::Role::Icon {
+                kind: chrome::ChromeIcon::UsageBar,
+                marked: false,
+            },
+        );
+        panel.spinner = child(
+            panel.window,
+            "STATIC",
+            "Refreshing usage",
+            4,
+            windows_sys::Win32::System::SystemServices::SS_OWNERDRAW,
+        )?;
+        PAINT.with(|values| {
+            values
+                .borrow_mut()
+                .insert(panel.spinner as isize, Paint::Spinner(0))
+        });
         for (index, window) in panel.cards.iter_mut().enumerate() {
             *window = child(
                 panel.viewport,
@@ -604,6 +726,7 @@ impl Panel {
         self.anchor.set(anchor);
         self.offset.set(0);
         self.opened.set(true);
+        self.spinner_timer();
         self.position();
         if !background {
             unsafe {
@@ -615,6 +738,7 @@ impl Panel {
     }
     pub(super) fn hide(&self) {
         self.opened.set(false);
+        self.spinner_timer();
         self.anchor.set(std::ptr::null_mut());
         unsafe {
             let focus = GetFocus();
@@ -629,29 +753,28 @@ impl Panel {
     pub(super) fn is_open(&self) -> bool {
         self.opened.get()
     }
+    fn spinner_timer(&self) {
+        unsafe {
+            if self.opened.get() && self.refreshing.get() {
+                SetTimer(self.window, SPINNER_TIMER, 100, None);
+            } else {
+                KillTimer(self.window, SPINNER_TIMER);
+            }
+        }
+    }
     pub(super) fn update(&self, state: &UsagePanelState, bar_enabled: bool) {
         self.enabled.set(bar_enabled);
         self.refreshing.set(state.refreshing);
-        TOGGLES.with(|values| {
-            values
-                .borrow_mut()
-                .insert(self.window as isize, bar_enabled)
-        });
-        caption(
-            self.toggle,
-            if bar_enabled { "Hide bar" } else { "Show bar" },
-        );
-        caption(
-            self.refresh,
-            if state.refreshing {
-                "Refreshing…"
-            } else {
-                "Refresh"
-            },
-        );
         unsafe {
+            SendMessageW(self.toggle, BM_SETCHECK, usize::from(bar_enabled), 0);
+            InvalidateRect(self.toggle, std::ptr::null(), 0);
             EnableWindow(self.refresh, i32::from(!state.refreshing));
+            ShowWindow(
+                self.spinner,
+                if state.refreshing { SW_SHOWNA } else { SW_HIDE },
+            );
         }
+        self.spinner_timer();
         let values = [
             card(&state.claude, state.refreshing),
             card(&state.codex, state.refreshing),
@@ -732,22 +855,29 @@ impl Panel {
                 self.title,
                 p(10),
                 p(10),
-                (client.right - p(206)).max(1),
+                (client.right - p(if self.refreshing.get() { 108 } else { 86 })).max(1),
                 p(28),
             );
             place(
                 self.toggle,
-                (client.right - p(196)).max(0),
-                p(8),
-                p(88),
-                p(30),
+                (client.right - p(if self.refreshing.get() { 98 } else { 76 })).max(0),
+                p(10),
+                p(28),
+                p(28),
             );
             place(
                 self.refresh,
-                (client.right - p(102)).max(0),
-                p(8),
-                p(92),
-                p(30),
+                (client.right - p(if self.refreshing.get() { 64 } else { 42 })).max(0),
+                p(10),
+                p(28),
+                p(28),
+            );
+            place(
+                self.spinner,
+                (client.right - p(26)).max(0),
+                p(16),
+                p(16),
+                p(16),
             );
             let height = (client.bottom - p(58)).max(1);
             place(
@@ -829,7 +959,7 @@ impl Panel {
     }
     pub(super) fn diagnostics(&self) -> Value {
         let palette = chrome::palette();
-        json!({"window":self.window as usize,"owner":unsafe {GetWindow(self.window,GW_OWNER)} as usize,"open":self.opened.get(),"native_visible":unsafe {IsWindowVisible(self.window)!=0},"bounds":bounds(self.window),"anchor":self.anchor.get() as usize,"viewport":self.viewport as usize,"refresh":self.refresh as usize,"toggle":self.toggle as usize,"title":self.title as usize,"bar_enabled":self.enabled.get(),"refreshing":self.refreshing.get(),"scroll_offset":self.offset.get(),"colors":{"surface":palette.surface,"foreground":palette.foreground,"muted":palette.muted,"progress":palette.accent,"track":palette.border},"cards":self.cards.iter().zip(self.values.borrow().iter()).map(|(window,value)|json!({"window":*window as usize,"text":card_caption(value),"bounds":bounds(*window),"lines":value.lines.iter().map(|line|json!({"text":line.text,"muted":line.muted,"percent":line.percent})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+        json!({"window":self.window as usize,"owner":unsafe {GetWindow(self.window,GW_OWNER)} as usize,"open":self.opened.get(),"native_visible":unsafe {IsWindowVisible(self.window)!=0},"bounds":bounds(self.window),"anchor":self.anchor.get() as usize,"viewport":self.viewport as usize,"refresh":self.refresh as usize,"toggle":self.toggle as usize,"spinner":self.spinner as usize,"title":self.title as usize,"bar_enabled":self.enabled.get(),"refreshing":self.refreshing.get(),"scroll_offset":self.offset.get(),"colors":{"surface":palette.surface,"foreground":palette.foreground,"muted":palette.muted,"progress":palette.accent,"track":palette.border},"cards":self.cards.iter().zip(self.values.borrow().iter()).map(|(window,value)|json!({"window":*window as usize,"text":card_caption(value),"bounds":bounds(*window),"lines":value.lines.iter().map(|line|json!({"text":line.text,"muted":line.muted,"percent":line.percent})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
 }
 

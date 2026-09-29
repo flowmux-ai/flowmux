@@ -1463,6 +1463,7 @@ impl App {
             self.refresh_terminal_menu(surface)?;
         }
         if self.main_closed {
+            chrome::set_zoom_frame(self.window, None);
             return Ok(());
         }
         let mut client: RECT = unsafe { std::mem::zeroed() };
@@ -1478,8 +1479,18 @@ impl App {
         self.worktrees_reconcile()?;
         self.sessions_reconcile()?;
         let (mut geometry, content) = self.geometry(self.active_workspace)?;
+        let mut zoom_frame = None;
         if let Some(pane) = self.zoomed {
-            geometry.panes = vec![(pane, content)];
+            let inset_x = px(2).min(content.width / 2);
+            let inset_y = px(2).min(content.height / 2);
+            let inner = model::Rect {
+                x: content.x + inset_x,
+                y: content.y + inset_y,
+                width: (content.width - 2 * px(2)).max(0),
+                height: (content.height - 2 * px(2)).max(0),
+            };
+            zoom_frame = Some((content, inner));
+            geometry.panes = vec![(pane, inner)];
             geometry.dividers.clear();
         }
         panes::cursor_dividers(if self.background_test {
@@ -1490,7 +1501,9 @@ impl App {
         if self.main_workspace_indices().is_empty() {
             geometry.panes.clear();
             geometry.dividers.clear();
+            zoom_frame = None;
         }
+        chrome::set_zoom_frame(self.window, zoom_frame);
         let view_areas = geometry.panes.clone();
         let sessions_width = self.sessions_width((client.right - content.x - px(4)).max(1), scale);
         self.sessions_layout((sessions_width > 0).then_some(model::Rect {
@@ -1531,10 +1544,15 @@ impl App {
         self.refresh_pane_headers(areas);
         let visible: HashMap<_, _> = view_areas
             .iter()
+            .filter(|(_, area)| area.width > 0 && area.height > bar)
             .map(|(pane, area)| {
                 (
                     self.workspace().root.active_surface_id(*pane).unwrap(),
-                    *area,
+                    model::Rect {
+                        y: area.y + bar,
+                        height: area.height - bar,
+                        ..*area
+                    },
                 )
             })
             .collect();
@@ -1548,11 +1566,7 @@ impl App {
                 continue;
             }
             let show = visible.contains_key(id) && client.right > 0 && client.bottom > 0;
-            let area = visible.get(id).filter(|_| show).map(|area| model::Rect {
-                y: area.y + bar,
-                height: (area.height - bar).max(1),
-                ..*area
-            });
+            let area = visible.get(id).filter(|_| show).copied();
             surface.holder.layout(area, self.background_test)?;
             if let Some(area) = area {
                 surface
@@ -1581,11 +1595,7 @@ impl App {
             let area = visible
                 .get(id)
                 .filter(|_| client.right > 0 && client.bottom > 0)
-                .map(|area| model::Rect {
-                    y: area.y + bar,
-                    height: (area.height - bar).max(1),
-                    ..*area
-                });
+                .copied();
             editor.view.layout(area)?;
         }
         for (id, browser) in &mut self.browsers {
@@ -1595,11 +1605,7 @@ impl App {
             let area = visible
                 .get(id)
                 .filter(|_| client.right > 0 && client.bottom > 0)
-                .map(|area| model::Rect {
-                    y: area.y + bar,
-                    height: (area.height - bar).max(1),
-                    ..*area
-                });
+                .copied();
             let find_height = self
                 .browser_find
                 .layout(*id, area, scale, self.background_test);

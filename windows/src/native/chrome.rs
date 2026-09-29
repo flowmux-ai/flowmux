@@ -266,6 +266,7 @@ pub(super) enum ChromeIcon {
     Files,
     Worktrees,
     Usage,
+    UsageBar,
     Sessions,
     Search,
     CommandPalette,
@@ -528,6 +529,7 @@ struct State {
     controls: HashMap<isize, Entry>,
     tooltips: HashMap<isize, Tooltip>,
     pane_headers: HashMap<isize, Vec<(model::Rect, bool)>>,
+    zoom_frames: HashMap<isize, (model::Rect, model::Rect)>,
     workspace_closes: HashMap<isize, WorkspaceClose>,
 }
 impl State {
@@ -542,6 +544,7 @@ impl State {
             controls: HashMap::new(),
             tooltips: HashMap::new(),
             pane_headers: HashMap::new(),
+            zoom_frames: HashMap::new(),
             workspace_closes: HashMap::new(),
         }
     }
@@ -755,6 +758,22 @@ fn workspace_close_message(window: HWND, message: u32, wparam: WPARAM) {
         }
     }
     refresh_workspace_close(row);
+}
+
+pub(super) fn set_zoom_frame(window: HWND, frame: Option<(model::Rect, model::Rect)>) {
+    let changed = STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        if let Some(frame) = frame {
+            state.zoom_frames.insert(window as isize, frame) != Some(frame)
+        } else {
+            state.zoom_frames.remove(&(window as isize)).is_some()
+        }
+    });
+    if changed {
+        unsafe {
+            InvalidateRect(window, std::ptr::null(), 1);
+        }
+    }
 }
 
 pub(super) fn set_pane_headers(window: HWND, headers: Vec<(model::Rect, bool)>) {
@@ -1024,7 +1043,11 @@ pub(super) fn shutdown() {
     for window in controls {
         unregister(window as HWND);
     }
-    STATE.with(|slot| slot.borrow_mut().pane_headers.clear());
+    STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        state.pane_headers.clear();
+        state.zoom_frames.clear();
+    });
     // All controls now hold a stock font. Retained state resources remain valid
     // until the UI thread exits; no registered HWND references them at teardown.
 }
@@ -1105,6 +1128,7 @@ unsafe extern "system" fn control_proc(
                 let mut state = slot.borrow_mut();
                 state.controls.remove(&(window as isize));
                 state.pane_headers.remove(&(window as isize));
+                state.zoom_frames.remove(&(window as isize));
                 state.workspace_closes.retain(|row, close| {
                     *row != window as isize && close.button != window as isize
                 });
@@ -1514,7 +1538,13 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             | Role::Choice { selected: true }
             | Role::Tab { selected: true, .. }
             | Role::TabClose { selected: true, .. }
-    );
+    ) || (matches!(
+        role,
+        Role::Icon {
+            kind: ChromeIcon::UsageBar,
+            ..
+        }
+    ) && unsafe { SendMessageW(item.hwndItem, BM_GETCHECK, 0, 0) } == 1);
     let pressed = item.itemState & ODS_SELECTED != 0;
     let hot = hot || item.itemState & ODS_HOTLIGHT != 0;
     let disabled = item.itemState & ODS_DISABLED != 0;
@@ -1561,7 +1591,10 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
     } else if !palette.high_contrast && matches!(role, Role::Icon { marked: true, .. }) {
         palette.accent
     } else if !palette.high_contrast
-        && ((matches!(role, Role::Icon { .. }) && !hot && item.itemState & ODS_FOCUS == 0)
+        && ((matches!(role, Role::Icon { .. })
+            && !hot
+            && !selected
+            && item.itemState & ODS_FOCUS == 0)
             || matches!(
                 role,
                 Role::Tab {
@@ -1760,6 +1793,10 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                 LineTo(item.hDC, x(c), y(d));
             };
             match kind {
+                ChromeIcon::UsageBar => {
+                    Rectangle(item.hDC, x(-7), y(-6), x(7) + 1, y(6) + 1);
+                    line(-7, 2, 7, 2);
+                }
                 ChromeIcon::Maximize => {
                     Rectangle(item.hDC, x(-6), y(-6), x(6) + 1, y(6) + 1);
                 }
@@ -2140,7 +2177,7 @@ pub(super) fn message(
             (item.CtlType == ODT_BUTTON && draw_button(item)).then_some(1)
         }
         WM_ERASEBKGND | WM_PRINTCLIENT => {
-            let (brush, palette, dpi, headers) = STATE.with(|slot| {
+            let (brush, palette, dpi, headers, frame) = STATE.with(|slot| {
                 let state = slot.borrow();
                 (
                     state.resources.background,
@@ -2151,6 +2188,7 @@ pub(super) fn message(
                         .get(&(window as isize))
                         .cloned()
                         .unwrap_or_default(),
+                    state.zoom_frames.get(&(window as isize)).copied(),
                 )
             });
             let mut rect = RECT::default();
@@ -2197,12 +2235,40 @@ pub(super) fn message(
                         RestoreDC(dc, saved);
                     }
                 }
+                if let Some((outer, inner)) = frame {
+                    let right = outer.x + outer.width;
+                    let bottom = outer.y + outer.height;
+                    for (left, top, right, bottom) in [
+                        (outer.x, outer.y, right, inner.y),
+                        (outer.x, inner.y + inner.height, right, bottom),
+                        (outer.x, inner.y, inner.x, inner.y + inner.height),
+                        (
+                            inner.x + inner.width,
+                            inner.y,
+                            right,
+                            inner.y + inner.height,
+                        ),
+                    ] {
+                        fill(
+                            wparam as HDC,
+                            &RECT {
+                                left,
+                                top,
+                                right,
+                                bottom,
+                            },
+                            palette.accent,
+                        );
+                    }
+                }
             }
             Some(1)
         }
         WM_NCDESTROY => {
             STATE.with(|slot| {
-                slot.borrow_mut().pane_headers.remove(&(window as isize));
+                let mut state = slot.borrow_mut();
+                state.pane_headers.remove(&(window as isize));
+                state.zoom_frames.remove(&(window as isize));
             });
             None
         }
@@ -2506,7 +2572,9 @@ fn capture_impl(window: HWND, path: &std::path::Path, subtree: bool) -> anyhow::
                 clip.bottom - rect.top,
             );
         }
-        if entry.button.is_some() {
+        if entry.button.is_some()
+            && unsafe { GetWindowLongPtrW(child, GWL_STYLE) } as u32 & 0xf == BS_OWNERDRAW as u32
+        {
             let native_state = unsafe { SendMessageW(child, BM_GETSTATE, 0, 0) } as u32;
             let mut state = 0;
             if unsafe { IsWindowEnabled(child) } == 0 {
