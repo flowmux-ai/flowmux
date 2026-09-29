@@ -91,7 +91,8 @@ public static class OwnedCodexSessionFixture {
   if(!String.IsNullOrEmpty((string)request["surface"]))arguments+=" --surface "+request["surface"];
   if(!String.IsNullOrEmpty((string)request["config"])) {
    var config=json.Deserialize<System.Collections.Generic.Dictionary<string,object>>(File.ReadAllText((string)request["config"]));var events=(System.Collections.Generic.Dictionary<string,object>)config["hooks"];
-   var groups=(System.Collections.IList)events[(string)request["event"]=="session-start"?"SessionStart":"SessionEnd"];var group=(System.Collections.Generic.Dictionary<string,object>)groups[groups.Count-1];var handlers=(System.Collections.IList)group["hooks"];var handler=(System.Collections.Generic.Dictionary<string,object>)handlers[0];
+   var payload=json.Deserialize<System.Collections.Generic.Dictionary<string,object>>((string)request["payload"]);string eventName=payload.ContainsKey("hook_event_name")?(string)payload["hook_event_name"]:((string)request["event"]=="session-start"?"SessionStart":"SessionEnd");
+   var groups=(System.Collections.IList)events[eventName];var group=(System.Collections.Generic.Dictionary<string,object>)groups[groups.Count-1];var handlers=(System.Collections.IList)group["hooks"];var handler=(System.Collections.Generic.Dictionary<string,object>)handlers[0];
    if(handler.ContainsKey("commandWindows")){string command=(string)handler["commandWindows"];if(!command.StartsWith("powershell.exe -NoProfile -NonInteractive -EncodedCommand "))throw new Exception("Unexpected installed command");cli="powershell.exe";arguments=command.Substring("powershell.exe ".Length);}
    else{cli=(string)handler["command"];arguments="";foreach(string arg in (System.Collections.IList)handler["args"]){if(arg.IndexOfAny(new char[]{' ','\"','\r','\n'})>=0)throw new Exception("Unexpected hook argument");arguments+=(arguments.Length==0?"":" ")+arg;}}
   }
@@ -155,8 +156,46 @@ public static class OwnedCodexSessionFixture {
    $r=Request $setup;Require (-not $r.changed -and [IO.File]::ReadAllText($config) -ceq $written -and (Get-Item -LiteralPath $config).LastWriteTimeUtc -eq $time) 'Idempotent setup rewrote configuration'
    $r=Hook 'session-start' (@{session_id=$idA;cwd='한글 한 é'}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.session_id -ceq $idA}
+   if($provider -ceq 'codex'){
+    function Activity-Hook([string]$Name,[string]$Turn,[hashtable]$Extra=@{}){
+     $payload=$Extra.Clone();$payload.session_id=$idA;$payload.hook_event_name=$Name;$payload.turn_id=$Turn
+     $r=Hook 'running' ($payload|ConvertTo-Json -Compress) -Config $config
+     Require (-not $r.stderr -and $(if($Name -ceq 'Stop'){$r.stdout.Trim() -ceq '{}'}else{-not $r.stdout})) 'Installed activity hook emitted provider decisions or non-neutral context'
+    }
+    Require (($cap.agent_activity.native_activity_hooks.codex -join ',') -ceq 'turn-start,running,notification,subagent-start,subagent-stop,stop,interrupt') 'Codex native activity capability is incomplete'
+    Request @('focus-tab',$local.id)|Out-Null
+    Activity-Hook 'UserPromptSubmit' 'turn-a' @{prompt='PRIVATE_PROMPT_NEVER_RETAIN'}
+    $sidebarHandle=Agent-Sidebar 'native-working' 'working' 'Working'
+    $waitText='한글 한 é 😀 & 입력 대기';$doneText='한글 한 é 😀 & 작업 완료'
+    Activity-Hook 'PermissionRequest' 'turn-a' @{message=$waitText;tool_input=@{private='PRIVATE_TOOL_NEVER_RETAIN'}}
+    Activity-Hook 'PostToolUse' 'turn-a' @{tool_response='PRIVATE_RESULT_NEVER_RETAIN'}
+    Require ((Agent-Sidebar 'native-blocked' 'blocked' $waitText) -eq $sidebarHandle) 'Native permission status recreated the workspace control'
+    Activity-Hook 'SubagentStart' 'child-turn' @{agent_id='child-a'}
+    Activity-Hook 'Stop' 'turn-a' @{last_assistant_message=$doneText}
+    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.status -ceq 'working' -and $s.agent.message -ceq '1 active Codex subagent(s)'}
+    Activity-Hook 'PermissionRequest' 'child-turn' @{agent_id='child-a';message=$waitText}
+    Activity-Hook 'PreToolUse' 'child-turn' @{agent_id='child-a'}
+    Require ((Agent-Sidebar 'native-child-blocked' 'blocked' $waitText) -eq $sidebarHandle) 'Child progress cleared an unresolved permission or recreated its workspace'
+    Activity-Hook 'SubagentStop' 'child-turn' @{agent_id='child-a'}
+    Require ((Agent-Sidebar 'native-done' 'done' $doneText) -eq $sidebarHandle) 'Native completion lost raw Korean text or its retained workspace'
+    Activity-Hook 'SubagentStart' 'child-turn' @{agent_id='child-a'}
+    Activity-Hook 'UserPromptSubmit' 'turn-b'
+    Activity-Hook 'Stop' 'turn-a' @{last_assistant_message='STALE_COMPLETION'}
+    $tree=Tree;$presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
+    Require ($presence.status -ceq 'working' -and $presence.message -ceq 'Working' -and $presence.source -ceq 'flowmux:hook') 'Late root/child events changed the active turn'
+    Activity-Hook 'Interrupt' 'turn-b'
+    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.status -ceq 'idle' -and $s.agent.seen -and $s.agent.message -ceq 'Turn interrupted'}
+    Require (($tree|ConvertTo-Json -Depth 30 -Compress) -notmatch 'PRIVATE_PROMPT|PRIVATE_TOOL|PRIVATE_RESULT') 'Native activity retained private provider payloads'
+    Stable @($source,$local)|Out-Null
+    Passed 'installed-Codex-activity-Korean-native-sidebar-permission-waits-child-aggregation-stale-events-and-interrupt-without-focus-or-PTY-changes'
+   }
    $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress) -Config $config;Require (-not $r.stdout -and -not $r.stderr) 'Installed end hook leaked output into agent context'
    $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and -not $s.agent.session_id}
+   if($provider -ceq 'codex'){
+    Activity-Hook 'UserPromptSubmit' 'turn-after-end'
+    $tree=Tree;$presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
+    Require (-not $presence.session_id -and $presence.status -ceq 'unknown' -and $presence.seen -and $presence.message -ceq 'Session ended') 'Activity resurrected an ended session or retained a false completion'
+   }
    $r=Request $remove;$remaining=Get-Content -Raw -Encoding UTF8 -LiteralPath $config|ConvertFrom-Json;Require ($r.changed -and @($remaining.hooks.SessionStart).Count -eq 1 -and -not $remaining.hooks.SessionEnd -and $remaining.env.KEEP -ceq $original.env.KEEP -and $remaining.hooks.Stop[0].hooks[0].command -ceq 'echo STOP_KEEP') 'Uninstall removed unrelated settings or retained owned hooks'
    $written=[IO.File]::ReadAllText($config);$r=Request $remove;Require (-not $r.changed -and [IO.File]::ReadAllText($config) -ceq $written) 'Repeated uninstall rewrote configuration'
    foreach($bad in @('{bad','{"hooks":{"SessionEnd":{}}}','{"disableAllHooks":true}',('x'*1048577))){[IO.File]::WriteAllText($config,$bad,$utf8);Request $setup 3000 $true|Out-Null;Require ([IO.File]::ReadAllText($config) -ceq $bad) 'Invalid/disabled/oversized configuration was rewritten'}

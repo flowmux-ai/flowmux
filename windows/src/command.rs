@@ -229,6 +229,18 @@ pub struct AgentReportArgs {
 pub enum SessionHookEvent {
     SessionStart,
     SessionEnd,
+    TurnStart,
+    Running,
+    Notification,
+    SubagentStart,
+    SubagentStop,
+    Stop,
+    Interrupt,
+}
+impl SessionHookEvent {
+    pub fn is_session(self) -> bool {
+        matches!(self, Self::SessionStart | Self::SessionEnd)
+    }
 }
 
 #[derive(Debug, Clone, clap::Args, Serialize, Deserialize)]
@@ -242,6 +254,9 @@ pub struct SessionHookArgs {
     pub surface: Option<Uuid>,
     #[arg(skip)]
     pub session_id: Option<String>,
+    #[arg(skip)]
+    #[serde(default)]
+    pub details: crate::agent_activity::Input,
     /// Best-effort native integration; --json retains diagnostic output/errors.
     #[arg(long)]
     #[serde(skip)]
@@ -264,9 +279,9 @@ pub struct HookConfigArgs {
 #[derive(Debug, Clone, Subcommand, Serialize, Deserialize)]
 #[serde(tag = "agent", rename_all = "lowercase")]
 pub enum HooksOp {
-    /// Merge Windows session hooks into one provider's configuration.
+    /// Merge Windows native hooks into one provider's configuration.
     Setup(HookConfigArgs),
-    /// Remove only the Windows session hooks installed by flowmux.
+    /// Remove only the Windows native hooks installed by flowmux.
     Uninstall(HookConfigArgs),
     Claude(SessionHookArgs),
     Codex(SessionHookArgs),
@@ -301,12 +316,20 @@ impl SessionHookArgs {
                 alias = "conversationId"
             )]
             session_id: String,
+            #[serde(flatten)]
+            details: crate::agent_activity::Input,
         }
-        anyhow::ensure!(bytes.len() <= 65536, "session hook payload exceeds 64 KiB");
-        let payload: Payload = serde_json::from_slice(bytes)?;
+        anyhow::ensure!(
+            bytes.len() <= crate::agent_activity::MAX_HOOK_BYTES,
+            "native hook payload exceeds 1 MiB"
+        );
+        let mut payload: Payload = serde_json::from_slice(bytes)?;
         let agent = crate::session_history::SessionAgent::from_name(&self.agent)
             .ok_or_else(|| anyhow::anyhow!("unsupported local agent name"))?;
         self.session_id = Some(agent.canonical_session_id(&payload.session_id)?);
+        payload.details.normalize();
+        payload.details.validate(self.event, &self.agent)?;
+        self.details = payload.details;
         Ok(())
     }
 }
@@ -375,7 +398,7 @@ pub enum Command {
     Agents,
     /// Report one producer's ordered status snapshot, not individual tool-hook events.
     ReportAgent(AgentReportArgs),
-    /// Receive a native session-start/session-end JSON hook from stdin.
+    /// Receive a native session or activity JSON hook from stdin.
     Hooks {
         #[command(subcommand)]
         #[serde(flatten)]
@@ -726,7 +749,7 @@ mod tests {
             }
         }
         for args in [
-            vec!["hooks", "codex", "turn-start"],
+            vec!["hooks", "codex", "unknown-event"],
             vec!["hooks", "codex", "session-start", "--session-id", id],
         ] {
             assert!(Cli::try_parse_from(std::iter::once("flowmuxctl").chain(args)).is_err());
@@ -744,6 +767,37 @@ mod tests {
         assert_eq!(hook.session_id.as_deref(), Some("ses_Mixed123"));
         hook.agent = "unsupported".into();
         assert!(hook.read_payload(b"{\"session_id\":\"ses_123\"}").is_err());
+        let Command::Hooks { mut op } =
+            Cli::try_parse_from(["flowmuxctl", "hooks", "codex", "running"])
+                .unwrap()
+                .command
+        else {
+            panic!("wrong command")
+        };
+        let hook = op.runtime_mut().unwrap();
+        let mut payload = serde_json::json!({
+            "session_id":id, "turn_id":"turn-a", "message":"한 한 é 😀\n입력",
+            "tool_response":"PRIVATE_RESULT".repeat(6000)
+        });
+        hook.read_payload(&serde_json::to_vec(&payload).unwrap())
+            .unwrap();
+        assert_eq!(hook.details.message.as_deref(), Some("한 한 é 😀 입력"));
+        let wire = serde_json::to_string(hook).unwrap();
+        assert!(wire.len() < 512 && !wire.contains("PRIVATE_RESULT"));
+        payload["message"] = "한글😀".repeat(500).into();
+        hook.read_payload(&serde_json::to_vec(&payload).unwrap())
+            .unwrap();
+        let text = hook.details.message.as_ref().unwrap();
+        assert!(text.len() <= 1024 && text.ends_with('…'));
+        for invalid in [serde_json::Value::Null, "".into(), "../bad".into()] {
+            payload["turn_id"] = invalid;
+            assert!(hook
+                .read_payload(&serde_json::to_vec(&payload).unwrap())
+                .is_err());
+        }
+        assert!(hook
+            .read_payload(&vec![b' '; crate::agent_activity::MAX_HOOK_BYTES + 1])
+            .is_err());
         for operation in ["setup", "uninstall"] {
             for agent in ["claude", "codex"] {
                 let cli = Cli::try_parse_from([

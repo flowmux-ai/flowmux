@@ -114,6 +114,8 @@ fn make_pipe(name: &str, descriptor: &[u8], first: bool) -> anyhow::Result<Owned
 }
 
 pub fn run(mut cli: Cli) -> anyhow::Result<()> {
+    let codex_stop = matches!(&mut cli.command, Command::Hooks { op: crate::command::HooksOp::Codex(args) }
+        if args.event == crate::command::SessionHookEvent::Stop);
     let quiet = !cli.json
         && match &mut cli.command {
             Command::Hooks { op } => op.runtime_mut().is_some_and(|args| args.flowmux_hook),
@@ -121,8 +123,11 @@ pub fn run(mut cli: Cli) -> anyhow::Result<()> {
         };
     let result = response(cli);
     if quiet {
-        // Session tracking is observational. Native integrations must not add
+        // Activity tracking is observational. Native integrations must not add
         // context, block an agent, or emit warnings outside a flowmux terminal.
+        if codex_stop {
+            std::io::stdout().write_all(b"{}\n")?;
+        }
         return Ok(());
     }
     let response = result?;
@@ -157,7 +162,7 @@ fn response(mut cli: Cli) -> anyhow::Result<String> {
             .spawn(move || {
                 let mut bytes = Vec::new();
                 let result = std::io::stdin()
-                    .take(65537)
+                    .take((crate::agent_activity::MAX_HOOK_BYTES + 1) as u64)
                     .read_to_end(&mut bytes)
                     .map(|_| bytes);
                 let _ = send.send(result);

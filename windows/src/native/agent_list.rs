@@ -24,6 +24,32 @@ pub(super) struct State {
     presence: AgentPresence,
     session_reported: bool,
     last_hook: Option<Instant>,
+    native: Option<crate::agent_activity::Activity>,
+}
+impl State {
+    fn native_status(&mut self, snapshot: crate::agent_activity::Snapshot, visible: bool) -> bool {
+        let before = (
+            self.presence.public_status(),
+            self.presence.seen,
+            self.presence.status_text().map(str::to_string),
+        );
+        let mut report =
+            AgentStatusReport::from_activity(&self.presence.name, None, Some(self.entry.pid));
+        report.status = Some(snapshot.status);
+        report.source = Some("flowmux:hook".into());
+        report.message = Some(snapshot.text);
+        report.session_id = self.presence.session_id.clone();
+        self.presence.apply_report(report, visible);
+        if snapshot.interrupted {
+            self.presence.seen = true;
+        }
+        before
+            != (
+                self.presence.public_status(),
+                self.presence.seen,
+                self.presence.status_text().map(str::to_string),
+            )
+    }
 }
 pub(super) enum Report {
     Activity(SurfaceId, AgentReportArgs),
@@ -115,6 +141,7 @@ impl App {
                     .context("session hook requires a conversation ID")?,
             )?,
         );
+        args.details.validate(args.event, &args.agent)?;
         self.agents_poll();
         if self.agent_presence(surface).is_some() {
             return self
@@ -169,25 +196,67 @@ impl App {
             .context("Agent process is no longer available")?;
         // Native hooks have no producer sequence. Order observed requests only;
         // an old conversation's end must never clear the current conversation.
-        let accepted = state
-            .last_hook
-            .is_none_or(|last| reply.received_at() > last)
-            && (args.event == SessionHookEvent::SessionStart
-                || state.presence.session_id == args.session_id);
+        let visible = self.source_is_focused(Some(surface));
+        let accepted = if args.event.is_session() {
+            state
+                .last_hook
+                .is_none_or(|last| reply.received_at() > last)
+                && (args.event == SessionHookEvent::SessionStart
+                    || state.presence.session_id == args.session_id)
+        } else if state.presence.session_id == args.session_id
+            || (!state.session_reported && state.presence.session_id.is_none())
+        {
+            let activity = state.native.get_or_insert_with(Default::default);
+            let accepted = activity.apply(args.event, &args.details, reply.received_at());
+            if accepted {
+                let snapshot = activity.snapshot();
+                let identity_changed = state.presence.session_id != args.session_id;
+                state.presence.session_id = args.session_id.clone();
+                if state.native_status(snapshot, visible) || identity_changed {
+                    self.sender.send(Event::AgentChanged);
+                }
+            }
+            accepted
+        } else {
+            false
+        };
         if accepted {
-            state.last_hook = Some(reply.received_at());
+            state.last_hook = Some(
+                state
+                    .last_hook
+                    .map_or(reply.received_at(), |last| last.max(reply.received_at())),
+            );
             state.session_reported = true;
-            let id = if args.event == SessionHookEvent::SessionStart {
-                args.session_id.clone()
-            } else {
+            let id = if args.event == SessionHookEvent::SessionEnd {
                 None
+            } else {
+                args.session_id.clone()
             };
             if state.presence.session_id != id {
+                if state.native.take().is_some() {
+                    state.native_status(
+                        crate::agent_activity::Snapshot {
+                            status: AgentStatus::Unknown,
+                            text: if id.is_some() {
+                                "Ready"
+                            } else {
+                                "Session ended"
+                            }
+                            .into(),
+                            interrupted: true,
+                        },
+                        visible,
+                    );
+                }
                 state.presence.session_id = id;
                 self.sender.send(Event::AgentChanged);
             }
         }
-        Ok(json!({"accepted":accepted,"surface":surface,"session_id":state.presence.session_id}))
+        let mut presence = state.presence.clone();
+        presence.status = presence.public_status();
+        Ok(
+            json!({"accepted":accepted,"surface":surface,"session_id":state.presence.session_id,"agent":presence}),
+        )
     }
 
     pub(super) fn agent_presence(&self, id: SurfaceId) -> Option<AgentPresence> {
@@ -294,6 +363,7 @@ impl App {
                         presence,
                         session_reported: args.session_id.is_some(),
                         last_hook: None,
+                        native: None,
                     },
                 );
                 true
@@ -320,6 +390,9 @@ impl App {
                     state.presence.apply_report(report, visible)
                 };
                 if accepted {
+                    if args.session_id.is_some() && args.session_id != current_session {
+                        state.native = None;
+                    }
                     state.session_reported |= args.session_id.is_some();
                     if args.session_id.is_none() {
                         state.presence.session_id = current_session;
@@ -493,6 +566,12 @@ impl App {
             states.retain(|_, state| state.entry.current(self));
             let mut changed = before != states.len();
             for (id, state) in states.iter_mut() {
+                if let Some(activity) = &mut state.native {
+                    if activity.settle(Instant::now()) {
+                        let snapshot = activity.snapshot();
+                        changed |= state.native_status(snapshot, self.source_is_focused(Some(*id)));
+                    }
+                }
                 if self.source_is_focused(Some(*id)) {
                     changed |= state.presence.mark_seen();
                 }
@@ -620,6 +699,7 @@ impl App {
                     presence,
                     session_reported: false,
                     last_hook: None,
+                    native: None,
                 },
             );
             changed = true;

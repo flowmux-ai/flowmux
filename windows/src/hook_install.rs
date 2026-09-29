@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Windows session-hook configuration; unrelated provider settings stay intact.
+//! Windows native-hook configuration; unrelated provider settings stay intact.
 use anyhow::Context;
 use base64::Engine;
 use serde_json::{json, Value};
@@ -9,6 +9,25 @@ const EVENTS: [(&str, &str); 2] = [
     ("SessionStart", "session-start"),
     ("SessionEnd", "session-end"),
 ];
+const CODEX_EVENTS: [(&str, &str); 10] = [
+    ("SessionStart", "session-start"),
+    ("SessionEnd", "session-end"),
+    ("UserPromptSubmit", "turn-start"),
+    ("PreToolUse", "running"),
+    ("PostToolUse", "running"),
+    ("PermissionRequest", "notification"),
+    ("SubagentStart", "subagent-start"),
+    ("SubagentStop", "subagent-stop"),
+    ("Stop", "stop"),
+    ("Interrupt", "interrupt"),
+];
+fn events(agent: &str) -> &[(&str, &str)] {
+    if agent == "codex" {
+        &CODEX_EVENTS
+    } else {
+        &EVENTS
+    }
+}
 
 fn handler(agent: &str, event: &str, executable: &str) -> Value {
     if agent == "claude" {
@@ -66,7 +85,7 @@ fn changed(mut root: Value, agent: &str, executable: Option<&str>) -> anyhow::Re
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .context("hooks must be a JSON object")?;
-    for (event, operation) in EVENTS {
+    for &(event, operation) in events(agent) {
         if !hooks.contains_key(event) && executable.is_none() {
             continue;
         }
@@ -166,7 +185,7 @@ pub fn run(args: &crate::command::HookConfigArgs, uninstall: bool) -> anyhow::Re
             "{}\n",
             json!({"agent":args.agent,
         "path":path,"changed":changed,"operation":if uninstall {"uninstall"} else {"setup"},
-        "events":["SessionStart","SessionEnd"]})
+        "events":events(&args.agent).iter().map(|(event,_)| *event).collect::<Vec<_>>()})
         )
     };
     if uninstall && !requested.try_exists()? {
