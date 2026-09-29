@@ -2,7 +2,7 @@
 //! Native right-hand worktree dock; repository operations belong to the host.
 use super::*;
 use windows_sys::Win32::System::SystemServices::{
-    SS_ENDELLIPSIS, SS_NOPREFIX, SS_NOTIFY, SS_PATHELLIPSIS,
+    SS_EDITCONTROL, SS_ENDELLIPSIS, SS_NOPREFIX, SS_NOTIFY, SS_PATHELLIPSIS,
 };
 use windows_sys::Win32::UI::{
     Controls::SetScrollInfo,
@@ -34,6 +34,7 @@ struct Route {
     scroll: i32,
     limit: i32,
     step: i32,
+    rows_top: i32,
     open: bool,
     busy: bool,
     selection: Option<model::Rect>,
@@ -205,6 +206,8 @@ pub(super) struct Panel {
     heading: HWND,
     repository: HWND,
     message: HWND,
+    message_heading: HWND,
+    retry: HWND,
     refresh: HWND,
     close: HWND,
     viewport: HWND,
@@ -213,6 +216,7 @@ pub(super) struct Panel {
     title: String,
     status_text: String,
     busy: bool,
+    not_repository: bool,
     area: Option<model::Rect>,
     scale: f64,
     background: bool,
@@ -259,6 +263,8 @@ impl Panel {
                 heading: std::ptr::null_mut(),
                 repository: std::ptr::null_mut(),
                 message: std::ptr::null_mut(),
+                message_heading: std::ptr::null_mut(),
+                retry: std::ptr::null_mut(),
                 refresh: std::ptr::null_mut(),
                 close: std::ptr::null_mut(),
                 viewport: std::ptr::null_mut(),
@@ -267,6 +273,7 @@ impl Panel {
                 title: String::new(),
                 status_text: String::new(),
                 busy: false,
+                not_repository: false,
                 area: None,
                 scale: 1.0,
                 background,
@@ -283,6 +290,7 @@ impl Panel {
                         scroll: 0,
                         limit: 0,
                         step: 26,
+                        rows_top: 0,
                         open: false,
                         busy: false,
                         selection: None,
@@ -300,7 +308,6 @@ impl Panel {
             chrome::register_control(panel.heading, chrome::ControlRole::Caption);
             panel.repository =
                 panel.child(window, "STATIC", "", 2, SS_NOPREFIX | SS_PATHELLIPSIS)?;
-            panel.message = panel.child(window, "STATIC", "", 3, SS_NOPREFIX)?;
             panel.refresh = panel.child(window, "BUTTON", "Refresh worktrees", 4, 0)?;
             panel.close = panel.child(window, "BUTTON", "Close worktree panel", 5, 0)?;
             panel.viewport = panel.child(
@@ -311,6 +318,21 @@ impl Panel {
                 WS_VSCROLL | WS_CLIPCHILDREN | WS_TABSTOP,
             )?;
             SetWindowLongW(panel.viewport, GWL_EXSTYLE, WS_EX_CONTROLPARENT as i32);
+            panel.message = panel.child(
+                panel.viewport,
+                "STATIC",
+                "",
+                3,
+                SS_NOPREFIX | SS_EDITCONTROL,
+            )?;
+            panel.message_heading = panel.child(
+                panel.viewport,
+                "STATIC",
+                "",
+                7,
+                SS_NOPREFIX | SS_EDITCONTROL,
+            )?;
+            panel.retry = panel.child(panel.viewport, "BUTTON", "Retry", 8, 0)?;
             ROUTES.with(|routes| {
                 routes
                     .borrow_mut()
@@ -321,6 +343,7 @@ impl Panel {
             ACTIONS.with(|actions| {
                 let mut actions = actions.borrow_mut();
                 actions.insert(panel.refresh as isize, (window, UiAction::Refresh));
+                actions.insert(panel.retry as isize, (window, UiAction::Refresh));
                 actions.insert(panel.close as isize, (window, UiAction::Close));
             });
             panel.refresh_theme()?;
@@ -371,6 +394,7 @@ impl Panel {
         status: &str,
         rows: Vec<Row>,
         busy: bool,
+        not_repository: bool,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             rows.len() <= MAX_ROWS,
@@ -380,6 +404,7 @@ impl Panel {
             && self.status_text == status
             && self.rows == rows
             && self.busy == busy
+            && self.not_repository == not_repository
         {
             return Ok(());
         }
@@ -424,6 +449,7 @@ impl Panel {
         }
         self.rows = rows;
         self.busy = busy;
+        self.not_repository = not_repository;
         ROUTES.with(|routes| {
             routes
                 .borrow_mut()
@@ -434,6 +460,10 @@ impl Panel {
         unsafe {
             checked(SetWindowTextW(self.repository, wide(title).as_ptr()))?;
             checked(SetWindowTextW(self.message, wide(status).as_ptr()))?;
+            checked(SetWindowTextW(
+                self.message_heading,
+                wide(self.message_title()).as_ptr(),
+            ))?;
             EnableWindow(self.refresh, i32::from(!busy));
         }
         for (index, controls) in self.controls.iter().enumerate() {
@@ -526,20 +556,7 @@ impl Panel {
             );
             place(self.heading, margin, px(5), title_width, px(22));
             place(self.repository, margin, px(29), title_width, px(20));
-            let top = if self.status_text.is_empty() {
-                px(60)
-            } else {
-                px(90)
-            };
-            ShowWindow(
-                self.message,
-                if self.status_text.is_empty() {
-                    SW_HIDE
-                } else {
-                    SW_SHOWNA
-                },
-            );
-            place(self.message, margin, px(59), inner, px(26));
+            let top = px(60);
             place(
                 self.viewport,
                 margin,
@@ -550,13 +567,40 @@ impl Panel {
             let mut view = RECT::default();
             GetClientRect(self.viewport, &mut view);
             let page = view.bottom.max(1);
-            let content = px(self.rows.len() as i32 * ROW_HEIGHT);
+            // Keep a stable text width while the native vertical scrollbar
+            // appears/disappears, so wrapped diagnostics cannot oscillate.
+            let text_width = (inner
+                - px(8)
+                - GetSystemMetricsForDpi(SM_CXVSCROLL, (self.scale * 96.0).round() as u32))
+            .max(1);
+            let title_height = text_height(self.message_heading, text_width);
+            let message_height = text_height(self.message, text_width);
+            let retry = self.rows.is_empty()
+                && !self.busy
+                && !self.not_repository
+                && !self.status_text.is_empty();
+            EnableWindow(self.retry, i32::from(retry));
+            let status_height = if title_height + message_height == 0 {
+                0
+            } else {
+                title_height
+                    + message_height
+                    + px(if title_height > 0 { 20 } else { 12 })
+                    + if retry { px(40) } else { 0 }
+            };
+            let centered = if self.rows.is_empty() {
+                (page - status_height).max(0) / 2
+            } else {
+                0
+            };
+            let content = status_height + px(self.rows.len() as i32 * ROW_HEIGHT);
             let offset = ROUTES.with(|routes| {
                 let mut routes = routes.borrow_mut();
                 let route = routes.get_mut(&(self.window as isize)).unwrap();
                 route.limit = (content - page).max(0);
                 route.scroll = route.scroll.min(route.limit);
                 route.step = px(26).max(1);
+                route.rows_top = status_height;
                 route.scroll
             });
             let info = SCROLLINFO {
@@ -571,13 +615,37 @@ impl Panel {
             SetScrollInfo(self.viewport, SB_VERT, &info, 1);
             GetClientRect(self.viewport, &mut view);
             let row_width = view.right.max(1);
+            let message_top = centered + px(6) - offset;
+            for (window, visible) in [
+                (self.message_heading, title_height > 0),
+                (self.message, message_height > 0),
+                (self.retry, retry),
+            ] {
+                ShowWindow(window, if visible { SW_SHOWNA } else { SW_HIDE });
+            }
+            place(
+                self.message_heading,
+                px(4),
+                message_top,
+                text_width,
+                title_height,
+            );
+            let body_top = message_top + title_height + if title_height > 0 { px(8) } else { 0 };
+            place(self.message, px(4), body_top, text_width, message_height);
+            place(
+                self.retry,
+                ((row_width - px(88)) / 2).max(0),
+                body_top + message_height + px(12),
+                px(88),
+                px(28),
+            );
             let selection = self
                 .rows
                 .iter()
                 .position(|row| self.selected.as_ref() == Some(&row.info.path))
                 .map(|index| model::Rect {
                     x: 0,
-                    y: px(index as i32 * ROW_HEIGHT) - offset,
+                    y: status_height + px(index as i32 * ROW_HEIGHT) - offset,
                     width: row_width,
                     height: px(ROW_HEIGHT),
                 });
@@ -601,7 +669,7 @@ impl Panel {
                 if !visible {
                     continue;
                 }
-                let y = px(index as i32 * ROW_HEIGHT) - offset;
+                let y = status_height + px(index as i32 * ROW_HEIGHT) - offset;
                 for (line, label) in controls.labels.iter().enumerate() {
                     place(
                         *label,
@@ -639,6 +707,7 @@ impl Panel {
             let mut view = RECT::default();
             GetClientRect(self.viewport, &mut view);
             scroll(self.window, |route| {
+                let top = top + route.rows_top;
                 if top < route.scroll {
                     top
                 } else if top + height > route.scroll + view.bottom {
@@ -765,11 +834,13 @@ impl Panel {
             self.heading,
             self.repository,
             self.message,
+            self.message_heading,
             self.viewport,
         ] {
             chrome::register_control(window, chrome::ControlRole::Static);
         }
         chrome::register_control(self.heading, chrome::ControlRole::Caption);
+        chrome::register_button(self.retry, chrome::Role::Suggested);
         for (window, kind) in [
             (self.refresh, chrome::ChromeIcon::Reload),
             (self.close, chrome::ChromeIcon::Close),
@@ -811,11 +882,56 @@ impl Panel {
         }).collect();
         json!({"id":self.id,"window":self.window as usize,"owner":self.owner as usize,"refresh":self.refresh as usize,
             "heading":self.heading as usize,"repository":self.repository as usize,
+            "message_heading":self.message_heading as usize,"message_title":self.message_title(),
+            "message":self.message as usize,"message_bounds":geometry(self.message,self.viewport),
+            "retry":self.retry as usize,"retry_visible":unsafe {GetWindowLongPtrW(self.retry,GWL_STYLE) as u32 & WS_VISIBLE != 0},
+            "retry_bounds":geometry(self.retry,self.viewport),
             "refresh_tooltip":chrome::tooltip_text(self.refresh),"close_tooltip":chrome::tooltip_text(self.close),
             "close":self.close as usize,"viewport":self.viewport as usize,"open":self.area.is_some(),"busy":self.busy,
             "title":self.title,"status":self.status_text,"selected_path":self.selected,"rows":rows,"scroll":route.map_or(0,|r|r.scroll),
             "scroll_limit":route.map_or(0,|r|r.limit),"bounds":self.area,"viewport_bounds":geometry(self.viewport,self.window),
             "native_visible":unsafe{IsWindowVisible(self.window)!=0}})
+    }
+    fn message_title(&self) -> &'static str {
+        if !self.rows.is_empty() || self.busy {
+            ""
+        } else if self.not_repository {
+            "Not a Git repository"
+        } else if !self.status_text.is_empty() {
+            "Unable to load worktrees"
+        } else {
+            ""
+        }
+    }
+}
+fn text_height(window: HWND, width: i32) -> i32 {
+    unsafe {
+        let length = GetWindowTextLengthW(window).max(0) as usize;
+        if length == 0 {
+            return 0;
+        }
+        let mut raw = vec![0u16; length + 1];
+        let length = GetWindowTextW(window, raw.as_mut_ptr(), raw.len() as i32).max(0) as usize;
+        let text = chrome::caption_for_paint(&raw[..length]);
+        let dc = GetDC(window);
+        if dc.is_null() {
+            return 26;
+        }
+        let old = SelectObject(dc, SendMessageW(window, WM_GETFONT, 0, 0) as HFONT);
+        let mut rect = RECT {
+            right: width,
+            ..Default::default()
+        };
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            text.len() as i32,
+            &mut rect,
+            DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX | DT_EDITCONTROL,
+        );
+        SelectObject(dc, old);
+        ReleaseDC(window, dc);
+        rect.bottom.max(1)
     }
 }
 fn labels(row: &Row) -> [String; 5] {
@@ -902,6 +1018,8 @@ impl Drop for Panel {
             self.heading,
             self.repository,
             self.message,
+            self.message_heading,
+            self.retry,
             self.refresh,
             self.close,
             self.viewport,

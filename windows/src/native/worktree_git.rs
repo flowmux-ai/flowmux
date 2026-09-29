@@ -392,8 +392,17 @@ impl<'a> Runner<'a> {
     fn strings(&mut self, directory: &Path, args: &[&str]) -> Result<Output> {
         self.run(directory, &args.iter().map(OsStr::new).collect::<Vec<_>>())
     }
-    fn list(&mut self, start: &Path) -> Result<List> {
+    fn list(&mut self, start: &Path) -> Result<Option<List>> {
         let root = self.strings(start, &["rev-parse", "--show-toplevel"])?;
+        // The child environment fixes LC_ALL=C. Classify only Git's explicit
+        // discovery failure; permissions and corrupt metadata remain errors.
+        if root.code != 0
+            && root
+                .stderr
+                .starts_with(b"fatal: not a git repository (or any of the parent directories)")
+        {
+            return Ok(None);
+        }
         anyhow::ensure!(root.code == 0, "{}", root.error());
         let root_bytes = root.stdout.strip_suffix(b"\n").unwrap_or(&root.stdout);
         let root_bytes = root_bytes.strip_suffix(b"\r").unwrap_or(root_bytes);
@@ -460,11 +469,11 @@ impl<'a> Runner<'a> {
                 .then_with(|| a.branch.cmp(&b.branch))
                 .then_with(|| a.path.cmp(&b.path))
         });
-        Ok(List {
+        Ok(Some(List {
             repository_root: root.clone(),
             current_worktree: root,
             items,
-        })
+        }))
     }
 }
 fn normalize(path: &Path) -> PathBuf {
@@ -523,7 +532,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
         ) == CSTR_EQUAL
     }
 }
-pub(super) fn list(start: &Path, cancel: &AtomicBool) -> Result<List, String> {
+pub(super) fn list(start: &Path, cancel: &AtomicBool) -> Result<Option<List>, String> {
     Runner::new(cancel)
         .and_then(|mut runner| runner.list(start))
         .map_err(|e| format!("{e:#}"))
@@ -536,7 +545,10 @@ pub(super) fn remove(
 ) -> Result<(), RemoveError> {
     let failure = |error: anyhow::Error| RemoveError::Failed(format!("{error:#}"));
     let mut runner = Runner::new(cancel).map_err(failure)?;
-    let current = runner.list(root).map_err(failure)?;
+    let current = runner
+        .list(root)
+        .map_err(failure)?
+        .ok_or_else(|| RemoveError::Failed("Worktree repository is no longer available".into()))?;
     let path = normalize(path);
     let row = current
         .items

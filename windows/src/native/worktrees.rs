@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(super) enum Signal {
     Ui(Uuid, worktree_panel::UiAction),
-    Loaded(Uuid, Result<List, String>),
+    Loaded(Uuid, Result<Option<List>, String>),
     Removed(Uuid, PathBuf, Result<(), RemoveError>),
     Choice(Uuid, bool),
 }
@@ -289,18 +289,22 @@ impl App {
                     .to_string_lossy()
                     .into_owned()
             })
-            .unwrap_or_else(|| "Worktrees".into());
+            .unwrap_or_default();
+        let not_repository =
+            self.worktrees.list.is_none() && !busy && self.worktrees.error.is_empty();
         let status = if busy && self.worktrees.error.is_empty() {
             if self.worktrees.job.as_ref().is_some_and(|job| job.removing) {
                 "Removing worktree…"
             } else {
                 "Loading worktrees…"
             }
+        } else if not_repository {
+            "The focused pane is not in a Git repository"
         } else {
             &self.worktrees.error
         };
         if let Some(panel) = &mut self.worktrees.panel {
-            panel.set_state(&title, status, rows, busy)?;
+            panel.set_state(&title, status, rows, busy, not_repository)?;
         }
         Ok(())
     }
@@ -512,7 +516,7 @@ impl App {
                 {
                     match result {
                         Ok(list) => {
-                            self.worktrees.list = Some(list);
+                            self.worktrees.list = list;
                             self.worktrees.error.clear();
                         }
                         Err(error) => {
