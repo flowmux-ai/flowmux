@@ -11,7 +11,9 @@
 
 [Website](https://flowmux.org/) · [Releases](https://github.com/flowmux-ai/flowmux/releases/latest) · [Documentation](#documentation)
 
-<img src="resources/screenshot/screenshot_1.gif" alt="flowmux overview" width="100%" />
+<a href="https://flowmux.org/assets/flowmux-intro.mp4"><img src="resources/screenshot/flowmux-intro-preview.jpg" alt="Watch the flowmux introduction video" width="100%" /></a>
+
+[▶ Watch the introduction video](https://flowmux.org/assets/flowmux-intro.mp4)
 
 </div>
 
