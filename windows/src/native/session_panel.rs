@@ -7,7 +7,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 use windows_sys::Win32::{
-    System::SystemServices::{SS_ENDELLIPSIS, SS_NOPREFIX},
+    System::SystemServices::{SS_EDITCONTROL, SS_ENDELLIPSIS, SS_NOPREFIX},
     UI::{
         Controls::{
             DRAWITEMSTRUCT, EM_LIMITTEXT, EM_SETCUEBANNER, ODS_FOCUS, ODS_NOFOCUSRECT,
@@ -559,7 +559,7 @@ impl Panel {
                 RESUME,
                 WS_TABSTOP | BS_OWNERDRAW as u32,
             )?;
-            panel.message = panel.child("STATIC", "", 8, SS_NOPREFIX)?;
+            panel.message = panel.child("STATIC", "", 8, SS_NOPREFIX | SS_EDITCONTROL)?;
             ROUTES.with(|routes| {
                 routes.borrow_mut().insert(
                     window as isize,
@@ -754,12 +754,16 @@ impl Panel {
             p(28),
         );
         place(self.close, width - margin - tool, p(6), tool, p(28));
-        place(self.message, margin, p(40), inner, p(34));
-        place(self.search, margin, p(80), inner, p(28));
         let resume_height = p(30).min(height);
         let resume_y = (height - margin - resume_height).max(0);
         place(self.resume, margin, resume_y, inner, resume_height);
-        let content_top = p(116);
+        let message_height = chrome::wrapped_text_height(self.message, inner)
+            .max(p(34))
+            .min((resume_y - p(40 + 6 + 28) - gap).max(0));
+        place(self.message, margin, p(40), inner, message_height);
+        let search_y = p(40 + 6) + message_height;
+        place(self.search, margin, search_y, inner, p(28));
+        let content_top = search_y + p(28 + 8);
         let available = (resume_y - gap - content_top).max(0);
         let preview_height = p(150).min((available - p(80) - gap).max(0));
         let list_height =

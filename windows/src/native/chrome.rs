@@ -1682,6 +1682,38 @@ pub(super) fn search_key(text: &str) -> String {
     String::from_utf16_lossy(&caption_for_paint(&raw)).to_lowercase()
 }
 
+// Match wrapped STATIC drawing with the current font and transient NFC copy.
+pub(super) fn wrapped_text_height(window: HWND, width: i32) -> i32 {
+    unsafe {
+        let length = GetWindowTextLengthW(window).max(0) as usize;
+        if length == 0 {
+            return 0;
+        }
+        let mut raw = vec![0u16; length + 1];
+        let length = GetWindowTextW(window, raw.as_mut_ptr(), raw.len() as i32).max(0) as usize;
+        let text = caption_for_paint(&raw[..length]);
+        let dc = GetDC(window);
+        if dc.is_null() {
+            return 26;
+        }
+        let old = SelectObject(dc, SendMessageW(window, WM_GETFONT, 0, 0) as HFONT);
+        let mut rect = RECT {
+            right: width,
+            ..Default::default()
+        };
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            text.len() as i32,
+            &mut rect,
+            DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX | DT_EDITCONTROL,
+        );
+        SelectObject(dc, old);
+        ReleaseDC(window, dc);
+        rect.bottom.max(1)
+    }
+}
+
 // Native HWND text stays raw; only ordinary STATIC text uses the shared NFC
 // drawing copy. Image/owner-draw controls and oversized captions stay native.
 unsafe fn static_text_format(window: HWND) -> Option<u32> {

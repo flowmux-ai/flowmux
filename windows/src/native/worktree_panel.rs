@@ -573,8 +573,8 @@ impl Panel {
                 - px(8)
                 - GetSystemMetricsForDpi(SM_CXVSCROLL, (self.scale * 96.0).round() as u32))
             .max(1);
-            let title_height = text_height(self.message_heading, text_width);
-            let message_height = text_height(self.message, text_width);
+            let title_height = chrome::wrapped_text_height(self.message_heading, text_width);
+            let message_height = chrome::wrapped_text_height(self.message, text_width);
             let retry = self.rows.is_empty()
                 && !self.busy
                 && !self.not_repository
@@ -902,36 +902,6 @@ impl Panel {
         } else {
             ""
         }
-    }
-}
-fn text_height(window: HWND, width: i32) -> i32 {
-    unsafe {
-        let length = GetWindowTextLengthW(window).max(0) as usize;
-        if length == 0 {
-            return 0;
-        }
-        let mut raw = vec![0u16; length + 1];
-        let length = GetWindowTextW(window, raw.as_mut_ptr(), raw.len() as i32).max(0) as usize;
-        let text = chrome::caption_for_paint(&raw[..length]);
-        let dc = GetDC(window);
-        if dc.is_null() {
-            return 26;
-        }
-        let old = SelectObject(dc, SendMessageW(window, WM_GETFONT, 0, 0) as HFONT);
-        let mut rect = RECT {
-            right: width,
-            ..Default::default()
-        };
-        DrawTextW(
-            dc,
-            text.as_ptr(),
-            text.len() as i32,
-            &mut rect,
-            DT_CALCRECT | DT_WORDBREAK | DT_EXPANDTABS | DT_NOPREFIX | DT_EDITCONTROL,
-        );
-        SelectObject(dc, old);
-        ReleaseDC(window, dc);
-        rect.bottom.max(1)
     }
 }
 fn labels(row: &Row) -> [String; 5] {
