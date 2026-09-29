@@ -367,6 +367,15 @@ impl App {
                     return Ok(());
                 }
                 use session_panel::UiAction;
+                if matches!(action, UiAction::Refresh | UiAction::Resume(_))
+                    && self
+                        .sessions
+                        .panel
+                        .as_ref()
+                        .is_some_and(|panel| panel.composing())
+                {
+                    return Ok(());
+                }
                 match action {
                     UiAction::Close => {
                         self.sessions.shutdown();

@@ -81,13 +81,22 @@ fn set_text(window: HWND, value: &str) {
 fn enabled(window: HWND) -> bool {
     unsafe { IsWindowEnabled(window) != 0 && IsWindowEnabled(GetParent(window)) != 0 }
 }
+fn update_actions(window: HWND) {
+    if let Some(r) = route(window) {
+        unsafe {
+            let ready = !r.loading && !r.composing;
+            EnableWindow(GetDlgItem(window, 2), i32::from(ready));
+            EnableWindow(r.resume, i32::from(ready && r.can_resume));
+        }
+    }
+}
 fn emit(window: HWND, action: UiAction) {
     let Some(r) = route(window) else {
         return;
     };
     if !r.open
         || !enabled(window)
-        || (r.loading && matches!(action, UiAction::Refresh | UiAction::Resume(_)))
+        || ((r.loading || r.composing) && matches!(action, UiAction::Refresh | UiAction::Resume(_)))
     {
         return;
     }
@@ -184,6 +193,7 @@ unsafe extern "system" fn input_proc(
     _: usize,
 ) -> LRESULT {
     let parent = GetParent(window);
+    let lost_composition = message == WM_KILLFOCUS && route(parent).is_some_and(|r| r.composing);
     ROUTES.with(|routes| {
         if let Some(r) = routes.borrow_mut().get_mut(&(parent as isize)) {
             match message {
@@ -204,8 +214,14 @@ unsafe extern "system" fn input_proc(
         }
     });
     let result = DefSubclassProc(window, message, w, l);
-    if message == WM_IME_ENDCOMPOSITION {
+    if message == WM_IME_ENDCOMPOSITION || lost_composition {
         rebuild(parent, true);
+    }
+    if matches!(
+        message,
+        WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION | WM_KILLFOCUS
+    ) {
+        update_actions(parent);
     }
     if message == WM_NCDESTROY {
         RemoveWindowSubclass(window, Some(input_proc), id);
@@ -596,6 +612,14 @@ impl Panel {
                 .and_then(|r| r.selected.clone())
         })
     }
+    pub(super) fn composing(&self) -> bool {
+        ROUTES.with(|routes| {
+            routes
+                .borrow()
+                .get(&(self.window as isize))
+                .is_some_and(|r| r.composing)
+        })
+    }
     pub(super) fn update(
         &mut self,
         rows: &[HistorySession],
@@ -675,9 +699,8 @@ impl Panel {
         self.status_text = status.to_owned();
         set_text(self.message, status);
         set_text(self.preview, preview);
+        update_actions(self.window);
         unsafe {
-            EnableWindow(self.refresh, i32::from(!loading));
-            EnableWindow(self.resume, i32::from(allow));
             InvalidateRect(self.list, std::ptr::null(), 1);
         }
         self.layout(self.area.get());
