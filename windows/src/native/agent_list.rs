@@ -376,7 +376,7 @@ impl App {
     }
 
     fn apply_agent_report(
-        &self,
+        &mut self,
         surface: SurfaceId,
         args: &AgentReportArgs,
         entry: Option<Entry>,
@@ -390,64 +390,48 @@ impl App {
         report.message = args.message.clone();
         report.session_id = args.session_id.clone();
         let visible = self.source_is_focused(Some(surface));
+        if let Some(entry) = entry {
+            anyhow::ensure!(
+                entry.current(self)
+                    && entry.pid == args.pid
+                    && entry.agent.name().eq_ignore_ascii_case(&args.agent),
+                "report does not match the live agent in this terminal"
+            );
+            self.record_agents(vec![entry]);
+        }
         let accepted = {
             let mut states = self.agent_states.borrow_mut();
-            if let Some(entry) = entry {
-                anyhow::ensure!(
-                    entry.current(self)
-                        && entry.pid == args.pid
-                        && entry.agent.name().eq_ignore_ascii_case(&args.agent),
-                    "report does not match the live agent in this terminal"
-                );
-                let mut presence =
+            let state = states
+                .get_mut(&surface)
+                .context("agent process is no longer available")?;
+            anyhow::ensure!(
+                state.entry.current(self)
+                    && state.entry.pid == args.pid
+                    && state.presence.name == args.agent,
+                "report does not match the live agent in this terminal"
+            );
+            let current_session = state.presence.session_id.clone();
+            let accepted = if state.presence.source.as_deref() == Some(AGENT_SOURCE_PROC)
+                && state.presence.seq.is_none()
+            {
+                // Process identity alone is not a started turn. The first
+                // idle report establishes presence without inventing Done.
+                state.presence =
                     AgentPresence::from_report(report, visible).context("missing agent status")?;
-                if presence.session_id.is_none() {
-                    presence.session_id = entry.session_id.clone();
-                }
-                states.insert(
-                    surface,
-                    State {
-                        entry,
-                        presence,
-                        session_reported: args.session_id.is_some(),
-                        last_hook: None,
-                        native: None,
-                    },
-                );
                 true
             } else {
-                let state = states
-                    .get_mut(&surface)
-                    .context("agent process is no longer available")?;
-                anyhow::ensure!(
-                    state.entry.current(self)
-                        && state.entry.pid == args.pid
-                        && state.presence.name == args.agent,
-                    "report does not match the live agent in this terminal"
-                );
-                let current_session = state.presence.session_id.clone();
-                let accepted = if state.presence.source.as_deref() == Some(AGENT_SOURCE_PROC)
-                    && state.presence.seq.is_none()
-                {
-                    // Process identity alone is not a started turn. The first
-                    // idle report establishes presence without inventing Done.
-                    state.presence = AgentPresence::from_report(report, visible)
-                        .context("missing agent status")?;
-                    true
-                } else {
-                    state.presence.apply_report(report, visible)
-                };
-                if accepted {
-                    if args.session_id.is_some() && args.session_id != current_session {
-                        state.native = None;
-                    }
-                    state.session_reported |= args.session_id.is_some();
-                    if args.session_id.is_none() {
-                        state.presence.session_id = current_session;
-                    }
+                state.presence.apply_report(report, visible)
+            };
+            if accepted {
+                if args.session_id.is_some() && args.session_id != current_session {
+                    state.native = None;
                 }
-                accepted
+                state.session_reported |= args.session_id.is_some();
+                if args.session_id.is_none() {
+                    state.presence.session_id = current_session;
+                }
             }
+            accepted
         };
         let after = self.agent_presence(surface);
         let display = |p: &AgentPresence| {
@@ -725,9 +709,12 @@ impl App {
                 let (workspace, pane, _) = self.locate(entry.surface)?;
                 let workspace = &self.workspaces[workspace];
                 let presence = self.agent_presence(entry.surface).filter(|p| p.pid == Some(entry.pid) && p.name.eq_ignore_ascii_case(entry.agent.name()));
+                // The first reply precedes record_agents. An existing presence
+                // may deliberately clear its ID after a session-end hook.
+                let session_id = presence.as_ref().map_or(entry.session_id.as_deref(), |p| p.session_id.as_deref());
                 Some(json!({"workspace":workspace.name,"workspace_id":workspace.id,"root":workspace.cwd,
                     "pane":pane,"tab":entry.surface,"agent":entry.agent.name().to_ascii_lowercase(),"pid":entry.pid,"cwd":entry.cwd,
-                    "status":presence.as_ref().map_or(AgentStatus::Unknown, |p|p.status),"message":presence.as_ref().and_then(|p|p.message.as_deref()),"session_id":presence.as_ref().and_then(|p|p.session_id.as_deref()),"session_name":null,"messaging":false}))
+                    "status":presence.as_ref().map_or(AgentStatus::Unknown, |p|p.status),"message":presence.as_ref().and_then(|p|p.message.as_deref()),"session_id":session_id,"session_name":null,"messaging":false}))
                 }).collect());
                 self.record_agents(found.entries);
                 result

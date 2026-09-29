@@ -133,21 +133,25 @@ public static class OwnedCodexSessionFixture {
    File.WriteAllText(path+".result.tmp",json.Serialize(new {exit=child.ExitCode,stdout=stdout.Result,stderr=stderr.Result}),new UTF8Encoding(false));File.Delete(path);File.Move(path+".result.tmp",path+".result");
   }
  }
+ static void Hold(string home) {
+  var watch=Stopwatch.StartNew();string hook=Path.Combine(home,"hook-"+Process.GetCurrentProcess().Id+".json");
+  while(watch.ElapsedMilliseconds<60000){if(File.Exists(hook))Hook(hook);Thread.Sleep(10);}
+ }
  public static int Main(string[] args) {
   Console.OutputEncoding=new UTF8Encoding(false);
   if(args.Length==2 && args[0]=="--forward"){Hook(args[1],true);return 0;}
   if((args.Length==2 || (args.Length==4 && args[2]=="resume")) && args[0]=="--hold") {
    Environment.SetEnvironmentVariable("CODEX_HOME",Path.GetFullPath(args[1]),EnvironmentVariableTarget.Process);
    Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR",Path.GetFullPath(args[1]),EnvironmentVariableTarget.Process);
-   Console.WriteLine("SESSION_SOURCE_READY");Console.Out.Flush();var watch=Stopwatch.StartNew();string hook=Path.Combine(args[1],"hook-"+Process.GetCurrentProcess().Id+".json");
-   while(watch.ElapsedMilliseconds<60000){if(File.Exists(hook))Hook(hook);Thread.Sleep(10);}return 0;
+   Console.WriteLine("SESSION_SOURCE_READY");Console.Out.Flush();Hold(args[1]);return 0;
   }
   if(args.Length==2 && args[0]=="resume") {
    Guid id;if(!Guid.TryParse(args[1],out id))return 21;
    string home=Environment.GetEnvironmentVariable("CODEX_HOME");if(String.IsNullOrEmpty(home))return 22;
    var proof=new {argv=args,cwd=Environment.CurrentDirectory,home=home,pid=Process.GetCurrentProcess().Id,image=Process.GetCurrentProcess().MainModule.FileName};
    File.WriteAllText(Path.Combine(home,"resume-"+id.ToString()+".json"),new JavaScriptSerializer().Serialize(proof),new UTF8Encoding(false));
-   Console.WriteLine("RESUMED_"+id.ToString());return 0;
+   Console.WriteLine("RESUMED_"+id.ToString());Console.Out.Flush();
+   if(File.Exists(Path.Combine(home,"hold-resumed")))Hold(home);return 0;
   }
   return 23;
  }
@@ -160,6 +164,7 @@ public static class OwnedCodexSessionFixture {
  Require (@(Request @('agents')).Count -eq 0) 'Plain shell or a Codex-looking title was classified as an agent'
  Request @('settings','shell','cmd','--arg','/d')|Out-Null;$source=Agent-Tab $homeA $projectA $idA;$sourceIdentity=Request @('identify')
  if($RestoreOnly){
+ $first=Request @('report-agent','codex','--surface',$source.id,'--pid',[string]$source.pid,'--seq','1','--status','working','--message','작업 중 한 é 😀');Require ($first.accepted -and $first.agent.session_id -ceq $idA -and $first.agent.status -ceq 'working') 'Initial activity report lost the native resume ID or activity'
  $r=Hook 'session-start' (@{session_id=$idB}|ConvertTo-Json -Compress);Require ($r.accepted) 'Current conversation hook failed'
  $marker='RESTORE_RAW_한글_한_é_😀';Write-Line $local.id ('echo '+$marker);Screen $local.id {param($s) $s.text.Contains($marker)}|Out-Null
  $saved=Request @('save-state');$snapshot=[IO.File]::ReadAllText($saved.path);$state=$snapshot|ConvertFrom-Json;$binding=$state.agent_sessions.($source.id)
@@ -203,6 +208,25 @@ public static class OwnedCodexSessionFixture {
  $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};Screen $savedSurface {param($s) $s.text.Contains('Cannot resume session:') -and $s.text.Replace("`r",'').Replace("`n",'').Contains($projectA+'>')}|Out-Null
  Write-Line $savedSurface 'echo RESTORE_MISSING_AGENT_OK';Screen $savedSurface {param($s) $s.text.Contains('RESTORE_MISSING_AGENT_OK')}|Out-Null;Require ([IO.File]::ReadAllText($proofPath) -ceq $proofText) 'Missing executable reran the previous agent'
  Passed 'removed-agent-executable-reports-failure-and-returns-to-the-configured-shell'
+ Quit-Host;[IO.File]::WriteAllText((Join-Path $homeA 'hold-resumed'),'',$utf8);[IO.File]::WriteAllText($saved.path,$snapshot,$utf8);Start-Host @('--restore-window',$saved.window)
+ $tree=Await {param($t) @($t.surfaces).Count -eq 2 -and @($t.surfaces|Where-Object {$_.ready -and $_.running}).Count -eq 2};Screen $savedSurface {param($s) $s.text.Contains('RESUMED_'+$idB)}|Out-Null
+ $agents=@(Request @('agents'));$agent=@($agents|Where-Object tab -ceq $savedSurface);$terminal=@($tree.surfaces|Where-Object id -ceq $savedSurface)[0]
+ Require ($agent.Count -eq 1 -and $agent[0].session_id -ceq $idB -and $agent[0].pid -ne $terminal.pid) 'Resumed child agent was not discovered separately from its wrapper shell'
+ $source=@{id=$savedSurface;pid=$agent[0].pid};$r=Hook 'session-start' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted) 'Resumed child could not report its switched conversation'
+ Request @('detach-tab',$savedSurface)|Out-Null;$tree=Await {param($t) @($t.detached_windows|Where-Object surface -ceq $savedSurface).Count -eq 1};$frame=@($tree.detached_windows|Where-Object surface -ceq $savedSurface)[0]
+ Require (-not [CliProbe]::IsWindowVisible([IntPtr][long]$frame.window_handle)) 'Detached restore probe exposed a window';[OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id)|Out-Null;Stable @($terminal)|Out-Null
+ $detachedSave=Request @('save-state');$detachedState=[IO.File]::ReadAllText($detachedSave.path)|ConvertFrom-Json
+ Require ($detachedState.agent_sessions.($savedSurface).session_id -ceq $idA -and $detachedState.detached_windows.($savedSurface) -and $detachedState.shells.($savedSurface).program -ceq 'cmd') 'Moving a live resumed agent lost its current conversation, detached placement or ordinary shell'
+ Quit-Host $true;Start-Host @('--restore-window',$saved.window);$tree=Await {param($t) @($t.detached_windows|Where-Object surface -ceq $savedSurface).Count -eq 1 -and @($t.surfaces|Where-Object {$_.id -ceq $savedSurface -and $_.ready -and $_.running}).Count -eq 1}
+ $frame=@($tree.detached_windows|Where-Object surface -ceq $savedSurface)[0];Require (-not [CliProbe]::IsWindowVisible([IntPtr][long]$frame.window_handle)) 'Restored detached window became visible';[OptionsFixture]::Describe([long]$frame.window_handle,$owned.Id)|Out-Null
+ Screen $savedSurface {param($s) $s.text.Contains('RESUMED_'+$idA) -and -not $s.text.Contains('RESUMED_'+$idB)}|Out-Null
+ $agents=@(Request @('agents'));$agent=@($agents|Where-Object tab -ceq $savedSurface);Require ($agent.Count -eq 1 -and $agent[0].session_id -ceq $idA -and $agent[0].pid -ne $source.pid -and (Path-Same $agent[0].cwd $projectA)) 'Second restore did not continue the switched conversation in its project'
+ Passed 'live-resumed-agent-conversation-switch-survives-detach-save-close-and-second-restore'
+ $source=@{id=$savedSurface;pid=$agent[0].pid};$terminal=@($tree.surfaces|Where-Object id -ceq $savedSurface)[0];Request @('move-tab',$savedSurface,'--to-pane',$sourceIdentity.pane)|Out-Null;$tree=Await {param($t) @($t.detached_windows).Count -eq 0};Stable @($terminal)|Out-Null
+ $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted) 'Reattached resumed agent could not end its current conversation';$ended=@(Request @('agents'));Require (@($ended|Where-Object {$_.tab -ceq $savedSurface -and -not $_.session_id}).Count -eq 1) 'Agent list revived a session ID after its end hook';$closedSave=Request @('save-state');$closedState=[IO.File]::ReadAllText($closedSave.path)|ConvertFrom-Json;Require (-not $closedState.agent_sessions -and $closedState.shells.($savedSurface).program -ceq 'cmd') 'Reattached session end retained an automatic resume binding'
+ Request @('close-tab',$savedSurface)|Out-Null;$closedSave=Request @('save-state');$closedState=[IO.File]::ReadAllText($closedSave.path)|ConvertFrom-Json;Require (-not $closedState.agent_sessions -and -not $closedState.shells.($savedSurface) -and -not $closedState.screens.($savedSurface)) 'Closed resumed tab left orphaned state'
+ Passed 'reattach-keeps-live-session-identity-and-end-or-close-removes-persisted-agent-state'
+
  }else{
  $r=Hook 'session-end' (@{session_id=$idA}|ConvertTo-Json -Compress);Require ($r.accepted -and -not $r.session_id) 'Native end could not clear a startup resume ID before a start hook'
  $r=Hook 'session-start' (@{session_id=$idA.ToUpperInvariant();cwd='한글 한 é 😀'}|ConvertTo-Json -Compress);Require ($r.accepted -and $r.surface -ceq $source.id -and $r.session_id -ceq $idA) 'Owned child native hook did not establish its canonical conversation'
