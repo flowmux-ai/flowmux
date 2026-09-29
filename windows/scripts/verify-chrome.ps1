@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Owned hidden native chrome only. Run under a60s run-check.ps1 Job.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('details','overflow','resize')][string]$Case='details')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('details','overflow','resize','focus')][string]$Case='details')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
@@ -73,7 +73,7 @@ function Await-Width([int]$Width,[bool]$Dragging) {
         Start-Sleep -Milliseconds 20
     }while($true)
 }
-function Capture([string]$Name,$Tree) {
+function Capture([string]$Name,$Tree,[string]$FocusColor='#fff4b3') {
     Budget|Out-Null;$handle=[long]$Tree.window_handle;$controls=@([ChromeFixture]::Read($handle,$hostProcess.Id));$size=[ChromeFixture]::Size($handle,$hostProcess.Id)
     $path=Join-Path $directory ($Name+'.png');$bmp=Join-Path $directory ($Name+'.bmp')
     $capture=Request @('chrome-capture',$bmp)
@@ -102,7 +102,7 @@ function Capture([string]$Name,$Tree) {
     Require ([Math]::Abs($rows[0].ClipY-$Tree.chrome.sidebar_list_top) -le [Math]::Ceiling(2*$scale)) 'Scrolled rows leave unused space above the viewport'
     $selectionPixel=[ChromeFixture]::Pixel($path,($row[0].X+$row[0].Width-4),($row[0].Y+$row[0].Height-4))
     Require ($selectionPixel -eq $background) 'Selected workspace does not retain the sidebar background'
-    $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
+    $accent=$FocusColor
     $stripe=[int][Math]::Max(1,[Math]::Round(5*$scale))
     Require ([ChromeFixture]::ColorCount($path,$row[0].X,$row[0].Y,$stripe,$row[0].Height,$accent) -eq $stripe*$row[0].Height) 'Selected workspace lacks its full-height accent stripe independent of workspace color'
     $muted=if($Tree.chrome.theme -eq 'light'){'#5f6269'}else{'#abb1bc'}
@@ -159,10 +159,13 @@ function Workspace-Unread($Tree,$Capture,[string]$Workspace,[bool]$Unread) {
         Require ($count -gt $diameter*$diameter/3 -and $count -lt $diameter*$diameter -and [ChromeFixture]::Pixel($Capture.path,($x+[int][Math]::Floor($diameter/2)),($y+[int][Math]::Floor($diameter/2))) -eq $accent) 'Unread workspace dot was not painted as a7DIP circle'
     }else{Require ($count -eq 0) 'Workspace retained a stale unread dot'}
 }
-function FocusPaint($Tree,$Capture) {
+function Blend([string]$Color,[string]$Background,[int]$Opacity) {
+    $channels=foreach($offset in @(1,3,5)){[int][Math]::Floor(([Convert]::ToInt32($Color.Substring($offset,2),16)*$Opacity+[Convert]::ToInt32($Background.Substring($offset,2),16)*(100-$Opacity))/100)}
+    return '#{0:x2}{1:x2}{2:x2}' -f $channels[0],$channels[1],$channels[2]
+}
+function FocusPaint($Tree,$Capture,[string]$FocusColor='#fff4b3',[int]$Opacity=30) {
     $scale=[Math]::Max(96,$Capture.dpi)/96.0;$line=[int][Math]::Max(1,[Math]::Round(2*$scale));$one=[int][Math]::Max(1,[Math]::Round($scale));$bar=[int][Math]::Round(28*$scale)
     $surface=if($Tree.chrome.theme -eq 'light'){'#ffffff'}else{'#282c34'}
-    $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'}
     $border=if($Tree.chrome.theme -eq 'light'){'#d1d1d3'}else{'#454a55'}
     $selectedColor=if($Tree.chrome.theme -eq 'light'){'#dae6f5'}else{'#313741'}
     $selected=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.selected -and $_.layout_visible})
@@ -171,7 +174,7 @@ function FocusPaint($Tree,$Capture) {
     foreach($pane in $panes){
         $area=$pane[1];$active=@($selected|Where-Object {$_.pane -eq $pane[0]})
         Require ($active.Count -eq 1) 'A visible pane has no single active native tab'
-        $expected=if(-not $solo -and $active[0].focused){$accent}else{$surface}
+        $expected=if(-not $solo -and $active[0].focused){Blend $FocusColor $surface $Opacity}else{$surface}
         Require ([ChromeFixture]::ColorCount($Capture.path,$area.x,$area.y,$area.width,$line,$expected) -eq $area.width*$line) 'Pane focus line is missing, partial or visible in a single-surface workspace'
         Require ([ChromeFixture]::Pixel($Capture.path,($area.x+[int]($area.width/2)),($area.y+$line)) -eq $surface) 'Pane focus line exceeds2DIP'
         Require ([ChromeFixture]::ColorCount($Capture.path,$area.x,($area.y+$bar-$one),$area.width,$one,$border) -eq $area.width*$one) 'Pane header bottom separator is missing or covered by a tab'
@@ -181,7 +184,7 @@ function FocusPaint($Tree,$Capture) {
         Require ($close.Count -eq 1) 'Selected tab has no visible paired close control'
         $c=$close[0].rect;$multiple=@($Tree.chrome.controls|Where-Object {$_.kind -eq 'tab' -and $_.pane -eq $tab.pane}).Count -gt 1
         Require ($r.x+$r.width -eq $c.x -and $r.y -eq $c.y -and $r.height -eq $c.height -and [Math]::Abs($r.height-23*$scale) -le 1) 'Tab body and close are not a contiguous23DIP shape'
-        $top=if($multiple){$accent}else{$selectedColor}
+        $top=if($multiple){Blend $FocusColor $selectedColor $Opacity}else{$selectedColor}
         Require ([ChromeFixture]::ColorCount($Capture.path,($c.x-1),$r.y,2,$line,$top) -eq 2*$line) 'Active tab top line does not continue across body/close, or appears on a single tab'
         foreach($x in @(($c.x-1),$c.x,($c.x+$c.width-2))){
             Require ([ChromeFixture]::Pixel($Capture.path,$x,($r.y+$r.height-2)) -eq $selectedColor) 'Selected tab body and close do not share one background'
@@ -216,7 +219,31 @@ try {
     # Pin this fixture name before separate IPC/native reads; startup titles arrive asynchronously.
     Request @('workspace','rename',$tree.active_workspace,'workspace 한글')|Out-Null;$tree=Tree
     $initial=Capture 'initial' $tree
-    if($Case -eq 'details') {
+    if($Case -eq 'focus') {
+        FocusPaint $tree $initial
+        $defaults=(Request @('settings','show')).document.terminal
+        Require ($defaults.focus_border_color -ceq '#fff4b3' -and $defaults.focus_border_opacity -eq 30) 'Windows focus defaults differ from Linux'
+        Request @('new-tab','--shell=cmd','--cwd',$cwd)|Out-Null;$tree=Ready 2;$source=Request @('identify')
+        Request @('split','vertical','--shell=cmd')|Out-Null;$tree=Ready 3;$stable=Identities $tree;$controls=ControlIds $tree
+        $capture=Capture 'focus-default' $tree;FocusPaint $tree $capture
+        $evidence.checks+=@{name='Linux_focus_defaults_and_solo_multitab_split_paint';passed=$true}
+        foreach($theme in @('dark','light')){
+            Request @('settings','set','theme',$theme)|Out-Null
+            foreach($opacity in @(0,37,100)){
+                Request @('settings','set','focus-border-color','#12ABEF')|Out-Null;Request @('settings','set','focus-border-opacity',([string]$opacity))|Out-Null
+                $settings=Request @('settings','show');Require ($settings.document.terminal.focus_border_color -ceq '#12abef' -and $settings.document.terminal.focus_border_opacity -eq $opacity) 'Focus settings were not saved exactly'
+                $tree=Tree;$capture=Capture ('focus-'+$theme+'-'+$opacity) $tree '#12abef';FocusPaint $tree $capture '#12abef' $opacity
+                Require ((Identities $tree) -ceq $stable -and (ControlIds $tree) -ceq $controls) 'Focus appearance recreated terminal processes or native controls'
+            }
+        }
+        $evidence.checks+=@{name='focus_color_and_zero_partial_full_opacity_paint_live_in_dark_and_light';passed=$true}
+        Request @('settings','set','focus-border-opacity','0')|Out-Null;Request @('toggle-pane-zoom',$source.pane)|Out-Null;$tree=Tree
+        $capture=Capture 'focus-zoom-opacity-zero' $tree '#12abef';FocusPaint $tree $capture '#12abef' 0
+        $inner=$tree.layout.panes[0][1];$edge=[int][Math]::Round(2*$capture.dpi/96.0);$x=$inner.x-$edge;$y=$inner.y-$edge;$w=$inner.width+2*$edge;$h=$inner.height+2*$edge
+        foreach($strip in @(@($x,$y,$w,$edge),@($x,($y+$h-$edge),$w,$edge),@($x,$y,$edge,$h),@(($x+$w-$edge),$y,$edge,$h))){Require ([ChromeFixture]::ColorCount($capture.path,$strip[0],$strip[1],$strip[2],$strip[3],'#12abef') -eq $strip[2]*$strip[3]) 'Zoom outline lost full-opacity focus color'}
+        Request @('toggle-pane-zoom',$source.pane)|Out-Null;$tree=Tree;Require ((Identities $tree) -ceq $stable) 'Restoring focus frame replaced a terminal'
+        $evidence.checks+=@{name='workspace_stripe_and_zoom_frame_remain_full_opacity_with_transparent_focus_lines';passed=$true}
+    } elseif($Case -eq 'details') {
         FocusPaint $tree $initial
         $notification=(Request @('notify','--global','--title','한글 알림','chrome fixture')).id
         $noticeTree=Tree;$notice=Capture 'unread-bell' $noticeTree

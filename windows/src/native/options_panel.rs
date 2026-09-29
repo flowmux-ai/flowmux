@@ -37,6 +37,7 @@ pub(crate) enum UiAction {
     Close,
     About,
     AboutClosed(Uuid),
+    FocusColor,
     Layout,
     Bindings(bindings::Signal),
     FontPicker(fonts::Signal),
@@ -141,6 +142,7 @@ unsafe extern "system" fn procedure(
                     4 => emit(UiAction::Close),
                     5 => emit(UiAction::Reload),
                     8 => emit(UiAction::About),
+                    9 => emit(UiAction::FocusColor),
                     _ => {}
                 }
             }
@@ -211,6 +213,8 @@ pub(crate) struct Panel {
     reload: HWND,
     about_button: HWND,
     about: Option<(Uuid, editor::ClosePanel)>,
+    focus_color_button: HWND,
+    focus_custom_colors: [COLORREF; 16],
     rows: Vec<Row>,
     page: usize,
     open: bool,
@@ -282,6 +286,8 @@ impl Panel {
                 reload: std::ptr::null_mut(),
                 about_button: std::ptr::null_mut(),
                 about: None,
+                focus_color_button: std::ptr::null_mut(),
+                focus_custom_colors: [0; 16],
                 rows: Vec::new(),
                 page: 0,
                 open: false,
@@ -326,6 +332,7 @@ impl Panel {
             checked((!p.viewport.is_null()) as i32)?;
             for (page, first, label) in [
                 (0, Some(SettingKey::FontFamily), "Terminal"),
+                (0, Some(SettingKey::FocusBorderColor), "Focus"),
                 (0, Some(SettingKey::MinimapEnabled), "Minimap"),
                 (0, None, "Shell"),
                 (0, Some(SettingKey::UsageBarEnabled), "Agents"),
@@ -370,6 +377,18 @@ impl Panel {
                     ("Underline", "underline"),
                     ("Bar", "bar"),
                 ],
+            )?;
+            p.row(
+                Some(SettingKey::FocusBorderColor),
+                0,
+                "Focus border color (#RRGGBB)",
+                vec![],
+            )?;
+            p.row(
+                Some(SettingKey::FocusBorderOpacity),
+                0,
+                "Focus border opacity (0–100%)",
+                vec![],
             )?;
             p.row(
                 Some(SettingKey::MinimapEnabled),
@@ -439,6 +458,7 @@ impl Panel {
             p.bindings = Some(bindings::Bindings::new(&p)?);
             let font_entry = p.child_in(p.viewport, "BUTTON", "Choose…", 7, WS_TABSTOP)?;
             p.font_picker = Some(fonts::Picker::new(p.window, font_entry));
+            p.focus_color_button = p.child_in(p.viewport, "BUTTON", "Choose…", 9, WS_TABSTOP)?;
             p.layout();
             Ok(p)
         }
@@ -792,11 +812,12 @@ impl Panel {
         document: &crate::settings::Document,
         error: Option<&str>,
     ) {
+        let index = self.index(SettingKey::FontFamily);
         if matches!(signal, fonts::Signal::Open) {
             if !self.open
                 || self.page != 0
                 || self.pending.is_some()
-                || self.rows[0].due.is_some()
+                || self.rows[index].due.is_some()
                 || COMPOSING.with(Cell::get) != 0
                 || self
                     .bindings
@@ -805,7 +826,7 @@ impl Panel {
             {
                 return;
             }
-            let raw = Self::value(&self.rows[0]);
+            let raw = Self::value(&self.rows[index]);
             if let Some(picker) = self.font_picker.as_mut() {
                 if let Err(error) = picker.open(&raw, self.background, self.theme) {
                     self.status(&format!("{error:#}"));
@@ -833,7 +854,7 @@ impl Panel {
                 return;
             }
         };
-        let current = Self::value(&self.rows[0]);
+        let current = Self::value(&self.rows[index]);
         if COMPOSING.with(Cell::get) != 0 || snapshot.as_deref() != Some(current.as_str()) {
             picker.error(
                 "The original font field changed or is composing. Cancel and reopen the picker."
@@ -848,19 +869,19 @@ impl Panel {
             self.update(document, error, false);
             return;
         }
-        Self::set(&self.rows[0], &value);
-        if value == self.rows[0].baseline && value != document.terminal.font_family {
+        Self::set(&self.rows[index], &value);
+        if value == self.rows[index].baseline && value != document.terminal.font_family {
             // An explicit choice returning a dirty field to its old baseline
             // still conflicts with an external winner; next_due's normal no-op
             // optimization must not silently discard this case.
-            self.rows[0].due = None;
+            self.rows[index].due = None;
             self.failed(
-                0,
+                index,
                 "this setting changed elsewhere; reopen the editor before applying",
             );
             return;
         }
-        self.changed(0);
+        self.changed(index);
     }
     pub(super) fn theme_signal(&mut self, signal: themes::Signal) {
         if let themes::Signal::Reveal(index) = signal {
@@ -946,6 +967,54 @@ impl Panel {
                 }
             }
             _ => {}
+        }
+    }
+    pub(super) fn pick_focus_color(&mut self) {
+        if self.page != 0 || !self.reset_ready() {
+            return;
+        }
+        if self.background {
+            self.status("The native color dialog is disabled during hidden verification; use the hex field.");
+            return;
+        }
+        let index = self.index(SettingKey::FocusBorderColor);
+        let raw = Self::value(&self.rows[index]);
+        let baseline = self.rows[index].baseline.clone();
+        let initial = if crate::theme::valid_color(&raw) {
+            &raw
+        } else {
+            &baseline
+        };
+        match chrome::choose_color(
+            self.window,
+            chrome::color_ref(initial),
+            &mut self.focus_custom_colors,
+            self.background,
+        ) {
+            Ok(Some(color)) => {
+                if COMPOSING.with(Cell::get) != 0
+                    || raw != Self::value(&self.rows[index])
+                    || baseline != self.rows[index].baseline
+                {
+                    self.status(
+                        "The color field changed while the chooser was open; choose again.",
+                    );
+                    return;
+                }
+                Self::set(
+                    &self.rows[index],
+                    &format!(
+                        "#{:02x}{:02x}{:02x}",
+                        color & 255,
+                        (color >> 8) & 255,
+                        (color >> 16) & 255
+                    ),
+                );
+                self.changed(index);
+                self.rows[index].due = Some(Instant::now());
+            }
+            Ok(None) => {}
+            Err(error) => self.status(&format!("{error:#}")),
         }
     }
     pub(super) fn operation(
@@ -1094,7 +1163,7 @@ impl Panel {
             .as_ref()
             .is_some_and(fonts::Picker::is_open);
         for (index, row) in self.rows.iter_mut().enumerate() {
-            if index == 0 && font_picker_open {
+            if row.key == Some(SettingKey::FontFamily) && font_picker_open {
                 continue;
             }
             let value = row
@@ -1134,7 +1203,7 @@ impl Panel {
                     row.due = None;
                 }
                 row.baseline = value;
-                shell_baseline_updated |= index == 8;
+                shell_baseline_updated |= row.key.is_none();
                 row.error = None;
             } else if !composing
                 && current == row.baseline
@@ -1143,7 +1212,7 @@ impl Panel {
             {
                 Self::set(row, &value);
                 row.baseline = value;
-                shell_baseline_updated |= index == 8;
+                shell_baseline_updated |= row.key.is_none();
             }
             if own.is_some() && error.is_some() {
                 row.error = error.map(str::to_owned);
@@ -1182,6 +1251,7 @@ impl Panel {
             }
             EnableWindow(self.reset, i32::from(self.pending.is_none()));
             EnableWindow(self.reload, i32::from(self.pending.is_none()));
+            EnableWindow(self.focus_color_button, i32::from(self.pending.is_none()));
             if let Some(picker) = self.font_picker.as_ref() {
                 EnableWindow(picker.entry, i32::from(self.pending.is_none()));
             }
@@ -1349,6 +1419,10 @@ impl Panel {
                 }
             }
             let mut general_y = 8;
+            ShowWindow(
+                self.focus_color_button,
+                if self.page == 0 { SW_SHOWNA } else { SW_HIDE },
+            );
             for row in &self.rows {
                 let show =
                     row.page == self.page && (row.page == 0 || row.key == Some(SettingKey::Theme));
@@ -1383,19 +1457,33 @@ impl Panel {
                         px(246),
                         px(top) - offset,
                         view.right
-                            - px(if row.key == Some(SettingKey::FontFamily) {
-                                342
-                            } else if row.key == Some(SettingKey::Theme) {
-                                438
-                            } else {
-                                254
-                            }),
+                            - px(
+                                if matches!(
+                                    row.key,
+                                    Some(SettingKey::FontFamily | SettingKey::FocusBorderColor)
+                                ) {
+                                    342
+                                } else if row.key == Some(SettingKey::Theme) {
+                                    438
+                                } else {
+                                    254
+                                },
+                            ),
                         if row.choices.is_empty() {
                             px(30)
                         } else {
                             px(160)
                         },
                     );
+                    if row.key == Some(SettingKey::FocusBorderColor) {
+                        place(
+                            self.focus_color_button,
+                            view.right - px(88),
+                            px(top) - offset,
+                            px(80),
+                            px(30),
+                        );
+                    }
                 }
             }
             if let Some(picker) = self.font_picker.as_ref() {
@@ -1480,7 +1568,7 @@ impl Panel {
         })
     }
     pub(super) fn diagnostics(&self) -> Value {
-        json!({"about_button":self.about_button as usize,"about":self.about.as_ref().map(|(_, panel)|panel.diagnostics()),"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
+        json!({"focus_color_picker":self.focus_color_button as usize,"about_button":self.about_button as usize,"about":self.about.as_ref().map(|(_, panel)|panel.diagnostics()),"window":self.window as usize,"owner":unsafe{GetWindow(self.window,GW_OWNER)} as usize,"open":self.open,"native_visible":unsafe{IsWindowVisible(self.window)}!=0,"modal":false,"page":match self.page {0=>"general",1=>"theme",_=>"keybindings"},"pending":self.pending.is_some(),"auto_apply":true,"queued":self.rows.iter().filter(|row|row.due.is_some()).count(),"composing":COMPOSING.with(Cell::get)!=0,"viewport":self.viewport as usize,"scroll_offset":self.scroll.get(),"error_or_status":Self::text(self.status),"tabs":[{"name":"General","handle":self.tabs[0] as usize},{"name":"Theme","handle":self.tabs[1] as usize},{"name":"Keybindings","handle":self.tabs[2] as usize}],"keybindings":self.bindings.as_ref().map(bindings::Bindings::diagnostics),"font_picker":self.font_picker.as_ref().map(fonts::Picker::diagnostics),"theme_panel":self.theme_panel.as_ref().map(|theme|theme.diagnostics(self)),"reset":self.reset as usize,"reload":self.reload as usize,"close":self.close as usize,"controls":self.rows.iter().map(|row|json!({"key":row.key.map(|key|serde_json::to_value(key).unwrap()).unwrap_or(json!("default_shell")),"label":Self::text(row.label),"input":row.input as usize,"parent":self.viewport as usize,"draft_error":row.error,"page":if row.page==0{"general"}else{"theme"},"value":Self::value(row),"baseline":row.baseline})).collect::<Vec<_>>()})
     }
     pub(super) fn handle_message(&self, message: &MSG) -> bool {
         if self

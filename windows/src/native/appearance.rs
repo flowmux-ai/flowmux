@@ -153,6 +153,10 @@ impl App {
             return Ok(());
         };
         let index = match action {
+            UiAction::FocusColor => {
+                panel.pick_focus_color();
+                return self.options_save_next();
+            }
             UiAction::About => return panel.show_about(),
             UiAction::AboutClosed(id) => {
                 panel.close_about(id);

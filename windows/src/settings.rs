@@ -28,6 +28,8 @@ pub enum SettingKey {
     MinimapWidth,
     MinimapOpacity,
     EditorMinimapEnabled,
+    FocusBorderColor,
+    FocusBorderOpacity,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +124,8 @@ pub struct TerminalSettings {
     pub minimap_width: u16,
     pub minimap_opacity: u8,
     pub editor_minimap_enabled: bool,
+    pub focus_border_color: String,
+    pub focus_border_opacity: u8,
 }
 impl Default for TerminalSettings {
     fn default() -> Self {
@@ -141,11 +145,21 @@ impl Default for TerminalSettings {
             minimap_width: 40,
             minimap_opacity: 50,
             editor_minimap_enabled: true,
+            focus_border_color: flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT.into(),
+            focus_border_opacity: flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT,
         }
     }
 }
 impl TerminalSettings {
     pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            crate::theme::valid_color(&self.focus_border_color),
+            "focus border color must be #RRGGBB"
+        );
+        anyhow::ensure!(
+            self.focus_border_opacity <= 100,
+            "focus border opacity must be between 0 and 100"
+        );
         anyhow::ensure!(
             self.theme_preset
                 .as_deref()
@@ -195,6 +209,8 @@ impl TerminalSettings {
             SettingKey::MinimapWidth => self.minimap_width.to_string(),
             SettingKey::MinimapOpacity => self.minimap_opacity.to_string(),
             SettingKey::EditorMinimapEnabled => self.editor_minimap_enabled.to_string(),
+            SettingKey::FocusBorderColor => self.focus_border_color.clone(),
+            SettingKey::FocusBorderOpacity => self.focus_border_opacity.to_string(),
             SettingKey::ThemePreset => self.theme_preset.clone().unwrap_or_default(),
             SettingKey::ThemeBackground => {
                 self.theme_overrides.background.clone().unwrap_or_default()
@@ -271,6 +287,13 @@ impl TerminalSettings {
                 next.theme_overrides.normalize()?;
             }
             SettingKey::FontFamily => next.font_family = value.into(),
+            SettingKey::FocusBorderColor => next.focus_border_color = value.to_ascii_lowercase(),
+            SettingKey::FocusBorderOpacity => {
+                next.focus_border_opacity = value
+                    .trim()
+                    .parse()
+                    .context("focus border opacity must be an integer")?
+            }
             SettingKey::FontSize => {
                 next.font_size = value
                     .trim()
@@ -443,6 +466,22 @@ mod tests {
         .unwrap();
         assert!(old.terminal.minimap_enabled);
         assert!(old.terminal.editor_minimap_enabled);
+        assert_eq!(
+            old.terminal.focus_border_color,
+            flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT
+        );
+        assert_eq!(
+            old.terminal.focus_border_opacity,
+            flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT
+        );
+        for (key, value) in [
+            (SettingKey::FocusBorderColor, "#fff"),
+            (SettingKey::FocusBorderColor, "#한글aa"),
+            (SettingKey::FocusBorderOpacity, "101"),
+            (SettingKey::FocusBorderOpacity, "-1"),
+        ] {
+            assert!(old.terminal.changed(key, value, None).is_err());
+        }
         assert!(old
             .terminal
             .changed(SettingKey::EditorMinimapEnabled, "on", None)
@@ -458,6 +497,9 @@ mod tests {
             (SettingKey::MinimapOpacity, "100"),
             (SettingKey::MinimapEnabled, "false"),
             (SettingKey::EditorMinimapEnabled, "false"),
+            (SettingKey::FocusBorderColor, "#123abc"),
+            (SettingKey::FocusBorderOpacity, "0"),
+            (SettingKey::FocusBorderOpacity, "100"),
         ] {
             let value = old.terminal.changed(key, text, None).unwrap();
             assert_eq!(value.value(key), text);

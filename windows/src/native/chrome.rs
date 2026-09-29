@@ -326,6 +326,8 @@ pub(super) struct Palette {
     pub hover: COLORREF,
     pub selected: COLORREF,
     pub accent: COLORREF,
+    pub focus: COLORREF,
+    pub focus_opacity: u8,
     pub destructive: COLORREF,
     pub high_contrast: bool,
 }
@@ -347,6 +349,8 @@ impl Palette {
                     hover: GetSysColor(COLOR_HIGHLIGHT),
                     selected: GetSysColor(COLOR_HIGHLIGHT),
                     accent: GetSysColor(COLOR_HIGHLIGHT),
+                    focus: GetSysColor(COLOR_HIGHLIGHT),
+                    focus_opacity: 100,
                     destructive: GetSysColor(COLOR_WINDOWTEXT),
                     high_contrast: true,
                 }
@@ -362,6 +366,8 @@ impl Palette {
                 hover: rgb(55, 60, 70),
                 selected: rgb(49, 55, 65),
                 accent: rgb(120, 174, 237),
+                focus: color_ref(flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT),
+                focus_opacity: flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT,
                 destructive: rgb(246, 97, 81),
                 high_contrast: false,
             },
@@ -374,6 +380,8 @@ impl Palette {
                 hover: rgb(226, 227, 230),
                 selected: rgb(218, 230, 245),
                 accent: rgb(32, 102, 186),
+                focus: color_ref(flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT),
+                focus_opacity: flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT,
                 destructive: rgb(192, 28, 40),
                 high_contrast: false,
             },
@@ -618,6 +626,7 @@ struct WorkspaceClose {
 struct State {
     theme: Theme,
     resolved: Option<crate::theme::ResolvedTheme>,
+    focus: (COLORREF, u8),
     dpi: u32,
     palette: Palette,
     resources: Resources,
@@ -633,6 +642,10 @@ impl State {
         Self {
             theme: Theme::Dark,
             resolved: None,
+            focus: (
+                color_ref(flowmux_config::options::FOCUS_BORDER_COLOR_DEFAULT),
+                flowmux_config::options::FOCUS_BORDER_OPACITY_DEFAULT,
+            ),
             dpi: 96,
             palette,
             resources: Resources::new(palette, 96),
@@ -954,7 +967,14 @@ pub(super) fn configure_settings(settings: &crate::settings::TerminalSettings, d
     };
     // Keep the established legacy Windows chrome until a preset or custom color is selected.
     let custom = settings.theme_preset.is_some() || settings.theme_overrides != Default::default();
-    STATE.with(|slot| slot.borrow_mut().resolved = custom.then_some(colors));
+    STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        state.resolved = custom.then_some(colors);
+        state.focus = (
+            color_ref(&settings.focus_border_color),
+            settings.focus_border_opacity,
+        );
+    });
     configure(mode, dpi);
 }
 pub(super) fn color_ref(hex: &str) -> COLORREF {
@@ -973,6 +993,7 @@ pub(super) fn configure(theme: Theme, dpi: u32) {
     let contrast = high_contrast();
     let mut palette = Palette::new(theme, contrast);
     if !contrast {
+        (palette.focus, palette.focus_opacity) = STATE.with(|slot| slot.borrow().focus);
         if let Some(colors) = STATE.with(|slot| slot.borrow().resolved.clone()) {
             let bg = color_ref(&colors.background);
             let fg = color_ref(&colors.foreground);
@@ -1835,7 +1856,7 @@ unsafe fn draw_tab_background(
                 bottom: (rect.top + ((2 * dpi as i32 + 48) / 96).max(1)).min(rect.bottom),
                 ..*rect
             },
-            palette.accent,
+            blend(palette.focus, color, u32::from(palette.focus_opacity)),
         );
     }
     RestoreDC(dc, saved);
@@ -2006,7 +2027,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
             SetDCPenColor(
                 item.hDC,
                 if (selected && !working) || (attention && palette.high_contrast) {
-                    palette.accent
+                    blend(palette.focus, background, u32::from(palette.focus_opacity))
                 } else if palette.high_contrast {
                     palette.border
                 } else {
@@ -2163,7 +2184,7 @@ fn draw_button(item: &DRAWITEMSTRUCT) -> bool {
                         right: (item.rcItem.left + pixel(5)).min(item.rcItem.right),
                         ..item.rcItem
                     },
-                    palette.accent,
+                    palette.focus,
                 );
             }
             if let Some(workspace_color) = workspace_color {
@@ -2855,7 +2876,11 @@ pub(super) fn message(
                                             .min(area.bottom),
                                         ..area
                                     },
-                                    palette.accent,
+                                    blend(
+                                        palette.focus,
+                                        palette.surface,
+                                        u32::from(palette.focus_opacity),
+                                    ),
                                 );
                             }
                             fill(
@@ -2893,7 +2918,7 @@ pub(super) fn message(
                                 right,
                                 bottom,
                             },
-                            palette.accent,
+                            palette.focus,
                         );
                     }
                 }

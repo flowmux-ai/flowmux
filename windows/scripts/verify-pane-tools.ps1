@@ -76,7 +76,7 @@ function Pane-Area($Tree,[string]$Id){$bounds=$null;$count=0;foreach($entry in $
 function Check-ZoomFrame($Tree,[string]$Pane,[string]$Surface,$Outer,[bool]$Zoomed){
  $bitmap=Join-Path $directory 'zoom-frame.bmp';$capture=Request @('chrome-capture',$bitmap)
  Require ($capture.root_handle -eq $Tree.window_handle) 'Zoom frame capture selected another owned window'
- $accent=if($Tree.chrome.theme -eq 'light'){'#2066ba'}else{'#78aeed'};$edge=[int][Math]::Round(2*$Tree.chrome.dpi/96.0);$bar=[int][Math]::Round(28*$Tree.chrome.dpi/96.0)
+ $accent='#fff4b3';$edge=[int][Math]::Round(2*$Tree.chrome.dpi/96.0);$bar=[int][Math]::Round(28*$Tree.chrome.dpi/96.0)
  $x=[int]$Outer.x;$y=[int]$Outer.y;$w=[int]$Outer.width;$h=[int]$Outer.height
  Require ($w -gt 2*$edge -and $h -gt $bar+2*$edge) 'Zoom pixel fixture has no usable interior'
  if($Zoomed){

@@ -170,6 +170,14 @@ public static class OwnedCodexSessionFixture {
  Request @('focus-tab',$source.id)|Out-Null;$tree=Tree;$state=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
  Require ($state.status -ceq 'done' -and $state.seq -eq 5) 'Hidden focus falsely acknowledged Done'
  $agents=@(Request @('agents'));Require ($agents[0].status -ceq 'done' -and -not $agents[0].messaging) 'Agent listing discarded reported activity or advertised fake messaging'
+ Request @('settings','set','focus-border-color','#12abef')|Out-Null
+ foreach($focus in @(@('0','#24272e'),@('37','#1d5775'),@('100','#12abef'))){
+  Request @('settings','set','focus-border-opacity',$focus[0])|Out-Null;$tree=Tree;$rect=Agent-Bounds $tree $source.id $false
+  $bmp=Join-Path $directory ('agent-focus-'+$focus[0]+'.bmp');$png=Join-Path $directory ('agent-focus-'+$focus[0]+'.png');Request @('chrome-capture',$bmp,'--agent-bar')|Out-Null;[ChromeFixture]::Png($bmp,$png)
+  Require ([ChromeFixture]::Pixel($png,([int]($rect.X+$rect.Width/2)),$rect.Y) -ceq $focus[1] -and $tree.agent_bar.items[0].handle -eq $barHandle) 'Selected agent outline lost configured focus opacity or native control identity'
+ }
+ Request @('settings','set','focus-border-color','#fff4b3')|Out-Null;Request @('settings','set','focus-border-opacity','30')|Out-Null
+ Passed 'selected-agent-focus-color-opacity-zero-intermediate-full-and-stable-HWND'
  $r=Request ($report+@('--seq','6','--status','working'));Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.seen) 'A new turn retained an old completion alert'
  Passed 'Linux-agent-header-status-path-native-tree-tints-Unicode-and-stable-workspace-HWND'
  Stable @($source,$local)|Out-Null;Passed 'ordered-agent-reports-stale-duplicates-Unicode-blocked-unseen-completion-and-hidden-focus'

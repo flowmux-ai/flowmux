@@ -1,6 +1,6 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Hidden owned live Options; 50s work + bounded cleanup, outer Job60s.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about')][string]$Case='all')
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[ValidateSet('all','about','focus')][string]$Case='all')
 if (-not $env:FLOWMUX_TEST_ARTIFACT_ROOT) { throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.' }
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$cli=Join-Path $BuildDirectory 'flowmuxctl.exe';$gui=Join-Path $BuildDirectory 'flowmux.exe'
@@ -37,6 +37,28 @@ function Parent-Of($Status,$Row){Require ([bool]$Row.parent) 'Live Options input
 function Edit($Status,[string]$Key,[string]$Value){$row=Field $Status $Key;[OptionsFixture]::SetText((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Value)}
 function Guard($Status,[string]$Key,[bool]$Active){$row=Field $Status $Key;[OptionsFixture]::CompositionGuard((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Active)}
 function Select-Field($Status,[string]$Key,[int]$Index){$row=Field $Status $Key;[OptionsFixture]::Select((Parent-Of $Status $row),[long]$row.input,$owned.Id,$Index)}
+function Verify-Focus($Status){
+    $color=Field $Status 'focus_border_color';$opacity=Field $Status 'focus_border_opacity'
+    foreach($row in @($color,$opacity)){Require ((([OptionsFixture]::Describe([long]$row.input,$owned.Id)).Style -band 0x10000000) -ne 0) 'General focus field is hidden'}
+    $picker=[long]$Status.options.focus_color_picker;Require ([OptionsFixture]::Parent($picker,$owned.Id) -eq $Status.options.viewport) 'Focus color picker belongs to another viewport'
+    $bounds=[OptionsFixture]::RelativeBounds([long]$color.parent,[long]$color.input,$owned.Id);$button=[OptionsFixture]::RelativeBounds([long]$color.parent,$picker,$owned.Id)
+    Require ($button.X -ge $bounds.X+$bounds.Width -and $button.Y -eq $bounds.Y) 'Focus hex input overlaps its native chooser'
+    $revision=$Status.document.revision;[OptionsFixture]::Click([long]$color.parent,$picker,$owned.Id);$Status=Await {param($s) $s.options.error_or_status -match 'disabled during hidden verification'}
+    Require ($Status.document.revision -eq $revision) 'Hidden native color picker changed settings'
+    Edit $Status 'focus_border_color' '#한글 한';$Status=Await {param($s) (Field $s 'focus_border_color').draft_error -and -not $s.options.pending}
+    Edit $Status 'focus_border_opacity' '101';$Status=Await {param($s) (Field $s 'focus_border_opacity').draft_error -and -not $s.options.pending}
+    Request @('settings','set','theme','light')|Out-Null;$Status=Await {param($s) $s.document.terminal.theme -eq 'light' -and (Ack $s)}
+    Require ((Field $Status 'focus_border_color').value -ceq '#한글 한' -and (Field $Status 'focus_border_opacity').value -ceq '101' -and $Status.document.terminal.focus_border_color -ceq '#fff4b3' -and $Status.document.terminal.focus_border_opacity -eq 30) 'Invalid focus drafts changed saved values or disappeared after theme update'
+    $evidence.checks+=@{name='focus_fields_and_chooser_keep_invalid_Unicode_and_opacity_drafts_without_opening_desktop_dialog';passed=$true}
+    Guard $Status 'focus_border_color' $true;Edit $Status 'focus_border_color' '#12ABEF';[OptionsFixture]::Click([long]$color.parent,$picker,$owned.Id)
+    $Status=Await {param($s) $s.options.composing -and (Field $s 'focus_border_color').value -ceq '#12ABEF'}
+    Require ($Status.document.terminal.focus_border_color -ceq '#fff4b3' -and ([OptionsFixture]::Describe([long]$Status.options.window,$owned.Id)).Enabled) 'Chooser interrupted composition or committed the guarded color'
+    Guard $Status 'focus_border_color' $false;$Status=Await {param($s) $s.document.terminal.focus_border_color -ceq '#12abef' -and -not $s.options.pending -and (Ack $s)}
+    foreach($value in @('0','37','100')){Edit $Status 'focus_border_opacity' $value;$Status=Await {param($s) $s.document.terminal.focus_border_opacity -eq [int]$value -and -not $s.options.pending -and (Ack $s)}}
+    Require ((Identities (Tree)) -ceq $identities) 'Focus options restarted a terminal'
+    $evidence.checks+=@{name='focus_color_guard_commits_normalized_HEX_then_opacity_boundaries_apply_without_restarting_terminals';passed=$true;scope='application message guard only, not OS Korean IME/TSF'}
+    return $Status
+}
 function Verify-About($Status){
     $window=[OptionsFixture]::Describe([long]$Status.options.window,$owned.Id);$client=[ChromeFixture]::Size([long]$Status.options.window,$owned.Id)
     [ChromeFixture]::Resize([long]$Status.options.window,$owned.Id,[int](620*$scale-$window.Width+$client[0]),[int](400*$scale-$window.Height+$client[1]))
@@ -100,7 +122,7 @@ try {
     $controls=@([ChromeFixture]::Read([long]$status.options.window,$owned.Id));Require (@($controls|Where-Object {$_.Shown -and $_.Class -eq 'Button' -and (($_.Style -band 15) -ne 11 -or $_.Font -eq 0)}).Count -eq 0) 'Options buttons are not themed native controls'
 
 
-    if($Case -eq 'about'){$status=Verify-About $status}else{
+    if($Case -eq 'about'){$status=Verify-About $status}elseif($Case -eq 'focus'){$status=Verify-Focus $status}else{
     Require ($status.options.auto_apply -and [bool]$status.options.viewport) 'Options immediate-apply/viewport diagnostics missing'
     $previousBottom=0;$viewSize=[ChromeFixture]::Size([long]$status.options.viewport,$owned.Id)
     foreach($row in @($status.options.controls|Where-Object {$_.page -eq 'general'})){
