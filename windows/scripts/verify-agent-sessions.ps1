@@ -1,10 +1,10 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Actual owned agent process, child-only home and native history UI; no account access.
-param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$HooksOnly)
+param([string]$BuildDirectory="$PSScriptRoot\..\target\x86_64-pc-windows-msvc\debug",[switch]$HooksOnly,[switch]$SessionsOnly)
 if(-not $env:FLOWMUX_TEST_ARTIFACT_ROOT){throw 'Run this verifier through windows/scripts/run-check.ps1 so temporary artifacts are cleaned automatically.'}
 $ErrorActionPreference='Stop';$OutputEncoding=[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $BuildDirectory=(Resolve-Path $BuildDirectory).Path;$gui=Join-Path $BuildDirectory 'flowmux.exe';$cli=Join-Path $BuildDirectory 'flowmuxctl.exe'
-Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'SearchDialogFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'CliProbe.cs'),(Join-Path $PSScriptRoot 'OptionsFixture.cs'),(Join-Path $PSScriptRoot 'SearchDialogFixture.cs'),(Join-Path $PSScriptRoot 'PaneToolsFixture.cs')
 Add-Type -ReferencedAssemblies System.Drawing -Path (Join-Path $PSScriptRoot 'ChromeFixture.cs')
 $directory=Join-Path $env:FLOWMUX_TEST_ARTIFACT_ROOT 'sessions';[IO.Directory]::CreateDirectory($directory)|Out-Null
 $clock=[Diagnostics.Stopwatch]::StartNew();$owned=$null;$pipeName=$null;$hostOut=$null;$hostErr=$null;$failure=$null;$cleanupErrors=@();$cleaning=$false;$checks=@();$savedLocal=$env:LOCALAPPDATA;$originalCodexHome=$env:CODEX_HOME
@@ -64,7 +64,8 @@ function Hook([string]$Event,[string]$Payload,[bool]$Expected=$true,[bool]$Close
  $path=Join-Path $homeA ('hook-'+$source.pid+'.json');$result=$path+'.result';if(Test-Path -LiteralPath $result){Remove-Item -LiteralPath $result -Force}
  $payloadJson=@{cli=$cli;provider=$Provider;event=$Event;payload=$Payload;close=$CloseInput;surface=$Surface;shell=$Shell;nested=$Nested;config=$Config;padding=$Padding}|ConvertTo-Json -Compress
  [IO.File]::WriteAllText(($path+'.tmp'),$payloadJson,$utf8);[IO.File]::Move(($path+'.tmp'),$path);$timer=[Diagnostics.Stopwatch]::StartNew()
- while(-not (Test-Path -LiteralPath $result)){Budget|Out-Null;Require ($timer.ElapsedMilliseconds -lt 4500) 'Owned hook process exceeded deadline';Start-Sleep -Milliseconds 10}
+ $hookSource=[Diagnostics.Process]::GetProcessById([int]$source.pid)
+ try{while(-not (Test-Path -LiteralPath $result)){Budget|Out-Null;Require (-not $hookSource.HasExited) 'Owned hook source exited before writing its result';Require ($timer.ElapsedMilliseconds -lt 4500) 'Owned hook process exceeded deadline';Start-Sleep -Milliseconds 10}}finally{$hookSource.Dispose()}
  $r=Get-Content -Raw -Encoding UTF8 -LiteralPath $result|ConvertFrom-Json;$diagnostic.lastHook=$r;Require (($r.exit -eq 0) -eq $Expected) ('Hook exit mismatch: '+$r.stderr);if($Expected -and -not $Config){return ($r.stdout|ConvertFrom-Json)};return $r
 }
 function Outside-Hook($Id){
@@ -109,10 +110,14 @@ public static class OwnedCodexSessionFixture {
   info.UseShellExecute=false;info.CreateNoWindow=true;info.WindowStyle=ProcessWindowStyle.Hidden;info.RedirectStandardInput=true;info.RedirectStandardOutput=true;info.RedirectStandardError=true;info.StandardOutputEncoding=new UTF8Encoding(false);info.StandardErrorEncoding=new UTF8Encoding(false);
   using(var child=Process.Start(info)) {
    var stdout=child.StandardOutput.ReadToEndAsync();var stderr=child.StandardError.ReadToEndAsync();byte[] payload=Encoding.UTF8.GetBytes((string)request["payload"]);int padding=Convert.ToInt32(request["padding"]);
-   if(padding>0){byte[] prefix=Encoding.UTF8.GetBytes("{\"tool_calls\":[{\"tool_response\":\"");child.StandardInput.BaseStream.Write(prefix,0,prefix.Length);byte[] block=Encoding.UTF8.GetBytes(new String('x',4096)+"한 한 é 😀 PRIVATE_LARGE_RESULT");for(int n=0;n<padding;n+=block.Length)child.StandardInput.BaseStream.Write(block,0,block.Length);byte[] tail=Encoding.UTF8.GetBytes("\"}],");child.StandardInput.BaseStream.Write(tail,0,tail.Length);child.StandardInput.BaseStream.Write(payload,1,payload.Length-1);}
-   else child.StandardInput.BaseStream.Write(payload,0,payload.Length);
-   child.StandardInput.BaseStream.Flush();if((bool)request["close"])child.StandardInput.Close();
+   IOException inputError=null;
+   try {
+    if(padding>0){byte[] prefix=Encoding.UTF8.GetBytes("{\"tool_calls\":[{\"tool_response\":\"");child.StandardInput.BaseStream.Write(prefix,0,prefix.Length);byte[] block=Encoding.UTF8.GetBytes(new String('x',4096)+"한 한 é 😀 PRIVATE_LARGE_RESULT");for(int n=0;n<padding;n+=block.Length)child.StandardInput.BaseStream.Write(block,0,block.Length);byte[] tail=Encoding.UTF8.GetBytes("\"}],");child.StandardInput.BaseStream.Write(tail,0,tail.Length);child.StandardInput.BaseStream.Write(payload,1,payload.Length-1);}
+    else child.StandardInput.BaseStream.Write(payload,0,payload.Length);
+    child.StandardInput.BaseStream.Flush();if((bool)request["close"])child.StandardInput.Close();
+   } catch(IOException error) { inputError=error; }
    if(!child.WaitForExit(4000)){child.Kill();child.WaitForExit(1000);throw new TimeoutException("Hook CLI exceeded4s");}
+   if(inputError!=null && child.ExitCode==0)throw inputError;
    if(!stdout.Wait(500)||!stderr.Wait(500))throw new TimeoutException("Hook output did not close");
    File.WriteAllText(path+".result.tmp",json.Serialize(new {exit=child.ExitCode,stdout=stdout.Result,stderr=stderr.Result}),new UTF8Encoding(false));File.Delete(path);File.Move(path+".result.tmp",path+".result");
   }
@@ -299,6 +304,8 @@ public static class OwnedCodexSessionFixture {
   }
  }finally{$source=$setupSource;$agentExe=$setupAgentExe;$sourceIdentity=$setupSourceIdentity;Request @('focus-tab',$source.id)|Out-Null}
  }else{
+ $report=@('report-agent','codex','--surface',$source.id,'--pid',[string]$source.pid)
+ if(-not $SessionsOnly){
  Request @('focus-tab',$local.id)|Out-Null
  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $source.id})[0];$s.agent.pid -eq $source.pid -and $s.agent.source -ceq 'flowmux:proc'}
  $presence=@($tree.surfaces|Where-Object {$_.id -ceq $source.id})[0].agent
@@ -312,7 +319,6 @@ public static class OwnedCodexSessionFixture {
  Require ($agents.Count -eq 1 -and $agents[0].tab -ceq $source.id -and $unchanged.surface -ceq $local.id -and -not (Tree).agent_sessions.open) 'Agent listing omitted an inactive tab, changed focus or opened a dock'
  Request @('focus-tab',$source.id)|Out-Null;Passed 'window-agent-list-empty-spoof-rejection-owned-identity-unknown-activity-Unicode-and-inactive-tabs-without-dock'
 
- $report=@('report-agent','codex','--surface',$source.id,'--pid',[string]$source.pid)
  $initial=Request ($report+@('--seq','1','--status','idle'));Require ($initial.accepted -and $initial.agent.status -ceq 'idle' -and $initial.agent.seen) 'Initial idle report invented a completion alert'
  $statusText='한글 한 é 😀 상태';$r=Request ($report+@('--seq','2','--status','working','--message',$statusText))
  Require ($r.accepted -and $r.agent.status -ceq 'working' -and $r.agent.activity -ceq 'running' -and $r.agent.message -ceq $statusText) 'Working status did not preserve raw Unicode'
@@ -541,6 +547,7 @@ public static class OwnedCodexSessionFixture {
  foreach($extra in $extras[1..3]){Request @('close-tab',$extra.id)|Out-Null}
  $tree=Await {param($t) $row=@($t.chrome.controls|Where-Object {$_.kind -ceq 'workspace' -and $_.workspace -ceq $sourceIdentity.workspace})[0];$row.workspace_lines.Count -eq 3 -and @($t.surfaces).Count -eq 2};Stable @($source,$local)|Out-Null
  Passed 'five-owned-providers-Linux-urgency-and-pane-MRU-four-agent-cap-overflow-native-logos-and-close-shrink'
+ }
  Require ([IO.File]::Exists((Join-Path $homeA 'session_index.jsonl')) -and [IO.Directory]::Exists((Join-Path $homeA 'sessions'))) 'Owned session history fixture disappeared before discovery'
  Shortcut $source.id;$tree=Await {param($t) $t.agent_sessions.open -and -not $t.agent_sessions.loading -and @($t.agent_sessions.rows).Count -eq 2};$panel=Panel $tree
  Require (-not $tree.agent_sessions.agent.session_id) 'Native end resurrected the startup resume ID';Require ($tree.agent_sessions.agent.name -ceq 'Codex' -and $tree.agent_sessions.agent.pid -eq $source.pid -and (Path-Same $tree.agent_sessions.agent.home $homeA) -and $tree.agent_sessions.source.surface -ceq $source.id -and $tree.agent_sessions.source.session -ceq $source.session) 'Discovery did not resolve actual focused agent Job/home/session'
@@ -570,7 +577,19 @@ public static class OwnedCodexSessionFixture {
  [OptionsFixture]::PostEnter([long]$panel.query_handle,$owned.Id);[OptionsFixture]::PostEscape([long]$panel.query_handle,$owned.Id);Request @('settings','set','theme-preset','nord')|Out-Null;$tree=Tree
  Require ($tree.agent_sessions.open -and $tree.agent_sessions.panel.composing -and [string]::Equals([OptionsFixture]::Text([long]$panel.query_handle,$owned.Id),'한 é',[StringComparison]::Ordinal) -and @($tree.surfaces).Count -eq $compositionSurfaces.Count -and $tree.agent_sessions.selected -ceq $idA -and -not [OptionsFixture]::Describe([long]$panel.resume,$owned.Id).Enabled -and -not [OptionsFixture]::Describe([long]$panel.refresh,$owned.Id).Enabled) 'Theme or keys changed the composing draft, selection or disabled action state'
  Stable $compositionSurfaces|Out-Null;Passed 'session-composition-disables-Resume-Refresh-and-preserves-selection-processes-and-raw-draft-through-theme'
- [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.query_handle,$owned.Id,$false);[OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,65,$true,$false);$tree=Await {param($t) -not $t.agent_sessions.panel.composing -and @($t.agent_sessions.panel.rows).Count -eq 1 -and $t.agent_sessions.panel.resume_enabled -and [OptionsFixture]::Describe([long]$panel.refresh,$owned.Id).Enabled};Require ($tree.agent_sessions.panel.window -eq $panel.window -and $tree.agent_sessions.panel.list -eq $panel.list -and $tree.agent_sessions.panel.rows[0].id -ceq $idA) 'Composition commit/theme rebuilt controls or selected another row';Query $tree '';Passed 'owned-IME-guard-keeps-NFD-draft-through-theme-and-Escape-until-commit'
+ [OptionsFixture]::CompositionGuard([long]$panel.window,[long]$panel.query_handle,$owned.Id,$false);$tree=Await {param($t) -not $t.agent_sessions.panel.composing -and @($t.agent_sessions.panel.rows).Count -eq 1}
+ function Pending-SessionInput{
+  $t=Await {param($v) -not $v.agent_sessions.loading};$p=Panel $t
+  Require (-not $p.resume_enabled -and -not [OptionsFixture]::Describe([long]$p.refresh,$owned.Id).Enabled) 'Session actions became active before the IME ending key was released'
+  foreach($handle in @($p.resume,$p.refresh)){[PaneToolsFixture]::Command($owned,[long]$p.window,[long]$handle)}
+  [OptionsFixture]::PostKey([long]$p.query_handle,$owned.Id,13,$false,$false);[OptionsFixture]::PostKey([long]$p.query_handle,$owned.Id,27,$false,$false);$t=Tree
+  Require ($t.agent_sessions.open -and $t.agent_sessions.selected -ceq $idA -and @($t.agent_sessions.panel.rows).Count -eq 1 -and $t.agent_sessions.panel.query -ceq '한 é' -and -not $t.agent_sessions.panel.resume_enabled) 'Pending IME input resumed, refreshed, closed, or changed the raw draft/selection'
+  Stable $compositionSurfaces|Out-Null
+ }
+ Pending-SessionInput;[OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,16,$true,$false);Pending-SessionInput
+ [OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,65,$true,$false);$tree=Await {param($t) $t.agent_sessions.panel.resume_enabled -and [OptionsFixture]::Describe([long]$panel.refresh,$owned.Id).Enabled}
+ [OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,229,$false,$false);Pending-SessionInput;[OptionsFixture]::PostKey([long]$panel.query_handle,$owned.Id,229,$true,$false);$tree=Await {param($t) $t.agent_sessions.panel.resume_enabled -and [OptionsFixture]::Describe([long]$panel.refresh,$owned.Id).Enabled}
+ Require ($tree.agent_sessions.panel.window -eq $panel.window -and $tree.agent_sessions.panel.list -eq $panel.list -and $tree.agent_sessions.panel.rows[0].id -ceq $idA) 'Composition commit/theme rebuilt controls or selected another row';Query $tree '';Passed 'owned-IME-end-and-PROCESS-key-hold-disable-stale-Resume-Refresh-until-nonmodifier-release'
 
  $tree=Await {param($t) @($t.agent_sessions.panel.rows).Count -eq 2 -and -not $t.agent_sessions.loading};$tree=Select-Session $tree $idA;$currentPreview=$tree.agent_sessions.panel.preview_text
  $r=Request ($report+@('--seq','10','--status','blocked','--session-id',$idA.ToUpperInvariant()));Require ($r.accepted -and $r.agent.session_id -ceq $idA) 'Current conversation report was not canonicalized or accepted'
@@ -636,10 +655,11 @@ public static class OwnedCodexSessionFixture {
  Request ($report+@('--seq','10','--status','idle')) 3000 $true|Out-Null;Passed 'reported-state-follows-live-tab-moves-and-clears-on-owned-process-exit-without-false-completion'
 
  # Run/exit/relaunch a child agent in the same CMD Job, with no agents query.
+ Request @('settings','set','agent-bar-mode','true')|Out-Null
  Request @('focus-tab',$new.id)|Out-Null;$identity=Request @('identify');$plain=@((Tree).surfaces|Where-Object {$_.id -ceq $new.id})[0]
  foreach($run in @(1,2)){
   Request @('send-keys',$identity.pane,('"'+$agentExe+'" --hold "'+$homeA+'"'))|Out-Null;Request @('send-key','Enter','--surface',$new.id)|Out-Null
-  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$s.agent.source -ceq 'flowmux:proc' -and $s.agent.pid -ne $plain.pid -and @($t.agent_bar.items).Count -eq 1}
+  $tree=Await {param($t) $s=@($t.surfaces|Where-Object {$_.id -ceq $new.id})[0];$s.agent.source -ceq 'flowmux:proc' -and $s.agent.pid -ne $plain.pid -and $t.agent_bar -and @($t.agent_bar.items).Count -eq 1}
   $child=@($tree.surfaces|Where-Object {$_.id -ceq $new.id})[0].agent
   Require ($child.name -ceq 'codex' -and $child.status -ceq 'unknown' -and -not $child.seq -and -not $child.message -and -not $child.session_id) 'Child launch inherited a previous process activity or sequence'
   Require (@($tree.agent_bar.items).Count -eq 1 -and $tree.agent_bar.items[0].surface -ceq $new.id) 'New child agent did not restore its Agents bar'
@@ -653,7 +673,7 @@ public static class OwnedCodexSessionFixture {
  }
 
 }
-catch{$failure=$_.Exception.Message}
+catch{$failure=$_.Exception.Message;$diagnostic.failureAt=$_.InvocationInfo.PositionMessage}
 finally{
  $cleaning=$true
  if($owned){try{if(-not $owned.HasExited){Request @('quit','--discard-state')|Out-Null;Require ($owned.WaitForExit(4000)) 'Owned host quit timed out'};Require ($owned.ExitCode -eq 0) 'Owned host failed'}catch{$cleanupErrors+=,$_.Exception.Message}finally{try{if(-not $owned.HasExited){$owned.Kill();[CliProbe]::WaitAfterKill($owned)};$diagnostic.host=@{pid=$owned.Id;exitCode=$owned.ExitCode;stdout=[CliProbe]::Output($hostOut);stderr=[CliProbe]::Output($hostErr)}}catch{$cleanupErrors+=,$_.Exception.Message}finally{$owned.Dispose()}}}

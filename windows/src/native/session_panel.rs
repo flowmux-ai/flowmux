@@ -84,7 +84,7 @@ fn enabled(window: HWND) -> bool {
 fn update_actions(window: HWND) {
     if let Some(r) = route(window) {
         unsafe {
-            let ready = !r.loading && !r.composing;
+            let ready = !r.loading && !r.composing && !r.settling;
             EnableWindow(GetDlgItem(window, 2), i32::from(ready));
             EnableWindow(r.resume, i32::from(ready && r.can_resume));
         }
@@ -96,7 +96,8 @@ fn emit(window: HWND, action: UiAction) {
     };
     if !r.open
         || !enabled(window)
-        || ((r.loading || r.composing) && matches!(action, UiAction::Refresh | UiAction::Resume(_)))
+        || ((r.loading || r.composing || r.settling)
+            && matches!(action, UiAction::Refresh | UiAction::Resume(_)))
     {
         return;
     }
@@ -194,8 +195,9 @@ unsafe extern "system" fn input_proc(
 ) -> LRESULT {
     let parent = GetParent(window);
     let lost_composition = message == WM_KILLFOCUS && route(parent).is_some_and(|r| r.composing);
-    ROUTES.with(|routes| {
+    let changed = ROUTES.with(|routes| {
         if let Some(r) = routes.borrow_mut().get_mut(&(parent as isize)) {
+            let pending = r.composing || r.settling;
             match message {
                 WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION => {
                     r.composing = message == WM_IME_STARTCOMPOSITION;
@@ -211,16 +213,16 @@ unsafe extern "system" fn input_proc(
                 }
                 _ => {}
             }
+            pending != (r.composing || r.settling)
+        } else {
+            false
         }
     });
     let result = DefSubclassProc(window, message, w, l);
     if message == WM_IME_ENDCOMPOSITION || lost_composition {
         rebuild(parent, true);
     }
-    if matches!(
-        message,
-        WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION | WM_KILLFOCUS
-    ) {
+    if changed {
         update_actions(parent);
     }
     if message == WM_NCDESTROY {
@@ -612,12 +614,12 @@ impl Panel {
                 .and_then(|r| r.selected.clone())
         })
     }
-    pub(super) fn composing(&self) -> bool {
+    pub(super) fn composition_pending(&self) -> bool {
         ROUTES.with(|routes| {
             routes
                 .borrow()
                 .get(&(self.window as isize))
-                .is_some_and(|r| r.composing)
+                .is_some_and(|r| r.composing || r.settling)
         })
     }
     pub(super) fn update(

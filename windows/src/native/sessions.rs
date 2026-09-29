@@ -398,7 +398,7 @@ impl App {
                         .sessions
                         .panel
                         .as_ref()
-                        .is_some_and(|panel| panel.composing())
+                        .is_some_and(|panel| panel.composition_pending())
                 {
                     return Ok(());
                 }
@@ -499,6 +499,15 @@ impl App {
                             && self.sessions.selected.as_deref() == Some(&item.id)
                             && self.sessions.current_session.as_deref() != Some(&item.id)
                         {
+                            self.sessions.resume_enabled = true;
+                            if self
+                                .sessions
+                                .panel
+                                .as_ref()
+                                .is_some_and(|panel| panel.composition_pending())
+                            {
+                                return self.sessions_render();
+                            }
                             self.sessions_guard()?;
                             let normal = self.settings.default_shell.clone();
                             let surface = self.new_terminal(
