@@ -850,7 +850,6 @@ fn show_about_popup(parent: &impl IsA<gtk::Widget>) {
 fn about_body_with_version(version: &str) -> String {
     format!(
         "flowmux - Agent Workflow Multiplexer Terminal\n\n\
-         flowmux was inspired by the cmux (macOS) project.\n\n\
          Maintained by JSUYA (Junsu Choi).\n\
          <a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>\n\n\
          Version: v{}",
@@ -1521,7 +1520,7 @@ mod tests {
     fn about_body_contains_requested_copy() {
         let body = about_body_with_version("9.8.7-6");
         assert!(body.contains("flowmux - Agent Workflow Multiplexer Terminal"));
-        assert!(body.contains("flowmux was inspired by the cmux (macOS) project."));
+        assert!(!body.contains("cmux"));
         assert!(body.contains("Maintained by JSUYA (Junsu Choi)."));
         assert!(body.contains(
             "<a href=\"https://github.com/flowmux-ai/flowmux\">https://github.com/flowmux-ai/flowmux</a>"
