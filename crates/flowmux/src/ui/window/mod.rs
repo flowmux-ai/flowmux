@@ -1224,6 +1224,8 @@ mod agent_bar;
 mod browser_commands;
 mod command_palette;
 mod file_browser;
+#[cfg(all(test, feature = "native-smoke", target_os = "macos"))]
+pub(crate) mod macos_smoke;
 mod notification_commands;
 mod notification_coordinator;
 mod pane_callbacks;

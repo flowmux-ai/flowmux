@@ -52,10 +52,23 @@ updated `dist` directory and `package-lock.json` together.
 
 ### Platform scope
 
-Release packaging and CI target Linux. macOS-specific WebKit/IME code and
-[`install-macos.sh`](../scripts/install-macos.sh) are retained for development;
-the script's preflight does not establish that all workspace dependencies
-build on macOS. There is no native Windows build or installer in this tree.
+Release packaging targets Linux. CI also builds the workspace on macOS 15
+with Homebrew `pkg-config`, `gtk4`, `libadwaita`, and `vte3`, and runs an
+isolated main-thread GTK/WKWebView smoke test. It checks browser state,
+native focus, dirty-editor close cancellation, and persistence failure/retry.
+
+To run that native check locally, build the CLI first, then run:
+
+```sh
+cargo build -p flowmux-cli --locked
+FLOWMUX_BUNDLED_CLI_PATH="$PWD/target/debug/flowmuxctl" \
+  cargo test -p flowmux --test macos_native --features native-smoke --locked
+```
+
+The smoke executable owns temporary state/configuration and its own window;
+it does not restart an installed FlowMux. A logged-in macOS desktop is
+required. [`install-macos.sh`](../scripts/install-macos.sh) builds a local
+application bundle. There is no native Windows build or installer in this tree.
 
 ## Optional runtime dependencies
 

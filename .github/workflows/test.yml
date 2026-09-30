@@ -135,3 +135,41 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Run the separately ignored stress probes
         run: cargo test -p flowmux-core -p flowmux-daemon -p flowmux-notify --locked -- --ignored --nocapture
+
+  macos:
+    name: macOS build and native smoke
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUST_BACKTRACE: "1"
+      G_DEBUG: fatal-criticals
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install native dependencies
+        run: brew install pkg-config gtk4 libadwaita vte3
+      - name: Build the workspace
+        run: cargo build --workspace --locked
+      - name: Test IPC and GTK bridge contracts
+        run: |
+          cargo test -p flowmux --bin flowmux --locked ipc_handler::tests
+          cargo test -p flowmux --bin flowmux --locked bridge::tests
+      - name: Run isolated native smoke on the main thread
+        env:
+          FLOWMUX_BUNDLED_CLI_PATH: ${{ github.workspace }}/target/debug/flowmuxctl
+        run: |
+          cargo test -p flowmux --test macos_native --features native-smoke --locked 2>&1 | tee target/macos-native-smoke.log
+          grep -q '^MACOS_NATIVE_SMOKE_OK$' target/macos-native-smoke.log
+      - name: Upload native smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-native-smoke
+          path: target/macos-native-smoke.log
+          if-no-files-found: warn

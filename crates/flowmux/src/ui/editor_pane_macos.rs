@@ -523,6 +523,17 @@ impl EditorPane {
         Ok(())
     }
 
+    #[cfg(all(test, feature = "native-smoke"))]
+    pub(crate) fn insert_smoke_text(&self, text: &str) {
+        evaluate_script(
+            &self.native.web_view,
+            &format!(
+                "document.execCommand('insertText', false, {})",
+                serde_json::to_string(text).unwrap()
+            ),
+        );
+    }
+
     pub fn dirty_document_paths(&self) -> Vec<PathBuf> {
         self.host.dirty_document_paths()
     }
