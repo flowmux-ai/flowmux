@@ -48,6 +48,55 @@ async fn single_pane_handler_with_store(
 }
 
 #[tokio::test]
+async fn focus_requests_wait_for_gtk_application() {
+    for surface_focus in [false, true] {
+        for outcome in 0..3 {
+            let (handler, rx, pane, surface) = single_pane_handler().await;
+            let workspace = handler
+                .inner
+                .store()
+                .workspace_for_pane(pane)
+                .await
+                .unwrap();
+            let request = if surface_focus {
+                Request::SurfaceFocus { pane, surface }
+            } else {
+                Request::WorkspaceFocus { workspace }
+            };
+            let response = handler.handle(request);
+            tokio::pin!(response);
+            let command = tokio::select! {
+                biased;
+                result = &mut response => panic!("focus completed before GTK applied it: {result:?}"),
+                command = rx.recv() => command.unwrap(),
+            };
+            tokio::select! {
+                result = &mut response => panic!("focus completed with GTK still pending: {result:?}"),
+                _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+            }
+            let ack = match command {
+                GtkCommand::ActivateSurface { ack, .. } if surface_focus => ack.unwrap(),
+                GtkCommand::ActivateWorkspace { ack, .. } if !surface_focus => ack.unwrap(),
+                other => panic!("unexpected focus command: {other:?}"),
+            };
+            match outcome {
+                0 => drop(ack),
+                1 => ack.send(Ok(())).unwrap(),
+                _ => ack
+                    .send(Err("target was removed while queued".into()))
+                    .unwrap(),
+            }
+            let result = response.await;
+            if outcome == 1 {
+                assert!(matches!(result, Response::Ok));
+            } else {
+                assert!(matches!(result, Response::Error(RpcError::Internal(_))));
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
     let (handler, rx, _pane, _tab) = single_pane_handler().await;
     let root = std::path::PathBuf::from("/tmp/flowmux-ipc-create-workspace");
@@ -168,15 +217,18 @@ async fn workspace_focus_dispatches_activate_workspace_for_known_workspace() {
         .unwrap()
         .id;
 
-    assert!(matches!(
-        handler.handle(Request::WorkspaceFocus { workspace }).await,
-        Response::Ok
-    ));
-    let command = rx.recv().await.expect("workspace focus should dispatch");
-    assert!(matches!(
-        command,
-        GtkCommand::ActivateWorkspace { id } if id == workspace
-    ));
+    let response = handler.handle(Request::WorkspaceFocus { workspace });
+    tokio::pin!(response);
+    let command = tokio::select! {
+        result = &mut response => panic!("focus completed before GTK reply: {result:?}"),
+        command = rx.recv() => command.unwrap(),
+    };
+    let GtkCommand::ActivateWorkspace { id, ack: Some(ack) } = command else {
+        panic!("expected workspace activation with reply");
+    };
+    assert_eq!(id, workspace);
+    ack.send(Ok(())).unwrap();
+    assert!(matches!(response.await, Response::Ok));
 }
 
 #[tokio::test]
@@ -2404,7 +2456,12 @@ fn ack_any(command: GtkCommand) -> &'static str {
             ack.send(Ok(())).unwrap();
             "remove-workspace"
         }
-        GtkCommand::ActivateWorkspace { .. } => "activate-workspace",
+        GtkCommand::ActivateWorkspace { ack, .. } => {
+            if let Some(ack) = ack {
+                ack.send(Ok(())).unwrap();
+            }
+            "activate-workspace"
+        }
         other => panic!("unexpected bridge command: {other:?}"),
     }
 }

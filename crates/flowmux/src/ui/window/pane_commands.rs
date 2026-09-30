@@ -216,8 +216,15 @@ impl WindowController {
                         .await;
                 }
             }
-            GtkCommand::ActivateSurface { pane, surface } => {
+            GtkCommand::ActivateSurface { pane, surface, ack } => {
                 let ws_id = self.store.set_active_surface(pane, surface).await;
+                if ws_id.is_none() {
+                    if let Some(ack) = ack {
+                        let _ =
+                            ack.send(Err(format!("surface not found in pane {pane}: {surface}")));
+                    }
+                    return;
+                }
                 self.pane_registry
                     .borrow_mut()
                     .activate_surface(pane, surface);
@@ -239,6 +246,9 @@ impl WindowController {
                         browser.grab_focus();
                     } else if let Some(editor) = r.editors.get(&surface) {
                         editor.grab_focus();
+                    }
+                    if let Some(ack) = ack {
+                        let _ = ack.send(Ok(()));
                     }
                 });
             }

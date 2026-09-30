@@ -64,6 +64,16 @@ async fn materialize_workspace(
     reply.await.map_err(|_| "bridge closed".to_string())?
 }
 
+async fn activate_workspace(bridge: &Bridge, id: flowmux_core::WorkspaceId) -> Result<(), String> {
+    let (ack, reply) = oneshot::channel();
+    bridge
+        .tx
+        .send(GtkCommand::ActivateWorkspace { id, ack: Some(ack) })
+        .await
+        .map_err(|_| "bridge closed".to_string())?;
+    reply.await.map_err(|_| "bridge closed".to_string())?
+}
+
 async fn browser_action(bridge: &Bridge, pane: flowmux_core::PaneId, op: BrowserOp) -> Response {
     tracing::debug!(
         %pane,
@@ -307,12 +317,10 @@ impl GuiHandler {
                     .iter()
                     .any(|w| w.id == workspace);
                 if exists {
-                    let _ = self
-                        .bridge
-                        .tx
-                        .send(GtkCommand::ActivateWorkspace { id: workspace })
-                        .await;
-                    Response::Ok
+                    match activate_workspace(&self.bridge, workspace).await {
+                        Ok(()) => Response::Ok,
+                        Err(error) => Response::Error(RpcError::Internal(error)),
+                    }
                 } else {
                     Response::Error(RpcError::NotFound(workspace.to_string()))
                 }
@@ -445,8 +453,8 @@ impl GuiHandler {
             }
             Request::SurfaceFocus { pane, surface } => {
                 // Validate the pane against live state (reusing the
-                // tree flattener), then fire the same ActivateSurface
-                // the tab bar uses. Non-destructive, no dialog.
+                // tree flattener), then await the same ActivateSurface the tab
+                // bar uses so a following query observes the selected tab.
                 let workspaces = self.inner.store().ordered_workspaces().await;
                 let tree = flowmux_ipc::protocol::describe_workspaces(&workspaces);
                 let pane_found = tree.iter().flat_map(|w| &w.panes).any(|p| p.id == pane);
@@ -456,12 +464,21 @@ impl GuiHandler {
                     .find(|p| p.id == pane)
                     .is_some_and(|p| p.tabs.iter().any(|tab| tab.id == surface));
                 if surface_found {
+                    let (ack, reply) = oneshot::channel();
                     let _ = self
                         .bridge
                         .tx
-                        .send(GtkCommand::ActivateSurface { pane, surface })
+                        .send(GtkCommand::ActivateSurface {
+                            pane,
+                            surface,
+                            ack: Some(ack),
+                        })
                         .await;
-                    Response::Ok
+                    match reply.await {
+                        Ok(Ok(())) => Response::Ok,
+                        Ok(Err(error)) => Response::Error(RpcError::Internal(error)),
+                        Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
+                    }
                 } else if pane_found {
                     Response::Error(RpcError::NotFound(format!(
                         "surface not found in pane {pane}: {surface}"
@@ -1312,12 +1329,8 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         rx.await.map_err(|_| "bridge closed".to_string())?
     }
 
-    async fn workspace_activated(&self, id: flowmux_core::WorkspaceId) {
-        let _ = self
-            .bridge
-            .tx
-            .send(GtkCommand::ActivateWorkspace { id })
-            .await;
+    async fn workspace_activated(&self, id: flowmux_core::WorkspaceId) -> Result<(), String> {
+        activate_workspace(self.bridge, id).await
     }
 }
 

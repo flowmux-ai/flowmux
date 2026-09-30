@@ -149,8 +149,17 @@ impl WindowController {
                     self.activate_workspace(id).await;
                 }
             }
-            GtkCommand::ActivateWorkspace { id } => {
-                self.activate_workspace(id).await;
+            GtkCommand::ActivateWorkspace { id, ack } => {
+                let available = ack.is_none() || self.surfaces.borrow().contains_key(&id);
+                let result = if available {
+                    self.activate_workspace(id).await;
+                    Ok(())
+                } else {
+                    Err(format!("workspace not found: {id}"))
+                };
+                if let Some(ack) = ack {
+                    let _ = ack.send(result);
+                }
             }
             other => {
                 unreachable!("workspace router got a non-workspace command: {other:?}")

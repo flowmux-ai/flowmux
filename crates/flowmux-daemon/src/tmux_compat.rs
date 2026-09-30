@@ -61,7 +61,7 @@ pub trait TmuxCompatUi {
     /// killing the last pane kills the session.
     async fn remove_workspace(&self, id: WorkspaceId) -> Result<(), String>;
     /// Focus the workspace (attach).
-    async fn workspace_activated(&self, id: WorkspaceId);
+    async fn workspace_activated(&self, id: WorkspaceId) -> Result<(), String>;
 }
 
 /// Log-only [`TmuxCompatUi`] for the headless daemon binary: state
@@ -124,8 +124,9 @@ impl TmuxCompatUi for HeadlessTmuxUi<'_> {
         Ok(())
     }
 
-    async fn workspace_activated(&self, id: WorkspaceId) {
+    async fn workspace_activated(&self, id: WorkspaceId) -> Result<(), String> {
         self.store.set_active_workspace(Some(id)).await;
+        Ok(())
     }
 }
 
@@ -385,7 +386,9 @@ pub async fn execute(
             };
             match ws {
                 Some(ws) => {
-                    ui.workspace_activated(ws.id).await;
+                    if let Err(error) = ui.workspace_activated(ws.id).await {
+                        return TmuxCompatOutput::fail(1, format!("attach: {error}\n"));
+                    }
                     TmuxCompatOutput::out(format!(
                         "flowmux: workspace '{}' focused (teammate panes are shown there)\n",
                         ws.name

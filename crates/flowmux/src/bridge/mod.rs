@@ -367,6 +367,7 @@ pub enum GtkCommand {
     ActivateSurface {
         pane: PaneId,
         surface: SurfaceId,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// Close a pane-local surface tab.
     CloseSurface {
@@ -660,6 +661,7 @@ pub enum GtkCommand {
     /// in one flow shared by clicks, Alt+number, and Ctrl+Tab.
     ActivateWorkspace {
         id: WorkspaceId,
+        ack: Option<oneshot::Sender<Result<(), String>>>,
     },
     /// A bottom agent-bar item was clicked. The dispatcher activates the
     /// workspace, switches to that pane-local tab, focuses the pane, and

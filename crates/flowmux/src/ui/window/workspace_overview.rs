@@ -925,6 +925,7 @@ mod tests {
         assert!(command_dismisses_workspace_overview(
             &GtkCommand::ActivateWorkspace {
                 id: WorkspaceId::new(),
+                ack: None
             }
         ));
         assert!(command_dismisses_workspace_overview(
@@ -1280,7 +1281,10 @@ mod tests {
             "closing a card keeps overview focus on the surviving workspace"
         );
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: second })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: second,
+                ack: None,
+            })
             .await;
         assert!(!controller.workspace_overview.is_active());
         assert_eq!(store.snapshot().await.active_workspace, Some(second));

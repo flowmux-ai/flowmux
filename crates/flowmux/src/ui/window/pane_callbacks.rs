@@ -154,7 +154,14 @@ impl PaneCallbackRouter {
                 let focused = focused.clone();
                 Rc::new(RefCell::new(move |pane, surface| {
                     focused.set(Some(pane));
-                    dispatch_detached(&bridge, GtkCommand::ActivateSurface { pane, surface });
+                    dispatch_detached(
+                        &bridge,
+                        GtkCommand::ActivateSurface {
+                            pane,
+                            surface,
+                            ack: None,
+                        },
+                    );
                 }))
             },
             on_new_surface: {

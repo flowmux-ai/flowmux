@@ -1565,7 +1565,10 @@ fn attach_tab_drop_to_row(
             gtk::glib::MainContext::default().spawn_local(async move {
                 let _ = bridge
                     .tx
-                    .send(GtkCommand::ActivateWorkspace { id: ws_id })
+                    .send(GtkCommand::ActivateWorkspace {
+                        id: ws_id,
+                        ack: None,
+                    })
                     .await;
             });
             true

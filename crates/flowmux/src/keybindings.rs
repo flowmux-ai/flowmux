@@ -858,7 +858,11 @@ fn make_surface_nav_action(
             glib::MainContext::default().spawn_local(async move {
                 let _ = bridge
                     .tx
-                    .send(GtkCommand::ActivateSurface { pane, surface })
+                    .send(GtkCommand::ActivateSurface {
+                        pane,
+                        surface,
+                        ack: None,
+                    })
                     .await;
             });
         })

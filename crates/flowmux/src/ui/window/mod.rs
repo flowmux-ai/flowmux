@@ -1611,7 +1611,10 @@ impl WindowController {
         let on_select = move |id: WorkspaceId| {
             let bridge = bridge_for_select.clone();
             glib::MainContext::default().spawn_local(async move {
-                let _ = bridge.tx.send(GtkCommand::ActivateWorkspace { id }).await;
+                let _ = bridge
+                    .tx
+                    .send(GtkCommand::ActivateWorkspace { id, ack: None })
+                    .await;
             });
         };
         let bridge_for_close = bridge.clone();
@@ -3750,6 +3753,19 @@ mod tests {
     async fn confirmation_does_not_block_queries_or_allow_queued_mutations() {
         let (controller, workspace, pane) =
             build_single_workspace_controller("com.flowmux.App.UiTest.QueryWhileConfirming").await;
+        let first = controller
+            .pane_registry
+            .borrow()
+            .active_surface(pane)
+            .unwrap();
+        let (_, second) = controller
+            .store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, second)
+            .await;
         let (bridge, rx) = Bridge::new();
         spawn_dispatch_loop(rx, controller.clone());
         controller.window.present();
@@ -3780,6 +3796,16 @@ mod tests {
             })
             .await
             .unwrap();
+        let (ack, mut focused) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::ActivateSurface {
+                pane,
+                surface: first,
+                ack: Some(ack),
+            })
+            .await
+            .unwrap();
         let (ack, screen) = oneshot::channel();
         bridge
             .send(GtkCommand::PaneReadScreen { pane, ack })
@@ -3798,6 +3824,14 @@ mod tests {
             renamed.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
         ));
+        assert!(matches!(
+            focused.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane),
+            Some(second)
+        );
         let dialog = controller
             .window
             .visible_dialog()
@@ -3814,6 +3848,15 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        glib::future_with_timeout(Duration::from_secs(1), focused)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            controller.pane_registry.borrow().active_surface(pane),
+            Some(first)
+        );
         assert_eq!(
             controller
                 .store
@@ -5048,6 +5091,7 @@ mod tests {
             .dispatch(GtkCommand::ActivateSurface {
                 pane,
                 surface: original_surface,
+                ack: None,
             })
             .await;
         let term_title = store.surface_title(pane, original_surface).await.unwrap();
@@ -5060,6 +5104,7 @@ mod tests {
             .dispatch(GtkCommand::ActivateSurface {
                 pane,
                 surface: browser,
+                ack: None,
             })
             .await;
         // add_browser_surface_to_pane stores browser surfaces as "Browser".
@@ -6277,6 +6322,7 @@ mod tests {
             .dispatch(GtkCommand::ActivateSurface {
                 pane,
                 surface: first_surface,
+                ack: None,
             })
             .await;
         assert!(controller.file_browser.panel.is_showing_root(&first_dir));
@@ -6285,6 +6331,7 @@ mod tests {
             .dispatch(GtkCommand::ActivateSurface {
                 pane,
                 surface: second_surface,
+                ack: None,
             })
             .await;
         assert!(controller.file_browser.panel.is_showing_root(&second_dir));
@@ -6392,7 +6439,10 @@ mod tests {
         // Clicking ws_b in the side panel dispatches GtkCommand::ActivateWorkspace.
         // Reproduce that same flow by dispatching directly.
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_b_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_b_id,
+                ack: None,
+            })
             .await;
         // Pass through one idle via oneshot to flush the idle queued by
         // activate_workspace's focus_first_leaf_of.
@@ -9482,7 +9532,10 @@ mod tests {
 
         // Side-panel click goes through `GtkCommand::ActivateWorkspace`.
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
 
         assert_eq!(
@@ -9537,13 +9590,19 @@ mod tests {
             build_single_workspace_controller("com.flowmux.App.UiTest.BadgeRepeat").await;
         push_notification(&controller, Some(pane), Some(ws_id), "a").await;
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         assert_eq!(controller.notifications.unread_count(), 0);
         // A second activation on the same workspace must not reintroduce
         // unread state, panic, or otherwise disturb the dock count.
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         assert_eq!(
             controller.notifications.unread_count(),
@@ -9593,7 +9652,10 @@ mod tests {
         assert_eq!(controller.notifications.unread_count(), 3);
 
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_a_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_a_id,
+                ack: None,
+            })
             .await;
         assert_eq!(
             controller.notifications.unread_count(),
@@ -9602,7 +9664,10 @@ mod tests {
         );
 
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_b_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_b_id,
+                ack: None,
+            })
             .await;
         assert_eq!(
             controller.notifications.unread_count(),
@@ -9631,7 +9696,10 @@ mod tests {
         assert_eq!(controller.notifications.unread_count(), 2);
 
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
 
         assert_eq!(
@@ -9661,7 +9729,10 @@ mod tests {
 
         // User activates the workspace before the daemon's reply lands.
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         assert_eq!(controller.notifications.unread_count(), 0);
 
@@ -9708,7 +9779,10 @@ mod tests {
         push_notification(&controller, Some(pane), Some(ws_id), "a").await;
         push_notification(&controller, Some(pane), Some(ws_id), "b").await;
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
 
         assert_eq!(
@@ -9718,7 +9792,10 @@ mod tests {
         );
 
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         assert_eq!(controller.notifications.unread_count(), 0);
     }
@@ -9744,7 +9821,10 @@ mod tests {
         push_notification(&controller, Some(pane), Some(ws_id), "ws").await;
 
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         assert_eq!(
             controller.notifications.unread_count(),
@@ -10121,7 +10201,10 @@ mod tests {
             // we sweep on the boundary and nothing else has pushed).
             if (i + 1) % 50 == 0 {
                 controller
-                    .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+                    .dispatch(GtkCommand::ActivateWorkspace {
+                        id: ws_id,
+                        ack: None,
+                    })
                     .await;
                 assert_eq!(
                     controller.notifications.unread_count(),
@@ -10276,7 +10359,10 @@ mod tests {
                     // ActivateWorkspace mid-stream — sweeps everything
                     // pushed so far that targets this workspace.
                     controller
-                        .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+                        .dispatch(GtkCommand::ActivateWorkspace {
+                            id: ws_id,
+                            ack: None,
+                        })
                         .await;
                     assert_eq!(
                         controller.notifications.unread_count(),
@@ -10317,7 +10403,10 @@ mod tests {
         // the workspace sweep, then the popover sweep so global / orphan
         // entries (none here, but the call must be a safe no-op) drain.
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         let leftover = controller.notifications.mark_all_unread_read();
         controller
@@ -10351,7 +10440,10 @@ mod tests {
             "no refresh command should ever mutate the store; the count must remain 1",
         );
         controller
-            .dispatch(GtkCommand::ActivateWorkspace { id: ws_id })
+            .dispatch(GtkCommand::ActivateWorkspace {
+                id: ws_id,
+                ack: None,
+            })
             .await;
         for _ in 0..100 {
             controller.dispatch(GtkCommand::RefreshLauncherBadge).await;

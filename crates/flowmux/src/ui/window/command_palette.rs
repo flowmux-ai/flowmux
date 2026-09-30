@@ -813,8 +813,12 @@ impl WindowController {
                 surface,
             } => {
                 self.activate_workspace(workspace).await;
-                self.dispatch(GtkCommand::ActivateSurface { pane, surface })
-                    .await;
+                self.dispatch(GtkCommand::ActivateSurface {
+                    pane,
+                    surface,
+                    ack: None,
+                })
+                .await;
             }
         }
     }
