@@ -11,10 +11,14 @@ impl WindowController {
                 // pane ids) instead of fabricating new ones — otherwise
                 // `focused_pane` gets a UUID that doesn't exist in the
                 // store and split / close shortcuts no-op.
-                if let Some(ws) = self.store.get_workspace(id).await {
-                    self.render_workspace(&ws);
-                }
-                let _ = ack.send(());
+                let result = match self.store.get_workspace(id).await {
+                    Some(ws) => {
+                        self.render_workspace(&ws);
+                        Ok(())
+                    }
+                    None => Err("Workspace no longer exists".into()),
+                };
+                let _ = ack.send(result);
             }
             GtkCommand::NewWorkspace { root } => {
                 // Prefer the focused pane's cwd so a new tab opens
@@ -37,19 +41,19 @@ impl WindowController {
             }
             GtkCommand::RemoveWorkspace { id, confirm, ack } => {
                 if confirm && !self.confirm_close_workspace(id).await {
-                    let _ = ack.send(());
+                    let _ = ack.send(Err("Workspace close cancelled".into()));
                     return;
                 }
                 let closing_surfaces = self.pane_registry.borrow().surface_ids_in_workspace(id);
                 if !self.confirm_dirty_surfaces(&closing_surfaces).await {
-                    let _ = ack.send(());
+                    let _ = ack.send(Err("Workspace close cancelled".into()));
                     return;
                 }
                 if self.store.remove_workspace(id).await {
                     self.drop_workspace(id);
                     self.activate_active_or_show_empty().await;
                 }
-                let _ = ack.send(());
+                let _ = ack.send(Ok(()));
             }
             GtkCommand::RemoveAllWorkspaces { ack } => {
                 if !self.confirm_close_all_workspaces().await {

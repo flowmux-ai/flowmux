@@ -31,7 +31,12 @@ use std::path::Path;
 #[allow(async_fn_in_trait)]
 pub trait TmuxCompatUi {
     /// A workspace was created in the store; materialize its GUI page.
-    async fn workspace_created(&self, id: WorkspaceId, name: &str, root: &Path);
+    async fn workspace_created(
+        &self,
+        id: WorkspaceId,
+        name: &str,
+        root: &Path,
+    ) -> Result<(), String>;
     /// `split_pane` succeeded in the store; materialize the new pane.
     async fn pane_split_applied(
         &self,
@@ -54,7 +59,7 @@ pub trait TmuxCompatUi {
     /// Remove a whole workspace (store + widget) — kill-pane on the
     /// last pane and kill-server land here, mirroring tmux where
     /// killing the last pane kills the session.
-    async fn remove_workspace(&self, id: WorkspaceId);
+    async fn remove_workspace(&self, id: WorkspaceId) -> Result<(), String>;
     /// Focus the workspace (attach).
     async fn workspace_activated(&self, id: WorkspaceId);
 }
@@ -67,8 +72,14 @@ pub struct HeadlessTmuxUi<'a> {
 }
 
 impl TmuxCompatUi for HeadlessTmuxUi<'_> {
-    async fn workspace_created(&self, id: WorkspaceId, name: &str, _root: &Path) {
+    async fn workspace_created(
+        &self,
+        id: WorkspaceId,
+        name: &str,
+        _root: &Path,
+    ) -> Result<(), String> {
         tracing::info!(%id, name, "tmux-compat: workspace created (headless, no widgets)");
+        Ok(())
     }
 
     async fn pane_split_applied(
@@ -108,8 +119,9 @@ impl TmuxCompatUi for HeadlessTmuxUi<'_> {
             .ok_or_else(|| format!("no pane {pane}"))
     }
 
-    async fn remove_workspace(&self, id: WorkspaceId) {
+    async fn remove_workspace(&self, id: WorkspaceId) -> Result<(), String> {
         self.store.remove_workspace(id).await;
+        Ok(())
     }
 
     async fn workspace_activated(&self, id: WorkspaceId) {
@@ -157,7 +169,10 @@ pub async fn execute(
             // stable across that UI sync, so pin it as the displayed
             // workspace title as well.
             store.rename_workspace(ws_id, key.clone()).await;
-            ui.workspace_created(ws_id, &key, cwd).await;
+            if let Err(error) = ui.workspace_created(ws_id, &key, cwd).await {
+                store.remove_workspace(ws_id).await;
+                return TmuxCompatOutput::fail(1, format!("new-session: {error}\n"));
+            }
             let Some(first) = first_leaf(store, ws_id).await else {
                 return TmuxCompatOutput::fail(
                     1,
@@ -340,8 +355,10 @@ pub async fn execute(
             if pane_count <= 1 {
                 // tmux semantics: killing the last pane kills the
                 // window/session — remove the workspace.
-                ui.remove_workspace(ws_id).await;
-                return TmuxCompatOutput::ok();
+                return match ui.remove_workspace(ws_id).await {
+                    Ok(()) => TmuxCompatOutput::ok(),
+                    Err(error) => TmuxCompatOutput::fail(1, format!("kill-pane: {error}\n")),
+                };
             }
             match ui.close_pane(pane).await {
                 Ok(()) => TmuxCompatOutput::ok(),
@@ -381,7 +398,9 @@ pub async fn execute(
         TmuxCommand::KillServer => match socket {
             Some(sock) => {
                 if let Some(ws) = find_workspace(store, sock).await {
-                    ui.remove_workspace(ws.id).await;
+                    if let Err(error) = ui.remove_workspace(ws.id).await {
+                        return TmuxCompatOutput::fail(1, format!("kill-server: {error}\n"));
+                    }
                 }
                 TmuxCompatOutput::ok()
             }

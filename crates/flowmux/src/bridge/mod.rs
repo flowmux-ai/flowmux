@@ -214,7 +214,7 @@ pub enum GtkCommand {
     /// Render a freshly-created workspace in the sidebar + open its first pane.
     WorkspaceCreated {
         id: WorkspaceId,
-        ack: oneshot::Sender<()>,
+        ack: oneshot::Sender<Result<(), String>>,
     },
     /// Apply a split that was already committed to the store.
     PaneSplitApplied {
@@ -513,7 +513,7 @@ pub enum GtkCommand {
     RemoveWorkspace {
         id: WorkspaceId,
         confirm: bool,
-        ack: oneshot::Sender<()>,
+        ack: oneshot::Sender<Result<(), String>>,
     },
     /// Remove every open workspace. Triggered by the sidebar context
     /// menu's "Close all tabs" item.

@@ -51,6 +51,19 @@ fn browser_error_response(error: String) -> Response {
     }
 }
 
+async fn materialize_workspace(
+    bridge: &Bridge,
+    id: flowmux_core::WorkspaceId,
+) -> Result<(), String> {
+    let (ack, reply) = oneshot::channel();
+    bridge
+        .tx
+        .send(GtkCommand::WorkspaceCreated { id, ack })
+        .await
+        .map_err(|_| "bridge closed".to_string())?;
+    reply.await.map_err(|_| "bridge closed".to_string())?
+}
+
 async fn browser_action(bridge: &Bridge, pane: flowmux_core::PaneId, op: BrowserOp) -> Response {
     tracing::debug!(
         %pane,
@@ -265,24 +278,19 @@ impl GuiHandler {
     async fn handle_workspace_verb(&self, req: Request) -> Response {
         match req {
             Request::WorkspaceCreate { .. } => {
-                // Persist via the headless handler first so state.json is consistent...
+                // Create the model, then require the GUI to materialize it.
                 let resp = self.inner.handle(req.clone()).await;
                 let id = match &resp {
                     Response::WorkspaceCreated { id } => *id,
                     _ => return resp,
                 };
-                // ...then ask the GTK side to materialize widgets.
-                let (tx, rx) = oneshot::channel();
-                if let Err(e) = self
-                    .bridge
-                    .tx
-                    .send(GtkCommand::WorkspaceCreated { id, ack: tx })
-                    .await
-                {
-                    warn!(error = %e, "bridge closed");
+                match materialize_workspace(&self.bridge, id).await {
+                    Ok(()) => Response::WorkspaceCreated { id },
+                    Err(error) => {
+                        self.inner.store().remove_workspace(id).await;
+                        Response::Error(RpcError::Internal(error))
+                    }
                 }
-                let _ = rx.await;
-                Response::WorkspaceCreated { id }
             }
             Request::WorkspaceFocus { workspace } => {
                 // Validate against live state so a bad id returns a
@@ -497,7 +505,7 @@ impl GuiHandler {
                         .await;
                     match rx.await {
                         Ok(Ok(())) => Response::Ok,
-                        Ok(Err(e)) => Response::Error(RpcError::NotFound(e)),
+                        Ok(Err(e)) => Response::Error(RpcError::Internal(e)),
                         Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                     }
                 }
@@ -550,7 +558,7 @@ impl GuiHandler {
                             .await;
                         match rx.await {
                             Ok(Ok(())) => Response::Ok,
-                            Ok(Err(e)) => Response::Error(RpcError::NotFound(e)),
+                            Ok(Err(e)) => Response::Error(RpcError::Internal(e)),
                             Err(_) => Response::Error(RpcError::Internal("bridge closed".into())),
                         }
                     }
@@ -1206,14 +1214,8 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         id: flowmux_core::WorkspaceId,
         _name: &str,
         _root: &std::path::Path,
-    ) {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .bridge
-            .tx
-            .send(GtkCommand::WorkspaceCreated { id, ack: tx })
-            .await;
-        let _ = rx.await;
+    ) -> Result<(), String> {
+        materialize_workspace(self.bridge, id).await
     }
 
     async fn pane_split_applied(
@@ -1295,10 +1297,9 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         }
     }
 
-    async fn remove_workspace(&self, id: flowmux_core::WorkspaceId) {
+    async fn remove_workspace(&self, id: flowmux_core::WorkspaceId) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
-        let _ = self
-            .bridge
+        self.bridge
             .tx
             .send(GtkCommand::RemoveWorkspace {
                 id,
@@ -1306,8 +1307,9 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
                 confirm: false,
                 ack: tx,
             })
-            .await;
-        let _ = rx.await;
+            .await
+            .map_err(|_| "bridge closed".to_string())?;
+        rx.await.map_err(|_| "bridge closed".to_string())?
     }
 
     async fn workspace_activated(&self, id: flowmux_core::WorkspaceId) {

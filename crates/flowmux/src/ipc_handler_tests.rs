@@ -64,12 +64,68 @@ async fn workspace_create_dispatches_workspace_created_and_waits_for_ack() {
     let GtkCommand::WorkspaceCreated { id, ack } = command else {
         panic!("expected WorkspaceCreated command");
     };
-    ack.send(()).unwrap();
+    ack.send(Ok(())).unwrap();
 
     assert!(matches!(
         response.await,
         Response::WorkspaceCreated { id: response_id } if response_id == id
     ));
+}
+
+#[tokio::test]
+async fn workspace_creation_failure_rolls_back_the_model() {
+    for failure in 0..3 {
+        let (handler, rx, _, _) = single_pane_handler().await;
+        let before = handler.inner.store().list_workspaces().await;
+        let response = handler.handle(Request::WorkspaceCreate {
+            name: Some("must not survive".into()),
+            root: std::env::temp_dir(),
+        });
+        tokio::pin!(response);
+        if failure > 0 {
+            let command = tokio::select! {
+                result = &mut response => panic!("completed before GUI reply: {result:?}"),
+                command = rx.recv() => command.unwrap(),
+            };
+            let GtkCommand::WorkspaceCreated { ack, .. } = command else {
+                panic!("expected creation")
+            };
+            if failure == 2 {
+                ack.send(Err("render rejected".into())).unwrap();
+            }
+        }
+        drop(rx);
+        assert!(matches!(
+            response.await,
+            Response::Error(RpcError::Internal(_))
+        ));
+        assert_eq!(handler.inner.store().list_workspaces().await, before);
+    }
+}
+
+#[tokio::test]
+async fn tmux_creation_and_removal_propagate_missing_gui_reply() {
+    let (handler, rx, pane, _) = single_pane_handler().await;
+    let before = handler.inner.store().list_workspaces().await;
+    for args in [
+        vec!["new-session".to_string(), "-s".into(), "missing-ui".into()],
+        vec!["kill-pane".to_string(), "-t".into(), format!("%{}", pane.0)],
+    ] {
+        let response = handler.handle(Request::TmuxCompat {
+            args,
+            cwd: std::env::temp_dir(),
+        });
+        tokio::pin!(response);
+        tokio::select! {
+            result = &mut response => panic!("completed before GUI reply: {result:?}"),
+            command = rx.recv() => drop(command.unwrap()),
+        }
+        let Response::TmuxCompatResult(output) = response.await else {
+            panic!("expected tmux output")
+        };
+        assert_ne!(output.code, 0);
+        assert_eq!(handler.inner.store().list_workspaces().await, before);
+    }
 }
 
 #[tokio::test]
@@ -1257,7 +1313,7 @@ async fn claude_teams_uses_incremental_splits_after_initial_workspace_render() {
     let GtkCommand::WorkspaceCreated { id: ws_id, ack } = command else {
         panic!("expected WorkspaceCreated command");
     };
-    ack.send(()).unwrap();
+    ack.send(Ok(())).unwrap();
 
     let mut panes = Vec::new();
     let mut expected_source = None;
@@ -2321,7 +2377,7 @@ async fn run_tmux_compat(
 fn ack_any(command: GtkCommand) -> &'static str {
     match command {
         GtkCommand::WorkspaceCreated { ack, .. } => {
-            ack.send(()).unwrap();
+            ack.send(Ok(())).unwrap();
             "workspace-created"
         }
         GtkCommand::PaneSplitApplied { ack, .. } => {
@@ -2345,7 +2401,7 @@ fn ack_any(command: GtkCommand) -> &'static str {
                 !confirm,
                 "agent-driven teardown must skip the confirm dialog"
             );
-            ack.send(()).unwrap();
+            ack.send(Ok(())).unwrap();
             "remove-workspace"
         }
         GtkCommand::ActivateWorkspace { .. } => "activate-workspace",

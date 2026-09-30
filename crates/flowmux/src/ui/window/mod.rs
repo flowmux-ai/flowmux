@@ -3805,10 +3805,11 @@ mod tests {
             .downcast::<adw::AlertDialog>()
             .unwrap();
         dialog.emit_by_name::<()>("response", &[&"cancel"]);
-        glib::future_with_timeout(Duration::from_secs(1), closed)
+        assert!(glib::future_with_timeout(Duration::from_secs(1), closed)
             .await
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .is_err());
         glib::future_with_timeout(Duration::from_secs(1), renamed)
             .await
             .unwrap()

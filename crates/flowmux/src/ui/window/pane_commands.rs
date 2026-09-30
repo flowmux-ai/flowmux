@@ -79,7 +79,7 @@ impl WindowController {
                 // workspace. Confirm with the user first.
                 if let Some((ws_id, count)) = self.store.workspace_pane_count_for(pane).await {
                     if count == 1 && !self.confirm_close_workspace(ws_id).await {
-                        let _ = ack.send(Ok(()));
+                        let _ = ack.send(Err("Pane close cancelled".into()));
                         return;
                     }
                 }
@@ -91,7 +91,7 @@ impl WindowController {
                     .map(|tabs| tabs.iter().map(|(surface, _)| *surface).collect::<Vec<_>>())
                     .unwrap_or_default();
                 if !self.confirm_dirty_surfaces(&closing_surfaces).await {
-                    let _ = ack.send(Ok(()));
+                    let _ = ack.send(Err("Pane close cancelled".into()));
                     return;
                 }
                 let outcome = self.store.close_pane(pane).await;
@@ -258,13 +258,13 @@ impl WindowController {
                 if tabs == Some(1) {
                     if let Some((ws_id, count)) = panes {
                         if count == 1 && !self.confirm_close_workspace(ws_id).await {
-                            let _ = ack.send(Ok(()));
+                            let _ = ack.send(Err("Pane close cancelled".into()));
                             return;
                         }
                     }
                 }
                 if !self.confirm_dirty_surfaces(&[surface]).await {
-                    let _ = ack.send(Ok(()));
+                    let _ = ack.send(Err("Pane close cancelled".into()));
                     return;
                 }
                 let outcome = self.store.close_surface(pane, surface).await;
