@@ -3678,6 +3678,7 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
                 }
             }
             if controller.window_close.approved.get() {
+                rx.close();
                 break;
             }
         }

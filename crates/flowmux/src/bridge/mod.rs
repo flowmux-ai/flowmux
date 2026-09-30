@@ -769,6 +769,18 @@ pub struct BridgeReceiver {
 }
 
 impl BridgeReceiver {
+    /// Reject new commands and release replies for commands never dispatched.
+    /// Dropping the receiver alone retains buffered commands while senders live.
+    pub fn close(&self) {
+        let queues = [&self.regular, &self.priority, &self.queries];
+        for queue in queues {
+            queue.close();
+        }
+        for queue in queues {
+            while queue.try_recv().is_ok() {}
+        }
+    }
+
     pub async fn recv(&self) -> Result<GtkCommand, async_channel::RecvError> {
         loop {
             if let Ok(command) = self.priority.try_recv() {
@@ -852,6 +864,52 @@ impl Bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn closing_receiver_releases_queued_replies() {
+        let (bridge, receiver) = Bridge::new();
+        let (ack, mut reply) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::RenameWorkspace {
+                id: WorkspaceId::new(),
+                name: "never applied".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        let (ack, mut priority_reply) = oneshot::channel();
+        bridge
+            .send_priority(GtkCommand::RenameWorkspace {
+                id: WorkspaceId::new(),
+                name: "also never applied".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        let (ack, mut query_reply) = oneshot::channel();
+        bridge
+            .send(GtkCommand::QueryAgentSurfaceVisible {
+                surface: SurfaceId::new(),
+                ack,
+            })
+            .await
+            .unwrap();
+        receiver.close();
+        assert!(matches!(
+            reply.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert!(matches!(
+            priority_reply.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert!(matches!(
+            query_reply.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert!(bridge.send(GtkCommand::CloseWindow).await.is_err());
+    }
 
     #[test]
     fn command_queue_is_bounded() {
