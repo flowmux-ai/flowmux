@@ -107,9 +107,10 @@ const SESSION_WAIT_SCOPE: &str = "session";
 
 #[derive(Debug, Clone, Default)]
 struct AgentLifecycleRuntime {
-    /// Signed balances make start/resolve deltas commutative when parallel
-    /// hook processes reach the daemon out of order.
-    waits: HashMap<AgentLifecycleKey, HashMap<String, i64>>,
+    /// One state per tool-use id: true while waiting, false once resolved.
+    /// Keep resolved ids until the turn boundary so duplicate or reordered
+    /// hook deliveries cannot reopen them. Distinct calls keep distinct ids.
+    waits: HashMap<AgentLifecycleKey, HashMap<String, bool>>,
     permission_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
     permission_event_seq: HashMap<AgentPermissionSeqKey, u64>,
     session_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
@@ -485,7 +486,7 @@ fn lifecycle_has_waits(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey)
     runtime
         .waits
         .get(key)
-        .is_some_and(|waits| waits.values().any(|balance| *balance > 0))
+        .is_some_and(|waits| waits.values().any(|waiting| *waiting))
         || runtime
             .permission_waits
             .get(key)
@@ -2137,34 +2138,17 @@ impl StateStore {
                 message,
                 status_text,
             } => {
-                let balance = runtime
-                    .waits
-                    .entry(wait_key.clone())
-                    .or_default()
-                    .entry(item_id.clone())
-                    .or_default();
-                *balance += 1;
-                let active = *balance > 0;
-                if *balance == 0 {
-                    runtime
-                        .waits
-                        .get_mut(&wait_key)
-                        .expect("wait map exists")
-                        .remove(&item_id);
+                let waits = runtime.waits.entry(wait_key.clone()).or_default();
+                if let std::collections::hash_map::Entry::Vacant(wait) = waits.entry(item_id) {
+                    wait.insert(true);
+                    Some((NeedsInput, message, status_text))
+                } else {
+                    None
                 }
-                active.then_some((NeedsInput, message, status_text))
             }
             AgentLifecycleEvent::WaitResolved { item_id } => {
                 let waits = runtime.waits.entry(wait_key.clone()).or_default();
-                let balance = waits.entry(item_id.clone()).or_default();
-                let resolved_active = *balance > 0;
-                *balance -= 1;
-                if *balance == 0 {
-                    waits.remove(&item_id);
-                }
-                if runtime.waits.get(&wait_key).is_some_and(HashMap::is_empty) {
-                    runtime.waits.remove(&wait_key);
-                }
+                let resolved_active = waits.insert(item_id, false) == Some(true);
                 if resolved_active && !lifecycle_has_waits(&runtime, &wait_key) {
                     Some((Running, None, "Working".into()))
                 } else {
@@ -3111,7 +3095,7 @@ impl StateStore {
         }
         if status != AgentStatus::Blocked
             && (lifecycle.waits.iter().any(|((surface, _, _), waits)| {
-                *surface == surface_id && waits.values().any(|balance| *balance > 0)
+                *surface == surface_id && waits.values().any(|waiting| *waiting)
             }) || lifecycle
                 .permission_waits
                 .iter()
@@ -3229,7 +3213,7 @@ impl StateStore {
         if lifecycle.codex_turns.iter().any(|((surface, _), ledger)| {
             *surface == surface_id && !ledger.active_children.is_empty()
         }) || lifecycle.waits.iter().any(|((surface, _, _), waits)| {
-            *surface == surface_id && waits.values().any(|balance| *balance > 0)
+            *surface == surface_id && waits.values().any(|waiting| *waiting)
         }) || lifecycle
             .permission_waits
             .iter()
@@ -5442,6 +5426,118 @@ mod tests {
                 .status,
             AgentStatus::Working
         );
+    }
+
+    #[tokio::test]
+    async fn correlated_wait_delivery_is_idempotent_and_resolution_is_final() {
+        // Tool-use ids identify invocations, not a count of hook deliveries.
+        // Include replay with the same sequence, a new sequence, and no sequence.
+        let traces: &[&[(bool, Option<u64>)]] = &[
+            &[(true, Some(10)), (true, Some(10)), (false, Some(20))],
+            &[(true, Some(10)), (true, Some(11)), (false, Some(20))],
+            &[(true, Some(10)), (false, Some(20)), (true, Some(10))],
+            &[(true, Some(10)), (false, Some(20)), (true, Some(30))],
+            &[(false, Some(20)), (true, Some(10)), (true, Some(11))],
+            &[(true, None), (true, None), (false, None)],
+            &[(false, None), (true, None), (true, None)],
+            &[(true, None), (false, None), (false, None), (true, None)],
+        ];
+        for trace in traces {
+            let store = StateStore::new_lazy_ephemeral(State::default());
+            let ws = store.create_workspace(None, "/tmp".into()).await;
+            let surface = first_pane_active_surface(&store.get_workspace(ws).await.unwrap());
+            store
+                .report_agent_lifecycle_with_visibility(
+                    surface,
+                    "claude",
+                    None,
+                    None,
+                    "session",
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Starting turn".into(),
+                    },
+                    true,
+                )
+                .await;
+            let mut resolved = false;
+            let mut started = false;
+            for &(start, seq) in *trace {
+                let duplicate = if start { started || resolved } else { resolved };
+                let event = if start {
+                    AgentLifecycleEvent::WaitStarted {
+                        item_id: "tool-a".into(),
+                        message: None,
+                        status_text: "Waiting for input".into(),
+                    }
+                } else {
+                    AgentLifecycleEvent::WaitResolved {
+                        item_id: "tool-a".into(),
+                    }
+                };
+                let result = store
+                    .report_agent_lifecycle_with_visibility(
+                        surface, "claude", None, seq, "session", event, true,
+                    )
+                    .await;
+                started |= start;
+                resolved |= !start;
+                assert_eq!(
+                    store.workspace_agent_status(ws).await,
+                    Some(if resolved {
+                        AgentStatus::Working
+                    } else {
+                        AgentStatus::Blocked
+                    }),
+                    "trace={trace:?}, event=({start}, {seq:?})"
+                );
+                if duplicate {
+                    assert_eq!(result, AgentLifecycleResult::default(), "trace={trace:?}");
+                }
+            }
+            // The resolution belongs to this turn, not a later invocation.
+            for (seq, event, status) in [
+                (
+                    100,
+                    AgentLifecycleEvent::TurnStarted {
+                        turn_id: None,
+                        status_text: "Starting turn".into(),
+                    },
+                    AgentStatus::Working,
+                ),
+                (
+                    101,
+                    AgentLifecycleEvent::WaitStarted {
+                        item_id: "tool-a".into(),
+                        message: None,
+                        status_text: "Waiting for input".into(),
+                    },
+                    AgentStatus::Blocked,
+                ),
+            ] {
+                assert_eq!(
+                    store
+                        .report_agent_lifecycle_with_visibility(
+                            surface,
+                            "claude",
+                            None,
+                            Some(seq),
+                            "session",
+                            event,
+                            true,
+                        )
+                        .await
+                        .workspace,
+                    Some(ws)
+                );
+                assert_eq!(store.workspace_agent_status(ws).await, Some(status));
+            }
+            assert!(store
+                .end_agent_session(surface, "claude", Some(102), Some("session"), None)
+                .await
+                .is_some());
+            assert!(store.agent_lifecycle.lock().await.waits.is_empty());
+        }
     }
 
     #[tokio::test]

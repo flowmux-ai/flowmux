@@ -97,6 +97,8 @@ v1.0.6 with C API bindings and loaders. GIF decoding uses Rust's `image` crate.
   modify the user's Codex hook trust decisions.
 - Claude permission events lack a tool-use ID. Retain their batch marker until
   `PostToolBatch`; explicit input-tool waits are correlated by `tool_use_id`.
+  Treat repeated starts/resolutions as idempotent. Retain resolved tool IDs
+  until the turn/session boundary so delayed starts cannot reopen them.
   Session-level quota/API/input waits remain separate.
 - Codex permission events lack a per-call resolution. Track their turn scope;
   ordinary `PostToolUse` must not clear an unrelated parallel permission wait.
