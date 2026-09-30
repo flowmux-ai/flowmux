@@ -4072,7 +4072,13 @@ impl StateStore {
                     elapsed_ms = started.elapsed().as_millis(),
                     "state persisted"
                 ),
-                Err(e) => error!(error = %e, "state save failed"),
+                Err(e) => {
+                    error!(error = %e, "state save failed");
+                    // Keep this generation dirty. Retry even without another
+                    // mutation, with a delay so a persistent failure cannot spin.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
             }
             // A mutation after the snapshot keeps a higher generation and starts
             // a fresh debounce. Stale Notify permits from mutations already in
