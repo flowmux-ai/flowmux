@@ -136,6 +136,51 @@ async fn terminal_split_roundtrip(client: &Client, terminal: PaneId) {
 
 #[tokio::test]
 async fn native_link_navigation_rejects_old_refs_and_fresh_snapshot_restores_actions() {
+    browser_navigation_roundtrip(false).await;
+}
+
+#[tokio::test]
+async fn explicit_sandbox_opt_out_preserves_browser_operations() {
+    browser_navigation_roundtrip(true).await;
+}
+
+fn assert_web_process_sandbox(app_pid: u32, enabled: bool) {
+    let namespace_depth = |status: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("NSpid:"))
+            .expect("Linux must expose PID namespace membership")
+            .split_whitespace()
+            .count()
+    };
+    let parent = std::fs::read_to_string(format!("/proc/{app_pid}/status")).unwrap();
+    let web_processes: Vec<_> = flowmux_procmon::descendants(app_pid)
+        .unwrap()
+        .into_iter()
+        .filter(|pid| {
+            flowmux_procmon::comm_of(*pid).is_some_and(|name| name.starts_with("WebKitWebProces"))
+        })
+        .collect();
+    assert!(
+        !web_processes.is_empty(),
+        "loaded page must have a web process"
+    );
+    for pid in web_processes {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+        assert_eq!(
+            namespace_depth(&status) > namespace_depth(&parent),
+            enabled,
+            "web process PID isolation must match the explicit sandbox policy: {status}"
+        );
+        if enabled {
+            assert!(status
+                .lines()
+                .any(|line| line.split_whitespace().eq(["Seccomp:", "2"])));
+        }
+    }
+}
+
+async fn browser_navigation_roundtrip(sandbox_opt_out: bool) {
     let dir = tempfile::tempdir().unwrap();
     let runtime = dir.path().join("runtime");
     std::fs::create_dir(&runtime).unwrap();
@@ -161,11 +206,15 @@ async fn native_link_navigation_rejects_old_refs_and_fresh_snapshot_restores_act
         .env("XDG_CACHE_HOME", dir.path().join("cache"))
         .env("FLOWMUX_RUNTIME_DIR", &runtime)
         .env("SHELL", "/bin/sh")
+        .env_remove("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS")
         .env_remove("FLATPAK_ID")
         .current_dir(dir.path())
         .stdin(Stdio::null())
         .stdout(log.try_clone().unwrap())
         .stderr(log);
+    if sandbox_opt_out {
+        command.env("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
+    }
     let mut app = App(command.spawn().unwrap());
     let socket = runtime.join(format!("flowmux-{}.sock", app.0.id()));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -213,6 +262,7 @@ async fn native_link_navigation_rejects_old_refs_and_fresh_snapshot_restores_act
         other => panic!("browser open: {other:?}"),
     };
     wait_page(&client, pane, "first").await;
+    assert_web_process_sandbox(app.0.id(), !sandbox_opt_out);
     let first_snapshot = snapshot(&client, pane).await;
     let old_ref = first_snapshot
         .refs

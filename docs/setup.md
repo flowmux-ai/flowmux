@@ -108,6 +108,25 @@ cannot load these hooks, and `doctor` reports that policy.
 
 ### Troubleshooting
 
+WebKitGTK's web-process sandbox is enabled by default. If opening a browser
+or editor fails with a `bwrap` / `uid map` permission error on Ubuntu, check
+the AppArmor audit log and allow user namespaces for the installed flowmux
+executable through an application-specific profile. See Ubuntu's
+[AppArmor documentation](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/#apparmor-unprivileged-user-namespace-restrictions).
+Do not disable AppArmor or user-namespace restrictions system-wide.
+
+For a temporary compatibility diagnosis only, WebKitGTK supports an explicit
+per-launch opt-out:
+
+```bash
+WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 flowmux
+```
+
+This removes WebKitGTK's web-process isolation for that launch, including the
+embedded editor. Use only trusted content, and remove the override after
+resolving the host policy. flowmux never enables this override automatically.
+This setting does not control macOS WKWebView.
+
 - `FLOWMUX_LOG=debug` (or any `tracing` filter) raises console log verbosity.
 - Daily log files are written under `$XDG_STATE_HOME/flowmux/logs`
   (usually `~/.local/state/flowmux/logs`); crash reports go to

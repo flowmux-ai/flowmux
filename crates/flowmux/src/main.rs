@@ -94,16 +94,6 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    // WebKitGTK 6.0's default sandbox starts bwrap + xdg-dbus-proxy. On
-    // Ubuntu 24.04 with unprivileged user namespaces restricted by AppArmor,
-    // bwrap fails with "setting up uid map: Permission denied", the proxy
-    // exits with code 1, and the first browser tab creation aborts the app.
-    // Set the sandbox bypass before the first WebView unless the user has
-    // already set an explicit value.
-    if std::env::var_os("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
-    }
-
     // Keep WebKitGTK's DMA-BUF renderer enabled by default. Its SHM fallback
     // makes Monaco cursor repaints several times slower on scaled displays.
     // Hosts with a broken DMA-BUF/EGL stack can still opt out before launch

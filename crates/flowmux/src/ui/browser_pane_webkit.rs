@@ -85,14 +85,6 @@ impl BrowserPane {
             persist_session,
             "creating browser pane (WebKitGTK + profile-isolated NetworkSession)"
         );
-        // Idempotent WebKit sandbox bypass. main.rs sets the same env var,
-        // but unit tests can build BrowserPane through the lib path without
-        // entering main.rs, so set it again here for consistent behavior.
-        // See the matching set_var comment in main.rs for the background.
-        if std::env::var_os("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS", "1");
-        }
-
         // Share a session per profile and persistence mode; persistent profiles
         // use their flowmux data directory, including the default profile.
         let network_session = build_network_session(&profile, persist_session);
