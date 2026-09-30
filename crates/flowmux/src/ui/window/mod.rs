@@ -8003,7 +8003,7 @@ mod tests {
         assert_eq!(registry.pane_frame(pane), Some(frame));
         assert_eq!(
             registry.active_terminal(pane).unwrap().render_area(),
-            &terminal
+            terminal
         );
     }
 
