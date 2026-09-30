@@ -251,29 +251,14 @@ enum PersistenceMode {
     Disabled,
 }
 
-async fn save_snapshot_blocking(
-    snapshot: State,
-    mode: PersistenceMode,
-) -> Result<u64, flowmux_state::StateError> {
-    tokio::task::spawn_blocking(move || {
-        match mode {
-            PersistenceMode::Full => flowmux_state::save_owned(snapshot)?,
-            PersistenceMode::Window(owner) => flowmux_state::save_window_owned(owner, snapshot)?,
-            PersistenceMode::Disabled => return Ok(0),
-        }
-        let file_size = flowmux_state::default_path()
-            .ok()
-            .and_then(|path| std::fs::metadata(path).ok())
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Ok(file_size)
-    })
-    .await
-    .map_err(|err| {
-        flowmux_state::StateError::Io(std::io::Error::other(format!(
-            "state persistence worker failed: {err}"
-        )))
-    })?
+async fn save_store_blocking(store: StateStore) -> Result<(usize, u64), flowmux_state::StateError> {
+    tokio::task::spawn_blocking(move || store.save_current_state_blocking())
+        .await
+        .map_err(|err| {
+            flowmux_state::StateError::Io(std::io::Error::other(format!(
+                "state persistence worker failed: {err}"
+            )))
+        })?
 }
 
 /// Return every live workspace id exactly once in sidebar order. Persisted
@@ -339,6 +324,7 @@ pub struct StateStore {
     dirty: Arc<Notify>,
     dirty_generation: Arc<AtomicU64>,
     persistence: PersistenceMode,
+    save_lock: Arc<std::sync::Mutex<()>>,
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -355,6 +341,7 @@ impl StateStore {
             agents: Arc::new(agent_runtime::AgentRuntime::default()),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
+            save_lock: Arc::new(std::sync::Mutex::new(())),
             persistence: PersistenceMode::Full,
         };
         let bg = store.clone();
@@ -376,6 +363,7 @@ impl StateStore {
             agents: Arc::new(agent_runtime::AgentRuntime::default()),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
+            save_lock: Arc::new(std::sync::Mutex::new(())),
             persistence: PersistenceMode::Full,
         };
         if normalized {
@@ -397,6 +385,7 @@ impl StateStore {
             agents: Arc::new(agent_runtime::AgentRuntime::default()),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
+            save_lock: Arc::new(std::sync::Mutex::new(())),
             persistence: PersistenceMode::Disabled,
         }
     }
@@ -411,6 +400,7 @@ impl StateStore {
             agents: Arc::new(agent_runtime::AgentRuntime::default()),
             dirty: Arc::new(Notify::new()),
             dirty_generation: Arc::new(AtomicU64::new(0)),
+            save_lock: Arc::new(std::sync::Mutex::new(())),
             persistence: PersistenceMode::Window(owner),
         };
         if normalized {
@@ -1909,11 +1899,9 @@ impl StateStore {
                 continue;
             }
             let snapshot_generation = self.dirty_generation.load(Ordering::Acquire);
-            let snap = self.snapshot().await;
-            let workspaces = snap.workspaces.len();
             let started = Instant::now();
-            match save_snapshot_blocking(snap, self.persistence).await {
-                Ok(file_size) => info!(
+            match save_store_blocking(self.clone()).await {
+                Ok((workspaces, file_size)) => info!(
                     generation = snapshot_generation,
                     workspaces,
                     file_size,
@@ -1939,22 +1927,35 @@ impl StateStore {
         if !self.persist_enabled() {
             return Ok(());
         }
-        let snap = self.snapshot().await;
-        save_snapshot_blocking(snap, self.persistence)
-            .await
-            .map(|_| ())
+        save_store_blocking(self.clone()).await.map(|_| ())
     }
 
     pub fn save_now_blocking(&self) -> Result<(), flowmux_state::StateError> {
+        self.save_current_state_blocking().map(|_| ())
+    }
+
+    fn save_current_state_blocking(&self) -> Result<(usize, u64), flowmux_state::StateError> {
         if !self.persist_enabled() {
-            return Ok(());
+            return Ok((0, 0));
         }
+        // Serialize snapshot acquisition as well as the write. A worker queued
+        // before a final save must read current state when it actually runs.
+        let _save = self.save_lock.lock().map_err(|_| {
+            flowmux_state::StateError::Io(std::io::Error::other("state save lock poisoned"))
+        })?;
         let snap = self.inner.blocking_lock().clone();
+        let workspaces = snap.workspaces.len();
         match self.persistence {
-            PersistenceMode::Full => flowmux_state::save_owned(snap),
-            PersistenceMode::Window(owner) => flowmux_state::save_window_owned(owner, snap),
-            PersistenceMode::Disabled => Ok(()),
+            PersistenceMode::Full => flowmux_state::save_owned(snap)?,
+            PersistenceMode::Window(owner) => flowmux_state::save_window_owned(owner, snap)?,
+            PersistenceMode::Disabled => return Ok((0, 0)),
         }
+        let file_size = flowmux_state::default_path()
+            .ok()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Ok((workspaces, file_size))
     }
 }
 

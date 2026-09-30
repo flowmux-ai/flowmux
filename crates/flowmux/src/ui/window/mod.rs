@@ -2120,71 +2120,76 @@ impl WindowController {
     fn install_state_flush_on_close(&self) {
         let controller = self.clone();
         self.window.connect_close_request(move |_| {
-            if controller.window_close.prompting.get() {
+            if controller.window_close.prompting.replace(true) {
                 return glib::Propagation::Stop;
             }
-            if !controller.window_close.approved.get() {
-                let editors = controller
-                    .pane_registry
-                    .borrow()
-                    .editors
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if !editors.is_empty() {
-                    controller.window_close.prompting.set(true);
-                    let pending = controller.clone();
-                    glib::spawn_future_local(async move {
-                        let approved = confirm_dirty_editor_close(&pending.window, editors).await;
-                        pending.window_close.prompting.set(false);
-                        if approved {
-                            pending.window_close.approved.set(true);
-                            pending.window.close();
-                        }
-                    });
-                    return glib::Propagation::Stop;
+            let pending = controller.clone();
+            glib::spawn_future_local(async move {
+                // Use the mutation lane so no later command can change the
+                // workspace while the final save waits for disk I/O.
+                if pending
+                    .bridge
+                    .tx
+                    .send(GtkCommand::CloseWindow)
+                    .await
+                    .is_err()
+                {
+                    // A window can outlive its command receiver during teardown.
+                    pending.close_window().await;
                 }
-                controller.window_close.approved.set(true);
-            }
-            controller.flush_terminal_cwds_blocking();
-            controller.flush_terminal_scrollback_blocking();
-            controller.flush_editor_sessions_blocking();
-            controller.flush_layout_blocking();
-            if let Err(e) = controller.store.save_now_blocking() {
-                tracing::warn!(error = %e, "state save on close failed");
-                controller.window_close.approved.set(false);
-                controller.window_close.prompting.set(true);
-                let pending = controller.clone();
-                glib::spawn_future_local(async move {
-                    show_error_dialog(
-                        &pending.window,
-                        "Could not save session",
-                        &format!("The window has been kept open. Resolve the save error and close it again to retry.\n\n{e}"),
-                    )
-                    .await;
-                    pending.window_close.prompting.set(false);
-                });
-                return glib::Propagation::Stop;
-            }
-            controller.pane_registry.borrow_mut().ssh.clear();
-            // Cancel all in-flight WebView loads with stop_loading only.
-            // The earlier `load_uri("about:blank")` attempt started a new load,
-            // which was then internally cancelled during destroy and printed two
-            // `internallyFailedLoadTimerFired` ERROR lines. `try_close()` can
-            // trigger beforeunload and the same race, so skip it too.
-            //
-            // Defer destroy by two idle cycles: first let GTK unrealize WebView
-            // widgets, then drop the window on the second idle. Avoid timeout to
-            // keep the polling-timer regression guard intact.
-            for browser in controller.pane_registry.borrow().browsers.values() {
-                browser.stop_loading();
-            }
-            let window = controller.window.clone();
-            glib::idle_add_local_once(move || {
-                let window = window.clone();
-                glib::idle_add_local_once(move || window.destroy());
             });
             glib::Propagation::Stop
+        });
+    }
+
+    async fn close_window(&self) {
+        let editors = self
+            .pane_registry
+            .borrow()
+            .editors
+            .values()
+            .cloned()
+            .collect();
+        if !confirm_dirty_editor_close(&self.window, editors).await {
+            self.window_close.prompting.set(false);
+            return;
+        }
+        self.flush_terminal_cwds_blocking();
+        self.flush_terminal_scrollback_blocking();
+        self.flush_editor_sessions_blocking();
+        self.flush_layout_blocking();
+        self.window.set_sensitive(false);
+        let store = self.store.clone();
+        let saved = gtk::gio::spawn_blocking(move || store.save_now_blocking())
+            .await
+            .unwrap_or_else(|_| {
+                Err(flowmux_state::StateError::Io(std::io::Error::other(
+                    "state persistence worker panicked",
+                )))
+            });
+        if let Err(error) = saved {
+            tracing::warn!(%error, "state save on close failed");
+            self.window.set_sensitive(true);
+            show_error_dialog(
+                &self.window,
+                "Could not save session",
+                &format!("The window has been kept open. Resolve the save error and close it again to retry.\n\n{error}"),
+            )
+            .await;
+            self.window_close.prompting.set(false);
+            return;
+        }
+        self.window_close.approved.set(true);
+        self.pane_registry.borrow_mut().ssh.clear();
+        // Stop loads before destruction; navigating to about:blank would start
+        // another load that immediately gets cancelled during teardown.
+        for browser in self.pane_registry.borrow().browsers.values() {
+            browser.stop_loading();
+        }
+        let window = self.window.clone();
+        // Let native WebViews unrealize before the window is destroyed.
+        glib::idle_add_local_once(move || {
+            glib::idle_add_local_once(move || window.destroy());
         });
     }
 
@@ -2775,7 +2780,8 @@ impl WindowController {
                 self.dispatch_pane_command(command).await;
             }
             GtkCommand::SessionPanel(action) => self.dispatch_session_panel(action).await,
-            command @ (GtkCommand::ShowOptionsDialog
+            command @ (GtkCommand::CloseWindow
+            | GtkCommand::ShowOptionsDialog
             | GtkCommand::ShowCommandPalette
             | GtkCommand::ShowTerminalOutputSearch
             | GtkCommand::ToggleWorkspaceOverview
@@ -3671,6 +3677,9 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
                     Ok(query) = rx.recv_query() => controller.dispatch(query).await,
                 }
             }
+            if controller.window_close.approved.get() {
+                break;
+            }
         }
     });
 }
@@ -3759,6 +3768,69 @@ mod tests {
             dirty_editor_dialog_body(&["한글.txt".into()]),
             "“한글.txt” has unsaved changes."
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn final_window_save_ends_the_mutation_lane() {
+        adw::init().unwrap();
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let workspace = store
+            .create_workspace(Some("initial".into()), std::env::temp_dir())
+            .await;
+        let (bridge, rx) = Bridge::new();
+        let app = adw::Application::builder()
+            .application_id("com.flowmux.App.UiTest.FinalSaveOrdering")
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let controller = WindowController::new(
+            &app,
+            store.clone(),
+            Arc::new(ResolvedTheme::load()),
+            bridge.clone(),
+            gtk::CssProvider::new(),
+            None,
+        );
+        let (ack, before) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::RenameWorkspace {
+                id: workspace,
+                name: "saved".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        bridge.tx.send(GtkCommand::CloseWindow).await.unwrap();
+        let (ack, after) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::RenameWorkspace {
+                id: workspace,
+                name: "too late".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        spawn_dispatch_loop(rx, controller.clone());
+        glib::future_with_timeout(Duration::from_secs(2), before)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(glib::future_with_timeout(Duration::from_secs(2), after)
+            .await
+            .unwrap()
+            .is_err());
+        assert!(controller.window_close.approved.get());
+        assert_eq!(
+            store
+                .get_workspace(workspace)
+                .await
+                .unwrap()
+                .display_title(),
+            "saved"
+        );
+        glib::timeout_future(Duration::from_millis(20)).await;
     }
 
     #[cfg(not(target_os = "macos"))]

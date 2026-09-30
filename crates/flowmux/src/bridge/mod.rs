@@ -204,6 +204,8 @@ pub enum WsNav {
 /// Commands from tokio to the GTK main loop, with optional oneshot replies.
 #[derive(Debug)]
 pub enum GtkCommand {
+    /// Finish prior mutations, save the final state, then destroy the window.
+    CloseWindow,
     /// Show the options dialog from the GTK side. Changes apply immediately;
     /// the dialog returns nothing through the bridge.
     ShowOptionsDialog,

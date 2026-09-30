@@ -6,6 +6,7 @@ use super::*;
 impl WindowController {
     pub(super) async fn dispatch_window_chrome_command(&self, cmd: GtkCommand) {
         match cmd {
+            GtkCommand::CloseWindow => self.close_window().await,
             GtkCommand::ShowOptionsDialog => {
                 let current = self.options.borrow().clone();
                 let options_cell = self.options.clone();
