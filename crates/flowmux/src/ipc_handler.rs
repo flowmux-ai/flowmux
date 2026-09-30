@@ -26,7 +26,6 @@ async fn query_agent_surface_visible(bridge: &Bridge, surface: flowmux_core::Sur
     tokio::time::timeout(AGENT_VISIBILITY_QUERY_TIMEOUT, async {
         let (visibility_tx, visibility_rx) = oneshot::channel();
         bridge
-            .tx
             .send(GtkCommand::QueryAgentSurfaceVisible {
                 surface,
                 ack: visibility_tx,
@@ -61,7 +60,6 @@ async fn browser_action(bridge: &Bridge, pane: flowmux_core::PaneId, op: Browser
     );
     let (tx, rx) = oneshot::channel();
     let _ = bridge
-        .tx
         .send(GtkCommand::BrowserAction { pane, op, ack: tx })
         .await;
     match rx.await {
@@ -401,7 +399,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::PaneReadScreen { pane, ack: tx })
                     .await;
                 match rx.await {
@@ -1126,7 +1123,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::ListNotifications {
                         unread_only,
                         ack: tx,

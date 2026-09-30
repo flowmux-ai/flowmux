@@ -3644,7 +3644,17 @@ fn run_browser_screenshot(
 pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: WindowController) {
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
-            controller.dispatch(cmd).await;
+            // Preserve mutation order while serving observations during SSH I/O
+            // and confirmation dialogs. Queries cannot close or replace widgets.
+            let dispatch = controller.dispatch(cmd);
+            tokio::pin!(dispatch);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut dispatch => break,
+                    Ok(query) = rx.recv_query() => controller.dispatch(query).await,
+                }
+            }
         }
     });
 }
@@ -3733,6 +3743,86 @@ mod tests {
             dirty_editor_dialog_body(&["한글.txt".into()]),
             "“한글.txt” has unsaved changes."
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn confirmation_does_not_block_queries_or_allow_queued_mutations() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.QueryWhileConfirming").await;
+        let (bridge, rx) = Bridge::new();
+        spawn_dispatch_loop(rx, controller.clone());
+        controller.window.present();
+        let (ack, mut closed) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::RemoveWorkspace {
+                id: workspace,
+                confirm: true,
+                ack,
+            })
+            .await
+            .unwrap();
+        glib::future_with_timeout(Duration::from_secs(2), async {
+            while controller.window.visible_dialog().is_none() {
+                glib::timeout_future(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let (ack, mut renamed) = oneshot::channel();
+        bridge
+            .tx
+            .send(GtkCommand::RenameWorkspace {
+                id: workspace,
+                name: "after cancel".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        let (ack, screen) = oneshot::channel();
+        bridge
+            .send(GtkCommand::PaneReadScreen { pane, ack })
+            .await
+            .unwrap();
+        assert!(glib::future_with_timeout(Duration::from_secs(1), screen)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_ok());
+        assert!(matches!(
+            closed.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            renamed.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        let dialog = controller
+            .window
+            .visible_dialog()
+            .unwrap()
+            .downcast::<adw::AlertDialog>()
+            .unwrap();
+        dialog.emit_by_name::<()>("response", &[&"cancel"]);
+        glib::future_with_timeout(Duration::from_secs(1), closed)
+            .await
+            .unwrap()
+            .unwrap();
+        glib::future_with_timeout(Duration::from_secs(1), renamed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            controller
+                .store
+                .get_workspace(workspace)
+                .await
+                .unwrap()
+                .display_title(),
+            "after cancel"
+        );
+        controller.window.destroy();
     }
 
     #[cfg(not(target_os = "macos"))]

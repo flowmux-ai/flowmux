@@ -752,6 +752,7 @@ pub enum GtkCommand {
 pub struct Bridge {
     pub tx: async_channel::Sender<GtkCommand>,
     priority_tx: async_channel::Sender<GtkCommand>,
+    query_tx: async_channel::Sender<GtkCommand>,
 }
 
 const GTK_COMMAND_QUEUE_CAPACITY: usize = 64;
@@ -761,6 +762,7 @@ const GTK_PRIORITY_QUEUE_CAPACITY: usize = 8;
 pub struct BridgeReceiver {
     regular: async_channel::Receiver<GtkCommand>,
     priority: async_channel::Receiver<GtkCommand>,
+    queries: async_channel::Receiver<GtkCommand>,
 }
 
 impl BridgeReceiver {
@@ -776,15 +778,23 @@ impl BridgeReceiver {
                     Err(_) => continue,
                 },
                 command = self.regular.recv() => return command,
+                command = self.queries.recv(), if !self.queries.is_closed() => match command {
+                    Ok(command) => return Ok(command),
+                    Err(_) => continue,
+                },
             }
         }
+    }
+
+    pub async fn recv_query(&self) -> Result<GtkCommand, async_channel::RecvError> {
+        self.queries.recv().await
     }
 
     #[cfg(test)]
     pub fn try_recv(&self) -> Result<GtkCommand, async_channel::TryRecvError> {
         match self.priority.try_recv() {
             Ok(command) => Ok(command),
-            Err(_) => self.regular.try_recv(),
+            Err(_) => self.queries.try_recv().or_else(|_| self.regular.try_recv()),
         }
     }
 }
@@ -793,13 +803,39 @@ impl Bridge {
     pub fn new() -> (Self, BridgeReceiver) {
         let (tx, rx) = async_channel::bounded(GTK_COMMAND_QUEUE_CAPACITY);
         let (priority_tx, priority) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
+        let (query_tx, queries) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
         (
-            Self { tx, priority_tx },
+            Self {
+                tx,
+                priority_tx,
+                query_tx,
+            },
             BridgeReceiver {
                 regular: rx,
                 priority,
+                queries,
             },
         )
+    }
+
+    /// Queries may observe the current state while a mutation waits for I/O or
+    /// user confirmation. Keep mutations on the ordered lane, including raw JS.
+    pub async fn send(
+        &self,
+        command: GtkCommand,
+    ) -> Result<(), async_channel::SendError<GtkCommand>> {
+        let query = match &command {
+            GtkCommand::PaneReadScreen { .. }
+            | GtkCommand::ListNotifications { .. }
+            | GtkCommand::QueryAgentSurfaceVisible { .. } => true,
+            GtkCommand::BrowserAction { op, .. } => op.is_query(),
+            _ => false,
+        };
+        if query {
+            self.query_tx.send(command).await
+        } else {
+            self.tx.send(command).await
+        }
     }
 
     pub async fn send_priority(
@@ -822,5 +858,62 @@ mod tests {
             bridge.priority_tx.capacity(),
             Some(GTK_PRIORITY_QUEUE_CAPACITY)
         );
+        assert_eq!(
+            bridge.query_tx.capacity(),
+            Some(GTK_PRIORITY_QUEUE_CAPACITY)
+        );
+    }
+
+    #[tokio::test]
+    async fn queries_bypass_pending_mutations_without_reordering_them() {
+        let (bridge, rx) = Bridge::new();
+        let pane = PaneId::new();
+        let (first, _) = oneshot::channel();
+        let (second, _) = oneshot::channel();
+        bridge
+            .send(GtkCommand::PaneSendKeys {
+                pane,
+                keys: "first".into(),
+                ack: first,
+            })
+            .await
+            .unwrap();
+        bridge
+            .send(GtkCommand::PaneSendKeys {
+                pane,
+                keys: "second".into(),
+                ack: second,
+            })
+            .await
+            .unwrap();
+        let (ack, _) = oneshot::channel();
+        bridge
+            .send(GtkCommand::PaneReadScreen { pane, ack })
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv_query().await.unwrap(),
+            GtkCommand::PaneReadScreen { .. }
+        ));
+        for expected in ["first", "second"] {
+            assert!(
+                matches!(rx.recv().await.unwrap(), GtkCommand::PaneSendKeys { keys, .. } if keys == expected)
+            );
+        }
+        // Raw eval can mutate a page; it must never enter the query lane.
+        let (ack, _) = oneshot::channel();
+        bridge
+            .send(GtkCommand::BrowserEval {
+                pane,
+                source: "location.reload()".into(),
+                ack,
+            })
+            .await
+            .unwrap();
+        assert!(rx.queries.try_recv().is_err());
+        assert!(matches!(
+            rx.recv().await.unwrap(),
+            GtkCommand::BrowserEval { .. }
+        ));
     }
 }
