@@ -3218,7 +3218,10 @@ mod tests {
             fs::set_permissions(path, permissions).unwrap();
         }
         let run = |args: &[&str], version: &str| {
-            let status = Command::new(&shim)
+            // Use the shim's interpreter so parallel fixture creation cannot
+            // make exec of this freshly written script fail with ETXTBSY.
+            let status = Command::new("/bin/bash")
+                .arg(&shim)
                 .args(args)
                 .env_clear()
                 .env(
