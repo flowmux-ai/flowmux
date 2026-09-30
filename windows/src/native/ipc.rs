@@ -318,10 +318,12 @@ pub(super) fn request(cli: Cli) -> anyhow::Result<Value> {
         };
     let mut command = cli.command;
     // Explicit relative paths belong to the CLI process, not the GUI's cwd.
-    if let Command::NewTab {
-        cwd: Some(path), ..
+    if let Command::NewTab { cwd, local_cwd, .. } = &mut command {
+        // Only the host knows whether the target is an SSH workspace. Keep
+        // both interpretations without resolving POSIX paths as Windows cwd.
+        *local_cwd = cwd.as_ref().map(std::path::absolute).transpose()?;
     }
-    | Command::NewWorkspace {
+    if let Command::NewWorkspace {
         cwd: Some(path), ..
     } = &mut command
     {

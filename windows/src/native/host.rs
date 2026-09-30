@@ -4014,13 +4014,19 @@ impl App {
                     }),
                 )?;
             }
-            Command::NewTab { cwd, shell } => {
-                self.new_terminal(
-                    self.target(None, caller)?,
-                    cwd,
-                    shell.requested()?,
-                    shells::NewTerminal::Tab,
-                )?;
+            Command::NewTab {
+                cwd,
+                local_cwd,
+                shell,
+            } => {
+                let source = self.target(None, caller)?;
+                let (workspace, _, _) = self.locate(source).context("source tab missing")?;
+                let cwd = if self.workspaces[workspace].ssh.is_some() {
+                    cwd
+                } else {
+                    local_cwd.or(cwd)
+                };
+                self.new_terminal(source, cwd, shell.requested()?, shells::NewTerminal::Tab)?;
             }
             Command::NewWorkspace { cwd, shell } => {
                 self.new_workspace(caller, cwd, shell.requested()?)?;

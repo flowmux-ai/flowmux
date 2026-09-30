@@ -390,6 +390,34 @@ mod native {
         }
         Ok(info)
     }
+    fn ensure_copy_has_no_named_streams(file: &File) -> anyhow::Result<()> {
+        // ponytail: byte copies cannot preserve ADS (including Mark-of-the-Web).
+        // Refuse them until a stream-preserving copy is implemented. Oversized
+        // stream inventories fail closed too; query the pinned source handle.
+        let mut storage = vec![0u64; 8192];
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileStreamInfo,
+                storage.as_mut_ptr().cast(),
+                (storage.len() * size_of::<u64>()) as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error())
+                .context("cannot verify file streams; copy refused");
+        }
+        let info = unsafe { &*storage.as_ptr().cast::<FILE_STREAM_INFO>() };
+        let unnamed: Vec<u16> = "::$DATA".encode_utf16().collect();
+        ensure!(
+            info.NextEntryOffset == 0
+                && info.StreamNameLength as usize == unnamed.len() * 2
+                && unsafe { std::slice::from_raw_parts(info.StreamName.as_ptr(), unnamed.len()) }
+                    == unnamed,
+            "Copying files with alternate data streams is unsupported; source left unchanged"
+        );
+        Ok(())
+    }
     fn identity(info: &BY_HANDLE_FILE_INFORMATION) -> Identity {
         Identity {
             volume: info.dwVolumeSerialNumber,
@@ -502,6 +530,7 @@ mod native {
                 "source volume changed"
             );
             if validated.request.kind == Kind::Copy {
+                ensure_copy_has_no_named_streams(&source)?;
                 ensure!(
                     length(&source_info) <= MAX_COPY_BYTES,
                     "copy exceeds 16 MiB"
@@ -574,6 +603,7 @@ mod native {
                     );
                     control.check()?;
                     temp.file.sync_all()?;
+                    ensure_copy_has_no_named_streams(&self.source)?;
                     control.check()?;
                     rename(&temp.file, parent, leaf)?;
                     temp.published = true; // Commit succeeded; no later cancellation rollback.
@@ -847,6 +877,52 @@ mod tests {
             );
             assert!(!fixture.path(source).exists());
             assert_eq!(fs::read(fixture.path(moved)).unwrap(), bytes);
+        }
+
+        #[test]
+        fn native_copy_refuses_named_streams_without_losing_security_metadata() {
+            let fixture = Fixture::new();
+            let source = "원본/하위/download.txt";
+            let destination = "대상/하위/copy.txt";
+            let control = control();
+            fs::write(fixture.path(source), b"downloaded").unwrap();
+            let zone = b"[ZoneTransfer]\r\nZoneId=3\r\n";
+            fs::write(fixture.path(&format!("{source}:Zone.Identifier")), zone).unwrap();
+            let error =
+                Prepared::prepare(fixture.request(Kind::Copy, source, destination), &control)
+                    .err()
+                    .expect("copy must retain or refuse named streams");
+            assert!(
+                error.to_string().contains("alternate data streams"),
+                "{error:#}"
+            );
+            assert_eq!(fs::read(fixture.path(source)).unwrap(), b"downloaded");
+            assert_eq!(
+                fs::read(fixture.path(&format!("{source}:Zone.Identifier"))).unwrap(),
+                zone
+            );
+            assert_eq!(fs::read_dir(fixture.path("대상/하위")).unwrap().count(), 0);
+
+            // Rename/move retain the file object and therefore its streams.
+            Prepared::prepare(fixture.request(Kind::Move, source, destination), &control)
+                .unwrap()
+                .commit(&control)
+                .unwrap();
+            assert_eq!(
+                fs::read(fixture.path(&format!("{destination}:Zone.Identifier"))).unwrap(),
+                zone
+            );
+
+            // Empty ordinary files remain copyable.
+            fs::write(fixture.path(source), b"").unwrap();
+            Prepared::prepare(
+                fixture.request(Kind::Copy, source, "대상/하위/empty.txt"),
+                &control,
+            )
+            .unwrap()
+            .commit(&control)
+            .unwrap();
+            assert_eq!(fs::read(fixture.path("대상/하위/empty.txt")).unwrap(), b"");
         }
 
         #[test]

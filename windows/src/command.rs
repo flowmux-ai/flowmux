@@ -524,6 +524,10 @@ pub enum Command {
     NewTab {
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// CLI-resolved Windows path; cwd remains verbatim for SSH targets.
+        #[arg(skip)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        local_cwd: Option<PathBuf>,
         #[command(flatten)]
         #[serde(flatten)]
         shell: ShellArgs,
@@ -1199,6 +1203,35 @@ mod tests {
             };
             assert!(shell.requested().unwrap().is_none());
         }
+    }
+
+    #[test]
+    fn new_tab_transports_remote_and_local_paths_separately() {
+        let mut cli =
+            Cli::try_parse_from(["flowmuxctl", "new-tab", "--cwd", "/srv/한 글/../project"])
+                .unwrap();
+        let Command::NewTab { local_cwd, .. } = &mut cli.command else {
+            panic!()
+        };
+        assert!(local_cwd.is_none());
+        *local_cwd = Some(PathBuf::from(r"C:\srv\project"));
+        let decoded: Command =
+            serde_json::from_slice(&serde_json::to_vec(&cli.command).unwrap()).unwrap();
+        let Command::NewTab { cwd, local_cwd, .. } = decoded else {
+            panic!()
+        };
+        assert_eq!(cwd.unwrap(), PathBuf::from("/srv/한 글/../project"));
+        assert_eq!(local_cwd.unwrap(), PathBuf::from(r"C:\srv\project"));
+        let old: Command =
+            serde_json::from_str(r#"{"method":"new_tab","cwd":"/srv/project"}"#).unwrap();
+        assert!(matches!(
+            old,
+            Command::NewTab {
+                local_cwd: None,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(["flowmuxctl", "new-tab", "--local-cwd", "x"]).is_err());
     }
 
     #[test]
