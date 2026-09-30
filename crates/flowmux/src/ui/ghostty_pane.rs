@@ -532,6 +532,30 @@ impl GhosttyPane {
     }
 
     pub fn grab_focus(&self) {
+        #[cfg(target_os = "macos")]
+        {
+            use glib::translate::ToGlibPtr;
+            use objc2::ClassType;
+            use objc2_app_kit::NSWindow;
+            extern "C" {
+                fn gdk_macos_surface_get_native_window(
+                    surface: *mut gtk::gdk::ffi::GdkSurface,
+                ) -> *mut std::ffi::c_void;
+            }
+            if let Some(surface) = self.widget.native().and_then(|native| native.surface()) {
+                let window = unsafe {
+                    gdk_macos_surface_get_native_window(surface.to_glib_none().0)
+                        .cast::<NSWindow>()
+                        .as_ref()
+                };
+                if let Some(window) = window {
+                    if let Some(view) = window.contentView() {
+                        // GTK focus alone leaves an embedded WKWebView as AppKit's responder.
+                        window.makeFirstResponder(Some(view.as_super()));
+                    }
+                }
+            }
+        }
         self.widget.grab_focus();
     }
 
