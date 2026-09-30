@@ -68,13 +68,18 @@ jobs:
             libwebkitgtk-6.0-dev libssl-dev \
             libssh2-1-dev libdbus-1-dev libsecret-1-dev \
             meson ninja-build \
-            dbus xvfb
+            dbus xvfb apparmor
 
       - name: Install ThorVG (image viewer backend, all loaders + C API)
         run: sudo ./scripts/install-thorvg.sh
 
+      - name: Allow WebKit namespaces for the test process
+        run: |
+          sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
+          sudo sh packaging/debian/postinst configure
+
       - name: Run test suite
-        run: GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
+        run: GDK_BACKEND=x11 GTK_A11Y=test G_DEBUG=fatal-criticals aa-exec -p flowmux-webkit -- xvfb-run -a dbus-run-session -- cargo test --workspace --locked -- --nocapture
 
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
@@ -96,6 +101,7 @@ jobs:
           cp target/release/flowmux-daemon     "$stage/"
           cp LICENSE NOTICE README.md \
             docs/legal/THIRD_PARTY_LICENSES.md "$stage/"
+          cp packaging/apparmor/flowmux-webkit "$stage/flowmux-webkit.apparmor"
           tar -C dist -czf "dist/${stage_name}.tar.gz" "$stage_name"
           (cd dist && sha256sum "${stage_name}.tar.gz" > "${stage_name}.tar.gz.sha256")
 

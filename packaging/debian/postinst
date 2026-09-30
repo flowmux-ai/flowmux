@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+if [ "${1:-}" = configure ] && command -v apparmor_parser >/dev/null 2>&1 \
+    && [ -d /sys/kernel/security/apparmor ]; then
+    apparmor_parser -r /etc/apparmor.d/flowmux-webkit
+fi

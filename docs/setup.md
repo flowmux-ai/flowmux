@@ -115,6 +115,30 @@ executable through an application-specific profile. See Ubuntu's
 [AppArmor documentation](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/#apparmor-unprivileged-user-namespace-restrictions).
 Do not disable AppArmor or user-namespace restrictions system-wide.
 
+The `.deb` package installs and loads the profile. `install.sh` offers to
+install it when the host restricts unprivileged namespaces, preserving any
+existing administrator policy. For a manual source install on Ubuntu 24.04+,
+install the supplied profile and restart flowmux:
+
+```bash
+sudo install -m 0644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
+sudo apparmor_parser -r /etc/apparmor.d/flowmux-webkit
+```
+
+Release tarballs include the same file as `flowmux-webkit.apparmor`.
+
+The profile covers `flowmux` and `flowmux-md-viewer` in `/usr/bin`,
+`/usr/local/bin`, and `/home/*/.local/bin` or `/home/*/.cargo/bin`. For a
+development binary or a custom install path, launch it explicitly in the profile:
+
+```bash
+aa-exec -p flowmux-webkit -- ./target/debug/flowmux
+```
+
+This permits namespace creation for that application while retaining WebKit's
+web-process sandbox. Linux CI uses the same profile for its test process and
+checks the running web process's PID namespace and seccomp filter.
+
 For a temporary compatibility diagnosis only, WebKitGTK supports an explicit
 per-launch opt-out:
 

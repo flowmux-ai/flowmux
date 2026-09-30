@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Permit WebKit's bubblewrap sandbox without changing the host-wide userns policy.
+# This adds a namespace permission to an otherwise unconfined desktop app;
+# WebKit still applies its own namespaces, mounts and seccomp filter.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile flowmux-webkit /{usr/bin,usr/local/bin,home/*/.local/bin,home/*/.cargo/bin}/flowmux{,-md-viewer} flags=(unconfined) {
+    userns,
+}

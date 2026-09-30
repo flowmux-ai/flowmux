@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -eu
+
+# Keep the profile loaded during upgrades. Removal happens before dpkg removes
+# the profile file, so the parser can still read its name and attachment.
+if [ "${1:-}" = remove ] && command -v apparmor_parser >/dev/null 2>&1 \
+    && [ -d /sys/kernel/security/apparmor ]; then
+    apparmor_parser -R /etc/apparmor.d/flowmux-webkit || true
+fi

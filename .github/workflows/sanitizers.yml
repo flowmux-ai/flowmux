@@ -28,11 +28,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
             libvte-2.91-gtk4-dev libwebkitgtk-6.0-dev libssl-dev \
-            libssh2-1-dev libdbus-1-dev meson ninja-build dbus-x11 xvfb tmux llvm-18
+            libssh2-1-dev libdbus-1-dev meson ninja-build dbus-x11 xvfb tmux llvm-18 apparmor
           sudo ./scripts/install-thorvg.sh
+      - name: Allow WebKit namespaces for the test process
+        run: |
+          sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
+          sudo sh packaging/debian/postinst configure
       - name: Headless ASan and leak checks
         run: bash scripts/test-sanitizers.sh headless
       - name: Native Lottie ASan and leak checks
         run: bash scripts/test-sanitizers.sh lottie -- --test-threads=1
       - name: GUI ASan checks
-        run: bash scripts/test-sanitizers.sh gui -- --test-threads=1
+        run: aa-exec -p flowmux-webkit -- bash scripts/test-sanitizers.sh gui -- --test-threads=1

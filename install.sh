@@ -213,6 +213,17 @@ for dir in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
     fi
 done
 
+# Restricted user namespaces need a scoped AppArmor permission for WebKit.
+if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
+    && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+    confirm "Install the FlowMux AppArmor profile to enable WebKit's sandbox?"
+    # Preserve an administrator's existing policy.
+    if [ ! -e /etc/apparmor.d/flowmux-webkit ]; then
+        sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
+    fi
+    sudo sh packaging/debian/postinst configure
+fi
+
 # Desktop entry + icons. A .desktop file alone is not enough — the launcher
 # resolves `Icon=com.flowmux.App` through the hicolor theme, so the PNG/SVG have
 # to land under the matching per-size apps/ directories with that basename.
