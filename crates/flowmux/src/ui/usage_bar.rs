@@ -90,18 +90,28 @@ impl UsageBar {
         let mut visible = [false; 2];
         for (provider, state) in [&state.claude, &state.codex].into_iter().enumerate() {
             let mut slots = [(300, "5h"), (10_080, "1W")].map(|(duration, label)| {
-                window_percent(state, duration).map(|value| (label, value))
+                window_percent(state, duration).map(|value| (label, label.to_owned(), value))
             });
-            // Credit-based plans report no 5h/1W window at all — Claude exposes
-            // only "Extra usage" and Codex only "Individual". Show that balance
+            // Credit-based and enterprise plans report no 5h/1W window at all:
+            // Claude may send "Extra usage", a seat key, or only "Spend", and
+            // Codex its seat allowance under the limit's own name. Show the
+            // provider's credit balance, or else its highest limit of any kind,
             // in the first slot so the bar still reports usage on such plans.
             if slots.iter().all(Option::is_none) {
                 slots[0] = scope_percent(state, CREDIT_SCOPES[provider])
-                    .map(|value| (CREDIT_LABELS[provider], value));
+                    .map(|value| {
+                        (
+                            CREDIT_LABELS[provider],
+                            CREDIT_LABELS[provider].to_owned(),
+                            value,
+                        )
+                    })
+                    .or_else(|| any_limit(state).map(|(name, value)| ("Limit", name, value)));
             }
             for (period, slot) in slots.into_iter().enumerate() {
                 let meter = &self.meters[provider][period];
-                if let Some((label, value)) = slot {
+                if let Some((label, long_label, value)) = &slot {
+                    let (label, value) = (*label, *value);
                     let name = ["Claude", "Codex"][provider];
                     // Values kept from an earlier collection say so on hover,
                     // since the bar itself has no room for a staleness marker.
@@ -110,7 +120,7 @@ impl UsageBar {
                     } else {
                         ""
                     };
-                    let description = format!("{name} {label} usage{stale}");
+                    let description = format!("{name} {long_label} usage{stale}");
                     meter.root.set_tooltip_text(Some(&description));
                     meter
                         .progress
@@ -140,6 +150,25 @@ fn window_percent(state: &ProviderState, duration: u64) -> Option<f64> {
 
 fn scope_percent(state: &ProviderState, scope: &str) -> Option<f64> {
     max_percent(state, |window| window.scope.as_deref() == Some(scope))
+}
+
+/// The highest limit of any scope or period, with the name the popover uses.
+/// The bar only has room for a short fixed label, so the name goes in the
+/// tooltip.
+fn any_limit(state: &ProviderState) -> Option<(String, f64)> {
+    let value = max_percent(state, |_| true)?;
+    let window = state
+        .limits
+        .as_ref()?
+        .value
+        .iter()
+        .find(|window| window.used_percent == value)?;
+    let name = match (&window.scope, window.duration_minutes) {
+        (Some(scope), Some(_)) => format!("{scope} {}", window.label),
+        (Some(scope), None) => scope.clone(),
+        (None, _) => window.label.clone(),
+    };
+    Some((name, value))
 }
 
 /// A failed refresh keeps whatever was collected last — the endpoint rate
@@ -358,10 +387,19 @@ mod tests {
         state.apply(refresh(Provider::Claude, &[(300, 22.0)]));
         bar.render(&state, true);
         assert_eq!(bar.meters[0][0].percent.text(), "22%(5h)");
-        // Other scoped windows are not promoted into the bar.
+        // Any other limit still shows, under a generic label, when a plan
+        // reports neither periods nor a known credit balance.
         state.apply(credit_refresh(Provider::Codex, "Team pool", 90.0));
         bar.render(&state, true);
-        assert!(!bar.providers[1].is_visible());
+        assert!(bar.providers[1].is_visible());
+        assert_eq!(bar.meters[1][0].percent.text(), "90%(Limit)");
+        assert_eq!(
+            bar.meters[1][0].root.tooltip_text().as_deref(),
+            Some("Codex Team pool usage")
+        );
+        state.apply(credit_refresh(Provider::Claude, "Cinder cove", 100.0));
+        bar.render(&state, true);
+        assert_eq!(bar.meters[0][0].percent.text(), "100%(Limit)");
     }
 
     #[cfg(not(target_os = "macos"))]

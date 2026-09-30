@@ -229,6 +229,14 @@ pub(crate) fn duration_label(minutes: Option<u64>) -> String {
     }
 }
 
+/// Usage services send some numbers as JSON strings (`"120.0"`); accept both.
+pub(crate) fn json_number(value: &serde_json::Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.trim().parse().ok())
+        .filter(|value| value.is_finite())
+}
+
 pub(crate) fn format_token_count(value: u64) -> String {
     if value >= 1_000_000 {
         format_compact(value, 1_000_000, "M")

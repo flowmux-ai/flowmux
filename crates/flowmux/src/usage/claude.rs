@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::{
-    duration_label, FieldRefresh, Provider, ProviderRefresh, TokenTotals, UsageError,
+    duration_label, json_number, FieldRefresh, Provider, ProviderRefresh, TokenTotals, UsageError,
     UsageErrorKind, UsageWindow,
 };
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, Offset, Utc};
@@ -222,30 +222,28 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
         )
     })?;
     let mut windows = Vec::new();
-    if let Some(window) = parse_named_window(object.get("five_hour"), Some(300), None)? {
-        windows.push(window);
-    }
-    if let Some(window) = parse_named_window(object.get("seven_day"), Some(10_080), None)? {
-        windows.push(window);
-    }
+    windows.extend(parse_named_window(object.get("five_hour"), Some(300), None));
+    windows.extend(parse_named_window(
+        object.get("seven_day"),
+        Some(10_080),
+        None,
+    ));
     // Model- or feature-scoped windows (e.g. "seven_day_opus", "fable") arrive
     // as extra top-level objects; keep them all instead of the fixed two.
     // Enterprise plans report no five_hour/seven_day window at all — their seat
     // limits arrive only through these extra objects.
     // "spend" restates "extra_usage" in money with a rounded percent, so it is
-    // dropped whenever the finer-grained section is present.
-    let has_extra_usage = object.get("extra_usage").is_some_and(Value::is_object);
+    // dropped whenever the finer-grained section reports a value. Orgs with
+    // extra usage disabled still send the section, with a null utilization.
+    let has_extra_usage = parse_named_window(object.get("extra_usage"), None, None).is_some();
     for (key, entry) in object {
         if matches!(key.as_str(), "five_hour" | "seven_day" | "limits")
             || (key == "spend" && has_extra_usage)
-            || !entry.is_object()
         {
             continue;
         }
         let (duration_minutes, scope) = window_metadata(key);
-        if let Some(window) = parse_named_window(Some(entry), duration_minutes, scope)? {
-            windows.push(window);
-        }
+        windows.extend(parse_named_window(Some(entry), duration_minutes, scope));
     }
     // Same for the optional "limits" array, which carries kind/group metadata.
     if let Some(limits) = object.get("limits").and_then(Value::as_array) {
@@ -255,9 +253,7 @@ fn parse_usage_response(value: &Value) -> Result<Vec<UsageWindow>, UsageError> {
                 .and_then(Value::as_str)
                 .and_then(kind_duration_minutes);
             let scope = limit.get("group").and_then(Value::as_str).map(scope_label);
-            if let Some(window) = parse_named_window(Some(limit), duration_minutes, scope)? {
-                windows.push(window);
-            }
+            windows.extend(parse_named_window(Some(limit), duration_minutes, scope));
         }
     }
     deduplicate_windows(&mut windows);
@@ -292,42 +288,29 @@ fn scope_label(raw: &str) -> String {
     }
 }
 
+/// Anything that is not a window with a percentage is skipped rather than
+/// failing the response: plans differ in which sections they fill in.
 fn parse_named_window(
     value: Option<&Value>,
     duration_minutes: Option<u64>,
     scope: Option<String>,
-) -> Result<Option<UsageWindow>, UsageError> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let Some(object) = value.as_object() else {
-        return Err(UsageError::new(
-            UsageErrorKind::InvalidData,
-            "The Claude rate limit response was invalid.",
-        ));
-    };
-    let Some(used_percent) = object
-        .get("utilization")
-        .or_else(|| object.get("percent"))
-        .and_then(Value::as_f64)
-    else {
-        return Ok(None);
-    };
+) -> Option<UsageWindow> {
+    let object = value?.as_object()?;
+    let used_percent = ["utilization", "percent"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(json_number))?;
     let resets_at = object
         .get("resets_at")
         .and_then(Value::as_str)
         .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
         .map(|value| value.with_timezone(&Utc));
-    Ok(Some(UsageWindow {
+    Some(UsageWindow {
         label: duration_label(duration_minutes),
         scope,
         used_percent,
         duration_minutes,
         resets_at,
-    }))
+    })
 }
 
 fn deduplicate_windows(windows: &mut Vec<UsageWindow>) {
@@ -694,5 +677,26 @@ mod tests {
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].scope.as_deref(), Some("Spend"));
         assert_eq!(windows[0].used_percent, 54.0);
+    }
+
+    #[test]
+    fn disabled_extra_usage_keeps_spend_and_skips_malformed_sections() {
+        let value = serde_json::json!({
+            "five_hour": null,
+            "seven_day": "unavailable",
+            "extra_usage": {"is_enabled": false, "utilization": null},
+            "spend": {"percent": "12.5"},
+            "limits": ["unexpected", {"kind": "weekly", "utilization": 30}]
+        });
+
+        let windows = parse_usage_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 2);
+        assert!(windows
+            .iter()
+            .any(|window| window.scope.as_deref() == Some("Spend") && window.used_percent == 12.5));
+        assert!(windows
+            .iter()
+            .any(|window| window.duration_minutes == Some(10_080) && window.used_percent == 30.0));
     }
 }

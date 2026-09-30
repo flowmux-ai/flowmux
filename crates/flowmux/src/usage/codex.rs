@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::{
-    duration_label, FieldRefresh, Provider, ProviderRefresh, TokenTotals, UsageError,
+    duration_label, json_number, FieldRefresh, Provider, ProviderRefresh, TokenTotals, UsageError,
     UsageErrorKind, UsageWindow,
 };
 use chrono::{DateTime, Local, NaiveDate, Utc};
@@ -342,7 +342,7 @@ fn parse_rate_limits_response(value: &Value) -> Result<Vec<UsageWindow>, UsageEr
         .and_then(|snapshot| snapshot.get("limitId"))
         .and_then(Value::as_str);
     if let Some(snapshot) = result.get("rateLimits") {
-        append_snapshot_windows(snapshot, None, &mut windows)?;
+        append_snapshot_windows(snapshot, None, &mut windows);
     }
     if let Some(by_id) = result.get("rateLimitsByLimitId").and_then(Value::as_object) {
         for (limit_id, snapshot) in by_id {
@@ -358,7 +358,7 @@ fn parse_rate_limits_response(value: &Value) -> Result<Vec<UsageWindow>, UsageEr
                 .and_then(Value::as_str)
                 .unwrap_or(limit_id)
                 .to_owned();
-            append_snapshot_windows(snapshot, Some(scope), &mut windows)?;
+            append_snapshot_windows(snapshot, Some(scope), &mut windows);
         }
     }
     let mut seen = HashSet::new();
@@ -377,8 +377,10 @@ fn append_snapshot_windows(
     snapshot: &Value,
     fallback_scope: Option<String>,
     windows: &mut Vec<UsageWindow>,
-) -> Result<(), UsageError> {
-    let object = snapshot.as_object().ok_or_else(invalid_response)?;
+) {
+    let Some(object) = snapshot.as_object() else {
+        return;
+    };
     let scope = object
         .get("limitName")
         .and_then(Value::as_str)
@@ -391,15 +393,20 @@ fn append_snapshot_windows(
         if value.is_null() {
             continue;
         }
-        let window = value.as_object().ok_or_else(invalid_response)?;
-        let Some(used_percent) = window.get("usedPercent").and_then(Value::as_f64) else {
+        // Skip, rather than reject, a window this parser does not understand:
+        // one odd bucket must not hide the rest of the account's limits.
+        let Some(window) = value.as_object() else {
             continue;
         };
-        let duration_minutes = window.get("windowDurationMins").and_then(Value::as_u64);
-        let resets_at = window
-            .get("resetsAt")
-            .and_then(Value::as_i64)
-            .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0));
+        let Some(used_percent) = window.get("usedPercent").and_then(json_number) else {
+            continue;
+        };
+        let duration_minutes = window
+            .get("windowDurationMins")
+            .and_then(json_number)
+            .filter(|minutes| *minutes >= 0.0)
+            .map(|minutes| minutes.round() as u64);
+        let resets_at = window.get("resetsAt").and_then(timestamp);
         windows.push(UsageWindow {
             label: duration_label(duration_minutes),
             scope: scope.clone(),
@@ -410,25 +417,21 @@ fn append_snapshot_windows(
     }
     // Business/enterprise plans leave primary and secondary null and report the
     // seat's own allowance as `individualLimit` instead.
-    if let Some(value) = object
-        .get("individualLimit")
-        .filter(|value| !value.is_null())
-    {
-        let window = value.as_object().ok_or_else(invalid_response)?;
-        if let Some(remaining_percent) = window.get("remainingPercent").and_then(Value::as_f64) {
+    if let Some(window) = object.get("individualLimit").and_then(Value::as_object) {
+        if let Some(remaining_percent) = window.get("remainingPercent").and_then(json_number) {
             windows.push(UsageWindow {
                 label: duration_label(None),
                 scope: scope.or_else(|| Some("Individual".to_owned())),
                 used_percent: 100.0 - remaining_percent,
                 duration_minutes: None,
-                resets_at: window
-                    .get("resetsAt")
-                    .and_then(Value::as_i64)
-                    .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0)),
+                resets_at: window.get("resetsAt").and_then(timestamp),
             });
         }
     }
-    Ok(())
+}
+
+fn timestamp(value: &Value) -> Option<DateTime<Utc>> {
+    DateTime::<Utc>::from_timestamp(json_number(value)? as i64, 0)
 }
 
 fn parse_token_usage_response(value: &Value, day: NaiveDate) -> Result<TokenTotals, UsageError> {
@@ -969,5 +972,25 @@ mod tests {
         assert_eq!(windows.len(), 2);
         assert_eq!(windows[1].used_percent, 75.0);
         assert_eq!(windows[1].scope.as_deref(), Some("Team pool"));
+    }
+
+    #[test]
+    fn stringly_numbers_are_read_and_malformed_windows_skipped() {
+        let value = serde_json::json!({"result": {"rateLimits": {
+            "primary": "unavailable",
+            "secondary": {"usedPercent": "15", "windowDurationMins": 300.0, "resetsAt": "1788220801"},
+            "individualLimit": {"remainingPercent": "40.0"}
+        }}});
+
+        let windows = parse_rate_limits_response(&value).unwrap();
+
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].used_percent, 15.0);
+        assert_eq!(windows[0].duration_minutes, Some(300));
+        assert_eq!(
+            windows[0].resets_at,
+            DateTime::<Utc>::from_timestamp(1788220801, 0)
+        );
+        assert_eq!(windows[1].used_percent, 60.0);
     }
 }
