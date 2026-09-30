@@ -108,6 +108,18 @@ cannot load these hooks, and `doctor` reports that policy.
 
 ### Troubleshooting
 
+Each GUI/daemon socket accepts up to 64 concurrent connections, with one
+in-flight request per connection. Excess connections are closed immediately;
+clients should reduce concurrency when the server is busy. Idle or incomplete
+request reads and blocked response writes expire after 30 seconds. Persistent
+clients should reconnect after an idle connection closes.
+
+Read-only queries have a 10-second response budget. Browser waits retain the
+requested wait duration plus 10 seconds for dispatch and response delivery.
+Mutations, including close confirmations, raw JavaScript and screenshot file
+writes, are not cancelled by the query deadline. A lost connection does not
+prove that a mutation failed; inspect its result before retrying it.
+
 WebKitGTK's web-process sandbox is enabled by default. If opening a browser
 or editor fails with a `bwrap` / `uid map` permission error on Ubuntu, check
 the AppArmor audit log and allow user namespaces for the installed flowmux

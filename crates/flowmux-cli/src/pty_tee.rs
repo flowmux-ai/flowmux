@@ -688,22 +688,29 @@ fn ipc_worker(
     };
 
     rt.block_on(async move {
-        let client = match connect_with_retry(&socket).await {
-            Some(c) => c,
-            None => {
-                tracing::warn!(
-                    socket = %socket.display(),
-                    "ipc worker: daemon unreachable; terminal events disabled"
-                );
-                for _ in rx.iter() {}
-                return;
-            }
-        };
-
         let mut next_output_refresh = None;
         loop {
-            match rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(PtyEvent::Notify(ev)) => {
+            let event = match rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            // Silent terminals must not reserve an IPC slot or reuse a socket
+            // that the server expired while they were idle. One connection
+            // carries this batch's notification and coalesced output update.
+            let client = match connect_with_retry(&socket).await {
+                Some(c) => c,
+                None => {
+                    tracing::warn!(
+                        socket = %socket.display(),
+                        "ipc worker: daemon unreachable; terminal events disabled"
+                    );
+                    for _ in rx.iter() {}
+                    return;
+                }
+            };
+            match event {
+                PtyEvent::Notify(ev) => {
                     let req = Request::Notify {
                         pane,
                         surface,
@@ -715,9 +722,7 @@ fn ipc_worker(
                         tracing::warn!(error = %e, "ipc worker: notify call failed");
                     }
                 }
-                Ok(PtyEvent::Output) => {}
-                Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                PtyEvent::Output => {}
             }
             if output_refresh.requested.swap(false, Ordering::AcqRel) {
                 if let Some(delay) = output_refresh_delay(next_output_refresh, Instant::now()) {
@@ -745,7 +750,9 @@ fn ipc_worker(
                         );
                     }
                     Err(error) => {
-                        output_refresh.supported.store(false, Ordering::Release);
+                        // A closed/overloaded connection is not an unsupported
+                        // capability. Fresh output may try a new connection;
+                        // do not replay an ambiguously delivered request.
                         tracing::warn!(%error, "ipc worker: terminal output call failed");
                     }
                 }
@@ -1123,6 +1130,51 @@ impl Drop for SavedTermios {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ipc_worker_reconnects_between_terminal_event_batches() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("events.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let (tx, rx) = mpsc::sync_channel(2);
+        let state = Arc::new(OutputRefreshState::new());
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            ipc_worker(socket, None, Some(SurfaceId::new()), rx, worker_state);
+        });
+        for batch in 0..3 {
+            queue_output_refresh(&tx, &state);
+            let (stream, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                .await
+                .expect("each event batch must connect without reusing a closed socket")
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["verb"], "terminal_output");
+            let response = flowmux_ipc::protocol::Envelope {
+                id: request["id"].as_u64().unwrap(),
+                payload: flowmux_ipc::protocol::Payload::Response(Response::Ok),
+            };
+            if batch != 1 {
+                reader
+                    .get_mut()
+                    .write_all(
+                        format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            // The next event must survive the server closing this connection.
+        }
+        drop(tx);
+        tokio::task::spawn_blocking(move || worker.join().unwrap())
+            .await
+            .unwrap();
+        assert!(state.supported.load(Ordering::Acquire));
+    }
 
     #[test]
     fn ssh_tracker_does_not_inject_local_cwd_or_title() {

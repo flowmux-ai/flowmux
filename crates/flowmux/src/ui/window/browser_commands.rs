@@ -39,6 +39,11 @@ impl WindowController {
                         let cell = std::cell::Cell::new(Some(ack));
                         browser.evaluate_js(flowmux_browser::scripts::SNAPSHOT_JS, move |result| {
                             if let Some(ack) = cell.take() {
+                                // An expired query must not replace a newer
+                                // snapshot's references when its callback arrives.
+                                if ack.is_closed() {
+                                    return;
+                                }
                                 let mapped = match result {
                                     Ok(json) => {
                                         if let Ok(snap) =

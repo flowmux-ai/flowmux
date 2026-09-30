@@ -1,18 +1,56 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Unix socket server dispatching requests through a supplied [`Handler`].
 
-use crate::protocol::{Envelope, Payload, Request, Response, RpcError};
+use crate::protocol::{Envelope, Payload, Request, Response, RpcError, SshRequest};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::Semaphore;
+use tokio::time::timeout;
 use tracing::{info, warn};
 
 /// Hard cap on a single envelope, including snapshots. Bounds memory when a
 /// peer streams without a terminating `\n`.
 pub(crate) const MAX_LINE_BYTES: usize = 1024 * 1024;
+// One request at a time per connection also bounds queued/in-flight handlers.
+const MAX_CONNECTIONS: usize = 64;
+const IO_TIMEOUT: Duration = Duration::from_secs(30);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn query_timeout(request: &Request) -> Option<Duration> {
+    match request {
+        Request::BrowserWait { timeout_ms, .. } => {
+            Some(Duration::from_millis(*timeout_ms).saturating_add(QUERY_TIMEOUT))
+        }
+        Request::Ping
+        | Request::WorkspaceList
+        | Request::WorkspaceTree
+        | Request::WorkspaceCurrent
+        | Request::PaneReadScreen { .. }
+        | Request::NotificationsList { .. }
+        | Request::AgentSessionGet { .. }
+        | Request::Ssh {
+            request: SshRequest::Status { .. },
+        }
+        | Request::BrowserSnapshot { .. }
+        | Request::BrowserUrl { .. }
+        | Request::BrowserTitle { .. }
+        | Request::BrowserText { .. }
+        | Request::BrowserValue { .. }
+        | Request::BrowserAttr { .. }
+        | Request::BrowserIsVisible { .. }
+        | Request::BrowserIsEnabled { .. }
+        | Request::BrowserIsChecked { .. }
+        | Request::BrowserCount { .. } => Some(QUERY_TIMEOUT),
+        // Mutations (including raw JS and screenshot file writes) may already
+        // have effects or be waiting for user confirmation. Do not cancel them.
+        _ => None,
+    }
+}
 
 pub trait Handler: Send + Sync + 'static {
     fn handle<'a>(&'a self, req: Request) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
@@ -23,11 +61,20 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
         std::fs::remove_file(socket)?;
     }
     let listener = UnixListener::bind(socket)?;
+    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     info!(path = %socket.display(), "flowmux daemon listening");
     loop {
         let (stream, _) = listener.accept().await?;
+        let Ok(permit) = connections.clone().try_acquire_owned() else {
+            warn!(
+                limit = MAX_CONNECTIONS,
+                "IPC connection limit reached; dropping connection"
+            );
+            continue;
+        };
         let h = handler.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             if let Err(e) = serve_one(stream, h).await {
                 warn!(error = %e, "client disconnected with error");
             }
@@ -40,7 +87,12 @@ async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::R
     let mut reader = BufReader::new(r);
     let mut buf = String::new();
     loop {
-        match read_line_bounded(&mut reader, &mut buf, MAX_LINE_BYTES).await {
+        match timeout(
+            IO_TIMEOUT,
+            read_line_bounded(&mut reader, &mut buf, MAX_LINE_BYTES),
+        )
+        .await?
+        {
             Ok(0) => return Ok(()),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
@@ -60,7 +112,17 @@ async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::R
             }
         };
         let response = match env.payload {
-            Payload::Request(req) => handler.handle(req).await,
+            Payload::Request(req) => match query_timeout(&req) {
+                Some(budget) => timeout(budget, handler.handle(req))
+                    .await
+                    .unwrap_or_else(|_| {
+                        Response::Error(RpcError::Io(format!(
+                            "query response timed out after {} ms",
+                            budget.as_millis()
+                        )))
+                    }),
+                None => handler.handle(req).await,
+            },
             Payload::Response(_) | Payload::Event(_) => Response::Error(RpcError::InvalidArgument(
                 "client sent non-request payload".into(),
             )),
@@ -71,8 +133,11 @@ async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::R
         };
         let mut line = serde_json::to_string(&out)?;
         line.push('\n');
-        w.write_all(line.as_bytes()).await?;
-        w.flush().await?;
+        timeout(IO_TIMEOUT, async {
+            w.write_all(line.as_bytes()).await?;
+            w.flush().await
+        })
+        .await??;
     }
 }
 
@@ -153,6 +218,251 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     struct PingHandler;
+
+    #[test]
+    fn explicit_browser_wait_keeps_its_budget_and_effects_are_not_timed_out() {
+        let pane = flowmux_core::PaneId::new();
+        assert_eq!(
+            query_timeout(&Request::BrowserWait {
+                pane,
+                condition: crate::protocol::BrowserWaitCondition::Text("ready".into()),
+                timeout_ms: 60_000,
+                poll_ms: 100,
+            }),
+            Some(Duration::from_secs(70))
+        );
+        for request in [
+            Request::SurfaceClose {
+                pane,
+                surface: flowmux_core::SurfaceId::new(),
+            },
+            Request::BrowserEval {
+                pane,
+                source: "run()".into(),
+            },
+            Request::BrowserScreenshot {
+                pane,
+                path: "/tmp/screenshot.png".into(),
+            },
+        ] {
+            assert_eq!(query_timeout(&request), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn client_that_never_reads_cannot_hold_a_response_forever() {
+        struct LargeReply(tokio::sync::Notify);
+        impl Handler for LargeReply {
+            fn handle<'a>(
+                &'a self,
+                _: Request,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                Box::pin(async move {
+                    self.0.notify_one();
+                    Response::ScreenContents {
+                        text: "x".repeat(2 * MAX_LINE_BYTES),
+                    }
+                })
+            }
+        }
+        let handler = Arc::new(LargeReply(tokio::sync::Notify::new()));
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let task = tokio::spawn(serve_one(server, handler.clone()));
+        write_envelope(
+            &mut client,
+            Envelope {
+                id: 1,
+                payload: Payload::Request(Request::Ping),
+            },
+        )
+        .await;
+        handler.0.notified().await;
+        tokio::task::yield_now().await;
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
+        assert!(tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("blocked writes must expire")
+            .unwrap()
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn excess_connections_are_rejected_and_capacity_recovers() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("bounded.sock");
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
+        let mut clients = Vec::new();
+        for _ in 0..64 {
+            let stream = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let Ok(stream) = UnixStream::connect(&socket).await {
+                        break stream;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let mut reader = BufReader::new(stream);
+            write_envelope(
+                reader.get_mut(),
+                Envelope {
+                    id: 1,
+                    payload: Payload::Request(Request::Ping),
+                },
+            )
+            .await;
+            assert!(matches!(
+                read_envelope(&mut reader).await.payload,
+                Payload::Response(Response::Pong)
+            ));
+            clients.push(reader);
+        }
+        let extra = UnixStream::connect(&socket).await.unwrap();
+        let mut extra = BufReader::new(extra);
+        let closed =
+            tokio::time::timeout(Duration::from_secs(1), extra.read_line(&mut String::new())).await;
+        // Abort the accept loop even when the regression assertion fails.
+        if closed.is_err() {
+            server.abort();
+        }
+        assert_eq!(
+            closed
+                .expect("excess connections must be rejected")
+                .unwrap(),
+            0
+        );
+        drop(clients.pop());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let mut reader = BufReader::new(UnixStream::connect(&socket).await.unwrap());
+                let request = b"{\"id\":2,\"kind\":\"request\",\"verb\":\"ping\"}\n";
+                if reader.get_mut().write_all(request).await.is_ok() {
+                    let mut line = String::new();
+                    if matches!(reader.read_line(&mut line).await, Ok(n) if n > 0) {
+                        let reply: Envelope = serde_json::from_str(&line).unwrap();
+                        assert!(matches!(reply.payload, Payload::Response(Response::Pong)));
+                        break;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("closing a client must release capacity");
+        drop(clients);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn incomplete_request_cannot_hold_a_connection_forever() {
+        use std::time::Duration;
+        let (server, mut client) = UnixStream::pair().unwrap();
+        let task = tokio::spawn(serve_one(server, Arc::new(PingHandler)));
+        client.write_all(b"{").await.unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::time::resume();
+        let result = tokio::time::timeout(Duration::from_secs(2), task).await;
+        assert!(result
+            .expect("incomplete requests must expire")
+            .unwrap()
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn query_deadline_does_not_cancel_a_pending_mutation() {
+        use std::time::Duration;
+        struct WaitingHandler {
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        impl Handler for WaitingHandler {
+            fn handle<'a>(
+                &'a self,
+                req: Request,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                Box::pin(async move {
+                    if matches!(req, Request::Ping) {
+                        return Response::Pong;
+                    }
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                    Response::Ok
+                })
+            }
+        }
+        for request in [
+            Request::WorkspaceList,
+            Request::PaneClose {
+                pane: flowmux_core::PaneId::new(),
+            },
+        ] {
+            let query = matches!(request, Request::WorkspaceList);
+            let handler = Arc::new(WaitingHandler {
+                entered: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            });
+            let (server, mut client) = UnixStream::pair().unwrap();
+            let task = tokio::spawn(serve_one(server, handler.clone()));
+            write_envelope(
+                &mut client,
+                Envelope {
+                    id: 9,
+                    payload: Payload::Request(request),
+                },
+            )
+            .await;
+            handler.entered.notified().await;
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(if query { 11 } else { 31 })).await;
+            tokio::time::resume();
+            let mut reader = BufReader::new(client);
+            if !query {
+                assert!(
+                    tokio::time::timeout(
+                        Duration::from_millis(30),
+                        reader.read_line(&mut String::new())
+                    )
+                    .await
+                    .is_err(),
+                    "mutations must still wait for confirmation"
+                );
+                handler.release.notify_one();
+            }
+            let reply = tokio::time::timeout(Duration::from_secs(2), read_envelope(&mut reader))
+                .await
+                .expect("queries must expire; approved mutations must finish");
+            assert_eq!(reply.id, 9);
+            assert!(if query {
+                matches!(
+                    reply.payload,
+                    Payload::Response(Response::Error(RpcError::Io(_)))
+                )
+            } else {
+                matches!(reply.payload, Payload::Response(Response::Ok))
+            });
+            write_envelope(
+                reader.get_mut(),
+                Envelope {
+                    id: 10,
+                    payload: Payload::Request(Request::Ping),
+                },
+            )
+            .await;
+            assert!(matches!(
+                read_envelope(&mut reader).await.payload,
+                Payload::Response(Response::Pong)
+            ));
+            drop(reader);
+            task.await.unwrap().unwrap();
+        }
+    }
 
     impl Handler for PingHandler {
         fn handle<'a>(

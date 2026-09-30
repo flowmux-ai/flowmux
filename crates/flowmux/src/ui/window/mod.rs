@@ -3568,6 +3568,9 @@ fn poll_browser_wait(
     interval: Duration,
     ack: Rc<RefCell<Option<tokio::sync::oneshot::Sender<Result<BrowserActionResult, String>>>>>,
 ) {
+    if ack.borrow().as_ref().is_none_or(|ack| ack.is_closed()) {
+        return;
+    }
     if Instant::now() >= deadline {
         if let Some(ack) = ack.borrow_mut().take() {
             let _ = ack.send(Ok(BrowserActionResult::Bool(false)));
