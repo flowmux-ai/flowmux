@@ -185,7 +185,7 @@ impl WindowController {
                     if let Some(source_surface) = entry.surface {
                         let active = self.pane_registry.borrow().active_surface(pane);
                         if active != Some(source_surface) {
-                            self.activate_surface_now(pane, source_surface).await;
+                            let _ = self.activate_surface_now(pane, source_surface).await;
                         }
                     }
                     self.focus_pane(pane);

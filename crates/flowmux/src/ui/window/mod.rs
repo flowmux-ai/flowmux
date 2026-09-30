@@ -80,7 +80,7 @@ fn command_dismisses_workspace_overview(command: &GtkCommand) -> bool {
             | GtkCommand::FocusWorkspaceDir { .. }
             | GtkCommand::FocusWorkspaceAt { .. }
             | GtkCommand::ActivateWorkspace { .. }
-            | GtkCommand::PaneSplitApplied { .. }
+            | GtkCommand::SplitPane { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::NewSurface { .. }
@@ -2526,21 +2526,18 @@ impl WindowController {
         self.refresh_agent_displays().await;
     }
 
-    /// Inline copy of the `GtkCommand::ActivateSurface` arm — used by
-    /// the notification click router so we can `await` the surface
-    /// switch before grabbing focus. Idempotent when the surface is
-    /// already active.
-    async fn activate_surface_now(&self, pane: PaneId, surface: SurfaceId) {
-        let ws_id = self.store.set_active_surface(pane, surface).await;
-        self.pane_registry
-            .borrow_mut()
-            .activate_surface(pane, surface);
+    /// Shared by IPC, notifications, agent-bar actions and output search.
+    /// Applies the tab before callers schedule focus; persistence is deferred.
+    async fn activate_surface_now(&self, pane: PaneId, surface: SurfaceId) -> Result<(), String> {
+        let ws_id = self
+            .workspace_presenter
+            .activate_surface(pane, surface)
+            .await?;
         self.refresh_window_title().await;
-        if let Some(ws_id) = ws_id {
-            self.sync_workspace_agent_status_from_store(ws_id).await;
-        }
+        self.sync_workspace_agent_status_from_store(ws_id).await;
         self.refresh_agent_screen_status(surface, None).await;
         self.refresh_file_browser_from_focus().await;
+        Ok(())
     }
 
     /// True when the GUI is the foreground window AND the user is
@@ -2745,7 +2742,7 @@ impl WindowController {
             | GtkCommand::ActivateWorkspace { .. }) => {
                 self.dispatch_workspace_command(command).await;
             }
-            command @ (GtkCommand::PaneSplitApplied { .. }
+            command @ (GtkCommand::SplitPane { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::FocusDirection { .. }
@@ -7931,9 +7928,9 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    async fn pane_split_applied_preserves_existing_terminal_widget_identity() {
+    async fn split_pane_preserves_existing_terminal_widget_identity() {
         let (controller, ws_id, pane) =
-            build_single_workspace_controller("com.flowmux.App.UiTest.PaneSplitApplied").await;
+            build_single_workspace_controller("com.flowmux.App.UiTest.SplitPane").await;
         let original_terminal = {
             let registry = controller.pane_registry.borrow();
             registry
@@ -7943,24 +7940,19 @@ mod tests {
                 .clone()
         };
 
-        let (split_ws, new_pane) = controller
-            .store
-            .split_pane(pane, SplitDirection::Vertical)
-            .await
-            .expect("split should succeed");
-        assert_eq!(split_ws, ws_id);
-
         let (ack_tx, ack_rx) = oneshot::channel();
         controller
-            .dispatch(GtkCommand::PaneSplitApplied {
-                id: ws_id,
+            .dispatch(GtkCommand::SplitPane {
                 pane,
-                new_pane,
                 direction: SplitDirection::Vertical,
                 ack: ack_tx,
             })
             .await;
-        ack_rx.await.unwrap().unwrap();
+        let new_pane = ack_rx.await.unwrap().unwrap();
+        assert_eq!(
+            controller.store.workspace_for_pane(new_pane).await,
+            Some(ws_id)
+        );
 
         let registry = controller.pane_registry.borrow();
         let current_terminal = registry
@@ -7973,6 +7965,45 @@ mod tests {
         assert!(
             registry.active_terminal(new_pane).is_some(),
             "new split pane should get its own terminal"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn split_pane_failure_rolls_back_without_rebuilding_the_source() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.SplitRollback").await;
+        let (frame, terminal) = {
+            let registry = controller.pane_registry.borrow();
+            (
+                registry.pane_frame(pane).unwrap(),
+                registry
+                    .active_terminal(pane)
+                    .unwrap()
+                    .render_area()
+                    .clone(),
+            )
+        };
+        // A detached source cannot be replaced by a split in the widget tree.
+        controller.stack.remove(&frame);
+        let (ack, reply) = oneshot::channel();
+        controller
+            .dispatch(GtkCommand::SplitPane {
+                pane,
+                direction: SplitDirection::Vertical,
+                ack,
+            })
+            .await;
+        assert!(reply.await.unwrap().is_err());
+        assert_eq!(
+            controller.store.workspace_pane_count_for(pane).await,
+            Some((workspace, 1))
+        );
+        let registry = controller.pane_registry.borrow();
+        assert_eq!(registry.pane_frame(pane), Some(frame));
+        assert_eq!(
+            registry.active_terminal(pane).unwrap().render_area(),
+            &terminal
         );
     }
 

@@ -216,13 +216,12 @@ pub enum GtkCommand {
         id: WorkspaceId,
         ack: oneshot::Sender<Result<(), String>>,
     },
-    /// Apply a split that was already committed to the store.
-    PaneSplitApplied {
-        id: WorkspaceId,
+    /// Split model + widgets in the ordered GTK lane. Success means applied,
+    /// not persisted. Failure rolls back the new pane before replying.
+    SplitPane {
         pane: PaneId,
-        new_pane: PaneId,
         direction: SplitDirection,
-        ack: oneshot::Sender<Result<(), String>>,
+        ack: oneshot::Sender<Result<PaneId, String>>,
     },
     /// Send keystrokes to a pane.
     PaneSendKeys {
@@ -255,8 +254,7 @@ pub enum GtkCommand {
         ack: oneshot::Sender<Result<(), String>>,
     },
     /// Split the focused pane without rebuilding its live siblings. Used by
-    /// keyboard shortcuts (the IPC verb path goes through the daemon
-    /// directly via `Request::PaneSplit`).
+    /// keyboard shortcuts; shares the model/widget operation with `SplitPane`.
     SplitFocused {
         pane: PaneId,
         direction: SplitDirection,
@@ -363,7 +361,8 @@ pub enum GtkCommand {
         pane: PaneId,
         path: PathBuf,
     },
-    /// Switch the active pane-local surface tab.
+    /// Switch the active pane-local surface tab. An ack reports completion
+    /// after GTK applies focus; it does not wait for background persistence.
     ActivateSurface {
         pane: PaneId,
         surface: SurfaceId,

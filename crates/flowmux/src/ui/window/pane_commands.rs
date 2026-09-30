@@ -9,7 +9,7 @@ impl WindowController {
     pub(super) async fn dispatch_pane_command(&self, cmd: GtkCommand) {
         let zoomed = self.zoomed_pane();
         let clears_zoom = match &cmd {
-            GtkCommand::PaneSplitApplied { .. }
+            GtkCommand::SplitPane { .. }
             | GtkCommand::SplitFocused { .. }
             | GtkCommand::CloseFocused { .. }
             | GtkCommand::FocusDirection { .. }
@@ -27,51 +27,33 @@ impl WindowController {
         }
 
         match cmd {
-            GtkCommand::PaneSplitApplied {
-                id,
+            GtkCommand::SplitPane {
                 pane,
-                new_pane,
                 direction,
                 ack,
             } => {
-                let result = self
-                    .apply_split_incremental_or_rerender(id, pane, new_pane, direction)
-                    .await;
-                let _ = ack.send(result);
+                let _ = ack.send(self.split_pane(pane, direction).await);
             }
             GtkCommand::SplitFocused {
                 pane,
                 direction,
                 ack,
             } => {
-                match self.store.split_pane(pane, direction).await {
-                    Some((ws_id, new_pane)) => {
-                        if let Err(error) = self
-                            .apply_split_incremental_or_rerender(ws_id, pane, new_pane, direction)
-                            .await
-                        {
-                            let _ = ack.send(Err(error));
-                            return;
+                let result = self.split_pane(pane, direction).await;
+                if let Ok(new_pane) = result {
+                    let registry = self.pane_registry.clone();
+                    glib::idle_add_local_once(move || {
+                        let r = registry.borrow();
+                        if let Some(term) = r.active_terminal(new_pane) {
+                            term.grab_focus();
+                        } else if let Some(browser) = r.active_browser(new_pane) {
+                            browser.grab_focus();
+                        } else if let Some(editor) = r.active_editor(new_pane) {
+                            editor.grab_focus();
                         }
-                        // Move keyboard focus to the new pane. Also handle browser splits
-                        // from BrowserOpenSplit so web_view receives focus.
-                        let registry = self.pane_registry.clone();
-                        glib::idle_add_local_once(move || {
-                            let r = registry.borrow();
-                            if let Some(term) = r.active_terminal(new_pane) {
-                                term.grab_focus();
-                            } else if let Some(browser) = r.active_browser(new_pane) {
-                                browser.grab_focus();
-                            } else if let Some(editor) = r.active_editor(new_pane) {
-                                editor.grab_focus();
-                            }
-                        });
-                        let _ = ack.send(Ok(new_pane));
-                    }
-                    None => {
-                        let _ = ack.send(Err(format!("pane not found: {pane}")));
-                    }
+                    });
                 }
+                let _ = ack.send(result);
             }
             GtkCommand::CloseFocused { pane, ack } => {
                 // Peek before mutating: if this is the only pane in
@@ -217,25 +199,12 @@ impl WindowController {
                 }
             }
             GtkCommand::ActivateSurface { pane, surface, ack } => {
-                let ws_id = self.store.set_active_surface(pane, surface).await;
-                if ws_id.is_none() {
+                if let Err(error) = self.activate_surface_now(pane, surface).await {
                     if let Some(ack) = ack {
-                        let _ =
-                            ack.send(Err(format!("surface not found in pane {pane}: {surface}")));
+                        let _ = ack.send(Err(error));
                     }
                     return;
                 }
-                self.pane_registry
-                    .borrow_mut()
-                    .activate_surface(pane, surface);
-                self.refresh_window_title().await;
-                if let Some(ws_id) = ws_id {
-                    // Tab activation changes the active surface used for the
-                    // side-panel name and subtitles.
-                    self.sync_workspace_agent_status_from_store(ws_id).await;
-                }
-                self.refresh_agent_screen_status(surface, None).await;
-                self.refresh_file_browser_from_focus().await;
                 // Focus the newly active surface after GTK has mounted it.
                 let registry = self.pane_registry.clone();
                 glib::idle_add_local_once(move || {

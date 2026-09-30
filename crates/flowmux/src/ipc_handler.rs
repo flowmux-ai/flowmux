@@ -64,6 +64,25 @@ async fn materialize_workspace(
     reply.await.map_err(|_| "bridge closed".to_string())?
 }
 
+/// Success means the model and GTK tree have both applied the split.
+async fn split_pane(
+    bridge: &Bridge,
+    pane: flowmux_core::PaneId,
+    direction: SplitDirection,
+) -> Result<flowmux_core::PaneId, String> {
+    let (ack, reply) = oneshot::channel();
+    bridge
+        .tx
+        .send(GtkCommand::SplitPane {
+            pane,
+            direction,
+            ack,
+        })
+        .await
+        .map_err(|_| "bridge closed".to_string())?;
+    reply.await.map_err(|_| "bridge closed".to_string())?
+}
+
 async fn activate_workspace(bridge: &Bridge, id: flowmux_core::WorkspaceId) -> Result<(), String> {
     let (ack, reply) = oneshot::channel();
     bridge
@@ -361,37 +380,12 @@ impl GuiHandler {
     async fn handle_pane_verb(&self, req: Request) -> Response {
         match req {
             Request::PaneSplit { pane, direction } => {
-                match self.inner.store().split_pane(pane, direction).await {
-                    None => Response::Error(RpcError::NotFound(pane.to_string())),
-                    Some((ws_id, new_pane)) => {
-                        let (tx, rx) = oneshot::channel();
-                        if let Err(error) = self
-                            .bridge
-                            .tx
-                            .send(GtkCommand::PaneSplitApplied {
-                                id: ws_id,
-                                pane,
-                                new_pane,
-                                direction,
-                                ack: tx,
-                            })
-                            .await
-                        {
-                            let _ = self.inner.store().close_pane(new_pane).await;
-                            return Response::Error(RpcError::Internal(error.to_string()));
-                        }
-                        match rx.await {
-                            Ok(Ok(())) => Response::PaneSplitDone { new_pane },
-                            Ok(Err(error)) => {
-                                let _ = self.inner.store().close_pane(new_pane).await;
-                                Response::Error(RpcError::Internal(error))
-                            }
-                            Err(_) => {
-                                let _ = self.inner.store().close_pane(new_pane).await;
-                                Response::Error(RpcError::Internal("bridge closed".to_string()))
-                            }
-                        }
-                    }
+                if self.inner.store().workspace_for_pane(pane).await.is_none() {
+                    return Response::Error(RpcError::NotFound(pane.to_string()));
+                }
+                match split_pane(&self.bridge, pane, direction).await {
+                    Ok(new_pane) => Response::PaneSplitDone { new_pane },
+                    Err(error) => Response::Error(RpcError::Internal(error)),
                 }
             }
             Request::PaneSendKeys { pane, keys } => {
@@ -741,40 +735,12 @@ impl GuiHandler {
                     } else {
                         SplitDirection::Horizontal
                     };
-                    if let Some((_, new_pane)) = store.split_pane(current, dir).await {
-                        let source_pane = current;
-                        let (tx, rx) = oneshot::channel();
-                        if let Err(error) = self
-                            .bridge
-                            .tx
-                            .send(GtkCommand::PaneSplitApplied {
-                                id: ws_id,
-                                pane: source_pane,
-                                new_pane,
-                                direction: dir,
-                                ack: tx,
-                            })
-                            .await
-                        {
-                            let _ = store.close_pane(new_pane).await;
-                            return Response::Error(RpcError::Internal(error.to_string()));
+                    match split_pane(&self.bridge, current, dir).await {
+                        Ok(new_pane) => {
+                            all_panes.push(new_pane);
+                            current = new_pane;
                         }
-                        match rx.await {
-                            Ok(Ok(())) => {
-                                all_panes.push(new_pane);
-                                current = new_pane;
-                            }
-                            Ok(Err(error)) => {
-                                let _ = store.close_pane(new_pane).await;
-                                return Response::Error(RpcError::Internal(error));
-                            }
-                            Err(_) => {
-                                let _ = store.close_pane(new_pane).await;
-                                return Response::Error(RpcError::Internal(
-                                    "bridge closed".to_string(),
-                                ));
-                            }
-                        }
+                        Err(error) => return Response::Error(RpcError::Internal(error)),
                     }
                 }
                 // Feed the `claude` invocation into each pane.
@@ -1235,29 +1201,12 @@ impl flowmux_daemon::tmux_compat::TmuxCompatUi for GuiTmuxUi<'_> {
         materialize_workspace(self.bridge, id).await
     }
 
-    async fn pane_split_applied(
+    async fn split_pane(
         &self,
-        workspace: flowmux_core::WorkspaceId,
         pane: flowmux_core::PaneId,
-        new_pane: flowmux_core::PaneId,
         direction: SplitDirection,
-    ) -> Result<(), String> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self
-            .bridge
-            .tx
-            .send(GtkCommand::PaneSplitApplied {
-                id: workspace,
-                pane,
-                new_pane,
-                direction,
-                ack: tx,
-            })
-            .await;
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err("bridge closed".to_string()),
-        }
+    ) -> Result<flowmux_core::PaneId, String> {
+        split_pane(self.bridge, pane, direction).await
     }
 
     async fn send_keys(&self, pane: flowmux_core::PaneId, keys: &str) -> Result<(), String> {

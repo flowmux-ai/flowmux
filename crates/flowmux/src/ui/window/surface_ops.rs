@@ -233,6 +233,22 @@ impl WindowController {
             }
         });
     }
+    /// One owner for the state transition, widget update and rollback.
+    pub(super) async fn split_pane(
+        &self,
+        pane: PaneId,
+        direction: SplitDirection,
+    ) -> Result<PaneId, String> {
+        let (workspace, new_pane) = self
+            .store
+            .split_pane(pane, direction)
+            .await
+            .ok_or_else(|| format!("pane not found: {pane}"))?;
+        self.apply_split_incremental_or_rerender(workspace, pane, new_pane, direction)
+            .await?;
+        Ok(new_pane)
+    }
+
     /// Update the GTK widget tree after the daemon-side split has completed.
     /// When possible, reuse `target_pane`'s existing `gtk::Frame` inside the new
     /// `gtk::Paned` so other panes in the same workspace, including shell

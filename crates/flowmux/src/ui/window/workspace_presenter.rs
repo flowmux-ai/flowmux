@@ -13,6 +13,23 @@ pub struct WorkspacePresenter {
 }
 
 impl WorkspacePresenter {
+    /// Keep the authoritative active tab and its widget projection together.
+    pub(super) async fn activate_surface(
+        &self,
+        pane: PaneId,
+        surface: SurfaceId,
+    ) -> Result<WorkspaceId, String> {
+        let workspace = self
+            .store
+            .set_active_surface(pane, surface)
+            .await
+            .ok_or_else(|| format!("surface not found in pane {pane}: {surface}"))?;
+        self.pane_registry
+            .borrow_mut()
+            .activate_surface(pane, surface);
+        Ok(workspace)
+    }
+
     pub(super) fn new(
         store: StateStore,
         sidebar: Sidebar,

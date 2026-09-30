@@ -576,7 +576,9 @@ impl WindowController {
             })
             .count();
         self.activate_workspace(workspace).await;
-        self.activate_surface_now(pane, hit.surface).await;
+        self.activate_surface_now(pane, hit.surface)
+            .await
+            .map_err(|_| "This tab is no longer available. Refresh the search.")?;
         self.focus_pane(pane);
         if !terminal.find_output_match(&hit.line.needle, hit.line.column, occurrence) {
             return Err("This output is no longer searchable. Refresh the search.");

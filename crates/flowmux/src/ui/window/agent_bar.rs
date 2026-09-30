@@ -76,7 +76,7 @@ impl WindowController {
             .any(|root| root.root_pane.find_surface_ref(pane, surface).is_some());
         if tab_exists && self.pane_registry.borrow().has_pane(pane) {
             if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
-                self.activate_surface_now(pane, surface).await;
+                let _ = self.activate_surface_now(pane, surface).await;
             }
             self.focus_pane(pane);
         }
@@ -279,7 +279,7 @@ impl WindowController {
     ) {
         self.activate_workspace(workspace).await;
         if self.pane_registry.borrow().active_surface(pane) != Some(surface) {
-            self.activate_surface_now(pane, surface).await;
+            let _ = self.activate_surface_now(pane, surface).await;
         }
         self.acknowledge_source_notifications(Some(workspace), Some(pane), Some(surface));
         self.window.present();
@@ -309,7 +309,7 @@ impl WindowController {
             if let Some(source_surface) = entry.surface {
                 let active = self.pane_registry.borrow().active_surface(pane);
                 if active != Some(source_surface) {
-                    self.activate_surface_now(pane, source_surface).await;
+                    let _ = self.activate_surface_now(pane, source_surface).await;
                 }
             }
 
