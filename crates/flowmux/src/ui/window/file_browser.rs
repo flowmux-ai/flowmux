@@ -122,8 +122,14 @@ impl WindowController {
                 .show_with_message("Could not create an editor tab");
             return;
         };
-        self.attach_or_rerender_surface(workspace_id, target_pane, editor_surface)
-            .await;
+        if let Err(error) = self
+            .attach_or_rerender_surface(workspace_id, target_pane, editor_surface)
+            .await
+        {
+            self.store.close_surface(target_pane, editor_surface).await;
+            self.clipboard_toast.show_with_message(&error);
+            return;
+        }
 
         self.store
             .set_active_surface(target_pane, editor_surface)

@@ -19,6 +19,9 @@ impl WorkspacePresenter {
         pane: PaneId,
         surface: SurfaceId,
     ) -> Result<WorkspaceId, String> {
+        if !self.pane_registry.borrow().has_surface(pane, surface) {
+            return Err(format!("surface is not rendered in pane {pane}: {surface}"));
+        }
         let workspace = self
             .store
             .set_active_surface(pane, surface)

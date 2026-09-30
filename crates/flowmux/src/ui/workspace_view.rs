@@ -189,9 +189,11 @@ pub struct PaneRegistry {
     /// Live editors detached ahead of a workspace rerender, waiting to be
     /// re-adopted by the rebuilt tree (see `detach_workspace_editors`).
     pending_editor_reuse: HashMap<SurfaceId, EditorPane>,
-    /// Focus controller per editor surface, so re-adoption can swap in a
+    pending_terminal_reuse: HashMap<SurfaceId, PaneTerminal>,
+    pending_browser_reuse: HashMap<SurfaceId, BrowserPane>,
+    /// Focus controller per surface, so re-adoption can swap in a
     /// controller bound to the new pane frame.
-    editor_focus_controllers: HashMap<SurfaceId, gtk::EventControllerFocus>,
+    surface_focus_controllers: HashMap<SurfaceId, gtk::EventControllerFocus>,
 }
 
 pub struct TornOffSurface {
@@ -529,7 +531,7 @@ impl PaneRegistry {
     /// editor would demote its unsaved buffer to a crash-recovery prompt. The
     /// rebuilt tree re-adopts them via [`Self::take_reusable_editor`]; anything
     /// left over must be released with
-    /// [`Self::discard_unused_detached_editors`].
+    /// [`Self::discard_unused_detached_surfaces`].
     pub fn detach_workspace_editors(&mut self, workspace: WorkspaceId) {
         let surfaces: Vec<SurfaceId> = self
             .surface_workspace
@@ -540,6 +542,7 @@ impl PaneRegistry {
             let Some(editor) = self.editors.remove(&surface) else {
                 continue;
             };
+            self.remove_surface_focus_controller(surface);
             if let Some(parent) = editor.root.parent() {
                 if let Some(stack) = parent.downcast_ref::<gtk::Stack>() {
                     stack.remove(&editor.root);
@@ -555,29 +558,76 @@ impl PaneRegistry {
         self.pending_editor_reuse.remove(&surface)
     }
 
-    pub fn set_editor_focus_controller(
+    pub fn set_surface_focus_controller(
         &mut self,
         surface: SurfaceId,
-        editor: &EditorPane,
         controller: gtk::EventControllerFocus,
     ) {
-        if let Some(previous) = self.editor_focus_controllers.remove(&surface) {
-            editor.root.remove_controller(&previous);
-        }
-        self.editor_focus_controllers.insert(surface, controller);
+        self.remove_surface_focus_controller(surface);
+        self.surface_focus_controllers.insert(surface, controller);
     }
 
-    fn remove_editor_focus_controller(&mut self, surface: SurfaceId, editor: &EditorPane) {
-        if let Some(controller) = self.editor_focus_controllers.remove(&surface) {
-            editor.root.remove_controller(&controller);
+    fn remove_surface_focus_controller(&mut self, surface: SurfaceId) {
+        if let Some(controller) = self.surface_focus_controllers.remove(&surface) {
+            if let Some(widget) = controller.widget() {
+                widget.remove_controller(&controller);
+            }
         }
     }
 
-    /// Close detached editors the rebuilt tree did not re-adopt (their
+    /// SSH channels keep their generation-aware reuse path. Remaining local
+    /// terminals and browsers retain their live sessions during layout repair.
+    pub fn detach_workspace_surfaces(&mut self, workspace: WorkspaceId) {
+        self.detach_workspace_editors(workspace);
+        let surfaces: Vec<_> = self
+            .surface_workspace
+            .iter()
+            .filter_map(|(surface, owner)| (*owner == workspace).then_some(*surface))
+            .collect();
+        for surface in surfaces {
+            let handle = if self
+                .terminals
+                .get(&surface)
+                .is_some_and(|terminal| !terminal.is_ssh)
+            {
+                MovingHandle::Terminal(self.terminals.remove(&surface).unwrap())
+            } else if let Some(browser) = self.browsers.remove(&surface) {
+                MovingHandle::Browser(browser)
+            } else {
+                continue;
+            };
+            let content = match &handle {
+                MovingHandle::Terminal(terminal) => terminal.root_widget(),
+                MovingHandle::Browser(browser) => browser.root.clone().upcast(),
+                MovingHandle::Editor(_) => unreachable!(),
+            };
+            self.remove_surface_focus_controller(surface);
+            if let Some(parent) = content.parent() {
+                if let Some(stack) = parent.downcast_ref::<gtk::Stack>() {
+                    stack.remove(&content);
+                } else {
+                    content.unparent();
+                }
+            }
+            self.stash_moving_surface_for_rerender(MovingSurface {
+                surface,
+                content,
+                handle,
+            });
+        }
+    }
+
+    /// Close detached sessions the rebuilt tree did not re-adopt (their
     /// surfaces no longer exist in the workspace).
-    pub fn discard_unused_detached_editors(&mut self) {
+    pub fn discard_unused_detached_surfaces(&mut self) {
+        for (_, terminal) in self.pending_terminal_reuse.drain() {
+            terminal.close_pty();
+        }
+        for (_, browser) in self.pending_browser_reuse.drain() {
+            browser.prepare_for_close();
+        }
         for (surface, editor) in self.pending_editor_reuse.drain() {
-            if let Some(controller) = self.editor_focus_controllers.remove(&surface) {
+            if let Some(controller) = self.surface_focus_controllers.remove(&surface) {
                 editor.root.remove_controller(&controller);
             }
             editor.prepare_for_close();
@@ -626,10 +676,10 @@ impl PaneRegistry {
                 browser.prepare_for_close();
             }
             if let Some(editor) = self.editors.remove(&surface) {
-                self.remove_editor_focus_controller(surface, &editor);
+                self.remove_surface_focus_controller(surface);
                 editor.prepare_for_close();
             } else {
-                self.editor_focus_controllers.remove(&surface);
+                self.surface_focus_controllers.remove(&surface);
             }
             self.surface_tab_labels.remove(&surface);
             self.surface_workspace.remove(&surface);
@@ -714,10 +764,18 @@ impl PaneRegistry {
         self.split_workspace.insert(split_id, workspace);
     }
 
-    pub fn activate_surface(&mut self, pane: PaneId, surface: SurfaceId) {
-        if let Some(stack) = self.surface_stacks.get(&pane) {
-            stack.set_visible_child_name(&surface.to_string());
+    pub fn has_surface(&self, pane: PaneId, surface: SurfaceId) -> bool {
+        self.surface_stacks
+            .get(&pane)
+            .and_then(|stack| stack.child_by_name(&surface.to_string()))
+            .is_some()
+    }
+
+    pub fn activate_surface(&mut self, pane: PaneId, surface: SurfaceId) -> bool {
+        if !self.has_surface(pane, surface) {
+            return false;
         }
+        self.surface_stacks[&pane].set_visible_child_name(&surface.to_string());
         if self.terminals.contains_key(&surface) {
             self.active_terminal_by_pane.insert(pane, surface);
             self.active_browser_by_pane.remove(&pane);
@@ -740,6 +798,7 @@ impl PaneRegistry {
                 }
             }
         }
+        true
     }
 
     /// Whether `pane` is currently rendered (its surface stack exists).
@@ -856,10 +915,10 @@ impl PaneRegistry {
                 browser.prepare_for_close();
             }
             if let Some(editor) = self.editors.remove(&s) {
-                self.remove_editor_focus_controller(s, &editor);
+                self.remove_surface_focus_controller(s);
                 editor.prepare_for_close();
             } else {
-                self.editor_focus_controllers.remove(&s);
+                self.surface_focus_controllers.remove(&s);
             }
             self.surface_tab_labels.remove(&s);
             self.surface_workspace.remove(&s);
@@ -929,10 +988,10 @@ impl PaneRegistry {
             browser.prepare_for_close();
         }
         if let Some(editor) = self.editors.remove(&surface) {
-            self.remove_editor_focus_controller(surface, &editor);
+            self.remove_surface_focus_controller(surface);
             editor.prepare_for_close();
         } else {
-            self.editor_focus_controllers.remove(&surface);
+            self.surface_focus_controllers.remove(&surface);
         }
         self.surface_tab_labels.remove(&surface);
         self.surface_workspace.remove(&surface);
@@ -999,7 +1058,7 @@ impl PaneRegistry {
                 None,
             )
         } else if let Some(editor) = self.editors.remove(&surface) {
-            self.remove_editor_focus_controller(surface, &editor);
+            self.remove_surface_focus_controller(surface);
             let session = editor.session_state();
             (
                 editor.focus_widget(),
@@ -1148,17 +1207,19 @@ impl PaneRegistry {
         Ok(())
     }
 
-    /// Keep a detached editor alive across a full workspace rebuild. Other
-    /// surface kinds can be reconstructed from the model, but an editor may
-    /// contain unsaved buffers that must remain in the original live handle.
-    pub fn stash_moving_editor_for_rerender(&mut self, moving: MovingSurface) {
-        let MovingSurface {
-            surface,
-            content: _,
-            handle,
-        } = moving;
-        if let MovingHandle::Editor(editor) = handle {
-            self.pending_editor_reuse.insert(surface, editor);
+    /// Keep every live backend across recovery after an incremental mount fails.
+    pub fn stash_moving_surface_for_rerender(&mut self, moving: MovingSurface) {
+        self.remove_surface_focus_controller(moving.surface);
+        match moving.handle {
+            MovingHandle::Terminal(terminal) => {
+                self.pending_terminal_reuse.insert(moving.surface, terminal);
+            }
+            MovingHandle::Browser(browser) => {
+                self.pending_browser_reuse.insert(moving.surface, browser);
+            }
+            MovingHandle::Editor(editor) => {
+                self.pending_editor_reuse.insert(moving.surface, editor);
+            }
         }
     }
 }
@@ -2414,7 +2475,7 @@ mod tab_dnd_tests {
         assert!(registry.take_reusable_editor(surface).is_none());
 
         registry.pending_editor_reuse.insert(surface, reused);
-        registry.discard_unused_detached_editors();
+        registry.discard_unused_detached_surfaces();
         assert!(registry.pending_editor_reuse.is_empty());
     }
 
@@ -2489,7 +2550,7 @@ mod tab_dnd_tests {
 
     #[cfg(not(target_os = "macos"))]
     #[gtk::test]
-    fn closing_surface_and_pane_release_editor_focus_controllers() {
+    fn closing_surface_and_pane_release_surface_focus_controllers() {
         let workspace = tempfile::tempdir().unwrap();
         let options = flowmux_config::options::Options::default();
         let appearance = ResolvedTheme::load().editor_appearance(&options);
@@ -2517,11 +2578,11 @@ mod tab_dnd_tests {
         registry.pane_tab_containers.insert(pane, tabs);
         registry.editors.insert(surface, editor);
         registry
-            .editor_focus_controllers
+            .surface_focus_controllers
             .insert(surface, focus.clone());
 
         registry.detach_surface_widget(pane, surface);
-        assert!(!registry.editor_focus_controllers.contains_key(&surface));
+        assert!(!registry.surface_focus_controllers.contains_key(&surface));
         assert!(focus.widget().is_none());
 
         let next_surface = SurfaceId::new();
@@ -2541,12 +2602,12 @@ mod tab_dnd_tests {
         );
         registry.editors.insert(next_surface, next_editor);
         registry
-            .editor_focus_controllers
+            .surface_focus_controllers
             .insert(next_surface, next_focus.clone());
 
         registry.forget_pane(pane);
         assert!(!registry
-            .editor_focus_controllers
+            .surface_focus_controllers
             .contains_key(&next_surface));
         assert!(next_focus.widget().is_none());
     }
@@ -3665,112 +3726,121 @@ fn build_panel(
             workspace, pane_id, surface, callbacks, registry, theme,
         ),
         SurfaceKind::Terminal { cwd, shell } => {
-            let opts = (callbacks.read_options)();
-            let inherited_shell = argv.first().map(String::as_str);
-            let requested_shell = preferred_shell(
-                shell.as_deref().or(inherited_shell),
-                opts.default_shell.as_deref(),
-            )
-            .map(str::to_string);
-            let mut argv = argv;
-            let mut resolved_shell = None;
-            let mut shell_warning = None;
-            if let Some(requested_shell) = requested_shell.as_deref() {
-                match flowmux_terminal::validate_shell_command(requested_shell) {
-                    Ok(()) => {
-                        resolved_shell = Some(requested_shell.to_string());
-                        argv = vec![requested_shell.to_string()];
-                    }
-                    Err(error) => {
-                        tracing::warn!(shell = requested_shell, %error, "configured shell is unavailable");
-                        argv.clear();
-                        shell_warning = Some(format!(
-                            "flowmux: cannot start shell {requested_shell:?}: {error}\r\n\
+            let reused = registry
+                .borrow_mut()
+                .pending_terminal_reuse
+                .remove(&surface.id);
+            let pane_terminal = if let Some(terminal) = reused {
+                terminal.set_pane_id(pane_id);
+                terminal
+            } else {
+                let opts = (callbacks.read_options)();
+                let inherited_shell = argv.first().map(String::as_str);
+                let requested_shell = preferred_shell(
+                    shell.as_deref().or(inherited_shell),
+                    opts.default_shell.as_deref(),
+                )
+                .map(str::to_string);
+                let mut argv = argv;
+                let mut resolved_shell = None;
+                let mut shell_warning = None;
+                if let Some(requested_shell) = requested_shell.as_deref() {
+                    match flowmux_terminal::validate_shell_command(requested_shell) {
+                        Ok(()) => {
+                            resolved_shell = Some(requested_shell.to_string());
+                            argv = vec![requested_shell.to_string()];
+                        }
+                        Err(error) => {
+                            tracing::warn!(shell = requested_shell, %error, "configured shell is unavailable");
+                            argv.clear();
+                            shell_warning = Some(format!(
+                                "flowmux: cannot start shell {requested_shell:?}: {error}\r\n\
                              Falling back to $SHELL.\r\n"
-                        ));
+                            ));
+                        }
                     }
                 }
-            }
-            // Match the per-PID socket that `flowmux::main` binds, so
-            // PTYs inside this GUI window route their notifications
-            // back to the SAME GUI even when multiple flowmux windows
-            // are running. Same process ⇒ same path.
-            let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
-            let bundled_cli = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("flowmux")))
-                .filter(|p| p.exists());
-            let extra_env = flowmux_terminal::agent_pty_env(
-                pane_id,
-                surface.id,
-                workspace,
-                &socket,
-                bundled_cli.as_deref(),
-            );
-            // Start the new terminal widget with the current font + zoom
-            // options so a freshly spawned tab matches the live ones.
-            let font = theme.terminal_font(&opts);
-            let resume_command = take_restored_agent_shell_command(
-                surface.id,
-                opts.auto_resume_agent_sessions,
-                flowmux_state::default_agent_session_store(),
-            );
-            let is_resuming_agent = resume_command.is_some();
-            let mut resume_input = None;
-            if let Some(command) = resume_command {
-                if is_flatpak_sandbox() {
-                    // Flatpak's host-shell bridge needs to own the controlling
-                    // terminal, so keep its normal spawn path and feed there.
-                    argv = shell.clone().map(|s| vec![s]).unwrap_or_default();
-                    resume_input = Some(format!("{command}\n"));
-                } else {
-                    let shell = resolved_shell
-                        .clone()
-                        .or_else(|| argv.first().cloned())
-                        .or_else(|| std::env::var("SHELL").ok())
-                        .unwrap_or_else(|| "/bin/bash".into());
-                    argv = resumed_agent_shell_argv(&shell, &command);
+                // Match the per-PID socket that `flowmux::main` binds, so
+                // PTYs inside this GUI window route their notifications
+                // back to the SAME GUI even when multiple flowmux windows
+                // are running. Same process ⇒ same path.
+                let socket = flowmux_config::paths::runtime_socket_for_pid(std::process::id());
+                let bundled_cli = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("flowmux")))
+                    .filter(|p| p.exists());
+                let extra_env = flowmux_terminal::agent_pty_env(
+                    pane_id,
+                    surface.id,
+                    workspace,
+                    &socket,
+                    bundled_cli.as_deref(),
+                );
+                // Start the new terminal widget with the current font + zoom
+                // options so a freshly spawned tab matches the live ones.
+                let font = theme.terminal_font(&opts);
+                let resume_command = take_restored_agent_shell_command(
+                    surface.id,
+                    opts.auto_resume_agent_sessions,
+                    flowmux_state::default_agent_session_store(),
+                );
+                let is_resuming_agent = resume_command.is_some();
+                let mut resume_input = None;
+                if let Some(command) = resume_command {
+                    if is_flatpak_sandbox() {
+                        // Flatpak's host-shell bridge needs to own the controlling
+                        // terminal, so keep its normal spawn path and feed there.
+                        argv = shell.clone().map(|s| vec![s]).unwrap_or_default();
+                        resume_input = Some(format!("{command}\n"));
+                    } else {
+                        let shell = resolved_shell
+                            .clone()
+                            .or_else(|| argv.first().cloned())
+                            .or_else(|| std::env::var("SHELL").ok())
+                            .unwrap_or_else(|| "/bin/bash".into());
+                        argv = resumed_agent_shell_argv(&shell, &command);
+                    }
                 }
-            }
 
-            // VTE is the only terminal backend. GhosttyPane owns the
-            // PTY + render; title/cwd changes are forwarded from inside it.
-            let pane: PaneTerminal = GhosttyPane::spawn(
-                pane_id,
-                surface.id,
-                argv,
-                cwd.clone(),
-                extra_env,
-                opts.scrollback_lines_or_default(),
-                callbacks.clone(),
-            );
-            theme.apply_to_ghostty(&pane);
-            pane.set_font(&font);
-            pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
-            pane.set_minimap(
-                opts.terminal_minimap_enabled,
-                opts.terminal_minimap_width,
-                opts.terminal_minimap_opacity,
-            );
-            if let Some(scrollback) = scrollback_to_restore(
-                opts.restore_terminal_scrollback,
-                is_resuming_agent,
-                surface.scrollback.as_ref(),
-            ) {
-                pane.restore_scrollback(scrollback);
-            }
-            if let Some(message) = shell_warning {
-                pane.show_message(&message);
-            }
-            if let Some(command) = resume_input {
-                let terminal = pane.clone();
-                gtk::glib::idle_add_local_once(move || {
-                    if let Err(error) = terminal.write_input(command.as_bytes()) {
-                        tracing::warn!(%error, "failed to start restored agent session");
-                    }
-                });
-            }
-            let pane_terminal: PaneTerminal = pane;
+                // VTE is the only terminal backend. GhosttyPane owns the
+                // PTY + render; title/cwd changes are forwarded from inside it.
+                let pane: PaneTerminal = GhosttyPane::spawn(
+                    pane_id,
+                    surface.id,
+                    argv,
+                    cwd.clone(),
+                    extra_env,
+                    opts.scrollback_lines_or_default(),
+                    callbacks.clone(),
+                );
+                theme.apply_to_ghostty(&pane);
+                pane.set_font(&font);
+                pane.set_cursor_blink(opts.cursor_blink, opts.cursor_blink_interval_ms);
+                pane.set_minimap(
+                    opts.terminal_minimap_enabled,
+                    opts.terminal_minimap_width,
+                    opts.terminal_minimap_opacity,
+                );
+                if let Some(scrollback) = scrollback_to_restore(
+                    opts.restore_terminal_scrollback,
+                    is_resuming_agent,
+                    surface.scrollback.as_ref(),
+                ) {
+                    pane.restore_scrollback(scrollback);
+                }
+                if let Some(message) = shell_warning {
+                    pane.show_message(&message);
+                }
+                if let Some(command) = resume_input {
+                    let terminal = pane.clone();
+                    gtk::glib::idle_add_local_once(move || {
+                        if let Err(error) = terminal.write_input(command.as_bytes()) {
+                            tracing::warn!(%error, "failed to start restored agent session");
+                        }
+                    });
+                }
+                pane
+            };
 
             // Theme CSS uses this focus class to highlight the pane header.
             let frame_in = frame.downgrade();
@@ -3786,7 +3856,10 @@ fn build_panel(
                     frame_out.remove_css_class("focused");
                 }
             });
-            pane_terminal.add_controller(focus);
+            pane_terminal.add_controller(focus.clone());
+            registry
+                .borrow_mut()
+                .set_surface_focus_controller(surface.id, focus);
 
             // The terminal widget is the pane's root; keeping the same root
             // instance alive preserves the running PTY child across split
@@ -3818,14 +3891,25 @@ fn build_panel(
                 .upcast();
             }
             let opts = (callbacks.read_options)();
-            let pane = BrowserPane::new(
-                pane_id,
-                surface.id,
-                preview_url.as_deref().or(initial_url.as_deref()),
-                callbacks.clone(),
-                opts.default_browser_engine.clone(),
-                opts.persist_browser_session,
-            );
+            let reused = registry
+                .borrow_mut()
+                .pending_browser_reuse
+                .remove(&surface.id)
+                // Expired SSH previews cannot be revived on a new port lease.
+                .filter(|browser| preview.is_none() || browser.root.is_sensitive());
+            let pane = if let Some(browser) = reused {
+                browser.set_pane_id(pane_id);
+                browser
+            } else {
+                BrowserPane::new(
+                    pane_id,
+                    surface.id,
+                    preview_url.as_deref().or(initial_url.as_deref()),
+                    callbacks.clone(),
+                    opts.default_browser_engine.clone(),
+                    opts.persist_browser_session,
+                )
+            };
             if let Some(preview) = preview {
                 if let Some(runtime) = runtime {
                     runtime.borrow_mut().register_preview(preview, pane.clone());
@@ -3865,7 +3949,10 @@ fn build_panel(
                     frame_out.remove_css_class("focused");
                 }
             });
-            pane.root.add_controller(focus);
+            pane.root.add_controller(focus.clone());
+            registry
+                .borrow_mut()
+                .set_surface_focus_controller(surface.id, focus);
 
             let widget = pane.root.clone().upcast::<gtk::Widget>();
             let mut r = registry.borrow_mut();
@@ -3945,7 +4032,7 @@ fn build_panel(
 
             let widget = editor.root.clone().upcast::<gtk::Widget>();
             let mut registry = registry.borrow_mut();
-            registry.set_editor_focus_controller(surface.id, &editor, focus);
+            registry.set_surface_focus_controller(surface.id, focus);
             registry.editors.insert(surface.id, editor);
             registry.surface_workspace.insert(surface.id, workspace);
             widget

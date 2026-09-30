@@ -591,8 +591,13 @@ impl WindowController {
             .add_browser_surface_to_pane(pane, format!("flowmux-ssh-preview://{id}"))
             .await
             .ok_or("Could not open preview")?;
-        self.attach_or_rerender_surface(workspace, pane, surface)
-            .await;
+        if let Err(error) = self
+            .attach_or_rerender_surface(workspace, pane, surface)
+            .await
+        {
+            self.store.close_surface(pane, surface).await;
+            return Err(error);
+        }
         Ok(
             serde_json::json!({"pane": pane, "surface": surface, "url": format!("{}://127.0.0.1:{port}", if https {"https"} else {"http"})}),
         )

@@ -873,8 +873,14 @@ impl WindowController {
                     .store
                     .add_terminal_surface_to_pane(pane, Some(cwd))
                     .await?;
-                self.attach_or_rerender_surface(ws_id, pane, surface_id)
-                    .await;
+                if let Err(error) = self
+                    .attach_or_rerender_surface(ws_id, pane, surface_id)
+                    .await
+                {
+                    self.store.close_surface(pane, surface_id).await;
+                    self.clipboard_toast.show_with_message(&error);
+                    return None;
+                }
                 Some(pane)
             }
             CommandTarget::SplitDown | CommandTarget::SplitRight => {

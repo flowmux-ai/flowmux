@@ -331,8 +331,14 @@ impl WindowController {
                             // state. Falling back to rerender_workspace
                             // here would kill claude/codex running in the
                             // caller's terminal (regression #pane-reset).
-                            self.attach_or_rerender_surface(workspace, reuse_target, surface_id)
-                                .await;
+                            if let Err(error) = self
+                                .attach_or_rerender_surface(workspace, reuse_target, surface_id)
+                                .await
+                            {
+                                self.store.close_surface(reuse_target, surface_id).await;
+                                let _ = ack.send(Err(error));
+                                return;
+                            }
                             let _ = ack.send(Ok(BrowserOpenOutcome {
                                 pane: reuse_target,
                                 placement_strategy: PlacementStrategy::ReuseRightSibling,
@@ -388,8 +394,13 @@ impl WindowController {
                 if let Some((ws_id, surface_id)) =
                     self.store.add_browser_surface_to_pane(pane, url).await
                 {
-                    self.attach_or_rerender_surface(ws_id, pane, surface_id)
-                        .await;
+                    if let Err(error) = self
+                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .await
+                    {
+                        self.store.close_surface(pane, surface_id).await;
+                        self.clipboard_toast.show_with_message(&error);
+                    }
                 }
             }
             GtkCommand::InjectCookies { cookies, ack } => {

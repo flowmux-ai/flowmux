@@ -382,8 +382,14 @@ impl WindowController {
                 .set_text("Cannot create a terminal tab for this session.");
             return;
         };
-        self.attach_or_rerender_surface(workspace, target.pane, surface)
-            .await;
+        if let Err(error) = self
+            .attach_or_rerender_surface(workspace, target.pane, surface)
+            .await
+        {
+            self.store.close_surface(target.pane, surface).await;
+            self.clipboard_toast.show_with_message(&error);
+            return;
+        }
         let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
         if let Some(terminal) = terminal {
             match terminal.write_input(format!("{line}\r").as_bytes()) {

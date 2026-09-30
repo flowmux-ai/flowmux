@@ -123,8 +123,13 @@ impl WindowController {
                 if let Some((ws_id, surface_id)) =
                     self.store.add_terminal_surface_to_pane(pane, cwd).await
                 {
-                    self.attach_or_rerender_surface(ws_id, pane, surface_id)
-                        .await;
+                    if let Err(error) = self
+                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .await
+                    {
+                        self.store.close_surface(pane, surface_id).await;
+                        self.clipboard_toast.show_with_message(&error);
+                    }
                 }
             }
             GtkCommand::OpenTig { pane } => {
@@ -137,8 +142,14 @@ impl WindowController {
                 if let Some((workspace, surface)) =
                     self.store.add_terminal_surface_to_pane(pane, cwd).await
                 {
-                    self.attach_or_rerender_surface(workspace, pane, surface)
-                        .await;
+                    if let Err(error) = self
+                        .attach_or_rerender_surface(workspace, pane, surface)
+                        .await
+                    {
+                        self.store.close_surface(pane, surface).await;
+                        self.clipboard_toast.show_with_message(&error);
+                        return;
+                    }
                     let terminal = self.pane_registry.borrow().terminals.get(&surface).cloned();
                     if let Some(terminal) = terminal {
                         glib::timeout_add_local_once(Duration::from_millis(250), move || {
@@ -179,8 +190,13 @@ impl WindowController {
                         .await
                     {
                         Some((ws_id, surface)) => {
-                            self.attach_or_rerender_surface(ws_id, pane, surface).await;
-                            Ok((pane, surface))
+                            match self.attach_or_rerender_surface(ws_id, pane, surface).await {
+                                Ok(()) => Ok((pane, surface)),
+                                Err(error) => {
+                                    self.store.close_surface(pane, surface).await;
+                                    Err(error)
+                                }
+                            }
                         }
                         None => Err(format!("workspace has no tab-capable pane: {workspace}")),
                     },
@@ -194,8 +210,13 @@ impl WindowController {
                     .add_browser_surface_to_pane(pane, "about:blank".into())
                     .await
                 {
-                    self.attach_or_rerender_surface(ws_id, pane, surface_id)
-                        .await;
+                    if let Err(error) = self
+                        .attach_or_rerender_surface(ws_id, pane, surface_id)
+                        .await
+                    {
+                        self.store.close_surface(pane, surface_id).await;
+                        self.clipboard_toast.show_with_message(&error);
+                    }
                 }
             }
             GtkCommand::ActivateSurface { pane, surface, ack } => {

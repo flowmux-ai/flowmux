@@ -2051,17 +2051,16 @@ impl WindowController {
         }
         self.sidebar.upsert(ws);
         {
-            // Keep live editors across the rebuild: destroying one would turn
-            // its unsaved buffer into a crash-recovery prompt.
+            // Rebuild the layout around live sessions, without restarting them.
             let mut registry = self.pane_registry.borrow_mut();
-            registry.detach_workspace_editors(ws.id);
+            registry.detach_workspace_surfaces(ws.id);
             registry.clear_workspace(ws.id);
         }
         let new_widget = self.build_workspace_widget(ws);
         self.discard_unused_ssh_channels(ws.id);
         self.pane_registry
             .borrow_mut()
-            .discard_unused_detached_editors();
+            .discard_unused_detached_surfaces();
         let mut surfaces = self.surfaces.borrow_mut();
         if let Some(old) = surfaces.remove(&ws.id) {
             self.stack.remove(&old);
@@ -3743,6 +3742,144 @@ mod tests {
         labels
     }
 
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn layout_recovery_preserves_live_surfaces_and_focus_controllers() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.RecoverSessions").await;
+        let store = &controller.store;
+        let terminal = controller
+            .pane_registry
+            .borrow()
+            .active_terminal(pane)
+            .cloned()
+            .unwrap();
+        let terminal_root = terminal.root_widget();
+        let pid = terminal.pid.get();
+        assert!(pid.is_some());
+        let (_, browser_id) = store
+            .add_browser_surface_to_pane(pane, "about:blank".into())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, browser_id)
+            .await
+            .unwrap();
+        let (_, editor_id) = store
+            .add_editor_surface_to_pane(pane, std::env::temp_dir())
+            .await
+            .unwrap();
+        controller
+            .attach_or_rerender_surface(workspace, pane, editor_id)
+            .await
+            .unwrap();
+        let browser_root = controller.pane_registry.borrow().browsers[&browser_id]
+            .root
+            .clone();
+        let editor_root = controller.pane_registry.borrow().editors[&editor_id]
+            .root
+            .clone();
+        let focus_count = || {
+            [
+                terminal.widget.clone().upcast::<gtk::Widget>(),
+                browser_root.clone().upcast(),
+                editor_root.clone().upcast(),
+            ]
+            .map(|root| root.observe_controllers().n_items())
+        };
+        let controllers_before = focus_count();
+
+        let removed = controller
+            .split_pane(pane, SplitDirection::Vertical)
+            .await
+            .unwrap();
+        let frame = controller
+            .pane_registry
+            .borrow()
+            .pane_frame(removed)
+            .unwrap();
+        let parent = frame.parent().unwrap().downcast::<gtk::Paned>().unwrap();
+        if parent.start_child().as_ref() == Some(&frame) {
+            parent.set_start_child(None::<&gtk::Widget>);
+        } else {
+            parent.set_end_child(None::<&gtk::Widget>);
+        }
+        store.close_pane(removed).await.unwrap();
+        // Missing parent forces the actual close fallback, not incremental repair.
+        controller
+            .apply_close_pane_incremental_or_rerender(workspace, removed)
+            .await;
+        controller.rerender_workspace(&store.get_workspace(workspace).await.unwrap());
+        {
+            let registry = controller.pane_registry.borrow();
+            assert_eq!(
+                registry.terminals.values().next().unwrap().root_widget(),
+                terminal_root
+            );
+            assert_eq!(registry.terminals.values().next().unwrap().pid.get(), pid);
+            assert_eq!(registry.browsers[&browser_id].root, browser_root);
+            assert_eq!(registry.editors[&editor_id].root, editor_root);
+        }
+        assert_eq!(
+            focus_count(),
+            controllers_before,
+            "rebuild must replace focus controllers"
+        );
+
+        // Failed DnD mounting uses the same preservation contract.
+        let moving = controller
+            .pane_registry
+            .borrow_mut()
+            .detach_surface_for_move(pane, browser_id)
+            .unwrap();
+        controller
+            .rerender_with_moving_surface(workspace, moving)
+            .await;
+        assert_eq!(
+            controller.pane_registry.borrow().browsers[&browser_id].root,
+            browser_root
+        );
+        controller.drop_workspace(workspace);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gtk::test]
+    async fn missing_surface_ui_does_not_commit_activation_or_report_a_move() {
+        let (controller, workspace, pane) =
+            build_single_workspace_controller("com.flowmux.App.UiTest.RejectMissingSurface").await;
+        let store = &controller.store;
+        let original =
+            active_surface_from_workspace(&store.get_workspace(workspace).await.unwrap(), pane)
+                .unwrap();
+        let (_, unmounted) = store
+            .add_terminal_surface_to_pane(pane, None)
+            .await
+            .unwrap();
+        store.set_active_surface(pane, original).await.unwrap();
+        assert!(controller
+            .activate_surface_now(pane, unmounted)
+            .await
+            .is_err());
+        assert_eq!(
+            active_surface_from_workspace(&store.get_workspace(workspace).await.unwrap(), pane),
+            Some(original)
+        );
+        assert!(controller
+            .move_surface(pane, unmounted, None, pane, 0)
+            .await
+            .is_err());
+        let terminal = controller.pane_registry.borrow().terminals[&original].root_widget();
+        assert!(controller
+            .attach_or_rerender_surface(workspace, pane, SurfaceId::new())
+            .await
+            .is_err());
+        assert_eq!(
+            controller.pane_registry.borrow().terminals[&original].root_widget(),
+            terminal
+        );
+        controller.drop_workspace(workspace);
+    }
+
     #[test]
     fn dirty_editor_dialog_lists_multilingual_paths_and_limits_long_lists() {
         let labels = vec![
@@ -3851,7 +3988,8 @@ mod tests {
             .unwrap();
         controller
             .attach_or_rerender_surface(workspace, pane, second)
-            .await;
+            .await
+            .unwrap();
         let (bridge, rx) = Bridge::new();
         spawn_dispatch_loop(rx, controller.clone());
         controller.window.present();
@@ -7728,7 +7866,8 @@ mod tests {
             .expect("agent tab should be added");
         controller
             .attach_or_rerender_surface(ws_id, pane, agent_surface)
-            .await;
+            .await
+            .unwrap();
         store
             .report_agent_status(
                 agent_surface,

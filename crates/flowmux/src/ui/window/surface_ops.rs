@@ -12,9 +12,8 @@ impl WindowController {
     ///
     /// Falls back to [`Self::rerender_workspace`] when the GTK tree
     /// shape is not the simple "frame inside Paned" case (e.g. the
-    /// removed pane was the workspace root). The fallback resets
-    /// PTYs, but `close_pane` returning `WorkspaceRemoved` already
-    /// goes down a different path, so the fallback is rarely hit.
+    /// removed pane was the workspace root). The fallback reuses surviving
+    /// sessions and closes only surfaces absent from the rebuilt tree.
     pub async fn apply_close_pane_incremental_or_rerender(
         &self,
         ws_id: WorkspaceId,
@@ -336,17 +335,20 @@ impl WindowController {
         ws_id: WorkspaceId,
         pane: PaneId,
         surface_id: SurfaceId,
-    ) {
-        let Some(ws) = self.store.get_workspace(ws_id).await else {
-            return;
-        };
+    ) -> Result<(), String> {
+        let ws = self
+            .store
+            .get_workspace(ws_id)
+            .await
+            .ok_or_else(|| format!("workspace no longer exists: {ws_id}"))?;
         let workspace_visible =
             self.stack.visible_child_name().as_deref() == Some(ws.id.to_string().as_str());
         let surface = ws
             .surfaces
             .iter()
-            .find_map(|s| s.root_pane.find_surface(pane, surface_id));
-        if let Some(surface) = surface {
+            .find_map(|s| s.root_pane.find_surface(pane, surface_id))
+            .ok_or_else(|| format!("surface not found in pane {pane}: {surface_id}"))?;
+        {
             let attached = attach_surface_to_pane(
                 pane,
                 ws.id,
@@ -376,11 +378,18 @@ impl WindowController {
                         }
                     });
                 }
-                return;
+                return Ok(());
             }
         }
         self.rerender_workspace(&ws);
         self.refresh_window_title().await;
+        if self.pane_registry.borrow().has_surface(pane, surface_id) {
+            Ok(())
+        } else {
+            Err(format!(
+                "surface could not be mounted in pane {pane}: {surface_id}"
+            ))
+        }
     }
     pub(super) fn build_torn_off_pane(
         torn: TornOffSurface,
@@ -718,6 +727,9 @@ impl WindowController {
         if src_pane == dst_pane {
             // A drop onto the tab's own pane (e.g. pane-body drop) is just a
             // reorder; do that instead of a no-op move.
+            if !self.pane_registry.borrow().has_surface(src_pane, surface) {
+                return Err("source surface is not rendered".into());
+            }
             if self
                 .store
                 .reorder_surface_in_pane(src_pane, surface, target_index)
@@ -729,8 +741,9 @@ impl WindowController {
                     surface,
                     target_index,
                 );
+                return Ok(());
             }
-            return Ok(());
+            return Err("source surface no longer exists".into());
         }
 
         if !self.pane_registry.borrow().has_pane(dst_pane) {
@@ -787,7 +800,7 @@ impl WindowController {
             )
             .await;
         if let Err(moving) = mounted {
-            self.rerender_with_moving_editor(outcome.dst_workspace, *moving)
+            self.rerender_with_moving_surface(outcome.dst_workspace, *moving)
                 .await;
         }
 
@@ -812,6 +825,13 @@ impl WindowController {
                 .await;
         }
         self.refresh_window_title().await;
+        if !self
+            .pane_registry
+            .borrow()
+            .has_surface(outcome.dst_pane, outcome.surface)
+        {
+            return Err("moved surface could not be mounted".into());
+        }
         self.focus_pane(outcome.dst_pane);
         Ok(())
     }
@@ -882,14 +902,21 @@ impl WindowController {
     }
 
     /// Rebuild a workspace after an incremental DnD mount failed. A detached
-    /// editor is stashed first so dirty buffers and its live WebView survive;
-    /// terminals and browsers fall back to their persisted model state.
-    async fn rerender_with_moving_editor(&self, workspace: WorkspaceId, moving: MovingSurface) {
+    /// surface is stashed first so its PTY, WebView and unsaved state survive.
+    pub(super) async fn rerender_with_moving_surface(
+        &self,
+        workspace: WorkspaceId,
+        moving: MovingSurface,
+    ) {
         self.pane_registry
             .borrow_mut()
-            .stash_moving_editor_for_rerender(moving);
+            .stash_moving_surface_for_rerender(moving);
         if let Some(ws) = self.store.get_workspace(workspace).await {
             self.rerender_workspace(&ws);
+        } else {
+            self.pane_registry
+                .borrow_mut()
+                .discard_unused_detached_surfaces();
         }
     }
     /// Best-effort restore of a detached surface back into its source pane when
@@ -905,7 +932,7 @@ impl WindowController {
             .mount_moved_surface(src_pane, src_workspace, surface, moving, usize::MAX)
             .await;
         if let Err(moving) = mounted {
-            self.rerender_with_moving_editor(src_workspace, *moving)
+            self.rerender_with_moving_surface(src_workspace, *moving)
                 .await;
         }
     }
@@ -938,8 +965,13 @@ impl WindowController {
             return Err("destination pane no longer exists".to_string());
         };
 
-        self.attach_or_rerender_surface(ws_id, dst_pane, surface_id)
-            .await;
+        if let Err(error) = self
+            .attach_or_rerender_surface(ws_id, dst_pane, surface_id)
+            .await
+        {
+            self.store.close_surface(dst_pane, surface_id).await;
+            return Err(error);
+        }
         if let Some(ws) = self.store.get_workspace(ws_id).await {
             self.refresh_workspace_solo(&ws);
         }
@@ -1098,7 +1130,7 @@ impl WindowController {
         let Some(new_split_id) = new_split_id else {
             // Could not locate the split node; fall back to a plain tab move so
             // the live widget is not lost.
-            self.rerender_with_moving_editor(dst_ws, moving).await;
+            self.rerender_with_moving_surface(dst_ws, moving).await;
             return Err("could not locate the new split node".to_string());
         };
 
@@ -1122,24 +1154,27 @@ impl WindowController {
             self.current_theme(),
             true,
         );
-        match split_outcome {
+        let moving = match split_outcome {
             IncrementalSplitOutcome::SucceededRoot { new_root } => {
                 self.surfaces.borrow_mut().insert(ws.id, new_root);
+                Some(moving)
             }
-            IncrementalSplitOutcome::SucceededNested => {}
+            IncrementalSplitOutcome::SucceededNested => Some(moving),
             IncrementalSplitOutcome::Failed => {
-                // The model already contains the new split. Rebuild from that
-                // canonical state while retaining a live editor handle.
-                self.rerender_with_moving_editor(dst_ws, moving).await;
-                return Err("incremental split failed".to_string());
+                // The model already owns the split. Recover its live sessions
+                // and finish source cleanup before reporting the actual result.
+                self.rerender_with_moving_surface(dst_ws, moving).await;
+                None
             }
-        }
+        };
 
-        let mounted = self
-            .mount_moved_surface(new_pane, dst_ws, surface, moving, 0)
-            .await;
-        if let Err(moving) = mounted {
-            self.rerender_with_moving_editor(dst_ws, *moving).await;
+        if let Some(moving) = moving {
+            if let Err(moving) = self
+                .mount_moved_surface(new_pane, dst_ws, surface, moving, 0)
+                .await
+            {
+                self.rerender_with_moving_surface(dst_ws, *moving).await;
+            }
         }
 
         if outcome.src_workspace_removed {
@@ -1162,6 +1197,9 @@ impl WindowController {
                 .await;
         }
         self.refresh_window_title().await;
+        if !self.pane_registry.borrow().has_surface(new_pane, surface) {
+            return Err("moved surface could not be mounted in the new pane".into());
+        }
         self.focus_pane(new_pane);
         Ok(())
     }
