@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Replay representative native hook payloads through the CLI into an isolated GUI.
+
+Use only a disposable GUI's explicit socket. Creates local test workspaces and
+fake agent processes; leaves payload/state evidence in the printed directory.
+The existing SSH GUI coverage harness owns GUI startup and normal shutdown.
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shlex
+import signal
+import socket
+import subprocess
+import tempfile
+import time
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--socket", required=True)
+    parser.add_argument("--cli", required=True)
+    args = parser.parse_args()
+    root = Path(tempfile.mkdtemp(prefix="fm-hooks-"))
+    print(f"HOOK ARTIFACTS: {root}", flush=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FLOWMUX_")}
+    # A real executable basename is needed for process identity on both OSes.
+    source = root / "agent.c"
+    source.write_text("""#include <stdio.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    if (argc != 2) return 1;
+    FILE *f = fopen(argv[1], "w");
+    if (!f) return 2;
+    fprintf(f, "%d", getpid()); fclose(f);
+    for (;;) pause();
+}
+""")
+
+    def rpc(verb, **fields):
+        with socket.socket(socket.AF_UNIX) as stream:
+            stream.settimeout(10)
+            stream.connect(args.socket)
+            stream.sendall((json.dumps(dict(id=1, kind="request", verb=verb, **fields)) + "\n").encode())
+            response = json.loads(stream.makefile().readline())
+        assert "error" not in response, response
+        return response
+
+    with (root / "events.jsonl").open("w", buffering=1) as evidence:
+        for name in ("claude", "codex"):
+            executable = root / name
+            subprocess.run(["cc", str(source), "-o", str(executable)], check=True, timeout=30)
+            created = rpc("workspace_create", name=f"Hook regression {name}", root=str(root))
+            workspace = created["workspace_created"]["id"]
+            ws = next(w for w in rpc("workspace_tree")["tree"]["workspaces"] if w["id"] == workspace)
+            pane = ws["panes"][0]["id"]
+            surface = ws["panes"][0]["tabs"][0]["id"]
+            pid_file = root / f"{name}.pid"
+            rpc("pane_send_keys", pane=pane,
+                keys=f"exec {shlex.quote(str(executable))} {shlex.quote(str(pid_file))}\r")
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() or not pid_file.read_text():
+                assert time.monotonic() < deadline, f"{name} fixture did not start"
+                time.sleep(.05)
+            pid = int(pid_file.read_text())
+            hook_env = dict(env, FLOWMUX_PANE_ID=pane, FLOWMUX_SURFACE_ID=surface,
+                            FLOWMUX_WORKSPACE_ID=workspace, FLOWMUX_AGENT_PID=str(pid),
+                            FLOWMUX_AGENT_NAME=name)
+
+            def observed():
+                return next(t for w in rpc("workspace_tree")["tree"]["workspaces"]
+                            for p in w["panes"] for t in p["tabs"] if t["id"] == surface).get("agent")
+
+            def hook(event, activity, **fields):
+                payload = dict(session_id=f"fixture-{name}", hook_event_name=event,
+                               future_extension={"ignored": True}, **fields)
+                subprocess.run([args.cli, "--socket", args.socket, "hooks", name, event],
+                               input=json.dumps(payload), text=True, env=hook_env,
+                               capture_output=True, check=True, timeout=10)
+                if event in ("stop", "subagent-stop") and activity == "running":
+                    # Outlast the 250ms completion grace; do not accept a
+                    # transient running state just before a false completion.
+                    time.sleep(.5)
+                # Hook delivery is best effort: exit zero alone proves nothing.
+                deadline = time.monotonic() + 5
+                while True:
+                    value = observed()
+                    if value and value["activity"] == activity:
+                        break
+                    assert time.monotonic() < deadline, (name, event, payload, activity, value)
+                    time.sleep(.05)
+                assert value["name"] == name and value["session_id"] == payload["session_id"], value
+                assert value["source"] == "flowmux:hook", value
+                statuses = {"running": ("working",), "needs_input": ("blocked",),
+                            "idle": ("idle", "done")}
+                expected = ("unknown",) if name == "codex" and event == "session-start" else statuses[activity]
+                assert value["status"] in expected, value
+                evidence.write(json.dumps(dict(agent=name, event=event, payload=payload, observed=value)) + "\n")
+
+            try:
+                if name == "claude":
+                    hook("session-start", "idle")
+                    hook("prompt-submit", "running")
+                    question = dict(tool_name="AskUserQuestion", tool_use_id="a")
+                    hook("pre-tool-use", "needs_input", **question)
+                    hook("pre-tool-use", "needs_input", **question)
+                    hook("pre-tool-use", "needs_input", tool_name="AskUserQuestion", tool_use_id="b")
+                    hook("post-tool-use", "needs_input", **question)
+                    hook("post-tool-use", "needs_input", **question)
+                    hook("pre-tool-use", "needs_input", **question)
+                    hook("post-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="b")
+                    hook("pre-tool-use", "running", **question)
+                    hook("post-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="early")
+                    hook("pre-tool-use", "running", tool_name="AskUserQuestion", tool_use_id="early")
+                    hook("permission-request", "needs_input", tool_name="Bash")
+                    hook("post-tool-use", "needs_input", tool_name="Bash", tool_use_id="ordinary")
+                    hook("post-tool-batch", "running")
+                    hook("stop-failure", "needs_input", error="rate_limit")
+                    hook("post-tool-batch", "needs_input")
+                    hook("notification", "running", notification_type="quota_auto_resume_fired")
+                    hook("stop", "idle", last_assistant_message="Completed fixture")
+                    hook("prompt-submit", "running")
+                    hook("pre-tool-use", "needs_input", **question)
+                    hook("post-tool-use", "running", **question)
+                    hook("stop", "idle")
+                else:
+                    hook("session-start", "idle")
+                    hook("turn-start", "running", turn_id="root-1")
+                    child = dict(agent_id="child", turn_id="child-1")
+                    hook("subagent-start", "running", **child)
+                    hook("stop", "running", turn_id="root-1")
+                    hook("subagent-stop", "idle", **child)
+                    hook("turn-start", "running", turn_id="root-2")
+                    # A reused child reports a prompt without SubagentStart.
+                    hook("turn-start", "running", agent_id="child", turn_id="child-2")
+                    hook("subagent-stop", "running", **child)
+                    hook("stop", "running", turn_id="root-2")
+                    hook("subagent-stop", "idle", agent_id="child", turn_id="child-2")
+                    hook("turn-start", "running", turn_id="root-3")
+                    hook("stop", "idle", turn_id="root-3")
+                    hook("running", "running", turn_id="root-3")
+                    hook("stop", "idle", turn_id="root-3", stop_hook_active=True)
+                    hook("turn-start", "running", turn_id="root-4")
+                    hook("interrupt", "idle", turn_id="root-4")
+                    hook("turn-start", "running", turn_id="root-5")
+                    hook("stop", "running", turn_id="root-4")
+                    hook("stop", "idle", turn_id="root-5")
+                print(f"PASS: {name} native hook replay", flush=True)
+            finally:
+                # Only the executable started in this test's new terminal.
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+    print("LIVE_NATIVE_HOOK_MATRIX_OK", flush=True)
+
+
+if __name__ == "__main__":
+    main()

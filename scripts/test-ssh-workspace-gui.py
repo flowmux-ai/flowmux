@@ -541,6 +541,9 @@ while time.monotonic() < deadline:
         self.pass_check("missing tmux session is never recreated by reconnect")
         self.check_one_shot(path)
         self.check_agent_fallback(path)
+        subprocess.run(["python3", str(Path(__file__).with_name("test-agent-hooks-gui.py")),
+                        "--socket", str(path), "--cli", self.args.cli],
+                       env=self.env, check=True, timeout=180)
         self.assert_protected()
         (self.root / "final-tree.json").write_text(json.dumps(self.tree(path), indent=2))
         self.log("complete", protected_pids=sorted(self.protected_pids), display=self.env["DISPLAY"])
