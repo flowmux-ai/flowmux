@@ -2120,10 +2120,10 @@ impl WindowController {
     fn install_state_flush_on_close(&self) {
         let controller = self.clone();
         self.window.connect_close_request(move |_| {
+            if controller.window_close.prompting.get() {
+                return glib::Propagation::Stop;
+            }
             if !controller.window_close.approved.get() {
-                if controller.window_close.prompting.get() {
-                    return glib::Propagation::Stop;
-                }
                 let editors = controller
                     .pane_registry
                     .borrow()
@@ -2146,14 +2146,27 @@ impl WindowController {
                 }
                 controller.window_close.approved.set(true);
             }
-            controller.pane_registry.borrow_mut().ssh.clear();
             controller.flush_terminal_cwds_blocking();
             controller.flush_terminal_scrollback_blocking();
             controller.flush_editor_sessions_blocking();
             controller.flush_layout_blocking();
             if let Err(e) = controller.store.save_now_blocking() {
                 tracing::warn!(error = %e, "state save on close failed");
+                controller.window_close.approved.set(false);
+                controller.window_close.prompting.set(true);
+                let pending = controller.clone();
+                glib::spawn_future_local(async move {
+                    show_error_dialog(
+                        &pending.window,
+                        "Could not save session",
+                        &format!("The window has been kept open. Resolve the save error and close it again to retry.\n\n{e}"),
+                    )
+                    .await;
+                    pending.window_close.prompting.set(false);
+                });
+                return glib::Propagation::Stop;
             }
+            controller.pane_registry.borrow_mut().ssh.clear();
             // Cancel all in-flight WebView loads with stop_loading only.
             // The earlier `load_uri("about:blank")` attempt started a new load,
             // which was then internally cancelled during destroy and printed two

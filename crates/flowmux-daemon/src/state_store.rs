@@ -430,6 +430,7 @@ pub struct StateStore {
 }
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
+const PERSIST_MAX_DELAY: Duration = Duration::from_secs(2);
 
 fn agent_screen_fingerprint(screen_text: Option<&str>, osc_title: Option<&str>) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -4037,10 +4038,12 @@ impl StateStore {
             notified.await;
         };
 
+        // Continuous edits must still reach disk, even without a quiet interval.
+        let deadline = tokio::time::Instant::now() + PERSIST_MAX_DELAY;
         loop {
-            tokio::time::sleep(debounce).await;
+            tokio::time::sleep_until((tokio::time::Instant::now() + debounce).min(deadline)).await;
             let current = self.dirty_generation.load(Ordering::Acquire);
-            if current == observed {
+            if current == observed || tokio::time::Instant::now() >= deadline {
                 return current;
             }
             observed = current;
@@ -11434,6 +11437,32 @@ Do you want to continue?";
         store.mark_dirty();
 
         assert_eq!(waiter.await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn persistence_debounce_flushes_during_continuous_changes() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        store.mark_dirty();
+        let writer = {
+            let store = store.clone();
+            tokio::spawn(async move {
+                loop {
+                    store.mark_dirty();
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            store.wait_for_stable_dirty_generation(0, Duration::from_millis(50)),
+        )
+        .await;
+        writer.abort();
+        assert!(
+            result.is_ok(),
+            "continuous changes must not starve persistence"
+        );
+        assert!(result.unwrap() > 1);
     }
 
     #[tokio::test]
