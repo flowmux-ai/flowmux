@@ -992,7 +992,7 @@ fn present_web_permission_dialog(
         decision_handler,
         native_browser_suspend,
     ))));
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         if let Some((decision_handler, native_browser_suspend)) = pending.borrow_mut().take() {
             let decision = if response == "allow" {
                 WKPermissionDecision::Grant
@@ -1002,7 +1002,6 @@ fn present_web_permission_dialog(
             decision_handler.call((decision,));
             drop(native_browser_suspend);
         }
-        dialog.close();
     });
     dialog.present(Some(parent));
 }

@@ -719,11 +719,10 @@ impl WindowController {
 
         let (tx, rx) = oneshot::channel();
         let tx = Rc::new(RefCell::new(Some(tx)));
-        dialog.connect_response(None, move |dialog, response| {
+        dialog.connect_response(None, move |_dialog, response| {
             if let Some(tx) = tx.borrow_mut().take() {
                 let _ = tx.send(response == "create");
             }
-            dialog.close();
         });
         let _native_browser_suspend =
             crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -909,11 +908,10 @@ impl WindowController {
 
         let (tx, rx) = oneshot::channel();
         let tx = Rc::new(RefCell::new(Some(tx)));
-        dialog.connect_response(None, move |dialog, response| {
+        dialog.connect_response(None, move |_dialog, response| {
             if let Some(tx) = tx.borrow_mut().take() {
                 let _ = tx.send(response == "run");
             }
-            dialog.close();
         });
         let _native_browser_suspend =
             crate::ui::browser_pane::suspend_native_browser_views_for_window(

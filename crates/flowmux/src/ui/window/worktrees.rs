@@ -123,11 +123,10 @@ fn confirmation_receiver(
 ) -> oneshot::Receiver<bool> {
     let (tx, rx) = oneshot::channel();
     let tx = Rc::new(Cell::new(Some(tx)));
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         if let Some(tx) = tx.take() {
             let _ = tx.send(response == accepted_response);
         }
-        dialog.close();
     });
     rx
 }

@@ -554,7 +554,7 @@ fn show_newer_update_prompt(
     dialog.set_response_appearance("latest", adw::ResponseAppearance::Suggested);
 
     let on_choice = Rc::new(RefCell::new(Some(on_choice)));
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         let choice = match response {
             "selected" => Some(selected),
             "latest" => Some(latest),
@@ -563,7 +563,6 @@ fn show_newer_update_prompt(
         if let Some(on_choice) = on_choice.borrow_mut().take() {
             on_choice(choice);
         }
-        dialog.close();
     });
     dialog.present(Some(parent));
 }
@@ -841,9 +840,6 @@ fn show_about_popup(parent: &impl IsA<gtk::Widget>) {
         .close_response("ok")
         .build();
     dialog.add_response("ok", "OK");
-    dialog.connect_response(None, move |dialog, _| {
-        dialog.close();
-    });
     dialog.present(Some(parent));
 }
 

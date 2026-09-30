@@ -502,11 +502,10 @@ async fn show_error_dialog(parent: &adw::ApplicationWindow, title: &str, error: 
 
     let (tx, rx) = oneshot::channel::<()>();
     let tx_cell: Rc<Cell<Option<oneshot::Sender<()>>>> = Rc::new(Cell::new(Some(tx)));
-    dialog.connect_response(None, move |dialog, _| {
+    dialog.connect_response(None, move |_dialog, _| {
         if let Some(tx) = tx_cell.take() {
             let _ = tx.send(());
         }
-        dialog.close();
     });
     let _native_view_suspend =
         crate::ui::browser_pane::suspend_native_browser_views_for_window(parent.upcast_ref());
@@ -528,11 +527,10 @@ fn build_dirty_editor_dialog(labels: &[String]) -> (adw::AlertDialog, oneshot::R
 
     let (tx, rx) = oneshot::channel::<String>();
     let tx_cell: Rc<Cell<Option<oneshot::Sender<String>>>> = Rc::new(Cell::new(Some(tx)));
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         if let Some(tx) = tx_cell.take() {
             let _ = tx.send(response.to_string());
         }
-        dialog.close();
     });
     (dialog, rx)
 }
@@ -2468,11 +2466,10 @@ impl WindowController {
         let tx_cell: Rc<Cell<Option<tokio::sync::oneshot::Sender<bool>>>> =
             Rc::new(Cell::new(Some(tx)));
         let tx_for_resp = tx_cell.clone();
-        dialog.connect_response(None, move |dialog, response| {
+        dialog.connect_response(None, move |_dialog, response| {
             if let Some(tx) = tx_for_resp.take() {
                 let _ = tx.send(response == "close");
             }
-            dialog.close();
         });
         let _native_browser_suspend =
             crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -2507,11 +2504,10 @@ impl WindowController {
         let tx_cell: Rc<Cell<Option<tokio::sync::oneshot::Sender<bool>>>> =
             Rc::new(Cell::new(Some(tx)));
         let tx_for_resp = tx_cell.clone();
-        dialog.connect_response(None, move |dialog, response| {
+        dialog.connect_response(None, move |_dialog, response| {
             if let Some(tx) = tx_for_resp.take() {
                 let _ = tx.send(response == "close");
             }
-            dialog.close();
         });
         let _native_browser_suspend =
             crate::ui::browser_pane::suspend_native_browser_views_for_window(
@@ -3298,7 +3294,7 @@ fn show_rename_dialog(
     dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
 
     let entry_for_resp = entry.clone();
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         if response == "ok" {
             // Match cmux: pass empty or whitespace-only input through to the
             // daemon as the signal to reset custom_title to None. The daemon
@@ -3317,7 +3313,6 @@ fn show_rename_dialog(
                     .await;
             });
         }
-        dialog.close();
     });
     dialog.present(Some(window));
 }
@@ -3342,7 +3337,7 @@ fn show_rename_surface_dialog(
     dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
 
     let entry_for_resp = entry.clone();
-    dialog.connect_response(None, move |dialog, response| {
+    dialog.connect_response(None, move |_dialog, response| {
         if response == "ok" {
             let new_title = entry_for_resp.text().trim().to_string();
             if !new_title.is_empty() {
@@ -3361,7 +3356,6 @@ fn show_rename_surface_dialog(
                 });
             }
         }
-        dialog.close();
     });
     dialog.present(Some(window));
 }
@@ -4064,7 +4058,7 @@ mod tests {
             .unwrap()
             .downcast::<adw::AlertDialog>()
             .unwrap();
-        dialog.emit_by_name::<()>("response", &[&"cancel"]);
+        dialog.close();
         assert!(glib::future_with_timeout(Duration::from_secs(1), closed)
             .await
             .unwrap()

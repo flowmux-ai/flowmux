@@ -244,13 +244,12 @@ impl BrowserPane {
             dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
 
             let request = request.clone();
-            dialog.connect_response(None, move |dialog, response| {
+            dialog.connect_response(None, move |_dialog, response| {
                 if response == "allow" {
                     request.allow();
                 } else {
                     request.deny();
                 }
-                dialog.close();
             });
             dialog.present(Some(&parent));
             true
