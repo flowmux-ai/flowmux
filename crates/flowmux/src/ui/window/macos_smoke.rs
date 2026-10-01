@@ -197,6 +197,46 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     wait_until("editor refocused", || editor.has_native_focus()).await;
     println!("MACOS_NATIVE_FOCUS_OK");
 
+    // A hook-owned presence needs a real agent in this terminal's process tree.
+    // Otherwise the normal process sweep correctly removes this test report.
+    let agent_source = root.join("native_agent.c");
+    let agent_executable = root.join("claude");
+    std::fs::write(
+        &agent_source,
+        "#include <unistd.h>\nint main(void) { alarm(120); for (;;) pause(); }\n",
+    )
+    .unwrap();
+    let compiled = std::process::Command::new("cc")
+        .arg(&agent_source)
+        .arg("-o")
+        .arg(&agent_executable)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    terminal
+        .write_input(
+            format!(
+                "exec {}\n",
+                flowmux_core::ssh::shell_quote(agent_executable.to_str().unwrap())
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let terminal_pid = u32::try_from(pid).unwrap();
+    wait_until("agent process running", || {
+        flowmux_procmon::agent_names_in_tree(terminal_pid).contains(&"claude")
+    })
+    .await;
+    let agent_pid = flowmux_procmon::descendants(terminal_pid)
+        .unwrap()
+        .into_iter()
+        .find(|pid| flowmux_procmon::agent_name_for_pid(*pid) == Some("claude"))
+        .unwrap();
+
     controller.window.close();
     wait_until("dirty dialog presented", || {
         controller.window.visible_dialog().is_some()
@@ -263,7 +303,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
                 pane: Some(terminal_pane),
                 surface: agent_surface,
                 agent: "claude".into(),
-                pid: None,
+                pid: Some(agent_pid),
                 seq: Some(1),
                 session_id: "native-saturation".into(),
                 lifecycle: AgentLifecycleEvent::TurnStarted {
@@ -313,15 +353,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .unwrap();
     assert!(controller.window.visible_dialog().is_some());
     assert!(!controller.window_close.approved.get());
-    assert_eq!(
-        store
-            .located_agent_presence(agent_surface)
-            .await
-            .unwrap()
-            .presence
-            .name,
-        "claude"
-    );
+    controller.poll_agent_processes().await;
+    let presence = store
+        .located_agent_presence(agent_surface)
+        .await
+        .unwrap()
+        .presence;
+    assert_eq!(presence.name, "claude");
+    assert_eq!(presence.pid, Some(agent_pid));
+    assert_eq!(presence.source.as_deref(), Some("flowmux:hook"));
+    assert_eq!(presence.session_id.as_deref(), Some("native-saturation"));
     assert!(controller
         .notifications
         .entries()
