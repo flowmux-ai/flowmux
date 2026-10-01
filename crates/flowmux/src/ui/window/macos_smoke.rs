@@ -215,6 +215,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     // Exercise the real socket handler and GTK dispatcher while CloseWindow
     // waits for the dirty-editor decision. Saturating the ordinary endpoint
     // must not hide hook telemetry or prevent state queries.
+    // This isolated smoke verifies in-app delivery, without requiring a desktop
+    // notification service (which can wait on D-Bus authentication on CI).
+    controller.options.borrow_mut().system_notifications_enabled = false;
     let socket = root.join("run/native.sock");
     let server_socket = socket.clone();
     let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
@@ -253,6 +256,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             assert!(matches!(reply.payload, Payload::Response(Response::Pong)));
             held.push(stream);
         }
+        println!("MACOS_NATIVE_IPC_CONNECTIONS_SATURATED");
         let client = Client::connect(&socket).await.unwrap();
         for request in [
             Request::AgentLifecycleUpdate {
@@ -275,7 +279,9 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
                 level: flowmux_core::NotificationLevel::NeedsInput,
             },
         ] {
+            println!("MACOS_NATIVE_IPC_REQUEST {request:?}");
             assert!(matches!(client.call(request).await.unwrap(), Response::Ok));
+            println!("MACOS_NATIVE_IPC_REQUEST_OK");
         }
         assert!(matches!(
             client.call(Request::Ping).await.unwrap(),
