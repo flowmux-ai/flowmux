@@ -214,13 +214,12 @@ for dir in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
 done
 
 # Restricted user namespaces need a scoped AppArmor permission for WebKit.
+# An existing profile is managed by the administrator and AppArmor service.
 if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
-    && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ]; then
+    && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ] \
+    && [ ! -e /etc/apparmor.d/flowmux-webkit ]; then
     confirm "Install the FlowMux AppArmor profile to enable WebKit's sandbox?"
-    # Preserve an administrator's existing policy.
-    if [ ! -e /etc/apparmor.d/flowmux-webkit ]; then
-        sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
-    fi
+    sudo install -m644 packaging/apparmor/flowmux-webkit /etc/apparmor.d/flowmux-webkit
     sudo sh packaging/debian/postinst configure
 fi
 
