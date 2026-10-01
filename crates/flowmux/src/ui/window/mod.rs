@@ -3658,6 +3658,26 @@ fn run_browser_screenshot(
     });
 }
 
+/// Finish one control message without admitting another ordered command.
+/// Return whether the original dispatch also finished.
+async fn service_control(
+    dispatch: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
+    control: impl std::future::Future<Output = ()>,
+) -> bool {
+    // A pending lock future can already own the next mutex permit. Suspending
+    // the original dispatch while control awaits that lock would deadlock both.
+    // Poll both, with at most one control operation in flight.
+    tokio::pin!(control);
+    tokio::select! {
+        biased;
+        _ = dispatch => {
+            control.await;
+            true
+        }
+        _ = &mut control => false,
+    }
+}
+
 pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: WindowController) {
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
@@ -3670,7 +3690,11 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
                 tokio::select! {
                     biased;
                     _ = &mut dispatch => break,
-                    Ok(control) = rx.recv_control() => controller.dispatch(control).await,
+                    Ok(control) = rx.recv_control() => {
+                        if service_control(dispatch.as_mut(), controller.dispatch(control)).await {
+                            break;
+                        }
+                    },
                 }
             }
             if controller.window_close.approved.get() {
@@ -3696,6 +3720,44 @@ mod tests {
 
     fn agent_bar_visible(controller: &WindowController) -> bool {
         controller.agent_bar.bar.root.property::<bool>("visible")
+    }
+
+    #[tokio::test]
+    async fn control_dispatch_keeps_the_original_lock_waiter_progressing() {
+        use std::future::Future;
+        use std::task::Poll;
+        let state = tokio::sync::Mutex::new(());
+        let held = state.lock().await;
+        let dispatch = async {
+            let _guard = state.lock().await;
+        };
+        tokio::pin!(dispatch);
+        // Register the original dispatch first. Releasing the guard grants its
+        // pending lock future the permit before the GUI loop polls it again.
+        assert!(
+            std::future::poll_fn(|cx| Poll::Ready(dispatch.as_mut().poll(cx).is_pending())).await
+        );
+        drop(held);
+        let control = async {
+            let _guard = state.lock().await;
+        };
+        assert!(tokio::time::timeout(
+            Duration::from_millis(100),
+            service_control(dispatch.as_mut(), control)
+        )
+        .await
+        .expect("a control message must not suspend the owner of the state lock"));
+
+        // A quick observation must also return while a confirmation is pending,
+        // so subsequent observations can still be served without cancelling it.
+        let (approved, approval) = oneshot::channel();
+        let dispatch = async {
+            approval.await.unwrap();
+        };
+        tokio::pin!(dispatch);
+        assert!(!service_control(dispatch.as_mut(), async {}).await);
+        approved.send(()).unwrap();
+        dispatch.await;
     }
 
     fn activity_panel_visible(controller: &WindowController) -> bool {
