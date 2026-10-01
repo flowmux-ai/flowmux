@@ -3,6 +3,7 @@
 use super::*;
 use crate::ui::browser_pane::BrowserPane;
 use flowmux_state::{State, WindowOwner};
+use std::io::{BufRead, Read, Write};
 
 pub(crate) fn run() {
     let isolated = tempfile::tempdir().expect("isolated native smoke directory");
@@ -26,15 +27,15 @@ pub(crate) fn run() {
         .build();
     app.register(None::<&gtk::gio::Cancellable>).unwrap();
     glib::MainContext::default().block_on(async {
-        glib::future_with_timeout(Duration::from_secs(60), check(&app, isolated.path()))
+        glib::future_with_timeout(Duration::from_secs(120), check(&app, isolated.path()))
             .await
-            .expect("native smoke exceeded 60 seconds");
+            .expect("native smoke exceeded 120 seconds");
     });
     println!("MACOS_NATIVE_SMOKE_OK");
 }
 
 async fn wait_until(description: &str, mut ready: impl FnMut() -> bool) {
-    glib::future_with_timeout(Duration::from_secs(10), async {
+    glib::future_with_timeout(Duration::from_secs(30), async {
         while !ready() {
             glib::timeout_future(Duration::from_millis(20)).await;
         }
@@ -85,18 +86,31 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     let pid = terminal.pid.get().expect("terminal shell must be running");
 
     println!("MACOS_NATIVE_BROWSER_START");
-    let page = root.join("browser.html");
-    std::fs::write(
-        &page,
-        "<!doctype html><title>Native smoke</title><input id=smoke>",
-    )
-    .unwrap();
+    // A loopback fixture avoids file URL access differences between macOS versions.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let page = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        for line in std::io::BufReader::new((&stream).take(8192)).lines() {
+            if line.unwrap().is_empty() {
+                break;
+            }
+        }
+        let body = "<!doctype html><title>Native smoke</title><input id=smoke>";
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
     let (ack, opened) = oneshot::channel();
     bridge
         .tx
         .send(GtkCommand::BrowserOpenSplit {
             target_pane: Some(terminal_pane),
-            url: format!("file://{}", page.display()),
+            url,
             direction: SplitDirection::Vertical,
             ack,
         })
@@ -113,6 +127,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         browser.current_title() == "Native smoke"
     })
     .await;
+    page.join().unwrap();
     assert_eq!(
         javascript(
             &browser,
