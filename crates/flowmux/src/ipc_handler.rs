@@ -215,7 +215,7 @@ impl Handler for GuiHandler {
             match req {
                 Request::Ssh { request } => {
                     let (ack, rx) = oneshot::channel();
-                    let _ = self.bridge.tx.send(GtkCommand::Ssh { request, ack }).await;
+                    let _ = self.bridge.send(GtkCommand::Ssh { request, ack }).await;
                     match rx.await {
                         Ok(Ok(value)) => Response::Ssh { value },
                         Ok(Err(error)) => Response::Error(RpcError::Internal(error)),
@@ -852,13 +852,12 @@ impl GuiHandler {
                     }
                     let _ = self
                         .bridge
-                        .tx
                         .send(GtkCommand::SetAgentStatus { workspace: ws_id })
                         .await;
                     if let Some(located) = self.inner.store().located_agent_presence(surface).await
                     {
                         if let Some(entry) = ActivityEntry::from_hook_presence(located) {
-                            let _ = self.bridge.tx.send(GtkCommand::AddActivity { entry }).await;
+                            let _ = self.bridge.send(GtkCommand::AddActivity { entry }).await;
                         }
                     }
                 }
@@ -916,7 +915,6 @@ impl GuiHandler {
                             let ws_id = removed.workspace;
                             let _ = self
                                 .bridge
-                                .tx
                                 .send(GtkCommand::AddActivity {
                                     entry: ActivityEntry::session_ended(
                                         removed,
@@ -926,7 +924,6 @@ impl GuiHandler {
                                 .await;
                             let _ = self
                                 .bridge
-                                .tx
                                 .send(GtkCommand::SetAgentStatus { workspace: ws_id })
                                 .await;
                         }
@@ -966,7 +963,6 @@ impl GuiHandler {
                             }
                             let _ = self
                                 .bridge
-                                .tx
                                 .send(GtkCommand::SetAgentStatus { workspace: ws_id })
                                 .await;
                             if record_activity {
@@ -977,7 +973,6 @@ impl GuiHandler {
                                     {
                                         let _ = self
                                             .bridge
-                                            .tx
                                             .send(GtkCommand::AddActivity { entry })
                                             .await;
                                     }
@@ -1065,7 +1060,6 @@ impl GuiHandler {
                 let (tx, rx) = oneshot::channel();
                 let _ = self
                     .bridge
-                    .tx
                     .send(GtkCommand::AddNotification {
                         pane,
                         surface,
@@ -1092,7 +1086,6 @@ impl GuiHandler {
                     {
                         let _ = self
                             .bridge
-                            .tx
                             .send(GtkCommand::SetNotificationDesktopId {
                                 id: entry_id,
                                 desktop_id: desktop_id.clone(),

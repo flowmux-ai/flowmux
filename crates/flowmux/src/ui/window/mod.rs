@@ -3662,14 +3662,15 @@ pub fn spawn_dispatch_loop(rx: crate::bridge::BridgeReceiver, controller: Window
     glib::MainContext::default().spawn_local(async move {
         while let Ok(cmd) = rx.recv().await {
             // Preserve mutation order while serving observations during SSH I/O
-            // and confirmation dialogs. Queries cannot close or replace widgets.
+            // and confirmation dialogs. Control messages only read state or update
+            // hook telemetry; they cannot close or replace widgets.
             let dispatch = controller.dispatch(cmd);
             tokio::pin!(dispatch);
             loop {
                 tokio::select! {
                     biased;
                     _ = &mut dispatch => break,
-                    Ok(query) = rx.recv_query() => controller.dispatch(query).await,
+                    Ok(control) = rx.recv_control() => controller.dispatch(control).await,
                 }
             }
             if controller.window_close.approved.get() {

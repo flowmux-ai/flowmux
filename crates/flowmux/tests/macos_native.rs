@@ -13,6 +13,8 @@ mod activity;
 mod bridge;
 #[path = "../src/builtin_icons.rs"]
 mod builtin_icons;
+#[path = "../src/ipc_handler.rs"]
+mod ipc_handler;
 #[path = "../src/keybindings.rs"]
 mod keybindings;
 #[path = "../src/notifications.rs"]

@@ -761,6 +761,32 @@ pub enum BrowserWaitCondition {
     Js(String),
 }
 
+impl Request {
+    /// Small state reads and native hook reports have independent admission.
+    /// Browser operations (especially waits/eval) and layout changes stay on
+    /// the regular endpoint; they cannot consume this reserved capacity.
+    pub(crate) fn uses_control_socket(&self) -> bool {
+        matches!(
+            self,
+            Self::Ping
+                | Self::WorkspaceList
+                | Self::WorkspaceTree
+                | Self::WorkspaceCurrent
+                | Self::PaneReadScreen { .. }
+                | Self::NotificationsList { .. }
+                | Self::AgentSessionGet { .. }
+                | Self::AgentSessionUpdate { .. }
+                | Self::AgentSessionForget { .. }
+                | Self::AgentActivityUpdate { .. }
+                | Self::AgentLifecycleUpdate { .. }
+                | Self::Notify { .. }
+                | Self::Ssh {
+                    request: SshRequest::Status { .. }
+                }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
@@ -858,6 +884,8 @@ pub struct NotificationSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "code", content = "message", rename_all = "snake_case")]
 pub enum RpcError {
+    /// Rejected before invoking the handler; no effects from this request.
+    Busy(String),
     Unimplemented(String),
     NotFound(String),
     InvalidArgument(String),

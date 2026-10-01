@@ -397,6 +397,7 @@ fn main() -> anyhow::Result<()> {
     let exit_code = app.run();
     drop(rt);
     let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(flowmux_ipc::control_socket_path(&socket));
     drop(log_guard);
     std::process::exit(exit_code.into());
 }

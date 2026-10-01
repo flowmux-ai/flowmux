@@ -755,7 +755,7 @@ pub enum GtkCommand {
 pub struct Bridge {
     pub tx: async_channel::Sender<GtkCommand>,
     priority_tx: async_channel::Sender<GtkCommand>,
-    query_tx: async_channel::Sender<GtkCommand>,
+    control_tx: async_channel::Sender<GtkCommand>,
 }
 
 const GTK_COMMAND_QUEUE_CAPACITY: usize = 64;
@@ -765,14 +765,14 @@ const GTK_PRIORITY_QUEUE_CAPACITY: usize = 8;
 pub struct BridgeReceiver {
     regular: async_channel::Receiver<GtkCommand>,
     priority: async_channel::Receiver<GtkCommand>,
-    queries: async_channel::Receiver<GtkCommand>,
+    control: async_channel::Receiver<GtkCommand>,
 }
 
 impl BridgeReceiver {
     /// Reject new commands and release replies for commands never dispatched.
     /// Dropping the receiver alone retains buffered commands while senders live.
     pub fn close(&self) {
-        let queues = [&self.regular, &self.priority, &self.queries];
+        let queues = [&self.regular, &self.priority, &self.control];
         for queue in queues {
             queue.close();
         }
@@ -793,7 +793,7 @@ impl BridgeReceiver {
                     Err(_) => continue,
                 },
                 command = self.regular.recv() => return command,
-                command = self.queries.recv(), if !self.queries.is_closed() => match command {
+                command = self.control.recv(), if !self.control.is_closed() => match command {
                     Ok(command) => return Ok(command),
                     Err(_) => continue,
                 },
@@ -801,15 +801,15 @@ impl BridgeReceiver {
         }
     }
 
-    pub async fn recv_query(&self) -> Result<GtkCommand, async_channel::RecvError> {
-        self.queries.recv().await
+    pub async fn recv_control(&self) -> Result<GtkCommand, async_channel::RecvError> {
+        self.control.recv().await
     }
 
     #[cfg(test)]
     pub fn try_recv(&self) -> Result<GtkCommand, async_channel::TryRecvError> {
         match self.priority.try_recv() {
             Ok(command) => Ok(command),
-            Err(_) => self.queries.try_recv().or_else(|_| self.regular.try_recv()),
+            Err(_) => self.control.try_recv().or_else(|_| self.regular.try_recv()),
         }
     }
 }
@@ -818,36 +818,45 @@ impl Bridge {
     pub fn new() -> (Self, BridgeReceiver) {
         let (tx, rx) = async_channel::bounded(GTK_COMMAND_QUEUE_CAPACITY);
         let (priority_tx, priority) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
-        let (query_tx, queries) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
+        let (control_tx, control) = async_channel::bounded(GTK_PRIORITY_QUEUE_CAPACITY);
         (
             Self {
                 tx,
                 priority_tx,
-                query_tx,
+                control_tx,
             },
             BridgeReceiver {
                 regular: rx,
                 priority,
-                queries,
+                control,
             },
         )
     }
 
-    /// Queries may observe the current state while a mutation waits for I/O or
-    /// user confirmation. Keep mutations on the ordered lane, including raw JS.
+    /// Status reads and hook telemetry can run while a layout mutation waits
+    /// for I/O or confirmation. These commands cannot close or replace widgets.
+    /// Keep other effects on the ordered lane, including raw JS.
     pub async fn send(
         &self,
         command: GtkCommand,
     ) -> Result<(), async_channel::SendError<GtkCommand>> {
-        let query = match &command {
+        let control = match &command {
             GtkCommand::PaneReadScreen { .. }
             | GtkCommand::ListNotifications { .. }
-            | GtkCommand::QueryAgentSurfaceVisible { .. } => true,
+            | GtkCommand::QueryAgentSurfaceVisible { .. }
+            | GtkCommand::SetAgentStatus { .. }
+            | GtkCommand::AddActivity { .. }
+            | GtkCommand::AddNotification { .. }
+            | GtkCommand::SetNotificationDesktopId { .. }
+            | GtkCommand::Ssh {
+                request: flowmux_ipc::protocol::SshRequest::Status { .. },
+                ..
+            } => true,
             GtkCommand::BrowserAction { op, .. } => op.is_query(),
             _ => false,
         };
-        if query {
-            self.query_tx.send(command).await
+        if control {
+            self.control_tx.send(command).await
         } else {
             self.tx.send(command).await
         }
@@ -920,13 +929,43 @@ mod tests {
             Some(GTK_PRIORITY_QUEUE_CAPACITY)
         );
         assert_eq!(
-            bridge.query_tx.capacity(),
+            bridge.control_tx.capacity(),
             Some(GTK_PRIORITY_QUEUE_CAPACITY)
         );
     }
 
     #[tokio::test]
-    async fn queries_bypass_pending_mutations_without_reordering_them() {
+    async fn hook_updates_bypass_a_full_mutation_queue() {
+        let (bridge, rx) = Bridge::new();
+        for _ in 0..GTK_COMMAND_QUEUE_CAPACITY {
+            bridge.tx.try_send(GtkCommand::CloseWindow).unwrap();
+        }
+        let (ack, _) = oneshot::channel();
+        for command in [
+            GtkCommand::SetAgentStatus {
+                workspace: WorkspaceId::new(),
+            },
+            GtkCommand::AddNotification {
+                pane: None,
+                surface: None,
+                workspace: None,
+                title: "ready".into(),
+                body: "completed".into(),
+                level: flowmux_core::NotificationLevel::Info,
+                ack,
+            },
+        ] {
+            tokio::time::timeout(std::time::Duration::from_millis(100), bridge.send(command))
+                .await
+                .expect("hook updates must not wait for mutation capacity")
+                .unwrap();
+            rx.recv_control().await.unwrap();
+        }
+        assert_eq!(bridge.tx.len(), GTK_COMMAND_QUEUE_CAPACITY);
+    }
+
+    #[tokio::test]
+    async fn control_messages_bypass_pending_mutations_without_reordering_them() {
         let (bridge, rx) = Bridge::new();
         let pane = PaneId::new();
         let (first, _) = oneshot::channel();
@@ -953,7 +992,7 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            rx.recv_query().await.unwrap(),
+            rx.recv_control().await.unwrap(),
             GtkCommand::PaneReadScreen { .. }
         ));
         for expected in ["first", "second"] {
@@ -971,7 +1010,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(rx.queries.try_recv().is_err());
+        assert!(rx.control.try_recv().is_err());
         assert!(matches!(
             rx.recv().await.unwrap(),
             GtkCommand::BrowserEval { .. }

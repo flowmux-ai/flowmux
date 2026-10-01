@@ -121,17 +121,28 @@ cannot load these hooks, and `doctor` reports that policy.
 
 ### Troubleshooting
 
-Each GUI/daemon socket accepts up to 64 concurrent connections, with one
-in-flight request per connection. Excess connections are closed immediately;
-clients should reduce concurrency when the server is busy. Idle or incomplete
-request reads and blocked response writes expire after 30 seconds. Persistent
-clients should reconnect after an idle connection closes.
+Each GUI/daemon has a regular socket (64 connections) and a companion
+`<socket>.ctl` endpoint (16 connections) reserved for native agent hooks,
+notifications and status reads. The CLI selects the companion automatically;
+older clients can still use the regular socket. Browser operations stay on the
+regular socket so long browser waits cannot exhaust the hook reserve. Each
+connection processes one request at a time. Excess connections are closed;
+idle/incomplete reads and blocked writes expire after 30 seconds.
+
+At most 32 regular mutations enter the handler concurrently. Further mutations
+receive `busy` with “request not started”; they are not queued and cannot take
+effect later. Admission is the handler boundary, not a claim that a queued GUI
+command has run. Once admitted, changes may wait for I/O or confirmation and
+are never cancelled by server deadlines or client disconnects. Hooks and status
+reads can still reach GTK while a layout change waits for confirmation.
 
 Read-only queries have a 10-second response budget. Browser waits retain the
-requested wait duration plus 10 seconds for dispatch and response delivery.
-Mutations, including close confirmations, raw JavaScript and screenshot file
-writes, are not cancelled by the query deadline. A lost connection does not
-prove that a mutation failed; inspect its result before retrying it.
+requested duration plus 10 seconds. Mutations include raw JavaScript and
+screenshot file writes. A lost connection does not prove a mutation failed;
+inspect its result before retrying. The client never automatically replays a
+sent request. It falls back to an older server's regular socket only when the
+companion is unavailable before transmission. Persistent clients must reconnect
+after their idle connection closes.
 
 WebKitGTK's web-process sandbox is enabled by default. If opening a browser
 or editor fails with a `bwrap` / `uid map` permission error on Ubuntu, check

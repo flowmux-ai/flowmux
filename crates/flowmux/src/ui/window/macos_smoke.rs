@@ -212,6 +212,115 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         dialog.heading().as_deref(),
         Some("Save changes before closing?")
     );
+    // Exercise the real socket handler and GTK dispatcher while CloseWindow
+    // waits for the dirty-editor decision. Saturating the ordinary endpoint
+    // must not hide hook telemetry or prevent state queries.
+    let socket = root.join("run/native.sock");
+    let server_socket = socket.clone();
+    let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
+        flowmux_daemon::DaemonHandler::new(store.clone()),
+        bridge.clone(),
+    ));
+    let ipc_server = tokio::spawn(async move {
+        flowmux_ipc::server::run(&server_socket, handler)
+            .await
+            .unwrap();
+    });
+    wait_until("IPC listening", || socket.exists()).await;
+    let agent_surface = controller
+        .pane_registry
+        .borrow()
+        .active_surface(terminal_pane)
+        .unwrap();
+    let checks = tokio::spawn(async move {
+        use flowmux_ipc::{
+            client::Client,
+            protocol::{AgentLifecycleEvent, Envelope, Payload, Request, Response},
+        };
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let mut held = Vec::new();
+        for _ in 0..64 {
+            let mut stream =
+                tokio::io::BufReader::new(tokio::net::UnixStream::connect(&socket).await.unwrap());
+            stream
+                .get_mut()
+                .write_all(b"{\"id\":1,\"kind\":\"request\",\"verb\":\"ping\"}\n")
+                .await
+                .unwrap();
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            let reply: Envelope = serde_json::from_str(&line).unwrap();
+            assert!(matches!(reply.payload, Payload::Response(Response::Pong)));
+            held.push(stream);
+        }
+        let client = Client::connect(&socket).await.unwrap();
+        for request in [
+            Request::AgentLifecycleUpdate {
+                pane: Some(terminal_pane),
+                surface: agent_surface,
+                agent: "claude".into(),
+                pid: None,
+                seq: Some(1),
+                session_id: "native-saturation".into(),
+                lifecycle: AgentLifecycleEvent::TurnStarted {
+                    turn_id: None,
+                    status_text: "running".into(),
+                },
+            },
+            Request::Notify {
+                pane: Some(terminal_pane),
+                surface: Some(agent_surface),
+                title: "Saturation hook".into(),
+                body: "Still delivered while closing".into(),
+                level: flowmux_core::NotificationLevel::NeedsInput,
+            },
+        ] {
+            assert!(matches!(client.call(request).await.unwrap(), Response::Ok));
+        }
+        assert!(matches!(
+            client.call(Request::Ping).await.unwrap(),
+            Response::Pong
+        ));
+        assert!(matches!(
+            client
+                .call(Request::PaneReadScreen {
+                    pane: terminal_pane
+                })
+                .await
+                .unwrap(),
+            Response::ScreenContents { .. }
+        ));
+        let response = client
+            .call(Request::NotificationsList { unread_only: false })
+            .await
+            .unwrap();
+        assert!(
+            matches!(response, Response::Notifications { entries, .. } if entries.iter().any(|entry| entry.title == "Saturation hook"))
+        );
+    });
+    glib::future_with_timeout(Duration::from_secs(10), checks)
+        .await
+        .expect("hooks and queries must respond during saturated close confirmation")
+        .unwrap();
+    assert!(controller.window.visible_dialog().is_some());
+    assert!(!controller.window_close.approved.get());
+    assert_eq!(
+        store
+            .located_agent_presence(agent_surface)
+            .await
+            .unwrap()
+            .presence
+            .name,
+        "claude"
+    );
+    assert!(controller
+        .notifications
+        .entries()
+        .iter()
+        .any(|entry| entry.title == "Saturation hook"));
+    ipc_server.abort();
+    println!("MACOS_NATIVE_IPC_SATURATION_OK");
+
     assert!(dialog.close());
     wait_until("dirty dialog closed", || {
         !controller.window_close.prompting.get() && controller.window.visible_dialog().is_none()

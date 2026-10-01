@@ -16,8 +16,11 @@ use tracing::{info, warn};
 /// Hard cap on a single envelope, including snapshots. Bounds memory when a
 /// peer streams without a terminating `\n`.
 pub(crate) const MAX_LINE_BYTES: usize = 1024 * 1024;
-// One request at a time per connection also bounds queued/in-flight handlers.
+// Independent connection pools protect control admission from ordinary peers.
+// One request at a time per connection bounds queued/in-flight handlers.
 const MAX_CONNECTIONS: usize = 64;
+const MAX_CONTROL_CONNECTIONS: usize = 16;
+const MAX_MUTATIONS: usize = 32;
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -60,29 +63,60 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
     if socket.exists() {
         std::fs::remove_file(socket)?;
     }
+    let control_path = crate::control_socket_path(socket);
+    if control_path.exists() {
+        std::fs::remove_file(&control_path)?;
+    }
+    // Bind control first so a published main endpoint already has its reserve.
+    let control_listener = UnixListener::bind(&control_path)?;
     let listener = UnixListener::bind(socket)?;
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let control_connections = Arc::new(Semaphore::new(MAX_CONTROL_CONNECTIONS));
+    let mutations = Arc::new(Semaphore::new(MAX_MUTATIONS));
     info!(path = %socket.display(), "flowmux daemon listening");
     loop {
-        let (stream, _) = listener.accept().await?;
-        let Ok(permit) = connections.clone().try_acquire_owned() else {
-            warn!(
-                limit = MAX_CONNECTIONS,
-                "IPC connection limit reached; dropping connection"
-            );
+        let (accepted, control) = tokio::select! {
+            result = listener.accept() => (result, false),
+            result = control_listener.accept() => (result, true),
+        };
+        let (stream, _) = accepted?;
+        let pool = if control {
+            &control_connections
+        } else {
+            &connections
+        };
+        let Ok(permit) = pool.clone().try_acquire_owned() else {
+            warn!(control, "IPC connection limit reached; dropping connection");
             continue;
         };
         let h = handler.clone();
+        let mutations = mutations.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(e) = serve_one(stream, h).await {
+            if let Err(e) = serve_connection(stream, h, control, mutations).await {
                 warn!(error = %e, "client disconnected with error");
             }
         });
     }
 }
 
+#[cfg(test)]
 async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::Result<()> {
+    serve_connection(
+        stream,
+        handler,
+        false,
+        Arc::new(Semaphore::new(MAX_MUTATIONS)),
+    )
+    .await
+}
+
+async fn serve_connection<H: Handler>(
+    stream: UnixStream,
+    handler: Arc<H>,
+    control: bool,
+    mutations: Arc<Semaphore>,
+) -> anyhow::Result<()> {
     let (r, mut w) = stream.into_split();
     let mut reader = BufReader::new(r);
     let mut buf = String::new();
@@ -112,17 +146,35 @@ async fn serve_one<H: Handler>(stream: UnixStream, handler: Arc<H>) -> anyhow::R
             }
         };
         let response = match env.payload {
-            Payload::Request(req) => match query_timeout(&req) {
-                Some(budget) => timeout(budget, handler.handle(req))
-                    .await
-                    .unwrap_or_else(|_| {
-                        Response::Error(RpcError::Io(format!(
-                            "query response timed out after {} ms",
-                            budget.as_millis()
-                        )))
-                    }),
-                None => handler.handle(req).await,
-            },
+            Payload::Request(req) => {
+                let is_control = req.uses_control_socket();
+                if control && !is_control {
+                    Response::Error(RpcError::InvalidArgument(
+                        "request requires the regular socket; not started".into(),
+                    ))
+                } else if let Some(budget) = query_timeout(&req) {
+                    timeout(budget, handler.handle(req))
+                        .await
+                        .unwrap_or_else(|_| {
+                            Response::Error(RpcError::Io(format!(
+                                "query response timed out after {} ms",
+                                budget.as_millis()
+                            )))
+                        })
+                } else if is_control {
+                    handler.handle(req).await
+                } else {
+                    // No hidden admission queue: reject before calling the handler.
+                    // After admission, even a dropped client or a confirmation
+                    // dialog cannot cause us to cancel/replay an ambiguous effect.
+                    match mutations.try_acquire() {
+                        Ok(_permit) => handler.handle(req).await,
+                        Err(_) => Response::Error(RpcError::Busy(
+                            "mutation capacity reached; request not started".into(),
+                        )),
+                    }
+                }
+            }
             Payload::Response(_) | Payload::Event(_) => Response::Error(RpcError::InvalidArgument(
                 "client sent non-request payload".into(),
             )),
@@ -295,14 +347,218 @@ mod tests {
         let socket = dir.path().join("bounded.sock");
         let server_socket = socket.clone();
         let server = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
-        let mut clients = Vec::new();
-        for _ in 0..64 {
-            let stream = tokio::time::timeout(Duration::from_secs(2), async {
+        for (socket, limit) in [
+            (socket.clone(), MAX_CONNECTIONS),
+            (crate::control_socket_path(&socket), MAX_CONTROL_CONNECTIONS),
+        ] {
+            let mut clients = Vec::new();
+            for _ in 0..limit {
+                let stream = tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if let Ok(stream) = UnixStream::connect(&socket).await {
+                            break stream;
+                        }
+                        tokio::time::sleep(Duration::from_millis(1)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                let mut reader = BufReader::new(stream);
+                write_envelope(
+                    reader.get_mut(),
+                    Envelope {
+                        id: 1,
+                        payload: Payload::Request(Request::Ping),
+                    },
+                )
+                .await;
+                assert!(matches!(
+                    read_envelope(&mut reader).await.payload,
+                    Payload::Response(Response::Pong)
+                ));
+                clients.push(reader);
+            }
+            let extra = UnixStream::connect(&socket).await.unwrap();
+            let mut extra = BufReader::new(extra);
+            let closed =
+                tokio::time::timeout(Duration::from_secs(1), extra.read_line(&mut String::new()))
+                    .await;
+            // Abort the accept loop even when the regression assertion fails.
+            if closed.is_err() {
+                server.abort();
+            }
+            assert_eq!(
+                closed
+                    .expect("excess connections must be rejected")
+                    .unwrap(),
+                0
+            );
+            drop(clients.pop());
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let mut reader = BufReader::new(UnixStream::connect(&socket).await.unwrap());
+                    let request = b"{\"id\":2,\"kind\":\"request\",\"verb\":\"ping\"}\n";
+                    if reader.get_mut().write_all(request).await.is_ok() {
+                        let mut line = String::new();
+                        if matches!(reader.read_line(&mut line).await, Ok(n) if n > 0) {
+                            let reply: Envelope = serde_json::from_str(&line).unwrap();
+                            assert!(matches!(reply.payload, Payload::Response(Response::Pong)));
+                            break;
+                        }
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("closing a client must release capacity");
+            drop(clients);
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn mutation_admission_rejects_before_effects_and_preserves_started_work() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Gate {
+            entered: Semaphore,
+            release: Semaphore,
+            completed: AtomicUsize,
+        }
+        impl Handler for Gate {
+            fn handle<'a>(
+                &'a self,
+                req: Request,
+            ) -> Pin<Box<dyn Future<Output = Response> + Send + 'a>> {
+                Box::pin(async move {
+                    match req {
+                        Request::Ping => Response::Pong,
+                        Request::Notify { .. } => Response::Ok,
+                        Request::PaneSendKeys { .. } => {
+                            self.entered.add_permits(1);
+                            self.release.acquire().await.unwrap().forget();
+                            self.completed.fetch_add(1, Ordering::SeqCst);
+                            Response::Ok
+                        }
+                        other => panic!("unexpected {other:?}"),
+                    }
+                })
+            }
+        }
+        let handler = Arc::new(Gate {
+            entered: Semaphore::new(0),
+            release: Semaphore::new(0),
+            completed: AtomicUsize::new(0),
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("admit.sock");
+        let task_socket = socket.clone();
+        let task_handler = handler.clone();
+        let server = tokio::spawn(async move { run(&task_socket, task_handler).await });
+        let request = Request::PaneSendKeys {
+            pane: flowmux_core::PaneId::new(),
+            keys: "effect".into(),
+        };
+        let mut pending = Vec::new();
+        timeout(Duration::from_secs(2), async {
+            for _ in 0..MAX_MUTATIONS {
+                let mut stream = loop {
+                    if let Ok(stream) = UnixStream::connect(&socket).await {
+                        break stream;
+                    }
+                    tokio::task::yield_now().await;
+                };
+                write_envelope(
+                    &mut stream,
+                    Envelope {
+                        id: 1,
+                        payload: Payload::Request(request.clone()),
+                    },
+                )
+                .await;
+                handler.entered.acquire().await.unwrap().forget();
+                pending.push(BufReader::new(stream));
+            }
+        })
+        .await
+        .unwrap();
+        let client = crate::client::Client::connect(&socket).await.unwrap();
+        assert!(matches!(
+            client.call(request.clone()).await.unwrap(),
+            Response::Error(RpcError::Busy(_))
+        ));
+        assert!(matches!(
+            client.call(Request::Ping).await.unwrap(),
+            Response::Pong
+        ));
+        assert!(matches!(
+            client
+                .call(Request::Notify {
+                    pane: None,
+                    surface: None,
+                    title: "hook".into(),
+                    body: "done".into(),
+                    level: NotificationLevel::Info,
+                })
+                .await
+                .unwrap(),
+            Response::Ok
+        ));
+        // A caller cannot bypass the mutation cap by selecting the control socket.
+        let mut control = BufReader::new(
+            UnixStream::connect(crate::control_socket_path(&socket))
+                .await
+                .unwrap(),
+        );
+        write_envelope(
+            control.get_mut(),
+            Envelope {
+                id: 9,
+                payload: Payload::Request(request),
+            },
+        )
+        .await;
+        assert!(matches!(
+            read_envelope(&mut control).await.payload,
+            Payload::Response(Response::Error(RpcError::InvalidArgument(_)))
+        ));
+        assert_eq!(handler.completed.load(Ordering::SeqCst), 0);
+        // Losing a client after admission must not cancel its already-started effect.
+        drop(pending.pop());
+        handler.release.add_permits(MAX_MUTATIONS);
+        timeout(Duration::from_secs(2), async {
+            for mut reader in pending {
+                assert!(matches!(
+                    read_envelope(&mut reader).await.payload,
+                    Payload::Response(Response::Ok)
+                ));
+            }
+            while handler.completed.load(Ordering::SeqCst) < MAX_MUTATIONS {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // Neither rejected request was left waiting to run after capacity returned.
+        assert_eq!(handler.entered.available_permits(), 0);
+        assert_eq!(handler.release.available_permits(), 0);
+        assert_eq!(handler.completed.load(Ordering::SeqCst), MAX_MUTATIONS);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn status_queries_survive_idle_connection_saturation() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("idle.sock");
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            let stream = timeout(Duration::from_secs(2), async {
                 loop {
                     if let Ok(stream) = UnixStream::connect(&socket).await {
                         break stream;
                     }
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    tokio::task::yield_now().await;
                 }
             })
             .await
@@ -320,42 +576,14 @@ mod tests {
                 read_envelope(&mut reader).await.payload,
                 Payload::Response(Response::Pong)
             ));
-            clients.push(reader);
+            held.push(reader);
         }
-        let extra = UnixStream::connect(&socket).await.unwrap();
-        let mut extra = BufReader::new(extra);
-        let closed =
-            tokio::time::timeout(Duration::from_secs(1), extra.read_line(&mut String::new())).await;
-        // Abort the accept loop even when the regression assertion fails.
-        if closed.is_err() {
-            server.abort();
-        }
-        assert_eq!(
-            closed
-                .expect("excess connections must be rejected")
-                .unwrap(),
-            0
-        );
-        drop(clients.pop());
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let mut reader = BufReader::new(UnixStream::connect(&socket).await.unwrap());
-                let request = b"{\"id\":2,\"kind\":\"request\",\"verb\":\"ping\"}\n";
-                if reader.get_mut().write_all(request).await.is_ok() {
-                    let mut line = String::new();
-                    if matches!(reader.read_line(&mut line).await, Ok(n) if n > 0) {
-                        let reply: Envelope = serde_json::from_str(&line).unwrap();
-                        assert!(matches!(reply.payload, Payload::Response(Response::Pong)));
-                        break;
-                    }
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("closing a client must release capacity");
-        drop(clients);
+        let alias = dir.path().join("current.sock");
+        std::os::unix::fs::symlink(&socket, &alias).unwrap();
+        let client = crate::client::Client::connect(&alias).await.unwrap();
+        let response = timeout(Duration::from_secs(2), client.call(Request::Ping)).await;
         server.abort();
+        assert!(matches!(response, Ok(Ok(Response::Pong))), "{response:?}");
     }
 
     #[tokio::test]

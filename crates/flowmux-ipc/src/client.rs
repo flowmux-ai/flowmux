@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use crate::protocol::{Envelope, Payload, Request, Response};
 use anyhow::{anyhow, Context};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 
 pub struct Client {
     inner: Mutex<Inner>,
+    socket: PathBuf,
     next_id: std::sync::atomic::AtomicU64,
 }
 
@@ -27,6 +28,7 @@ impl Client {
                 reader: BufReader::new(r),
                 writer: w,
             }),
+            socket: socket.canonicalize().unwrap_or_else(|_| socket.to_owned()),
             next_id: std::sync::atomic::AtomicU64::new(1),
         })
     }
@@ -35,21 +37,47 @@ impl Client {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut inner = self.inner.lock().await;
+        if req.uses_control_socket() {
+            match UnixStream::connect(crate::control_socket_path(&self.socket)).await {
+                Ok(stream) => {
+                    let (r, w) = stream.into_split();
+                    return Inner {
+                        reader: BufReader::new(r),
+                        writer: w,
+                    }
+                    .call(id, req)
+                    .await;
+                }
+                // Compatibility with older daemons. Fall back only before any
+                // request bytes were sent; never replay an ambiguous effect.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        inner.call(id, req).await
+    }
+}
+
+impl Inner {
+    async fn call(&mut self, id: u64, req: Request) -> anyhow::Result<Response> {
         let env = Envelope {
             id,
             payload: Payload::Request(req),
         };
         let mut line = serde_json::to_string(&env)?;
         line.push('\n');
-
-        let mut inner = self.inner.lock().await;
-        inner.writer.write_all(line.as_bytes()).await?;
-        inner.writer.flush().await?;
+        self.writer.write_all(line.as_bytes()).await?;
+        self.writer.flush().await?;
 
         let mut buf = String::new();
         loop {
             buf.clear();
-            let n = inner.reader.read_line(&mut buf).await?;
+            let n = self.reader.read_line(&mut buf).await?;
             if n == 0 {
                 return Err(anyhow!("daemon closed the connection"));
             }
@@ -154,6 +182,44 @@ mod tests {
             }
             server.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn disconnected_control_response_is_not_replayed_on_regular_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("no-replay.sock");
+        let regular = UnixListener::bind(&socket).unwrap();
+        let control = UnixListener::bind(crate::control_socket_path(&socket)).unwrap();
+        let client = Client::connect(&socket).await.unwrap();
+        let (regular, _) = regular.accept().await.unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = control.accept().await.unwrap();
+            let mut line = String::new();
+            BufReader::new(stream).read_line(&mut line).await.unwrap();
+            let request: Envelope = serde_json::from_str(&line).unwrap();
+            assert!(matches!(
+                request.payload,
+                Payload::Request(Request::Notify { .. })
+            ));
+            // The effect may have happened; dropping its response cannot authorize retry.
+        });
+        assert!(client
+            .call(Request::Notify {
+                pane: None,
+                surface: None,
+                title: "hook".into(),
+                body: "done".into(),
+                level: NotificationLevel::Info,
+            })
+            .await
+            .is_err());
+        server.await.unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            BufReader::new(regular).read_line(&mut String::new())
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
