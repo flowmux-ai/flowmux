@@ -4058,6 +4058,8 @@ mod tests {
             .unwrap()
             .downcast::<adw::AlertDialog>()
             .unwrap();
+        // Test queue ordering independently of the dialog's closing animation.
+        dialog.emit_by_name::<()>("response", &[&"cancel"]);
         dialog.close();
         assert!(glib::future_with_timeout(Duration::from_secs(1), closed)
             .await
