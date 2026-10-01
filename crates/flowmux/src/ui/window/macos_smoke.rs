@@ -89,21 +89,28 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     // A loopback fixture avoids file URL access differences between macOS versions.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap());
+    let _idle_connection = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let page = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        for line in std::io::BufReader::new((&stream).take(8192)).lines() {
-            if line.unwrap().is_empty() {
-                break;
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            // WebKit may preconnect without sending a request on that socket.
+            let complete = std::io::BufReader::new((&stream).take(8192))
+                .lines()
+                .map_while(Result::ok)
+                .any(|line| line.is_empty());
+            if !complete {
+                continue;
             }
+            let body = "<!doctype html><title>Native smoke</title><input id=smoke>";
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            break;
         }
-        let body = "<!doctype html><title>Native smoke</title><input id=smoke>";
-        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
     });
     let (ack, opened) = oneshot::channel();
     bridge
