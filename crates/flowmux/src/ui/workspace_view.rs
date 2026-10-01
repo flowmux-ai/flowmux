@@ -2096,7 +2096,14 @@ mod tab_dnd_tests {
         window.set_default_size(640, 480);
         window.set_child(Some(&tab));
         window.present();
-        gtk::glib::timeout_future(Duration::from_millis(30)).await;
+        // A synthetic click can run before the first allocation on a slow runner.
+        for _ in 0..100 {
+            if tab.is_mapped() && tab.width() > 0 && tab.height() > 0 {
+                break;
+            }
+            gtk::glib::timeout_future(Duration::from_millis(10)).await;
+        }
+        assert!(tab.is_mapped() && tab.width() > 0 && tab.height() > 0);
         let controllers = tab.observe_controllers();
         let click = (0..controllers.n_items())
             .find_map(|i| controllers.item(i).and_downcast::<gtk::GestureClick>())
