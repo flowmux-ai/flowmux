@@ -40,21 +40,20 @@ pub struct LocatedAgentPresence {
 }
 
 type AgentLifecycleKey = (SurfaceId, String, String);
-type AgentPermissionSeqKey = (SurfaceId, String, String, String);
-type AgentSessionWaitSeqKey = (SurfaceId, String, String, String);
+type AgentScopeSequences = HashMap<AgentLifecycleKey, HashMap<String, u64>>;
 const SESSION_PERMISSION_SCOPE: &str = "session";
 const SESSION_WAIT_SCOPE: &str = "session";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
     /// One state per tool-use id: true while waiting, false once resolved.
     /// Keep resolved ids until the turn boundary so duplicate or reordered
     /// hook deliveries cannot reopen them. Distinct calls keep distinct ids.
     pub(super) waits: HashMap<AgentLifecycleKey, HashMap<String, bool>>,
     pub(super) permission_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
-    pub(super) permission_event_seq: HashMap<AgentPermissionSeqKey, u64>,
+    pub(super) permission_event_seq: AgentScopeSequences,
     pub(super) session_waits: HashMap<AgentLifecycleKey, HashSet<String>>,
-    pub(super) session_wait_event_seq: HashMap<AgentSessionWaitSeqKey, u64>,
+    pub(super) session_wait_event_seq: AgentScopeSequences,
     /// Highest non-child event observed, used to reject delayed terminal
     /// boundaries and native SessionStart. Codex child ordering is tracked by
     /// the child-specific sequence maps below so its start/Stop ingress race
@@ -66,6 +65,71 @@ pub(super) struct AgentLifecycleRuntime {
     pub(super) ended: HashMap<AgentLifecycleKey, EndedAgentLifecycle>,
     pub(super) ended_order: VecDeque<AgentLifecycleKey>,
     pub(super) codex_turns: HashMap<(SurfaceId, String), CodexTurnLedger>,
+}
+
+// A rejected report restores only the session this event can mutate. Other
+// sessions and bounded tombstones never participate in a per-event copy.
+struct LifecycleCheckpoint {
+    key: AgentLifecycleKey,
+    waits: Option<HashMap<String, bool>>,
+    permission_waits: Option<HashSet<String>>,
+    permission_event_seq: Option<HashMap<String, u64>>,
+    session_waits: Option<HashSet<String>>,
+    session_wait_event_seq: Option<HashMap<String, u64>>,
+    last_seq: Option<u64>,
+    boundary_seq: Option<u64>,
+    codex_turn: Option<CodexTurnLedger>,
+}
+
+impl LifecycleCheckpoint {
+    fn capture(runtime: &AgentLifecycleRuntime, key: &AgentLifecycleKey) -> Self {
+        Self {
+            key: key.clone(),
+            waits: runtime.waits.get(key).cloned(),
+            permission_waits: runtime.permission_waits.get(key).cloned(),
+            permission_event_seq: runtime.permission_event_seq.get(key).cloned(),
+            session_waits: runtime.session_waits.get(key).cloned(),
+            session_wait_event_seq: runtime.session_wait_event_seq.get(key).cloned(),
+            last_seq: runtime.last_seq.get(key).cloned(),
+            boundary_seq: runtime.boundary_seq.get(key).cloned(),
+            codex_turn: runtime.codex_turns.get(&(key.0, key.2.clone())).cloned(),
+        }
+    }
+
+    fn restore(self, runtime: &mut AgentLifecycleRuntime) {
+        restore_entry(&mut runtime.waits, &self.key, self.waits);
+        restore_entry(
+            &mut runtime.permission_waits,
+            &self.key,
+            self.permission_waits,
+        );
+        restore_entry(
+            &mut runtime.permission_event_seq,
+            &self.key,
+            self.permission_event_seq,
+        );
+        restore_entry(&mut runtime.session_waits, &self.key, self.session_waits);
+        restore_entry(
+            &mut runtime.session_wait_event_seq,
+            &self.key,
+            self.session_wait_event_seq,
+        );
+        restore_entry(&mut runtime.last_seq, &self.key, self.last_seq);
+        restore_entry(&mut runtime.boundary_seq, &self.key, self.boundary_seq);
+        restore_entry(
+            &mut runtime.codex_turns,
+            &(self.key.0, self.key.2),
+            self.codex_turn,
+        );
+    }
+}
+
+fn restore_entry<K: Eq + Hash + Clone, V>(map: &mut HashMap<K, V>, key: &K, previous: Option<V>) {
+    if let Some(previous) = previous {
+        map.insert(key.clone(), previous);
+    } else {
+        map.remove(key);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -203,8 +267,14 @@ fn clear_permission_scope_if_newer(
     scope: &str,
     seq: Option<u64>,
 ) -> bool {
-    let seq_key = (key.0, key.1.clone(), key.2.clone(), scope.to_string());
-    let newer = match (runtime.permission_event_seq.get(&seq_key).copied(), seq) {
+    let newer = match (
+        runtime
+            .permission_event_seq
+            .get(key)
+            .and_then(|scopes| scopes.get(scope))
+            .copied(),
+        seq,
+    ) {
         (Some(current), Some(incoming)) => incoming > current,
         (Some(_), None) => false,
         _ => true,
@@ -213,7 +283,11 @@ fn clear_permission_scope_if_newer(
         return false;
     }
     if let Some(seq) = seq {
-        runtime.permission_event_seq.insert(seq_key, seq);
+        runtime
+            .permission_event_seq
+            .entry(key.clone())
+            .or_default()
+            .insert(scope.to_string(), seq);
     }
     clear_permission_scope(runtime, key, scope);
     true
@@ -235,11 +309,7 @@ fn clear_permission_event_seq_for_key(
     runtime: &mut AgentLifecycleRuntime,
     key: &AgentLifecycleKey,
 ) {
-    runtime
-        .permission_event_seq
-        .retain(|(surface, agent, session, _), _| {
-            *surface != key.0 || agent != &key.1 || session != &key.2
-        });
+    runtime.permission_event_seq.remove(key);
 }
 
 fn clear_session_wait_scope(
@@ -265,11 +335,7 @@ fn clear_session_wait_event_seq_for_key(
     runtime: &mut AgentLifecycleRuntime,
     key: &AgentLifecycleKey,
 ) {
-    runtime
-        .session_wait_event_seq
-        .retain(|(surface, agent, session, _), _| {
-            *surface != key.0 || agent != &key.1 || session != &key.2
-        });
+    runtime.session_wait_event_seq.remove(key);
 }
 
 fn clear_agent_lifecycle_runtime(
@@ -290,15 +356,11 @@ fn clear_agent_lifecycle_runtime(
         .retain(|key, _| keep_wait_key(key));
     lifecycle
         .permission_event_seq
-        .retain(|(key_surface, key_agent, key_session, _), _| {
-            keep_wait_key(&(*key_surface, key_agent.clone(), key_session.clone()))
-        });
+        .retain(|key, _| keep_wait_key(key));
     lifecycle.session_waits.retain(|key, _| keep_wait_key(key));
     lifecycle
         .session_wait_event_seq
-        .retain(|(key_surface, key_agent, key_session, _), _| {
-            keep_wait_key(&(*key_surface, key_agent.clone(), key_session.clone()))
-        });
+        .retain(|key, _| keep_wait_key(key));
     lifecycle.last_seq.retain(|key, _| keep_wait_key(key));
     lifecycle.boundary_seq.retain(|key, _| keep_wait_key(key));
     lifecycle
@@ -365,13 +427,13 @@ impl StateStore {
             .retain(|(surface, _, _), _| !surfaces.contains(surface));
         lifecycle
             .permission_event_seq
-            .retain(|(surface, _, _, _), _| !surfaces.contains(surface));
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
         lifecycle
             .session_waits
             .retain(|(surface, _, _), _| !surfaces.contains(surface));
         lifecycle
             .session_wait_event_seq
-            .retain(|(surface, _, _, _), _| !surfaces.contains(surface));
+            .retain(|(surface, _, _), _| !surfaces.contains(surface));
         lifecycle
             .last_seq
             .retain(|(surface, _, _), _| !surfaces.contains(surface));
@@ -744,7 +806,9 @@ impl StateStore {
         } {
             return AgentLifecycleResult::default();
         }
-        let runtime_before = runtime.clone();
+        let runtime_before = current
+            .is_none()
+            .then(|| LifecycleCheckpoint::capture(&runtime, &wait_key));
         let codex_child_event = agent == "codex"
             && (matches!(
                 &lifecycle_event,
@@ -850,16 +914,11 @@ impl StateStore {
                 scope,
             } => {
                 let scope = scope.unwrap_or_else(|| SESSION_PERMISSION_SCOPE.to_string());
-                let permission_seq_key = (
-                    surface_id,
-                    agent.clone(),
-                    session_id.to_string(),
-                    scope.clone(),
-                );
                 let newer = match (
                     runtime
                         .permission_event_seq
-                        .get(&permission_seq_key)
+                        .get(&wait_key)
+                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
                         .copied(),
                     seq,
                 ) {
@@ -869,7 +928,11 @@ impl StateStore {
                 };
                 if newer {
                     if let Some(seq) = seq {
-                        runtime.permission_event_seq.insert(permission_seq_key, seq);
+                        runtime
+                            .permission_event_seq
+                            .entry(wait_key.clone())
+                            .or_default()
+                            .insert(scope.to_string(), seq);
                     }
                     runtime
                         .permission_waits
@@ -887,16 +950,11 @@ impl StateStore {
                 scope,
             } => {
                 let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
-                let session_wait_seq_key = (
-                    surface_id,
-                    agent.clone(),
-                    session_id.to_string(),
-                    scope.clone(),
-                );
                 let newer = match (
                     runtime
                         .session_wait_event_seq
-                        .get(&session_wait_seq_key)
+                        .get(&wait_key)
+                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
                         .copied(),
                     seq,
                 ) {
@@ -908,7 +966,9 @@ impl StateStore {
                     if let Some(seq) = seq {
                         runtime
                             .session_wait_event_seq
-                            .insert(session_wait_seq_key, seq);
+                            .entry(wait_key.clone())
+                            .or_default()
+                            .insert(scope.to_string(), seq);
                     }
                     runtime
                         .session_waits
@@ -926,16 +986,11 @@ impl StateStore {
                 scope,
             } => {
                 let scope = scope.unwrap_or_else(|| SESSION_WAIT_SCOPE.to_string());
-                let session_wait_seq_key = (
-                    surface_id,
-                    agent.clone(),
-                    session_id.to_string(),
-                    scope.clone(),
-                );
                 let newer = match (
                     runtime
                         .session_wait_event_seq
-                        .get(&session_wait_seq_key)
+                        .get(&wait_key)
+                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
                         .copied(),
                     seq,
                 ) {
@@ -949,7 +1004,9 @@ impl StateStore {
                     if let Some(seq) = seq {
                         runtime
                             .session_wait_event_seq
-                            .insert(session_wait_seq_key, seq);
+                            .entry(wait_key.clone())
+                            .or_default()
+                            .insert(scope.to_string(), seq);
                     }
                     clear_session_wait_scope(&mut runtime, &wait_key, &scope);
                     if !resume {
@@ -965,16 +1022,12 @@ impl StateStore {
                 }
             }
             AgentLifecycleEvent::ToolBatchFinished { status_text } => {
-                let permission_seq_key = (
-                    surface_id,
-                    agent.clone(),
-                    session_id.to_string(),
-                    SESSION_PERMISSION_SCOPE.to_string(),
-                );
+                let scope = SESSION_PERMISSION_SCOPE;
                 let newer = match (
                     runtime
                         .permission_event_seq
-                        .get(&permission_seq_key)
+                        .get(&wait_key)
+                        .and_then(|scopes| scopes.get::<str>(scope.as_ref()))
                         .copied(),
                     seq,
                 ) {
@@ -984,7 +1037,11 @@ impl StateStore {
                 };
                 if newer {
                     if let Some(seq) = seq {
-                        runtime.permission_event_seq.insert(permission_seq_key, seq);
+                        runtime
+                            .permission_event_seq
+                            .entry(wait_key.clone())
+                            .or_default()
+                            .insert(scope.to_string(), seq);
                     }
                     clear_permission_scope(&mut runtime, &wait_key, SESSION_PERMISSION_SCOPE);
                     (!lifecycle_has_waits(&runtime, &wait_key)).then_some((
@@ -1338,8 +1395,8 @@ impl StateStore {
             .apply_agent_status_report(surface_id, report, surface_visible)
             .await
             .map(|(workspace, _)| workspace);
-        if workspace.is_none() && current.is_none() {
-            *runtime = runtime_before;
+        if let Some(before) = runtime_before.filter(|_| workspace.is_none()) {
+            before.restore(&mut runtime);
             completed = false;
             completion_message = None;
         }
@@ -1380,7 +1437,7 @@ impl StateStore {
             .flatten();
         let accepted = if starts_native_session {
             let mut lifecycle = self.agents.lifecycle.lock().await;
-            let session_id = report.session_id.as_deref().unwrap();
+            let session_id = report.session_id.clone().unwrap();
             let agent = report.name.to_ascii_lowercase();
             let key = (surface_id, agent.clone(), session_id.to_string());
             let current = self.located_agent_presence(surface_id).await;
@@ -1399,7 +1456,6 @@ impl StateStore {
             } {
                 return None;
             }
-            let before = lifecycle.clone();
             let displaced = current.as_ref().and_then(|located| {
                 let presence = &located.presence;
                 presence.session_id.as_ref().and_then(|session| {
@@ -1411,11 +1467,18 @@ impl StateStore {
                     (displaced_key != key).then_some((displaced_key, presence.pid, presence.seq))
                 })
             });
+            let owner_pid = report.pid;
+            let start_seq = report.seq;
+            // A rejected SessionStart must leave the live waits untouched.
+            // Commit the report before clearing ledgers, under the lifecycle lock.
+            let accepted = self
+                .apply_agent_status_report(surface_id, report, surface_visible)
+                .await?;
             clear_agent_lifecycle_runtime(&mut lifecycle, surface_id, None, None, None);
             if let Some((displaced_key, displaced_pid, seq)) = displaced {
                 let distinct_nested_identity = displaced_key.1 != agent
                     || displaced_pid
-                        .zip(report.pid)
+                        .zip(owner_pid)
                         .is_some_and(|(outer, inner)| outer != inner);
                 let reactivates_after_process_return =
                     distinct_nested_identity && displaced_pid.is_some();
@@ -1429,7 +1492,7 @@ impl StateStore {
             }
             lifecycle.ended.remove(&key);
             lifecycle.ended_order.retain(|ended| ended != &key);
-            if let Some(seq) = report.seq {
+            if let Some(seq) = start_seq {
                 lifecycle.last_seq.insert(key.clone(), seq);
                 lifecycle.boundary_seq.insert(key, seq);
             }
@@ -1437,22 +1500,14 @@ impl StateStore {
                 lifecycle.codex_turns.insert(
                     (surface_id, session_id.to_string()),
                     CodexTurnLedger {
-                        owner_pid: report.pid,
+                        owner_pid,
                         ..CodexTurnLedger::default()
                     },
                 );
             }
-            let accepted = self
-                .apply_agent_status_report(surface_id, report, surface_visible)
-                .await;
-            if accepted.is_none() {
-                *lifecycle = before;
-            }
-            if accepted.is_some() {
-                self.allow_agent_screen_restore(surface_id).await;
-            }
+            self.allow_agent_screen_restore(surface_id).await;
             drop(lifecycle);
-            accepted
+            Some(accepted)
         } else if let Some((agent, session_id)) = hook_session {
             // Serialize every session-bearing direct report with lifecycle
             // teardown. This closes the gap where SessionEnd could tombstone a
@@ -1575,7 +1630,7 @@ impl StateStore {
         }) {
             return AgentLifecycleResult::default();
         }
-        let before = runtime.clone();
+        let before = LifecycleCheckpoint::capture(&runtime, &wait_key);
         let pending = {
             let Some(ledger) = runtime
                 .codex_turns
@@ -1628,7 +1683,7 @@ impl StateStore {
             .await
             .map(|(workspace, _)| workspace);
         if workspace.is_none() {
-            *runtime = before;
+            before.restore(&mut runtime);
             return AgentLifecycleResult::default();
         }
         self.allow_agent_screen_restore(surface_id).await;
@@ -2327,5 +2382,154 @@ fn preserve_live_agent_pid(report: &mut AgentStatusReport, existing: &AgentPrese
     }
     if flowmux_procmon::pid_alive(existing_pid) {
         report.pid = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_checkpoint_restores_one_session_without_rewinding_others() {
+        let mut runtime = AgentLifecycleRuntime::default();
+        let key = (SurfaceId::new(), "codex".into(), "target".into());
+        let other = (SurfaceId::new(), "claude".into(), "other".into());
+        runtime
+            .waits
+            .insert(key.clone(), HashMap::from([("tool".into(), true)]));
+        runtime
+            .permission_event_seq
+            .insert(key.clone(), HashMap::from([("scope".into(), 7)]));
+        runtime
+            .session_wait_event_seq
+            .insert(key.clone(), HashMap::from([("quota".into(), 8)]));
+        runtime.last_seq.insert(key.clone(), 8);
+        runtime.codex_turns.insert(
+            (key.0, key.2.clone()),
+            CodexTurnLedger {
+                current_parent_turn: Some("turn".into()),
+                active_children: HashMap::from([("child".into(), "child-turn".into())]),
+                ..Default::default()
+            },
+        );
+        let before = LifecycleCheckpoint::capture(&runtime, &key);
+        clear_agent_lifecycle_runtime(&mut runtime, key.0, None, None, None);
+        runtime
+            .permission_waits
+            .insert(key.clone(), HashSet::from(["new".into()]));
+        runtime
+            .session_waits
+            .insert(key.clone(), HashSet::from(["new".into()]));
+        runtime.boundary_seq.insert(key.clone(), 99);
+        runtime
+            .waits
+            .insert(other.clone(), HashMap::from([("unrelated".into(), false)]));
+        remember_ended_agent_lifecycle(&mut runtime, other.clone(), None, Some(12), false);
+        before.restore(&mut runtime);
+        assert_eq!(runtime.waits[&key], HashMap::from([("tool".into(), true)]));
+        assert_eq!(runtime.permission_event_seq[&key]["scope"], 7);
+        assert_eq!(runtime.session_wait_event_seq[&key]["quota"], 8);
+        assert_eq!(runtime.last_seq[&key], 8);
+        assert!(!runtime.boundary_seq.contains_key(&key));
+        assert!(!runtime.permission_waits.contains_key(&key));
+        assert!(!runtime.session_waits.contains_key(&key));
+        let turn = &runtime.codex_turns[&(key.0, key.2.clone())];
+        assert_eq!(turn.current_parent_turn.as_deref(), Some("turn"));
+        assert_eq!(turn.active_children["child"], "child-turn");
+        assert!(!runtime.waits[&other]["unrelated"]);
+        assert_eq!(runtime.ended[&other].seq, Some(12));
+        assert_eq!(runtime.ended_order.back(), Some(&other));
+    }
+
+    #[tokio::test]
+    async fn rejected_session_start_preserves_runtime_waits() {
+        let store = StateStore::new_lazy_ephemeral(State::default());
+        let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+        let ws = store.get_workspace(workspace).await.unwrap();
+        let pane = &ws.surfaces[0].root_pane;
+        let surface = pane
+            .active_surface_id(pane.first_leaf_id().unwrap())
+            .unwrap();
+        let key = (surface, "claude".into(), "session".into());
+        store
+            .agents
+            .lifecycle
+            .lock()
+            .await
+            .waits
+            .insert(key.clone(), HashMap::from([("unresolved".into(), true)]));
+        // Ready metadata with no activity/status cannot create a presence.
+        let result = store
+            .report_agent_status_with_visibility(
+                surface,
+                AgentStatusReport {
+                    name: "claude".into(),
+                    status: None,
+                    activity: None,
+                    pid: None,
+                    source: Some("flowmux:hook".into()),
+                    seq: Some(1),
+                    message: None,
+                    custom_status: Some("Ready".into()),
+                    session_id: Some("session".into()),
+                    session_name: None,
+                    messaging_socket: None,
+                },
+                true,
+            )
+            .await;
+        assert!(result.is_none());
+        let runtime = store.agents.lifecycle.lock().await;
+        assert!(runtime.waits[&key]["unresolved"]);
+        assert!(!runtime.last_seq.contains_key(&key));
+    }
+
+    #[tokio::test]
+    #[ignore = "transition cost probe; run with --ignored --nocapture"]
+    async fn lifecycle_transition_cost_with_many_sessions() {
+        for unrelated_sessions in [0, 100, 1000] {
+            let store = StateStore::new_lazy_ephemeral(State::default());
+            let workspace = store.create_workspace(None, std::env::temp_dir()).await;
+            let ws = store.get_workspace(workspace).await.unwrap();
+            let pane = &ws.surfaces[0].root_pane;
+            let surface = pane
+                .active_surface_id(pane.first_leaf_id().unwrap())
+                .unwrap();
+            {
+                let mut runtime = store.agents.lifecycle.lock().await;
+                for index in 0..unrelated_sessions {
+                    runtime.waits.insert(
+                        (SurfaceId::new(), "claude".into(), format!("other-{index}")),
+                        (0..32).map(|item| (format!("tool-{item}"), true)).collect(),
+                    );
+                }
+            }
+            let started = std::time::Instant::now();
+            for seq in 1..=200 {
+                let result = store
+                    .report_agent_lifecycle_with_visibility(
+                        surface,
+                        "claude",
+                        None,
+                        Some(seq),
+                        "measured",
+                        AgentLifecycleEvent::TurnStarted {
+                            turn_id: None,
+                            status_text: "Working".into(),
+                        },
+                        true,
+                    )
+                    .await;
+                assert_eq!(result.workspace, Some(workspace));
+            }
+            println!(
+                "LIFECYCLE_COST unrelated_sessions={unrelated_sessions} events=200 elapsed_us={}",
+                started.elapsed().as_micros()
+            );
+            assert_eq!(
+                store.agents.lifecycle.lock().await.waits.len(),
+                unrelated_sessions
+            );
+        }
     }
 }
