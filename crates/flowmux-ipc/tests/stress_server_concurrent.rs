@@ -225,3 +225,29 @@ async fn malformed_envelope_skipped_then_next_request_succeeds() {
     server.abort();
     let _ = server.await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_verb_with_readable_id_gets_an_error_reply() {
+    let handler = Arc::new(CountingPing {
+        handled: AtomicU64::new(0),
+    });
+    let (socket, server) = spawn_server(handler.clone()).await;
+
+    let mut stream = UnixStream::connect(&socket).await.unwrap();
+    // A newer client can send a verb this server build predates.
+    stream
+        .write_all(b"{\"id\":9,\"kind\":\"request\",\"verb\":\"verb_from_a_newer_client\"}\n")
+        .await
+        .unwrap();
+    let (r, _w) = stream.into_split();
+    let mut reader = BufReader::new(r);
+    let resp = read_envelope(&mut reader).await.unwrap();
+    assert_eq!(resp.id, 9);
+    assert!(matches!(
+        resp.payload,
+        Payload::Response(Response::Error(RpcError::InvalidArgument(_)))
+    ));
+    assert_eq!(handler.handled.load(Ordering::Relaxed), 0);
+    server.abort();
+    let _ = server.await;
+}

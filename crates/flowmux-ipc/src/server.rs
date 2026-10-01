@@ -153,6 +153,14 @@ async fn serve_connection<H: Handler>(
             Ok(e) => e,
             Err(e) => {
                 warn!(error = %e, raw = %buf, "malformed envelope");
+                // A newer client can send a verb this build predates. Reply
+                // when the id is readable so it fails now, not at IO_TIMEOUT.
+                if let Ok(RequestId { id }) = serde_json::from_str(buf.trim_end()) {
+                    let response = Response::Error(RpcError::InvalidArgument(
+                        "request not recognized; not started. If flowmux was just updated, restart it".into(),
+                    ));
+                    write_response(&mut w, id, response).await?;
+                }
                 continue;
             }
         };
@@ -190,18 +198,32 @@ async fn serve_connection<H: Handler>(
                 "client sent non-request payload".into(),
             )),
         };
-        let out = Envelope {
-            id: env.id,
-            payload: Payload::Response(response),
-        };
-        let mut line = serde_json::to_string(&out)?;
-        line.push('\n');
-        timeout(IO_TIMEOUT, async {
-            w.write_all(line.as_bytes()).await?;
-            w.flush().await
-        })
-        .await??;
+        write_response(&mut w, env.id, response).await?;
     }
+}
+
+#[derive(serde::Deserialize)]
+struct RequestId {
+    id: u64,
+}
+
+async fn write_response(
+    w: &mut tokio::net::unix::OwnedWriteHalf,
+    id: u64,
+    response: Response,
+) -> anyhow::Result<()> {
+    let out = Envelope {
+        id,
+        payload: Payload::Response(response),
+    };
+    let mut line = serde_json::to_string(&out)?;
+    line.push('\n');
+    timeout(IO_TIMEOUT, async {
+        w.write_all(line.as_bytes()).await?;
+        w.flush().await
+    })
+    .await??;
+    Ok(())
 }
 
 /// Read one `\n`-terminated line into `out`, refusing to grow past `max`
