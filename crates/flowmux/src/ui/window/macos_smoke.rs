@@ -321,6 +321,39 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
     ipc_server.abort();
     println!("MACOS_NATIVE_IPC_SATURATION_OK");
 
+    // A valid maximum-length socket must still serve the GUI when appending
+    // the companion suffix exceeds macOS's sockaddr_un path limit.
+    let socket = root.join("l".repeat(103 - root.as_os_str().len() - 1));
+    let server_socket = socket.clone();
+    let handler = Arc::new(crate::ipc_handler::GuiHandler::new(
+        flowmux_daemon::DaemonHandler::new(store.clone()),
+        bridge.clone(),
+    ));
+    let ipc_server = tokio::spawn(async move {
+        flowmux_ipc::server::run(&server_socket, handler)
+            .await
+            .unwrap();
+    });
+    wait_until("long IPC path listening", || socket.exists()).await;
+    let query = tokio::spawn(async move {
+        let client = flowmux_ipc::client::Client::connect(&socket).await.unwrap();
+        client
+            .call(flowmux_ipc::Request::PaneReadScreen {
+                pane: terminal_pane,
+            })
+            .await
+            .unwrap()
+    });
+    assert!(matches!(
+        glib::future_with_timeout(Duration::from_secs(2), query)
+            .await
+            .unwrap()
+            .unwrap(),
+        flowmux_ipc::Response::ScreenContents { .. }
+    ));
+    ipc_server.abort();
+    println!("MACOS_NATIVE_IPC_LONG_PATH_OK");
+
     assert!(dialog.close());
     wait_until("dirty dialog closed", || {
         !controller.window_close.prompting.get() && controller.window.visible_dialog().is_none()

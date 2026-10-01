@@ -67,8 +67,18 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
     if control_path.exists() {
         std::fs::remove_file(&control_path)?;
     }
-    // Bind control first so a published main endpoint already has its reserve.
-    let control_listener = UnixListener::bind(&control_path)?;
+    // Bind control first so normal paths publish both endpoints together.
+    let control_listener = match UnixListener::bind(&control_path) {
+        Ok(listener) => Some(listener),
+        // The original socket can fit sun_path while its companion does not.
+        // ponytail: overlong custom paths keep regular admission; shorten the
+        // runtime path to restore control capacity.
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+            warn!(path = %control_path.display(), %error, "control socket unavailable; using regular admission");
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
     let listener = UnixListener::bind(socket)?;
     let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let control_connections = Arc::new(Semaphore::new(MAX_CONTROL_CONNECTIONS));
@@ -77,7 +87,8 @@ pub async fn run<H: Handler>(socket: &Path, handler: Arc<H>) -> anyhow::Result<(
     loop {
         let (accepted, control) = tokio::select! {
             result = listener.accept() => (result, false),
-            result = control_listener.accept() => (result, true),
+            result = async { control_listener.as_ref().unwrap().accept().await },
+                if control_listener.is_some() => (result, true),
         };
         let (stream, _) = accepted?;
         let pool = if control {
@@ -543,6 +554,35 @@ mod tests {
         assert_eq!(handler.release.available_permits(), 0);
         assert_eq!(handler.completed.load(Ordering::SeqCst), MAX_MUTATIONS);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn longest_supported_regular_socket_remains_usable() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::Builder::new()
+            .prefix("fm-long-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let max = if cfg!(target_os = "macos") { 103 } else { 107 };
+        let filename_len = max - dir.path().as_os_str().as_bytes().len() - 1;
+        let socket = dir
+            .path()
+            .join(format!("{}.sock", "s".repeat(filename_len - 5)));
+        // This path is valid for the original, regular endpoint.
+        drop(UnixListener::bind(&socket).unwrap());
+        let server_socket = socket.clone();
+        let server = tokio::spawn(async move { run(&server_socket, Arc::new(PingHandler)).await });
+        let response = timeout(Duration::from_secs(1), async {
+            loop {
+                if let Ok(client) = crate::client::Client::connect(&socket).await {
+                    break client.call(Request::Ping).await;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        server.abort();
+        assert!(matches!(response, Ok(Ok(Response::Pong))), "{response:?}");
     }
 
     #[tokio::test]

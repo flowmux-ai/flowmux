@@ -49,12 +49,15 @@ impl Client {
                     .call(id, req)
                     .await;
                 }
-                // Compatibility with older daemons. Fall back only before any
-                // request bytes were sent; never replay an ambiguous effect.
+                // Older daemons and overlong companion paths use regular admission.
+                // Fall back only before any request bytes were sent; never
+                // replay an ambiguous effect.
                 Err(error)
                     if matches!(
                         error.kind(),
-                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                        std::io::ErrorKind::NotFound
+                            | std::io::ErrorKind::ConnectionRefused
+                            | std::io::ErrorKind::InvalidInput
                     ) => {}
                 Err(error) => return Err(error.into()),
             }

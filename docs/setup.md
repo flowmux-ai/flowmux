@@ -126,8 +126,9 @@ Each GUI/daemon has a regular socket (64 connections) and a companion
 notifications and status reads. The CLI selects the companion automatically;
 older clients can still use the regular socket. Browser operations stay on the
 regular socket so long browser waits cannot exhaust the hook reserve. Each
-connection processes one request at a time. Excess connections are closed;
-idle/incomplete reads and blocked writes expire after 30 seconds.
+connection processes one request at a time. Custom socket paths too long for
+the companion endpoint retain regular admission only. Excess connections are
+closed; idle/incomplete reads and blocked writes expire after 30 seconds.
 
 At most 32 regular mutations enter the handler concurrently. Further mutations
 receive `busy` with “request not started”; they are not queued and cannot take
