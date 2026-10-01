@@ -304,7 +304,10 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             matches!(response, Response::Notifications { entries, .. } if entries.iter().any(|entry| entry.title == "Saturation hook"))
         );
     });
-    glib::future_with_timeout(Duration::from_secs(10), checks)
+    // This batch includes first-time native hook/notification rendering. Match
+    // the other native UI readiness checks; individual queries still retain
+    // their server-side deadline, and no request is retried.
+    glib::future_with_timeout(Duration::from_secs(30), checks)
         .await
         .expect("hooks and queries must respond during saturated close confirmation")
         .unwrap();
