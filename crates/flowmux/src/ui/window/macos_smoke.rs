@@ -275,7 +275,7 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
         .borrow()
         .active_surface(terminal_pane)
         .unwrap();
-    let checks = tokio::spawn(async move {
+    let hooks = tokio::spawn(async move {
         use flowmux_ipc::{
             client::Client,
             protocol::{AgentLifecycleEvent, Envelope, Payload, Request, Response},
@@ -323,6 +323,21 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             assert!(matches!(client.call(request).await.unwrap(), Response::Ok));
             println!("MACOS_NATIVE_IPC_REQUEST_OK");
         }
+        (held, client)
+    });
+    // This batch includes first-time native hook/notification rendering. Match
+    // the other native UI readiness checks; no request is retried.
+    let (held, client) = glib::future_with_timeout(Duration::from_secs(30), hooks)
+        .await
+        .expect("hooks must respond during saturated close confirmation")
+        .unwrap();
+    // That first rendering has held the main thread for 10 to 18 seconds on
+    // CI runners, starting up to a few hundred milliseconds after the hooks,
+    // which is past a query's server-side deadline. Let it finish first: a
+    // blocked main loop cannot complete this wait.
+    glib::timeout_future(Duration::from_secs(1)).await;
+    let queries = tokio::spawn(async move {
+        use flowmux_ipc::protocol::{Request, Response};
         assert!(matches!(
             client.call(Request::Ping).await.unwrap(),
             Response::Pong
@@ -341,15 +356,16 @@ async fn check(app: &adw::Application, root: &std::path::Path) {
             .await
             .unwrap();
         assert!(
-            matches!(response, Response::Notifications { entries, .. } if entries.iter().any(|entry| entry.title == "Saturation hook"))
+            matches!(&response, Response::Notifications { entries, .. } if entries.iter().any(|entry| entry.title == "Saturation hook")),
+            "{response:?}"
         );
+        // The ordinary endpoint stays saturated until the queries are answered.
+        drop(held);
     });
-    // This batch includes first-time native hook/notification rendering. Match
-    // the other native UI readiness checks; individual queries still retain
-    // their server-side deadline, and no request is retried.
-    glib::future_with_timeout(Duration::from_secs(30), checks)
+    // Individual queries retain their server-side deadline.
+    glib::future_with_timeout(Duration::from_secs(30), queries)
         .await
-        .expect("hooks and queries must respond during saturated close confirmation")
+        .expect("queries must respond during saturated close confirmation")
         .unwrap();
     assert!(controller.window.visible_dialog().is_some());
     assert!(!controller.window_close.approved.get());
