@@ -201,6 +201,7 @@ fn build_dialog(
         let kb_state = kb_state.clone();
         let theme_state = theme_state.clone();
         let agent_notification_target = current.agent_notification_target;
+        let agent_sort_mode = current.agent_sort_mode;
         Rc::new(move || {
             let kb = kb_state.borrow().clone();
             let conflicts = crate::ui::keybindings_panel::detect_conflicts(&kb);
@@ -234,6 +235,7 @@ fn build_dialog(
                 &families,
                 default_font_size,
                 agent_notification_target,
+                agent_sort_mode,
                 &kb,
                 &theme_state.borrow(),
             ));
@@ -972,6 +974,7 @@ fn collect_options(
     families: &[Option<String>],
     default_font_size: f32,
     agent_notification_target: AgentNotificationTarget,
+    agent_sort_mode: flowmux_config::options::AgentSortMode,
     keybindings: &KeybindingOverrides,
     theme_selection: &crate::ui::theme_tab::ThemeSelection,
 ) -> Options {
@@ -1025,6 +1028,7 @@ fn collect_options(
         font_family,
         font_size,
         agent_notification_target,
+        agent_sort_mode,
         theme: theme_selection.theme.clone(),
         theme_overrides: theme_selection.overrides.clone(),
         keybindings: keybindings.clone(),
@@ -1673,6 +1677,7 @@ mod tests {
             &families,
             12.0,
             AgentNotificationTarget::Both,
+            Default::default(),
             &kb,
             &crate::ui::theme_tab::ThemeSelection::default(),
         );
@@ -1741,6 +1746,7 @@ mod tests {
             &families,
             12.0,
             AgentNotificationTarget::Workspace,
+            Default::default(),
             &kb,
             &crate::ui::theme_tab::ThemeSelection::default(),
         );

@@ -26,6 +26,14 @@ impl WindowController {
                 self.sidebar.set_agent_bar_mode(enabled);
                 self.refresh_agent_displays().await;
             }
+            GtkCommand::SetAgentSortMode { mode } => {
+                self.options.borrow_mut().agent_sort_mode = mode;
+                if let Err(error) = flowmux_config::options::save(&self.options.borrow()) {
+                    tracing::warn!(%error, "agent sort mode save failed");
+                }
+                self.sidebar.set_agent_sort_mode(mode);
+                self.refresh_activity_panel().await;
+            }
             GtkCommand::OpenActivityTarget {
                 workspace,
                 pane,

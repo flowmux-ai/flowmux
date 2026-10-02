@@ -31,6 +31,7 @@ impl WindowController {
                         }
                         *options_cell.borrow_mut() = opts.clone();
                         controller.sidebar.set_agent_bar_mode(opts.agent_bar_mode);
+                        controller.sidebar.set_agent_sort_mode(opts.agent_sort_mode);
                         controller
                             .sidebar
                             .usage

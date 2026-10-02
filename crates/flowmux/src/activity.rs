@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded, in-memory Agent activity history for the side-panel popover.
 
+use flowmux_config::options::AgentSortMode;
 use flowmux_core::{AgentStatus, PaneId, SurfaceId, WorkspaceId};
 use flowmux_daemon::LocatedAgentPresence;
 use std::cell::RefCell;
@@ -114,6 +115,10 @@ impl ActivityEntry {
 pub struct ActivityStore {
     entries: Rc<RefCell<VecDeque<ActivityEntry>>>,
     active_sessions: Rc<RefCell<HashMap<SurfaceId, (String, Option<String>)>>>,
+    /// Per live agent: whether it is mid-turn and since when, as observed by
+    /// the Agents list. Status changes are timed here rather than taken from
+    /// hook entries so agents known only by process or screen detection sort too.
+    turns: Rc<RefCell<HashMap<SurfaceId, (bool, chrono::DateTime<chrono::Utc>)>>>,
 }
 
 impl ActivityStore {
@@ -184,6 +189,7 @@ impl ActivityStore {
         false
     }
 
+    #[cfg(test)]
     pub fn entries(&self) -> Vec<ActivityEntry> {
         self.entries.borrow().iter().cloned().collect()
     }
@@ -193,6 +199,62 @@ impl ActivityStore {
         for surface in surfaces {
             sessions.remove(surface);
         }
+    }
+
+    /// Time shown on an Agents row and used to sort it: when the current turn
+    /// was requested or the last one ended, else the latest activity entry.
+    pub fn since(&self, surface: SurfaceId) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.turns
+            .borrow()
+            .get(&surface)
+            .map(|turn| turn.1)
+            .or_else(|| {
+                let entries = self.entries.borrow();
+                let latest = entries.iter().rev().find(|entry| entry.surface == surface);
+                latest.map(|entry| entry.created_at)
+            })
+    }
+
+    /// Record turn changes of the live agents, then order the Agents list.
+    /// `entries` arrive in workspace order, which the stable sort keeps for ties.
+    pub fn sort_entries(&self, entries: &mut [ActivityNowEntry], mode: AgentSortMode) {
+        let in_progress = |status| matches!(status, AgentStatus::Working | AgentStatus::Blocked);
+        {
+            let now = chrono::Utc::now();
+            let mut turns = self.turns.borrow_mut();
+            turns.retain(|surface, _| entries.iter().any(|entry| entry.surface == *surface));
+            for entry in entries.iter() {
+                let busy = in_progress(entry.status);
+                match turns.get(&entry.surface) {
+                    Some(turn) if turn.0 == busy => {}
+                    // An agent first seen idle has no known finish time.
+                    None if !busy => {}
+                    _ => {
+                        turns.insert(entry.surface, (busy, now));
+                    }
+                }
+            }
+        }
+        if mode == AgentSortMode::Workspace {
+            return;
+        }
+        entries.sort_by_key(|entry| {
+            let at = self
+                .since(entry.surface)
+                .and_then(|at| at.timestamp_nanos_opt());
+            // Recently finished: working agents by request time, then the
+            // latest finish first; an unknown finish counts as the oldest.
+            let key = if in_progress(entry.status) {
+                (0, at.unwrap_or(i64::MAX))
+            } else {
+                (1, -at.unwrap_or(-i64::MAX))
+            };
+            // Oldest finished is the exact reverse.
+            match mode {
+                AgentSortMode::RecentlyFinished => key,
+                _ => (-key.0, -key.1),
+            }
+        });
     }
 }
 
@@ -249,6 +311,72 @@ mod tests {
             ActivityEntry::from_hook_presence(located(AgentStatus::Working, "Using Bash"))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn sort_entries_puts_working_agents_before_recent_finishes_and_mirrors_for_oldest() {
+        let store = ActivityStore::new();
+        let now = || ActivityNowEntry {
+            agent: "codex".into(),
+            status: AgentStatus::Idle,
+            status_text: String::new(),
+            seen: true,
+            workspace: WorkspaceId::new(),
+            pane: PaneId::new(),
+            surface: SurfaceId::new(),
+            surface_label: "zsh".into(),
+            color: "#abcdef".into(),
+        };
+        // Workspace order. No hook entries exist: every time is observed.
+        let mut entries = [now(), now(), now(), now(), now()];
+        let [unknown, late, second, early, first] = entries.each_ref().map(|entry| entry.surface);
+        let mut observe = |changes: &[(usize, AgentStatus)]| {
+            for (index, status) in changes {
+                entries[*index].status = *status;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            store.sort_entries(&mut entries.clone(), AgentSortMode::Workspace);
+            entries.clone()
+        };
+        observe(&[
+            (1, AgentStatus::Working),
+            (3, AgentStatus::Blocked),
+            (4, AgentStatus::Working),
+        ]);
+        observe(&[(2, AgentStatus::Working), (3, AgentStatus::Idle)]);
+        // `first` stays mid-turn across a permission wait and keeps its request time.
+        let entries = observe(&[(1, AgentStatus::Done), (4, AgentStatus::Blocked)]);
+        let sorted = |mode| {
+            let mut entries = entries.clone();
+            store.sort_entries(&mut entries, mode);
+            entries.map(|entry| entry.surface)
+        };
+
+        assert_eq!(
+            sorted(AgentSortMode::Workspace),
+            [unknown, late, second, early, first]
+        );
+        assert_eq!(
+            sorted(AgentSortMode::RecentlyFinished),
+            [first, second, late, early, unknown]
+        );
+        assert_eq!(
+            sorted(AgentSortMode::OldestFinished),
+            [unknown, early, late, second, first]
+        );
+        assert!(store.since(unknown).is_none());
+        assert!(store.since(early) < store.since(late));
+
+        // A row first seen idle falls back to its latest activity entry.
+        assert!(store.push(entry(unknown, Some(AgentStatus::Idle), "Session started")));
+        assert_eq!(
+            sorted(AgentSortMode::RecentlyFinished),
+            [first, second, unknown, late, early]
+        );
+
+        // Agents that left the list are forgotten.
+        store.sort_entries(&mut [], AgentSortMode::Workspace);
+        assert!(store.since(first).is_none());
     }
 
     #[test]

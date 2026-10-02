@@ -12,7 +12,8 @@ the built-in defaults.
 `focus_border_opacity`, `persist_browser_session`, `auto_resume_agent_sessions`,
 `restore_terminal_scrollback`, `scrollback_lines`, `default_shell`,
 `terminal_minimap_enabled`, `terminal_minimap_width`, `terminal_minimap_opacity`,
-`system_notifications_enabled`, `agent_bar_mode`, `usage_bar_enabled`, `cursor_blink`,
+`system_notifications_enabled`, `agent_bar_mode`, `agent_sort_mode`,
+`usage_bar_enabled`, `cursor_blink`,
 `cursor_blink_interval_ms`, `font_family`, `font_size`,
 `editor_minimap_enabled`, `agent_notification_target`, `theme`, `theme_overrides`,
 and `keybindings`.
@@ -20,6 +21,15 @@ and `keybindings`.
 precedence, then `$SHELL` is used. Invalid commands fall back safely.
 `agent_bar_mode` switches Agent Activity from the resizable lower side-panel
 area to the compact bottom bar.
+`agent_sort_mode` orders the side panel's Agents list: `workspace` (default),
+`recently_finished`, or `oldest_finished`. The sort button at the right of the
+Agents header cycles through them. `recently_finished` lists working agents
+first, earliest request first, then finished agents with the latest finish
+first; `oldest_finished` is the exact reverse. The time on each row is the sort
+key: when the current turn was requested or the last one ended. flowmux times
+these status changes itself, so agents without hooks sort too; the times last
+for the running flowmux process, and an agent with no observed finish counts
+as the longest finished.
 
 The browser uses the platform WebKit backend; Options shows a fixed `WebKit`
 label. Legacy `default_browser_engine` values are preserved for existing profile

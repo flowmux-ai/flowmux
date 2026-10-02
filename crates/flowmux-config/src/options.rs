@@ -89,6 +89,30 @@ impl BrowserEngine {
     }
 }
 
+/// Order of the side panel's Agents list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSortMode {
+    /// Workspace order, then pane/tab order inside each workspace.
+    #[default]
+    Workspace,
+    /// Most recently finished agents first.
+    RecentlyFinished,
+    /// Agents that finished longest ago first.
+    OldestFinished,
+}
+
+impl AgentSortMode {
+    /// The mode the Agents list sort button switches to on click.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Workspace => Self::RecentlyFinished,
+            Self::RecentlyFinished => Self::OldestFinished,
+            Self::OldestFinished => Self::Workspace,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Options {
     #[serde(default = "default_zoom")]
@@ -145,6 +169,9 @@ pub struct Options {
     /// [`AGENT_BAR_MODE_DEFAULT`] (`false`).
     #[serde(default = "default_agent_bar_mode")]
     pub agent_bar_mode: bool,
+    /// Order of the side panel's Agents list. Default: workspace order.
+    #[serde(default)]
+    pub agent_sort_mode: AgentSortMode,
     /// Show the compact AI usage footer. Enabled by default.
     #[serde(default = "default_usage_bar_enabled")]
     pub usage_bar_enabled: bool,
@@ -273,6 +300,7 @@ impl Default for Options {
             default_shell: None,
             system_notifications_enabled: default_system_notifications_enabled(),
             agent_bar_mode: default_agent_bar_mode(),
+            agent_sort_mode: AgentSortMode::default(),
             usage_bar_enabled: default_usage_bar_enabled(),
             cursor_blink: default_cursor_blink(),
             editor_minimap_enabled: default_editor_minimap_enabled(),
@@ -670,6 +698,24 @@ mod tests {
 
         let opts: Options = serde_json::from_value(value).unwrap();
         assert!(!opts.agent_bar_mode);
+    }
+
+    #[test]
+    fn agent_sort_mode_defaults_to_workspace_and_cycles_through_all_modes() {
+        let mut value = serde_json::to_value(Options::default()).unwrap();
+        value.as_object_mut().unwrap().remove("agent_sort_mode");
+        let mut opts: Options = serde_json::from_value(value).unwrap();
+        assert_eq!(opts.agent_sort_mode, AgentSortMode::Workspace);
+
+        opts.agent_sort_mode = opts.agent_sort_mode.next();
+        let s = serde_json::to_string(&opts).unwrap();
+        assert!(s.contains("\"agent_sort_mode\":\"recently_finished\""));
+        assert_eq!(serde_json::from_str::<Options>(&s).unwrap(), opts);
+        assert_eq!(opts.agent_sort_mode.next(), AgentSortMode::OldestFinished);
+        assert_eq!(
+            AgentSortMode::OldestFinished.next(),
+            AgentSortMode::Workspace
+        );
     }
 
     #[test]

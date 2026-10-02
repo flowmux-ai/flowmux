@@ -32,6 +32,7 @@ use crate::ui::{
     agent_icon, agent_status_css_class, agent_status_icon_name, agent_status_indicator,
 };
 use adw::prelude::*;
+use flowmux_config::options::AgentSortMode;
 use flowmux_core::{AgentStatus, NotificationLevel, PrState, SurfaceId, Workspace, WorkspaceId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -161,6 +162,8 @@ pub struct Sidebar {
     activity_has_agents: Rc<Cell<bool>>,
     agent_bar_mode: Rc<Cell<bool>>,
     agent_bar_button: gtk::ToggleButton,
+    agent_sort_mode: Rc<Cell<AgentSortMode>>,
+    agent_sort_button: gtk::Button,
     usage_button: gtk::MenuButton,
     pub(crate) usage: UsagePopover,
     notifications: NotificationStore,
@@ -463,7 +466,20 @@ impl Sidebar {
         let update_banner = UpdateBanner::new(tokio_handle);
 
         let activity_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let (activity_list_root, activity_list) = activity_list();
+        let (activity_list_root, activity_list, agent_sort_button) = activity_list();
+        let agent_sort_mode = Rc::new(Cell::new(AgentSortMode::default()));
+        show_agent_sort_mode(&agent_sort_button, agent_sort_mode.get());
+        let agent_sort_mode_for_click = agent_sort_mode.clone();
+        let bridge_for_sort = bridge.clone();
+        agent_sort_button.connect_clicked(move |button| {
+            let mode = agent_sort_mode_for_click.get().next();
+            agent_sort_mode_for_click.set(mode);
+            show_agent_sort_mode(button, mode);
+            let bridge = bridge_for_sort.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let _ = bridge.tx.send(GtkCommand::SetAgentSortMode { mode }).await;
+            });
+        });
         activity_panel.append(&activity_list_root);
         activity_panel.set_visible(false);
 
@@ -562,6 +578,8 @@ impl Sidebar {
             activity_has_agents,
             agent_bar_mode,
             agent_bar_button,
+            agent_sort_mode,
+            agent_sort_button,
             usage_button,
             usage,
             notifications,
@@ -923,6 +941,11 @@ impl Sidebar {
         );
     }
 
+    pub(crate) fn set_agent_sort_mode(&self, mode: AgentSortMode) {
+        self.agent_sort_mode.set(mode);
+        show_agent_sort_mode(&self.agent_sort_button, mode);
+    }
+
     #[cfg(test)]
     pub(crate) fn activity_panel_is_visible(&self) -> bool {
         self.activity_panel.is_visible()
@@ -998,17 +1021,43 @@ fn activity_panel_target_height(
     }
 }
 
-fn activity_list() -> (gtk::Widget, gtk::Box) {
+fn show_agent_sort_mode(button: &gtk::Button, mode: AgentSortMode) {
+    let (icon, label) = match mode {
+        AgentSortMode::Workspace => ("view-list-ordered-symbolic", "Sort: workspace order"),
+        AgentSortMode::RecentlyFinished => (
+            "view-sort-descending-symbolic",
+            "Sort: recently finished first",
+        ),
+        AgentSortMode::OldestFinished => (
+            "view-sort-ascending-symbolic",
+            "Sort: longest finished first",
+        ),
+    };
+    button.set_icon_name(icon);
+    button.set_tooltip_text(Some(label));
+    button.update_property(&[gtk::accessible::Property::Label(label)]);
+}
+
+fn activity_list() -> (gtk::Widget, gtk::Box, gtk::Button) {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
     root.set_margin_top(8);
     root.set_margin_bottom(8);
     root.set_margin_start(8);
     root.set_margin_end(8);
 
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let title = gtk::Label::new(Some("Agents"));
     title.add_css_class("heading");
     title.set_halign(gtk::Align::Start);
-    root.append(&title);
+    title.set_hexpand(true);
+    header.append(&title);
+    let sort_button = gtk::Button::new();
+    sort_button.add_css_class("flat");
+    sort_button.add_css_class("flowmux-sidebar-options");
+    sort_button.set_focus_on_click(false);
+    sort_button.set_widget_name("flowmux-agent-sort-button");
+    header.append(&sort_button);
+    root.append(&header);
 
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
@@ -1019,7 +1068,7 @@ fn activity_list() -> (gtk::Widget, gtk::Box) {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
     scroll.set_child(Some(&content));
     root.append(&scroll);
-    (root.upcast(), content)
+    (root.upcast(), content, sort_button)
 }
 
 fn render_activity_rows(
@@ -1050,11 +1099,8 @@ fn activity_now_row(
     bridge: Bridge,
 ) -> gtk::Widget {
     let when = store
-        .entries()
-        .iter()
-        .rev()
-        .find(|recent| recent.surface == entry.surface)
-        .map(|recent| format_relative_time(&recent.created_at));
+        .since(entry.surface)
+        .map(|at| format_relative_time(&at));
     let row = activity_row(
         &entry.agent,
         Some(entry.status),
@@ -2996,6 +3042,25 @@ mod tests {
             .unwrap();
         assert_eq!(refreshed_scroll, scroll);
         assert_eq!(refreshed_scroll.vadjustment().value(), position);
+
+        for (mode, icon) in [
+            (
+                AgentSortMode::RecentlyFinished,
+                "view-sort-descending-symbolic",
+            ),
+            (
+                AgentSortMode::OldestFinished,
+                "view-sort-ascending-symbolic",
+            ),
+            (AgentSortMode::Workspace, "view-list-ordered-symbolic"),
+        ] {
+            sidebar.agent_sort_button.emit_clicked();
+            gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;
+            assert!(
+                matches!(rx.try_recv().unwrap(), GtkCommand::SetAgentSortMode { mode: sent } if sent == mode)
+            );
+            assert_eq!(sidebar.agent_sort_button.icon_name().as_deref(), Some(icon));
+        }
 
         sidebar.agent_bar_button.emit_clicked();
         gtk::glib::timeout_future(std::time::Duration::from_millis(10)).await;

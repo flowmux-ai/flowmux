@@ -35,7 +35,9 @@ impl WindowController {
     }
 
     fn render_activity_panel(&self, model: &flowmux_core::AgentBarModel) {
-        let current = current_activity_entries(model);
+        let mut current = current_activity_entries(model);
+        self.activities
+            .sort_entries(&mut current, self.options.borrow().agent_sort_mode);
         let focused_surface = self
             .focused_pane
             .get()

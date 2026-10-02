@@ -586,6 +586,9 @@ pub enum GtkCommand {
     SetAgentBarMode {
         enabled: bool,
     },
+    SetAgentSortMode {
+        mode: flowmux_config::options::AgentSortMode,
+    },
     OpenActivityTarget {
         workspace: WorkspaceId,
         pane: PaneId,
