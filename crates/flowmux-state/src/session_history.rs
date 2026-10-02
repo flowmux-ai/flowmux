@@ -17,6 +17,7 @@ pub enum SessionAgent {
     OpenCode,
     Antigravity,
     Cline,
+    Gemini,
 }
 
 impl SessionAgent {
@@ -27,6 +28,7 @@ impl SessionAgent {
             "opencode" => Some(Self::OpenCode),
             "agy" | "antigravity" => Some(Self::Antigravity),
             "cline" => Some(Self::Cline),
+            "gemini" => Some(Self::Gemini),
             _ => None,
         }
     }
@@ -38,6 +40,7 @@ impl SessionAgent {
             Self::OpenCode => "OpenCode",
             Self::Antigravity => "Antigravity",
             Self::Cline => "Cline",
+            Self::Gemini => "Gemini",
         }
     }
 
@@ -62,6 +65,7 @@ impl SessionAgent {
                 "CLINE_DB_DATA_DIR",
                 "CLINE_SESSION_DATA_DIR",
             ],
+            Self::Gemini => &["HOME", "GEMINI_CLI_HOME"],
         }
     }
 
@@ -85,6 +89,9 @@ impl SessionAgent {
                     })
                     .map(|p| p.join("db"))
             }),
+            Self::Gemini => value("GEMINI_CLI_HOME")
+                .or_else(home)
+                .map(|p| p.join(".gemini")),
         }
     }
 }
@@ -123,6 +130,7 @@ impl HistorySession {
             SessionAgent::Codex => format!("codex resume {id}"),
             SessionAgent::Antigravity => format!("agy --conversation {id}"),
             SessionAgent::Cline => format!("cline --id {id} --tui"),
+            SessionAgent::Gemini => format!("gemini --resume {id}"),
             SessionAgent::OpenCode => unreachable!(),
         })
     }
@@ -142,12 +150,33 @@ impl HistorySession {
         } else {
             String::new()
         };
+        let header = text.len();
+        let gemini = self.agent == SessionAgent::Gemini;
+        // Gemini re-appends its latest message under the same `id` as it gains tool calls.
+        let mut latest = (String::new(), header);
         for record in records(&bytes) {
-            if let Some((role, message)) = message(&record, self.agent) {
-                text.push_str(role);
-                text.push('\n');
-                text.push_str(&message);
-                text.push_str("\n\n");
+            let nested = gemini
+                .then(|| record["$set"]["messages"].as_array())
+                .flatten();
+            if nested.is_some() {
+                // Gemini replaces its whole history with `$set.messages` on resume.
+                // ponytail: `$rewindTo` is ignored, so rewound messages stay visible;
+                // track message IDs here if that becomes confusing.
+                text.truncate(header);
+            }
+            for record in nested.into_iter().flatten().chain([&record]) {
+                if let Some((role, message)) = message(record, self.agent) {
+                    if let Some(id) = record["id"].as_str().filter(|_| gemini) {
+                        if id == latest.0 {
+                            text.truncate(latest.1);
+                        }
+                        latest = (id.to_owned(), text.len());
+                    }
+                    text.push_str(role);
+                    text.push('\n');
+                    text.push_str(&message);
+                    text.push_str("\n\n");
+                }
             }
         }
         if text.is_empty() {
@@ -237,6 +266,37 @@ fn message(record: &Value, agent: SessionAgent) -> Option<(&'static str, String)
             }
             &record["payload"]
         }
+        SessionAgent::Gemini => {
+            let role = match record["type"].as_str()? {
+                "user" => "You",
+                "gemini" => "Assistant",
+                _ => return None,
+            };
+            // Parts carry `text` without a `type`; tool data is omitted.
+            let text = match &record["content"] {
+                Value::String(text) => clean(text),
+                parts => parts
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|part| {
+                        part["text"]
+                            .as_str()
+                            .map(clean)
+                            .or_else(|| part.get("inlineData").map(|_| "[Image]".into()))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            };
+            let start = text.trim_start();
+            if start.is_empty()
+                || start.starts_with("<session_context>")
+                || start.starts_with("<hook_context>")
+            {
+                return None;
+            }
+            return Some((role, text));
+        }
         _ => return None,
     };
     let role = match body["role"].as_str()? {
@@ -299,14 +359,50 @@ fn session(path: PathBuf, agent: SessionAgent) -> io::Result<Option<HistorySessi
                     }
                 }
             }
+            SessionAgent::Gemini => {
+                if record["kind"].as_str().is_some_and(|kind| kind != "main") {
+                    return Ok(None);
+                }
+                if id.is_none() {
+                    id = record["sessionId"].as_str().map(str::to_owned);
+                }
+                // Appended as `$set.summary`; rewritten transcripts keep it in the header.
+                if let Some(value) = record["$set"]["summary"]
+                    .as_str()
+                    .or_else(|| record["summary"].as_str())
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    title = short(value);
+                }
+            }
             _ => {}
         }
-        if let Some((role, text)) = message(&record, agent) {
-            if title.is_empty() && role == "You" {
-                title = short(&text);
+        // Gemini's `$set.messages` holds its history so far.
+        let nested = (agent == SessionAgent::Gemini)
+            .then(|| record["$set"]["messages"].as_array())
+            .flatten();
+        for record in nested.into_iter().flatten().chain([&record]) {
+            if let Some((role, text)) = message(record, agent) {
+                if title.is_empty() && role == "You" {
+                    title = short(&text);
+                }
+                summary = short(&text);
             }
-            summary = short(&text);
         }
+    }
+    if agent == SessionAgent::Gemini {
+        // Every launch records a context-only transcript; Gemini cannot resume those.
+        if summary.is_empty() {
+            return Ok(None);
+        }
+        // Gemini keeps the project directory beside `chats/`, not in the transcript.
+        cwd = path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(|project| read_window(&project.join(".project_root"), 4096, false).ok())
+            .and_then(|(bytes, _)| String::from_utf8(bytes).ok())
+            .map(|root| PathBuf::from(root.trim()))
+            .filter(|root| root.is_absolute());
     }
     let Some(id) = id
         .and_then(|id| uuid::Uuid::parse_str(&id).ok())
@@ -343,14 +439,28 @@ pub fn list_sessions(agent: SessionAgent, home: &Path) -> io::Result<Vec<History
     let root = home.join(match agent {
         SessionAgent::Claude => "projects",
         SessionAgent::Codex => "sessions",
+        // `tmp/<project>/chats/session-*.jsonl`
+        SessionAgent::Gemini => "tmp",
         _ => unreachable!(),
     });
     let mut paths = Vec::new();
     collect(
         &root,
-        if agent == SessionAgent::Codex { 3 } else { 1 },
+        match agent {
+            SessionAgent::Codex => 3,
+            SessionAgent::Gemini => 2,
+            _ => 1,
+        },
         &mut paths,
     )?;
+    if agent == SessionAgent::Gemini {
+        paths.retain(|path| {
+            path.parent().is_some_and(|dir| dir.ends_with("chats"))
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("session-"))
+        });
+    }
     let mut sessions = HashMap::new();
     for path in paths {
         if let Ok(Some(item)) = session(path, agent) {
@@ -416,6 +526,7 @@ mod tests {
                 "/home/test/.gemini/antigravity-cli",
             ),
             (SessionAgent::Cline, "/home/test/.cline/data/db"),
+            (SessionAgent::Gemini, "/home/test/.gemini"),
         ] {
             assert_eq!(
                 agent.history_home(|key| env.get(key).cloned()),
@@ -497,6 +608,81 @@ mod tests {
             invalid.id = id.into();
             assert!(invalid.resume_command().is_err());
         }
+    }
+
+    #[test]
+    fn gemini_reads_project_root_native_summary_and_resumed_history() {
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("tmp/proj");
+        let context =
+            json!({"id":"c","type":"user","content":[{"text":"<session_context>\nhidden"}]});
+        let question = json!({"id":"q","type":"user","content":[{"text":"한글 질문 🦀"},{"inlineData":{"mimeType":"image/png"}}]});
+        let answer =
+            json!({"id":"a","type":"gemini","content":"답변","thoughts":[{"subject":"private"}]});
+        write(
+            &project.join("chats/session-2026-10-02T01-38-12345678.jsonl"),
+            &[
+                json!({"sessionId":ID,"startTime":"2026-10-02T01:38:53.141Z","kind":"main"}),
+                json!({"$set":{"messages":[context.clone()]}}),
+                question.clone(),
+                json!({"$set":{"lastUpdated":"2026-10-02T01:38:53.649Z"}}),
+                answer.clone(),
+                // The latest message is appended again as it gains tool calls.
+                json!({"id":"a","type":"gemini","content":"답변","toolCalls":[{"name":"edit"}]}),
+                // A resume rewrites the history so far, then appends.
+                json!({"$set":{"messages":[context.clone(), question.clone(), answer]}}),
+                json!({"id":"i","type":"info","content":"hidden notice"}),
+                json!({"id":"q2","type":"user","content":[{"text":"second"}]}),
+                json!({"id":"a2","type":"gemini","content":"둘째 답"}),
+                json!({"id":"a2","type":"gemini","content":"둘째 답변","toolCalls":[{"name":"edit"}]}),
+                json!({"$set":{"summary":"Native summary"}}),
+            ],
+        );
+        fs::write(project.join(".project_root"), "/한글 path\n").unwrap();
+        write(
+            &project.join("chats/session-2026-10-02T01-39-23456789.jsonl"),
+            &[
+                json!({"sessionId":"23456789-1234-4234-8234-123456789abc","kind":"subagent"}),
+                json!({"id":"q","type":"user","content":[{"text":"child"}]}),
+            ],
+        );
+        write(
+            &project.join("chats/session-2026-10-02T01-44-56789abc.jsonl"),
+            &[
+                json!({"sessionId":"56789abc-1234-4234-8234-123456789abc","kind":"main"}),
+                json!({"$set":{"messages":[context]}}),
+            ],
+        );
+        // Not a session transcript, and a project without a recorded directory.
+        write(
+            &project.join("logs/session-other.jsonl"),
+            &[json!({"sessionId":"3456789a-1234-4234-8234-123456789abc","kind":"main"})],
+        );
+        write(
+            &home.path().join("tmp/rootless/chats/session-x.jsonl"),
+            &[
+                json!({"sessionId":"456789ab-1234-4234-8234-123456789abc","kind":"main"}),
+                question,
+            ],
+        );
+        let items = list_sessions(SessionAgent::Gemini, home.path()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Native summary");
+        assert_eq!(items[0].summary, "둘째 답변");
+        assert_eq!(items[0].cwd, Path::new("/한글 path"));
+        assert_eq!(
+            items[0].resume_command().unwrap(),
+            format!("gemini --resume {ID}")
+        );
+        assert_eq!(
+            items[0].preview().unwrap(),
+            "You\n한글 질문 🦀\n[Image]\n\nAssistant\n답변\n\nYou\nsecond\n\nAssistant\n둘째 답변\n\n"
+        );
+        assert!(
+            list_sessions(SessionAgent::Gemini, &home.path().join("missing"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

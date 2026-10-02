@@ -6,7 +6,7 @@
 - [Configuration](configuration.md)
 - [Keyboard shortcuts](keybindings.md)
 - [SSH workspaces](ssh-workspaces.md)
-- [Claude and Codex session history](agent-sessions.md)
+- [Agent session history](agent-sessions.md)
 - [Agent CLI and browser automation](../AGENTS.md)
 - [Development guide](../CLAUDE.md)
 - [Memory sanitizer checks](sanitizers.md)

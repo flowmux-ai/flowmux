@@ -205,7 +205,7 @@ impl WindowController {
         let Some(target) = target else {
             panel
                 .status
-                .set_text("Focus a local Claude, Codex, OpenCode, Antigravity, or Cline terminal tab to browse sessions.");
+                .set_text("Focus a local Claude, Codex, OpenCode, Antigravity, Cline, or Gemini terminal tab to browse sessions.");
             return;
         };
         let controller = self.clone();
@@ -450,6 +450,13 @@ mod tests {
                 "CLINE_DATA_DIR",
                 "--id",
                 ".cline",
+            ),
+            (
+                SessionAgent::Gemini,
+                "gemini",
+                "GEMINI_CLI_HOME",
+                "--resume",
+                ".gemini",
             ),
         ] {
             let root = tempfile::tempdir().unwrap();

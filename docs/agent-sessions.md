@@ -4,7 +4,8 @@
 
 Click **Agent sessions** in the side-panel footer or press **Ctrl+Alt+J** to toggle
 the right-side session panel. While open, it follows the focused terminal tab's
-Claude Code, Codex, OpenCode, Antigravity (`agy`), or Cline identity. Closing it
+Claude Code, Codex, OpenCode, Antigravity (`agy`), Cline, or Gemini CLI identity.
+Closing it
 leaves the file and worktree panels as they were.
 
 The list includes local sessions from all projects, ordered by saved
@@ -34,12 +35,16 @@ To resume a session, select it and click **Resume in new tab**:
 - **OpenCode:** `opencode --session <ses_ID>`.
 - **Antigravity:** `agy --conversation <UUID>`.
 - **Cline CLI:** `cline --id <UUID> --tui`.
+- **Gemini CLI:** `gemini --resume <UUID>`. Gemini resolves sessions per project,
+  so the saved project directory is required. Gemini CLI 0.62.0 was observed to
+  delete a resumed session's transcript at its next launch in that project when
+  no new message had been sent after resuming.
 
-All five agents open a new tab in the saved project directory and preserve the
+All six agents open a new tab in the saved project directory and preserve the
 original tab and draft. The new tab uses the normal configured terminal shell;
 exiting the agent returns to that shell in the selected project directory.
 On Linux, OpenCode retains its XDG/config overrides,
-Antigravity retains its home, and Cline retains its directory overrides and
+Antigravity retains its home, Gemini CLI retains `GEMINI_CLI_HOME`, and Cline retains its directory overrides and
 `--config` / `--data-dir` arguments, including isolated sandbox storage.
 
 Another session can be opened while the focused agent is working or waiting for
@@ -66,14 +71,18 @@ The additional native stores are:
 | OpenCode | `~/.local/share/opencode/opencode.db` | Current SQLite `session`, `message`, and `part` tables |
 | Antigravity | `~/.gemini/antigravity-cli/conversation_summaries.db` | Local workspace summaries |
 | Cline CLI | `~/.cline/data/db/sessions.db` | CLI 3 sessions and their saved messages JSON |
+| Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` | JSONL transcripts with the project's `.project_root` |
 
-OpenCode's older JSON store and Cline's legacy VS Code task history are not read.
+OpenCode's older JSON store, Cline's legacy VS Code task history, and Gemini CLI's
+older single-file `session-*.json` transcripts are not read. Gemini titles use its
+native summary when present; context-only transcripts that Gemini cannot resume are
+hidden, and messages removed with its rewind remain visible in previews.
 Archives and child/subagent sessions are excluded where the store identifies them.
 Linux reads the running process's home/config directory overrides. Other platforms
 use flowmux's environment. Remote SSH session history is not read from the local
 machine.
 
-File reads run off the GTK thread. Claude/Codex list scanning samples the beginning
+File reads run off the GTK thread. Claude/Codex/Gemini list scanning samples the beginning
 and end of each transcript. Their previews show the latest 2 MiB of a transcript
 and explicitly report when earlier content was omitted. Malformed/incomplete
 JSONL records are skipped; a disappeared transcript reports a read error.
@@ -101,7 +110,8 @@ in a running isolated flowmux: list, preview, native restoration in a new tab,
 project directory, and original Unicode draft preservation. Antigravity's list,
 summary preview, and new-tab `--conversation` launch were checked; full native
 restoration could not be checked because the isolated agy home requires Google
-login. No model request was submitted during these checks.
+login. Gemini CLI 0.62.0 on Node.js 24 was checked with a history recorded
+against a local stub API: process identity, list, and native `--resume` by ID. No model request was submitted during these checks.
 Parser and GTK tests cover missing
 and damaged histories, Unicode, long records, child sessions, search, stale
 results, busy agents, current sessions, and preservation of other panels.
