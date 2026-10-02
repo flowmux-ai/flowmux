@@ -3264,13 +3264,14 @@ mod tests {
         }
         let window = gtk::Window::builder().child(&content).build();
         window.present();
-        for zoom in [100, 200] {
+        // 1em of the 10pt caption font, in whole pixels.
+        for (zoom, size) in [(100, 13), (200, 26)] {
             provider.load_from_string(&theme.css("#fff4b3", 0.5, zoom));
             gtk::glib::timeout_future(std::time::Duration::from_millis(100)).await;
             for icon in &icons {
                 assert!(icon.is_mapped());
                 assert_eq!(icon.pixel_size(), -1);
-                assert_eq!(icon.width(), 12 * i32::from(zoom) / 100);
+                assert_eq!(icon.width(), size);
                 assert_eq!(icon.height(), icon.width());
             }
         }

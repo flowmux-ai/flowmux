@@ -777,8 +777,8 @@ paned > separator {{
             toast_bg = toast_bg_css,
             toast_border = toast_border_css,
             agent_item_min = AGENT_BAR_ITEM_MIN_WIDTH_PX,
-            sidebar_body_font = 11.0 * sidebar_zoom,
-            sidebar_caption_font = 9.0 * sidebar_zoom,
+            sidebar_body_font = 12.0 * sidebar_zoom,
+            sidebar_caption_font = 10.0 * sidebar_zoom,
         )
     }
 }
@@ -1146,12 +1146,12 @@ mod tests {
         let theme = ResolvedTheme::from_ghostty(&cfg);
 
         let half = theme.css("#fff4b3", 0.5, 50);
-        assert!(half.contains("font-size: 5.50pt;"));
-        assert!(half.contains("font-size: 4.50pt;"));
+        assert!(half.contains("font-size: 6.00pt;"));
+        assert!(half.contains("font-size: 5.00pt;"));
 
         let double = theme.css("#fff4b3", 0.5, 200);
-        assert!(double.contains("font-size: 22.00pt;"));
-        assert!(double.contains("font-size: 18.00pt;"));
+        assert!(double.contains("font-size: 24.00pt;"));
+        assert!(double.contains("font-size: 20.00pt;"));
     }
 
     /// Multi-tab panes paint a 2px top stripe on the active tab. The
