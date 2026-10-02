@@ -57,14 +57,15 @@ impl SavedAgentSession {
 
     /// Command used as a shell startup argument while restoring a session. The
     /// agent and flags are fixed by [`Self::resume_argv`]; the opaque session id is
-    /// single-quote escaped. When the agent exits or fails to start, erase both
-    /// the visible screen and scrollback so the replacement shell starts clean.
+    /// single-quote escaped. The agent name stays unquoted so an interactive
+    /// shell applies the user's alias for it, as when they started the agent.
+    /// When the agent exits or fails to start, erase both the visible screen
+    /// and scrollback so the replacement shell starts clean.
     pub fn shell_command(&self) -> Option<String> {
         let argv = self.resume_argv();
         let executable = argv.first()?;
-        let command = argv
-            .iter()
-            .map(|arg| shell_quote(arg))
+        let command = std::iter::once(executable.clone())
+            .chain(argv[1..].iter().map(|arg| shell_quote(arg)))
             .collect::<Vec<_>>()
             .join(" ");
         let cleanup = match self.agent.as_str() {

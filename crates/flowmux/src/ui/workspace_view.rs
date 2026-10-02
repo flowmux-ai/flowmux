@@ -4066,9 +4066,11 @@ fn take_restored_agent_shell_command(
         .and_then(|session| session.shell_command())
 }
 
+/// Interactive, so the alias or function the user starts the agent with
+/// applies to the resumed one too.
 fn resumed_agent_shell_argv(shell: &str, command: &str) -> Vec<String> {
     let shell_command = format!("{command}; exec {} -l", shell_quote(shell));
-    vec![shell.into(), "-lc".into(), shell_command]
+    vec![shell.into(), "-lic".into(), shell_command]
 }
 
 fn shell_quote(value: &str) -> String {
@@ -4115,7 +4117,7 @@ mod resume_tests {
         assert!(store.lookup_surface(surface).is_some());
         let command =
             take_restored_agent_shell_command(surface, true, Some(store.clone())).unwrap();
-        assert!(command.contains("'claude' '--resume' 'session-1'"));
+        assert!(command.contains("then claude '--resume' 'session-1'"));
         assert!(store.lookup_surface(surface).is_none());
         assert!(take_restored_agent_shell_command(SurfaceId::new(), true, None).is_none());
     }
@@ -4124,7 +4126,7 @@ mod resume_tests {
     fn resumed_agent_starts_as_hidden_shell_command_then_returns_to_login_shell() {
         let argv = resumed_agent_shell_argv("/bin/zsh", "resume-command");
         assert_eq!(argv[0], "/bin/zsh");
-        assert_eq!(argv[1], "-lc");
+        assert_eq!(argv[1], "-lic");
         assert_eq!(
             argv[2], "resume-command; exec '/bin/zsh' -l",
             "resume text must be a shell argv, never terminal input"
