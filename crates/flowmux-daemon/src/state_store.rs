@@ -5285,31 +5285,37 @@ mod tests {
         let ws = store.get_workspace(ws_id).await.unwrap();
         let pane = first_pane(&ws);
         let surface = first_pane_active_surface(&ws);
-        let find = |name, cwd| store.codex_session_tab("s1", Some((name, Path::new(cwd))));
+        let unnamed = HashMap::new();
+        let named: HashMap<String, String> = HashMap::from([
+            ("s1".into(), "Fix bug".into()),
+            ("s2".into(), "Other".into()),
+        ]);
+        let find =
+            |session, names, cwd| store.codex_session_tab(session, Some((names, Path::new(cwd))));
 
         // A tab without a Codex process is never a match.
-        assert_eq!(find(None, "/tmp/demo").await, None);
+        assert_eq!(find("s1", &unnamed, "/tmp/demo").await, None);
         store
             .reconcile_process_agents(&[(surface, Some("codex"))])
             .await;
-        let tab = Some((pane, surface, false));
+        let tab = Some((pane, surface, None));
         assert_eq!(store.codex_session_tab("s1", None).await, None);
 
         // The only Codex tab in the directory that names no thread yet.
-        assert_eq!(find(None, "/tmp/demo").await, tab);
-        assert_eq!(find(Some("Fix bug"), "/tmp/demo").await, tab);
-        assert_eq!(find(None, "/elsewhere").await, None);
+        assert_eq!(find("s1", &unnamed, "/tmp/demo").await, tab);
+        assert_eq!(find("s1", &named, "/tmp/demo").await, tab);
+        assert_eq!(find("s1", &unnamed, "/elsewhere").await, None);
 
         // Once the title names a thread, only that thread's session matches.
         store
             .update_surface_auto_title(pane, surface, "⠋ Fix bug | demo".into())
             .await;
-        assert_eq!(find(Some("Fix bug"), "/tmp/demo").await, tab);
-        assert_eq!(find(Some("Fix bug"), "/elsewhere").await, None);
-        assert_eq!(find(Some("Other"), "/tmp/demo").await, None);
-        assert_eq!(find(None, "/tmp/demo").await, None);
+        assert_eq!(find("s1", &named, "/tmp/demo").await, tab);
+        assert_eq!(find("s1", &named, "/elsewhere").await, None);
+        assert_eq!(find("s2", &named, "/tmp/demo").await, None);
+        assert_eq!(find("s3", &named, "/tmp/demo").await, None);
 
-        // Once the tab has reported the session its title no longer matters.
+        // A tab that reported the session matches whatever its title says.
         let report = AgentStatusReport {
             name: "codex".into(),
             status: Some(AgentStatus::Working),
@@ -5324,12 +5330,46 @@ mod tests {
             messaging_socket: None,
         };
         store.report_agent_status(surface, report).await;
-        store
-            .update_surface_auto_title(pane, surface, "Renamed | demo".into())
-            .await;
-        let reported = Some((pane, surface, true));
+        let reported = Some((pane, surface, Some("s1".into())));
         assert_eq!(store.codex_session_tab("s1", None).await, reported);
         assert_eq!(store.codex_session_tab("s2", None).await, None);
+
+        // Its title names the other thread now: that session takes the tab over.
+        store
+            .update_surface_auto_title(pane, surface, "Other | demo".into())
+            .await;
+        assert_eq!(find("s2", &named, "/tmp/demo").await, reported);
+        assert_eq!(find("s3", &named, "/tmp/demo").await, None);
+
+        // A tab whose title names no thread keeps the session it reported
+        // until that session has a name; after that the title should show it,
+        // so an unnamed title means another thread was opened in the tab.
+        let other_ws = store
+            .create_workspace(Some("other".into()), std::path::PathBuf::from("/tmp/other"))
+            .await;
+        let other_ws = store.get_workspace(other_ws).await.unwrap();
+        let other = first_pane_active_surface(&other_ws);
+        store
+            .reconcile_process_agents(&[(other, Some("codex"))])
+            .await;
+        let report = AgentStatusReport {
+            name: "codex".into(),
+            status: Some(AgentStatus::Working),
+            activity: Some(flowmux_core::AgentActivity::Running),
+            pid: None,
+            source: Some("flowmux:hook".into()),
+            seq: Some(1),
+            message: None,
+            custom_status: None,
+            session_id: Some("y1".into()),
+            session_name: None,
+            messaging_socket: None,
+        };
+        store.report_agent_status(other, report).await;
+        assert_eq!(find("z", &named, "/tmp/other").await, None);
+        let named = HashMap::from([("y1".to_string(), "Done".to_string())]);
+        let taken = Some((first_pane(&other_ws), other, Some("y1".into())));
+        assert_eq!(find("z", &named, "/tmp/other").await, taken);
     }
 
     #[tokio::test]

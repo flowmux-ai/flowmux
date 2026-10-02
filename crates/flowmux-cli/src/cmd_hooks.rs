@@ -953,12 +953,12 @@ pub(crate) async fn run_generic_agent_hook_event(
             let Some(session_id) = input.session_id.as_deref() else {
                 return Ok(());
             };
-            let Some((client, pane, surface, reported)) =
+            let Some((client, pane, surface, other_session)) =
                 resolve_codex_tab(session_id, input.cwd.as_deref()).await
             else {
                 return Ok(());
             };
-            session_route = Some((client, reported));
+            session_route = Some((client, other_session));
             (Some(pane), Some(surface), None)
         } else {
             (pane, surface, pid)
@@ -966,10 +966,10 @@ pub(crate) async fn run_generic_agent_hook_event(
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
     let mut reqs: Vec<_> = Vec::new();
-    // Only a session start moves a tab to a session it has not reported, such
-    // as the thread a `/new` opened in it. Built first: requests carry an
-    // increasing sequence and the window drops one older than the last.
-    if matches!(session_route, Some((_, false)))
+    // Only a session start moves a tab off another session, as when a `/new`
+    // opened this thread in it. Built first: requests carry an increasing
+    // sequence and the window drops one older than the last.
+    if matches!(session_route, Some((_, true)))
         && !matches!(event, AgentHookEvent::SessionStart { .. })
     {
         reqs.push(build_unknown_activity_update_with_session(

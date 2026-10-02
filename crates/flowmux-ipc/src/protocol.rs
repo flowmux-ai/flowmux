@@ -855,13 +855,14 @@ pub enum Response {
     AgentSession {
         session_id: Option<String>,
     },
-    /// Reply to `AgentSurfaceResolve`. `reported` is false when the tab was
-    /// found by its title or directory and has yet to report this session.
+    /// Reply to `AgentSurfaceResolve`. `session_id` is the session the tab
+    /// last reported; it differs from the requested one when the tab was
+    /// found by its title or directory.
     AgentSurface {
         pane: PaneId,
         surface: SurfaceId,
         #[serde(default)]
-        reported: bool,
+        session_id: Option<String>,
     },
     /// Reply to `Request::Notify`. Carries the `org.gtk.Notifications`
     /// id the daemon assigned, so the GUI can later issue

@@ -508,8 +508,14 @@ pub fn codex_title_thread(title: &str) -> Option<&str> {
     Some(name.trim_matches(|c: char| c.is_whitespace() || ('\u{2800}'..='\u{28ff}').contains(&c)))
 }
 
+/// Whether two paths name one directory; a shell reports the path it was
+/// given, Codex the resolved one.
+pub fn same_directory(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
+}
+
 /// Codex sessions with their current thread names, oldest first.
-fn codex_thread_names(home: &Path) -> Vec<(String, String)> {
+pub fn codex_thread_names(home: &Path) -> Vec<(String, String)> {
     let index = read_window(&home.join("session_index.jsonl"), 4 * 1024 * 1024, true);
     let mut names: Vec<(String, String)> =
         records(&index.map(|(bytes, _)| bytes).unwrap_or_default())
@@ -546,15 +552,7 @@ pub fn codex_session_for_title(home: &Path, title: &str, cwd: &Path) -> Option<S
     names
         .into_iter()
         .rev()
-        .find_map(|(id, _)| (codex_session_cwd(home, &id)? == cwd).then_some(id))
-}
-
-/// Current thread name of a Codex session, as its tab title shows it.
-pub fn codex_thread_name(home: &Path, id: &str) -> Option<String> {
-    let names = codex_thread_names(home);
-    names
-        .into_iter()
-        .find_map(|(known, name)| (known == id).then_some(name))
+        .find_map(|(id, _)| same_directory(&codex_session_cwd(home, &id)?, cwd).then_some(id))
 }
 
 fn collect(directory: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -667,9 +665,9 @@ mod tests {
         assert_eq!(find("한글 작업", "/work/app"), None);
         assert_eq!(find("app", "/work/app"), None);
 
-        let name = codex_thread_name(home.path(), RENAMED);
-        assert_eq!(name.as_deref(), Some("Renamed"));
-        assert_eq!(codex_thread_name(home.path(), "unknown"), None);
+        let names = codex_thread_names(home.path());
+        assert_eq!(names.last().unwrap(), &(RENAMED.into(), "Renamed".into()));
+        assert_eq!(names.len(), 3);
     }
 
     #[test]

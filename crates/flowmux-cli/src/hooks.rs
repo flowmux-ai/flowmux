@@ -557,19 +557,23 @@ pub fn started_by_codex_app_server() -> bool {
             return false;
         }
         let cmdline = std::fs::read(format!("/proc/{parent}/cmdline")).unwrap_or_default();
-        app_server |= cmdline
-            .split(|byte| *byte == 0)
-            .any(|arg| arg == b"app-server");
+        let has = |name: &[u8]| cmdline.split(|byte| *byte == 0).any(|arg| arg == name);
+        // The shared daemon serves other tabs even while its first pane lives.
+        if has(b"--managed-daemon") {
+            return true;
+        }
+        app_server |= has(b"app-server");
         pid = parent;
     }
     app_server
 }
 
-/// Ask each running flowmux window which tab runs Codex session `session_id`,
-/// started in `cwd`. The flag is false when that tab has yet to report the
-/// session.
-// ponytail: the first window that knows the session wins; two windows showing
-// same-named threads from one directory cannot be told apart.
+/// Ask the running flowmux windows which tab runs Codex session `session_id`,
+/// started in `cwd`. The flag says the tab still holds another session. A
+/// window whose tab already reported the session beats one that matched a tab
+/// by title or directory.
+// ponytail: among windows that only matched by title or directory the first
+// wins; same-named threads from one directory cannot be told apart.
 pub async fn resolve_codex_tab(
     session_id: &str,
     cwd: Option<&str>,
@@ -581,6 +585,7 @@ pub async fn resolve_codex_tab(
     sockets.extend(scan_pid_sockets().unwrap_or_default());
     sockets.sort();
     sockets.dedup();
+    let mut found = None;
     for socket in sockets {
         let request = Request::AgentSurfaceResolve {
             agent: "codex".into(),
@@ -591,16 +596,20 @@ pub async fn resolve_codex_tab(
         let Ok(Some(Response::AgentSurface {
             pane,
             surface,
-            reported,
+            session_id: current,
         })) = reply
         else {
             continue;
         };
-        if let Some(client) = try_connect(&socket, HOOK_CONNECT_TIMEOUT).await {
-            return Some((client, pane, surface, reported));
+        if current.as_deref() == Some(session_id) {
+            found = Some((socket, pane, surface, false));
+            break;
         }
+        found.get_or_insert((socket, pane, surface, current.is_some()));
     }
-    None
+    let (socket, pane, surface, other_session) = found?;
+    let client = try_connect(&socket, HOOK_CONNECT_TIMEOUT).await?;
+    Some((client, pane, surface, other_session))
 }
 
 /// One query to a window that may predate its verb. Such a window skips the

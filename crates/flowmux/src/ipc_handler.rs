@@ -13,7 +13,7 @@ use flowmux_core::{AgentStatusReport, SplitDirection};
 use flowmux_daemon::DaemonHandler;
 use flowmux_ipc::protocol::{Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
-use flowmux_state::session_history::{codex_session_cwd, codex_thread_name, SessionAgent};
+use flowmux_state::session_history::{codex_session_cwd, codex_thread_names, SessionAgent};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -796,20 +796,21 @@ impl GuiHandler {
                         let thread = tokio::task::spawn_blocking(move || {
                             let home = SessionAgent::Codex.env_history_home()?;
                             let cwd = cwd.or_else(|| codex_session_cwd(&home, &id))?;
-                            Some((codex_thread_name(&home, &id), cwd))
+                            let names = codex_thread_names(&home).into_iter().collect();
+                            Some((names, cwd))
                         });
-                        if let Some((name, cwd)) = thread.await.ok().flatten() {
+                        if let Some((names, cwd)) = thread.await.ok().flatten() {
                             tab = store
-                                .codex_session_tab(&session_id, Some((name.as_deref(), &cwd)))
+                                .codex_session_tab(&session_id, Some((&names, &cwd)))
                                 .await;
                         }
                     }
                 }
                 match tab {
-                    Some((pane, surface, reported)) => Response::AgentSurface {
+                    Some((pane, surface, session_id)) => Response::AgentSurface {
                         pane,
                         surface,
-                        reported,
+                        session_id,
                     },
                     None => Response::Error(RpcError::NotFound(format!(
                         "no tab runs {agent} session {session_id}"
