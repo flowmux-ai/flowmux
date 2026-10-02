@@ -11,12 +11,13 @@ use flowmux_core::{
     detect_agent_interruption, detect_agent_name_from_signals, detect_agent_progress_text,
     detect_agent_status_from_signals, detect_agent_usage_limit_text,
     select_process_agent_candidate, AgentPresence, AgentStatus, AgentStatusReport, Pane,
-    PaneContent, PaneId, SurfaceId, Workspace, WorkspaceId,
+    PaneContent, PaneId, PaneSurface, SurfaceId, SurfaceKind, Workspace, WorkspaceId,
 };
 use flowmux_ipc::protocol::AgentLifecycleEvent;
 use flowmux_state::State;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::Path;
 use tokio::sync::Mutex;
 
 #[derive(Default)]
@@ -392,6 +393,89 @@ impl StateStore {
                     .iter()
                     .any(|root| agent_presence_slot_in_pane(&root.root_pane, surface).is_some())
             })
+    }
+
+    /// Tab running Codex session `session_id`, and whether it already
+    /// reported that session. Otherwise, among Codex tabs opened in `cwd`: one
+    /// whose title names the session's thread, preferring a tab no session
+    /// has claimed, else the only tab whose title names no thread yet.
+    // ponytail: a Codex session started in `cwd` outside flowmux also lands
+    // on that only unnamed tab until the tab's own thread has a name.
+    pub async fn codex_session_tab(
+        &self,
+        session_id: &str,
+        thread: Option<(Option<&str>, &Path)>,
+    ) -> Option<(PaneId, SurfaceId, bool)> {
+        fn for_each_tab(pane: &Pane, f: &mut impl FnMut(PaneId, &PaneSurface)) {
+            match pane {
+                Pane::Leaf {
+                    id,
+                    content: PaneContent::Tabs { surfaces, .. },
+                } => surfaces.iter().for_each(|tab| f(*id, tab)),
+                Pane::Leaf { .. } => {}
+                Pane::Split { first, second, .. } => {
+                    for_each_tab(first, f);
+                    for_each_tab(second, f);
+                }
+            }
+        }
+        let state = self.inner.lock().await;
+        let mut reported = None;
+        let mut titled: Option<(bool, (PaneId, SurfaceId))> = None;
+        let mut unnamed = Vec::new();
+        let mut visit = |pane: PaneId, tab: &PaneSurface| {
+            let Some(agent) = tab.agent.as_ref().filter(|agent| agent.name == "codex") else {
+                return;
+            };
+            if agent.session_id.as_deref() == Some(session_id) {
+                reported.get_or_insert((pane, tab.id));
+                return;
+            }
+            let (
+                Some((name, cwd)),
+                SurfaceKind::Terminal {
+                    cwd: Some(tab_cwd), ..
+                },
+            ) = (thread, &tab.kind)
+            else {
+                return;
+            };
+            if tab_cwd != cwd {
+                return;
+            }
+            let claimed = agent.session_id.is_some();
+            // A user-chosen title says nothing about the thread it shows.
+            let shown = (!tab.title_locked)
+                .then(|| flowmux_state::session_history::codex_title_thread(&tab.title));
+            match shown {
+                Some(Some(shown)) if Some(shown) == name => {
+                    if titled.is_none_or(|(taken, _)| taken && !claimed) {
+                        titled = Some((claimed, (pane, tab.id)));
+                    }
+                }
+                Some(Some(_)) => {}
+                Some(None) => unnamed.push((pane, tab.id)),
+                None if !claimed => unnamed.push((pane, tab.id)),
+                None => {}
+            }
+        };
+        for workspace in state
+            .workspaces
+            .iter()
+            .filter(|ws| ws.local_root().is_some())
+        {
+            for root in &workspace.surfaces {
+                for_each_tab(&root.root_pane, &mut visit);
+            }
+        }
+        let only_unnamed = (unnamed.len() == 1).then(|| unnamed[0]);
+        match reported {
+            Some((pane, tab)) => Some((pane, tab, true)),
+            None => titled
+                .map(|(_, tab)| tab)
+                .or(only_unnamed)
+                .map(|(pane, tab)| (pane, tab, false)),
+        }
     }
 
     pub(super) async fn forget_cleared_agent_surfaces(&self, surfaces: &[SurfaceId]) {

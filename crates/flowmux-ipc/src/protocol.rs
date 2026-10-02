@@ -646,6 +646,16 @@ pub enum Request {
         agent: String,
         surface: SurfaceId,
     },
+    /// Find the tab running session `session_id` of `agent`, which was
+    /// started in `cwd`. Codex's shared app-server daemon runs hooks outside
+    /// the pane, so they know their session but not their tab. Replies
+    /// `AgentSurface`, or `NotFound`.
+    AgentSurfaceResolve {
+        agent: String,
+        session_id: String,
+        #[serde(default)]
+        cwd: Option<PathBuf>,
+    },
 
     /// Report a change in an AI agent's live activity inside a surface,
     /// emitted by the agent's lifecycle hooks (`flowmux hooks <agent>
@@ -777,6 +787,7 @@ impl Request {
                 | Self::AgentSessionGet { .. }
                 | Self::AgentSessionUpdate { .. }
                 | Self::AgentSessionForget { .. }
+                | Self::AgentSurfaceResolve { .. }
                 | Self::AgentActivityUpdate { .. }
                 | Self::AgentLifecycleUpdate { .. }
                 | Self::Notify { .. }
@@ -843,6 +854,14 @@ pub enum Response {
     /// previous session was recorded for this `(agent, surface)`.
     AgentSession {
         session_id: Option<String>,
+    },
+    /// Reply to `AgentSurfaceResolve`. `reported` is false when the tab was
+    /// found by its title or directory and has yet to report this session.
+    AgentSurface {
+        pane: PaneId,
+        surface: SurfaceId,
+        #[serde(default)]
+        reported: bool,
     },
     /// Reply to `Request::Notify`. Carries the `org.gtk.Notifications`
     /// id the daemon assigned, so the GUI can later issue

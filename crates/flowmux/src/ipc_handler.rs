@@ -13,6 +13,7 @@ use flowmux_core::{AgentStatusReport, SplitDirection};
 use flowmux_daemon::DaemonHandler;
 use flowmux_ipc::protocol::{Request, Response, RpcError};
 use flowmux_ipc::server::Handler;
+use flowmux_state::session_history::{codex_session_cwd, codex_thread_name, SessionAgent};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -270,6 +271,7 @@ impl Handler for GuiHandler {
                 | Request::AgentSessionUpdate { .. }
                 | Request::AgentSessionGet { .. }
                 | Request::AgentSessionForget { .. }
+                | Request::AgentSurfaceResolve { .. }
                 | Request::AgentActivityUpdate { .. }
                 | Request::AgentLifecycleUpdate { .. } => self.handle_agent_verb(req).await,
                 Request::Notify { .. }
@@ -778,6 +780,42 @@ impl GuiHandler {
                     "XDG data dir unavailable; cannot persist agent session".into(),
                 )),
             },
+            Request::AgentSurfaceResolve {
+                agent,
+                session_id,
+                cwd,
+            } => {
+                let store = self.inner.store();
+                let mut tab = None;
+                if agent.eq_ignore_ascii_case("codex") {
+                    tab = store.codex_session_tab(&session_id, None).await;
+                    if tab.is_none() {
+                        let id = session_id.clone();
+                        // Hooks name their directory; the legacy notify
+                        // payload does not, but its session file does.
+                        let thread = tokio::task::spawn_blocking(move || {
+                            let home = SessionAgent::Codex.env_history_home()?;
+                            let cwd = cwd.or_else(|| codex_session_cwd(&home, &id))?;
+                            Some((codex_thread_name(&home, &id), cwd))
+                        });
+                        if let Some((name, cwd)) = thread.await.ok().flatten() {
+                            tab = store
+                                .codex_session_tab(&session_id, Some((name.as_deref(), &cwd)))
+                                .await;
+                        }
+                    }
+                }
+                match tab {
+                    Some((pane, surface, reported)) => Response::AgentSurface {
+                        pane,
+                        surface,
+                        reported,
+                    },
+                    None => Response::Error(RpcError::NotFound(format!(
+                        "no tab runs {agent} session {session_id}"
+                    ))),
+                }
+            }
             Request::AgentSessionGet { agent, surface } => match self.session_store.as_ref() {
                 Some(store) => Response::AgentSession {
                     session_id: store.lookup(&agent, surface),

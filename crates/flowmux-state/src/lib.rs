@@ -417,11 +417,11 @@ fn bind_codex_title_sessions(state: &State, store: &AgentSessionStore, codex_hom
             let flowmux_core::SurfaceKind::Terminal { cwd: Some(cwd), .. } = &tab.kind else {
                 return;
             };
-            if tab.title_locked || store.lookup_surface(tab.id).is_some() {
+            if tab.title_locked {
                 return;
             }
             let session = session_history::codex_session_for_title(codex_home, &tab.title, cwd);
-            if let Some(session) = session {
+            if let Some(session) = session.filter(|_| store.lookup_surface(tab.id).is_none()) {
                 let _ = store.record("codex", tab.id, &session);
             }
         });
@@ -444,10 +444,12 @@ pub fn claim_window(owner: WindowOwner) -> Result<State, StateError> {
         for surface in &expired_surfaces {
             let _ = store.forget_surface(*surface);
         }
-        let codex_home = session_history::SessionAgent::Codex
-            .history_home(|key| std::env::var_os(key).map(PathBuf::from));
-        if let Some(codex_home) = codex_home {
-            bind_codex_title_sessions(&state, &store, &codex_home);
+        // Nothing consumes a binding while auto-resume is off; one saved now
+        // would resume a long-closed session once the option is turned on.
+        if flowmux_config::options::load().auto_resume_agent_sessions {
+            if let Some(codex_home) = session_history::SessionAgent::Codex.env_history_home() {
+                bind_codex_title_sessions(&state, &store, &codex_home);
+            }
         }
     }
     Ok(state)

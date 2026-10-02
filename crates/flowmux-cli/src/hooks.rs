@@ -45,6 +45,9 @@ pub struct ClaudeHookInput {
     /// resumable so an ambiguous teardown cannot discard recovery state.
     #[serde(default, alias = "terminationReason")]
     pub reason: Option<String>,
+    /// Directory the session was started in.
+    #[serde(default)]
+    pub cwd: Option<String>,
     /// Set when `Notification` fires for permission/info popups.
     #[serde(default)]
     pub message: Option<String>,
@@ -527,21 +530,130 @@ async fn try_connect(socket: &Path, timeout: Duration) -> Option<Client> {
     }
 }
 
+/// Whether Codex's shared app-server daemon started this hook. The daemon
+/// serves every Codex tab, so the pane, tab and socket it inherited belong to
+/// whichever pane first launched it, not to the session this hook reports.
+/// An app-server still running under the pane's own flowmux window inherited
+/// the right ones.
+// ponytail: recognizes the daemon by its `app-server` argument; if Codex
+// renames it these hooks fall back to the inherited environment.
+pub fn started_by_codex_app_server() -> bool {
+    let window_socket = std::env::var_os("FLOWMUX_SOCKET_PATH").map(PathBuf::from);
+    let mut app_server = false;
+    let mut pid = std::process::id();
+    for _ in 0..32 {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            break;
+        };
+        // `pid (comm) state ppid ...`; comm may itself contain spaces.
+        let parent = stat
+            .rsplit_once(") ")
+            .and_then(|(_, rest)| rest.split(' ').nth(1))
+            .and_then(|parent| parent.parse::<u32>().ok());
+        let Some(parent) = parent.filter(|parent| *parent > 1) else {
+            break;
+        };
+        if window_socket == Some(flowmux_config::paths::runtime_socket_for_pid(parent)) {
+            return false;
+        }
+        let cmdline = std::fs::read(format!("/proc/{parent}/cmdline")).unwrap_or_default();
+        app_server |= cmdline
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == b"app-server");
+        pid = parent;
+    }
+    app_server
+}
+
+/// Ask each running flowmux window which tab runs Codex session `session_id`,
+/// started in `cwd`. The flag is false when that tab has yet to report the
+/// session.
+// ponytail: the first window that knows the session wins; two windows showing
+// same-named threads from one directory cannot be told apart.
+pub async fn resolve_codex_tab(
+    session_id: &str,
+    cwd: Option<&str>,
+) -> Option<(Client, PaneId, SurfaceId, bool)> {
+    // Per-PID sockets share the directory and name of this probe path.
+    let probe = flowmux_config::paths::runtime_socket_for_pid(0);
+    let name = probe.file_name()?.to_string_lossy().into_owned();
+    let mut sockets = pid_sockets_in(probe.parent()?, name.strip_suffix("0.sock")?);
+    sockets.extend(scan_pid_sockets().unwrap_or_default());
+    sockets.sort();
+    sockets.dedup();
+    for socket in sockets {
+        let request = Request::AgentSurfaceResolve {
+            agent: "codex".into(),
+            session_id: session_id.into(),
+            cwd: cwd.map(PathBuf::from),
+        };
+        let reply = tokio::time::timeout(HOOK_NOTIFY_TIMEOUT, ask_window(&socket, request)).await;
+        let Ok(Some(Response::AgentSurface {
+            pane,
+            surface,
+            reported,
+        })) = reply
+        else {
+            continue;
+        };
+        if let Some(client) = try_connect(&socket, HOOK_CONNECT_TIMEOUT).await {
+            return Some((client, pane, surface, reported));
+        }
+    }
+    None
+}
+
+/// One query to a window that may predate its verb. Such a window skips the
+/// line without replying, so a ping rides along: whichever reply comes first
+/// tells an unknown verb from a slow answer.
+async fn ask_window(socket: &Path, request: Request) -> Option<Response> {
+    use flowmux_ipc::protocol::{Envelope, Payload};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+    let stream = match UnixStream::connect(flowmux_ipc::control_socket_path(socket)).await {
+        Ok(stream) => stream,
+        Err(_) => UnixStream::connect(socket).await.ok()?,
+    };
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = String::new();
+    for (id, request) in [(1, request), (2, Request::Ping)] {
+        let payload = Payload::Request(request);
+        lines.push_str(&serde_json::to_string(&Envelope { id, payload }).ok()?);
+        lines.push('\n');
+    }
+    writer.write_all(lines.as_bytes()).await.ok()?;
+    let mut reply = String::new();
+    tokio::io::BufReader::new(reader)
+        .read_line(&mut reply)
+        .await
+        .ok()?;
+    match serde_json::from_str(&reply).ok()? {
+        Envelope {
+            id: 1,
+            payload: Payload::Response(response),
+        } => Some(response),
+        _ => None,
+    }
+}
+
 /// Enumerate `$HOME/.cache/flowmux/flowmux-*.sock` entries. Returns
 /// None when the dir does not exist; an empty list when the dir is
 /// there but contains no per-PID sockets.
 fn scan_pid_sockets() -> Option<Vec<PathBuf>> {
     let dir = flowmux_config::paths::host_visible_cache_dir()?;
-    let entries = std::fs::read_dir(&dir).ok()?;
+    Some(pid_sockets_in(&dir, "flowmux-"))
+}
+
+fn pid_sockets_in(dir: &Path, prefix: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for e in entries.flatten() {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name();
         let name_s = name.to_string_lossy();
-        if name_s.starts_with("flowmux-") && name_s.ends_with(".sock") {
+        if name_s.starts_with(prefix) && name_s.ends_with(".sock") {
             out.push(e.path());
         }
     }
-    Some(out)
+    out
 }
 
 #[cfg(test)]

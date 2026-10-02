@@ -36,6 +36,7 @@ fn query_timeout(request: &Request) -> Option<Duration> {
         | Request::PaneReadScreen { .. }
         | Request::NotificationsList { .. }
         | Request::AgentSessionGet { .. }
+        | Request::AgentSurfaceResolve { .. }
         | Request::Ssh {
             request: SshRequest::Status { .. },
         }

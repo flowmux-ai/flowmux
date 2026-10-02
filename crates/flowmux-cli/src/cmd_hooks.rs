@@ -943,9 +943,43 @@ pub(crate) async fn run_generic_agent_hook_event(
     } else {
         read_codex_hook_input(args)
     };
+    // Codex's shared app-server daemon runs every tab's hooks with the pane,
+    // tab and socket of whichever pane first launched it. Ask the flowmux
+    // windows which tab runs this session instead. The daemon outlives the
+    // tab, so it is not the agent PID either.
+    let mut session_route = None;
+    let (pane, surface, pid) =
+        if reported_agent.eq_ignore_ascii_case("codex") && started_by_codex_app_server() {
+            let Some(session_id) = input.session_id.as_deref() else {
+                return Ok(());
+            };
+            let Some((client, pane, surface, reported)) =
+                resolve_codex_tab(session_id, input.cwd.as_deref()).await
+            else {
+                return Ok(());
+            };
+            session_route = Some((client, reported));
+            (Some(pane), Some(surface), None)
+        } else {
+            (pane, surface, pid)
+        };
     let agent = resolve_hook_agent_name(reported_agent, pid);
     let agent_display_name = hook_agent_display_name(&agent);
     let mut reqs: Vec<_> = Vec::new();
+    // Only a session start moves a tab to a session it has not reported, such
+    // as the thread a `/new` opened in it. Built first: requests carry an
+    // increasing sequence and the window drops one older than the last.
+    if matches!(session_route, Some((_, false)))
+        && !matches!(event, AgentHookEvent::SessionStart { .. })
+    {
+        reqs.push(build_unknown_activity_update_with_session(
+            &agent,
+            pid,
+            pane,
+            surface,
+            input.session_id.as_deref(),
+        ));
+    }
     match event {
         AgentHookEvent::Stop { .. } => {
             reqs.extend(build_generic_stop_requests(
@@ -1188,7 +1222,11 @@ pub(crate) async fn run_generic_agent_hook_event(
             ));
         }
     };
-    if let Some(client) = hooks::connect_daemon(socket).await {
+    let client = match session_route {
+        Some((client, _)) => Some(client),
+        None => hooks::connect_daemon(socket).await,
+    };
+    if let Some(client) = client {
         for req in reqs {
             hooks::send_best_effort(&client, req).await;
         }

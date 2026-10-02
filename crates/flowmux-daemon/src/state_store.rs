@@ -5276,6 +5276,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_session_tab_uses_reported_session_then_title_and_directory() {
+        use std::path::Path;
+        let store = StateStore::new_lazy(State::default());
+        let ws_id = store
+            .create_workspace(Some("demo".into()), std::path::PathBuf::from("/tmp/demo"))
+            .await;
+        let ws = store.get_workspace(ws_id).await.unwrap();
+        let pane = first_pane(&ws);
+        let surface = first_pane_active_surface(&ws);
+        let find = |name, cwd| store.codex_session_tab("s1", Some((name, Path::new(cwd))));
+
+        // A tab without a Codex process is never a match.
+        assert_eq!(find(None, "/tmp/demo").await, None);
+        store
+            .reconcile_process_agents(&[(surface, Some("codex"))])
+            .await;
+        let tab = Some((pane, surface, false));
+        assert_eq!(store.codex_session_tab("s1", None).await, None);
+
+        // The only Codex tab in the directory that names no thread yet.
+        assert_eq!(find(None, "/tmp/demo").await, tab);
+        assert_eq!(find(Some("Fix bug"), "/tmp/demo").await, tab);
+        assert_eq!(find(None, "/elsewhere").await, None);
+
+        // Once the title names a thread, only that thread's session matches.
+        store
+            .update_surface_auto_title(pane, surface, "⠋ Fix bug | demo".into())
+            .await;
+        assert_eq!(find(Some("Fix bug"), "/tmp/demo").await, tab);
+        assert_eq!(find(Some("Fix bug"), "/elsewhere").await, None);
+        assert_eq!(find(Some("Other"), "/tmp/demo").await, None);
+        assert_eq!(find(None, "/tmp/demo").await, None);
+
+        // Once the tab has reported the session its title no longer matters.
+        let report = AgentStatusReport {
+            name: "codex".into(),
+            status: Some(AgentStatus::Working),
+            activity: Some(flowmux_core::AgentActivity::Running),
+            pid: None,
+            source: Some("flowmux:hook".into()),
+            seq: Some(1),
+            message: None,
+            custom_status: None,
+            session_id: Some("s1".into()),
+            session_name: None,
+            messaging_socket: None,
+        };
+        store.report_agent_status(surface, report).await;
+        store
+            .update_surface_auto_title(pane, surface, "Renamed | demo".into())
+            .await;
+        let reported = Some((pane, surface, true));
+        assert_eq!(store.codex_session_tab("s1", None).await, reported);
+        assert_eq!(store.codex_session_tab("s2", None).await, None);
+    }
+
+    #[tokio::test]
     async fn reconcile_process_agents_creates_then_drops_proc_presence() {
         let store = StateStore::new_lazy(State::default());
         let ws_id = store

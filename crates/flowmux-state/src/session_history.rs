@@ -69,6 +69,11 @@ impl SessionAgent {
         }
     }
 
+    /// [`Self::history_home`] for this process's environment.
+    pub fn env_history_home(self) -> Option<PathBuf> {
+        self.history_home(|key| std::env::var_os(key).map(PathBuf::from))
+    }
+
     pub fn history_home(self, value: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
         let home = || value("HOME");
         match self {
@@ -495,36 +500,61 @@ pub fn list_sessions(agent: SessionAgent, home: &Path) -> io::Result<Vec<History
     Ok(sessions)
 }
 
-/// Codex session behind a terminal tab title that Codex set. Once a thread has
-/// a name the title reads `<thread name> | <project>`, behind a spinner while
-/// working. The newest session with that name started in `cwd` wins.
-pub fn codex_session_for_title(home: &Path, title: &str, cwd: &Path) -> Option<String> {
+/// Thread name in a terminal tab title that Codex set. Once a thread has a
+/// name the title reads `<thread name> | <project>`, behind a spinner while
+/// working.
+pub fn codex_title_thread(title: &str) -> Option<&str> {
     let name = title.rsplit_once(" | ")?.0;
-    let name =
-        name.trim_matches(|c: char| c.is_whitespace() || ('\u{2800}'..='\u{28ff}').contains(&c));
-    let (index, _) = read_window(&home.join("session_index.jsonl"), 4 * 1024 * 1024, true).ok()?;
+    Some(name.trim_matches(|c: char| c.is_whitespace() || ('\u{2800}'..='\u{28ff}').contains(&c)))
+}
+
+/// Codex sessions with their current thread names, oldest first.
+fn codex_thread_names(home: &Path) -> Vec<(String, String)> {
+    let index = read_window(&home.join("session_index.jsonl"), 4 * 1024 * 1024, true);
+    let mut names: Vec<(String, String)> =
+        records(&index.map(|(bytes, _)| bytes).unwrap_or_default())
+            .filter_map(|entry| {
+                let id = entry["id"].as_str()?.to_owned();
+                Some((id, entry["thread_name"].as_str()?.trim().to_owned()))
+            })
+            .collect();
     // Append-only: the last entry of a session holds its current name.
-    let mut names: Vec<(String, String)> = Vec::new();
-    for entry in records(&index) {
-        if let (Some(id), Some(name)) = (entry["id"].as_str(), entry["thread_name"].as_str()) {
-            names.retain(|(known, _)| known != id);
-            names.push((id.to_owned(), name.trim().to_owned()));
-        }
-    }
-    names.retain(|(_, known)| known == name);
-    if names.is_empty() {
-        return None;
-    }
+    let mut seen = std::collections::HashSet::new();
+    names.reverse();
+    names.retain(|(id, _)| seen.insert(id.clone()));
+    names.reverse();
+    names
+}
+
+/// Directory a Codex session was started in.
+pub fn codex_session_cwd(home: &Path, id: &str) -> Option<PathBuf> {
     let mut paths = Vec::new();
     collect(&home.join("sessions"), 3, &mut paths).ok()?;
-    names.iter().rev().find_map(|(id, _)| {
-        let suffix = format!("{id}.jsonl");
-        let path = paths
-            .iter()
-            .find(|path| path.to_string_lossy().ends_with(&suffix))?;
-        let item = session(path.clone(), SessionAgent::Codex).ok()??;
-        (item.cwd == cwd).then_some(item.id)
-    })
+    let suffix = format!("{id}.jsonl");
+    let path = paths
+        .into_iter()
+        .find(|path| path.to_string_lossy().ends_with(&suffix))?;
+    Some(session(path, SessionAgent::Codex).ok()??.cwd)
+}
+
+/// Codex session behind a terminal tab title that Codex set: the newest
+/// session with the title's thread name that was started in `cwd`.
+pub fn codex_session_for_title(home: &Path, title: &str, cwd: &Path) -> Option<String> {
+    let name = codex_title_thread(title)?;
+    let mut names = codex_thread_names(home);
+    names.retain(|(_, known)| known == name);
+    names
+        .into_iter()
+        .rev()
+        .find_map(|(id, _)| (codex_session_cwd(home, &id)? == cwd).then_some(id))
+}
+
+/// Current thread name of a Codex session, as its tab title shows it.
+pub fn codex_thread_name(home: &Path, id: &str) -> Option<String> {
+    let names = codex_thread_names(home);
+    names
+        .into_iter()
+        .find_map(|(known, name)| (known == id).then_some(name))
 }
 
 fn collect(directory: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> io::Result<()> {
@@ -636,6 +666,10 @@ mod tests {
         assert_eq!(find("한글 작업 | app", "/work/elsewhere"), None);
         assert_eq!(find("한글 작업", "/work/app"), None);
         assert_eq!(find("app", "/work/app"), None);
+
+        let name = codex_thread_name(home.path(), RENAMED);
+        assert_eq!(name.as_deref(), Some("Renamed"));
+        assert_eq!(codex_thread_name(home.path(), "unknown"), None);
     }
 
     #[test]
