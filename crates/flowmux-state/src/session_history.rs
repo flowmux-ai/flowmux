@@ -495,6 +495,38 @@ pub fn list_sessions(agent: SessionAgent, home: &Path) -> io::Result<Vec<History
     Ok(sessions)
 }
 
+/// Codex session behind a terminal tab title that Codex set. Once a thread has
+/// a name the title reads `<thread name> | <project>`, behind a spinner while
+/// working. The newest session with that name started in `cwd` wins.
+pub fn codex_session_for_title(home: &Path, title: &str, cwd: &Path) -> Option<String> {
+    let name = title.rsplit_once(" | ")?.0;
+    let name =
+        name.trim_matches(|c: char| c.is_whitespace() || ('\u{2800}'..='\u{28ff}').contains(&c));
+    let (index, _) = read_window(&home.join("session_index.jsonl"), 4 * 1024 * 1024, true).ok()?;
+    // Append-only: the last entry of a session holds its current name.
+    let mut names: Vec<(String, String)> = Vec::new();
+    for entry in records(&index) {
+        if let (Some(id), Some(name)) = (entry["id"].as_str(), entry["thread_name"].as_str()) {
+            names.retain(|(known, _)| known != id);
+            names.push((id.to_owned(), name.trim().to_owned()));
+        }
+    }
+    names.retain(|(_, known)| known == name);
+    if names.is_empty() {
+        return None;
+    }
+    let mut paths = Vec::new();
+    collect(&home.join("sessions"), 3, &mut paths).ok()?;
+    names.iter().rev().find_map(|(id, _)| {
+        let suffix = format!("{id}.jsonl");
+        let path = paths
+            .iter()
+            .find(|path| path.to_string_lossy().ends_with(&suffix))?;
+        let item = session(path.clone(), SessionAgent::Codex).ok()??;
+        (item.cwd == cwd).then_some(item.id)
+    })
+}
+
 fn collect(directory: &Path, depth: usize, paths: &mut Vec<PathBuf>) -> io::Result<()> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
@@ -563,6 +595,47 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(path, format!("{text}\n")).unwrap();
+    }
+
+    #[test]
+    fn codex_session_for_title_matches_current_name_and_directory() {
+        const OTHER: &str = "22222222-2222-4222-8222-222222222222";
+        const RENAMED: &str = "33333333-3333-4333-8333-333333333333";
+        let home = tempfile::tempdir().unwrap();
+        for (id, cwd) in [
+            (ID, "/work/app"),
+            (OTHER, "/work/other"),
+            (RENAMED, "/work/app"),
+        ] {
+            write(
+                &home.path().join(format!(
+                    "sessions/2026/10/02/rollout-2026-10-02T12-00-00-{id}.jsonl"
+                )),
+                &[json!({"type":"session_meta","payload":{"id":id,"cwd":cwd,"source":"cli"}})],
+            );
+        }
+        write(
+            &home.path().join("session_index.jsonl"),
+            &[
+                json!({"id":RENAMED,"thread_name":"한글 작업"}),
+                json!({"id":ID,"thread_name":"한글 작업"}),
+                json!({"id":OTHER,"thread_name":"한글 작업"}),
+                json!({"id":RENAMED,"thread_name":"Renamed"}),
+            ],
+        );
+        let find =
+            |title: &str, cwd: &str| codex_session_for_title(home.path(), title, Path::new(cwd));
+
+        assert_eq!(find("한글 작업 | app", "/work/app").as_deref(), Some(ID));
+        assert_eq!(find("⠋ 한글 작업 | app", "/work/app").as_deref(), Some(ID));
+        assert_eq!(
+            find("한글 작업 | other", "/work/other").as_deref(),
+            Some(OTHER)
+        );
+        assert_eq!(find("Renamed | app", "/work/app").as_deref(), Some(RENAMED));
+        assert_eq!(find("한글 작업 | app", "/work/elsewhere"), None);
+        assert_eq!(find("한글 작업", "/work/app"), None);
+        assert_eq!(find("app", "/work/app"), None);
     }
 
     #[test]

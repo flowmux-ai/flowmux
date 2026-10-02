@@ -385,23 +385,46 @@ fn current_boot_id() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Every tab id in the workspace's pane trees.
-fn workspace_surface_ids(workspace: &Workspace, out: &mut Vec<flowmux_core::SurfaceId>) {
-    fn rec(pane: &flowmux_core::Pane, out: &mut Vec<flowmux_core::SurfaceId>) {
+/// Every tab in the workspace's pane trees.
+fn for_each_workspace_tab(workspace: &Workspace, f: &mut impl FnMut(&flowmux_core::PaneSurface)) {
+    fn rec(pane: &flowmux_core::Pane, f: &mut impl FnMut(&flowmux_core::PaneSurface)) {
         match pane {
             flowmux_core::Pane::Leaf { content, .. } => {
                 if let flowmux_core::PaneContent::Tabs { surfaces, .. } = content {
-                    out.extend(surfaces.iter().map(|surface| surface.id));
+                    surfaces.iter().for_each(&mut *f);
                 }
             }
             flowmux_core::Pane::Split { first, second, .. } => {
-                rec(first, out);
-                rec(second, out);
+                rec(first, f);
+                rec(second, f);
             }
         }
     }
     for surface in &workspace.surfaces {
-        rec(&surface.root_pane, out);
+        rec(&surface.root_pane, f);
+    }
+}
+
+/// Save the Codex session of restored tabs that no hook reported: Codex's
+/// shared app-server daemon runs hooks outside the pane. The title Codex set
+/// identifies the session, and restore resets that title, so bind it first.
+/// A hook-recorded session wins.
+// ponytail: a matching title is the only evidence Codex was still running;
+// persist agent presence if a stale title ever resumes a closed session.
+fn bind_codex_title_sessions(state: &State, store: &AgentSessionStore, codex_home: &Path) {
+    for workspace in &state.workspaces {
+        for_each_workspace_tab(workspace, &mut |tab| {
+            let flowmux_core::SurfaceKind::Terminal { cwd: Some(cwd), .. } = &tab.kind else {
+                return;
+            };
+            if tab.title_locked || store.lookup_surface(tab.id).is_some() {
+                return;
+            }
+            let session = session_history::codex_session_for_title(codex_home, &tab.title, cwd);
+            if let Some(session) = session {
+                let _ = store.record("codex", tab.id, &session);
+            }
+        });
     }
 }
 
@@ -417,11 +440,14 @@ fn workspace_surface_ids(workspace: &Workspace, out: &mut Vec<flowmux_core::Surf
 pub fn claim_window(owner: WindowOwner) -> Result<State, StateError> {
     let path = default_path()?;
     let (state, expired_surfaces) = claim_window_impl(&path, owner, current_boot_id())?;
-    if !expired_surfaces.is_empty() {
-        if let Some(store) = default_agent_session_store() {
-            for surface in &expired_surfaces {
-                let _ = store.forget_surface(*surface);
-            }
+    if let Some(store) = default_agent_session_store() {
+        for surface in &expired_surfaces {
+            let _ = store.forget_surface(*surface);
+        }
+        let codex_home = session_history::SessionAgent::Codex
+            .history_home(|key| std::env::var_os(key).map(PathBuf::from));
+        if let Some(codex_home) = codex_home {
+            bind_codex_title_sessions(&state, &store, &codex_home);
         }
     }
     Ok(state)
@@ -473,7 +499,7 @@ fn claim_window_impl(
     let mut expired_surfaces = Vec::new();
     for workspace in &disk.workspaces {
         if expired.contains(&workspace.id) {
-            workspace_surface_ids(workspace, &mut expired_surfaces);
+            for_each_workspace_tab(workspace, &mut |tab| expired_surfaces.push(tab.id));
         }
     }
     disk.workspaces
