@@ -278,13 +278,22 @@ pub fn agent_name_for_pid(pid: u32) -> Option<&'static str> {
     if let Some(name) = match_agent_comm(&comm) {
         return Some(name);
     }
-    if !AGENT_SCRIPT_INTERPRETERS
-        .iter()
-        .any(|interpreter| interpreter.eq_ignore_ascii_case(comm.trim()))
-    {
+    if !is_interpreter_comm(&comm) {
         return None;
     }
     agent_from_argv(&cmdline_of(pid))
+}
+
+/// Whether `comm` can belong to a script interpreter hosting an agent.
+/// Node.js 23+ names its main thread `MainThread`, which replaces `node` as
+/// the Linux `comm`; `agent_from_argv` still verifies the interpreter itself.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn is_interpreter_comm(comm: &str) -> bool {
+    let comm = comm.trim();
+    comm == "MainThread"
+        || AGENT_SCRIPT_INTERPRETERS
+            .iter()
+            .any(|interpreter| interpreter.eq_ignore_ascii_case(comm))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -642,6 +651,18 @@ mod tests {
     #[test]
     fn agent_from_argv_resolves_interpreter_hosted_agents() {
         let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Node.js 23+ reports `MainThread` instead of `node` as its comm.
+        assert!(is_interpreter_comm("MainThread\n") && is_interpreter_comm("Node"));
+        assert!(!is_interpreter_comm("bash"));
+        assert_eq!(
+            agent_from_argv(&argv(&[
+                "/opt/node/bin/node",
+                "--max-old-space-size=4096",
+                "/home/u/.local/bin/gemini",
+                "--skip-trust"
+            ])),
+            Some("gemini")
+        );
         // Cline: a Node CLI whose script basename is the agent name.
         assert_eq!(
             agent_from_argv(&argv(&["node", "/home/u/.local/bin/cline", "--tui"])),
