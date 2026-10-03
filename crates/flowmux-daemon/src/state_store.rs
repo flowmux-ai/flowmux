@@ -5598,6 +5598,7 @@ mod tests {
             .reconcile_process_agent_candidates_if_unchanged(
                 &[(surface, vec!["claude"])],
                 &observed,
+                &[],
             )
             .await
             .is_empty());
@@ -5991,6 +5992,116 @@ mod tests {
             vec![(ws_id, None)]
         );
         assert!(store.located_agent_presence(surface).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn process_poll_rejects_replayed_agent_screen_after_restart() {
+        for (agent, screen) in [
+            ("codex", "OpenAI Codex\n› Ask Codex to do anything\n$ "),
+            ("claude", "❯ Welcome to Claude Code\n$ "),
+        ] {
+            let store = StateStore::new_lazy(State::default());
+            let ws_id = store.create_workspace(None, "/tmp".into()).await;
+            let ws = store.get_workspace(ws_id).await.unwrap();
+            let surface = first_pane_active_surface(&ws);
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            let observed = store
+                .agent_process_reconciliation_snapshot(&[surface])
+                .await;
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![])],
+                    &observed,
+                    &[],
+                )
+                .await;
+            assert!(
+                store.agent_bar_model().await.items.is_empty(),
+                "{agent}: stale screen survived process poll"
+            );
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            assert!(
+                store.agent_bar_model().await.items.is_empty(),
+                "{agent}: stale screen recreated presence"
+            );
+            assert_eq!(store.workspace_agent_status(ws_id).await, None);
+            let tree =
+                flowmux_ipc::protocol::describe_workspaces(&store.snapshot().await.workspaces);
+            assert!(tree[0].panes[0].tabs[0].agent.is_none());
+
+            // A newly started process restores both identity and screen refinement.
+            let observed = store
+                .agent_process_reconciliation_snapshot(&[surface])
+                .await;
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![agent])],
+                    &observed,
+                    &[],
+                )
+                .await;
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            assert_eq!(store.agent_bar_model().await.items.len(), 1);
+            let observed = store
+                .agent_process_reconciliation_snapshot(&[surface])
+                .await;
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![])],
+                    &observed,
+                    &[],
+                )
+                .await;
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            assert!(store.agent_bar_model().await.items.is_empty());
+
+            // An attached SSH/tmux/container client still permits remote detection.
+            let observed = store
+                .agent_process_reconciliation_snapshot(&[surface])
+                .await;
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![])],
+                    &observed,
+                    &[surface],
+                )
+                .await;
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            assert_eq!(store.agent_bar_model().await.items.len(), 1);
+            let observed = store
+                .agent_process_reconciliation_snapshot(&[surface])
+                .await;
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![])],
+                    &observed,
+                    &[surface],
+                )
+                .await;
+            assert_eq!(store.agent_bar_model().await.items.len(), 1);
+            // Disconnecting the transport removes even a retained remote frame.
+            store
+                .reconcile_process_agent_candidates_if_unchanged(
+                    &[(surface, vec![])],
+                    &observed,
+                    &[],
+                )
+                .await;
+            store
+                .report_agent_screen_signals(surface, Some(screen), None)
+                .await;
+            assert!(store.agent_bar_model().await.items.is_empty());
+        }
     }
 
     #[tokio::test]

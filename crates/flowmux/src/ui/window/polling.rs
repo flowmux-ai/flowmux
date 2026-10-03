@@ -183,7 +183,7 @@ impl WindowController {
         let started = Instant::now();
         let detected = match gtk::gio::spawn_blocking(move || {
             pids.into_iter()
-                .map(|(surface, pid)| (surface, flowmux_procmon::agent_names_in_tree(pid)))
+                .map(|(surface, pid)| (surface, flowmux_procmon::agent_process_tree(pid)))
                 .collect::<Vec<_>>()
         })
         .await
@@ -204,9 +204,17 @@ impl WindowController {
             elapsed_ms = started.elapsed().as_millis(),
             "agent process poll completed"
         );
+        let screen_fallback = detected
+            .iter()
+            .filter_map(|(surface, tree)| tree.screen_fallback.then_some(*surface))
+            .collect::<Vec<_>>();
+        let detected = detected
+            .into_iter()
+            .map(|(surface, tree)| (surface, tree.agents))
+            .collect::<Vec<_>>();
         let changed = self
             .store
-            .reconcile_process_agent_candidates_if_unchanged(&detected, &observed)
+            .reconcile_process_agent_candidates_if_unchanged(&detected, &observed, &screen_fallback)
             .await;
         for (workspace, _) in changed {
             self.sync_workspace_agent_status(workspace).await;

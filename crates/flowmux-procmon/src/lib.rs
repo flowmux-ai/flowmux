@@ -156,14 +156,19 @@ fn match_agent_comm(comm: &str) -> Option<&'static str> {
 const AGENT_SCRIPT_INTERPRETERS: &[&str] = &["node", "bun", "deno", "python", "python3"];
 
 /// For a known interpreter, scan non-flag arguments for a basename matching an
-/// agent name after removing `.js`, `.mjs`, or `.cjs`. Non-interpreter argv
-/// returns `None`; native binaries are matched by `comm` instead.
+/// agent name after removing `.js`, `.mjs`, or `.cjs`. Native launchers can
+/// also identify themselves through argv[0] when `comm` is a version number.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn agent_from_argv(argv: &[String]) -> Option<&'static str> {
     let interpreter = std::path::Path::new(argv.first()?)
         .file_name()?
         .to_str()?
         .to_ascii_lowercase();
+    // Native Claude installations can have a version-number executable name
+    // in `comm` while argv[0] remains the canonical launcher name.
+    if let Some(name) = match_agent_comm(&interpreter) {
+        return Some(name);
+    }
     if !AGENT_SCRIPT_INTERPRETERS.contains(&interpreter.as_str()) {
         return None;
     }
@@ -278,7 +283,7 @@ pub fn agent_name_for_pid(pid: u32) -> Option<&'static str> {
     if let Some(name) = match_agent_comm(&comm) {
         return Some(name);
     }
-    if !is_interpreter_comm(&comm) {
+    if !is_interpreter_comm(&comm) && !comm.as_bytes().first().is_some_and(u8::is_ascii_digit) {
         return None;
     }
     agent_from_argv(&cmdline_of(pid))
@@ -391,31 +396,45 @@ fn rank_agent_tree_matches(mut matches: Vec<AgentTreeMatch>) -> Vec<&'static str
         .collect()
 }
 
-/// Detect agent identities in `root`'s process tree, ordered deepest-first with
-/// lower PIDs breaking ties. Repeated names are returned once.
-///
-/// Direct-child traversal considers at most `AGENT_TREE_NODE_CAP` distinct
-/// processes. If the root children files cannot be read, fall back to a full
-/// procfs parent-map scan. Concurrent exits or unreadable processes can be missed.
-#[cfg(target_os = "linux")]
-pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
+/// Process evidence scoped to one terminal, excluding nested FlowMux windows.
+#[derive(Debug, Default)]
+pub struct AgentProcessTree {
+    pub agents: Vec<&'static str>,
+    /// A live transport can host agents outside the local process subtree.
+    pub screen_fallback: bool,
+}
+
+fn is_agent_transport(comm: &str) -> bool {
+    matches!(
+        comm,
+        "ssh" | "mosh-client" | "tmux" | "screen" | "docker" | "podman"
+    ) || comm.starts_with("tmux: ")
+}
+
+/// Inspect at most `AGENT_TREE_NODE_CAP` processes in a terminal's subtree.
+/// Another FlowMux window owns its own terminals and must not contribute here.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub fn agent_process_tree(root: u32) -> AgentProcessTree {
+    #[cfg(target_os = "linux")]
     if read_children(root).is_none() {
-        // No readable root children file: fall back to a full procfs scan.
+        let mut result = AgentProcessTree::default();
         let Ok(descendants) = descendants(root) else {
-            return Vec::new();
+            return result;
         };
-        let mut pids: Vec<u32> = descendants.into_iter().collect();
-        pids.sort_unstable();
-        let matches = pids
+        let matches = descendants
             .into_iter()
             .filter_map(|pid| {
-                let name = agent_name_for_pid(pid)?;
                 let depth = process_depth_from_root(root, pid)?;
+                let comm = comm_of(pid)?;
+                result.screen_fallback |= is_agent_transport(&comm);
+                let name = agent_name_for_pid(pid)?;
                 Some(AgentTreeMatch { name, pid, depth })
             })
             .collect();
-        return rank_agent_tree_matches(matches);
+        result.agents = rank_agent_tree_matches(matches);
+        return result;
     }
+    let mut result = AgentProcessTree::default();
     let mut stack = vec![(root, 0)];
     let mut seen = HashSet::new();
     let mut matches = Vec::new();
@@ -423,48 +442,47 @@ pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
         if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
             continue;
         }
+        let comm = comm_of(pid).unwrap_or_default();
+        if comm == "flowmux" || comm == "flowmux-daemon" {
+            continue;
+        }
+        result.screen_fallback |= is_agent_transport(&comm);
         if let Some(name) = agent_name_for_pid(pid) {
             matches.push(AgentTreeMatch { name, pid, depth });
         }
+        #[cfg(target_os = "linux")]
         let mut children = read_children(pid).unwrap_or_default();
-        children.sort_unstable_by(|left, right| right.cmp(left));
-        stack.extend(children.into_iter().map(|child| (child, depth + 1)));
-    }
-    rank_agent_tree_matches(matches)
-}
-
-#[cfg(target_os = "macos")]
-pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
-    let mut stack = vec![(root, 0)];
-    let mut seen = HashSet::new();
-    let mut matches = Vec::new();
-    while let Some((pid, depth)) = stack.pop() {
-        if !seen.insert(pid) || seen.len() > AGENT_TREE_NODE_CAP {
-            continue;
-        }
-        if let Some(name) = agent_name_for_pid(pid) {
-            matches.push(AgentTreeMatch { name, pid, depth });
-        }
+        #[cfg(target_os = "macos")]
         let mut children = child_pids(pid);
         children.sort_unstable_by(|left, right| right.cmp(left));
         stack.extend(children.into_iter().map(|child| (child, depth + 1)));
     }
-    rank_agent_tree_matches(matches)
+    result.agents = rank_agent_tree_matches(matches);
+    result
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
-    let Ok(descendants) = descendants(root) else {
-        return Vec::new();
+pub fn agent_process_tree(root: u32) -> AgentProcessTree {
+    let mut result = AgentProcessTree {
+        screen_fallback: true,
+        ..Default::default()
     };
-    let mut names: Vec<_> = descendants
-        .into_iter()
-        .filter_map(comm_of)
-        .filter_map(|comm| match_agent_comm(&comm))
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    names
+    if let Ok(descendants) = descendants(root) {
+        result.agents = descendants
+            .into_iter()
+            .filter_map(comm_of)
+            .filter_map(|comm| match_agent_comm(&comm))
+            .collect();
+        result.agents.sort_unstable();
+        result.agents.dedup();
+    }
+    result
+}
+
+/// Detect agent identities deepest-first, with lower PIDs breaking ties.
+/// Repeated names are returned once; nested FlowMux windows are excluded.
+pub fn agent_names_in_tree(root: u32) -> Vec<&'static str> {
+    agent_process_tree(root).agents
 }
 
 /// Detect the preferred process-derived agent identity in `root`'s subtree.
@@ -479,6 +497,12 @@ pub fn agent_name_in_tree(root: u32) -> Option<&'static str> {
 fn process_depth_from_root(root: u32, pid: u32) -> Option<usize> {
     let mut current = pid;
     for depth in 0..=AGENT_TREE_NODE_CAP {
+        if matches!(
+            comm_of(current).as_deref(),
+            Some("flowmux" | "flowmux-daemon")
+        ) {
+            return None;
+        }
         if current == root {
             return Some(depth);
         }
@@ -687,8 +711,12 @@ mod tests {
             agent_from_argv(&argv(&["python3", "/opt/agy"])),
             Some("antigravity")
         );
-        // Non-interpreter argv[0]: native binaries go through `comm`, so a shell
-        // merely touching a file named `cline` must not false-match.
+        // Native versioned binaries retain their launcher in argv[0].
+        assert_eq!(
+            agent_from_argv(&argv(&["claude", "--resume"])),
+            Some("claude")
+        );
+        // A shell merely touching a file named `cline` must not false-match.
         assert_eq!(agent_from_argv(&argv(&["bash", "cline"])), None);
         // An interpreter running an unrelated script matches nothing.
         assert_eq!(agent_from_argv(&argv(&["node", "/srv/server.js"])), None);

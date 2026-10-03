@@ -47,6 +47,8 @@ const SESSION_WAIT_SCOPE: &str = "session";
 
 #[derive(Debug, Default)]
 pub(super) struct AgentLifecycleRuntime {
+    /// Local process polls found neither an agent nor an out-of-tree transport.
+    screen_absent: HashSet<SurfaceId>,
     /// One state per tool-use id: true while waiting, false once resolved.
     /// Keep resolved ids until the turn boundary so duplicate or reordered
     /// hook deliveries cannot reopen them. Distinct calls keep distinct ids.
@@ -504,6 +506,9 @@ impl StateStore {
         }
         drop(saw_no_signal);
         let mut lifecycle = self.agents.lifecycle.lock().await;
+        lifecycle
+            .screen_absent
+            .retain(|surface| !surfaces.contains(surface));
         lifecycle
             .waits
             .retain(|(surface, _, _), _| !surfaces.contains(surface));
@@ -1864,27 +1869,35 @@ impl StateStore {
         &self,
         detected: &[(SurfaceId, Vec<&str>)],
     ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
-        self.reconcile_process_agent_candidates_inner(detected, None)
+        self.reconcile_process_agent_candidates_inner(detected, None, None)
             .await
     }
 
     /// Apply a process-tree snapshot only to surfaces whose agent slot still
     /// matches the value observed before the blocking process walk. A native
     /// SessionStart that lands during that walk must not be displaced and
-    /// tombstoned by older process truth.
+    /// tombstoned by older process truth. `screen_fallback` contains surfaces
+    /// with a live SSH/tmux/container transport; all other absent local agents
+    /// must stay absent even when terminal history still shows their UI.
     pub async fn reconcile_process_agent_candidates_if_unchanged(
         &self,
         detected: &[(SurfaceId, Vec<&str>)],
         observed: &[(SurfaceId, Option<AgentPresence>)],
+        screen_fallback: &[SurfaceId],
     ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
-        self.reconcile_process_agent_candidates_inner(detected, Some(observed))
-            .await
+        self.reconcile_process_agent_candidates_inner(
+            detected,
+            Some(observed),
+            Some(screen_fallback),
+        )
+        .await
     }
 
     async fn reconcile_process_agent_candidates_inner(
         &self,
         detected: &[(SurfaceId, Vec<&str>)],
         observed: Option<&[(SurfaceId, Option<AgentPresence>)]>,
+        screen_fallback: Option<&[SurfaceId]>,
     ) -> Vec<(WorkspaceId, Option<AgentStatus>)> {
         let mut changed: Vec<(WorkspaceId, Option<AgentStatus>)> = Vec::new();
         let mut created_surfaces: Vec<SurfaceId> = Vec::new();
@@ -1908,6 +1921,13 @@ impl StateStore {
                 if changed_during_scan {
                     continue;
                 }
+                if let Some(screen_fallback) = screen_fallback {
+                    if candidates.is_empty() && !screen_fallback.contains(surface_id) {
+                        lifecycle.screen_absent.insert(*surface_id);
+                    } else {
+                        lifecycle.screen_absent.remove(surface_id);
+                    }
+                }
                 for ws in s
                     .workspaces
                     .iter_mut()
@@ -1917,10 +1937,15 @@ impl StateStore {
                     for surface in ws.surfaces.iter_mut() {
                         let previous = surface.root_pane.agent_presence_for_surface(*surface_id);
                         let name = select_process_agent_candidate(previous.as_ref(), candidates);
+                        let cleared_screen = lifecycle.screen_absent.contains(surface_id)
+                            && surface
+                                .root_pane
+                                .clear_surface_agent_from_source(*surface_id, "flowmux:screen")
+                                == Some(true);
                         if let Some(result) =
                             surface.root_pane.reconcile_process_agent(*surface_id, name)
                         {
-                            applied = Some((result, previous, name));
+                            applied = Some((result || cleared_screen, previous, name));
                             break;
                         }
                     }
@@ -2012,6 +2037,11 @@ impl StateStore {
         // SSH remains excluded from process scans and native hook reports.
         let lifecycle = self.agents.lifecycle.lock().await;
         if !self.is_local_agent_surface(surface_id).await && !self.is_ssh_surface(surface_id).await
+        {
+            return None;
+        }
+        if lifecycle.screen_absent.contains(&surface_id)
+            && self.located_agent_presence(surface_id).await.is_none()
         {
             return None;
         }
